@@ -13,7 +13,7 @@ use tracing::info;
 use tracing_log::LogTracer;
 
 #[derive(Parser, Debug)]
-#[command(name = "bundlebase-server")]
+#[command(name = "bundlebase-cli")]
 #[command(about = "Bundlebase Server", long_about = None)]
 struct Args {
     /// Path to bundle to load

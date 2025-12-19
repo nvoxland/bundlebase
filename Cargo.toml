@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "rust/bundlebase",
-    "rust/bundlebase-server",
+    "rust/bundlebase-cli",
 ]
 resolver = "2"
 

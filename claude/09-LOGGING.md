@@ -95,11 +95,11 @@ logging.basicConfig(
 
 ## REPL Logging
 
-The `Bundlebase-server` REPL displays Rust logs using the `ui` log level by default, which shows a minimal format (message only) for clean interactive output. The log level is fully configurable via the `--log-level` CLI argument.
+The `Bundlebase-cli` REPL displays Rust logs using the `ui` log level by default, which shows a minimal format (message only) for clean interactive output. The log level is fully configurable via the `--log-level` CLI argument.
 
 ### How It Works
 
-1. The REPL binary (`Bundlebase-server`) uses `tracing-subscriber` as the logging backend
+1. The REPL binary (`Bundlebase-cli`) uses `tracing-subscriber` as the logging backend
 2. The `tracing-log` crate bridges `log::*` macros to `tracing-subscriber`
 3. All Rust logs from the Bundlebase library are captured and displayed
 4. Log level is configured via the `--log-level` CLI argument
@@ -109,22 +109,22 @@ The `Bundlebase-server` REPL displays Rust logs using the `ui` log level by defa
 
 ```bash
 # Default: UI mode (minimal format, message only)
-Bundlebase-server --container mydata --repl
+Bundlebase-cli --container mydata --repl
 
 # Show DEBUG logs with full format (timestamps, module names, levels)
-Bundlebase-server --container mydata --repl --log-level debug
+Bundlebase-cli --container mydata --repl --log-level debug
 
 # Show TRACE logs (most verbose with full format)
-Bundlebase-server --container mydata --repl --log-level trace
+Bundlebase-cli --container mydata --repl --log-level trace
 
 # Show only INFO logs with full format
-Bundlebase-server --container mydata --repl --log-level info
+Bundlebase-cli --container mydata --repl --log-level info
 
 # Show only WARN and ERROR with full format
-Bundlebase-server --container mydata --repl --log-level warn
+Bundlebase-cli --container mydata --repl --log-level warn
 
 # Show only ERROR with full format
-Bundlebase-server --container mydata --repl --log-level error
+Bundlebase-cli --container mydata --repl --log-level error
 ```
 
 ### Log Levels
@@ -173,7 +173,7 @@ Attached data.parquet
 
 - Uses `tracing-log` to bridge `log` crate logs to `tracing`
 - Uses `tracing-subscriber` to format and display the logs
-- Configured at startup in `Bundlebase-server/src/main.rs`
+- Configured at startup in `Bundlebase-cli/src/main.rs`
 - Log level is set via the `--log-level` CLI argument with default "ui"
 - Default level: `ui` mode (shows INFO and higher with minimal formatting)
 - `ui` mode configuration: Disables timestamps, log levels, target/module names, and thread info
@@ -199,7 +199,7 @@ Bundlebase.set_rust_log_level(logging.DEBUG)
 
 ```bash
 # Run with DEBUG level
-Bundlebase-server --container mydata --repl --log-level debug
+Bundlebase-cli --container mydata --repl --log-level debug
 
 # You should see DEBUG logs like:
 # 2024-12-12T10:30:45.123456Z DEBUG bundlebase::builder: ...
@@ -257,14 +257,14 @@ import Bundlebase
 **Solution**: Use the `ui` log level (default) or set it to a higher level:
 ```bash
 # Use UI mode (minimal format, message only) - this is the default
-Bundlebase-server --container mydata --repl
+Bundlebase-cli --container mydata --repl
 
 # Or explicitly set to UI mode
-Bundlebase-server --container mydata --repl --log-level ui
+Bundlebase-cli --container mydata --repl --log-level ui
 
 # Or set to INFO level with full format
-Bundlebase-server --container mydata --repl --log-level info
+Bundlebase-cli --container mydata --repl --log-level info
 
 # Or show only WARN and ERROR with full format
-Bundlebase-server --container mydata --repl --log-level warn
+Bundlebase-cli --container mydata --repl --log-level warn
 ```
