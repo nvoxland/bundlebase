@@ -1,0 +1,225 @@
+# Release Workflow
+# Automatically builds and publishes releases when version tags are pushed
+#
+# To create a release:
+# 1. Update version in Cargo.toml (workspace.package.version = "X.Y.Z")
+# 2. Commit: git commit -m "Bump version to X.Y.Z"
+# 3. Push: git push
+# 4. Tag: git tag vX.Y.Z
+# 5. Push tag: git push origin vX.Y.Z
+#
+# Required secrets:
+# - PYPI_API_TOKEN: PyPI API token for publishing (create at https://pypi.org/manage/account/token/)
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write  # For creating releases
+
+jobs:
+  validate-version:
+    name: Validate tag matches Cargo.toml version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract tag version
+        id: tag_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Extract Cargo.toml version
+        id: cargo_version
+        run: |
+          VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Compare versions
+        run: |
+          TAG_VERSION="${{ steps.tag_version.outputs.VERSION }}"
+          CARGO_VERSION="${{ steps.cargo_version.outputs.VERSION }}"
+
+          echo "Tag version: $TAG_VERSION"
+          echo "Cargo.toml version: $CARGO_VERSION"
+
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Version mismatch! Tag is v$TAG_VERSION but Cargo.toml has version $CARGO_VERSION"
+            echo "::error::Please update Cargo.toml version to $TAG_VERSION before releasing"
+            exit 1
+          fi
+
+          echo "✅ Version validation passed: $TAG_VERSION"
+
+  build-linux:
+    name: Build Linux wheels
+    runs-on: ubuntu-latest
+    needs: validate-version
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64
+          args: --release --out dist --find-interpreter
+          sccache: 'true'
+          manylinux: auto
+          rust-toolchain: stable
+          working-directory: .
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.python-version }}
+          path: dist/*.whl
+
+  build-macos:
+    name: Build macOS wheels
+    runs-on: ${{ matrix.os }}
+    needs: validate-version
+    strategy:
+      matrix:
+        os: [macos-13, macos-latest]  # Intel and Apple Silicon
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.os == 'macos-13' && 'x86_64' || 'aarch64' }}
+          args: --release --out dist --find-interpreter
+          sccache: 'true'
+          rust-toolchain: stable
+          working-directory: .
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.python-version }}
+          path: dist/*.whl
+
+  build-windows:
+    name: Build Windows wheels
+    runs-on: windows-latest
+    needs: validate-version
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64
+          args: --release --out dist --find-interpreter
+          sccache: 'true'
+          rust-toolchain: stable
+          working-directory: .
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-windows-${{ matrix.python-version }}
+          path: dist/*.whl
+
+  build-sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    needs: validate-version
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+          rust-toolchain: stable
+          working-directory: .
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-macos, build-windows, build-sdist]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/bundlebase
+    permissions:
+      id-token: write  # For trusted publishing
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -R dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: publish-pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          generate_release_notes: true
+          name: Release v${{ steps.version.outputs.VERSION }}
+          body: |
+            ## Installation
+
+            ```bash
+            pip install bundlebase==${{ steps.version.outputs.VERSION }}
+            ```
+
+            ## What's Changed
+
+            See below for auto-generated release notes.
