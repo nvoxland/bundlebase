@@ -1,0 +1,95 @@
+use crate::data_reader::DataPack;
+use crate::data_storage::ObjectId;
+use arrow_schema::SchemaRef;
+use async_trait::async_trait;
+use datafusion::catalog::{Session, TableProvider};
+use datafusion::datasource::TableType;
+use datafusion::error::Result;
+use datafusion::logical_expr::Expr;
+use datafusion::physical_plan::{union::UnionExec, ExecutionPlan};
+use std::any::Any;
+use std::sync::Arc;
+
+/// Custom TableProvider that represents a UNION of all blocks in a pack.
+///
+/// This table lazily constructs the UNION when scanned, maintaining the streaming
+/// execution model. Multiple blocks in a pack are combined using UNION BY NAME.
+pub struct PackUnionTable {
+    pack_id: ObjectId,
+    pack: Arc<DataPack>,
+    schema: SchemaRef,
+}
+
+impl std::fmt::Debug for PackUnionTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PackUnionTable")
+            .field("pack_id", &self.pack_id)
+            .field("pack", &self.pack)
+            .field("schema", &self.schema)
+            .finish()
+    }
+}
+
+impl PackUnionTable {
+    pub fn new(pack_id: ObjectId, pack: Arc<DataPack>) -> Result<Self> {
+        // Get schema from first block
+        let blocks = pack.blocks();
+
+        if blocks.is_empty() {
+            return Err(datafusion::error::DataFusionError::Plan(format!(
+                "Pack {} has no blocks",
+                pack_id
+            )));
+        }
+
+        let schema = blocks.first().unwrap().schema();
+
+        Ok(Self {
+            pack_id,
+            pack,
+            schema,
+        })
+    }
+}
+
+#[async_trait]
+impl TableProvider for PackUnionTable {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::View
+    }
+
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        let blocks = self.pack.blocks();
+
+        // Scan each block to get its physical plan
+        let mut inputs: Vec<Arc<dyn ExecutionPlan>> = Vec::new();
+        for block in &blocks {
+            let plan = block.scan(state, projection, filters, limit).await?;
+            inputs.push(plan);
+        }
+
+        // If only one block, return its plan directly
+        if inputs.len() == 1 {
+            return Ok(inputs.into_iter().next().unwrap());
+        }
+
+        // Create a UnionExec to combine all block plans
+        Ok(Arc::new(UnionExec::new(inputs)))
+    }
+}
+
+// Unit tests are covered by integration tests in the main test suite

@@ -1,0 +1,56 @@
+use crate::data_reader::plugin::{
+    CsvPlugin, FunctionPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin,
+};
+use crate::data_reader::{DataReader, ObjectId};
+use crate::data_storage::DataStorage;
+use crate::functions::FunctionRegistry;
+use crate::{BundlebaseError, Bundle};
+use arrow_schema::SchemaRef;
+use datafusion::common::DataFusionError;
+use parking_lot::RwLock;
+use std::sync::Arc;
+
+pub struct DataReaderFactory {
+    plugins: Vec<Arc<dyn ReaderPlugin>>,
+    storage: Arc<DataStorage>,
+}
+
+impl DataReaderFactory {
+    pub fn new(
+        function_registry: Arc<RwLock<FunctionRegistry>>,
+        storage: Arc<DataStorage>,
+    ) -> Self {
+        Self {
+            storage: storage.clone(),
+            plugins: vec![
+                Arc::new(CsvPlugin::default()),
+                Arc::new(FunctionPlugin::new(function_registry.clone())),
+                Arc::new(JsonPlugin::default()),
+                Arc::new(ParquetPlugin::default()),
+            ],
+        }
+    }
+
+    pub fn storage(&self) -> &Arc<DataStorage> {
+        &self.storage
+    }
+
+    pub async fn reader(
+        &self,
+        source: &str,
+        block_id: &ObjectId,
+        bundle: &Bundle,
+        schema: Option<SchemaRef>,
+        layout: Option<String>,
+    ) -> Result<Arc<dyn DataReader>, BundlebaseError> {
+        for plugin in &self.plugins {
+            let reader = plugin
+                .reader(source, block_id, bundle, schema.clone(), layout.clone())
+                .await?;
+            if reader.is_some() {
+                return Ok(reader.unwrap());
+            }
+        }
+        Err(DataFusionError::NotImplemented(format!("No reader found for {}", source)).into())
+    }
+}

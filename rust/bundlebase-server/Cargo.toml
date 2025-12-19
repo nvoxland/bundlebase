@@ -1,0 +1,31 @@
+[package]
+name = "bundlebase-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bundlebase-server"
+path = "src/main.rs"
+
+[dependencies]
+bundlebase = { path = "../bundlebase" }
+arrow = { workspace = true }
+arrow-schema = { workspace = true }
+arrow-flight = { workspace = true }
+datafusion = { workspace = true }
+tonic = { workspace = true }
+tokio = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tracing-log = "0.2"
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+async-stream = "0.3"
+futures = "0.3"
+bytes = "1"
+reedline = "0.37"
+comfy-table = "7.1"
+anyhow = "1.0"
+indicatif = "0.17"
+parking_lot = "0.12"

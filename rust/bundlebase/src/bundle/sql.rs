@@ -1,0 +1,580 @@
+use crate::bundle::JoinTypeOption;
+use crate::data_reader::{DataBlock, DataPack, PackJoin};
+use crate::{bundle, BundlebaseError};
+use datafusion::common::DataFusionError;
+use datafusion::dataframe::DataFrame;
+use datafusion::logical_expr::{Expr, LogicalPlan, Operator};
+use datafusion::prelude::Expr::BinaryExpr;
+use datafusion::prelude::SessionContext;
+use datafusion::sql::TableReference;
+use std::sync::{Arc, OnceLock};
+use std::sync::atomic::AtomicU64;
+
+static TEMP_COUNTER: OnceLock<AtomicU64> = OnceLock::new();
+
+/// Finds the original source (table and column name) for a logical column.
+///
+/// Analyzes the logical execution plan to trace a column back to its physical source,
+/// accounting for renames and joins. Returns all source pairs if a column comes from
+/// multiple sources (e.g., via UNION). If data_packs is provided, expands pack tables
+/// into their constituent block tables.
+///
+/// # Arguments
+/// * `column_name` - The logical column name to trace
+/// * `df` - The DataFrame to analyze
+/// * `data_packs` - Optional map of packs for expanding pack tables to blocks
+///
+/// # Returns
+/// * `Ok(Some(sources))` - List of (table_name, physical_column_name) pairs
+/// * `Ok(None)` - Column not found in the schema
+/// * `Err(e)` - Analysis failed
+pub(crate) async fn column_sources_from_df(
+    column_name: &str,
+    df: &DataFrame,
+    data_packs: Option<&Arc<parking_lot::RwLock<std::collections::HashMap<crate::data_storage::ObjectId, Arc<crate::data_reader::DataPack>>>>>,
+) -> Result<Option<Vec<(String, String)>>, BundlebaseError> {
+    let plan = df.logical_plan();
+
+    let mut sources = Vec::new();
+    find_orig(plan, column_name, &mut sources);
+
+    // Expand pack references to their constituent blocks if data_packs is provided
+    let expanded_sources = if let Some(packs_map) = data_packs {
+        let mut result = Vec::new();
+        for (table_name, col_name) in sources {
+            if let Some(pack_id) = DataPack::parse_id(&table_name) {
+                // This is a pack table - expand it to the individual blocks that have this column
+                let packs = packs_map.read();
+                if let Some(pack) = packs.get(&pack_id) {
+                    for block in pack.blocks() {
+                        // Only include this block if it actually has the column
+                        let block_schema = block.schema();
+                        if block_schema.column_with_name(&col_name).is_some() {
+                            result.push((
+                                format!("blocks.{}", DataBlock::table_name(block.id())),
+                                col_name.clone()
+                            ));
+                        }
+                    }
+                } else {
+                    // Pack not found - just return the pack table name
+                    result.push((table_name, col_name));
+                }
+            } else {
+                result.push((table_name, col_name));
+            }
+        }
+        result
+    } else {
+        sources
+    };
+
+    if expanded_sources.is_empty() {
+        Ok(None)
+    } else {
+        // Preserve order of appearance in logical plan instead of sorting
+        // Use HashSet-based dedup to avoid reordering
+        let mut seen = std::collections::HashSet::new();
+        let mut deduped = expanded_sources;
+        deduped.retain(|item| seen.insert(item.clone()));
+        Ok(Some(deduped))
+    }
+}
+
+pub(crate) async fn column_sources(
+    column_name: &str,
+    ctx: &Arc<SessionContext>,
+) -> Result<Option<Vec<(String, String)>>, BundlebaseError> {
+    // Get the "data" table from the context and use its logical plan
+    let table = ctx.table(bundle::DATAFRAME_ALIAS).await.map_err(|e| {
+        BundlebaseError::from(format!(
+            "Failed to get '{}' table: {}",
+            bundle::DATAFRAME_ALIAS,
+            e
+        ))
+    })?;
+
+    column_sources_from_df(column_name, &table, None).await
+}
+
+/// Recursively traces a column back to its physical source(s) in the execution plan.
+///
+/// This function walks the logical execution plan to find where a column originally comes from.
+/// It handles:
+/// - **Projections/Aliases:** Tracks renamed columns back to their original names
+/// - **Unions:** Returns all sources if a column comes from multiple tables (UNION operation)
+/// - **Table Scans:** Identifies the physical table and column name
+/// - **Complex Expressions:** Traces through nested references
+///
+/// # Algorithm
+/// 1. For Projection nodes: Extract the underlying column name from the expression
+/// 2. For Union nodes: Recursively search all union inputs
+/// 3. For TableScan nodes: Return the physical table name and column
+/// 4. For other nodes: Look for column references in expressions
+/// 5. Recurse into plan inputs until reaching a table scan
+///
+/// # Edge Cases
+/// - **Computed Columns:** Functions/expressions that don't reference a single column
+///   are skipped (e.g., `SELECT col1 + col2 AS total`)
+/// - **Unions with Different Column Orders:** Each source returns independently,
+///   duplicates are removed by caller
+/// - **Complex Table References:** Attempts to extract table name, falls back to debug format
+///
+/// # Arguments
+/// * `plan` - The logical execution plan node to analyze
+/// * `target` - The column name to find (may be an alias)
+/// * `sources` - Accumulator vec of (table_name, physical_column_name) pairs
+fn find_orig(plan: &LogicalPlan, target: &str, sources: &mut Vec<(String, String)>) {
+    // Handle Projection nodes specially to track through aliases/renames
+    if let LogicalPlan::Projection(proj) = plan {
+        // Look for the target in the projection expressions
+        for (i, expr) in proj.expr.iter().enumerate() {
+            let output_col_name = proj.schema.field(i).name();
+
+            if output_col_name == target {
+                // Found the target, now find what it comes from
+                // Handle aliases: Alias(expr, name)
+                let source_expr = if let Expr::Alias(alias) = expr {
+                    &alias.expr
+                } else {
+                    expr
+                };
+
+                // Now recursively find the source for the underlying expression
+                if let Expr::Column(col) = source_expr {
+                    // Direct column reference - recurse with the original column name
+                    find_orig(&proj.input, col.name.as_str(), sources);
+                }
+                // Note: We ignore computed columns (SELECT expressions that aren't direct column refs)
+                // e.g., "SELECT col1 + col2 AS total" - the expression col1+col2 is not a Column
+                return;
+            }
+        }
+        // If target not found in projection outputs, recurse into input
+        find_orig(&proj.input, target, sources);
+        return;
+    }
+
+    // Handle Union nodes specially - search all inputs
+    // A column from a UNION comes from multiple sources
+    if let LogicalPlan::Union(_union) = plan {
+        for input in plan.inputs() {
+            find_orig(input, target, sources);
+        }
+        return;
+    }
+
+    // For TableScan nodes, add the table and column directly
+    if let LogicalPlan::TableScan(scan) = plan {
+        let table_name = scan.table_name.to_string();
+        // Check if the column is in the projected schema
+        for field in scan.projected_schema.fields() {
+            if field.name() == target {
+                sources.push((table_name, target.to_string()));
+                return;
+            }
+        }
+        return;
+    }
+
+    // For other node types, inspect expressions to find column references
+    for expr in plan.expressions() {
+        if let Expr::Column(col) = expr {
+            if col.name == target {
+                match &col.relation {
+                    Some(TableReference::Bare { table }) => {
+                        // Simple table reference - use directly
+                        sources.push((table.to_string(), col.name.clone()));
+                        return;
+                    }
+                    Some(other) => {
+                        // Complex table reference (qualified, subquery, etc.)
+                        // Try to extract a readable name
+                        let table_name = match other {
+                            TableReference::Bare { table } => table.to_string(),
+                            TableReference::Partial { schema, table } => {
+                                format!("{}.{}", schema, table)
+                            }
+                            TableReference::Full {
+                                catalog,
+                                schema,
+                                table,
+                            } => {
+                                format!("{}.{}.{}", catalog, schema, table)
+                            }
+                        };
+                        sources.push((table_name, col.name.clone()));
+                        return;
+                    }
+                    None => {
+                        // No relation specified - use the dataframe alias as source
+                        sources.push((
+                            bundle::DATAFRAME_ALIAS.to_string(),
+                            col.name.clone(),
+                        ));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    // Recurse into inputs to continue searching
+    for input in plan.inputs() {
+        find_orig(input, target, sources);
+    }
+}
+
+/// Parse a WHERE-clause fragment (no leading `WHERE`) into one or more DataFusion `Expr` nodes.
+///
+/// - `ctx` is the SessionContext used to parse SQL and resolve names.
+/// - `where_sql` is the condition text (e.g. `a > 10 AND b = 'x'`).
+/// - `table` is the table name to use as the FROM target when the condition references columns.
+///    If `None` a dummy name `t` is used (you can register a temp table with that name beforehand).
+pub(crate) async fn parse_join_expr(
+    ctx: &SessionContext,
+    table: &str,
+    join: &PackJoin,
+) -> Result<Vec<Expr>, DataFusionError> {
+    let join_type = match join.join_type() {
+        JoinTypeOption::Inner => "INNER JOIN",
+        JoinTypeOption::Left => "LEFT JOIN",
+        JoinTypeOption::Right => "RIGHT JOIN",
+        JoinTypeOption::Full => "FULL OUTER JOIN",
+    };
+
+    let join_expr = join.expression().replace("$base", table);
+
+    let sql = format!(
+        "SELECT * FROM {} {} packs.{} {} ON {}",
+        table,
+        join_type,
+        DataPack::table_name(join.pack_id()),
+        join.name(),
+        &join_expr
+    );
+
+    let df = ctx.sql(&sql).await?;
+    let plan = df.logical_plan();
+
+    let mut preds = Vec::new();
+    collect_join_exprs(&plan, &mut preds);
+    Ok(preds)
+}
+
+fn collect_join_exprs(plan: &LogicalPlan, out: &mut Vec<Expr>) {
+    match plan {
+        LogicalPlan::Join(filter) => {
+            match &filter.filter {
+                Some(filter) => out.push(filter.clone()),
+                None => {}
+            }
+            for (x1, x2) in &filter.on {
+                out.push(BinaryExpr(datafusion::logical_expr::BinaryExpr::new(
+                    Box::new(x1.clone()),
+                    Operator::Eq,
+                    Box::new(x2.clone()),
+                )));
+            }
+        }
+        other => {
+            // recurse into any inputs (covers Projection, Join, etc.)
+            for input in other.inputs() {
+                collect_join_exprs(input, out);
+            }
+        }
+    }
+}
+
+/// Execute a closure with a temporary table registered in the temp schema.
+///
+/// This helper handles the common pattern of:
+/// 1. Registering a DataFrame as a temp table
+/// 2. Executing a closure that can use the temporary table
+/// 3. Cleaning up the temporary table registration
+///
+/// # Arguments
+/// * `ctx` - The SessionContext to use
+/// * `df` - The DataFrame to register as the temporary table
+/// * `f` - A closure that receives the SessionContext and executes while the temp table is registered
+///
+pub async fn with_temp_table<F, Fut>(
+    ctx: &Arc<SessionContext>,
+    df: DataFrame,
+    f: F,
+) -> Result<DataFrame, BundlebaseError>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<DataFrame, BundlebaseError>>,
+{
+    let unique_int = {
+        TEMP_COUNTER
+            .get_or_init(|| AtomicU64::new(1))
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    };
+    let temp_tablename = format!("temp.temp_{}", unique_int);
+
+    // Register the DataFrame as "data" in the temp schema
+    ctx.register_table(temp_tablename.as_str(), df.into_view())?;
+
+    // Execute the provided function with access to the context
+    let result = f(temp_tablename.clone()).await;
+
+    // Cleanup: deregister the temporary table
+    ctx.deregister_table(temp_tablename.as_str())?;
+
+    result
+}
+
+mod tests {
+    use super::*;
+    use crate::data_storage::ObjectId;
+    use arrow_schema::{DataType, Field, Schema, SchemaRef};
+    use datafusion::catalog::SchemaProvider;
+    use datafusion::datasource::empty::EmptyTable;
+    use std::sync::Arc;
+    use crate::bundle::{sql, BundleFacade};
+    use crate::BundleBuilder;
+    use crate::test_utils::test_datafile;
+
+    #[tokio::test]
+    async fn test_parse_join() {
+        let ctx = SessionContext::new();
+        ctx.register_table(
+            "t",
+            Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
+                Field::new("a", DataType::Int32, false),
+                Field::new("b", DataType::Utf8, false),
+            ])))),
+        )
+            .unwrap();
+
+        let join_id: ObjectId = 5.into();
+
+        // Create and register a packs schema for testing
+        use datafusion::catalog::MemorySchemaProvider;
+        let packs_schema = Arc::new(MemorySchemaProvider::new());
+
+        ctx.catalog("datafusion")
+            .unwrap()
+            .register_schema("packs", packs_schema.clone())
+            .unwrap();
+
+        packs_schema
+            .register_table(
+                DataPack::table_name(&join_id).to_string(),
+                Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
+                    Field::new("x", DataType::Int32, false),
+                    Field::new("y", DataType::Utf8, false),
+                ])))),
+            )
+            .unwrap();
+
+        let preds = parse_join_expr(
+            &ctx,
+            "t",
+            &PackJoin::new(&join_id, "test_join", &JoinTypeOption::Inner, "a=x"),
+        )
+            .await
+            .unwrap()
+            .iter()
+            .map(|pred| format!("{:?}", pred))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!("BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"t\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) })",
+                   preds.as_str());
+
+        let preds = parse_join_expr(
+            &ctx,
+            "t",
+            &PackJoin::new(
+                &join_id,
+                "test_join",
+                &JoinTypeOption::Inner,
+                "a=x and x > 3",
+            ),
+        )
+            .await
+            .unwrap()
+            .iter()
+            .map(|pred| format!("{:?}", pred))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!("BinaryExpr(BinaryExpr { left: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"t\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) }), op: And, right: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }), op: Gt, right: Literal(Int64(3), None) }) })",
+                   preds.as_str());
+    }
+
+    #[tokio::test]
+    async fn test_column_source_basic() {
+        // Test that column_source correctly identifies the original column and table
+        let ctx = Arc::new(SessionContext::new());
+
+        // Register a simple table
+        ctx.register_table(
+            bundle::DATAFRAME_ALIAS,
+            Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
+                Field::new("id", DataType::Int32, false),
+                Field::new("name", DataType::Utf8, false),
+            ])))),
+        )
+            .unwrap();
+
+        let result = column_sources("id", &ctx).await.unwrap();
+        assert!(result.is_some());
+        let sources = result.unwrap();
+        assert_eq!(sources.len(), 1);
+        let (table, col) = &sources[0];
+        assert_eq!(table, bundle::DATAFRAME_ALIAS);
+        assert_eq!(col, "id");
+    }
+
+    #[tokio::test]
+    async fn test_column_source_nonexistent() {
+        // Test that column_source returns None for non-existent column
+        let ctx = Arc::new(SessionContext::new());
+
+        ctx.register_table(
+            bundle::DATAFRAME_ALIAS,
+            Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
+                Field::new("id", DataType::Int32, false),
+                Field::new("name", DataType::Utf8, false),
+            ])))),
+        )
+            .unwrap();
+
+        let result = column_sources("nonexistent", &ctx).await;
+        // Should return None when column doesn't exist
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_column_source_after_projection() {
+        // Test that column_source tracks renamed columns back to original names
+        let ctx = Arc::new(SessionContext::new());
+
+        ctx.register_table(
+            "source_table",
+            Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
+                Field::new("original_id", DataType::Int32, false),
+                Field::new("original_name", DataType::Utf8, false),
+            ])))),
+        )
+            .unwrap();
+
+        // Create a view that renames columns
+        let df = ctx
+            .sql("SELECT original_id as id, original_name as name FROM source_table")
+            .await
+            .unwrap();
+
+        ctx.register_table(bundle::DATAFRAME_ALIAS, df.into_view())
+            .unwrap();
+
+        // Query for the renamed column
+        let result = column_sources("id", &ctx).await.unwrap();
+        assert!(result.is_some());
+        let sources = result.unwrap();
+        assert_eq!(sources.len(), 1);
+        let (table, col) = &sources[0];
+        // Should return the source table and original column name
+        assert_eq!(table, "source_table");
+        assert_eq!(col, "original_id");
+    }
+
+    #[tokio::test]
+    async fn test_column_source_multiple_columns() {
+        // Test that column_source works correctly with multiple columns
+        let ctx = Arc::new(SessionContext::new());
+
+        ctx.register_table(
+            bundle::DATAFRAME_ALIAS,
+            Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
+                Field::new("col1", DataType::Int32, false),
+                Field::new("col2", DataType::Utf8, false),
+                Field::new("col3", DataType::Float64, false),
+            ])))),
+        )
+            .unwrap();
+
+        // Test each column
+        for col_name in &["col1", "col2", "col3"] {
+            let result = column_sources(col_name, &ctx).await.unwrap();
+            assert!(result.is_some());
+            let sources = result.unwrap();
+            assert_eq!(sources.len(), 1);
+            let (table, col) = &sources[0];
+            assert_eq!(table, bundle::DATAFRAME_ALIAS);
+            assert_eq!(col, *col_name);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_column_source_union() {
+        // Test that column_source returns multiple sources when a column comes from a union
+        let ctx = Arc::new(SessionContext::new());
+
+        ctx.register_table(
+            "table1",
+            Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
+                Field::new("id", DataType::Int32, false),
+                Field::new("name", DataType::Utf8, false),
+            ])))),
+        )
+            .unwrap();
+
+        ctx.register_table(
+            "table2",
+            Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
+                Field::new("id", DataType::Int32, false),
+                Field::new("value", DataType::Float64, false),
+            ])))),
+        )
+            .unwrap();
+
+        // Create a union of both tables
+        let df = ctx
+            .sql("SELECT id, name as data FROM table1 UNION ALL SELECT id, CAST(value AS VARCHAR) as data FROM table2")
+            .await
+            .unwrap();
+
+        ctx.register_table(bundle::DATAFRAME_ALIAS, df.into_view())
+            .unwrap();
+
+        // Query for the 'id' column which comes from both tables
+        let result = column_sources("id", &ctx).await.unwrap();
+        assert!(result.is_some());
+        let sources = result.unwrap();
+        assert_eq!(sources.len(), 2);
+
+        // Should have both table1 and table2 as sources
+        let tables: Vec<&String> = sources.iter().map(|(t, _)| t).collect();
+        assert_eq!(2, tables.len());
+        assert!(tables.contains(&&"table1".to_string()));
+        assert!(tables.contains(&&"table2".to_string()));
+
+        // All sources should have "id" as the column name
+        for (_, col) in &sources {
+            assert_eq!(col, "id");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_column_source_from_dataframe() -> Result<(), BundlebaseError>{
+        let mut bundle = BundleBuilder::create("memory:///test_bundle").await?;
+        bundle.attach(test_datafile("userdata.parquet")).await?;
+
+        let df = bundle.dataframe().await?;
+
+        // Test with pack expansion - should return only blocks that have the column
+        let sources = column_sources_from_df("first_name", &df, Some(&bundle.bundle().data_packs)).await?.ok_or("Could not find columns")?;
+
+        assert!(!sources.is_empty(), "Expected at least one source");
+        let (table, col) = sources.get(0).unwrap();
+        // The table should be in the blocks schema
+        assert!(table.starts_with("blocks.__block_"), "Expected table to start with 'blocks.__block_' but got: '{}'", table);
+        assert_eq!("first_name", col);
+
+        Ok(())
+
+    }
+}
