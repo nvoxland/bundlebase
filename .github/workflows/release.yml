@@ -120,7 +120,7 @@ jobs:
     needs: validate-version
     strategy:
       matrix:
-        os: [macos-13, macos-latest]  # Intel and Apple Silicon
+        os: [macos-latest]
         python-version: ['3.11', '3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
