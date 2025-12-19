@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "bundlebase"
-version = "0.1.0"
+# Version is automatically read from rust/bundlebase/Cargo.toml by Maturin
 description = "High-performance data processing library with Rust backend and Python bindings"
 authors = ["Nathan Voxland <nathan@voxland.net>"]
 readme = "README.md"

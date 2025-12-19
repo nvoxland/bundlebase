@@ -5,6 +5,10 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
 [workspace.dependencies]
 datafusion = { version = "51", features = ["avro"] }
 arrow = { version = "57", features = ["ffi", "pyarrow"] }
