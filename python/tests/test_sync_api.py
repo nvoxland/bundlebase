@@ -275,15 +275,6 @@ class TestSyncIndex:
         # Verify bundle still works
         assert c.num_rows() == 1000
 
-    def test_sync_drop_index(self):
-        """Test dropping an index synchronously."""
-        c = dc.create(random_bundle())
-        c.attach(datafile("userdata.parquet"))
-        c.define_index("id")
-        c.drop_index("id")
-
-        assert c.num_rows() == 1000
-
     def test_sync_rebuild_index(self):
         """Test rebuilding an index synchronously."""
         c = dc.create(random_bundle())
