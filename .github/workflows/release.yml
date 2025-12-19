@@ -2,14 +2,16 @@
 # Automatically builds and publishes releases when version tags are pushed
 #
 # To create a release:
-# 1. Update version in Cargo.toml (workspace.package.version = "X.Y.Z")
-# 2. Commit: git commit -m "Bump version to X.Y.Z"
+# 1. Update version in BOTH files:
+#    - Cargo.toml: [workspace.package] version = "X.Y.Z"
+#    - pyproject.toml: [tool.poetry] version = "X.Y.Z"
+# 2. Commit: git commit -am "Bump version to X.Y.Z"
 # 3. Push: git push
 # 4. Tag: git tag vX.Y.Z
 # 5. Push tag: git push origin vX.Y.Z
 #
 # Required secrets:
-# - PYPI_API_TOKEN: PyPI API token for publishing (create at https://pypi.org/manage/account/token/)
+# - PYPI_API_TOKEN: PyPI API token for publishing
 
 name: Release
 
@@ -38,17 +40,45 @@ jobs:
           VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Extract pyproject.toml version
+        id: pyproject_version
+        run: |
+          VERSION=$(grep '^version = ' pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Compare versions
         run: |
           TAG_VERSION="${{ steps.tag_version.outputs.VERSION }}"
           CARGO_VERSION="${{ steps.cargo_version.outputs.VERSION }}"
+          PYPROJECT_VERSION="${{ steps.pyproject_version.outputs.VERSION }}"
 
-          echo "Tag version: $TAG_VERSION"
+          echo "Tag version:        $TAG_VERSION"
           echo "Cargo.toml version: $CARGO_VERSION"
+          echo "pyproject.toml:     $PYPROJECT_VERSION"
+          echo ""
+
+          MISMATCH=0
 
           if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
-            echo "::error::Version mismatch! Tag is v$TAG_VERSION but Cargo.toml has version $CARGO_VERSION"
-            echo "::error::Please update Cargo.toml version to $TAG_VERSION before releasing"
+            echo "::error::Version mismatch! Tag is v$TAG_VERSION but Cargo.toml has $CARGO_VERSION"
+            MISMATCH=1
+          fi
+
+          if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
+            echo "::error::Version mismatch! Tag is v$TAG_VERSION but pyproject.toml has $PYPROJECT_VERSION"
+            MISMATCH=1
+          fi
+
+          if [ "$CARGO_VERSION" != "$PYPROJECT_VERSION" ]; then
+            echo "::error::Version mismatch! Cargo.toml has $CARGO_VERSION but pyproject.toml has $PYPROJECT_VERSION"
+            MISMATCH=1
+          fi
+
+          if [ $MISMATCH -eq 1 ]; then
+            echo ""
+            echo "::error::Please ensure all versions match before releasing:"
+            echo "::error::  1. Update Cargo.toml:      [workspace.package] version = \"$TAG_VERSION\""
+            echo "::error::  2. Update pyproject.toml:  [tool.poetry] version = \"$TAG_VERSION\""
             exit 1
           fi
 
