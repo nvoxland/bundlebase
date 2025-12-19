@@ -62,8 +62,8 @@ class OperationChain:
             # Don't intercept private attributes
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
-        # Conversion methods should execute the chain, not queue operations
-        conversion_methods = {"to_pandas", "to_polars", "to_numpy", "to_dict"}
+        # Conversion and streaming methods should execute the chain, not queue operations
+        conversion_methods = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyarrow_stream"}
         if name in conversion_methods:
             async def conversion_wrapper(*args, **kwargs):
                 # Execute the chain first
@@ -193,8 +193,8 @@ class CreateChain:
             # Don't intercept private attributes
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
-        # Conversion methods should execute the chain, not queue operations
-        conversion_methods = {"to_pandas", "to_polars", "to_numpy", "to_dict"}
+        # Conversion and streaming methods should execute the chain, not queue operations
+        conversion_methods = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyarrow_stream"}
         if name in conversion_methods:
             async def conversion_wrapper(*args, **kwargs):
                 # Execute the chain first
@@ -324,8 +324,8 @@ class ExtendChain:
             # Don't intercept private attributes
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
-        # Conversion methods should execute the chain, not queue operations
-        conversion_methods = {"to_pandas", "to_polars", "to_numpy", "to_dict"}
+        # Conversion and streaming methods should execute the chain, not queue operations
+        conversion_methods = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyarrow_stream"}
         if name in conversion_methods:
             async def conversion_wrapper(*args, **kwargs):
                 # Execute the chain first
