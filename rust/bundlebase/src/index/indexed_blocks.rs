@@ -1,0 +1,42 @@
+use parking_lot::RwLock;
+use crate::data_reader::{ObjectId, VersionedBlockId};
+
+/// Represents a set of indexed blocks with their versions.
+/// Tracks which blocks (and at which versions) are covered by a particular index.
+#[derive(Debug)]
+pub struct IndexedBlocks {
+    /// List of versioned block IDs that are indexed
+    blocks: RwLock<Vec<VersionedBlockId>>,
+    /// Path to the index file
+    path: String,
+}
+
+impl IndexedBlocks {
+    /// Creates a new IndexedBlocks instance from a list of VersionedBlockId
+    pub fn new(blocks: Vec<VersionedBlockId>, path: String) -> Self {
+        Self {
+            blocks: RwLock::new(blocks),
+            path,
+        }
+    }
+
+    /// Creates a new IndexedBlocks instance from a list of (block_id, version) tuples
+    #[cfg(test)]
+    pub(crate) fn from_tuples(blocks: Vec<(ObjectId, String)>, path: String) -> Self {
+        let versioned_blocks = blocks
+            .into_iter()
+            .map(|(block, version)| VersionedBlockId::new(block, version))
+            .collect();
+        Self::new(versioned_blocks, path)
+    }
+
+    /// Checks if this index contains the specified block at the specified version
+    pub fn contains(&self, block_id: &ObjectId, version: &str) -> bool {
+        self.blocks.read().iter().any(|vb| &vb.block == block_id && vb.version == version)
+    }
+
+    /// Returns the path to the index file
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+}

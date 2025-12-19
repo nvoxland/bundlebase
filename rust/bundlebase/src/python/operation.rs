@@ -1,0 +1,51 @@
+use crate::bundle::AnyOperation;
+use crate::Operation;
+use pyo3::prelude::*;
+
+#[pyclass]
+#[derive(Clone)]
+pub struct PyOperation {
+    inner: AnyOperation,
+}
+
+#[pymethods]
+impl PyOperation {
+    #[getter]
+    fn op_type(&self) -> String {
+        match &self.inner {
+            AnyOperation::AttachBlock(_) => "attachBlock".to_string(),
+            AnyOperation::RemoveColumns(_) => "removeColumns".to_string(),
+            AnyOperation::RenameColumn(_) => "renameColumn".to_string(),
+            AnyOperation::Filter(_) => "filter".to_string(),
+            AnyOperation::Select(_) => "select".to_string(),
+            AnyOperation::Join(_) => "join".to_string(),
+            AnyOperation::DefineFunction(_) => "defineFunction".to_string(),
+            AnyOperation::SetName(_) => "setName".to_string(),
+            AnyOperation::SetDescription(_) => "setDescription".to_string(),
+            AnyOperation::IndexBlocks(_) => "indexBlocks".to_string(),
+            AnyOperation::DefineIndex(_) => "defineIndex".to_string(),
+            AnyOperation::DefinePack(_) => "definePack".to_string(),
+            AnyOperation::RebuildIndex(_) => "rebuildIndex".to_string(),
+            AnyOperation::Query(_) => "query".to_string(),
+        }
+    }
+
+    #[getter]
+    fn describe(&self) -> String {
+        self.inner.describe()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("PyOperation({})", self.op_type())
+    }
+
+    fn __str__(&self) -> String {
+        self.describe()
+    }
+}
+
+impl PyOperation {
+    pub fn new(inner: AnyOperation) -> Self {
+        PyOperation { inner }
+    }
+}

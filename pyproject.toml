@@ -1,0 +1,41 @@
+[tool.poetry]
+name = "bundlebase"
+version = "0.1.0"
+description = "High-performance data processing library with Rust backend and Python bindings"
+authors = ["Nathan Voxland <nathan@voxland.net>"]
+readme = "README.md"
+packages = [{include = "bundlebase", from = "python/src"}]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+pyarrow = ">=14.0.0"
+pandas = ">=2.0.0"
+polars = {version = ">=0.20.0", optional = true}
+numpy = {version = ">=1.20.0", optional = true}
+nest-asyncio = {version = "^1.6.0", optional = true}
+
+[tool.poetry.group.dev.dependencies]
+maturin-import-hook = "^0.3.0"
+pytest = "^8.4"
+pytest-asyncio = "^1.2"
+mypy = "^1.18.2"
+
+# Keep versions in sync with optional dependencies above
+pandas = ">=2.0.0"
+polars = ">=0.20.0"
+numpy = ">=1.20.0"
+nest-asyncio = "^1.6.0"
+maturin = "^1.10.2"
+
+[tool.poetry.extras]
+jupyter = ["nest-asyncio"]
+
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+manifest-path = "rust/bundlebase/Cargo.toml"
+python-source = "python/src"
+module-name = "bundlebase._bundlebase"
+features = ["pyo3/extension-module"]
