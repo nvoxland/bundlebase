@@ -7,7 +7,7 @@ on:
 
 jobs:
   rust:
-    name: Test Rust library
+    name: Rust library
     runs-on: ubuntu-latest
 
     steps:

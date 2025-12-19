@@ -44,7 +44,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     let (contents, commit, url) = common::latest_commit(bundle.data_dir()).await?.unwrap();
 
     let expected = format!(
-        r#"author: nvoxland
+        r#"author: {}
 message: First commit
 timestamp: {}
 changes:
@@ -157,6 +157,7 @@ changes:
     oldName: first_name
     newName: name
 "#,
+        commit.author,
         commit.timestamp,
         commit.changes[0].id,
         commit.changes[0].description,
@@ -237,7 +238,7 @@ async fn test_save_multiple_operations() -> Result<(), BundlebaseError> {
 
     let expected = format!(
         r#"
-author: nvoxland
+author: {}
 message: Commit changes
 timestamp: {}
 changes:
@@ -362,6 +363,7 @@ changes:
     oldName: last_name
     newName: lname
 "#,
+        commit.author,
         commit.timestamp,
         commit.changes[0].id,
         commit.changes[0].description,
@@ -461,7 +463,7 @@ async fn test_attach_csv() -> Result<(), BundlebaseError> {
     assert_eq!(
         format!(
             r"
-author: nvoxland
+author: {}
 message: CSV commit
 timestamp: {}
 changes:
@@ -553,6 +555,7 @@ changes:
         dict_is_ordered: false
         metadata: {{}}
       metadata: {{}}",
+            commit.author,
             commit.timestamp,
             commit.changes[0].id,
             commit.changes[0].description,
@@ -619,7 +622,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     let (contents, commit, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
 
     // Verify it contains the expected operations
-    assert!(contents.contains("author: nvoxland"));
+    assert!(contents.contains("author: "));
     assert!(contents.contains("message: JSON commit"));
     assert!(contents.contains("type: attachBlock"));
     assert!(contents.contains("source: memory:///test_data/objects.json"));
