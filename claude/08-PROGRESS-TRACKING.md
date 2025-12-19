@@ -85,7 +85,7 @@ Bundlebase.progress.enable_tqdm()
 Progress bars appear automatically in the REPL:
 
 ```bash
-$ Bundlebase-server /path/to/container
+$ Bundlebase-cli /path/to/container
 Bundlebase REPL
 Type 'help' for available commands, 'exit' to quit
 

@@ -96,7 +96,7 @@ jobs:
           retention-days: 7
 
   build-cli:
-    name: Build bundlebase-server
+    name: Build bundlebase-cli
     runs-on: ubuntu-latest
     needs: rust
 
@@ -110,14 +110,14 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust/bundlebase-server -> target
+          workspaces: rust/bundlebase-cli -> target
 
-      - name: Build bundlebase-server (release)
-        run: cargo build --release --package bundlebase-server
+      - name: Build bundlebase-cli (release)
+        run: cargo build --release --package bundlebase-cli
 
-      - name: Upload bundlebase-server binary
+      - name: Upload bundlebase-cli binary
         uses: actions/upload-artifact@v4
         with:
-          name: bundlebase-server-${{ runner.os }}
-          path: target/release/bundlebase-server
+          name: bundlebase-cli-${{ runner.os }}
+          path: target/release/bundlebase-cli
           retention-days: 30

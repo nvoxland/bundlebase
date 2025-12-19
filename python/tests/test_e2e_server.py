@@ -1,7 +1,7 @@
 """
 End-to-end tests for Arrow Flight SQL server.
 
-Tests the bundlebase-server binary using pyarrow.flight client.
+Tests the bundlebase-cli binary using pyarrow.flight client.
 Verifies query execution, result streaming, and schema handling.
 """
 
@@ -19,7 +19,7 @@ SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 50051
 SERVER_URL = f"grpc://{SERVER_HOST}:{SERVER_PORT}"
 BUNDLE_PATH = "example"
-SERVER_BINARY = "./target/release/bundlebase-server"
+SERVER_BINARY = "./target/release/bundlebase-cli"
 
 
 @pytest.fixture(scope="session")
