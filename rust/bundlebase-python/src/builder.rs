@@ -1,8 +1,8 @@
-use crate::bundle::BundleBuilder;
-use crate::bundle::{BundleFacade, JoinTypeOption, BundleChange, BundleStatus};
-use crate::functions::FunctionSignature;
-use crate::python::function_impl::PythonFunctionImpl;
-use crate::python::utils::convert_py_params;
+use ::bundlebase::bundle::BundleBuilder;
+use ::bundlebase::bundle::{BundleFacade, JoinTypeOption, BundleChange, BundleStatus};
+use ::bundlebase::functions::FunctionSignature;
+use crate::function_impl::PythonFunctionImpl;
+use crate::utils::convert_py_params;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFunction};

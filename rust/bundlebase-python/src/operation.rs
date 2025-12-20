@@ -1,5 +1,5 @@
-use crate::bundle::AnyOperation;
-use crate::Operation;
+use ::bundlebase::bundle::AnyOperation;
+use ::bundlebase::Operation;
 use pyo3::prelude::*;
 
 #[pyclass]

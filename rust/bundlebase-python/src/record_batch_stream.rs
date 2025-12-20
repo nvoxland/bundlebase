@@ -74,7 +74,7 @@ impl PyRecordBatchStream {
                     // Convert the RecordBatch to PyArrow
                     use arrow::pyarrow::ToPyArrow;
                     Python::attach(|py| -> PyResult<Py<PyAny>> {
-                        batch.to_pyarrow(py).map(|obj| obj.unbind())
+                        batch.to_pyarrow(py).map(|obj: Bound<'_, PyAny>| obj.unbind())
                     })
                 }
                 Some(Err(e)) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
@@ -101,7 +101,7 @@ impl PyRecordBatchStream {
             let mut batches = Vec::new();
 
             while let Some(result) = stream_guard.next().await {
-                let batch = result.map_err(|e| {
+                let batch = result.map_err(|e: datafusion::error::DataFusionError| {
                     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
                         "Error reading batch: {}",
                         e
@@ -113,7 +113,7 @@ impl PyRecordBatchStream {
             // Convert all batches to PyArrow
             use arrow::pyarrow::ToPyArrow;
             Python::attach(|py| -> PyResult<Py<PyAny>> {
-                batches.to_pyarrow(py).map(|obj| obj.unbind())
+                batches.to_pyarrow(py).map(|obj: Bound<'_, PyAny>| obj.unbind())
             })
         })
     }

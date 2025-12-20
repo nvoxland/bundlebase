@@ -1,7 +1,7 @@
-use crate::functions::FunctionImpl;
-use crate::functions::FunctionSignature;
-use crate::python::data_generator::PythonDataGenerator;
-use crate::{BundlebaseError, DataGenerator};
+use ::bundlebase::functions::FunctionImpl;
+use ::bundlebase::functions::FunctionSignature;
+use crate::data_generator::PythonDataGenerator;
+use ::bundlebase::{BundlebaseError, DataGenerator};
 use pyo3::types::PyFunction;
 use pyo3::Py;
 use std::sync::Arc;

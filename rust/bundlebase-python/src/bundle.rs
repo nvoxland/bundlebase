@@ -1,6 +1,6 @@
 use super::commit::PyCommit;
-use crate::bundle::BundleFacade;
-use crate::Bundle;
+use ::bundlebase::bundle::BundleFacade;
+use ::bundlebase::Bundle;
 use arrow::pyarrow::ToPyArrow;
 use pyo3::prelude::*;
 
