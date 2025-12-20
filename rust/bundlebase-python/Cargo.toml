@@ -12,12 +12,16 @@ description = "Python bindings for bundlebase - high-performance data processing
 name = "_bundlebase"
 crate-type = ["cdylib"]
 
+[features]
+# Enable extension-module for Python builds (maturin), disable for cargo test (IDE)
+extension-module = ["pyo3/extension-module"]
+
 [dependencies]
 # Depend on core Rust library
 bundlebase = { path = "../bundlebase" }
 
 # PyO3 dependencies for Python bindings
-pyo3 = { version = "0.26", features = ["experimental-async", "extension-module"] }
+pyo3 = { version = "0.26", features = ["experimental-async"] }
 pyo3-async-runtimes = { version = "0.26", features = ["tokio-runtime"] }
 pyo3-log = "0.13"
 
