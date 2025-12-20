@@ -1,6 +1,6 @@
 use super::builder::PyChange;
 use super::operation::PyOperation;
-use crate::bundle::BundleCommit;
+use ::bundlebase::bundle::BundleCommit;
 use pyo3::prelude::*;
 
 #[pyclass]

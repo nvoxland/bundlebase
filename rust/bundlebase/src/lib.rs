@@ -7,15 +7,17 @@ pub mod data_storage;
 pub mod functions;
 mod index;
 pub mod progress;
-#[allow(clippy::unwrap_used)]
-mod python;
 mod schema_provider;
 pub mod test_utils;
 mod versioning;
 
-pub use crate::bundle::{AnyOperation, Bundle, BundleBuilder, Operation, BundleChange, BundleStatus};
+pub use crate::bundle::{
+    AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade,
+    BundleStatus, JoinTypeOption, Operation,
+};
 pub use crate::data_reader::DataGenerator;
-pub use functions::FunctionSignature;
+pub use crate::progress::{get_tracker, set_tracker, with_tracker, ProgressId, ProgressTracker};
+pub use functions::{FunctionImpl, FunctionSignature};
 use std::error::Error;
 
 /// Standard error type used throughout the Bundlebase codebase

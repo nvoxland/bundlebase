@@ -2,6 +2,11 @@
 name = "bundlebase-cli"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Command-line interface for bundlebase data processing"
 
 [[bin]]
 name = "bundlebase-cli"

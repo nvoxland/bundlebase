@@ -3,7 +3,7 @@
 //! This module provides the bridge between Rust progress tracking and Python
 //! callbacks, allowing Python code to register custom progress trackers (e.g., tqdm).
 
-use crate::progress::{ProgressId, ProgressTracker};
+use ::bundlebase::progress::{ProgressId, ProgressTracker};
 use parking_lot::Mutex;
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -108,7 +108,7 @@ impl ProgressTracker for PyProgressTracker {
 #[pyfunction]
 fn _register_progress_callback(callback: PyObject) {
     let tracker = PyProgressTracker::new(callback);
-    crate::progress::set_tracker(Box::new(tracker));
+    ::bundlebase::set_tracker(Box::new(tracker));
 }
 
 /// Python module initialization for progress tracking

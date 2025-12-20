@@ -20,7 +20,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust/bundlebase -> target
+          workspaces: |
+            rust/bundlebase -> target
+            rust/bundlebase-python -> target
 
       - name: Run Rust tests
         run: cargo test --verbose --package bundlebase
@@ -44,7 +46,9 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust/bundlebase -> target
+          workspaces: |
+            rust/bundlebase -> target
+            rust/bundlebase-python -> target
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5

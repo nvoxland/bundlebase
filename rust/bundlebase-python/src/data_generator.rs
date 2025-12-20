@@ -1,5 +1,5 @@
-use crate::data_reader::DataGenerator;
-use crate::BundlebaseError;
+use ::bundlebase::DataGenerator;
+use ::bundlebase::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use arrow::pyarrow::{FromPyArrow, ToPyArrow};
 use arrow::record_batch::RecordBatch;

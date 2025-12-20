@@ -10,7 +10,7 @@ mod schema;
 mod session_context;
 mod utils;
 
-use crate::bundle::{Bundle, BundleBuilder};
+use ::bundlebase::bundle::{Bundle, BundleBuilder};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
@@ -45,13 +45,13 @@ pub fn open(url: String, py: Python) -> PyResult<Bound<PyAny>> {
 /// Get memory URL for test data file
 #[pyfunction]
 pub fn test_datafile(name: String) -> PyResult<String> {
-    Ok(crate::test_utils::test_datafile(&name).to_string())
+    Ok(::bundlebase::test_utils::test_datafile(&name).to_string())
 }
 
 /// Get random memory URL for test bundle
 #[pyfunction]
 pub fn random_memory_url() -> PyResult<String> {
-    Ok(crate::test_utils::random_memory_url().to_string())
+    Ok(::bundlebase::test_utils::random_memory_url().to_string())
 }
 
 #[pymodule(name = "_bundlebase")]

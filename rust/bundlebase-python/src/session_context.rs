@@ -17,15 +17,15 @@ impl PySessionContext {
             let dataframe = inner
                 .sql(&query)
                 .await
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+                .map_err(|e: datafusion::error::DataFusionError| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
             let record_batches = dataframe
                 .collect()
                 .await
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+                .map_err(|e: datafusion::error::DataFusionError| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
 
             Python::attach(|py| -> PyResult<Py<PyAny>> {
-                record_batches.to_pyarrow(py).map(|obj| obj.unbind())
+                record_batches.to_pyarrow(py).map(|obj: Bound<'_, PyAny>| obj.unbind())
             })
         })
     }
