@@ -55,7 +55,7 @@ build-backend = "maturin"
 manifest-path = "rust/bundlebase-python/Cargo.toml"
 python-source = "python/src"
 module-name = "bundlebase._bundlebase"
-features = ["pyo3/extension-module"]
+features = ["extension-module"]
 
 # Include README as long_description for PyPI
 [project]

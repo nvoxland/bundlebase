@@ -120,7 +120,7 @@ pub fn register_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::progress::ProgressScope;
+    use bundlebase::progress::ProgressScope;
 
     #[test]
     fn test_py_progress_tracker_basic() {
