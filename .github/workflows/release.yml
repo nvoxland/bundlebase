@@ -208,11 +208,14 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: dist
-          merge-multiple: true
+          path: artifacts
 
-      - name: List artifacts
-        run: ls -R dist/
+      - name: Organize artifacts for PyPI
+        run: |
+          mkdir -p dist
+          find artifacts -name '*.whl' -exec cp {} dist/ \;
+          find artifacts -name '*.tar.gz' -exec cp {} dist/ \;
+          ls -lh dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -230,8 +233,14 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: dist
-          merge-multiple: true
+          path: artifacts
+
+      - name: Organize artifacts for release
+        run: |
+          mkdir -p dist
+          find artifacts -name '*.whl' -exec cp {} dist/ \;
+          find artifacts -name '*.tar.gz' -exec cp {} dist/ \;
+          ls -lh dist/
 
       - name: Extract version from tag
         id: version
