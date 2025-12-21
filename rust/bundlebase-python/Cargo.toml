@@ -33,6 +33,6 @@ arrow-schema = { workspace = true }
 datafusion = { workspace = true }
 
 # Async runtime and utilities
-tokio = { version = "1", features = ["fs"] }
+tokio = { workspace = true }
 futures = "0.3"
 parking_lot = "0.12"
