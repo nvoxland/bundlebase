@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
-use tokio::runtime::Runtime;
+use tokio::runtime::{Builder, Runtime};
 use url::Url;
 
 
@@ -46,8 +46,7 @@ pub fn test_datafile(name: &str) -> &'static str {
         // Run the async writes on a fresh thread/runtime so we don't start a Tokio runtime
         // on a thread that's already driving async tasks.
         std::thread::spawn(|| {
-            let rt = Runtime::new().unwrap();
-
+            let rt = Builder::new_current_thread().enable_all().build().unwrap();
             let mut map = HashMap::new();
             let data_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .parent()
