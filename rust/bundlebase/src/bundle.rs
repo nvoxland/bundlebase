@@ -299,9 +299,9 @@ impl Bundle {
 
         let df = (*self.dataframe().await?).clone();
         let plan = df.explain_with_options(ExplainOption {
-            verbose: true,
-            analyze: true,
-            format: ExplainFormat::Tree,
+            verbose: false,
+            analyze: false,
+            format: ExplainFormat::Indent,
         })?;
         let records = plan.collect().await?;
 
@@ -321,7 +321,7 @@ impl Bundle {
                     if !plan_type_column.is_null(i) && !plan_column.is_null(i) {
                         let plan_type = plan_type_array.value(i);
                         let plan_text = plan_array.value(i);
-                        result.push_str(&format!("\n*** {} ***\n\n{}\n", plan_type, plan_text));
+                        result.push_str(&format!("\n*** {} ***\n{}\n", plan_type, plan_text));
                     }
                 }
             }
@@ -498,7 +498,7 @@ impl BundleFacade for Bundle {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct DataFrameHolder {
     dataframe: Arc<RwLock<Option<Arc<DataFrame>>>>,
 }
@@ -526,6 +526,14 @@ impl DataFrameHolder {
     fn clear(&self) {
         let mut guard = self.dataframe.write();
         *guard = None;
+    }
+}
+
+impl Clone for DataFrameHolder {
+    fn clone(&self) -> Self {
+        Self {
+            dataframe: Arc::new(RwLock::new(None))
+        }
     }
 }
 

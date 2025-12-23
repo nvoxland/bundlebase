@@ -148,11 +148,12 @@ impl TableProvider for DataBlock {
                     let index_path = indexed_blocks.path();
 
                     log::debug!(
-                        "Using index on column '{}' for block {} (version {}) at path: {}",
+                        "Using index on column '{}' for block {} (version {}) at path: {}, projection: {:?}",
                         indexable.column,
                         self.id,
                         self.version,
-                        index_path
+                        index_path,
+                        projection
                     );
 
                     // Load index from disk and perform lookup

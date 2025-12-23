@@ -102,6 +102,32 @@ macro_rules! op_field {
     }};
 }
 
+/// Macro to assert that a string matches a regular expression pattern
+///
+/// This reduces boilerplate when testing regex matches in tests.
+///
+/// # Examples
+///
+/// ```
+/// assert_regexp!(r"hello \w+", "hello world");
+/// assert_regexp!(r"^\d{3}$", "123");
+/// ```
+#[macro_export]
+macro_rules! assert_regexp {
+    ($pattern:expr, $actual:expr) => {{
+        let pattern = $pattern;
+        let actual = $actual;
+        let regex = regex::Regex::new(pattern.trim())
+            .unwrap_or_else(|e| panic!("Invalid regex pattern '{}': {}", pattern, e));
+        assert!(
+            regex.is_match(actual.trim()),
+            "Pattern '{}' did not match actual value:\n{}",
+            pattern,
+            actual
+        );
+    }};
+}
+
 pub fn assert_regexp(expected: Vec<&str>, actual: Vec<String>) {
     let patterns = expected
         .iter()

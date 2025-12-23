@@ -9,7 +9,7 @@ use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::projection::ProjectionExpr;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayFormatType, Partitioning, SendableRecordBatchStream};
-use datafusion::common::{DataFusionError, Statistics};
+use datafusion::common::{DataFusionError, Statistics, project_schema};
 use futures::stream::{self, StreamExt};
 use object_store::{ObjectStore, GetOptions, GetRange};
 use std::any::Any;
@@ -33,8 +33,10 @@ pub enum LineOrientedFormat {
 pub struct RowIdOffsetDataSource {
     /// The source file
     file: ObjectStoreFile,
-    /// Schema of the data
+    /// Schema of the data (original full schema)
     schema: SchemaRef,
+    /// Schema after projection is applied (computed at construction time)
+    projected_schema: SchemaRef,
     /// List of RowIds to read (sorted by offset for sequential reading)
     row_ids: Vec<RowId>,
     /// Optional column projection (indices of columns to read)
@@ -68,9 +70,15 @@ impl RowIdOffsetDataSource {
         // Get object store from URL
         let object_store = file.store();
 
+        // Compute projected schema using DataFusion's utility
+        // This ensures eq_properties() returns the correct schema that matches what open() produces
+        let projected_schema = project_schema(&schema, projection.as_ref())
+            .expect("Failed to project schema");
+
         Self {
             file: file.clone(),
             schema,
+            projected_schema,
             row_ids: sorted_ids,
             projection,
             object_store,
@@ -215,7 +223,15 @@ impl DataSource for RowIdOffsetDataSource {
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
         // Read rows by their byte offsets (works for CSV and JSON Lines)
         let schema = self.schema.clone();
-        let schema_for_stream = schema.clone();
+
+        // Use pre-computed projected schema
+        // This was computed in the constructor using project_schema()
+        let output_schema = self.projected_schema.clone();
+
+        log::debug!("RowIdOffsetDataSource output schema has {} columns: {:?}",
+            output_schema.fields().len(),
+            output_schema.fields().iter().take(5).map(|f| format!("{}:{}", f.name(), f.data_type())).collect::<Vec<_>>());
+
         let row_ids = self.row_ids.clone();
         let object_store = self.object_store.clone();
         let file_path = self.file.store_path().clone();
@@ -254,7 +270,14 @@ impl DataSource for RowIdOffsetDataSource {
 
                 // Build RecordBatch from lines based on format
                 if lines.is_empty() {
-                    return Ok(RecordBatch::new_empty(schema.clone()));
+                    // Return empty batch with correct schema (projected if projection exists)
+                    let empty_schema = if let Some(proj) = &projection {
+                        Arc::new(schema.project(proj)
+                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?)
+                    } else {
+                        schema.clone()
+                    };
+                    return Ok(RecordBatch::new_empty(empty_schema));
                 }
 
                 let batch = match format {
@@ -304,13 +327,16 @@ impl DataSource for RowIdOffsetDataSource {
 
                 // Apply projection if specified
                 let final_batch = if let Some(proj) = &projection {
+                    log::debug!("Applying projection {:?} to batch with {} columns", proj, batch.num_columns());
                     let projected_columns: Vec<_> = proj.iter()
                         .map(|&i| batch.column(i).clone())
                         .collect();
                     let projected_schema = Arc::new(schema.project(proj)
                         .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?);
-                    RecordBatch::try_new(projected_schema, projected_columns)
-                        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?
+                    let result = RecordBatch::try_new(projected_schema, projected_columns)
+                        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+                    log::debug!("Created projected batch with {} columns", result.num_columns());
+                    result
                 } else {
                     batch
                 };
@@ -319,7 +345,8 @@ impl DataSource for RowIdOffsetDataSource {
             }
         });
 
-        Ok(Box::pin(RecordBatchStreamAdapter::new(schema_for_stream, stream)))
+        // Use output_schema which matches the actual schema of batches produced by the stream
+        Ok(Box::pin(RecordBatchStreamAdapter::new(output_schema, stream)))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -335,7 +362,9 @@ impl DataSource for RowIdOffsetDataSource {
     }
 
     fn eq_properties(&self) -> EquivalenceProperties {
-        EquivalenceProperties::new(self.schema.clone())
+        // Return projected schema, not original schema
+        // This ensures DataFusion knows what schema the execution plan will actually produce
+        EquivalenceProperties::new(self.projected_schema.clone())
     }
 
     fn partition_statistics(
