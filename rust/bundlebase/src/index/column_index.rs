@@ -169,7 +169,16 @@ impl Ord for IndexedValue {
             (_, IndexedValue::Null) => Ordering::Greater,
             (IndexedValue::Int64(a), IndexedValue::Int64(b)) => a.cmp(b),
             (IndexedValue::Float64(a), IndexedValue::Float64(b)) => {
-                a.partial_cmp(b).unwrap_or(Ordering::Equal)
+                // Handle NaN explicitly to maintain proper ordering semantics
+                if a.0.is_nan() && b.0.is_nan() {
+                    Ordering::Equal
+                } else if a.0.is_nan() {
+                    Ordering::Greater  // NaN sorts last
+                } else if b.0.is_nan() {
+                    Ordering::Less
+                } else {
+                    a.partial_cmp(b).unwrap()
+                }
             }
             (IndexedValue::Utf8(a), IndexedValue::Utf8(b)) => a.cmp(b),
             (IndexedValue::Boolean(a), IndexedValue::Boolean(b)) => a.cmp(b),
@@ -570,6 +579,9 @@ impl ColumnIndex {
             }
         }
 
+        // Sort and deduplicate to ensure consistent results
+        result.sort_unstable_by_key(|r| r.as_u64());
+        result.dedup();
         result
     }
 
