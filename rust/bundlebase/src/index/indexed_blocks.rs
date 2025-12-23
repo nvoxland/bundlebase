@@ -39,4 +39,9 @@ impl IndexedBlocks {
     pub fn path(&self) -> &str {
         &self.path
     }
+
+    /// Returns a clone of the versioned blocks list
+    pub(crate) fn blocks(&self) -> Vec<VersionedBlockId> {
+        self.blocks.read().clone()
+    }
 }
