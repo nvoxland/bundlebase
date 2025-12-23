@@ -85,9 +85,14 @@ impl DataBlock {
                 index.lookup_exact(val)
             }
             IndexPredicate::In(vals) => {
-                vals.iter()
+                // Collect all matching RowIds, then deduplicate
+                let mut row_ids: Vec<_> = vals.iter()
                     .flat_map(|v| index.lookup_exact(v))
-                    .collect()
+                    .collect();
+                // Sort and deduplicate to avoid duplicate rows in results
+                row_ids.sort_unstable_by_key(|r| r.as_u64());
+                row_ids.dedup();
+                row_ids
             }
             IndexPredicate::Range { min, max } => {
                 index.lookup_range(min, max)

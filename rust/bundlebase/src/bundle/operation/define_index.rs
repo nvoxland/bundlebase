@@ -42,6 +42,15 @@ impl Operation for DefineIndexOp {
             return Err(format!("Column '{}' not found in schema", self.column).into());
         }
 
+        // Check if an index already exists for this column
+        let indexes = bundle.indexes().read();
+        if indexes.iter().any(|idx| idx.column() == &self.column) {
+            return Err(format!(
+                "Index already exists for column '{}'. Cannot create duplicate index.",
+                self.column
+            ).into());
+        }
+
         Ok(())
     }
 
