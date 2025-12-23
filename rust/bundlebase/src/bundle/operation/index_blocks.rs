@@ -247,14 +247,17 @@ impl Operation for IndexBlocksOp {
                 index_def.column(),
                 self.blocks.len()
             );
-        } else {
-            log::warn!(
-                "IndexDefinition {} not found when applying IndexBlocksOp. This may indicate the index was removed.",
-                self.index_id
-            );
-        }
 
-        Ok(())
+            Ok(())
+        } else {
+            // Return error instead of silently continuing
+            // This prevents manifest inconsistencies
+            Err(DataFusionError::Internal(format!(
+                "IndexDefinition {} not found when applying IndexBlocksOp. \
+                 The index may have been dropped or the manifest may be corrupted.",
+                self.index_id
+            )))
+        }
     }
 }
 

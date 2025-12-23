@@ -25,6 +25,7 @@ impl PyOperation {
             AnyOperation::IndexBlocks(_) => "indexBlocks".to_string(),
             AnyOperation::DefineIndex(_) => "defineIndex".to_string(),
             AnyOperation::DefinePack(_) => "definePack".to_string(),
+            AnyOperation::DropIndex(_) => "dropIndex".to_string(),
             AnyOperation::RebuildIndex(_) => "rebuildIndex".to_string(),
             AnyOperation::Query(_) => "query".to_string(),
         }
