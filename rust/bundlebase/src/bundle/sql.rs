@@ -306,6 +306,25 @@ where
     F: FnOnce(String) -> Fut,
     Fut: std::future::Future<Output = Result<DataFrame, BundlebaseError>>,
 {
+    // Check if this is a simple TableScan that we can use directly to enable filter pushdown
+    let plan = df.logical_plan();
+    if let LogicalPlan::TableScan(table_scan) = plan {
+        // Extract the table name
+        let table_name = match &table_scan.table_name {
+            TableReference::Bare { table } => table.to_string(),
+            TableReference::Partial { schema, table } => format!("{}.{}", schema, table),
+            TableReference::Full { catalog, schema, table } => format!("{}.{}.{}", catalog, schema, table),
+        };
+
+        // If this is a pack table with no transformations, use it directly
+        // This enables DataFusion's optimizer to push filters down to DataBlock.scan()
+        if table_name.starts_with("packs.") && table_scan.projection.is_none() && table_scan.filters.is_empty() {
+            log::debug!("Using pack table directly for filter pushdown: {}", table_name);
+            return f(table_name).await;
+        }
+    }
+
+    // Fall back to creating a temp table for complex cases
     let unique_int = {
         TEMP_COUNTER
             .get_or_init(|| AtomicU64::new(1))
