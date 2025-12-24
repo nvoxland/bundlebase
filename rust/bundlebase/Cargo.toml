@@ -36,8 +36,8 @@ uuid = { version = "1.18.1", features = ["v4"] }
 regex = "1.12.2"
 lru = "0.12"
 opentelemetry = { version = "0.24", optional = true }
-opentelemetry_sdk = { version = "0.24", features = ["metrics", "rt-tokio"], optional = true }
-opentelemetry-stdout = { version = "0.5", features = ["metrics"], optional = true }
+opentelemetry_sdk = { version = "0.24", features = ["metrics", "trace", "rt-tokio"], optional = true }
+opentelemetry-stdout = { version = "0.5", features = ["metrics", "trace"], optional = true }
 
 [features]
 default = []

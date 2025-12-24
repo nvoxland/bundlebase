@@ -6,6 +6,7 @@ mod data_reader;
 pub mod data_storage;
 pub mod functions;
 mod index;
+pub mod observability;
 pub mod progress;
 mod schema_provider;
 pub mod test_utils;

@@ -6,8 +6,6 @@ mod rowid_cache;
 mod indexed_blocks;
 mod filter_analyzer;
 mod index_selector;
-pub mod metrics;
-pub mod logging_exporter;
 
 pub use column_index::{ColumnIndex, IndexedValue};
 pub use index_definition::IndexDefinition;
@@ -16,5 +14,3 @@ pub use rowid_cache::{RowIdCache, CacheStats, GLOBAL_ROWID_CACHE};
 pub use indexed_blocks::IndexedBlocks;
 pub use filter_analyzer::{FilterAnalyzer, IndexableFilter, IndexPredicate};
 pub use index_selector::IndexSelector;
-pub use metrics::{IndexOutcome, IndexLookupTimer};
-pub use logging_exporter::{init_logging_metrics, init_logging_metrics_with_interval, log_current_metrics};

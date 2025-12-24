@@ -1,5 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::{BundlebaseError, Bundle};
+use crate::observability::{OperationTimer, OperationCategory, OperationOutcome, start_span};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -89,12 +90,18 @@ impl Operation for FilterOp {
         df: DataFrame,
         ctx: Arc<SessionContext>,
     ) -> Result<DataFrame, BundlebaseError> {
+        let mut span = start_span(OperationCategory::Query, "filter");
+        span.set_attribute("expression", &self.where_clause);
+
+        let timer = OperationTimer::start(OperationCategory::Query, "filter")
+            .with_label("expression", &self.where_clause);
+
         // Build the filter expression with parameter substitution
         let where_clause = self.where_clause.clone();
         let parameters = self.parameters.clone();
         let ctx_for_closure = ctx.clone();
 
-        with_temp_table(&ctx, df, |temp_table| {
+        let result = with_temp_table(&ctx, df, |temp_table| {
             async move {
                 let mut substituted_clause = where_clause;
                 for (i, param) in parameters.iter().enumerate() {
@@ -110,7 +117,20 @@ impl Operation for FilterOp {
                     .map_err(|e| Box::new(e) as BundlebaseError)
             }
         })
-        .await
+        .await;
+
+        match &result {
+            Ok(_) => {
+                span.set_outcome(OperationOutcome::Success);
+                timer.finish(OperationOutcome::Success);
+            }
+            Err(e) => {
+                span.record_error(&e.to_string());
+                timer.finish(OperationOutcome::Error);
+            }
+        }
+
+        result
     }
 }
 
