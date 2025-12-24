@@ -682,6 +682,39 @@ async def test_index_operations_with_commit():
 
 
 @pytest.mark.asyncio
+async def test_drop_index():
+    """Test dropping an index"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Create an index on the id column
+    c = await c.define_index("id")
+
+    # Drop the index
+    c = await c.drop_index("id")
+
+    # Verify bundle still works
+    assert await c.num_rows() == 1000
+    results = await c.to_polars()
+    assert len(results) == 1000
+
+    # Should be able to recreate the index after dropping
+    c = await c.define_index("id")
+    assert await c.num_rows() == 1000
+
+
+@pytest.mark.asyncio
+async def test_drop_index_nonexistent():
+    """Test dropping a non-existent index raises an error"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Try to drop an index that doesn't exist
+    with pytest.raises(ValueError, match="No index found for column 'nonexistent'"):
+        await c.drop_index("nonexistent")
+
+
+@pytest.mark.asyncio
 async def test_status_empty_bundle():
     """Test status() on a newly created bundle"""
     c = await bundlebase.create(random_bundle())

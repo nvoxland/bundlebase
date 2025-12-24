@@ -24,7 +24,7 @@ pub enum IndexedValue {
 
 // Wrapper for f64 that implements Eq and Hash
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct OrderedFloat(f64);
+pub struct OrderedFloat(pub f64);
 
 impl Eq for OrderedFloat {}
 
@@ -157,6 +157,30 @@ impl IndexedValue {
             IndexedValue::Utf8(s) => 5 + s.len(),
             IndexedValue::Boolean(_) => 2,
             IndexedValue::Timestamp(_) => 9,
+        }
+    }
+
+    /// Get the minimum possible value for this type
+    pub fn min_for_type(&self) -> IndexedValue {
+        match self {
+            IndexedValue::Int64(_) => IndexedValue::Int64(i64::MIN),
+            IndexedValue::Float64(_) => IndexedValue::Float64(OrderedFloat(f64::NEG_INFINITY)),
+            IndexedValue::Utf8(_) => IndexedValue::Utf8(String::new()),
+            IndexedValue::Boolean(_) => IndexedValue::Boolean(false),
+            IndexedValue::Timestamp(_) => IndexedValue::Timestamp(i64::MIN),
+            IndexedValue::Null => IndexedValue::Null,
+        }
+    }
+
+    /// Get the maximum possible value for this type
+    pub fn max_for_type(&self) -> IndexedValue {
+        match self {
+            IndexedValue::Int64(_) => IndexedValue::Int64(i64::MAX),
+            IndexedValue::Float64(_) => IndexedValue::Float64(OrderedFloat(f64::INFINITY)),
+            IndexedValue::Utf8(_) => IndexedValue::Utf8("\u{10FFFF}".repeat(1000)), // Max Unicode character repeated
+            IndexedValue::Boolean(_) => IndexedValue::Boolean(true),
+            IndexedValue::Timestamp(_) => IndexedValue::Timestamp(i64::MAX),
+            IndexedValue::Null => IndexedValue::Null,
         }
     }
 }
@@ -358,7 +382,8 @@ pub struct ColumnIndex {
     data_type: DataType,
     blocks: Vec<IndexBlock>,
     directory: BlockDirectory,
-    total_entries: u64,
+    total_entries: u64,  // Number of distinct values
+    total_rows: u64,     // Total number of rows indexed
 }
 
 impl ColumnIndex {
@@ -373,6 +398,9 @@ impl ColumnIndex {
         sorted_entries.sort_by(|a, b| a.0.cmp(&b.0));
 
         let total_entries = sorted_entries.len() as u64;
+        let total_rows = sorted_entries.iter()
+            .map(|(_, row_ids)| row_ids.len() as u64)
+            .sum();
 
         // Partition into blocks
         let blocks = Self::partition_into_blocks(sorted_entries)?;
@@ -407,6 +435,7 @@ impl ColumnIndex {
                 entries: directory_entries,
             },
             total_entries,
+            total_rows,
         })
     }
 
@@ -445,16 +474,17 @@ impl ColumnIndex {
     pub fn serialize(&self) -> Result<Bytes, BundlebaseError> {
         let mut buf = BytesMut::new();
 
-        // Header (24 bytes)
+        // Header (32 bytes)
         buf.put_slice(MAGIC); // 8 bytes
         buf.put_u8(VERSION); // 1 byte
         buf.put_u8(self.data_type_to_u8()); // 1 byte
         buf.put_u32(self.blocks.len() as u32); // 4 bytes
         buf.put_u64(self.total_entries); // 8 bytes
+        buf.put_u64(self.total_rows); // 8 bytes
         buf.put_u16(0); // 2 bytes reserved
 
         // Update directory offsets
-        let header_size = 24;
+        let header_size = 32;
         let directory_size = self.blocks.len() * 24;
         let mut updated_directory = self.directory.clone();
         let mut current_offset = (header_size + directory_size) as u64;
@@ -496,11 +526,12 @@ impl ColumnIndex {
         let data_type = Self::u8_to_data_type(data_type_tag)?;
         let block_count = cursor.get_u32() as usize;
         let total_entries = cursor.get_u64();
+        let total_rows = cursor.get_u64();
         cursor.advance(2); // Skip reserved
 
         // Directory
         let directory_size = block_count * 24;
-        let directory_data = &data.as_ref()[24..24 + directory_size];
+        let directory_data = &data.as_ref()[32..32 + directory_size];
         let mut directory = BlockDirectory::deserialize(directory_data, block_count)?;
 
         // Blocks
@@ -532,6 +563,7 @@ impl ColumnIndex {
             blocks,
             directory,
             total_entries,
+            total_rows,
         })
     }
 
@@ -598,8 +630,77 @@ impl ColumnIndex {
         self.total_entries
     }
 
+    pub fn total_rows(&self) -> u64 {
+        self.total_rows
+    }
+
     pub fn block_count(&self) -> usize {
         self.blocks.len()
+    }
+
+    /// Estimate selectivity for an exact match predicate
+    /// Returns fraction of rows expected to match (0.0 to 1.0)
+    pub fn estimate_exact_selectivity(&self, _value: &IndexedValue) -> f64 {
+        if self.total_rows == 0 {
+            return 0.0;
+        }
+
+        // Assume uniform distribution: 1 / distinct_values
+        // This is a simple heuristic - could be improved with histograms
+        1.0 / self.total_entries as f64
+    }
+
+    /// Estimate selectivity for an IN list predicate
+    /// Returns fraction of rows expected to match (0.0 to 1.0)
+    pub fn estimate_in_selectivity(&self, values: &[IndexedValue]) -> f64 {
+        if self.total_rows == 0 || values.is_empty() {
+            return 0.0;
+        }
+
+        // Estimate: (number of values) / (total distinct values)
+        // Capped at 1.0 for safety
+        let estimate = values.len() as f64 / self.total_entries as f64;
+        estimate.min(1.0)
+    }
+
+    /// Estimate selectivity for a range predicate
+    /// Returns fraction of rows expected to match (0.0 to 1.0)
+    pub fn estimate_range_selectivity(&self, min: &IndexedValue, max: &IndexedValue) -> f64 {
+        if self.total_rows == 0 {
+            return 0.0;
+        }
+
+        // For range queries, we need to estimate based on the value distribution
+        // This is a simplified estimation - could be improved with histograms
+
+        // Count blocks that overlap with the range
+        let mut overlapping_blocks = 0;
+        for entry in &self.directory.entries {
+            if max >= &entry.min_value && min <= &entry.max_value {
+                overlapping_blocks += 1;
+            }
+        }
+
+        if overlapping_blocks == 0 {
+            return 0.0;
+        }
+
+        // Rough estimate: (overlapping blocks / total blocks)
+        // This assumes even distribution across blocks
+        let estimate = overlapping_blocks as f64 / self.directory.entries.len() as f64;
+        estimate.min(1.0)
+    }
+
+    /// Estimate selectivity for any predicate type
+    /// Returns fraction of rows expected to match (0.0 to 1.0)
+    pub fn estimate_selectivity(&self, predicate: &crate::index::IndexPredicate) -> f64 {
+        use crate::index::IndexPredicate;
+
+        match predicate {
+            IndexPredicate::Exact(value) => self.estimate_exact_selectivity(value),
+            IndexPredicate::In(values) => self.estimate_in_selectivity(values),
+            IndexPredicate::Range { min, max } => self.estimate_range_selectivity(min, max),
+        }
     }
 
     fn data_type_to_u8(&self) -> u8 {
@@ -696,5 +797,75 @@ mod tests {
         let result = deserialized.lookup_exact(&IndexedValue::Int64(1));
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].as_u64(), 100);
+    }
+
+    #[test]
+    fn test_selectivity_estimation() {
+        // Build index with 100 rows across 10 distinct values
+        let mut value_map = HashMap::new();
+        for i in 0..10 {
+            let row_ids: Vec<RowId> = (i*10..(i+1)*10).map(|r| RowId::from(r as u64)).collect();
+            value_map.insert(IndexedValue::Int64(i as i64), row_ids);
+        }
+
+        let index = ColumnIndex::build("test_col", &DataType::Int64, value_map).unwrap();
+
+        // Verify stats
+        assert_eq!(index.cardinality(), 10); // 10 distinct values
+        assert_eq!(index.total_rows(), 100); // 100 total rows
+
+        // Test exact selectivity: 1 / 10 distinct values = 0.1
+        let exact_sel = index.estimate_exact_selectivity(&IndexedValue::Int64(5));
+        assert!((exact_sel - 0.1).abs() < 0.01);
+
+        // Test IN selectivity: 3 values / 10 distinct = 0.3
+        let in_values = vec![
+            IndexedValue::Int64(1),
+            IndexedValue::Int64(2),
+            IndexedValue::Int64(3),
+        ];
+        let in_sel = index.estimate_in_selectivity(&in_values);
+        assert!((in_sel - 0.3).abs() < 0.01);
+
+        // Test range selectivity (harder to verify exactly, but should be reasonable)
+        let range_sel = index.estimate_range_selectivity(
+            &IndexedValue::Int64(3),
+            &IndexedValue::Int64(7),
+        );
+        assert!(range_sel > 0.0 && range_sel <= 1.0);
+    }
+
+    #[test]
+    fn test_selectivity_with_predicate() {
+        use crate::index::IndexPredicate;
+
+        let mut value_map = HashMap::new();
+        for i in 0..20 {
+            let row_ids: Vec<RowId> = (i*5..(i+1)*5).map(|r| RowId::from(r as u64)).collect();
+            value_map.insert(IndexedValue::Int64(i as i64), row_ids);
+        }
+
+        let index = ColumnIndex::build("test_col", &DataType::Int64, value_map).unwrap();
+
+        // Test with Exact predicate
+        let exact_pred = IndexPredicate::Exact(IndexedValue::Int64(10));
+        let sel = index.estimate_selectivity(&exact_pred);
+        assert!((sel - 0.05).abs() < 0.01); // 1/20 = 0.05
+
+        // Test with In predicate
+        let in_pred = IndexPredicate::In(vec![
+            IndexedValue::Int64(1),
+            IndexedValue::Int64(2),
+        ]);
+        let sel = index.estimate_selectivity(&in_pred);
+        assert!((sel - 0.1).abs() < 0.01); // 2/20 = 0.1
+
+        // Test with Range predicate
+        let range_pred = IndexPredicate::Range {
+            min: IndexedValue::Int64(5),
+            max: IndexedValue::Int64(15),
+        };
+        let sel = index.estimate_selectivity(&range_pred);
+        assert!(sel > 0.0 && sel <= 1.0);
     }
 }

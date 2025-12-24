@@ -116,7 +116,6 @@ impl IndexBlocksOp {
             }
 
             // Stream through block data
-            // Use projection to only read the indexed column for better performance
             let projection = Some(vec![col_idx]);
             let reader = block.reader();
             let mut rowid_stream = reader.extract_rowids_stream(bundle.ctx(), projection.as_ref()).await.map_err(|e| {
@@ -136,7 +135,6 @@ impl IndexBlocksOp {
                 let batch = rowid_batch.batch;
                 let row_ids = rowid_batch.row_ids;
 
-                // Since we used projection, the column is now at index 0 in the batch
                 let array = batch.column(0);
 
                 // Build value -> rowid mapping
@@ -250,8 +248,6 @@ impl Operation for IndexBlocksOp {
 
             Ok(())
         } else {
-            // Return error instead of silently continuing
-            // This prevents manifest inconsistencies
             Err(DataFusionError::Internal(format!(
                 "IndexDefinition {} not found when applying IndexBlocksOp. \
                  The index may have been dropped or the manifest may be corrupted.",
