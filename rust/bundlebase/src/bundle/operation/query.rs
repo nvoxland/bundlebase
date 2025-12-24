@@ -1,6 +1,7 @@
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::Operation;
 use crate::{BundlebaseError, Bundle};
+use crate::observability::{OperationTimer, OperationCategory, OperationOutcome, start_span};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -210,11 +211,17 @@ impl Operation for QueryOp {
         df: DataFrame,
         ctx: Arc<SessionContext>,
     ) -> Result<DataFrame, BundlebaseError> {
+        let mut span = start_span(OperationCategory::Query, "sql");
+        span.set_attribute("sql", &self.sql);
+        span.set_attribute("param_count", &self.parameters.len().to_string());
+
+        let timer = OperationTimer::start(OperationCategory::Query, "sql");
+
         let user_sql = self.sql.clone();
         let parameters = self.parameters.clone();
         let ctx_for_closure = ctx.clone();
 
-        with_temp_table(&ctx, df, |table_name| {
+        let result = with_temp_table(&ctx, df, |table_name| {
             async move {
                 // Substitute parameters into SQL
                 let mut sql = user_sql;
@@ -234,7 +241,20 @@ impl Operation for QueryOp {
                     .map_err(|e| Box::new(e) as BundlebaseError)
             }
         })
-        .await
+        .await;
+
+        match &result {
+            Ok(_) => {
+                span.set_outcome(OperationOutcome::Success);
+                timer.finish(OperationOutcome::Success);
+            }
+            Err(e) => {
+                span.record_error(&e.to_string());
+                timer.finish(OperationOutcome::Error);
+            }
+        }
+
+        result
     }
 }
 

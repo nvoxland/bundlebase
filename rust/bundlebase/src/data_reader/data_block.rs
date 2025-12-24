@@ -1,6 +1,7 @@
 use crate::data_reader::{DataReader, VersionedBlockId};
 use crate::data_storage::{ObjectId, ObjectStoreDir};
-use crate::index::{ColumnIndex, FilterAnalyzer, IndexableFilter, IndexDefinition, IndexPredicate, IndexSelector, IndexLookupTimer, IndexOutcome};
+use crate::index::{ColumnIndex, FilterAnalyzer, IndexableFilter, IndexDefinition, IndexPredicate, IndexSelector};
+use crate::observability::{OperationTimer, OperationCategory, OperationOutcome, start_span};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::memory::DataSourceExec;
@@ -271,8 +272,14 @@ impl TableProvider for DataBlock {
 
             // Evaluate all indexable filters and select the best index
             if let Some(best) = self.select_best_index(&indexable_filters, &versioned_block).await {
-                // Start timing the index lookup
-                let timer = IndexLookupTimer::start(&best.filter.column);
+                // Start span and timer for index lookup
+                let mut span = start_span(OperationCategory::Index, "lookup");
+                span.set_attribute("column", &best.filter.column);
+                span.set_attribute("selectivity", &format!("{:.3}", best.selectivity));
+                span.set_attribute("block_id", &self.id.to_string());
+
+                let timer = OperationTimer::start(OperationCategory::Index, "lookup")
+                    .with_label("column", &best.filter.column);
 
                 log::info!(
                     "Selected index on column '{}' with selectivity {:.1}% (best among {} candidates)",
@@ -299,7 +306,9 @@ impl TableProvider for DataBlock {
                         );
 
                         // Record successful index hit
-                        timer.finish(IndexOutcome::Hit);
+                        span.set_attribute("matched_rows", &row_ids.len().to_string());
+                        span.set_outcome(OperationOutcome::Success);
+                        timer.finish(OperationOutcome::Success);
 
                         // Use optimized data source with row IDs
                         let exec = DataSourceExec::new(
@@ -318,7 +327,8 @@ impl TableProvider for DataBlock {
                             e
                         );
                         // Record index error and fallback
-                        timer.finish(IndexOutcome::Error);
+                        span.record_error(&e.to_string());
+                        timer.finish(OperationOutcome::Error);
                     }
                 }
             } else {

@@ -1,26 +1,29 @@
-/// Lightweight OpenTelemetry metrics exporter that logs metrics instead of sending to external systems
+/// Lightweight OpenTelemetry exporter that logs metrics and traces instead of sending to external systems
 ///
-/// This provides a simple way to see index metrics via logging without needing
+/// This provides a simple way to see metrics and traces via logging without needing
 /// Prometheus, Jaeger, or other external collectors.
 ///
 /// # Example
 ///
 /// ```rust
-/// use bundlebase::index::init_logging_metrics;
+/// use bundlebase::observability::init_logging_metrics;
 ///
 /// // Initialize once at startup
 /// init_logging_metrics();
 ///
-/// // Metrics will be logged every 60 seconds automatically
+/// // Metrics and traces will be logged automatically
 /// // Or call log_current_metrics() to log on-demand
 /// ```
 
 #[cfg(feature = "metrics")]
 use opentelemetry::global;
 #[cfg(feature = "metrics")]
-use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
+use opentelemetry_sdk::{
+    metrics::{PeriodicReader, SdkMeterProvider},
+    trace::{BatchSpanProcessor, TracerProvider},
+};
 #[cfg(feature = "metrics")]
-use opentelemetry_stdout::MetricsExporter;
+use opentelemetry_stdout::{MetricsExporter, SpanExporter};
 
 /// Initialize logging-based metrics export with default settings
 ///
@@ -30,7 +33,7 @@ use opentelemetry_stdout::MetricsExporter;
 /// # Example
 ///
 /// ```rust
-/// use bundlebase::index::init_logging_metrics;
+/// use bundlebase::observability::init_logging_metrics;
 ///
 /// fn main() {
 ///     env_logger::init();
@@ -44,7 +47,7 @@ pub fn init_logging_metrics() -> bool {
     init_logging_metrics_with_interval(std::time::Duration::from_secs(60))
 }
 
-/// Initialize logging-based metrics export with custom interval
+/// Initialize logging-based metrics and tracing export with custom interval
 ///
 /// # Arguments
 ///
@@ -54,28 +57,38 @@ pub fn init_logging_metrics() -> bool {
 ///
 /// ```rust
 /// use std::time::Duration;
-/// use bundlebase::index::init_logging_metrics_with_interval;
+/// use bundlebase::observability::init_logging_metrics_with_interval;
 ///
 /// // Log metrics every 30 seconds
 /// init_logging_metrics_with_interval(Duration::from_secs(30));
 /// ```
 #[cfg(feature = "metrics")]
 pub fn init_logging_metrics_with_interval(interval: std::time::Duration) -> bool {
-    // Use stdout exporter which prints metrics to stdout
-    let exporter = MetricsExporter::default();
+    // Initialize tracing (spans)
+    let span_exporter = SpanExporter::default();
+    let span_processor = BatchSpanProcessor::builder(span_exporter, opentelemetry_sdk::runtime::Tokio).build();
 
-    let reader = PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio)
+    let tracer_provider = TracerProvider::builder()
+        .with_span_processor(span_processor)
+        .build();
+
+    global::set_tracer_provider(tracer_provider);
+
+    // Initialize metrics
+    let metrics_exporter = MetricsExporter::default();
+
+    let reader = PeriodicReader::builder(metrics_exporter, opentelemetry_sdk::runtime::Tokio)
         .with_interval(interval)
         .build();
 
-    let provider = SdkMeterProvider::builder()
+    let meter_provider = SdkMeterProvider::builder()
         .with_reader(reader)
         .build();
 
-    global::set_meter_provider(provider);
+    global::set_meter_provider(meter_provider);
 
     log::info!(
-        "Initialized logging-based metrics exporter (interval: {:?})",
+        "Initialized logging-based metrics and tracing exporters (interval: {:?})",
         interval
     );
 
@@ -93,7 +106,7 @@ pub fn init_logging_metrics_with_interval(interval: std::time::Duration) -> bool
 /// # Example
 ///
 /// ```rust
-/// use bundlebase::index::log_current_metrics;
+/// use bundlebase::observability::log_current_metrics;
 ///
 /// // After some operations
 /// log_current_metrics();

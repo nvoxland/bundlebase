@@ -1,5 +1,5 @@
 use crate::data_reader::RowId;
-use crate::index::metrics;
+use crate::observability;
 use lazy_static::lazy_static;
 use lru::LruCache;
 use parking_lot::Mutex;
@@ -34,7 +34,7 @@ impl RowIdCache {
         let result = self.cache.lock().get(url).cloned();
 
         // Record cache hit/miss metrics
-        metrics::record_cache_operation(result.is_some());
+        observability::record_cache_operation("rowid", result.is_some());
 
         result
     }
