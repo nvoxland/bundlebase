@@ -7,7 +7,7 @@ use crate::bundle::operation::{
     AttachBlockOp, DefineFunctionOp, DefinePackOp, FilterOp, JoinOp, RebuildIndexOp,
     RemoveColumnsOp, RenameColumnOp, SelectOp, SetDescriptionOp,
 };
-use crate::bundle::operation::{DefineIndexOp, JoinTypeOption};
+use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
 use crate::bundle::{commit, INIT_FILENAME};
 use crate::bundle::{sql, Bundle};
 use crate::data_reader::{DataBlock, DataPack, ObjectId, VersionedBlockId};
@@ -661,6 +661,37 @@ impl BundleBuilder {
                 builder.reindex().await?;
 
                 info!("Created index on: \"{}\"", column);
+
+                Ok(())
+            })
+        }).await?;
+
+        Ok(self)
+    }
+
+    /// Drop an index on a column
+    pub async fn drop_index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
+        let column = column.to_string();
+
+        self.do_change(&format!("Drop index on column {}", column), |builder| {
+            Box::pin(async move {
+                // Find the index ID for the given column
+                let index_id = {
+                    let indexes = builder.bundle.indexes().read();
+                    let index = indexes.iter().find(|idx| idx.column() == column.as_str());
+
+                    match index {
+                        Some(idx) => idx.id().clone(),
+                        None => {
+                            return Err(format!("No index found for column '{}'", column).into());
+                        }
+                    }
+                };
+
+                builder.apply_operation(DropIndexOp::setup(&index_id).await?.into())
+                    .await?;
+
+                info!("Dropped index on: \"{}\"", column);
 
                 Ok(())
             })

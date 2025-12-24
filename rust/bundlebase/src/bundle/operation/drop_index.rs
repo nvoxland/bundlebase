@@ -37,61 +37,11 @@ impl Operation for DropIndexOp {
     }
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
-        // Find the index definition
-        let index_def = {
-            let indexes = bundle.indexes().read();
-            indexes
-                .iter()
-                .find(|idx| idx.id() == &self.index_id)
-                .cloned()
-        };
 
-        if let Some(index_def) = index_def {
-            // Collect all index file paths before removing the index
-            let mut index_file_paths = Vec::new();
-            {
-                let blocks = index_def.all_indexed_blocks();
-                for indexed_blocks in blocks.iter() {
-                    index_file_paths.push(indexed_blocks.path().to_string());
-                }
-            }
+        // Remove index definition from bundle
+        bundle.indexes.write().retain(|idx| idx.id() != &self.index_id);
 
-            // Delete physical index files
-            for path in index_file_paths {
-                match bundle.data_dir.file(&path) {
-                    Ok(file) => {
-                        if let Err(e) = file.delete().await {
-                            log::warn!(
-                                "Failed to delete index file '{}' for index {}: {}",
-                                path,
-                                self.index_id,
-                                e
-                            );
-                            // Continue deletion even if one file fails
-                        } else {
-                            log::debug!("Deleted index file: {}", path);
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to get file handle for index file '{}': {}",
-                            path,
-                            e
-                        );
-                    }
-                }
-            }
-
-            // Remove index definition from bundle
-            bundle.indexes.write().retain(|idx| idx.id() != &self.index_id);
-
-            log::info!("Dropped index {}", self.index_id);
-        } else {
-            log::warn!(
-                "IndexDefinition {} not found when applying DropIndexOp",
-                self.index_id
-            );
-        }
+        log::info!("Dropped index {}", self.index_id);
 
         Ok(())
     }

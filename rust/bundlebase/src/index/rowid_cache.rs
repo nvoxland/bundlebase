@@ -1,4 +1,5 @@
 use crate::data_reader::RowId;
+use crate::index::metrics;
 use lazy_static::lazy_static;
 use lru::LruCache;
 use parking_lot::Mutex;
@@ -30,7 +31,12 @@ impl RowIdCache {
 
     /// Gets a cached RowId vector if it exists, promoting it to most-recently-used
     pub fn get(&self, url: &Url) -> Option<Arc<Vec<RowId>>> {
-        self.cache.lock().get(url).cloned()
+        let result = self.cache.lock().get(url).cloned();
+
+        // Record cache hit/miss metrics
+        metrics::record_cache_operation(result.is_some());
+
+        result
     }
 
     /// Inserts a RowId vector into the cache, evicting LRU entry if at capacity

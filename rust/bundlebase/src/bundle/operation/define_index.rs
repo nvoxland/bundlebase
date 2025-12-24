@@ -46,7 +46,7 @@ impl Operation for DefineIndexOp {
         let indexes = bundle.indexes().read();
         if indexes.iter().any(|idx| idx.column() == &self.column) {
             return Err(format!(
-                "Index already exists for column '{}'. Cannot create duplicate index.",
+                "Index already exists for column '{}'",
                 self.column
             ).into());
         }

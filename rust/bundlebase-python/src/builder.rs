@@ -721,6 +721,30 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Drop an index on the specified column
+    fn drop_index<'py>(
+        slf: PyRef<'_, Self>,
+        column: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let column = column.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            builder
+                .drop_index(&column)
+                .await
+                .map_err(|e| {
+                    to_py_error(&format!("Failed to drop index on column '{}'", column), e)
+                })?;
+            drop(builder);
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner: inner.clone() })
+                    .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
     /// Reindex - create or update index files for columns that are missing them
     ///
     /// This method ensures all blocks have index files for columns that have been
