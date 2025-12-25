@@ -13,8 +13,8 @@
 #[cfg(feature = "metrics")]
 use opentelemetry::{
     metrics::{Counter, Histogram, Meter, ObservableGauge},
-    trace::{Span as OtelSpan, Tracer, TracerProvider as _, Status, StatusCode},
-    KeyValue,
+    trace::{Tracer, TracerProvider as _, Status, Span as OtelSpanTrait},
+    global::BoxedSpan,
 };
 
 #[cfg(feature = "metrics")]
@@ -44,6 +44,13 @@ impl KeyValue {
 
 mod logging;
 pub use logging::{init_logging_metrics, init_logging_metrics_with_interval, log_current_metrics};
+
+// Progress tracking integration (when metrics feature enabled)
+#[cfg(feature = "metrics")]
+pub mod progress;
+
+#[cfg(feature = "metrics")]
+pub use progress::{SpanProgressTracker, CompositeTracker};
 
 /// Generic outcome for all operations
 #[derive(Debug, Clone, Copy)]
@@ -100,6 +107,24 @@ impl OperationCategory {
             OperationCategory::Attach => "attach",
         }
     }
+
+    /// Map an operation name string to an OperationCategory
+    ///
+    /// This is used for progress tracking integration where operation names
+    /// are strings like "Attaching 'file.csv'" or "Indexing column 'user_id'".
+    pub fn from_operation_name(name: &str) -> Self {
+        if name.starts_with("Attaching") {
+            OperationCategory::Attach
+        } else if name.starts_with("Indexing") {
+            OperationCategory::Index
+        } else if name.starts_with("Querying") || name.starts_with("Filtering") {
+            OperationCategory::Query
+        } else if name.starts_with("Committing") {
+            OperationCategory::Commit
+        } else {
+            OperationCategory::IO // default
+        }
+    }
 }
 
 /// Distributed tracing span that automatically finishes when dropped (RAII pattern)
@@ -111,7 +136,7 @@ pub struct Span {
     category: OperationCategory,
     operation: String,
     #[cfg(feature = "metrics")]
-    inner: OtelSpan,
+    inner: BoxedSpan,
 }
 
 impl Span {
@@ -121,8 +146,7 @@ impl Span {
 
         #[cfg(feature = "metrics")]
         {
-            let tracer = TRACER.as_ref();
-            let mut span = tracer.start(format!("{}.{}", category.as_str(), operation));
+            let mut span = TRACER.start(format!("{}.{}", category.as_str(), operation));
             span.set_attribute(KeyValue::new("category", category.as_str()));
             span.set_attribute(KeyValue::new("operation", operation.clone()));
 
@@ -223,8 +247,8 @@ pub fn start_span(category: OperationCategory, operation: impl Into<String>) -> 
 #[cfg(feature = "metrics")]
 lazy_static! {
     /// Global tracer for distributed tracing
-    static ref TRACER: Box<dyn Tracer + Send + Sync> = {
-        Box::new(opentelemetry::global::tracer("bundlebase"))
+    static ref TRACER: opentelemetry::global::BoxedTracer = {
+        opentelemetry::global::tracer("bundlebase")
     };
 
 
@@ -423,6 +447,24 @@ impl OperationTimer {
 
         record_operation(self.category, outcome, &self.operation, &self.labels);
     }
+}
+
+/// Initialize progress tracking with span integration
+///
+/// This sets up a CompositeTracker that forwards progress updates to both
+/// the logging tracker and the span tracker, allowing progress information
+/// to appear in distributed traces.
+#[cfg(feature = "metrics")]
+pub fn init_progress_with_spans() {
+    use crate::progress::{set_tracker, LoggingTracker};
+    use std::sync::Arc;
+
+    let composite = CompositeTracker::new(vec![
+        Arc::new(LoggingTracker::new()),
+        Arc::new(SpanProgressTracker::new()),
+    ]);
+
+    set_tracker(Box::new(composite));
 }
 
 #[cfg(all(test, feature = "metrics"))]
