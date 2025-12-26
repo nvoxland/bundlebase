@@ -105,13 +105,6 @@ macro_rules! op_field {
 /// Macro to assert that a string matches a regular expression pattern
 ///
 /// This reduces boilerplate when testing regex matches in tests.
-///
-/// # Examples
-///
-/// ```
-/// assert_regexp!(r"hello \w+", "hello world");
-/// assert_regexp!(r"^\d{3}$", "123");
-/// ```
 #[macro_export]
 macro_rules! assert_regexp {
     ($pattern:expr, $actual:expr) => {{

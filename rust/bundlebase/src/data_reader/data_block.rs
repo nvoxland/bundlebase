@@ -1,5 +1,5 @@
 use crate::data_reader::{DataReader, VersionedBlockId};
-use crate::data_storage::{ObjectId, ObjectStoreDir};
+use crate::data_storage::{ObjectId, ObjectStoreDir, ObjectStoreFile};
 use crate::index::{ColumnIndex, FilterAnalyzer, IndexableFilter, IndexDefinition, IndexPredicate, IndexSelector};
 use crate::observability::{OperationTimer, OperationCategory, OperationOutcome, start_span};
 use arrow_schema::SchemaRef;
@@ -81,7 +81,7 @@ impl DataBlock {
         predicate: &IndexPredicate,
     ) -> Result<Option<f64>, Box<dyn std::error::Error + Send + Sync>> {
         // Load index file from data directory
-        let index_file = self.data_dir.file(index_path)?;
+        let index_file = ObjectStoreFile::from_str(index_path, &self.data_dir)?;
 
         let index_bytes = index_file.read_bytes().await?
             .ok_or_else(|| format!("Index file not found: {}", index_path))?;
@@ -122,7 +122,7 @@ impl DataBlock {
         predicate: &IndexPredicate,
     ) -> Result<Vec<crate::data_reader::RowId>, Box<dyn std::error::Error + Send + Sync>> {
         // Load index file from data directory
-        let index_file = self.data_dir.file(index_path)?;
+        let index_file = ObjectStoreFile::from_str(index_path, &self.data_dir)?;
 
         let index_bytes = index_file.read_bytes().await?
             .ok_or_else(|| format!("Index file not found: {}", index_path))?;

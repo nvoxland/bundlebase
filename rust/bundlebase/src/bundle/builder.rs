@@ -1,6 +1,6 @@
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
-use crate::bundle::operation::{IndexBlocksOp, BundleChange};
+use crate::bundle::operation::{IndexBlocksOp, BundleChange, Operation};
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, QueryOp};
 use crate::bundle::operation::{
@@ -227,7 +227,19 @@ impl BundleBuilder {
         let author = std::env::var("BUNDLEBASE_AUTHOR")
             .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
 
-        let changes = self.status.changes().clone();
+        // Normalize paths in all operations before committing
+        let mut normalized_changes = Vec::new();
+        for change in self.status.changes() {
+            let mut normalized_ops = Vec::new();
+            for op in &change.operations {
+                normalized_ops.push(op.normalize_paths(&self.bundle.data_dir)?);
+            }
+            normalized_changes.push(BundleChange {
+                id: change.id,
+                description: change.description.clone(),
+                operations: normalized_ops,
+            });
+        }
 
         let commit_struct = commit::BundleCommit {
             url: None, //no need to set, we're just writing it and then will re-read it back
@@ -235,7 +247,7 @@ impl BundleBuilder {
             message: message.to_string(),
             author,
             timestamp,
-            changes,
+            changes: normalized_changes,
         };
 
         // Serialize directly using serde_yaml
@@ -1125,6 +1137,25 @@ mod tests {
             v1, v2,
             "Different operations should have different versions"
         );
+
+        // Test that data_packs are independent
+        let orig_packs_count = bundle.bundle.data_packs.read().len();
+        let clone_packs_count = bundle_clone.bundle.data_packs.read().len();
+        assert_eq!(orig_packs_count, clone_packs_count);
+
+        // Test that indexes are independent
+        let orig_indexes_count = bundle.bundle.indexes.read().len();
+        let clone_indexes_count = bundle_clone.bundle.indexes.read().len();
+        assert_eq!(orig_indexes_count, clone_indexes_count);
+
+        // Now add an index to the clone
+        bundle_clone.index("id").await.unwrap();
+
+        // Original should still have 0 indexes, clone should have 1
+        let orig_indexes_after = bundle.bundle.indexes.read().len();
+        let clone_indexes_after = bundle_clone.bundle.indexes.read().len();
+        assert_eq!(0, orig_indexes_after, "Original should have 0 indexes after clone modifies");
+        assert_eq!(1, clone_indexes_after, "Clone should have 1 index");
     }
 
     #[tokio::test]

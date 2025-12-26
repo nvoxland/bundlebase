@@ -12,6 +12,15 @@ pub struct FunctionRegistry {
     impls: HashMap<String, Arc<dyn FunctionImpl>>,
 }
 
+impl Clone for FunctionRegistry {
+    fn clone(&self) -> Self {
+        Self {
+            functions: self.functions.clone(),
+            impls: self.impls.clone(),
+        }
+    }
+}
+
 impl FunctionRegistry {
     pub fn new() -> Self {
         debug!("Creating FunctionRegistry");

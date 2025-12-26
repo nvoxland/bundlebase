@@ -590,15 +590,14 @@ changes:
     assert!(batches[0].num_rows() > 0);
     assert!(batches[0].schema().column_with_name("Website").is_some());
 
+    // Verify layout file exists (layout is now an absolute URL after normalization)
+    let layout_url = op_field!(commit.operations()[1], AnyOperation::AttachBlock, layout)
+        .unwrap();
+    let layout_file = ObjectStoreFile::from_url(&Url::parse(&layout_url)?)?;
     assert!(
-        data_dir
-            .file(
-                op_field!(commit.operations()[1], AnyOperation::AttachBlock, layout)
-                    .unwrap()
-                    .as_str()
-            )?
-            .exists()
-            .await?
+        layout_file.exists().await?,
+        "Layout file should exist at: {}",
+        layout_url
     );
 
     Ok(())
