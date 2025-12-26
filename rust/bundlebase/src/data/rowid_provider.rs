@@ -1,4 +1,4 @@
-use crate::data_reader::{ObjectId, RowId};
+use crate::data::{ObjectId, RowId};
 use crate::data_storage::ObjectStoreFile;
 use crate::index::{RowIdIndex, GLOBAL_ROWID_CACHE};
 use crate::BundlebaseError;

@@ -1,5 +1,5 @@
 use std::ops::Deref;
-use crate::data_reader::{ObjectId, RowId};
+use crate::data::{ObjectId, RowId};
 use crate::data_storage::{ObjectStoreDir, ObjectStoreFile};
 use crate::BundlebaseError;
 use futures::stream::StreamExt;

@@ -17,7 +17,7 @@ pub use operation::{AnyOperation, Operation, BundleChange};
 use std::collections::{HashMap, HashSet};
 
 use crate::bundle::commit::manifest_version;
-use crate::data_reader::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBlockId};
+use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBlockId};
 use crate::data_storage::{DataStorage, ObjectStoreDir, ObjectStoreFile, EMPTY_URL};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};

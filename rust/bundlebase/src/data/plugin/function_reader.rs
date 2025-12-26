@@ -1,5 +1,5 @@
-use crate::data_reader::plugin::ReaderPlugin;
-use crate::data_reader::{DataReader, ObjectId, RowId};
+use crate::data::plugin::ReaderPlugin;
+use crate::data::{DataReader, ObjectId, RowId};
 use crate::functions::FunctionDataSource;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionRegistry;

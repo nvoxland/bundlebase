@@ -1,4 +1,4 @@
-use crate::data_reader::{DataReader, ObjectId};
+use crate::data::{DataReader, ObjectId};
 use crate::BundlebaseError;
 use arrow::array::RecordBatch;
 use arrow_schema::SchemaRef;
@@ -63,7 +63,7 @@ impl DataReader for MockReader {
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
-        _row_ids: Option<&[crate::data_reader::RowId]>,
+        _row_ids: Option<&[crate::data::RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
         Ok(Arc::new(MockDataSource::new(self.schema.clone())))
     }

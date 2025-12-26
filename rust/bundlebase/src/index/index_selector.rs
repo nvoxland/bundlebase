@@ -1,4 +1,4 @@
-use crate::data_reader::VersionedBlockId;
+use crate::data::VersionedBlockId;
 use crate::index::IndexDefinition;
 use crate::Bundle;
 use parking_lot::RwLock;
@@ -118,7 +118,7 @@ impl IndexSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_reader::ObjectId;
+    use crate::data::ObjectId;
 
     #[tokio::test]
     async fn test_select_index_found() {

@@ -1,5 +1,5 @@
-use crate::data_reader::rowid_provider::RowIdProvider;
-use crate::data_reader::{RowId, RowIdBatch};
+use crate::data::rowid_provider::RowIdProvider;
+use crate::data::{RowId, RowIdBatch};
 use crate::BundlebaseError;
 use arrow::record_batch::RecordBatch;
 use datafusion::physical_plan::SendableRecordBatchStream;

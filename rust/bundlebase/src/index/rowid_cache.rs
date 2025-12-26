@@ -1,4 +1,4 @@
-use crate::data_reader::RowId;
+use crate::data::RowId;
 use crate::observability;
 use lazy_static::lazy_static;
 use lru::LruCache;
@@ -121,7 +121,7 @@ lazy_static! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_reader::ObjectId;
+    use crate::data::ObjectId;
 
     #[test]
     fn test_cache_basic_operations() {

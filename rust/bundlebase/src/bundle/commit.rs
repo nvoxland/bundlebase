@@ -538,7 +538,7 @@ changes:
     fn test_roundtrip_complex_operations() {
         // Test that serialization and deserialization are symmetric
         use crate::bundle::operation::{AttachBlockOp, RemoveColumnsOp};
-        use crate::data_reader::ObjectId;
+        use crate::data::ObjectId;
         use arrow_schema::{DataType, Field, Schema};
         use std::sync::Arc;
 

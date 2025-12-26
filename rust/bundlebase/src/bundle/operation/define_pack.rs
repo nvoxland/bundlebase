@@ -1,5 +1,5 @@
 use crate::bundle::operation::Operation;
-use crate::data_reader::DataPack;
+use crate::data::DataPack;
 use crate::data_storage::ObjectId;
 use crate::{BundlebaseError, Bundle};
 use async_trait::async_trait;

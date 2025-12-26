@@ -1,4 +1,4 @@
-use crate::data_reader::{LineOrientedFormat, RowId, RowIdOffsetDataSource};
+use crate::data::{LineOrientedFormat, RowId, RowIdOffsetDataSource};
 use crate::data_storage::ObjectStoreFile;
 use crate::{BundlebaseError, Bundle};
 use arrow::datatypes::SchemaRef;

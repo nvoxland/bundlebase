@@ -1,4 +1,4 @@
-use crate::data_reader::DataPack;
+use crate::data::DataPack;
 use crate::data_storage::ObjectId;
 use crate::schema_provider::PackUnionTable;
 use async_trait::async_trait;
@@ -94,7 +94,7 @@ impl SchemaProvider for PackSchemaProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_reader::{DataBlock, MockReader};
+    use crate::data::{DataBlock, MockReader};
     use arrow_schema::{DataType, Field, Schema};
     use parking_lot::RwLock;
     use std::collections::HashMap;

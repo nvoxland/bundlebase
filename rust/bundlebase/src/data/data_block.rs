@@ -1,4 +1,4 @@
-use crate::data_reader::{DataReader, VersionedBlockId};
+use crate::data::{DataReader, VersionedBlockId};
 use crate::data_storage::{ObjectId, ObjectStoreDir, ObjectStoreFile};
 use crate::index::{ColumnIndex, FilterAnalyzer, IndexableFilter, IndexDefinition, IndexPredicate, IndexSelector};
 use crate::observability::{OperationTimer, OperationCategory, OperationOutcome, start_span};
@@ -120,7 +120,7 @@ impl DataBlock {
         index_path: &str,
         column: &str,
         predicate: &IndexPredicate,
-    ) -> Result<Vec<crate::data_reader::RowId>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Vec<crate::data::RowId>, Box<dyn std::error::Error + Send + Sync>> {
         // Load index file from data directory
         let index_file = ObjectStoreFile::from_str(index_path, &self.data_dir)?;
 

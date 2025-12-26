@@ -1,7 +1,7 @@
-use crate::data_reader::object_id::ObjectId;
-use crate::data_reader::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
-use crate::data_reader::plugin::ReaderPlugin;
-use crate::data_reader::{LayoutRowIdProvider, DataReader, LineOrientedFormat, RowIdProvider, RowIdStreamAdapter, SendableRowIdBatchStream, RowId};
+use crate::data::object_id::ObjectId;
+use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
+use crate::data::plugin::ReaderPlugin;
+use crate::data::{LayoutRowIdProvider, DataReader, LineOrientedFormat, RowIdProvider, RowIdStreamAdapter, SendableRowIdBatchStream, RowId};
 use crate::data_storage::{ObjectStoreDir, ObjectStoreFile};
 use crate::index::RowIdIndex;
 use crate::{BundlebaseError, Bundle};
@@ -213,7 +213,7 @@ impl CsvReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_reader::plugin::ReaderPlugin;
+    use crate::data::plugin::ReaderPlugin;
     use crate::test_utils::test_datafile;
     use crate::Bundle;
     use arrow::array::{downcast_array, Array, StringArray};

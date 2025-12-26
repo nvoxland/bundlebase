@@ -26,7 +26,7 @@ impl RebuildIndexOp {
         // let data_type = field.data_type().clone();
         //
         // // Build index from DataFrame
-        // let mut value_to_rowids: HashMap<IndexedValue, Vec<crate::data_reader::RowId>> =
+        // let mut value_to_rowids: HashMap<IndexedValue, Vec<crate::data::RowId>> =
         //     HashMap::new();
         //
         // // TODO: re-enable when we figure out why it's segfaulting
@@ -59,7 +59,7 @@ impl RebuildIndexOp {
         //         let indexed_value = IndexedValue::from_scalar(&scalar)?;
         //
         //         // For MVP, use row index as a simple RowId
-        //         let row_id = crate::data_reader::RowId::from(row_index + row as u64);
+        //         let row_id = crate::data::RowId::from(row_index + row as u64);
         //
         //         value_to_rowids
         //             .entry(indexed_value)
@@ -87,7 +87,7 @@ impl RebuildIndexOp {
         //             None
         //         }
         //     })
-        //     .unwrap_or_else(|| crate::data_reader::ObjectId::from(0u8));
+        //     .unwrap_or_else(|| crate::data::ObjectId::from(0u8));
         //
         // let version = "current".to_string();
         //

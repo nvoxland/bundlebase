@@ -2,7 +2,7 @@ mod object_store_dir;
 mod object_store_file;
 mod util;
 
-pub use crate::data_reader::ObjectId;
+pub use crate::data::ObjectId;
 pub use crate::data_storage::object_store_dir::ObjectStoreDir;
 pub use crate::data_storage::object_store_file::ObjectStoreFile;
 use object_store::memory::InMemory;

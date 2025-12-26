@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::collections::HashMap;
 use parking_lot::RwLock;
-use crate::data_reader::{ObjectId, VersionedBlockId};
+use crate::data::{ObjectId, VersionedBlockId};
 use crate::index::indexed_blocks::IndexedBlocks;
 
 #[derive(Debug)]

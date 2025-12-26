@@ -1,4 +1,4 @@
-use crate::data_reader::ObjectId;
+use crate::data::ObjectId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Represents a block and its version, serialized as "{block}@{version}"
