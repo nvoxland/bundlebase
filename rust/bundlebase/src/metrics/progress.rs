@@ -3,8 +3,7 @@
 /// This module provides progress trackers that feed updates into OpenTelemetry spans,
 /// allowing progress information to appear in distributed traces.
 
-#[cfg(feature = "metrics")]
-use crate::observability::{start_span, OperationCategory, OperationOutcome, Span, KeyValue};
+use crate::metrics::{start_span, OperationCategory, OperationOutcome, Span, KeyValue};
 use crate::progress::{ProgressTracker, ProgressId};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,13 +13,11 @@ use parking_lot::RwLock;
 ///
 /// Creates a new span for each progress operation and updates it with progress events.
 /// Progress updates are recorded as span events to avoid cardinality issues.
-#[cfg(feature = "metrics")]
 pub struct SpanProgressTracker {
     /// Stores active spans by ProgressId
     spans: Arc<RwLock<HashMap<ProgressId, Span>>>,
 }
 
-#[cfg(feature = "metrics")]
 impl SpanProgressTracker {
     /// Create a new SpanProgressTracker
     pub fn new() -> Self {
@@ -30,14 +27,12 @@ impl SpanProgressTracker {
     }
 }
 
-#[cfg(feature = "metrics")]
 impl Default for SpanProgressTracker {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(feature = "metrics")]
 impl ProgressTracker for SpanProgressTracker {
     fn start(&self, operation: &str, total: Option<u64>) -> ProgressId {
         let id = ProgressId::new();
@@ -118,7 +113,7 @@ impl ProgressTracker for CompositeTracker {
     }
 }
 
-#[cfg(all(test, feature = "metrics"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

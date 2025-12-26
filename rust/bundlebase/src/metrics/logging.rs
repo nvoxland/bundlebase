@@ -6,7 +6,7 @@
 /// # Example
 ///
 /// ```rust
-/// use bundlebase::observability::init_logging_metrics;
+/// use bundlebase::metrics::init_logging_metrics;
 ///
 /// // Initialize once at startup
 /// init_logging_metrics();
@@ -15,14 +15,11 @@
 /// // Or call log_current_metrics() to log on-demand
 /// ```
 
-#[cfg(feature = "metrics")]
 use opentelemetry::global;
-#[cfg(feature = "metrics")]
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
     trace::{BatchSpanProcessor, TracerProvider},
 };
-#[cfg(feature = "metrics")]
 use opentelemetry_stdout::{MetricsExporter, SpanExporter};
 
 /// Initialize logging-based metrics export with default settings
@@ -33,7 +30,7 @@ use opentelemetry_stdout::{MetricsExporter, SpanExporter};
 /// # Example
 ///
 /// ```rust
-/// use bundlebase::observability::init_logging_metrics;
+/// use bundlebase::metrics::init_logging_metrics;
 ///
 /// fn main() {
 ///     env_logger::init();
@@ -42,7 +39,6 @@ use opentelemetry_stdout::{MetricsExporter, SpanExporter};
 ///     // Your code here - metrics will be logged automatically
 /// }
 /// ```
-#[cfg(feature = "metrics")]
 pub fn init_logging_metrics() -> bool {
     init_logging_metrics_with_interval(std::time::Duration::from_secs(60))
 }
@@ -57,12 +53,11 @@ pub fn init_logging_metrics() -> bool {
 ///
 /// ```rust
 /// use std::time::Duration;
-/// use bundlebase::observability::init_logging_metrics_with_interval;
+/// use bundlebase::metrics::init_logging_metrics_with_interval;
 ///
 /// // Log metrics every 30 seconds
 /// init_logging_metrics_with_interval(Duration::from_secs(30));
 /// ```
-#[cfg(feature = "metrics")]
 pub fn init_logging_metrics_with_interval(interval: std::time::Duration) -> bool {
     // Initialize tracing (spans)
     let span_exporter = SpanExporter::default();
@@ -106,12 +101,11 @@ pub fn init_logging_metrics_with_interval(interval: std::time::Duration) -> bool
 /// # Example
 ///
 /// ```rust
-/// use bundlebase::observability::log_current_metrics;
+/// use bundlebase::metrics::log_current_metrics;
 ///
 /// // After some operations
 /// log_current_metrics();
 /// ```
-#[cfg(feature = "metrics")]
 pub fn log_current_metrics() {
     // Note: OpenTelemetry 0.24 doesn't provide a simple way to force flush
     // from the global meter provider. The periodic reader will handle exports
@@ -119,21 +113,8 @@ pub fn log_current_metrics() {
     log::debug!("Metrics will be exported at the next periodic interval");
 }
 
-// No-op versions when metrics feature is disabled
-#[cfg(not(feature = "metrics"))]
-pub fn init_logging_metrics() -> bool {
-    false
-}
 
-#[cfg(not(feature = "metrics"))]
-pub fn init_logging_metrics_with_interval(_interval: std::time::Duration) -> bool {
-    false
-}
-
-#[cfg(not(feature = "metrics"))]
-pub fn log_current_metrics() {}
-
-#[cfg(all(test, feature = "metrics"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

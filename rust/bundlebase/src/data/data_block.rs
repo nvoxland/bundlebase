@@ -1,7 +1,7 @@
 use crate::data::{DataReader, VersionedBlockId};
 use crate::data_storage::{ObjectId, ObjectStoreDir, ObjectStoreFile};
 use crate::index::{ColumnIndex, FilterAnalyzer, IndexableFilter, IndexDefinition, IndexPredicate, IndexSelector};
-use crate::observability::{OperationTimer, OperationCategory, OperationOutcome, start_span};
+use crate::metrics::{OperationTimer, OperationCategory, OperationOutcome, start_span};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::memory::DataSourceExec;

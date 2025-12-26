@@ -356,7 +356,6 @@ row_ids.sort_unstable_by_key(|r| r.as_u64());  // Consistent ordering
 The index system exports metrics for monitoring:
 
 ```rust
-#[cfg(feature = "metrics")]
 pub fn record_index_lookup(column: &str, outcome: IndexOutcome) {
     INDEX_LOOKUPS.add(1, &[
         KeyValue::new("column", column.to_string()),
