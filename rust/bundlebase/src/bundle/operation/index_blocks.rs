@@ -255,21 +255,6 @@ impl Operation for IndexBlocksOp {
             )))
         }
     }
-
-    fn normalize_paths(&self, data_dir: &crate::io::ObjectStoreDir) -> Result<Self, BundlebaseError> {
-        use crate::bundle::operation::normalize_path;
-
-        // Normalize index file path
-        let path = normalize_path(&self.path, data_dir)?;
-
-        // Clone operation with normalized path
-        Ok(IndexBlocksOp {
-            index_id: self.index_id.clone(),
-            blocks: self.blocks.clone(),
-            path,
-            cardinality: self.cardinality,
-        })
-    }
 }
 
 #[cfg(test)]

@@ -64,20 +64,6 @@ impl Display for BundleChange {
     }
 }
 
-/// Helper function to normalize a file path to an absolute URL.
-///
-/// # Arguments
-/// * `path` - The path to normalize (can be relative or absolute)
-/// * `data_dir` - The bundle's data directory for resolving relative paths
-///
-/// # Returns
-/// The absolute URL as a string, or an error if the path cannot be resolved
-pub fn normalize_path(path: &str, data_dir: &crate::io::ObjectStoreDir) -> Result<String, BundlebaseError> {
-    use crate::io::ObjectStoreFile;
-    let file = ObjectStoreFile::from_str(path, data_dir)?;
-    Ok(file.url().to_string())
-}
-
 /// Trait for all operations
 #[async_trait]
 pub trait Operation: Send + Sync + Clone + Serialize + Debug {
@@ -109,21 +95,6 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
         versioning::hash_config(self)
     }
 
-    /// Normalize any file paths in this operation to absolute URLs.
-    /// This is called during commit to make operations location-agnostic.
-    ///
-    /// # Arguments
-    /// * `data_dir` - The bundle's data directory for resolving relative paths
-    ///
-    /// # Returns
-    /// A new operation with normalized paths, or self if no normalization needed
-    fn normalize_paths(&self, _data_dir: &crate::io::ObjectStoreDir) -> Result<Self, BundlebaseError>
-    where
-        Self: Sized,
-    {
-        // Default: no normalization needed
-        Ok(self.clone())
-    }
 }
 
 /// Enum wrapping all concrete operation types
@@ -251,18 +222,6 @@ impl Operation for AnyOperation {
             AnyOperation::Select(op) => op.version(),
             AnyOperation::SetName(op) => op.version(),
             AnyOperation::SetDescription(op) => op.version(),
-        }
-    }
-
-    fn normalize_paths(&self, data_dir: &crate::io::ObjectStoreDir) -> Result<Self, BundlebaseError> {
-        match self {
-            AnyOperation::AttachBlock(op) => {
-                Ok(AnyOperation::AttachBlock(op.normalize_paths(data_dir)?))
-            }
-            AnyOperation::IndexBlocks(op) => {
-                Ok(AnyOperation::IndexBlocks(op.normalize_paths(data_dir)?))
-            }
-            _ => Ok(self.clone()) // All other operations: no-op
         }
     }
 }

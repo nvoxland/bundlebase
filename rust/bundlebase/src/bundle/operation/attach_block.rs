@@ -122,32 +122,6 @@ impl Operation for AttachBlockOp {
 
         Ok(())
     }
-
-    fn normalize_paths(&self, data_dir: &crate::io::ObjectStoreDir) -> Result<Self, BundlebaseError> {
-        use crate::bundle::operation::normalize_path;
-
-        // Normalize source path
-        let source = normalize_path(&self.source, data_dir)?;
-
-        // Normalize layout path if present
-        let layout = if let Some(ref layout_path) = self.layout {
-            Some(normalize_path(layout_path, data_dir)?)
-        } else {
-            None
-        };
-
-        // Clone operation with normalized paths
-        Ok(AttachBlockOp {
-            source,
-            version: self.version.clone(),
-            id: self.id.clone(),
-            pack_id: self.pack_id.clone(),
-            layout,
-            num_rows: self.num_rows,
-            bytes: self.bytes,
-            schema: self.schema.clone(),
-        })
-    }
 }
 
 #[cfg(test)]

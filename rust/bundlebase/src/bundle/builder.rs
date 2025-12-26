@@ -227,19 +227,7 @@ impl BundleBuilder {
         let author = std::env::var("BUNDLEBASE_AUTHOR")
             .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
 
-        // Normalize paths in all operations before committing
-        let mut normalized_changes = Vec::new();
-        for change in self.status.changes() {
-            let mut normalized_ops = Vec::new();
-            for op in &change.operations {
-                normalized_ops.push(op.normalize_paths(&self.bundle.data_dir)?);
-            }
-            normalized_changes.push(BundleChange {
-                id: change.id,
-                description: change.description.clone(),
-                operations: normalized_ops,
-            });
-        }
+        let mut changes = self.status.changes().clone();
 
         let commit_struct = commit::BundleCommit {
             url: None, //no need to set, we're just writing it and then will re-read it back
@@ -247,7 +235,7 @@ impl BundleBuilder {
             message: message.to_string(),
             author,
             timestamp,
-            changes: normalized_changes,
+            changes,
         };
 
         // Serialize directly using serde_yaml
