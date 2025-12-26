@@ -7,13 +7,13 @@ mod operation;
 mod sql;
 
 use crate::io::EMPTY_SCHEME;
-pub use builder::{BundleStatus, BundleBuilder};
+pub use builder::{BundleBuilder, BundleStatus};
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
 pub use commit::BundleCommit;
 pub use facade::BundleFacade;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::JoinTypeOption;
-pub use operation::{AnyOperation, Operation, BundleChange};
+pub use operation::{AnyOperation, BundleChange, Operation};
 use std::collections::{HashMap, HashSet};
 
 use crate::bundle::commit::manifest_version;
@@ -21,7 +21,7 @@ use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBloc
 use crate::io::{DataStorage, ObjectStoreDir, ObjectStoreFile, EMPTY_URL};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
-use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider};
+use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
 use crate::BundlebaseError;
 use arrow::array::Array;
 use arrow_schema::SchemaRef;
@@ -39,9 +39,6 @@ use std::sync::Arc;
 use url::Url;
 use uuid::Uuid;
 
-pub static DATAFRAME_ALIAS: &str = "data";
-pub static CATALOG_NAME: &str = "bundlebase";
-
 /// A read-only view of a Bundle loaded from persistent storage.
 ///
 /// `Bundle` represents a bundle that has been committed and persisted to disk.
@@ -52,22 +49,19 @@ pub static CATALOG_NAME: &str = "bundlebase";
 /// When opening a bundle, all parent bundles referenced by the `from` field are loaded
 /// recursively, establishing a complete inheritance chain. This allows bundles to build
 /// upon previously committed versions.
-///
-/// # Cycle Detection
-/// The loader detects circular references in the bundle chain and fails safely if found.
 pub struct Bundle {
     id: String,
     name: Option<String>,
     description: Option<String>,
+    version: String,
+    last_manifest_version: u32,
 
     data_dir: ObjectStoreDir,
     commits: Vec<BundleCommit>,
     operations: Vec<AnyOperation>,
-    version: String,
-    manifest_version: u32,
 
-    base_pack: Option<ObjectId>,
     data_packs: Arc<RwLock<HashMap<ObjectId, Arc<DataPack>>>>,
+    base_pack: Option<ObjectId>,
     joins: HashMap<String, PackJoin>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     dataframe: DataFrameHolder,
@@ -100,7 +94,7 @@ impl Clone for Bundle {
             commits: self.commits.clone(),
             operations: self.operations.clone(),
             version: self.version.clone(),
-            manifest_version: self.manifest_version,
+            last_manifest_version: self.last_manifest_version,
             base_pack: self.base_pack.clone(),
             data_packs: Arc::clone(&self.data_packs),
             joins: self.joins.clone(),
@@ -186,7 +180,7 @@ impl Bundle {
             description: None,
             operations: vec![],
 
-            manifest_version: 0,
+            last_manifest_version: 0,
             version: "empty".to_string(),
             data_dir: ObjectStoreDir::from_url(&url)?,
             commits: vec![],
@@ -265,7 +259,7 @@ impl Bundle {
 
         // Load and apply each manifest in order
         for manifest_file in manifest_files {
-            bundle.manifest_version = manifest_version(manifest_file.filename());
+            bundle.last_manifest_version = manifest_version(manifest_file.filename());
             let mut commit: BundleCommit = manifest_file.read_yaml().await?.unwrap();
             commit.url = Some(manifest_file.url().clone());
             commit.data_dir = Some(data_dir.url().clone());

@@ -1,6 +1,6 @@
 use crate::bundle::JoinTypeOption;
 use crate::data::{DataBlock, DataPack, PackJoin};
-use crate::{bundle, BundlebaseError};
+use crate::{bundle, catalog, BundlebaseError};
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::{Expr, LogicalPlan, Operator};
@@ -86,10 +86,10 @@ pub(crate) async fn column_sources(
     ctx: &Arc<SessionContext>,
 ) -> Result<Option<Vec<(String, String)>>, BundlebaseError> {
     // Get the "data" table from the context and use its logical plan
-    let table = ctx.table(bundle::DATAFRAME_ALIAS).await.map_err(|e| {
+    let table = ctx.table(catalog::DATAFRAME_ALIAS).await.map_err(|e| {
         BundlebaseError::from(format!(
             "Failed to get '{}' table: {}",
-            bundle::DATAFRAME_ALIAS,
+            catalog::DATAFRAME_ALIAS,
             e
         ))
     })?;
@@ -209,7 +209,7 @@ fn find_orig(plan: &LogicalPlan, target: &str, sources: &mut Vec<(String, String
                     None => {
                         // No relation specified - use the dataframe alias as source
                         sources.push((
-                            bundle::DATAFRAME_ALIAS.to_string(),
+                            catalog::DATAFRAME_ALIAS.to_string(),
                             col.name.clone(),
                         ));
                         return;
@@ -351,8 +351,8 @@ mod tests {
     use datafusion::catalog::SchemaProvider;
     use datafusion::datasource::empty::EmptyTable;
     use std::sync::Arc;
-    use crate::bundle::{sql, BundleFacade};
-    use crate::BundleBuilder;
+    use crate::bundle::BundleFacade;
+    use crate::{catalog, BundleBuilder};
     use crate::test_utils::test_datafile;
 
     #[tokio::test]
@@ -429,7 +429,7 @@ mod tests {
 
         // Register a simple table
         ctx.register_table(
-            bundle::DATAFRAME_ALIAS,
+            catalog::DATAFRAME_ALIAS,
             Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
                 Field::new("id", DataType::Int32, false),
                 Field::new("name", DataType::Utf8, false),
@@ -442,7 +442,7 @@ mod tests {
         let sources = result.unwrap();
         assert_eq!(sources.len(), 1);
         let (table, col) = &sources[0];
-        assert_eq!(table, bundle::DATAFRAME_ALIAS);
+        assert_eq!(table, catalog::DATAFRAME_ALIAS);
         assert_eq!(col, "id");
     }
 
@@ -452,7 +452,7 @@ mod tests {
         let ctx = Arc::new(SessionContext::new());
 
         ctx.register_table(
-            bundle::DATAFRAME_ALIAS,
+            catalog::DATAFRAME_ALIAS,
             Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
                 Field::new("id", DataType::Int32, false),
                 Field::new("name", DataType::Utf8, false),
@@ -486,7 +486,7 @@ mod tests {
             .await
             .unwrap();
 
-        ctx.register_table(bundle::DATAFRAME_ALIAS, df.into_view())
+        ctx.register_table(catalog::DATAFRAME_ALIAS, df.into_view())
             .unwrap();
 
         // Query for the renamed column
@@ -506,7 +506,7 @@ mod tests {
         let ctx = Arc::new(SessionContext::new());
 
         ctx.register_table(
-            bundle::DATAFRAME_ALIAS,
+            catalog::DATAFRAME_ALIAS,
             Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
                 Field::new("col1", DataType::Int32, false),
                 Field::new("col2", DataType::Utf8, false),
@@ -522,7 +522,7 @@ mod tests {
             let sources = result.unwrap();
             assert_eq!(sources.len(), 1);
             let (table, col) = &sources[0];
-            assert_eq!(table, bundle::DATAFRAME_ALIAS);
+            assert_eq!(table, catalog::DATAFRAME_ALIAS);
             assert_eq!(col, *col_name);
         }
     }
@@ -556,7 +556,7 @@ mod tests {
             .await
             .unwrap();
 
-        ctx.register_table(bundle::DATAFRAME_ALIAS, df.into_view())
+        ctx.register_table(catalog::DATAFRAME_ALIAS, df.into_view())
             .unwrap();
 
         // Query for the 'id' column which comes from both tables
