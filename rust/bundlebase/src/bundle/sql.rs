@@ -31,7 +31,7 @@ static TEMP_COUNTER: OnceLock<AtomicU64> = OnceLock::new();
 pub(crate) async fn column_sources_from_df(
     column_name: &str,
     df: &DataFrame,
-    data_packs: Option<&Arc<parking_lot::RwLock<std::collections::HashMap<crate::data_storage::ObjectId, Arc<crate::data::DataPack>>>>>,
+    data_packs: Option<&Arc<parking_lot::RwLock<std::collections::HashMap<crate::io::ObjectId, Arc<crate::data::DataPack>>>>>,
 ) -> Result<Option<Vec<(String, String)>>, BundlebaseError> {
     let plan = df.logical_plan();
 
@@ -346,7 +346,7 @@ where
 
 mod tests {
     use super::*;
-    use crate::data_storage::ObjectId;
+    use crate::io::ObjectId;
     use arrow_schema::{DataType, Field, Schema, SchemaRef};
     use datafusion::catalog::SchemaProvider;
     use datafusion::datasource::empty::EmptyTable;

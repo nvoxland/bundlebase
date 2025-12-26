@@ -1,5 +1,5 @@
 use crate::data::{LineOrientedFormat, RowId, RowIdOffsetDataSource};
-use crate::data_storage::ObjectStoreFile;
+use crate::io::ObjectStoreFile;
 use crate::{BundlebaseError, Bundle};
 use arrow::datatypes::SchemaRef;
 use datafusion::catalog::Session;

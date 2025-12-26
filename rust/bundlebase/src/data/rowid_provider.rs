@@ -1,5 +1,5 @@
 use crate::data::{ObjectId, RowId};
-use crate::data_storage::ObjectStoreFile;
+use crate::io::ObjectStoreFile;
 use crate::index::{RowIdIndex, GLOBAL_ROWID_CACHE};
 use crate::BundlebaseError;
 use async_trait::async_trait;

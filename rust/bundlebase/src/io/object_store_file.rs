@@ -1,8 +1,8 @@
 use object_store::path::Path as ObjectPath;
 use object_store::{ObjectMeta, ObjectStore};
 
-use crate::data_storage::util::{compute_store_url, parse_url};
-use crate::data_storage::{ObjectStoreDir, EMPTY_SCHEME};
+use crate::io::util::{compute_store_url, parse_url};
+use crate::io::{ObjectStoreDir, EMPTY_SCHEME};
 use crate::BundlebaseError;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use futures::stream::{StreamExt, TryStreamExt};

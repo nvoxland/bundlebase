@@ -256,7 +256,7 @@ impl Operation for IndexBlocksOp {
         }
     }
 
-    fn normalize_paths(&self, data_dir: &crate::data_storage::ObjectStoreDir) -> Result<Self, BundlebaseError> {
+    fn normalize_paths(&self, data_dir: &crate::io::ObjectStoreDir) -> Result<Self, BundlebaseError> {
         use crate::bundle::operation::normalize_path;
 
         // Normalize index file path

@@ -20,11 +20,11 @@ Bundlebase is a high-performance data processing library written in Rust with Py
 │   ├── lib.rs                          # Library entry point
 │   ├── bundle.rs                       # Bundlebase trait interface
 │   ├── bundle/                         # Container implementations
-│   ├── data_adapter/                   # Data source plugins
-│   ├── data_storage/                   # Storage abstraction
+│   ├── data/                           # Data source plugins
+│   ├── io/                             # Storage abstraction
 │   ├── functions/                      # Function system
 │   └── python/                         # Python bindings
-├── python/Bundlebase/               # Python package
+├── python/Bundlebase/                  # Python package
 ├── tests/                              # Rust integration tests
 ├── test_data/                          # Test data files
 ├── Cargo.toml                          # Rust dependencies

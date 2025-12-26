@@ -1,6 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::{Bundle, BundleFacade};
-use crate::data_storage::ObjectId;
+use crate::io::ObjectId;
 use crate::index::IndexDefinition;
 use crate::BundlebaseError;
 use async_trait::async_trait;

@@ -1,4 +1,4 @@
-use crate::data_storage::{get_memory_store, get_null_store, EMPTY_SCHEME};
+use crate::io::{get_memory_store, get_null_store, EMPTY_SCHEME};
 use crate::BundlebaseError;
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use object_store::path::Path;

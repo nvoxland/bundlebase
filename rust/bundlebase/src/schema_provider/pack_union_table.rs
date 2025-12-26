@@ -1,5 +1,5 @@
 use crate::data::DataPack;
-use crate::data_storage::ObjectId;
+use crate::io::ObjectId;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::{Session, TableProvider};

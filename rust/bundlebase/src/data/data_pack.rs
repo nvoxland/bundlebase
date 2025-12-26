@@ -1,6 +1,6 @@
 use crate::data::data_block::DataBlock;
 
-use crate::data_storage::ObjectId;
+use crate::io::ObjectId;
 use parking_lot::RwLock;
 use std::sync::Arc;
 

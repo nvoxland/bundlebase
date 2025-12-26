@@ -11,7 +11,7 @@ use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
 use crate::bundle::{commit, INIT_FILENAME};
 use crate::bundle::{sql, Bundle};
 use crate::data::{DataBlock, DataPack, ObjectId, VersionedBlockId};
-use crate::data_storage::ObjectStoreDir;
+use crate::io::ObjectStoreDir;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;

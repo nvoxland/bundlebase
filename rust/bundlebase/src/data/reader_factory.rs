@@ -2,7 +2,7 @@ use crate::data::plugin::{
     CsvPlugin, FunctionPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin,
 };
 use crate::data::{DataReader, ObjectId};
-use crate::data_storage::DataStorage;
+use crate::io::DataStorage;
 use crate::functions::FunctionRegistry;
 use crate::{BundlebaseError, Bundle};
 use arrow_schema::SchemaRef;

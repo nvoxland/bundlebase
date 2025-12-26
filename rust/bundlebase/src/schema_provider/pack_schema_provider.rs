@@ -1,5 +1,5 @@
 use crate::data::DataPack;
-use crate::data_storage::ObjectId;
+use crate::io::ObjectId;
 use crate::schema_provider::PackUnionTable;
 use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, TableProvider};
@@ -141,7 +141,7 @@ mod tests {
 
         // Create empty indexes and data_dir for test
         let indexes = Arc::new(parking_lot::RwLock::new(Vec::new()));
-        let data_dir = Arc::new(crate::data_storage::ObjectStoreDir::from_str("memory:///test").unwrap());
+        let data_dir = Arc::new(crate::io::ObjectStoreDir::from_str("memory:///test").unwrap());
 
         let block11 = Arc::new(DataBlock::new(
             block11_id.clone(),
