@@ -55,7 +55,6 @@ pub static CATALOG_NAME: &str = "bundlebase";
 ///
 /// # Cycle Detection
 /// The loader detects circular references in the bundle chain and fails safely if found.
-#[derive(Clone)]
 pub struct Bundle {
     id: String,
     name: Option<String>,
@@ -77,6 +76,44 @@ pub struct Bundle {
     storage: Arc<DataStorage>,
     adapter_factory: Arc<DataReaderFactory>,
     function_registry: Arc<RwLock<FunctionRegistry>>,
+}
+
+impl Clone for Bundle {
+    fn clone(&self) -> Self {
+        // Deep clone indexes and function_registry for independence
+        // Share data_packs to maintain compatibility with SessionContext schema providers
+        let indexes = {
+            let idxs = self.indexes.read();
+            Arc::new(RwLock::new(idxs.clone()))
+        };
+
+        let function_registry = {
+            let registry = self.function_registry.read();
+            Arc::new(RwLock::new(registry.clone()))
+        };
+
+        Self {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            description: self.description.clone(),
+            data_dir: self.data_dir.clone(),
+            commits: self.commits.clone(),
+            operations: self.operations.clone(),
+            version: self.version.clone(),
+            manifest_version: self.manifest_version,
+            base_pack: self.base_pack.clone(),
+            data_packs: Arc::clone(&self.data_packs),
+            joins: self.joins.clone(),
+            indexes,
+            dataframe: DataFrameHolder {
+                dataframe: Arc::new(RwLock::new(self.dataframe.dataframe.read().clone()))
+            },
+            ctx: Arc::clone(&self.ctx),
+            storage: Arc::clone(&self.storage),
+            adapter_factory: Arc::clone(&self.adapter_factory),
+            function_registry,
+        }
+    }
 }
 
 impl Bundle {
@@ -500,7 +537,7 @@ impl BundleFacade for Bundle {
 
 #[derive(Debug)]
 pub struct DataFrameHolder {
-    dataframe: Arc<RwLock<Option<Arc<DataFrame>>>>,
+    pub(crate) dataframe: Arc<RwLock<Option<Arc<DataFrame>>>>,
 }
 
 impl DataFrameHolder {
@@ -532,7 +569,7 @@ impl DataFrameHolder {
 impl Clone for DataFrameHolder {
     fn clone(&self) -> Self {
         Self {
-            dataframe: Arc::new(RwLock::new(None))
+            dataframe: Arc::clone(&self.dataframe)
         }
     }
 }
