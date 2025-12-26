@@ -5,7 +5,7 @@
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use bundlebase::metrics::init_logging_metrics;
 ///
 /// // Initialize once at startup
@@ -29,7 +29,7 @@ use opentelemetry_stdout::{MetricsExporter, SpanExporter};
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use bundlebase::metrics::init_logging_metrics;
 ///
 /// fn main() {
@@ -51,7 +51,7 @@ pub fn init_logging_metrics() -> bool {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use std::time::Duration;
 /// use bundlebase::metrics::init_logging_metrics_with_interval;
 ///

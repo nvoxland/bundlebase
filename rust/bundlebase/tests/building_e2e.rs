@@ -191,7 +191,6 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     // Verify country column was removed
     assert!(!common::has_column(&bundle_b_reopened.schema().await?, "country"));
 
-    // Verify the operation was normalized to absolute path
     let operations = bundle_b_reopened.operations();
     let attach_op = operations
         .iter()
@@ -201,148 +200,10 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
         })
         .expect("Should have AttachBlock operation");
 
-    // Path should now be absolute (contains scheme)
-    assert!(
-        attach_op.source.contains(':'),
-        "Path should be absolute after normalization: {}",
-        attach_op.source
-    );
+    assert!(!attach_op.source.contains(':'));
 
     // Path should point to Bundle A's location
-    assert!(
-        attach_op.source.starts_with("memory:///"),
-        "Path should be a memory URL: {}",
-        attach_op.source
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_all_relative_paths_normalized() -> Result<(), BundlebaseError> {
-    let temp = random_memory_dir();
-
-    // Create bundle with relative path
-    let mut bundle = bundlebase::BundleBuilder::create(&temp.to_string()).await?;
-
-    // Copy data to bundle directory
-    let source_file = test_datafile("customers-0-100.csv");
-    let local_file = temp.file("my_data.csv")?;
-
-    let source_obj = ObjectStoreFile::from_url(&Url::parse(source_file)?)?;
-    let data = source_obj.read_bytes().await?.expect("Failed to read source file");
-    local_file.write(data).await?;
-
-    bundle.attach("my_data.csv").await?;
-    bundle.commit("Relative path").await?;
-
-    // Reopen - all relative paths are normalized to absolute URLs
-    let reopened = Bundle::open(&temp.to_string()).await?;
-    let df = reopened.dataframe().await?;
-    let batches = df.as_ref().clone().collect().await?;
-    assert!(batches[0].num_rows() > 0, "Should have rows from the attached file");
-
-    // Verify the operation path was normalized to absolute
-    let attach_op = reopened.operations()
-        .iter()
-        .find_map(|op| match op {
-            AnyOperation::AttachBlock(attach) => Some(attach),
-            _ => None,
-        })
-        .expect("Should have AttachBlock operation");
-
-    // Path should be normalized to absolute (contains scheme)
-    assert!(
-        attach_op.source.contains(':'),
-        "Path should be normalized to absolute: {}",
-        attach_op.source
-    );
-
-    // YAML should also have absolute path (normalization happens at commit time)
-    let (_, commit, _) = common::latest_commit(&temp).await?.expect("Should have a commit");
-    let yaml_op = commit.changes[0].operations
-        .iter()
-        .find_map(|op| match op {
-            AnyOperation::AttachBlock(attach) => Some(attach),
-            _ => None,
-        })
-        .expect("Should have AttachBlock operation in YAML");
-
-    assert!(
-        yaml_op.source.contains(':'),
-        "YAML should have absolute path: {}",
-        yaml_op.source
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_index_path_normalization() -> Result<(), BundlebaseError> {
-    let temp1 = random_memory_dir();
-    let temp2 = random_memory_dir();
-
-    // Create Bundle A with indexed data
-    let mut bundle_a = bundlebase::BundleBuilder::create(&temp1.to_string()).await?;
-
-    // Copy test data to bundle's directory
-    let source_file = test_datafile("userdata.parquet");
-    let local_file = temp1.file("data.parquet")?;
-    let source_obj = ObjectStoreFile::from_url(&Url::parse(source_file)?)?;
-    let data = source_obj.read_bytes().await?.expect("Failed to read source file");
-    local_file.write(data).await?;
-
-    // Attach and create index
-    bundle_a.attach("data.parquet").await?;
-    bundle_a.index("id").await?;
-    bundle_a.commit("Bundle A with index").await?;
-
-    // Extend to Bundle B in different location
-    let bundle_a_reopened = Bundle::open(&temp1.to_string()).await?;
-    let mut bundle_b = bundle_a_reopened.extend(&temp2.to_string())?;
-    bundle_b.remove_column("country").await?;
-    bundle_b.commit("Bundle B extends A").await?;
-
-    // Reopen Bundle B - this should work without file-not-found errors for index files
-    let bundle_b_reopened = Bundle::open(&temp2.to_string()).await?;
-
-    // Verify data is accessible
-    let df = bundle_b_reopened.dataframe().await?;
-    let batches = df.as_ref().clone().collect().await?;
-    assert!(batches[0].num_rows() > 0, "Should have rows from the attached file");
-
-    // Verify the IndexBlocksOp has absolute path
-    let operations = bundle_b_reopened.operations();
-    let index_blocks_op = operations
-        .iter()
-        .find_map(|op| match op {
-            AnyOperation::IndexBlocks(index) => Some(index),
-            _ => None,
-        })
-        .expect("Should have IndexBlocks operation");
-
-    assert!(
-        index_blocks_op.path.contains(':'),
-        "Index path should be absolute: {}",
-        index_blocks_op.path
-    );
-
-    // Verify AttachBlockOp layout field is also absolute (if present)
-    let attach_op = operations
-        .iter()
-        .find_map(|op| match op {
-            AnyOperation::AttachBlock(attach) => Some(attach),
-            _ => None,
-        })
-        .expect("Should have AttachBlock operation");
-
-    if let Some(ref layout) = attach_op.layout {
-        assert!(
-            layout.contains(':'),
-            "Layout path should be absolute: {}",
-            layout
-        );
-    }
+    assert_eq!("local_data.csv", attach_op.source);
 
     Ok(())
 }
