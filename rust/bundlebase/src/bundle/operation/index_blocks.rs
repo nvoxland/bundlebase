@@ -1,5 +1,5 @@
 use crate::bundle::operation::Operation;
-use crate::data_reader::{DataBlock, ObjectId, RowId, VersionedBlockId};
+use crate::data::{DataBlock, ObjectId, RowId, VersionedBlockId};
 use crate::index::{ColumnIndex, IndexedValue};
 use crate::progress::ProgressScope;
 use crate::{BundlebaseError, Bundle};

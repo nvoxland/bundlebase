@@ -1,4 +1,4 @@
-use crate::data_reader::RowId;
+use crate::data::RowId;
 use arrow::csv::ReaderBuilder as CsvReaderBuilder;
 use arrow::json::ReaderBuilder as JsonReaderBuilder;
 use arrow::datatypes::SchemaRef;
@@ -398,7 +398,7 @@ impl DataSource for RowIdOffsetDataSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_reader::ObjectId;
+    use crate::data::ObjectId;
     use url::Url;
 
     #[test]

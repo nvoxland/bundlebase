@@ -1,4 +1,4 @@
-use crate::data_reader::data_block::DataBlock;
+use crate::data::data_block::DataBlock;
 
 use crate::data_storage::ObjectId;
 use parking_lot::RwLock;

@@ -1,5 +1,5 @@
 use parking_lot::RwLock;
-use crate::data_reader::{ObjectId, VersionedBlockId};
+use crate::data::{ObjectId, VersionedBlockId};
 
 /// Represents a set of indexed blocks with their versions.
 /// Tracks which blocks (and at which versions) are covered by a particular index.

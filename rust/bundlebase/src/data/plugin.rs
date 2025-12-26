@@ -7,7 +7,7 @@ mod parquet_reader;
 #[cfg(test)]
 mod mock;
 
-use crate::data_reader::DataReader;
+use crate::data::DataReader;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 pub use csv_reader::CsvPlugin;
@@ -20,7 +20,7 @@ use std::sync::Arc;
 #[cfg(test)]
 pub use mock::MockReader;
 
-use crate::data_reader::object_id::ObjectId;
+use crate::data::object_id::ObjectId;
 use crate::{BundlebaseError, Bundle};
 
 #[async_trait]

@@ -1,4 +1,4 @@
-use crate::data_reader::ObjectId;
+use crate::data::ObjectId;
 use serde::{Deserialize, Serialize};
 
 /// RowId encodes row position and metadata as a u64:

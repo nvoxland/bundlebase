@@ -1,5 +1,5 @@
 /// Test utilities for data adapter tests
-use crate::data_reader::DataReaderFactory;
+use crate::data::DataReaderFactory;
 use crate::data_storage::{DataStorage, ObjectStoreDir, ObjectStoreFile};
 use crate::functions::FunctionRegistry;
 use crate::BundleBuilder;

@@ -1,7 +1,7 @@
-use crate::data_reader::object_id::ObjectId;
-use crate::data_reader::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
-use crate::data_reader::plugin::ReaderPlugin;
-use crate::data_reader::{DataReader, LineOrientedFormat, SendableRowIdBatchStream};
+use crate::data::object_id::ObjectId;
+use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
+use crate::data::plugin::ReaderPlugin;
+use crate::data::{DataReader, LineOrientedFormat, SendableRowIdBatchStream};
 use crate::data_storage::ObjectStoreDir;
 use crate::index::RowIdIndex;
 use crate::{BundlebaseError, Bundle};
@@ -104,7 +104,7 @@ impl DataReader for JsonReader {
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
-        row_ids: Option<&[crate::data_reader::RowId]>,
+        row_ids: Option<&[crate::data::RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
         self.inner
             .data_source(projection, filters, limit, row_ids)
@@ -181,7 +181,7 @@ impl JsonReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_reader::plugin::ReaderPlugin;
+    use crate::data::plugin::ReaderPlugin;
     use crate::test_utils::test_datafile;
     use crate::Bundle;
     use arrow::array::{downcast_array, Array, StringArray};

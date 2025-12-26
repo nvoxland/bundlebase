@@ -1,5 +1,5 @@
 use crate::bundle::JoinTypeOption;
-use crate::data_reader::ObjectId;
+use crate::data::ObjectId;
 
 /// Describes a join between base pack and another pack
 #[derive(Debug, Clone, PartialEq, Eq)]

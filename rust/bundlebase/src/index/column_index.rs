@@ -1,4 +1,4 @@
-use crate::data_reader::RowId;
+use crate::data::RowId;
 use crate::BundlebaseError;
 use arrow::datatypes::DataType;
 use bytes::{Buf, BufMut, Bytes, BytesMut};

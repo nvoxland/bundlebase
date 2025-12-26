@@ -2,7 +2,7 @@
 extern crate core;
 
 pub mod bundle;
-mod data_reader;
+mod data;
 pub mod data_storage;
 pub mod functions;
 mod index;
@@ -16,7 +16,7 @@ pub use crate::bundle::{
     AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade,
     BundleStatus, JoinTypeOption, Operation,
 };
-pub use crate::data_reader::DataGenerator;
+pub use crate::data::DataGenerator;
 pub use crate::progress::{get_tracker, set_tracker, with_tracker, ProgressId, ProgressTracker};
 pub use functions::{FunctionImpl, FunctionSignature};
 use std::error::Error;

@@ -1,4 +1,4 @@
-use crate::data_reader::RowId;
+use crate::data::RowId;
 use crate::BundlebaseError;
 use arrow::record_batch::RecordBatch;
 use futures::stream::Stream;

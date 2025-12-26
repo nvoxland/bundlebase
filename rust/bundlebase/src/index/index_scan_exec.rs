@@ -1,4 +1,4 @@
-use crate::data_reader::{DataReader, RowId, SendableRecordBatchStream};
+use crate::data::{DataReader, RowId, SendableRecordBatchStream};
 use crate::index::column_index::{ColumnIndex, IndexedValue};
 use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
