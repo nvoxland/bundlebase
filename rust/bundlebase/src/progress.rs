@@ -243,6 +243,7 @@ impl Drop for ProgressScope {
 mod tests {
     use super::*;
     pub use mock::{MockTracker, ProgressCall};
+    use serial_test::serial;
 
     #[test]
     fn test_progress_id_uniqueness() {
@@ -262,6 +263,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_progress_scope_lifecycle() {
         // Use mock tracker to verify calls
         let mock = MockTracker::new();
@@ -292,6 +294,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_progress_scope_update() {
         let mock = MockTracker::new();
         with_tracker(Box::new(mock.clone()), || {
@@ -325,6 +328,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_progress_scope_increment() {
         let mock = MockTracker::new();
         with_tracker(Box::new(mock.clone()), || {

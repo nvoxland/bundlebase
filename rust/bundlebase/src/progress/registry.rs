@@ -127,6 +127,7 @@ where
 mod tests {
     use super::*;
     use crate::progress::ProgressId;
+    use serial_test::serial;
 
     struct CountingTracker {
         count: Arc<parking_lot::Mutex<usize>>,
@@ -160,6 +161,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_default_tracker_is_noop() {
         let tracker = get_tracker();
         let id = tracker.start("Test", None);
@@ -168,6 +170,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_set_tracker() {
         let counter = CountingTracker::new();
         let count_ref = counter.count.clone();
@@ -187,6 +190,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_with_tracker_restores_previous() {
         // Set a counter tracker globally
         let global_counter = CountingTracker::new();
@@ -220,6 +224,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_with_tracker_returns_value() {
         let result = with_tracker(Box::new(LoggingTracker::new()), || 42);
         assert_eq!(result, 42);
