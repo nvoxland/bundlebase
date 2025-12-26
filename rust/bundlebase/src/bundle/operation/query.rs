@@ -1,7 +1,7 @@
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::Operation;
 use crate::{BundlebaseError, Bundle};
-use crate::observability::{OperationTimer, OperationCategory, OperationOutcome, start_span};
+use crate::metrics::{OperationTimer, OperationCategory, OperationOutcome, start_span};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
