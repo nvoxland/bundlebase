@@ -178,7 +178,7 @@ impl BundleBuilder {
         let mut new_bundle = bundle.deref().clone();
         new_bundle.data_dir = ObjectStoreDir::from_str(data_dir)?;
         if new_bundle.data_dir.url() != bundle.url() {
-            new_bundle.manifest_version = 0;
+            new_bundle.last_manifest_version = 0;
         }
         Ok(BundleBuilder {
             bundle: new_bundle,
@@ -210,14 +210,14 @@ impl BundleBuilder {
     pub async fn commit(&mut self, message: &str) -> Result<(), BundlebaseError> {
         let manifest_dir = self.bundle.data_dir.subdir("_manifest")?; //todo rename the dir
 
-        if self.bundle.manifest_version == 0 {
+        if self.bundle.last_manifest_version == 0 {
             let from = self.bundle.from();
             let init_file = manifest_dir.file(INIT_FILENAME)?;
             init_file.write_yaml(&InitCommit::new(from)).await?;
         };
 
         // Calculate next version number
-        let next_version = self.bundle.manifest_version + 1;
+        let next_version = self.bundle.last_manifest_version + 1;
 
         // Get current timestamp in UTC ISO format
         let now = std::time::SystemTime::now();

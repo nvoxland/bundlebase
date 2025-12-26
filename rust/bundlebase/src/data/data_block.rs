@@ -21,6 +21,7 @@ struct IndexCandidate<'a> {
     selectivity: f64,
 }
 
+/// A DataBlock is a logical, tablular view of data contained within a single source, regardless of the underlying storage format.
 #[derive(Clone, Debug)]
 pub struct DataBlock {
     id: ObjectId,
