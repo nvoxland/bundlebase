@@ -1,7 +1,7 @@
 /// Shared test utilities for integration tests
 use arrow::datatypes::SchemaRef;
 use bundlebase::bundle::{BundleCommit, INIT_FILENAME};
-use bundlebase::data_storage::ObjectStoreDir;
+use bundlebase::io::ObjectStoreDir;
 use bundlebase::BundlebaseError;
 use url::Url;
 

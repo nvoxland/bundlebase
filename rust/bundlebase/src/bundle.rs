@@ -6,7 +6,7 @@ mod init;
 mod operation;
 mod sql;
 
-use crate::data_storage::EMPTY_SCHEME;
+use crate::io::EMPTY_SCHEME;
 pub use builder::{BundleStatus, BundleBuilder};
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
 pub use commit::BundleCommit;
@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::bundle::commit::manifest_version;
 use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBlockId};
-use crate::data_storage::{DataStorage, ObjectStoreDir, ObjectStoreFile, EMPTY_URL};
+use crate::io::{DataStorage, ObjectStoreDir, ObjectStoreFile, EMPTY_URL};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
 use crate::schema_provider::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider};
@@ -161,11 +161,11 @@ impl Bundle {
 
         ctx.register_object_store(
             ObjectStoreUrl::parse("memory://")?.as_ref(),
-            crate::data_storage::get_memory_store(),
+            crate::io::get_memory_store(),
         );
         ctx.register_object_store(
             ObjectStoreUrl::parse(format!("{}://", EMPTY_SCHEME))?.as_ref(),
-            crate::data_storage::get_null_store(),
+            crate::io::get_null_store(),
         );
 
         Ok(Self {

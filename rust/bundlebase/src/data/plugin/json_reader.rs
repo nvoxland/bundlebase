@@ -2,7 +2,7 @@ use crate::data::object_id::ObjectId;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
 use crate::data::{DataReader, LineOrientedFormat, SendableRowIdBatchStream};
-use crate::data_storage::ObjectStoreDir;
+use crate::io::ObjectStoreDir;
 use crate::index::RowIdIndex;
 use crate::{BundlebaseError, Bundle};
 use arrow::datatypes::SchemaRef;

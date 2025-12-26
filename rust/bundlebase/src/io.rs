@@ -3,8 +3,8 @@ mod object_store_file;
 mod util;
 
 pub use crate::data::ObjectId;
-pub use crate::data_storage::object_store_dir::ObjectStoreDir;
-pub use crate::data_storage::object_store_file::ObjectStoreFile;
+pub use crate::io::object_store_dir::ObjectStoreDir;
+pub use crate::io::object_store_file::ObjectStoreFile;
 use object_store::memory::InMemory;
 use std::sync::{Arc, OnceLock};
 

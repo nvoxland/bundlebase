@@ -123,7 +123,7 @@ impl Operation for AttachBlockOp {
         Ok(())
     }
 
-    fn normalize_paths(&self, data_dir: &crate::data_storage::ObjectStoreDir) -> Result<Self, BundlebaseError> {
+    fn normalize_paths(&self, data_dir: &crate::io::ObjectStoreDir) -> Result<Self, BundlebaseError> {
         use crate::bundle::operation::normalize_path;
 
         // Normalize source path
@@ -154,7 +154,7 @@ impl Operation for AttachBlockOp {
 mod tests {
     use super::*;
     use crate::bundle::BundleFacade;
-    use crate::data_storage::ObjectStoreFile;
+    use crate::io::ObjectStoreFile;
     use crate::test_utils::{empty_bundle, for_yaml, test_datafile};
     use url::Url;
 

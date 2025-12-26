@@ -1,7 +1,7 @@
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use bundlebase;
 use bundlebase::bundle::{BundleFacade, INIT_FILENAME};
-use bundlebase::data_storage::ObjectStoreFile;
+use bundlebase::io::ObjectStoreFile;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::FunctionSignature;
 use bundlebase::{op_field, AnyOperation};

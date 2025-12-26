@@ -3,7 +3,7 @@ extern crate core;
 
 pub mod bundle;
 mod data;
-pub mod data_storage;
+pub mod io;
 pub mod functions;
 mod index;
 pub mod metrics;

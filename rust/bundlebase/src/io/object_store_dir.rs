@@ -1,8 +1,8 @@
 use object_store::{path::Path as ObjectPath, ObjectStore};
 use std::env;
 
-use crate::data_storage::util::{join_path, join_url, parse_url};
-use crate::data_storage::{ObjectStoreFile, EMPTY_SCHEME, EMPTY_URL};
+use crate::io::util::{join_path, join_url, parse_url};
+use crate::io::{ObjectStoreFile, EMPTY_SCHEME, EMPTY_URL};
 use crate::BundlebaseError;
 use env::current_dir;
 use std::fmt::Display;

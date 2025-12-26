@@ -72,8 +72,8 @@ impl Display for BundleChange {
 ///
 /// # Returns
 /// The absolute URL as a string, or an error if the path cannot be resolved
-pub fn normalize_path(path: &str, data_dir: &crate::data_storage::ObjectStoreDir) -> Result<String, BundlebaseError> {
-    use crate::data_storage::ObjectStoreFile;
+pub fn normalize_path(path: &str, data_dir: &crate::io::ObjectStoreDir) -> Result<String, BundlebaseError> {
+    use crate::io::ObjectStoreFile;
     let file = ObjectStoreFile::from_str(path, data_dir)?;
     Ok(file.url().to_string())
 }
@@ -117,7 +117,7 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
     ///
     /// # Returns
     /// A new operation with normalized paths, or self if no normalization needed
-    fn normalize_paths(&self, _data_dir: &crate::data_storage::ObjectStoreDir) -> Result<Self, BundlebaseError>
+    fn normalize_paths(&self, _data_dir: &crate::io::ObjectStoreDir) -> Result<Self, BundlebaseError>
     where
         Self: Sized,
     {
@@ -254,7 +254,7 @@ impl Operation for AnyOperation {
         }
     }
 
-    fn normalize_paths(&self, data_dir: &crate::data_storage::ObjectStoreDir) -> Result<Self, BundlebaseError> {
+    fn normalize_paths(&self, data_dir: &crate::io::ObjectStoreDir) -> Result<Self, BundlebaseError> {
         match self {
             AnyOperation::AttachBlock(op) => {
                 Ok(AnyOperation::AttachBlock(op.normalize_paths(data_dir)?))

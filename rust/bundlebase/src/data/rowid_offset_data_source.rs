@@ -16,7 +16,7 @@ use std::any::Any;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
-use crate::data_storage::ObjectStoreFile;
+use crate::io::ObjectStoreFile;
 
 /// File format for line-oriented data sources
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

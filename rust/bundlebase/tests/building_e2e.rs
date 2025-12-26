@@ -1,6 +1,6 @@
 use bundlebase;
 use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME};
-use bundlebase::data_storage::ObjectStoreFile;
+use bundlebase::io::ObjectStoreFile;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::BundlebaseError;
 use bundlebase::Bundle;

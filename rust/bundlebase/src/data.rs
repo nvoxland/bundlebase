@@ -11,7 +11,7 @@ mod rowid_provider;
 mod rowid_stream;
 mod versioned_blockid;
 
-use crate::data_storage::ObjectStoreDir;
+use crate::io::ObjectStoreDir;
 use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
