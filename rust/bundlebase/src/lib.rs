@@ -8,7 +8,7 @@ pub mod functions;
 mod index;
 pub mod metrics;
 pub mod progress;
-mod schema_provider;
+mod catalog;
 pub mod test_utils;
 mod versioning;
 

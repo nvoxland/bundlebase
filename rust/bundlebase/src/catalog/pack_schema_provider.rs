@@ -1,6 +1,6 @@
 use crate::data::DataPack;
 use crate::io::ObjectId;
-use crate::schema_provider::PackUnionTable;
+use crate::catalog::PackUnionTable;
 use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use datafusion::error::Result;
@@ -99,7 +99,7 @@ mod tests {
     use parking_lot::RwLock;
     use std::collections::HashMap;
     use std::sync::Arc;
-    use crate::schema_provider::BlockSchemaProvider;
+    use crate::catalog::BlockSchemaProvider;
 
     #[test]
     fn parse_block_id_non_prefixed() {

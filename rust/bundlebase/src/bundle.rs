@@ -21,7 +21,7 @@ use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBloc
 use crate::io::{DataStorage, ObjectStoreDir, ObjectStoreFile, EMPTY_URL};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
-use crate::schema_provider::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider};
+use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider};
 use crate::BundlebaseError;
 use arrow::array::Array;
 use arrow_schema::SchemaRef;
