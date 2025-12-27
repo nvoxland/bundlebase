@@ -17,7 +17,6 @@ impl PyOperation {
             AnyOperation::RemoveColumns(_) => "removeColumns".to_string(),
             AnyOperation::RenameColumn(_) => "renameColumn".to_string(),
             AnyOperation::Filter(_) => "filter".to_string(),
-            AnyOperation::Select(_) => "select".to_string(),
             AnyOperation::Join(_) => "join".to_string(),
             AnyOperation::DefineFunction(_) => "defineFunction".to_string(),
             AnyOperation::SetName(_) => "setName".to_string(),
@@ -27,7 +26,7 @@ impl PyOperation {
             AnyOperation::DefinePack(_) => "definePack".to_string(),
             AnyOperation::DropIndex(_) => "dropIndex".to_string(),
             AnyOperation::RebuildIndex(_) => "rebuildIndex".to_string(),
-            AnyOperation::Query(_) => "query".to_string(),
+            AnyOperation::Select(_) => "select".to_string(),
         }
     }
 

@@ -254,12 +254,6 @@ class SyncBundleBuilder(SyncBundle):
         self._async = self._loop.run_sync(coro)
         return self
 
-    def select(self, *columns: str) -> "SyncBundleBuilder":
-        """Select specific columns."""
-        coro = _call_original_method(self._async, "select", *columns)
-        self._async = self._loop.run_sync(coro)
-        return self
-
     def join(
         self, name: str, url: str, on: str, how: str = "inner"
     ) -> "SyncBundleBuilder":
@@ -274,7 +268,7 @@ class SyncBundleBuilder(SyncBundle):
         self._async = self._loop.run_sync(coro)
         return self
 
-    def query(self, sql: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
+    def select(self, sql: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
         """Execute a SQL query on the data.
 
         Args:
@@ -287,7 +281,7 @@ class SyncBundleBuilder(SyncBundle):
         """
         if params is None:
             params = []
-        coro = _call_original_method(self._async, "query", sql, params)
+        coro = _call_original_method(self._async, "select", sql, params)
         self._async = self._loop.run_sync(coro)
         return self
 

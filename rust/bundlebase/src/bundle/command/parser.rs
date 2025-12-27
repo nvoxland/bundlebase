@@ -73,19 +73,12 @@ pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError
 /// that will execute the corresponding BundleBuilder method.
 fn dispatch_statement(stmt: &Statement) -> Result<BundleCommand, BundlebaseError> {
     match stmt {
-        // SELECT statements -> Select or Query
+        // SELECT statements -> Select
         Statement::Query(query) => {
-            if is_simple_select(query.as_ref()) {
-                // Simple SELECT -> extract column list
-                let columns = extract_select_columns(query)?;
-                Ok(BundleCommand::Select { columns })
-            } else {
-                // Complex query (JOINs, GROUP BY, etc.)
-                Ok(BundleCommand::Query {
-                    sql: stmt.to_string(),
-                    params: vec![],
-                })
-            }
+            Ok(BundleCommand::Select {
+                sql: stmt.to_string(),
+                params: vec![],
+            })
         }
 
         // CREATE INDEX -> Index
@@ -111,50 +104,6 @@ fn dispatch_statement(stmt: &Statement) -> Result<BundleCommand, BundlebaseError
     }
 }
 
-/// Check if a query is a simple SELECT that should use SelectOp.
-///
-/// Simple SELECTs are column projections without complex features like:
-/// - GROUP BY
-/// - HAVING
-/// - Window functions
-/// - CTEs
-fn is_simple_select(query: &sqlparser::ast::Query) -> bool {
-    // Check if it's a basic SELECT without complex features
-    match query.body.as_ref() {
-        SetExpr::Select(select) => {
-            // In sqlparser 0.59, group_by is GroupByExpr enum
-            use sqlparser::ast::GroupByExpr;
-            let has_group_by = !matches!(select.group_by, GroupByExpr::Expressions(ref exprs, _) if exprs.is_empty());
-            !has_group_by && select.having.is_none()
-        }
-        _ => false,
-    }
-}
-
-/// Extract column names from a simple SELECT statement.
-///
-/// Converts SELECT projection items into a vector of column names/expressions.
-/// Supports column names, expressions, and aliases.
-fn extract_select_columns(query: &sqlparser::ast::Query) -> Result<Vec<String>, BundlebaseError> {
-    match query.body.as_ref() {
-        SetExpr::Select(select) => {
-            let columns: Result<Vec<String>, BundlebaseError> = select
-                .projection
-                .iter()
-                .map(|item| match item {
-                    SelectItem::UnnamedExpr(expr) => Ok(expr.to_string()),
-                    SelectItem::ExprWithAlias { expr, alias } => {
-                        Ok(format!("{} AS {}", expr, alias))
-                    }
-                    SelectItem::Wildcard(_) => Ok("*".to_string()),
-                    SelectItem::QualifiedWildcard(obj_name, _) => Ok(format!("{}.*", obj_name)),
-                })
-                .collect();
-            columns
-        }
-        _ => Err("Not a SELECT statement".into()),
-    }
-}
 
 /// Extract column name from index name.
 ///

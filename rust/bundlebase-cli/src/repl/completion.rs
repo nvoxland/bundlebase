@@ -18,7 +18,6 @@ impl BundleCompleter {
             "select".to_string(),
             "remove".to_string(),
             "rename".to_string(),
-            "query".to_string(),
             "join".to_string(),
             "schema".to_string(),
             "count".to_string(),

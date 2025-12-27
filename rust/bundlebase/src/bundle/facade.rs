@@ -38,7 +38,7 @@ pub trait BundleFacade {
     /// Builds and returns the final DataFrame
     async fn dataframe(&self) -> Result<Arc<DataFrame>, BundlebaseError>;
 
-    /// Executes a SQL query against the bundle data.
+    /// Executes a SQL query against the bundle data. "SELECT" keyword in SQL is optional.
     ///
     /// Returns a new `BundleBuilder` with the query applied as an operation.
     /// Parameters can be used for parameterized queries.
@@ -52,7 +52,7 @@ pub trait BundleFacade {
     ///
     /// # Errors
     /// Returns error if the query is invalid or references non-existent columns.
-    async fn query(
+    async fn select(
         &self,
         sql: &str,
         params: Vec<ScalarValue>,

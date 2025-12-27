@@ -228,18 +228,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_select() {
-        let cmd = parse("SELECT name, email FROM data").unwrap();
-        match cmd {
-            Command::Sql(BundleCommand::Select { columns }) => {
-                assert_eq!(columns.len(), 2);
-                assert!(columns.contains(&"name".to_string()));
-                assert!(columns.contains(&"email".to_string()));
-            }
-            _ => panic!("Expected Sql(Select) command"),
-        }
-    }
 
     #[test]
     fn test_parse_meta_commands() {

@@ -7,14 +7,14 @@ use datafusion::scalar::ScalarValue;
 mod common;
 
 #[tokio::test]
-async fn test_query_basic_filter() -> Result<(), BundlebaseError> {
+async fn test_select_basic_filter() -> Result<(), BundlebaseError> {
     let mut bundle =
         bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply SQL query to filter results
     let queried = bundle
-        .query(
+        .select(
             "SELECT first_name, last_name FROM data WHERE salary > $1",
             vec![ScalarValue::Float64(Some(50000.0))],
         )
@@ -30,15 +30,43 @@ async fn test_query_basic_filter() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
+
 #[tokio::test]
-async fn test_query_multiple_parameters() -> Result<(), BundlebaseError> {
+async fn test_select_is_not_required() -> Result<(), BundlebaseError> {
+    let mut bundle =
+        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+    bundle.attach(test_datafile("userdata.parquet")).await?;
+
+    // Apply SQL query to filter results
+    let queried = bundle
+        .select(
+            "first_name, last_name FROM data WHERE salary > $1",
+            vec![ScalarValue::Float64(Some(50000.0))],
+        )
+        .await?;
+
+    // Try to query the filtered data
+    let df = queried.dataframe().await?;
+    let record_batches = df.as_ref().clone().collect().await?;
+    assert!(
+        !record_batches.is_empty(),
+        "Should have at least one record batch"
+    );
+
+    Ok(())
+}
+
+
+#[tokio::test]
+async fn test_select_multiple_parameters() -> Result<(), BundlebaseError> {
     let mut bundle =
         bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply SQL query with multiple parameters
     let queried = bundle
-        .query(
+        .select(
             "SELECT id, first_name FROM data WHERE salary > $1 OR gender = $2",
             vec![
                 ScalarValue::Float64(Some(100000.0)),
@@ -59,14 +87,14 @@ async fn test_query_multiple_parameters() -> Result<(), BundlebaseError> {
     Ok(())
 }
 #[tokio::test]
-async fn test_query_no_parameters() -> Result<(), BundlebaseError> {
+async fn test_select_no_parameters() -> Result<(), BundlebaseError> {
     let mut bundle =
         bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply SQL query without parameters
     let queried = bundle
-        .query("SELECT * FROM data LIMIT 10", vec![])
+        .select("SELECT * FROM data LIMIT 10", vec![])
         .await?;
 
     let df = queried.dataframe().await?;
@@ -78,14 +106,14 @@ async fn test_query_no_parameters() -> Result<(), BundlebaseError> {
     Ok(())
 }
 #[tokio::test]
-async fn test_query_with_aggregation() -> Result<(), BundlebaseError> {
+async fn test_select_with_aggregation() -> Result<(), BundlebaseError> {
     let mut bundle =
         bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply SQL query with GROUP BY
     let queried = bundle
-        .query(
+        .select(
             "SELECT gender, COUNT(*) as count FROM data GROUP BY gender",
             vec![],
         )

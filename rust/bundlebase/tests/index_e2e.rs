@@ -16,7 +16,7 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
     bundle.commit("No index").await?;
 
     let rs = bundle
-        .query(
+        .select(
             "select Index, City from data where Email='elizabethbarr@ewing.com'",
             vec![],
         )
@@ -79,7 +79,7 @@ CoalesceBatchesExec: target_batch_size=8192
     );
 
     let rs = bundle
-        .query(
+        .select(
             "select Index, City from data where Email='elizabethbarr@ewing.com'",
             vec![],
         )
@@ -105,7 +105,7 @@ CoalesceBatchesExec: target_batch_size=8192
 }
 
 #[tokio::test]
-async fn test_query_with_indexed_column_exact_match() -> Result<(), BundlebaseError> {
+async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseError> {
     common::enable_logging();
     let data_dir = random_memory_dir();
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
@@ -142,7 +142,7 @@ async fn test_query_with_indexed_column_exact_match() -> Result<(), BundlebaseEr
 }
 
 #[tokio::test]
-async fn test_query_with_indexed_column_in_list() -> Result<(), BundlebaseError> {
+async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError> {
     common::enable_logging();
     let data_dir = random_memory_dir();
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
@@ -176,7 +176,7 @@ async fn test_query_with_indexed_column_in_list() -> Result<(), BundlebaseError>
 }
 
 #[tokio::test]
-async fn test_query_without_index_falls_back() -> Result<(), BundlebaseError> {
+async fn test_select_without_index_falls_back() -> Result<(), BundlebaseError> {
     common::enable_logging();
     let data_dir = random_memory_dir();
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
@@ -207,7 +207,7 @@ async fn test_query_without_index_falls_back() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_query_on_non_indexed_column() -> Result<(), BundlebaseError> {
+async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
     common::enable_logging();
     let data_dir = random_memory_dir();
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;

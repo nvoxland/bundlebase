@@ -88,7 +88,7 @@ c = c.filter("active = true")              # Filter rows
 c = c.select(["id", "name", "email"])      # Select columns
 c = c.remove_column("temp_field")          # Remove columns
 c = c.rename_column("old", "new")          # Rename columns
-c = c.query("SELECT * FROM self WHERE ...") # SQL queries
+c = c.select("SELECT * FROM self WHERE ...") # SQL queries
 ```
 
 ### Data Export

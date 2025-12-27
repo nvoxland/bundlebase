@@ -89,7 +89,7 @@ c = await Bundlebase.open("/my/container/dir")
 - `filter(where_clause, params)` - Filter rows
 - `select(*columns)` - Select columns
 - `join(url, expression, join_type)` - Join with another source
-- `query(sql, params)` - Execute custom SQL
+- `select(sql, params)` - Execute custom SQL
 - `set_name(name)` - Set container name
 - `set_description(description)` - Set container description
 - `define_function(name, output, func)` - Define custom function

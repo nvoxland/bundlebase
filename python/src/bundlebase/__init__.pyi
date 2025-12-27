@@ -490,20 +490,6 @@ class PyBundleBuilder:
         """
         ...
 
-    def select(self, *columns: str) -> "OperationChain":
-        """
-        Queue a select operation.
-
-        Args:
-            *columns: Column names or SQL expressions to select
-
-        Returns:
-            OperationChain for fluent chaining
-
-        Example:
-            c = await c.select("id", "name", "salary")
-        """
-        ...
 
     def join(self, url: str, expression: str, join_type: Optional[str] = None) -> "OperationChain":
         """
@@ -522,9 +508,9 @@ class PyBundleBuilder:
         """
         ...
 
-    def query(self, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
+    def select(self, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
         """
-        Queue a query operation.
+        Queue a select operation.
 
         Args:
             sql: SQL query string (e.g., "SELECT * FROM data LIMIT 10")
@@ -534,7 +520,7 @@ class PyBundleBuilder:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.query("SELECT * FROM data LIMIT 10")
+            c = await c.select("SELECT * FROM data LIMIT 10")
         """
         ...
 
@@ -712,16 +698,12 @@ class OperationChain:
         """Queue a filter operation."""
         ...
 
-    def select(self, *columns: str) -> "OperationChain":
-        """Queue a select operation."""
-        ...
-
     def join(self, url: str, expression: str, join_type: Optional[str] = None) -> "OperationChain":
         """Queue a join operation."""
         ...
 
-    def query(self, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
-        """Queue a query operation."""
+    def select(self, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
+        """Queue a select operation."""
         ...
 
     def set_name(self, name: str) -> "OperationChain":
@@ -772,16 +754,12 @@ class CreateChain:
         """Queue a filter operation."""
         ...
 
-    def select(self, *columns: str) -> "CreateChain":
-        """Queue a select operation."""
-        ...
-
     def join(self, url: str, expression: str, join_type: Optional[str] = None) -> "CreateChain":
         """Queue a join operation."""
         ...
 
-    def query(self, sql: str, params: Optional[List[Any]] = None) -> "CreateChain":
-        """Queue a query operation."""
+    def select(self, sql: str, params: Optional[List[Any]] = None) -> "CreateChain":
+        """Queue a select operation."""
         ...
 
     def set_name(self, name: str) -> "CreateChain":
@@ -832,16 +810,12 @@ class ExtendChain:
         """Queue a filter operation."""
         ...
 
-    def select(self, *columns: str) -> "ExtendChain":
-        """Queue a select operation."""
-        ...
-
     def join(self, url: str, expression: str, join_type: Optional[str] = None) -> "ExtendChain":
         """Queue a join operation."""
         ...
 
-    def query(self, sql: str, params: Optional[List[Any]] = None) -> "ExtendChain":
-        """Queue a query operation."""
+    def select(self, sql: str, params: Optional[List[Any]] = None) -> "ExtendChain":
+        """Queue a select operation."""
         ...
 
     def set_name(self, name: str) -> "ExtendChain":

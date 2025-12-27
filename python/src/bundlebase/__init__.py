@@ -60,7 +60,6 @@ _original_methods = {
     # Column operations
     "remove_column": _PyBundleBuilder.remove_column,
     "rename_column": _PyBundleBuilder.rename_column,
-    "select": _PyBundleBuilder.select,
 
     # Row operations
     "filter": _PyBundleBuilder.filter,
@@ -68,7 +67,7 @@ _original_methods = {
     "attach_to_join": _PyBundleBuilder.attach_to_join,
 
     # Query operations
-    "query": _PyBundleBuilder.query,
+    "select": _PyBundleBuilder.select,
 
     # Metadata operations
     "set_name": _PyBundleBuilder.set_name,
@@ -127,7 +126,7 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 # Wrap mutation methods to return OperationChain
 # (but NOT read-only methods like schema, num_rows, explain)
 mutation_methods = [
-    "attach", "remove_column", "rename_column", "filter", "select", "join", "query",
+    "attach", "remove_column", "rename_column", "filter", "select", "join"
     "set_name", "set_description", "define_function", "define_index",
     "rebuild_index", "reindex"
 ]

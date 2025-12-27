@@ -441,7 +441,7 @@ impl PyBundleBuilder {
     }
 
     #[pyo3(signature = (sql, params=None))]
-    fn query<'py>(
+    fn select<'py>(
         slf: PyRef<'_, Self>,
         sql: &str,
         params: Option<Vec<Py<PyAny>>>,
@@ -458,7 +458,7 @@ impl PyBundleBuilder {
 
             let mut builder = inner.lock().await;
             let modified_bundle = builder
-                .query(sql.as_str(), params_vec)
+                .select(sql.as_str(), params_vec)
                 .await
                 .map_err(|e| to_py_error("Failed to execute query", e))?;
             drop(builder);
@@ -503,41 +503,6 @@ impl PyBundleBuilder {
         })
     }
 
-    #[pyo3(signature = (*columns))]
-    fn select<'py>(
-        slf: PyRef<'_, Self>,
-        columns: &Bound<'_, pyo3::types::PyTuple>,
-        py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let inner = slf.inner.clone();
-
-        // Convert Python tuple of strings to Vec<String>
-        let column_strings: Vec<String> = columns
-            .iter()
-            .map(|item| {
-                item.extract::<String>().map_err(|_| {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        "All select arguments must be strings".to_string(),
-                    )
-                })
-            })
-            .collect::<PyResult<Vec<String>>>()?;
-
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let column_refs: Vec<&str> = column_strings.iter().map(|s| s.as_str()).collect();
-
-            let mut builder = inner.lock().await;
-            builder
-                .select(column_refs)
-                .await
-                .map_err(|e| to_py_error("Failed to apply select", e))?;
-            drop(builder);
-            Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
-            })
-        })
-    }
 
     fn num_rows<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();

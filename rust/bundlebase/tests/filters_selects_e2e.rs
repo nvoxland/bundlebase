@@ -96,77 +96,17 @@ async fn test_filter_with_other_operations() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
-#[tokio::test]
-async fn test_select_basic() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
-    bundle.attach(test_datafile("userdata.parquet")).await?;
 
-    // Select specific columns
-    let selected = bundle.select(vec!["id", "first_name", "salary"]).await?;
-
-    // Verify the selection works
-    let df = selected.dataframe().await?;
-    let result = df.as_ref().clone().collect().await?;
-
-    assert_eq!(result.len(), 1);
-    assert!(result[0].num_rows() > 0);
-    assert_eq!(result[0].num_columns(), 3);
-
-    Ok(())
-}
-#[tokio::test]
-async fn test_select_with_expressions() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
-    bundle.attach(test_datafile("userdata.parquet")).await?;
-
-    // Select with expressions and aliases
-    let selected = bundle
-        .select(vec!["id", "first_name", "salary * 2 AS doubled_salary"])
-        .await?;
-
-    let df = selected.dataframe().await?;
-    let result = df.as_ref().clone().collect().await?;
-
-    assert_eq!(result.len(), 1);
-    assert!(result[0].num_rows() > 0);
-    assert_eq!(result[0].num_columns(), 3);
-    assert_eq!(field_names(&result[0].schema()), vec!["id","first_name","doubled_salary"]);
-
-    Ok(())
-}
-#[tokio::test]
-async fn test_select_with_other_operations() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
-    bundle.attach(test_datafile("userdata.parquet")).await?;
-
-    // Chain select with filter
-    let filtered = bundle
-        .filter("salary > $1", vec![ScalarValue::Float64(Some(50000.0))])
-        .await?;
-    let selected = filtered.select(vec!["id", "first_name"]).await?;
-
-    let df = selected.dataframe().await?;
-    let result = df.as_ref().clone().collect().await?;
-
-    assert_eq!(result.len(), 1);
-    assert!(result[0].num_rows() > 0);
-    assert_eq!(result[0].num_columns(), 2);
-
-    Ok(())
-}
 
 #[tokio::test]
-async fn test_query_limit() -> Result<(), BundlebaseError> {
+async fn test_select_limit() -> Result<(), BundlebaseError> {
     let mut bundle =
         bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Query with LIMIT
     let queried = bundle
-        .query("SELECT * FROM data LIMIT 10", vec![])
+        .select("SELECT * FROM data LIMIT 10", vec![])
         .await?;
 
     // Check that the result is actually limited
@@ -183,14 +123,14 @@ async fn test_query_limit() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_query_with_filter() -> Result<(), BundlebaseError> {
+async fn test_select_with_filter() -> Result<(), BundlebaseError> {
     let mut bundle =
         bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Query with WHERE clause
     let queried = bundle
-        .query(
+        .select(
             "SELECT id, salary FROM data WHERE salary > $1",
             vec![ScalarValue::Float64(Some(50000.0))],
         )

@@ -20,7 +20,7 @@ Mutable container for modifications:
 - Wraps an Bundlebase with a working directory
 - Tracks new operations applied since the base container
 - All modification methods mutate in-place and return `&mut self`
-- Methods: `attach()`, `remove_column()`, `rename_column()`, `filter()`, `select()`, `join()`, `query()`, `define_function()`, `set_name()`, `set_description()`
+- Methods: `attach()`, `remove_column()`, `rename_column()`, `filter()`, `select()`, `join()`, `define_function()`, `set_name()`, `set_description()`
 - Can be committed via `commit(message)` to create a new versioned snapshot
 - Can be re-opened via `open_extending(url)` to load the latest state
 

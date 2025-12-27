@@ -29,10 +29,6 @@ pub enum BundleCommand {
         params: Vec<ScalarValue>,
     },
 
-    /// Select specific columns
-    /// Maps to: `bundle.select(columns)`
-    Select { columns: Vec<String> },
-
     /// Remove a column
     /// Maps to: `bundle.remove_column(&name)`
     RemoveColumn { name: String },
@@ -45,8 +41,8 @@ pub enum BundleCommand {
     },
 
     /// Execute a full SQL query
-    /// Maps to: `bundle.query(&sql, params)`
-    Query {
+    /// Maps to: `bundle.select(&sql, params)`
+    Select {
         sql: String,
         params: Vec<ScalarValue>,
     },
@@ -123,11 +119,6 @@ impl BundleCommand {
                 bundle.filter(&where_clause, params).await?;
                 Ok(())
             }
-            BundleCommand::Select { columns } => {
-                let col_refs: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
-                bundle.select(col_refs).await?;
-                Ok(())
-            }
             BundleCommand::RemoveColumn { name } => {
                 bundle.remove_column(&name).await?;
                 Ok(())
@@ -136,8 +127,8 @@ impl BundleCommand {
                 bundle.rename_column(&old_name, &new_name).await?;
                 Ok(())
             }
-            BundleCommand::Query { sql, params } => {
-                bundle.query(&sql, params).await?;
+            BundleCommand::Select { sql, params } => {
+                bundle.select(&sql, params).await?;
                 Ok(())
             }
             BundleCommand::Join {
@@ -214,7 +205,7 @@ impl BundleCommand {
             BundleCommand::Filter {
                 params: ref mut p, ..
             } => *p = params,
-            BundleCommand::Query {
+            BundleCommand::Select {
                 params: ref mut p, ..
             } => *p = params,
             _ => {} // Other commands don't support parameters
@@ -250,8 +241,8 @@ use crate::bundle::command::BundleCommand;
     }
 
     #[test]
-    fn test_with_params_query() {
-        let cmd = BundleCommand::Query {
+    fn test_with_params_select() {
+        let cmd = BundleCommand::Select {
             sql: "SELECT * FROM data WHERE id = $1".to_string(),
             params: vec![],
         };
@@ -260,7 +251,7 @@ use crate::bundle::command::BundleCommand;
         let cmd_with_params = cmd.with_params(params.clone());
 
         match cmd_with_params {
-            BundleCommand::Query { sql, params: p } => {
+            BundleCommand::Select { sql, params: p } => {
                 assert_eq!(sql, "SELECT * FROM data WHERE id = $1");
                 assert_eq!(p.len(), 1);
             }
