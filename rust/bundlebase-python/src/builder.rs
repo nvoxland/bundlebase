@@ -759,6 +759,60 @@ impl PyBundleBuilder {
                 total_operations: 0,
             })
     }
+
+    /// Attach a view from another BundleBuilder
+    fn attach_view<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        source: PyRef<'_, PyBundleBuilder>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let source_inner = source.inner.clone();
+        let name = name.to_string();
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            let source_builder = source_inner.lock().await;
+
+            builder
+                .attach_view(&name, &*source_builder)
+                .await
+                .map_err(|e| to_py_error(&format!("Failed to attach view '{}'", name), e))?;
+
+            drop(builder);
+            drop(source_builder);
+
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner: inner.clone() })
+                    .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
+    /// Open a view by name, returning a read-only Bundle
+    fn view<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let builder = inner.lock().await;
+            let bundle = builder
+                .view(&name)
+                .await
+                .map_err(|e| to_py_error(&format!("Failed to open view '{}'", name), e))?;
+            drop(builder);
+
+            Python::attach(|py| {
+                Py::new(py, super::bundle::PyBundle::new(bundle))
+                    .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
 }
 
 impl PyBundleBuilder {

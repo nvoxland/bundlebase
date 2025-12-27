@@ -62,8 +62,16 @@ impl ObjectStoreDir {
 
         while let Some(meta_result) = list_iter.next().await {
             let location = meta_result?.location;
+            // Get the relative path from self.path to location by stripping the prefix
+            let location_str = location.as_ref();
+            let prefix_str = self.path.as_ref();
+            let relative_path = if let Some(stripped) = location_str.strip_prefix(prefix_str) {
+                stripped.trim_start_matches('/')
+            } else {
+                location_str
+            };
             files.push(ObjectStoreFile::new(
-                &join_url(&self.url, location.filename().unwrap())?,
+                &join_url(&self.url, relative_path)?,
                 self.store.clone(),
                 &location,
             )?)

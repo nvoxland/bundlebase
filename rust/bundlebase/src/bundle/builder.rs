@@ -4,7 +4,7 @@ use crate::bundle::operation::{IndexBlocksOp, BundleChange, Operation};
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, SelectOp};
 use crate::bundle::operation::{
-    AttachBlockOp, DefineFunctionOp, DefinePackOp, FilterOp, JoinOp, RebuildIndexOp,
+    AttachBlockOp, AttachViewOp, DefineFunctionOp, DefinePackOp, FilterOp, JoinOp, RebuildIndexOp,
     RemoveColumnsOp, RenameColumnOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
@@ -426,6 +426,93 @@ impl BundleBuilder {
         }).await?;
 
         Ok(self)
+    }
+
+    /// Attach a view from another BundleBuilder
+    ///
+    /// Creates a named view that captures all uncommitted operations from the source BundleBuilder.
+    /// The view is stored in a subdirectory under _manifest/view_{id}/ and automatically inherits
+    /// changes from the parent bundle through the FROM mechanism.
+    ///
+    /// # Arguments
+    /// * `name` - Name of the view
+    /// * `source` - BundleBuilder containing the operations to capture (typically from a select())
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
+    /// # async fn example() -> Result<(), BundlebaseError> {
+    /// let mut c = BundleBuilder::create("memory:///container").await?;
+    /// c.attach("data.csv").await?;
+    /// c.commit("Initial").await?;
+    ///
+    /// let adults = c.select("select * where age > 21", vec![]).await?;
+    /// c.attach_view("adults", &adults).await?;
+    /// c.commit("Add adults view").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn attach_view(
+        &mut self,
+        name: &str,
+        source: &BundleBuilder,
+    ) -> Result<&mut Self, BundlebaseError> {
+        let name = name.to_string();
+        // Clone source to avoid lifetime issues in async move
+        let source_clone = source.clone();
+
+        self.do_change(&format!("Attach view '{}'", name), |builder| {
+            Box::pin(async move {
+                let op = AttachViewOp::setup(&name, &source_clone, builder).await?;
+                builder.apply_operation(op.into()).await?;
+                info!("Attached view '{}'", name);
+                Ok(())
+            })
+        })
+        .await?;
+
+        Ok(self)
+    }
+
+    /// Open a view by name, returning a read-only Bundle
+    ///
+    /// Looks up the view by name and opens it as a Bundle. The view automatically
+    /// inherits all changes from its parent bundle through the FROM mechanism.
+    ///
+    /// # Arguments
+    /// * `name` - Name of the view to open
+    ///
+    /// # Returns
+    /// A read-only Bundle representing the view
+    ///
+    /// # Errors
+    /// Returns an error if the view doesn't exist
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use bundlebase::{Bundle, BundleBuilder, BundlebaseError};
+    /// # async fn example(c: &BundleBuilder) -> Result<(), BundlebaseError> {
+    /// let view = c.view("adults").await?;
+    /// let operations = view.operations();
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn view(&self, name: &str) -> Result<Bundle, BundlebaseError> {
+        // Look up view ID
+        let view_id = self
+            .bundle
+            .get_view_id(name)
+            .ok_or_else(|| format!("View '{}' not found", name))?;
+
+        // Construct view path: _manifest/view_{id}/
+        let view_path = self
+            .data_dir()
+            .subdir(&format!("_manifest/view_{}", view_id))?
+            .url()
+            .to_string();
+
+        // Open view as Bundle (automatically loads parent via FROM)
+        Bundle::open(&view_path).await
     }
 
     /// Attach a data block to the joined pack
