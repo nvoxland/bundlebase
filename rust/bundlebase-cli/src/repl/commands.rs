@@ -1,67 +1,28 @@
 use crate::state::State;
 use bundlebase::{
-    bundle::{BundleFacade, JoinTypeOption},
-    BundlebaseError, Operation,
+    bundle::{parse_command, BundleFacade},
+    BundlebaseError,
 };
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
+use bundlebase::bundle::BundleCommand;
 
 #[derive(Debug, Clone)]
 pub enum Command {
-    // Data operations
-    Attach {
-        url: String,
-    },
+    // SQL operations (delegated to BundleCommand)
+    Sql(BundleCommand),
+
+    // REPL-only commands (not SQL)
     Show {
         limit: Option<usize>,
     },
-
-    // Transformations
-    Filter {
-        where_clause: String,
-    },
-    Select {
-        columns: Vec<String>,
-    },
-    RemoveColumn {
-        name: String,
-    },
-    RenameColumn {
-        old: String,
-        new: String,
-    },
-    Query {
-        sql: String,
-    },
-    Join {
-        name: String,
-        url: String,
-        expression: String,
-        join_type: Option<String>,
-    },
-
-    // Schema & info
     Schema,
     Count,
     Explain,
     History,
     Status,
 
-    // Indexing
-    Index {
-        column: String,
-    },
-    Reindex,
-
-    // Persistence
-    Commit {
-        message: String,
-    },
-    Reset,
-    undo,
-
-    // Meta
+    // Meta commands
     Help,
     Exit,
     Clear,
@@ -74,241 +35,87 @@ pub enum ExecuteResult {
     None,
 }
 
-/// Parse input string into Command
+/// Parse input string into Command using SQL syntax
 pub fn parse(input: &str) -> Result<Command, String> {
     let input = input.trim();
     if input.is_empty() {
         return Err("Empty command".to_string());
     }
 
-    // Split by whitespace, but respect quoted strings
-    let parts = parse_tokens(input)?;
-    if parts.is_empty() {
-        return Err("Empty command".to_string());
-    }
+    let upper = input.to_uppercase();
 
-    let command_name = parts[0].as_str();
-    let params = parse_parameters(&parts[1..])?;
-
-    match command_name {
-        "attach" => {
-            let url = params
-                .get("url")
-                .ok_or("Missing 'url' parameter")?
-                .to_string();
-            Ok(Command::Attach { url })
-        }
-        "show" => {
-            let limit = params.get("limit").and_then(|s| s.parse().ok());
-            Ok(Command::Show { limit })
-        }
-        "filter" => {
-            let where_clause = params
-                .get("where")
-                .ok_or("Missing 'where' parameter")?
-                .to_string();
-            Ok(Command::Filter { where_clause })
-        }
-        "select" => {
-            let columns_str = params.get("columns").ok_or("Missing 'columns' parameter")?;
-            let columns = columns_str
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .collect();
-            Ok(Command::Select { columns })
-        }
-        "remove" => {
-            let name = params
-                .get("name")
-                .ok_or("Missing 'name' parameter")?
-                .to_string();
-            Ok(Command::RemoveColumn { name })
-        }
-        "rename" => {
-            let old = params
-                .get("old")
-                .ok_or("Missing 'old' parameter")?
-                .to_string();
-            let new = params
-                .get("new")
-                .ok_or("Missing 'new' parameter")?
-                .to_string();
-            Ok(Command::RenameColumn { old, new })
-        }
-        "query" => {
-            let sql = params
-                .get("sql")
-                .ok_or("Missing 'sql' parameter")?
-                .to_string();
-            Ok(Command::Query { sql })
-        }
-        "join" => {
-            let name = params
-                .get("name")
-                .ok_or("Missing 'name' parameter")?
-                .to_string();
-            let url = params
-                .get("url")
-                .ok_or("Missing 'url' parameter")?
-                .to_string();
-            let expression = params
-                .get("expression")
-                .ok_or("Missing 'expression' parameter")?
-                .to_string();
-            let join_type = params.get("join_type").map(|s| s.to_string());
-            Ok(Command::Join {
-                name,
-                url,
-                expression,
-                join_type,
-            })
-        }
-        "schema" => Ok(Command::Schema),
-        "count" => Ok(Command::Count),
-        "explain" => Ok(Command::Explain),
-        "history" => Ok(Command::History),
-        "status" => Ok(Command::Status),
-        "index" => {
-            let column = params
-                .get("column")
-                .ok_or("Missing 'column' parameter")?
-                .to_string();
-            Ok(Command::Index { column })
-        }
-        "reindex" => Ok(Command::Reindex),
-        "commit" => {
-            let message = params
-                .get("message")
-                .ok_or("Missing 'message' parameter")?
-                .to_string();
-            Ok(Command::Commit { message })
-        }
-        "reset" => Ok(Command::Reset),
-        "undo" => Ok(Command::undo),
-        "help" => Ok(Command::Help),
-        "exit" | "quit" => Ok(Command::Exit),
-        "clear" => Ok(Command::Clear),
-        _ => Err(format!("Unknown command: {}", command_name)),
-    }
-}
-
-/// Parse key=value parameters
-fn parse_parameters(tokens: &[String]) -> Result<HashMap<String, String>, String> {
-    let mut params = HashMap::new();
-
-    for token in tokens {
-        if let Some((key, value)) = token.split_once('=') {
-            params.insert(key.trim().to_string(), value.trim().to_string());
+    // Handle REPL-specific commands (not SQL)
+    if upper == "HELP" {
+        return Ok(Command::Help);
+    } else if upper == "EXIT" || upper == "QUIT" {
+        return Ok(Command::Exit);
+    } else if upper == "CLEAR" {
+        return Ok(Command::Clear);
+    } else if upper == "SCHEMA" {
+        return Ok(Command::Schema);
+    } else if upper == "COUNT" {
+        return Ok(Command::Count);
+    } else if upper == "EXPLAIN" {
+        return Ok(Command::Explain);
+    } else if upper == "HISTORY" {
+        return Ok(Command::History);
+    } else if upper == "STATUS" {
+        return Ok(Command::Status);
+    } else if upper.starts_with("SHOW") {
+        // Parse: SHOW [LIMIT <n>]
+        let limit = if let Some(limit_str) = upper
+            .strip_prefix("SHOW")
+            .and_then(|s| s.trim().strip_prefix("LIMIT"))
+        {
+            limit_str.trim().parse().ok()
         } else {
-            return Err(format!(
-                "Invalid parameter format: '{}'. Expected key=value",
-                token
-            ));
-        }
+            None
+        };
+        return Ok(Command::Show { limit });
     }
 
-    Ok(params)
+    // Handle bundle lifecycle commands (BundleCommand but with special REPL parsing)
+    if upper == "RESET" {
+        return Ok(Command::Sql(BundleCommand::Reset));
+    } else if upper == "UNDO" {
+        return Ok(Command::Sql(BundleCommand::Undo));
+    } else if upper.starts_with("COMMIT") {
+        // Parse: COMMIT '<message>'
+        let message = input
+            .strip_prefix("COMMIT")
+            .ok_or("Invalid COMMIT syntax")?
+            .trim()
+            .trim_matches(|c| c == '\'' || c == '"')
+            .to_string();
+        if message.is_empty() {
+            return Err("COMMIT requires a message".to_string());
+        }
+        return Ok(Command::Sql(BundleCommand::Commit { message }));
+    }
+
+    // Everything else is SQL - parse and wrap
+    let sql_cmd = parse_command(input).map_err(|e| format!("Invalid SQL: {}", e))?;
+
+    Ok(Command::Sql(sql_cmd))
 }
 
-/// Parse tokens from input, respecting quoted strings
-fn parse_tokens(input: &str) -> Result<Vec<String>, String> {
-    let mut tokens = Vec::new();
-    let mut current_token = String::new();
-    let mut in_quotes = false;
-    let mut quote_char = ' ';
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' | '\'' if !in_quotes => {
-                in_quotes = true;
-                quote_char = ch;
-            }
-            '"' | '\'' if in_quotes && ch == quote_char => {
-                in_quotes = false;
-                quote_char = ' ';
-            }
-            ' ' | '\t' if !in_quotes => {
-                if !current_token.is_empty() {
-                    tokens.push(current_token.clone());
-                    current_token.clear();
-                }
-            }
-            _ => {
-                current_token.push(ch);
-            }
-        }
-    }
-
-    if in_quotes {
-        return Err(format!("Unclosed quote ({})", quote_char));
-    }
-
-    if !current_token.is_empty() {
-        tokens.push(current_token);
-    }
-
-    Ok(tokens)
-}
 
 /// Execute a command
 pub async fn execute(cmd: Command, state: &Arc<State>) -> Result<ExecuteResult, BundlebaseError> {
     use crate::repl::display;
 
     match cmd {
-        Command::Attach { url } => {
-            state.bundle.write().attach(&url).await?;
+        // SQL operations - delegate to BundleCommand
+        Command::Sql(sql_cmd) => {
+            sql_cmd.execute(&mut state.bundle.write()).await?;
             Ok(ExecuteResult::None)
         }
+
+        // REPL-only commands
         Command::Show { limit } => {
             let df = state.bundle.read().dataframe().await?;
             let table = display::display_dataframe(&df, limit).await?;
             Ok(ExecuteResult::Table(table))
-        }
-        Command::Filter { where_clause } => {
-            state
-                .bundle
-                .write()
-                .filter(&where_clause, vec![])
-                .await?;
-            Ok(ExecuteResult::None)
-        }
-        Command::Select { columns } => {
-            let col_refs: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
-            state.bundle.write().select(col_refs).await?;
-            Ok(ExecuteResult::None)
-        }
-        Command::RemoveColumn { name } => {
-            state.bundle.write().remove_column(&name).await?;
-            Ok(ExecuteResult::None)
-        }
-        Command::RenameColumn { old, new } => {
-            state.bundle.write().rename_column(&old, &new).await?;
-            Ok(ExecuteResult::None)
-        }
-        Command::Query { sql } => {
-            state.bundle.write().query(&sql, vec![]).await?;
-            Ok(ExecuteResult::None)
-        }
-        Command::Join {
-            name,
-            url,
-            expression,
-            join_type,
-        } => {
-            let join_type_opt = match join_type.as_deref() {
-                Some("Left") => JoinTypeOption::Left,
-                Some("Right") => JoinTypeOption::Right,
-                Some("Full") => JoinTypeOption::Full,
-                Some("Inner") | None => JoinTypeOption::Inner,
-                Some(other) => return Err(format!("Invalid join type: {}", other).into()),
-            };
-            state
-                .bundle
-                .write()
-                .join(&name, &url, &expression, join_type_opt)
-                .await?;
-            Ok(ExecuteResult::None)
         }
         Command::Schema => {
             let schema = state.bundle.read().schema().await?;
@@ -333,63 +140,52 @@ pub async fn execute(cmd: Command, state: &Arc<State>) -> Result<ExecuteResult, 
             let status = guard.status();
             Ok(ExecuteResult::Message(status.to_string()))
         }
-        Command::Index { column } => {
-            state.bundle.write().index(&column).await?;
-            Ok(ExecuteResult::None)
-        }
-        Command::Reindex => {
-            state.bundle.write().reindex().await?;
-            Ok(ExecuteResult::None)
-        }
-        Command::Commit { message } => {
-            state.bundle.write().commit(&message).await?;
-            Ok(ExecuteResult::None)
-        }
-        Command::Reset => {
-            state.bundle.write().reset().await?;
-            Ok(ExecuteResult::None)
-        }
-        Command::undo => {
-            state.bundle.write().undo().await?;
-            Ok(ExecuteResult::None)
-        }
         Command::Help => {
             let help_text = r#"
-Bundlebase REPL Commands:
+Bundlebase REPL - SQL Interface
 
 Data Operations:
-  attach url=<path>           Attach data source
-  show [limit=<n>]            Display rows (default: 10)
+  ATTACH '<path>'                      Attach data source
+  SHOW [LIMIT <n>]                     Display rows (default: 10)
 
-Transformations:
-  filter where=<clause>       Filter rows
-  select columns=<col1>,<col2>,...  Select columns
-  remove name=<column>        Remove column
-  rename old=<old> new=<new>  Rename column
-  query sql=<sql>             Execute SQL query
-  join name=<name> url=<url> expression=<expr> [join_type=<type>]
+Query & Transform:
+  SELECT col1, col2, ... FROM data     Select columns (supports full SQL)
+  FILTER WHERE <condition>             Filter rows by condition
+  ALTER TABLE data DROP COLUMN <col>   Remove column
+  ALTER TABLE data RENAME COLUMN <old> TO <new>  Rename column
 
-Schema & Info:
-  schema                      Show schema
-  count                       Show row count
-  explain                     Show query plan
-  history                     Show commit history
-  status                      Show uncommitted changes
+Join Data:
+  [LEFT|RIGHT|FULL|INNER] JOIN AS <name> ON <expression>
+    Example: LEFT JOIN AS users ON data.user_id = users.id
 
 Indexing:
-  index column=<column>       Create index
-  drop-index column=<column>  Drop index
-  reindex                     Rebuild all indexes
+  CREATE INDEX ON data(<column>)       Create index on column
+  REINDEX                              Rebuild all indexes
 
 Persistence:
-  commit message=<message>    Commit changes
-  reset                       Discard all uncommitted changes
-  undo, undo             Undo the last operation
+  COMMIT '<message>'                   Commit changes with message
+  RESET                                Discard all uncommitted changes
+  UNDO                                 Undo the last operation
 
-Meta:
-  help                        Show this help
-  exit, quit                  Exit REPL
-  clear                       Clear screen
+Schema & Info:
+  SCHEMA                               Show table schema
+  COUNT                                Show row count
+  EXPLAIN                              Show query plan
+  HISTORY                              Show commit history
+  STATUS                               Show uncommitted changes
+
+Meta Commands:
+  HELP                                 Show this help
+  EXIT, QUIT                           Exit REPL
+  CLEAR                                Clear screen
+
+Examples:
+  ATTACH 'users.parquet'
+  FILTER WHERE age > 21 AND country = 'USA'
+  SELECT name, email, salary * 1.1 AS new_salary FROM data
+  LEFT JOIN AS departments ON data.dept_id = departments.id
+  CREATE INDEX ON data(email)
+  COMMIT 'Added filtering and joined departments'
 "#;
             Ok(ExecuteResult::Message(help_text.to_string()))
         }
@@ -401,27 +197,11 @@ Meta:
     }
 }
 
-/// Get valid parameter names for a command (for tab completion)
-pub fn get_parameter_names(command_name: &str) -> Vec<String> {
-    match command_name {
-        "attach" => vec!["url".to_string()],
-        "show" => vec!["limit".to_string()],
-        "filter" => vec!["where".to_string()],
-        "select" => vec!["columns".to_string()],
-        "remove" => vec!["name".to_string()],
-        "rename" => vec!["old".to_string(), "new".to_string()],
-        "query" => vec!["sql".to_string()],
-        "join" => vec![
-            "name".to_string(),
-            "url".to_string(),
-            "expression".to_string(),
-            "join_type".to_string(),
-        ],
-        "index" => vec!["column".to_string()],
-        "drop-index" => vec!["column".to_string()],
-        "commit" => vec!["message".to_string()],
-        _ => vec![],
-    }
+/// Get SQL command suggestions (for tab completion)
+pub fn get_parameter_names(_command_name: &str) -> Vec<String> {
+    // With SQL syntax, we don't need parameter completion
+    // This function is kept for compatibility but returns empty
+    vec![]
 }
 
 #[cfg(test)]
@@ -430,41 +210,62 @@ mod tests {
 
     #[test]
     fn test_parse_attach() {
-        let cmd = parse("attach url=data.parquet").unwrap();
+        let cmd = parse("ATTACH 'data.parquet'").unwrap();
         match cmd {
-            Command::Attach { url } => assert_eq!(url, "data.parquet"),
-            _ => panic!("Expected Attach command"),
+            Command::Sql(BundleCommand::Attach { path }) => assert_eq!(path, "data.parquet"),
+            _ => panic!("Expected Sql(Attach) command"),
         }
     }
 
     #[test]
-    fn test_parse_filter_with_quotes() {
-        let cmd = parse("filter where=\"Country = 'USA'\"").unwrap();
+    fn test_parse_filter() {
+        let cmd = parse("FILTER WHERE country = 'USA'").unwrap();
         match cmd {
-            Command::Filter { where_clause } => assert_eq!(where_clause, "Country = 'USA'"),
-            _ => panic!("Expected Filter command"),
-        }
-    }
-
-    #[test]
-    fn test_parse_join() {
-        let cmd = parse(
-            "join name=regions url=data.csv expression='$base.id = regions.id' join_type=Inner",
-        )
-        .unwrap();
-        match cmd {
-            Command::Join {
-                name,
-                url,
-                expression,
-                join_type,
-            } => {
-                assert_eq!(name, "regions");
-                assert_eq!(url, "data.csv");
-                assert_eq!(expression, "$base.id = regions.id");
-                assert_eq!(join_type, Some("Inner".to_string()));
+            Command::Sql(BundleCommand::Filter { where_clause, .. }) => {
+                assert_eq!(where_clause, "country = 'USA'")
             }
-            _ => panic!("Expected Join command"),
+            _ => panic!("Expected Sql(Filter) command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_select() {
+        let cmd = parse("SELECT name, email FROM data").unwrap();
+        match cmd {
+            Command::Sql(BundleCommand::Select { columns }) => {
+                assert_eq!(columns.len(), 2);
+                assert!(columns.contains(&"name".to_string()));
+                assert!(columns.contains(&"email".to_string()));
+            }
+            _ => panic!("Expected Sql(Select) command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_meta_commands() {
+        assert!(matches!(parse("HELP").unwrap(), Command::Help));
+        assert!(matches!(parse("EXIT").unwrap(), Command::Exit));
+        assert!(matches!(parse("SCHEMA").unwrap(), Command::Schema));
+        assert!(matches!(parse("COUNT").unwrap(), Command::Count));
+    }
+
+    #[test]
+    fn test_parse_commit() {
+        let cmd = parse("COMMIT 'my commit message'").unwrap();
+        match cmd {
+            Command::Sql(BundleCommand::Commit { message }) => {
+                assert_eq!(message, "my commit message")
+            }
+            _ => panic!("Expected Sql(Commit) command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_show() {
+        let cmd = parse("SHOW LIMIT 20").unwrap();
+        match cmd {
+            Command::Show { limit } => assert_eq!(limit, Some(20)),
+            _ => panic!("Expected Show command"),
         }
     }
 }

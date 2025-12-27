@@ -1,0 +1,135 @@
+// ============================================================================
+// Bundlebase Custom SQL Grammar
+// ============================================================================
+// This grammar covers bundlebase-specific SQL extensions that aren't
+// recognized by sqlparser-rs. Standard SQL continues to use sqlparser-rs.
+//
+// Operations covered:
+// - FILTER WHERE <condition>
+// - ATTACH '<path>' [AS <name>] [WITH (...)]
+// - [join_type] JOIN AS <name> ON <expression>
+// - REINDEX [ON data(<column>)]
+// ============================================================================
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT = _{ "--" ~ (!"\n" ~ ANY)* ~ "\n" }
+
+// ============================================================================
+// Entry Point
+// ============================================================================
+
+statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt) ~ EOI }
+
+// ============================================================================
+// FILTER Statement
+// ============================================================================
+// Syntax: FILTER WHERE <condition>
+// Example: FILTER WHERE country = 'USA' AND age > 21
+
+filter_stmt = {
+    ^"filter" ~ ^"where" ~ where_condition
+}
+
+where_condition = @{
+    // Capture everything from WHERE to end as raw text
+    // This allows DataFusion to parse the expression later
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// ATTACH Statement
+// ============================================================================
+// Syntax: ATTACH '<path>' [AS <name>] [WITH (<options>)]
+// Examples:
+//   ATTACH 'data.parquet'
+//   ATTACH 'data.csv' AS mydata
+//   ATTACH 'data.csv' AS mydata WITH (delimiter = ',', header = true)
+
+attach_stmt = {
+    ^"attach" ~ quoted_string ~ (^"as" ~ identifier)? ~ (^"with" ~ with_options)?
+}
+
+with_options = {
+    "(" ~ option_pair ~ ("," ~ option_pair)* ~ ")"
+}
+
+option_pair = {
+    identifier ~ "=" ~ option_value
+}
+
+option_value = {
+    quoted_string | number | boolean | identifier
+}
+
+boolean = { ^"true" | ^"false" }
+
+// ============================================================================
+// JOIN Statement
+// ============================================================================
+// Syntax: [join_type] JOIN '<source>' AS <name> ON <expression>
+// Examples:
+//   JOIN 'other.csv' AS other ON id = other.id
+//   LEFT JOIN 'users.parquet' AS users ON user_id = users.id
+//   FULL OUTER JOIN 'data.json' AS data ON key = data.key
+
+join_stmt = {
+    join_type? ~ ^"join" ~ quoted_string ~ ^"as" ~ identifier ~ ^"on" ~ join_condition
+}
+
+join_type = {
+    (^"full" ~ ^"outer") | ^"full" | ^"left" | ^"right" | ^"inner" | ^"outer"
+}
+
+join_condition = @{
+    // Capture everything from ON to end as raw text
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// REINDEX Statement
+// ============================================================================
+// Syntax: REINDEX [ON data(<column>)]
+// Examples:
+//   REINDEX
+//   REINDEX ON data(id)
+
+reindex_stmt = {
+    ^"reindex" ~ (^"on" ~ ^"data" ~ "(" ~ identifier ~ ")")?
+}
+
+// ============================================================================
+// Lexical Elements
+// ============================================================================
+
+identifier = @{
+    // SQL identifier: starts with letter/underscore, contains alphanumeric/underscore
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+}
+
+quoted_string = @{
+    single_quoted | double_quoted
+}
+
+single_quoted = @{
+    "'" ~ single_quoted_content ~ "'"
+}
+
+single_quoted_content = @{
+    (escape_sequence | (!"'" ~ !"\\" ~ ANY))*
+}
+
+double_quoted = @{
+    "\"" ~ double_quoted_content ~ "\""
+}
+
+double_quoted_content = @{
+    (escape_sequence | !"\"" ~ !"\\" ~ ANY)*
+}
+
+escape_sequence = @{
+    "\\\\" | "\\'" | "\\\"" | "\\n" | "\\r" | "\\t"
+}
+
+number = @{
+    "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
+}
