@@ -233,9 +233,9 @@ async def test_select():
 
 
 @pytest.mark.asyncio
-async def test_query():
+async def test_select():
     c = await (bundlebase.create().attach(datafile("userdata.parquet")))
-    q = c.query("SELECT * FROM data LIMIT 10")
+    q = c.select("SELECT * FROM data LIMIT 10")
 
     results = await q.to_dict()
     assert len(results["id"]) == 10

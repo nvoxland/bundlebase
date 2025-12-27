@@ -189,7 +189,7 @@ async fn execute_query_impl(state: &Arc<State>, sql: String) -> Result<Vec<Fligh
 
     // Execute the query
     let bundle = builder
-        .query(&sql, vec![])
+        .select(&sql, vec![])
         .await
         .map_err(|e| Status::internal(format!("Failed to execute query: {}", e)))?;
 

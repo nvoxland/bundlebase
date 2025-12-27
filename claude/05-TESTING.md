@@ -8,7 +8,7 @@
 
 **Rust Integration Tests** (`tests/`):
 - **Test files**: `basic.rs`, `operations.rs`, `functions.rs`, `filters_selects.rs`, `joins.rs`, `queries.rs`, `schema.rs`, `extending.rs`
-- **Passing tests**: Cover all operations (attach, remove, rename, filter, select, query, join, commit/open, functions, metadata, row indexing)
+- **Passing tests**: Cover all operations (attach, remove, rename, filter, select, join, commit/open, functions, metadata, row indexing)
 - **Test organization**: Split by feature area for focused testing
 - **Common utilities**: `tests/common/mod.rs` provides shared test helpers
 

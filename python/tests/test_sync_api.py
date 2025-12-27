@@ -394,11 +394,11 @@ class TestSyncJoin:
 class TestSyncQuery:
     """Test synchronous query operations."""
 
-    def test_sync_query(self):
+    def test_sync_select(self):
         """Test SQL query execution synchronously."""
         c = dc.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.query("SELECT * FROM data LIMIT 10")
+        c.select("SELECT * FROM data LIMIT 10")
 
         results = c.to_dict()
         assert len(results["id"]) == 10

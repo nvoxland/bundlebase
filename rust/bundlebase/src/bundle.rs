@@ -521,14 +521,14 @@ impl BundleFacade for Bundle {
         Ok(self.dataframe.dataframe())
     }
 
-    async fn query(
+    async fn select(
         &self,
         sql: &str,
         params: Vec<ScalarValue>,
     ) -> Result<BundleBuilder, BundlebaseError> {
         let bundle =
             BundleBuilder::extend(Arc::new(self.clone()), &self.data_dir.url().as_str())?;
-        bundle.query(sql, params).await
+        bundle.select(sql, params).await
     }
 }
 

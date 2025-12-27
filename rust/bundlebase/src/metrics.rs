@@ -62,7 +62,7 @@ pub enum OperationCategory {
     /// Index operations (lookups, builds)
     Index,
     /// Query operations (filter, select, join, sql)
-    Query,
+    Select,
     /// I/O operations (file reads/writes)
     IO,
     /// Cache operations
@@ -77,7 +77,7 @@ impl OperationCategory {
     pub fn as_str(&self) -> &'static str {
         match self {
             OperationCategory::Index => "index",
-            OperationCategory::Query => "query",
+            OperationCategory::Select => "select",
             OperationCategory::IO => "io",
             OperationCategory::Cache => "cache",
             OperationCategory::Commit => "commit",
@@ -95,7 +95,7 @@ impl OperationCategory {
         } else if name.starts_with("Indexing") {
             OperationCategory::Index
         } else if name.starts_with("Querying") || name.starts_with("Filtering") {
-            OperationCategory::Query
+            OperationCategory::Select
         } else if name.starts_with("Committing") {
             OperationCategory::Commit
         } else {
@@ -355,13 +355,13 @@ mod tests {
     fn test_record_metrics() {
         // These shouldn't panic
         record_operation(
-            OperationCategory::Query,
+            OperationCategory::Select,
             OperationOutcome::Success,
             "test_op",
             &[],
         );
         record_duration(
-            OperationCategory::Query,
+            OperationCategory::Select,
             10.5,
             "test_op",
             OperationOutcome::Success,
@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn test_timer() {
-        let timer = OperationTimer::start(OperationCategory::Query, "test_op")
+        let timer = OperationTimer::start(OperationCategory::Select, "test_op")
             .with_label("test_label", "test_value");
         std::thread::sleep(std::time::Duration::from_millis(1));
         timer.finish(OperationOutcome::Success);

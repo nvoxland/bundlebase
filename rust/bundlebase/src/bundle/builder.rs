@@ -2,10 +2,10 @@ use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::{IndexBlocksOp, BundleChange, Operation};
 use crate::bundle::operation::SetNameOp;
-use crate::bundle::operation::{AnyOperation, QueryOp};
+use crate::bundle::operation::{AnyOperation, SelectOp};
 use crate::bundle::operation::{
     AttachBlockOp, DefineFunctionOp, DefinePackOp, FilterOp, JoinOp, RebuildIndexOp,
-    RemoveColumnsOp, RenameColumnOp, SelectOp, SetDescriptionOp,
+    RemoveColumnsOp, RenameColumnOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
 use crate::bundle::{commit, INIT_FILENAME};
@@ -523,25 +523,6 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Select columns (mutates self)
-    /// Columns can include expressions, functions, and AS aliases
-    pub async fn select(&mut self, columns: Vec<&str>) -> Result<&mut Self, BundlebaseError> {
-        let columns_owned: Vec<String> = columns.iter().map(|s| s.to_string()).collect();
-
-        self.do_change(&format!("Select columns: {:?}", &columns_owned), |builder| {
-            Box::pin(async move {
-                let columns_refs: Vec<&str> = columns_owned.iter().map(|s| s.as_str()).collect();
-                builder.apply_operation(SelectOp::setup(&columns_refs).await?.into())
-                    .await?;
-                let col_list = columns_owned.join(", ");
-                info!("Selected columns: {}", col_list);
-                Ok(())
-            })
-        }).await?;
-
-        Ok(self)
-    }
-
     /// Join with another data source (mutates self)
     pub async fn join(
         &mut self,
@@ -909,14 +890,19 @@ impl BundleFacade for BundleBuilder {
         self.bundle.dataframe().await
     }
 
-    async fn query(&self, sql: &str, params: Vec<ScalarValue>) -> Result<Self, BundlebaseError> {
+    async fn select(&self, sql: &str, params: Vec<ScalarValue>) -> Result<Self, BundlebaseError> {
         let mut bundle = self.clone();
         let sql = sql.to_string();
+        let sql = if (!sql.to_lowercase().starts_with("select ")) {
+          format!("SELECT {}", sql)
+        } else {
+            sql
+        };
 
         bundle.do_change(&format!("Query: {}", sql), |builder| {
             Box::pin(async move {
                 builder
-                    .apply_operation(QueryOp::setup(sql, params).await?.into())
+                    .apply_operation(SelectOp::setup(sql, params).await?.into())
                     .await?;
                 info!("Created query");
                 Ok(())

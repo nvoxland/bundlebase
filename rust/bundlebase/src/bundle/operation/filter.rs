@@ -90,10 +90,10 @@ impl Operation for FilterOp {
         df: DataFrame,
         ctx: Arc<SessionContext>,
     ) -> Result<DataFrame, BundlebaseError> {
-        let mut span = start_span(OperationCategory::Query, "filter");
+        let mut span = start_span(OperationCategory::Select, "filter");
         span.set_attribute("expression", &self.where_clause);
 
-        let timer = OperationTimer::start(OperationCategory::Query, "filter")
+        let timer = OperationTimer::start(OperationCategory::Select, "filter")
             .with_label("expression", &self.where_clause);
 
         // Build the filter expression with parameter substitution
