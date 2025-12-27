@@ -5,6 +5,7 @@ mod facade;
 mod init;
 mod operation;
 mod sql;
+mod command;
 
 use crate::io::EMPTY_SCHEME;
 pub use builder::{BundleBuilder, BundleStatus};
@@ -14,6 +15,8 @@ pub use facade::BundleFacade;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::JoinTypeOption;
 pub use operation::{AnyOperation, BundleChange, Operation};
+pub use command::parser::parse_command;
+pub use command::BundleCommand;
 use std::collections::{HashMap, HashSet};
 
 use crate::bundle::commit::manifest_version;

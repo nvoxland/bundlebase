@@ -1,0 +1,204 @@
+use crate::bundle::operation::*;
+use crate::bundle::command::parser_pest::parse_custom_pest;
+use crate::bundle::command::BundleCommand;
+use crate::BundlebaseError;
+use sqlparser::ast::{ObjectType, SelectItem, SetExpr, Statement};
+use sqlparser::dialect::GenericDialect;
+use sqlparser::parser::Parser;
+
+/// Parse a command statement into a BundleCommand.
+///
+/// This is the main entry point for parsing command statements into BundleCommand that can be
+/// executed on a BundleBuilder.
+///
+/// It handles:
+/// 1. Parsing custom bundlebase syntax (FILTER, ATTACH, JOIN, REINDEX) using Pest
+/// 2. Parsing standard SQL (SELECT, CREATE INDEX, etc.) using sqlparser-rs
+/// 3. Converting parsed statements into BundleCommand variants
+///
+/// # Arguments
+///
+/// * `command_str` - The command statement string to parse
+///
+/// # Returns
+///
+/// * `Ok(BundleCommand)` - Successfully parsed command
+/// * `Err(BundlebaseError)` - Parsing failed or statement type not supported
+///
+/// # Examples
+///
+/// ```ignore
+/// use bundlebase::bundle::{parse_command, BundleCommand};
+///
+/// // Parse a FILTER statement
+/// let cmd = parse_command("FILTER WHERE country = 'USA'").unwrap();
+///
+/// // Parse a SELECT statement
+/// let cmd = parse_command("SELECT name, email FROM data").unwrap();
+///
+/// // Parse an ATTACH statement
+/// let cmd = parse_command("ATTACH 'data.parquet'").unwrap();
+///
+/// // Execute on a BundleBuilder
+/// cmd.execute(&mut bundle).await?;
+/// ```
+pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError> {
+    // First, try Pest grammar for custom bundlebase syntax (FILTER, ATTACH, JOIN, REINDEX)
+    if let Some(op) = parse_custom_pest(command_str)? {
+        return Ok(op);
+    }
+
+    // Otherwise, use sqlparser-rs for standard SQL (SELECT, CREATE INDEX, etc.)
+    let dialect = GenericDialect {};
+    let ast = Parser::parse_sql(&dialect, command_str)
+        .map_err(|e| -> BundlebaseError { format!("SQL parse error: {}", e).into() })?;
+
+    if ast.is_empty() {
+        return Err("Empty SQL statement".into());
+    }
+
+    if ast.len() > 1 {
+        return Err("Multiple statements not supported. Please execute one statement at a time.".into());
+    }
+
+    let stmt = &ast[0];
+
+    // Dispatch to appropriate operation based on statement type
+    dispatch_statement(stmt)
+}
+
+/// Dispatch a SQL statement to the appropriate BundleCommand.
+///
+/// This function examines the statement type and creates the appropriate BundleCommand variant
+/// that will execute the corresponding BundleBuilder method.
+fn dispatch_statement(stmt: &Statement) -> Result<BundleCommand, BundlebaseError> {
+    match stmt {
+        // SELECT statements -> Select or Query
+        Statement::Query(query) => {
+            if is_simple_select(query.as_ref()) {
+                // Simple SELECT -> extract column list
+                let columns = extract_select_columns(query)?;
+                Ok(BundleCommand::Select { columns })
+            } else {
+                // Complex query (JOINs, GROUP BY, etc.)
+                Ok(BundleCommand::Query {
+                    sql: stmt.to_string(),
+                    params: vec![],
+                })
+            }
+        }
+
+        // CREATE INDEX -> Index
+        Statement::CreateIndex { .. } => {
+            // sqlparser 0.59 changed CreateIndex structure
+            // For now, return error - use REINDEX or custom INDEX commands instead
+            Err("CREATE INDEX via standard SQL is not yet supported. Use bundlebase INDEX command or REINDEX.".into())
+        }
+
+        // DROP INDEX -> DropIndex
+        Statement::Drop {
+            object_type: ObjectType::Index,
+            names,
+            ..
+        } => {
+            // Extract column name from index name
+            let column = extract_column_from_index_name(names)?;
+            Ok(BundleCommand::DropIndex { column })
+        }
+
+        // Unrecognized statement types
+        _ => Err(format!("Unsupported SQL statement type: {:?}", stmt).into()),
+    }
+}
+
+/// Check if a query is a simple SELECT that should use SelectOp.
+///
+/// Simple SELECTs are column projections without complex features like:
+/// - GROUP BY
+/// - HAVING
+/// - Window functions
+/// - CTEs
+fn is_simple_select(query: &sqlparser::ast::Query) -> bool {
+    // Check if it's a basic SELECT without complex features
+    match query.body.as_ref() {
+        SetExpr::Select(select) => {
+            // In sqlparser 0.59, group_by is GroupByExpr enum
+            use sqlparser::ast::GroupByExpr;
+            let has_group_by = !matches!(select.group_by, GroupByExpr::Expressions(ref exprs, _) if exprs.is_empty());
+            !has_group_by && select.having.is_none()
+        }
+        _ => false,
+    }
+}
+
+/// Extract column names from a simple SELECT statement.
+///
+/// Converts SELECT projection items into a vector of column names/expressions.
+/// Supports column names, expressions, and aliases.
+fn extract_select_columns(query: &sqlparser::ast::Query) -> Result<Vec<String>, BundlebaseError> {
+    match query.body.as_ref() {
+        SetExpr::Select(select) => {
+            let columns: Result<Vec<String>, BundlebaseError> = select
+                .projection
+                .iter()
+                .map(|item| match item {
+                    SelectItem::UnnamedExpr(expr) => Ok(expr.to_string()),
+                    SelectItem::ExprWithAlias { expr, alias } => {
+                        Ok(format!("{} AS {}", expr, alias))
+                    }
+                    SelectItem::Wildcard(_) => Ok("*".to_string()),
+                    SelectItem::QualifiedWildcard(obj_name, _) => Ok(format!("{}.*", obj_name)),
+                })
+                .collect();
+            columns
+        }
+        _ => Err("Not a SELECT statement".into()),
+    }
+}
+
+/// Extract column name from index name.
+///
+/// For now, we assume index names follow the pattern "idx_{column_name}"
+/// or just use the first object name directly as the column.
+fn extract_column_from_index_name(
+    names: &[sqlparser::ast::ObjectName],
+) -> Result<String, BundlebaseError> {
+    let name = names
+        .first()
+        .ok_or_else(|| -> BundlebaseError { "DROP INDEX requires index name".into() })?;
+
+    // Convert the entire object name to string
+    // This handles the sqlparser 0.59 API changes
+    Ok(name.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_sql_empty() {
+        let result = parse_command("");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Empty"));
+    }
+
+    #[test]
+    fn test_parse_sql_multiple_statements() {
+        let result = parse_command("SELECT * FROM data; SELECT * FROM data2;");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Multiple statements"));
+    }
+
+    #[test]
+    fn test_parse_sql_valid_select() {
+        // This will fail until we implement SelectOp::from_sql
+        let result = parse_command("SELECT name, email FROM data");
+        // For now, we expect this to fail since we haven't implemented the operation parsers yet
+        // Once implemented, this should succeed
+    }
+}

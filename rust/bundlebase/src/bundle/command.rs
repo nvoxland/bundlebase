@@ -1,0 +1,288 @@
+use datafusion::common::ScalarValue;
+use crate::{BundleBuilder, BundleFacade, BundlebaseError, JoinTypeOption};
+
+pub mod parser;
+pub mod parser_pest;
+
+/// Command that can be executed on a BundleBuilder.
+///
+/// This enum represents statements as user-facing Bundle/BundleBuilder method calls.
+///
+/// # Examples
+///
+/// ```ignore
+/// use bundlebase::bundle::BundleCommand;
+///
+/// let cmd = BundleCommand::Attach { path: "data.parquet".to_string() };
+/// cmd.execute(&mut bundle).await?;
+/// ```
+#[derive(Debug, Clone)]
+pub enum BundleCommand {
+    /// Attach a data source
+    /// Maps to: `bundle.attach(&path)`
+    Attach { path: String },
+
+    /// Filter rows by a WHERE condition
+    /// Maps to: `bundle.filter(&where_clause, params)`
+    Filter {
+        where_clause: String,
+        params: Vec<ScalarValue>,
+    },
+
+    /// Select specific columns
+    /// Maps to: `bundle.select(columns)`
+    Select { columns: Vec<String> },
+
+    /// Remove a column
+    /// Maps to: `bundle.remove_column(&name)`
+    RemoveColumn { name: String },
+
+    /// Rename a column
+    /// Maps to: `bundle.rename_column(&old_name, &new_name)`
+    RenameColumn {
+        old_name: String,
+        new_name: String,
+    },
+
+    /// Execute a full SQL query
+    /// Maps to: `bundle.query(&sql, params)`
+    Query {
+        sql: String,
+        params: Vec<ScalarValue>,
+    },
+
+    /// Join with another data source
+    /// Maps to: `bundle.join(&name, &source, &expression, join_type)`
+    Join {
+        name: String,
+        source: String,
+        expression: String,
+        join_type: JoinTypeOption,
+    },
+
+    /// Create an index on a column
+    /// Maps to: `bundle.index(&column)`
+    Index { column: String },
+
+    /// Drop an index on a column
+    /// Maps to: `bundle.drop_index(&column)`
+    DropIndex { column: String },
+
+    /// Rebuild all indexes
+    /// Maps to: `bundle.reindex()`
+    Reindex,
+
+    /// Set bundle name
+    /// Maps to: `bundle.set_name(&name)`
+    SetName { name: String },
+
+    /// Set bundle description
+    /// Maps to: `bundle.set_description(&description)`
+    SetDescription { description: String },
+
+    /// Commit changes
+    /// Maps to: `bundle.commit(&message)`
+    Commit { message: String },
+
+    /// Reset uncommitted changes
+    /// Maps to: `bundle.reset()`
+    Reset,
+
+    /// Undo last change
+    /// Maps to: `bundle.undo()`
+    Undo,
+}
+
+impl BundleCommand {
+    /// Execute this SQL command on a BundleBuilder.
+    ///
+    /// This method delegates to the appropriate BundleBuilder method based on the command variant.
+    ///
+    /// # Arguments
+    ///
+    /// * `bundle` - Mutable reference to the BundleBuilder to execute the command on
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` - Command executed successfully
+    /// * `Err(BundlebaseError)` - Execution failed
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let cmd = BundleCommand::Attach { path: "data.parquet".to_string() };
+    /// cmd.execute(&mut bundle).await?;
+    /// ```
+    pub async fn execute(self, bundle: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+        match self {
+            BundleCommand::Attach { path } => {
+                bundle.attach(&path).await?;
+                Ok(())
+            }
+            BundleCommand::Filter { where_clause, params } => {
+                bundle.filter(&where_clause, params).await?;
+                Ok(())
+            }
+            BundleCommand::Select { columns } => {
+                let col_refs: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
+                bundle.select(col_refs).await?;
+                Ok(())
+            }
+            BundleCommand::RemoveColumn { name } => {
+                bundle.remove_column(&name).await?;
+                Ok(())
+            }
+            BundleCommand::RenameColumn { old_name, new_name } => {
+                bundle.rename_column(&old_name, &new_name).await?;
+                Ok(())
+            }
+            BundleCommand::Query { sql, params } => {
+                bundle.query(&sql, params).await?;
+                Ok(())
+            }
+            BundleCommand::Join {
+                name,
+                source,
+                expression,
+                join_type,
+            } => {
+                bundle
+                    .join(&name, &source, &expression, join_type)
+                    .await?;
+                Ok(())
+            }
+            BundleCommand::Index { column } => {
+                bundle.index(&column).await?;
+                Ok(())
+            }
+            BundleCommand::DropIndex { column } => {
+                bundle.drop_index(&column).await?;
+                Ok(())
+            }
+            BundleCommand::Reindex => {
+                bundle.reindex().await?;
+                Ok(())
+            }
+            BundleCommand::SetName { name } => {
+                bundle.set_name(&name).await?;
+                Ok(())
+            }
+            BundleCommand::SetDescription { description } => {
+                bundle.set_description(&description).await?;
+                Ok(())
+            }
+            BundleCommand::Commit { message } => {
+                bundle.commit(&message).await?;
+                Ok(())
+            }
+            BundleCommand::Reset => {
+                bundle.reset().await?;
+                Ok(())
+            }
+            BundleCommand::Undo => {
+                bundle.undo().await?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Add parameters to this command for parameterized queries.
+    ///
+    /// This method is used to bind parameters ($1, $2, etc.) in SQL statements if applicable.
+    ///
+    /// # Arguments
+    ///
+    /// * `params` - Vector of ScalarValue parameters
+    ///
+    /// # Returns
+    ///
+    /// * `Self` - The command with parameters added
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let cmd = BundleCommand::Filter {
+    ///     where_clause: "salary > $1".to_string(),
+    ///     params: vec![],
+    /// };
+    /// let cmd_with_params = cmd.with_params(vec![
+    ///     ScalarValue::Float64(Some(50000.0))
+    /// ]);
+    /// ```
+    pub fn with_params(mut self, params: Vec<ScalarValue>) -> Self {
+        match &mut self {
+            BundleCommand::Filter {
+                params: ref mut p, ..
+            } => *p = params,
+            BundleCommand::Query {
+                params: ref mut p, ..
+            } => *p = params,
+            _ => {} // Other commands don't support parameters
+        }
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::bundle::ScalarValue;
+use crate::bundle::command::BundleCommand;
+    #[test]
+    fn test_with_params_filter() {
+        let cmd = BundleCommand::Filter {
+            where_clause: "salary > $1".to_string(),
+            params: vec![],
+        };
+
+        let params = vec![ScalarValue::Float64(Some(50000.0))];
+        let cmd_with_params = cmd.with_params(params.clone());
+
+        match cmd_with_params {
+            BundleCommand::Filter {
+                where_clause,
+                params: p,
+            } => {
+                assert_eq!(where_clause, "salary > $1");
+                assert_eq!(p.len(), 1);
+            }
+            _ => panic!("Expected Filter variant"),
+        }
+    }
+
+    #[test]
+    fn test_with_params_query() {
+        let cmd = BundleCommand::Query {
+            sql: "SELECT * FROM data WHERE id = $1".to_string(),
+            params: vec![],
+        };
+
+        let params = vec![ScalarValue::Int64(Some(42))];
+        let cmd_with_params = cmd.with_params(params.clone());
+
+        match cmd_with_params {
+            BundleCommand::Query { sql, params: p } => {
+                assert_eq!(sql, "SELECT * FROM data WHERE id = $1");
+                assert_eq!(p.len(), 1);
+            }
+            _ => panic!("Expected Query variant"),
+        }
+    }
+
+    #[test]
+    fn test_with_params_other_command() {
+        // with_params should have no effect on commands that don't support parameters
+        let cmd = BundleCommand::Attach {
+            path: "data.parquet".to_string(),
+        };
+
+        let params = vec![ScalarValue::Int64(Some(42))];
+        let cmd_with_params = cmd.with_params(params);
+
+        match cmd_with_params {
+            BundleCommand::Attach { path } => {
+                assert_eq!(path, "data.parquet");
+            }
+            _ => panic!("Expected Attach variant"),
+        }
+    }
+}
