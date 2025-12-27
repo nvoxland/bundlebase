@@ -67,6 +67,7 @@ pub struct Bundle {
     base_pack: Option<ObjectId>,
     joins: HashMap<String, PackJoin>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
+    pub(crate) views: HashMap<String, ObjectId>,
     dataframe: DataFrameHolder,
 
     ctx: Arc<SessionContext>,
@@ -102,6 +103,7 @@ impl Clone for Bundle {
             data_packs: Arc::clone(&self.data_packs),
             joins: self.joins.clone(),
             indexes,
+            views: self.views.clone(),
             dataframe: DataFrameHolder {
                 dataframe: Arc::new(RwLock::new(self.dataframe.dataframe.read().clone()))
             },
@@ -172,6 +174,7 @@ impl Bundle {
             data_packs,
             joins: HashMap::new(),
             indexes: Arc::new(RwLock::new(Vec::new())),
+            views: HashMap::new(),
             storage: Arc::clone(&storage),
             adapter_factory: DataReaderFactory::new(
                 Arc::clone(&function_registry),
@@ -242,8 +245,17 @@ impl Bundle {
 
         // Recursively load the base bundle and store the Arc reference
         if let Some(from_url) = &init_commit.from {
+            // Resolve relative URLs against current data_dir
+            let resolved_url = if from_url.path().starts_with("..") {
+                // Join relative path with current directory
+                let current_url = Url::parse(data_dir.url().as_str())?;
+                current_url.join(from_url.as_str())?
+            } else {
+                from_url.clone()
+            };
+
             // Box the recursive call to avoid infinite future size
-            Box::pin(Self::open_internal(from_url.as_str(), visited, bundle)).await?;
+            Box::pin(Self::open_internal(resolved_url.as_str(), visited, bundle)).await?;
         };
         bundle.id = init_commit.id;
         bundle.data_dir = data_dir.clone();
@@ -251,9 +263,26 @@ impl Bundle {
         // List files in the manifest directory
         let manifest_files = manifest_dir.list_files().await?;
 
+        // Filter out init file AND files from subdirectories (like view_* directories)
+        // We only want files directly in the manifest directory
+        let manifest_dir_url_str = manifest_dir.url().to_string();
         let manifest_files = manifest_files
             .iter()
-            .filter(|x| x.filename() != INIT_FILENAME)
+            .filter(|x| {
+                let file_url = x.url().to_string();
+                // File should start with manifest dir URL
+                if !file_url.starts_with(&manifest_dir_url_str) {
+                    return false;
+                }
+                // Get the path after the manifest dir
+                let relative_path = &file_url[manifest_dir_url_str.len()..];
+                // Skip init file
+                if x.filename() == INIT_FILENAME {
+                    return false;
+                }
+                // Only include files directly in manifest dir (no "/" in relative path except leading one)
+                !relative_path.trim_start_matches('/').contains('/')
+            })
             .collect::<Vec<_>>();
 
         if manifest_files.is_empty() {
@@ -267,11 +296,15 @@ impl Bundle {
             commit.url = Some(manifest_file.url().clone());
             commit.data_dir = Some(data_dir.url().clone());
 
+            debug!("Loading commit from {}: {} changes", manifest_file.filename(), commit.changes.len());
+
             bundle.commits.push(commit.clone());
 
             // Apply operations from this manifest's changes
             for change in commit.changes {
+                debug!("  Change: {} with {} operations", change.description, change.operations.len());
                 for op in change.operations {
+                    debug!("    Applying: {}", op.describe());
                     bundle.apply_operation(op).await?;
                 }
             }
@@ -283,6 +316,11 @@ impl Bundle {
     /// Will store the new bundle in the passed data_dir.
     pub fn extend(&self, data_dir: &str) -> Result<BundleBuilder, BundlebaseError> {
         BundleBuilder::extend(Arc::new(self.clone()), data_dir)
+    }
+
+    /// Get the view ID for a given view name
+    pub fn get_view_id(&self, name: &str) -> Option<&ObjectId> {
+        self.views.get(name)
     }
 
     /// Modifies this bundle with the given operation

@@ -359,3 +359,135 @@ await c.filter(
     ["Alice", 25, True]
 )
 ```
+
+## Views
+
+Views are named snapshots of container transformations that are stored and versioned within the bundle. They allow you to create reusable query patterns that automatically inherit changes from their parent container.
+
+### Creating Views
+
+Use `attach_view()` to create a named view from a BundleBuilder with uncommitted operations:
+
+```python
+c = await bundlebase.create("/path/to/container")
+await c.attach("customers.csv")
+await c.commit("Initial data")
+
+# Create view from select
+adults = await c.select("select * where age > 21")
+await c.attach_view("adults", adults)
+await c.commit("Add adults view")
+
+# Create view with multiple operations
+working_age = await c.select("select * where age > 21")
+await working_age.filter("age < 65")
+await c.attach_view("working_age", working_age)
+await c.commit("Add working age view")
+```
+
+**Method signature:**
+```python
+await c.attach_view(name: str, source: BundleBuilder) -> BundleBuilder
+```
+
+**Parameters:**
+- `name` - Unique name for the view
+- `source` - BundleBuilder containing operations to capture (typically from `select()`)
+
+**Returns:** Self (for method chaining)
+
+### Opening Views
+
+Use `view()` to open a previously created view as a read-only Bundle:
+
+```python
+# Open view - returns Bundle (read-only)
+view = await c.view("adults")
+
+# Access view operations
+print(f"View has {len(view.operations())} operations")
+for op in view.operations():
+    print(f"  {op.describe()}")
+```
+
+**Method signature:**
+```python
+await c.view(name: str) -> Bundle
+```
+
+**Parameters:**
+- `name` - Name of the view to open
+
+**Returns:** Read-only `Bundle` object (not `BundleBuilder`)
+
+**Raises:** Error if view doesn't exist
+
+### View Characteristics
+
+**Read-only:** Views return `Bundle` not `BundleBuilder`, so transformation methods are not available:
+```python
+view = await c.view("adults")
+# view.filter(...)  # ERROR: Bundle doesn't have filter()
+# view.attach(...)  # ERROR: Bundle doesn't have attach()
+```
+
+**Dynamic inheritance:** Views automatically see new commits from their parent container:
+```python
+# Create view
+await c.attach("data-1.csv")
+await c.commit("v1")
+active = await c.select("select * where status = 'active'")
+await c.attach_view("active", active)
+await c.commit("v2")
+
+# Add more data to parent
+c_bundle = await bundlebase.open("container")
+c_reopened = c_bundle.extend("container")
+await c_reopened.attach("data-2.csv")
+await c_reopened.commit("v3")
+
+# View automatically includes new parent data
+view = await c_reopened.view("active")  # Sees both data-1.csv and data-2.csv
+```
+
+### Common Use Cases
+
+**Reusable filters:**
+```python
+# Define standard views
+await c.attach_view("high_value", await c.select("select * where amount > 1000"))
+await c.attach_view("recent", await c.select("select * where date > today() - 30"))
+await c.commit("Add standard views")
+
+# Use later
+high_value_data = await c.view("high_value")
+```
+
+**Multi-tenant access:**
+```python
+# Create per-tenant views
+tenant_a = await c.select("select * where tenant_id = 'A'")
+await c.attach_view("tenant_a", tenant_a)
+await c.commit("Add tenant views")
+```
+
+### Error Handling
+
+```python
+# View not found
+try:
+    view = await c.view("nonexistent")
+except Exception as e:
+    print(f"Error: {e}")  # "View 'nonexistent' not found"
+
+# Duplicate view name
+await c.attach_view("adults", await c.select("select * where age > 21"))
+await c.commit("v1")
+
+try:
+    await c.attach_view("adults", await c.select("select * where age > 30"))
+except Exception as e:
+    print(f"Error: {e}")  # "View 'adults' already exists"
+```
+
+See [10-VIEWS.md](10-VIEWS.md) for detailed documentation on views architecture, storage structure, and advanced usage.
