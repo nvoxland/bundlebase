@@ -1,0 +1,142 @@
+site_name: Bundlebase Documentation
+site_description: Like Docker, but for data
+site_author: Nathan Voxland
+site_url: https://nvoxland.github.io/bundlebase/
+repo_name: nvoxland/bundlebase
+repo_url: https://github.com/nvoxland/bundlebase
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant      # Fast page loading
+    - navigation.tracking     # URL updates with scroll
+    - navigation.tabs         # Top-level tabs
+    - navigation.sections     # Collapsible sections
+    - navigation.expand       # Expand all sections by default
+    - navigation.top          # Back to top button
+    - search.suggest          # Search suggestions
+    - search.highlight        # Highlight search terms
+    - content.code.copy       # Copy button for code blocks
+    - content.code.annotate   # Annotations in code blocks
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            docstring_section_style: spacy
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+            docstring_options:
+              ignore_init_summary: true
+            members_order: source
+
+markdown_extensions:
+  # Python Markdown
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+  # PyMdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quick-start.md
+      - Basic Concepts: getting-started/basic-concepts.md
+  - Guides:
+      - Architecture: guides/architecture.md
+      - Versioning: guides/versioning.md
+      - Row Indexing: guides/row-indexing.md
+      - Progress Tracking: guides/progress-tracking.md
+      - Logging: guides/logging.md
+      - Views: guides/views.md
+  - API Reference:
+      - Python:
+          - Overview: api-reference/python/index.md
+          - Async API: api-reference/python/async-api.md
+          - Sync API: api-reference/python/sync-api.md
+          - Conversion: api-reference/python/conversion.md
+          - Progress: api-reference/python/progress.md
+          - Chains: api-reference/python/chain.md
+      - Rust:
+          - Overview: api-reference/rust/index.md
+  - Examples:
+      - Basic Operations: examples/basic-operations.md
+      - Metrics & Monitoring: examples/metrics.md
+  - Development:
+      - Setup: development/setup.md
+      - Testing: development/testing.md
+      - Python Bindings: development/python-bindings.md
+      - Contributing: development/contributing.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/nvoxland/bundlebase
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/bundlebase/
+
+copyright: Copyright &copy; 2025 Nathan Voxland

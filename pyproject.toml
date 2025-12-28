@@ -20,7 +20,7 @@ packages = [{include = "bundlebase", from = "python/src"}]
 
 [tool.poetry.urls]
 "Bug Tracker" = "https://github.com/nvoxland/bundlebase/issues"
-"Documentation" = "https://github.com/nvoxland/bundlebase"
+"Documentation" = "https://nvoxland.github.io/bundlebase/"
 "Source Code" = "https://github.com/nvoxland/bundlebase"
 
 [tool.poetry.dependencies]
@@ -43,6 +43,18 @@ polars = ">=0.20.0"
 numpy = ">=1.20.0"
 nest-asyncio = "^1.6.0"
 maturin = "^1.10.2"
+
+[tool.poetry.group.docs]
+optional = true
+
+[tool.poetry.group.docs.dependencies]
+mkdocs = "^1.6.0"
+mkdocs-material = "^9.5.0"
+mkdocstrings = {extras = ["python"], version = "^0.26.0"}
+pymdown-extensions = "^10.12.0"
+mkdocs-gen-files = "^0.5.0"
+mkdocs-literate-nav = "^0.6.0"
+mkdocs-autorefs = "^1.2.0"
 
 [tool.poetry.extras]
 jupyter = ["nest-asyncio"]
