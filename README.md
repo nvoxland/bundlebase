@@ -2,13 +2,17 @@
 
 Like Docker, but for data.
 
+**[Documentation](https://nvoxland.github.io/bundlebase/)** |
+[PyPI](https://pypi.org/project/bundlebase/) |
+[Issues](https://github.com/nvoxland/bundlebase/issues)
+
 ## Features
 
-- **📦 Multiple Formats**: Support for Parquet, CSV, JSON, and more
-- **🔄 Version Control**: Built-in commit system for data pipeline versioning
-- **🐍 Python Native**: Seamless async/sync Python API with type hints
-- **🚀 High Performance**: Rust-powered core with Apache Arrow columnar format
-- **🔗 Fluent API**: Chain operations with intuitive, readable syntax
+- **Multiple Formats**: Support for Parquet, CSV, JSON, and more
+- **Version Control**: Built-in commit system for data pipeline versioning
+- **Python Native**: Seamless async/sync Python API with type hints
+- **High Performance**: Rust-powered core with Apache Arrow columnar format
+- **Fluent API**: Chain operations with intuitive, readable syntax
 
 ## Installation
 
