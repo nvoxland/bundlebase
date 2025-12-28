@@ -87,6 +87,13 @@ pub enum BundleCommand {
     /// Undo last change
     /// Maps to: `bundle.undo()`
     Undo,
+
+    /// Attach data to an existing join's pack
+    /// Maps to: `bundle.attach_to_join(&join, &path)`
+    AttachToJoin {
+        join: String,
+        path: String,
+    },
 }
 
 impl BundleCommand {
@@ -172,6 +179,10 @@ impl BundleCommand {
             }
             BundleCommand::Undo => {
                 bundle.undo().await?;
+                Ok(())
+            }
+            BundleCommand::AttachToJoin { join, path } => {
+                bundle.attach_to_join(&join, &path).await?;
                 Ok(())
             }
         }
@@ -274,6 +285,22 @@ use crate::bundle::command::BundleCommand;
                 assert_eq!(path, "data.parquet");
             }
             _ => panic!("Expected Attach variant"),
+        }
+    }
+
+    #[test]
+    fn test_attach_to_join_command() {
+        let cmd = BundleCommand::AttachToJoin {
+            join: "users".to_string(),
+            path: "more_users.parquet".to_string(),
+        };
+
+        match cmd {
+            BundleCommand::AttachToJoin { join, path } => {
+                assert_eq!(join, "users");
+                assert_eq!(path, "more_users.parquet");
+            }
+            _ => panic!("Expected AttachToJoin variant"),
         }
     }
 }
