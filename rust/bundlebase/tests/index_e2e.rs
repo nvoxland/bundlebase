@@ -34,7 +34,7 @@ Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
 \*\*\* physical_plan \*\*\*
 CoalesceBatchesExec: target_batch_size=8192
   FilterExec: Email@2 = elizabethbarr@ewing.com, projection=\[Index@0, City@1]
-    RepartitionExec: partitioning=RoundRobinBatch\(14\), input_partitions=1
+    RepartitionExec: partitioning=RoundRobinBatch\(\d+\), input_partitions=1
       DataSourceExec: file_groups=\{1 group: \[\[test_data/customers-0-100.csv]]}, projection=\[Index, City, Email], file_type=csv, has_header=true
     "#,
         explain
