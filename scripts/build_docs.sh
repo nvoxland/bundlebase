@@ -7,6 +7,10 @@ echo "Building Bundlebase documentation..."
 echo "Installing documentation dependencies..."
 poetry install --with docs
 
+# Build Rust Python extension (needed for mkdocstrings to introspect Python API)
+echo "Building Rust Python extension..."
+poetry run maturin develop
+
 # Build Rust documentation
 echo "Generating Rust API documentation..."
 cargo doc --no-deps --package bundlebase --package bundlebase-python
