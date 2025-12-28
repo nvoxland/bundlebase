@@ -23,7 +23,7 @@ container/
 ├── _manifest/
 │   ├── 00000000000000000.yaml      # Parent init commit
 │   ├── 00001abc123.yaml            # Parent commit 1
-│   ├── 00002def456.yaml            # Parent commit 2 (contains AttachView op)
+│   ├── 00002def456.yaml            # Parent commit 2 (contains CreateView op)
 │   └── view_{uuid}/                # View subdirectory
 │       └── _manifest/
 │           ├── 00000000000000000.yaml  # View init: from="../../../"
@@ -53,13 +53,13 @@ await c.commit("Initial data")
 
 # Create a filtered view
 adults = await c.select("select * where age > 21")
-await c.attach_view("adults", adults)
+await c.create_view("adults", adults)
 await c.commit("Add adults view")
 
 # Create a view with multiple operations
 working_age = await c.select("select * where age > 21")
 await working_age.filter("age < 65")
-await c.attach_view("working_age", working_age)
+await c.create_view("working_age", working_age)
 await c.commit("Add working age view")
 ```
 
@@ -89,7 +89,7 @@ await c.commit("v1")
 
 # Create view
 active = await c.select("select * where status = 'active'")
-await c.attach_view("active", active)
+await c.create_view("active", active)
 await c.commit("v2")
 
 # Open view - sees data from customers-1-100.csv
@@ -120,7 +120,7 @@ c.commit("Initial").await?;
 
 // Create view from select
 let adults = c.select("select * where age > 21", vec![]).await?;
-c.attach_view("adults", &adults).await?;
+c.create_view("adults", &adults).await?;
 c.commit("Add adults view").await?;
 ```
 
@@ -138,9 +138,9 @@ for op in view.operations() {
 
 ## Operation Details
 
-### AttachViewOp
+### CreateViewOp
 
-The `AttachViewOp` operation is created when you call `attach_view()`. It:
+The `CreateViewOp` operation is created when you call `create_view()`. It:
 
 1. **Captures operations** - Extracts all uncommitted operations from the source BundleBuilder
 2. **Generates view ID** - Creates unique ObjectId for the view directory
@@ -173,8 +173,8 @@ When you call `view(name)`:
 
 ```python
 # Define common filters as views
-await c.attach_view("high_value", await c.select("select * where value > 1000"))
-await c.attach_view("recent", await c.select("select * where date > today() - 30"))
+await c.create_view("high_value", await c.select("select * where value > 1000"))
+await c.create_view("recent", await c.select("select * where date > today() - 30"))
 await c.commit("Add standard views")
 
 # Reuse later
@@ -186,10 +186,10 @@ high_value = await c.view("high_value")
 ```python
 # Create tenant-specific views
 tenant_a = await c.select("select * where tenant_id = 'A'")
-await c.attach_view("tenant_a", tenant_a)
+await c.create_view("tenant_a", tenant_a)
 
 tenant_b = await c.select("select * where tenant_id = 'B'")
-await c.attach_view("tenant_b", tenant_b)
+await c.create_view("tenant_b", tenant_b)
 
 await c.commit("Add tenant views")
 ```
@@ -198,7 +198,7 @@ await c.commit("Add tenant views")
 
 ```python
 # Create analysis-specific views
-await c.attach_view("sales_analysis",
+await c.create_view("sales_analysis",
     await c.select("""
         select product, sum(revenue) as total
         group by product
@@ -232,8 +232,8 @@ await c.commit("Q4 2024 analysis")
 ## Implementation Notes
 
 ### Key Files
-- `rust/bundlebase/src/bundle/operation/attach_view.rs` - AttachViewOp implementation
-- `rust/bundlebase/src/bundle/builder.rs` - attach_view() and view() methods
+- `rust/bundlebase/src/bundle/operation/create_view.rs` - CreateViewOp implementation
+- `rust/bundlebase/src/bundle/builder.rs` - create_view() and view() methods
 - `rust/bundlebase/src/bundle.rs` - views HashMap and view resolution
 - `rust/bundlebase-python/src/builder.rs` - Python bindings
 

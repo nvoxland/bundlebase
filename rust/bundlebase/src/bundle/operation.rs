@@ -1,5 +1,5 @@
 mod attach_block;
-mod attach_view;
+mod create_view;
 mod define_function;
 mod define_index;
 mod define_pack;
@@ -16,7 +16,7 @@ mod set_description;
 mod set_name;
 
 pub use crate::bundle::operation::attach_block::AttachBlockOp;
-pub use crate::bundle::operation::attach_view::AttachViewOp;
+pub use crate::bundle::operation::create_view::CreateViewOp;
 pub use crate::bundle::operation::define_function::DefineFunctionOp;
 pub use crate::bundle::operation::define_index::DefineIndexOp;
 pub use crate::bundle::operation::define_pack::DefinePackOp;
@@ -105,7 +105,7 @@ pub enum AnyOperation {
     RemoveColumns(RemoveColumnsOp),
     RenameColumn(RenameColumnOp),
     AttachBlock(AttachBlockOp),
-    AttachView(AttachViewOp),
+    CreateView(CreateViewOp),
     DefineFunction(DefineFunctionOp),
     Filter(FilterOp),
     IndexBlocks(IndexBlocksOp),
@@ -126,7 +126,7 @@ impl Operation for AnyOperation {
             AnyOperation::RemoveColumns(op) => op.describe(),
             AnyOperation::RenameColumn(op) => op.describe(),
             AnyOperation::AttachBlock(op) => op.describe(),
-            AnyOperation::AttachView(op) => op.describe(),
+            AnyOperation::CreateView(op) => op.describe(),
             AnyOperation::DefineFunction(op) => op.describe(),
             AnyOperation::Filter(op) => op.describe(),
             AnyOperation::IndexBlocks(op) => op.describe(),
@@ -146,7 +146,7 @@ impl Operation for AnyOperation {
             AnyOperation::RemoveColumns(op) => op.check(bundle).await,
             AnyOperation::RenameColumn(op) => op.check(bundle).await,
             AnyOperation::AttachBlock(op) => op.check(bundle).await,
-            AnyOperation::AttachView(op) => op.check(bundle).await,
+            AnyOperation::CreateView(op) => op.check(bundle).await,
             AnyOperation::DefineFunction(op) => op.check(bundle).await,
             AnyOperation::Filter(op) => op.check(bundle).await,
             AnyOperation::IndexBlocks(op) => op.check(bundle).await,
@@ -166,7 +166,7 @@ impl Operation for AnyOperation {
             AnyOperation::RemoveColumns(op) => op.apply(bundle).await,
             AnyOperation::RenameColumn(op) => op.apply(bundle).await,
             AnyOperation::AttachBlock(op) => op.apply(bundle).await,
-            AnyOperation::AttachView(op) => op.apply(bundle).await,
+            AnyOperation::CreateView(op) => op.apply(bundle).await,
             AnyOperation::DefineFunction(op) => op.apply(bundle).await,
             AnyOperation::Filter(op) => op.apply(bundle).await,
             AnyOperation::IndexBlocks(op) => op.apply(bundle).await,
@@ -190,7 +190,7 @@ impl Operation for AnyOperation {
             AnyOperation::RemoveColumns(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::RenameColumn(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::AttachBlock(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::AttachView(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::CreateView(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DefineFunction(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::Filter(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::IndexBlocks(op) => op.apply_dataframe(df, ctx).await,
@@ -210,7 +210,7 @@ impl Operation for AnyOperation {
             AnyOperation::RemoveColumns(op) => op.version(),
             AnyOperation::RenameColumn(op) => op.version(),
             AnyOperation::AttachBlock(op) => op.version(),
-            AnyOperation::AttachView(op) => op.version(),
+            AnyOperation::CreateView(op) => op.version(),
             AnyOperation::DefineFunction(op) => op.version(),
             AnyOperation::Filter(op) => op.version(),
             AnyOperation::IndexBlocks(op) => op.version(),
@@ -245,9 +245,9 @@ impl From<AttachBlockOp> for AnyOperation {
     }
 }
 
-impl From<AttachViewOp> for AnyOperation {
-    fn from(config: AttachViewOp) -> Self {
-        AnyOperation::AttachView(config)
+impl From<CreateViewOp> for AnyOperation {
+    fn from(config: CreateViewOp) -> Self {
+        AnyOperation::CreateView(config)
     }
 }
 

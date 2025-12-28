@@ -762,7 +762,7 @@ impl PyBundleBuilder {
     }
 
     /// Attach a view from another BundleBuilder
-    fn attach_view<'py>(
+    fn create_view<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         source: PyRef<'_, PyBundleBuilder>,
@@ -777,9 +777,9 @@ impl PyBundleBuilder {
             let source_builder = source_inner.lock().await;
 
             builder
-                .attach_view(&name, &*source_builder)
+                .create_view(&name, &*source_builder)
                 .await
-                .map_err(|e| to_py_error(&format!("Failed to attach view '{}'", name), e))?;
+                .map_err(|e| to_py_error(&format!("Failed to create view '{}'", name), e))?;
 
             drop(builder);
             drop(source_builder);
