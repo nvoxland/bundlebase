@@ -323,6 +323,16 @@ impl Bundle {
         self.views.get(name)
     }
 
+    /// Get the base pack ID (for testing/debugging)
+    pub fn base_pack(&self) -> Option<ObjectId> {
+        self.base_pack.clone()
+    }
+
+    /// Get the number of data packs (for testing/debugging)
+    pub fn data_packs_count(&self) -> usize {
+        self.data_packs.read().len()
+    }
+
     /// Modifies this bundle with the given operation
     async fn apply_operation(&mut self, op: AnyOperation) -> Result<(), BundlebaseError> {
         let description = &op.describe();
@@ -522,9 +532,10 @@ impl BundleFacade for Bundle {
         debug!("Building dataframe...");
         let df = match self.base_pack {
             Some(base_pack) => {
+                let table_name = format!("packs.{}", DataPack::table_name(&base_pack));
                 let mut df = self
                     .ctx
-                    .table(&format!("packs.{}", DataPack::table_name(&base_pack)))
+                    .table(&table_name)
                     .await?;
 
                 for (_, pack_join) in &self.joins {

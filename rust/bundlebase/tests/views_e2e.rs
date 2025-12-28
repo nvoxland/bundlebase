@@ -182,3 +182,73 @@ async fn test_view_from_field_points_to_parent() -> Result<(), BundlebaseError> 
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(&random_memory_url().to_string()).await?;
+    c.attach(&test_datafile("customers-0-100.csv"))
+        .await?;
+    c.commit("Initial data").await?;
+
+    let high_index = c.select("select * where \"Index\" > 50", vec![]).await?;
+    c.attach_view("high_index", &high_index).await?;
+    c.commit("Add view").await?;
+
+    let view = c.view("high_index").await?;
+
+    // Debug assertions
+    println!("View base_pack: {:?}", view.base_pack());
+    println!("View data_packs count: {}", view.data_packs_count());
+    println!("View operations: {:?}", view.operations().iter().map(|o| o.describe()).collect::<Vec<_>>());
+
+    // Verify data is present
+    assert!(view.base_pack().is_some(), "View should have base_pack from parent");
+    assert!(view.data_packs_count() > 0, "View should have data_packs from parent");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_regular_container_select() -> Result<(), BundlebaseError> {
+    // Test SELECT on a regular container (not a view) to isolate the issue
+    let mut c = BundleBuilder::create(&random_memory_url().to_string()).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Apply select operation
+    c.select("select * where Country = 'Chile'", vec![]).await?;
+    c.commit("After select").await?;
+
+    // Try to get dataframe
+    let df = c.dataframe().await?;
+    let schema = df.schema();
+
+    println!("Regular container schema: {:?}", schema);
+    assert!(schema.fields().len() > 0, "Container should have schema after select");
+    assert!(schema.field_with_name(None, "Country").is_ok(), "Container should have 'Country' column");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(&random_memory_url().to_string()).await?;
+    c.attach(&test_datafile("customers-0-100.csv"))
+        .await?;
+    c.commit("Initial data").await?;
+
+    let chile = c.select("select * from data where Country = 'Chile'", vec![]).await?;
+    c.attach_view("chile", &chile).await?;
+    c.commit("Add view").await?;
+
+    let view = c.view("chile").await?;
+
+    // This should work if data is inherited correctly
+    let df = view.dataframe().await?;
+    let schema = df.schema();
+
+    assert!(schema.fields().len() > 0, "View dataframe should have schema");
+    assert!(schema.field_with_name(None, "Country").is_ok(), "View should have 'Country' column");
+
+    Ok(())
+}

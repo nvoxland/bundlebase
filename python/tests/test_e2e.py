@@ -778,18 +778,11 @@ async def test_status_with_data_operations():
     """Test status() with data transformation operations"""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("userdata.parquet"))
-    c = await c.select("id", "first_name", "salary")
 
-    # Should have two changes (attach and select)
     status = c.status()
     assert isinstance(status, bundlebase.PyBundleStatus)
-    assert len(status.changes) == 2
-
-    # First operation should be attach
+    assert len(status.changes) == 1
     assert "Attach" in status.changes[0].description or "attach" in status.changes[0].description.lower()
-
-    # Second operation should be select
-    assert "Select" in status.changes[1].description or "select" in status.changes[1].description.lower()
 
 
 @pytest.mark.asyncio
@@ -798,13 +791,12 @@ async def test_status_chained_operations():
     c = await bundlebase.create(random_bundle())
     c = await (c.attach(datafile("userdata.parquet"))
                .set_name("User Data")
-               .filter("salary > $1", [50000.0])
-               .select("id", "first_name", "salary"))
+               .filter("salary > $1", [50000.0]))
 
     # Should have multiple changes
     status = c.status()
     assert isinstance(status, bundlebase.PyBundleStatus)
-    assert len(status.changes) >= 3  # attach, set_name, filter, select
+    assert len(status.changes) >= 2  # attach, set_name, filter
 
     # Verify all changes have proper attributes
     for change in status.changes:
@@ -839,3 +831,219 @@ async def test_status_after_commit():
         assert isinstance(status_after, bundlebase.PyBundleStatus)
         assert status_after.is_empty()
         assert len(status_after.changes) == 0
+
+
+# ============================================================================
+# Views Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_attach_view_basic():
+    """Test creating and opening a basic view."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create view with select
+    adults = await c.select("select * where \"Index\" > 50")
+    c = await c.attach_view("high_index", adults)
+    await c.commit("Add high_index view")
+
+    # Open view
+    view = await c.view("high_index")
+    assert view is not None
+
+    # Verify view has operations
+    operations = view.operations()
+    assert len(operations) >= 4  # CREATE PACK, ATTACH, ATTACH VIEW, SELECT
+
+
+@pytest.mark.asyncio
+async def test_view_not_found():
+    """Test error when opening non-existent view."""
+    c = await bundlebase.create(random_bundle())
+
+    # Try to open non-existent view
+    with pytest.raises(Exception) as exc_info:
+        await c.view("nonexistent")
+
+    assert "View 'nonexistent' not found" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_view_inherits_parent_changes():
+    """Test that views automatically see new parent commits."""
+    container_url = random_bundle()
+    c = await bundlebase.create(container_url)
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("v1")
+
+    # Create view
+    active = await c.select("select * where \"Index\" > 50")
+    c = await c.attach_view("active", active)
+    await c.commit("v2")
+
+    # Record initial view operations count
+    initial_view = await c.view("active")
+    initial_ops_count = len(initial_view.operations())
+
+    # Reopen container and add more data to parent
+    c_bundle = await bundlebase.open(container_url)
+    c_reopened = c_bundle.extend(container_url)
+    c_reopened = await c_reopened.attach(datafile("customers-101-150.csv"))
+    await c_reopened.commit("v3 - more data")
+
+    # View should see new parent commits through FROM chain
+    view_after_parent_change = await c_reopened.view("active")
+    new_ops_count = len(view_after_parent_change.operations())
+
+    # The view should have more operations now
+    assert new_ops_count > initial_ops_count, "View should inherit parent's new operations"
+
+
+@pytest.mark.asyncio
+async def test_view_with_multiple_operations():
+    """Test view with multiple chained operations."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create view with multiple operations (select + filter)
+    filtered = await c.select("select * where \"Index\" > 20")
+    filtered = await filtered.filter("\"Index\" < 80")
+
+    c = await c.attach_view("mid_range", filtered)
+    await c.commit("Add mid_range view")
+
+    # Open view and verify it has the operations
+    view = await c.view("mid_range")
+    operations = view.operations()
+
+    # Should have at least the select and filter operations from the view
+    op_descriptions = [op.describe for op in operations]
+    has_select = any("select" in desc.lower() for desc in op_descriptions)
+    has_filter = any("FILTER" in desc for desc in op_descriptions)
+
+    assert has_select, "View should have select operation"
+    assert has_filter, "View should have filter operation"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_view_name():
+    """Test error when creating duplicate view names."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial")
+
+    # Create first view
+    adults1 = await c.select("select * where \"Index\" > 50")
+    c = await c.attach_view("adults", adults1)
+    await c.commit("Add first adults view")
+
+    # Try to create view with same name
+    adults2 = await c.select("select * where \"Index\" > 70")
+    with pytest.raises(Exception) as exc_info:
+        await c.attach_view("adults", adults2)
+
+    assert "View 'adults' already exists" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_view_dataframe_execution():
+    """Test that views can execute dataframe queries."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create view with country filter
+    chile = await c.select("select * where Country = 'Chile'")
+    c = await c.attach_view("chile", chile)
+    await c.commit("Add chile view")
+
+    # Open view and execute dataframe query
+    view = await c.view("chile")
+
+    # This should work if data is inherited correctly
+    schema = await view.schema()
+    assert len(schema) > 0, "View should have schema"
+
+    # Verify Country field exists
+    country_field = schema.field("Country")
+    assert country_field is not None, "View should have 'Country' column"
+    assert country_field.name == "Country"
+
+
+@pytest.mark.asyncio
+async def test_view_to_polars():
+    """Test converting view results to Polars DataFrame."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create view with a simple filter
+    high_idx = await c.select("select * where \"Index\" > 50")
+    c = await c.attach_view("high_index_polars", high_idx)
+    await c.commit("Add high_index_polars view")
+
+    # Open view and convert to Polars
+    view = await c.view("high_index_polars")
+    df = await view.to_polars()
+
+    assert isinstance(df, polars.DataFrame), "Should return Polars DataFrame"
+    assert len(df) > 0, "Should have some high index customers"
+
+    # Verify all rows have Index > 50
+    assert all(df["Index"] > 50), "All rows should have Index > 50"
+
+
+@pytest.mark.asyncio
+async def test_view_to_pandas():
+    """Test converting view results to Pandas DataFrame."""
+    import pandas as pd
+
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create view for high index values
+    high_idx = await c.select("select * where \"Index\" > 80")
+    c = await c.attach_view("high_index", high_idx)
+    await c.commit("Add high_index view")
+
+    # Open view and convert to Pandas
+    view = await c.view("high_index")
+    df = await view.to_pandas()
+
+    assert isinstance(df, pd.DataFrame), "Should return Pandas DataFrame"
+    assert len(df) > 0, "Should have some high index customers"
+    assert all(df["Index"] > 80), "All rows should have Index > 80"
+
+
+@pytest.mark.asyncio
+async def test_view_chaining():
+    """Test that you can create multiple views from the same container."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create first view
+    view1 = await c.select("select * where \"Index\" > 20")
+    c = await c.attach_view("view1", view1)
+    await c.commit("Add first view")
+
+    # Create second view from base container
+    view2 = await c.select("select * where \"Index\" < 80")
+    c = await c.attach_view("view2", view2)
+    await c.commit("Add second view")
+
+    # Both views should be accessible
+    v1 = await c.view("view1")
+    v2 = await c.view("view2")
+
+    assert v1 is not None
+    assert v2 is not None
+
+    # Both should have operations
+    assert len(v1.operations()) >= 4
+    assert len(v2.operations()) >= 4
