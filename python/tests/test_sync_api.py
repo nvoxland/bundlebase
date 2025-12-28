@@ -89,16 +89,6 @@ class TestSyncOperations:
         results = c.to_dict()
         assert len(results["id"]) == 798  # 798 rows with salary > 50000
 
-    def test_sync_select(self):
-        """Test selecting columns synchronously."""
-        c = dc.create(random_bundle())
-        c.attach(datafile("userdata.parquet"))
-        c.select("id", "salary")
-
-        results = c.to_dict()
-        assert "id" in results
-        assert "salary" in results
-        assert "first_name" not in results
 
     def test_sync_set_name(self):
         """Test setting bundle name synchronously."""
@@ -391,8 +381,8 @@ class TestSyncJoin:
         assert "Country" in results
 
 
-class TestSyncQuery:
-    """Test synchronous query operations."""
+class TestSyncSelect:
+    """Test synchronous selecct operations."""
 
     def test_sync_select(self):
         """Test SQL query execution synchronously."""
@@ -452,30 +442,15 @@ class TestSyncStatus:
         assert status.changes[0].description == "Set name to Test Bundle"
         assert status.changes[1].description == "Set description to A test description"
 
-    def test_sync_status_with_data_operations(self):
-        """Test status() with data operations."""
-        c = dc.create(random_bundle())
-        c.attach(datafile("userdata.parquet"))
-        c.select("id", "first_name", "salary")
-
-        status = c.status()
-        assert len(status.changes) == 2
-
-        # Check that descriptions are present
-        for change in status.changes:
-            assert isinstance(change.description, str)
-            assert len(change.description) > 0
-
     def test_sync_status_chained_operations(self):
         """Test status() with chained operations."""
         c = dc.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
         c.set_name("User Data")
         c.filter("salary > $1", [50000.0])
-        c.select("id", "first_name", "salary")
 
         status = c.status()
-        assert len(status.changes) >= 3
+        assert len(status.changes) >= 2
 
         # Verify all changes have proper attributes
         for change in status.changes:
