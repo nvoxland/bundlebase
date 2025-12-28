@@ -4,7 +4,7 @@ use crate::bundle::operation::{IndexBlocksOp, BundleChange, Operation};
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, SelectOp};
 use crate::bundle::operation::{
-    AttachBlockOp, AttachViewOp, DefineFunctionOp, DefinePackOp, FilterOp, JoinOp, RebuildIndexOp,
+    AttachBlockOp, CreateViewOp, DefineFunctionOp, DefinePackOp, FilterOp, JoinOp, RebuildIndexOp,
     RemoveColumnsOp, RenameColumnOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
@@ -447,12 +447,12 @@ impl BundleBuilder {
     /// c.commit("Initial").await?;
     ///
     /// let adults = c.select("select * where age > 21", vec![]).await?;
-    /// c.attach_view("adults", &adults).await?;
+    /// c.create_view("adults", &adults).await?;
     /// c.commit("Add adults view").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn attach_view(
+    pub async fn create_view(
         &mut self,
         name: &str,
         source: &BundleBuilder,
@@ -461,9 +461,9 @@ impl BundleBuilder {
         // Clone source to avoid lifetime issues in async move
         let source_clone = source.clone();
 
-        self.do_change(&format!("Attach view '{}'", name), |builder| {
+        self.do_change(&format!("Create view '{}'", name), |builder| {
             Box::pin(async move {
-                let op = AttachViewOp::setup(&name, &source_clone, builder).await?;
+                let op = CreateViewOp::setup(&name, &source_clone, builder).await?;
                 builder.apply_operation(op.into()).await?;
                 info!("Attached view '{}'", name);
                 Ok(())

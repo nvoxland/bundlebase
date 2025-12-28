@@ -839,7 +839,7 @@ async def test_status_after_commit():
 
 
 @pytest.mark.asyncio
-async def test_attach_view_basic():
+async def test_create_view_basic():
     """Test creating and opening a basic view."""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
@@ -847,7 +847,7 @@ async def test_attach_view_basic():
 
     # Create view with select
     adults = await c.select("select * where \"Index\" > 50")
-    c = await c.attach_view("high_index", adults)
+    c = await c.create_view("high_index", adults)
     await c.commit("Add high_index view")
 
     # Open view
@@ -856,7 +856,7 @@ async def test_attach_view_basic():
 
     # Verify view has operations
     operations = view.operations()
-    assert len(operations) >= 4  # CREATE PACK, ATTACH, ATTACH VIEW, SELECT
+    assert len(operations) >= 4  # CREATE PACK, ATTACH, CREATE VIEW, SELECT
 
 
 @pytest.mark.asyncio
@@ -881,7 +881,7 @@ async def test_view_inherits_parent_changes():
 
     # Create view
     active = await c.select("select * where \"Index\" > 50")
-    c = await c.attach_view("active", active)
+    c = await c.create_view("active", active)
     await c.commit("v2")
 
     # Record initial view operations count
@@ -913,7 +913,7 @@ async def test_view_with_multiple_operations():
     filtered = await c.select("select * where \"Index\" > 20")
     filtered = await filtered.filter("\"Index\" < 80")
 
-    c = await c.attach_view("mid_range", filtered)
+    c = await c.create_view("mid_range", filtered)
     await c.commit("Add mid_range view")
 
     # Open view and verify it has the operations
@@ -938,13 +938,13 @@ async def test_duplicate_view_name():
 
     # Create first view
     adults1 = await c.select("select * where \"Index\" > 50")
-    c = await c.attach_view("adults", adults1)
+    c = await c.create_view("adults", adults1)
     await c.commit("Add first adults view")
 
     # Try to create view with same name
     adults2 = await c.select("select * where \"Index\" > 70")
     with pytest.raises(Exception) as exc_info:
-        await c.attach_view("adults", adults2)
+        await c.create_view("adults", adults2)
 
     assert "View 'adults' already exists" in str(exc_info.value)
 
@@ -958,7 +958,7 @@ async def test_view_dataframe_execution():
 
     # Create view with country filter
     chile = await c.select("select * where Country = 'Chile'")
-    c = await c.attach_view("chile", chile)
+    c = await c.create_view("chile", chile)
     await c.commit("Add chile view")
 
     # Open view and execute dataframe query
@@ -983,7 +983,7 @@ async def test_view_to_polars():
 
     # Create view with a simple filter
     high_idx = await c.select("select * where \"Index\" > 50")
-    c = await c.attach_view("high_index_polars", high_idx)
+    c = await c.create_view("high_index_polars", high_idx)
     await c.commit("Add high_index_polars view")
 
     # Open view and convert to Polars
@@ -1008,7 +1008,7 @@ async def test_view_to_pandas():
 
     # Create view for high index values
     high_idx = await c.select("select * where \"Index\" > 80")
-    c = await c.attach_view("high_index", high_idx)
+    c = await c.create_view("high_index", high_idx)
     await c.commit("Add high_index view")
 
     # Open view and convert to Pandas
@@ -1029,12 +1029,12 @@ async def test_view_chaining():
 
     # Create first view
     view1 = await c.select("select * where \"Index\" > 20")
-    c = await c.attach_view("view1", view1)
+    c = await c.create_view("view1", view1)
     await c.commit("Add first view")
 
     # Create second view from base container
     view2 = await c.select("select * where \"Index\" < 80")
-    c = await c.attach_view("view2", view2)
+    c = await c.create_view("view2", view2)
     await c.commit("Add second view")
 
     # Both views should be accessible
@@ -1058,10 +1058,10 @@ async def test_views_method():
 
     # Create multiple views
     view1 = await c.select("select * where \"Index\" > 50")
-    c = await c.attach_view("high_index", view1)
+    c = await c.create_view("high_index", view1)
 
     view2 = await c.select("select * where \"Index\" < 30")
-    c = await c.attach_view("low_index", view2)
+    c = await c.create_view("low_index", view2)
 
     await c.commit("Add views")
 
@@ -1086,7 +1086,7 @@ async def test_view_lookup_by_name_and_id():
 
     # Create a view
     high_index = await c.select("select * where \"Index\" > 50")
-    c = await c.attach_view("high_index", high_index)
+    c = await c.create_view("high_index", high_index)
     await c.commit("Add view")
 
     # Get the view ID

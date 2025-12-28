@@ -2,7 +2,7 @@ use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade, Operation};
 
 #[tokio::test]
-async fn test_attach_view_basic() -> Result<(), BundlebaseError> {
+async fn test_create_view_basic() -> Result<(), BundlebaseError> {
     // Create container and attach data
     let mut c = BundleBuilder::create(&random_memory_url().to_string()).await?;
     c.attach(&test_datafile("customers-0-100.csv"))
@@ -11,7 +11,7 @@ async fn test_attach_view_basic() -> Result<(), BundlebaseError> {
 
     // Create view with select
     let adults = c.select("select * where age > 21", vec![]).await?;
-    c.attach_view("adults", &adults).await?;
+    c.create_view("adults", &adults).await?;
     c.commit("Add adults view").await?;
 
     // Open view
@@ -24,7 +24,7 @@ async fn test_attach_view_basic() -> Result<(), BundlebaseError> {
         println!("  Op {}: {}", i, op.describe());
     }
 
-    // View should have: CREATE PACK, ATTACH, ATTACH VIEW (from parent), SELECT (from view)
+    // View should have: CREATE PACK, ATTACH, CREATE VIEW (from parent), SELECT (from view)
     assert!(operations.len() >= 4, "View should have at least 4 operations");
 
     // Verify SELECT operation is present
@@ -59,7 +59,7 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
     c.commit("v1").await?;
 
     let active_rs = c.select("select * where age > 21", vec![]).await?;
-    c.attach_view("active", &active_rs).await?;
+    c.create_view("active", &active_rs).await?;
     c.commit("v2").await?;
 
     // Record initial view operations count
@@ -101,7 +101,7 @@ async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
     let mut filtered = c.select("select * where age > 21", vec![]).await?;
     filtered.filter("age < 65", vec![]).await?;
 
-    c.attach_view("working_age", &filtered).await?;
+    c.create_view("working_age", &filtered).await?;
     c.commit("Add working_age view").await?;
 
     // Open view and verify it has the operations
@@ -139,12 +139,12 @@ async fn test_duplicate_view_name() -> Result<(), BundlebaseError> {
 
     // Create first view
     let adults1 = c.select("select * where age > 21", vec![]).await?;
-    c.attach_view("adults", &adults1).await?;
+    c.create_view("adults", &adults1).await?;
     c.commit("Add first adults view").await?;
 
     // Try to create view with same name
     let adults2 = c.select("select * where age > 30", vec![]).await?;
-    let result = c.attach_view("adults", &adults2).await;
+    let result = c.create_view("adults", &adults2).await;
 
     assert!(result.is_err());
     let err_msg = result.err().unwrap().to_string();
@@ -163,7 +163,7 @@ async fn test_view_from_field_points_to_parent() -> Result<(), BundlebaseError> 
     c.commit("v1").await?;
 
     let active = c.select("select * where age > 21", vec![]).await?;
-    c.attach_view("active", &active).await?;
+    c.create_view("active", &active).await?;
     c.commit("v2").await?;
 
     // Open the view
@@ -191,7 +191,7 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     let high_index = c.select("select * where \"Index\" > 50", vec![]).await?;
-    c.attach_view("high_index", &high_index).await?;
+    c.create_view("high_index", &high_index).await?;
     c.commit("Add view").await?;
 
     let view = c.view("high_index").await?;
@@ -238,7 +238,7 @@ async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     let chile = c.select("select * from data where Country = 'Chile'", vec![]).await?;
-    c.attach_view("chile", &chile).await?;
+    c.create_view("chile", &chile).await?;
     c.commit("Add view").await?;
 
     let view = c.view("chile").await?;
@@ -261,10 +261,10 @@ async fn test_views_method() -> Result<(), BundlebaseError> {
 
     // Create multiple views
     let view1 = c.select("select * where \"Index\" > 50", vec![]).await?;
-    c.attach_view("high_index", &view1).await?;
+    c.create_view("high_index", &view1).await?;
 
     let view2 = c.select("select * where \"Index\" < 30", vec![]).await?;
-    c.attach_view("low_index", &view2).await?;
+    c.create_view("low_index", &view2).await?;
 
     c.commit("Add views").await?;
 
@@ -289,7 +289,7 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
 
     // Create a view
     let adults = c.select("select * where age > 21", vec![]).await?;
-    c.attach_view("adults", &adults).await?;
+    c.create_view("adults", &adults).await?;
     c.commit("Add adults view").await?;
 
     // Get the view ID

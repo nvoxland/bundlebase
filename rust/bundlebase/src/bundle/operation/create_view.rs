@@ -16,12 +16,12 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct AttachViewOp {
+pub struct CreateViewOp {
     pub name: String,
     pub view_id: ObjectId,
 }
 
-impl AttachViewOp {
+impl CreateViewOp {
     pub async fn setup(
         name: &str,
         source_builder: &BundleBuilder,
@@ -95,7 +95,7 @@ impl AttachViewOp {
         view_manifest_dir.file(&filename)?.write_stream(stream).await?;
         debug!("Wrote view commit: {} with {} operations", filename, operations.len());
 
-        Ok(AttachViewOp {
+        Ok(CreateViewOp {
             name: name.to_string(),
             view_id,
         })
@@ -103,9 +103,9 @@ impl AttachViewOp {
 }
 
 #[async_trait]
-impl Operation for AttachViewOp {
+impl Operation for CreateViewOp {
     fn describe(&self) -> String {
-        format!("ATTACH VIEW: '{}'", self.name)
+        format!("CREATE VIEW: '{}'", self.name)
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -127,7 +127,7 @@ impl Operation for AttachViewOp {
         df: DataFrame,
         _ctx: Arc<SessionContext>,
     ) -> Result<DataFrame, BundlebaseError> {
-        // AttachViewOp doesn't modify the dataframe
+        // CreateViewOp doesn't modify the dataframe
         Ok(df)
     }
 
