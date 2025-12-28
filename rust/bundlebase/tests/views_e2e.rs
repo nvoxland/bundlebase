@@ -252,3 +252,80 @@ async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_views_method() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(&random_memory_url().to_string()).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create multiple views
+    let view1 = c.select("select * where \"Index\" > 50", vec![]).await?;
+    c.attach_view("high_index", &view1).await?;
+
+    let view2 = c.select("select * where \"Index\" < 30", vec![]).await?;
+    c.attach_view("low_index", &view2).await?;
+
+    c.commit("Add views").await?;
+
+    // Get views map
+    let views_map = c.views();
+
+    assert_eq!(views_map.len(), 2, "Should have 2 views");
+
+    // Check that both view names are present in the values
+    let names: Vec<&String> = views_map.values().collect();
+    assert!(names.contains(&&"high_index".to_string()));
+    assert!(names.contains(&&"low_index".to_string()));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(&random_memory_url().to_string()).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create a view
+    let adults = c.select("select * where age > 21", vec![]).await?;
+    c.attach_view("adults", &adults).await?;
+    c.commit("Add adults view").await?;
+
+    // Get the view ID
+    let views_map = c.views();
+    assert_eq!(views_map.len(), 1, "Should have 1 view");
+    let (view_id, view_name) = views_map.iter().next().unwrap();
+    assert_eq!(view_name, "adults");
+
+    // Test 1: Open view by name
+    let view_by_name = c.view("adults").await?;
+    assert!(view_by_name.operations().len() >= 4, "View should have operations");
+
+    // Test 2: Open view by ID
+    let view_by_id = c.view(&view_id.to_string()).await?;
+    assert!(view_by_id.operations().len() >= 4, "View should have operations");
+
+    // Test 3: Both should return the same view (same number of operations)
+    assert_eq!(
+        view_by_name.operations().len(),
+        view_by_id.operations().len(),
+        "View opened by name and ID should have same operations"
+    );
+
+    // Test 4: Non-existent name should error with helpful message
+    let result = c.view("nonexistent").await;
+    assert!(result.is_err());
+    let err_msg = result.err().unwrap().to_string();
+    assert!(err_msg.contains("View 'nonexistent' not found"), "Error should mention view not found");
+    assert!(err_msg.contains("adults"), "Error should list available views");
+    assert!(err_msg.contains(&view_id.to_string()), "Error should include view ID");
+
+    // Test 5: Non-existent ID should error
+    let result = c.view("00000000000000000000000000000000").await;
+    assert!(result.is_err());
+    let err_msg = result.err().unwrap().to_string();
+    assert!(err_msg.contains("View with ID"), "Error should mention ID not found");
+
+    Ok(())
+}

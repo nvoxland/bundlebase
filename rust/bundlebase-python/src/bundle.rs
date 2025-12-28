@@ -3,6 +3,7 @@ use ::bundlebase::bundle::BundleFacade;
 use ::bundlebase::Bundle;
 use arrow::pyarrow::ToPyArrow;
 use pyo3::prelude::*;
+use std::collections::HashMap;
 
 #[pyclass]
 #[derive(Clone)]
@@ -139,6 +140,14 @@ impl PyBundle {
                     .map(|obj| obj.into_any())
             })
         })
+    }
+
+    fn views(&self) -> HashMap<String, String> {
+        self.inner
+            .views()
+            .into_iter()
+            .map(|(id, name)| (id.to_string(), name))
+            .collect()
     }
 }
 
