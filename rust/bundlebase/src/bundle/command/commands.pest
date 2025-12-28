@@ -18,7 +18,7 @@ COMMENT = _{ "--" ~ (!"\n" ~ ANY)* ~ "\n" }
 // Entry Point
 // ============================================================================
 
-statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt) ~ EOI }
+statement = { SOI ~ (filter_stmt | attach_to_join_stmt | attach_stmt | join_stmt | reindex_stmt) ~ EOI }
 
 // ============================================================================
 // FILTER Statement
@@ -47,6 +47,18 @@ where_condition = @{
 
 attach_stmt = {
     ^"attach" ~ quoted_string ~ (^"as" ~ identifier)? ~ (^"with" ~ with_options)?
+}
+
+// ============================================================================
+// ATTACH TO JOIN Statement
+// ============================================================================
+// Syntax: ATTACH '<path>' TO JOIN '<join_name>'
+// Examples:
+//   ATTACH 'more_users.parquet' TO JOIN 'users'
+//   ATTACH "data.csv" TO JOIN "additional"
+
+attach_to_join_stmt = {
+    ^"attach" ~ quoted_string ~ ^"to" ~ ^"join" ~ quoted_string
 }
 
 with_options = {

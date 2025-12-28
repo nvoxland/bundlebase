@@ -24,6 +24,7 @@ pub fn parse_custom_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseE
             let cmd = match inner_stmt.as_rule() {
                 Rule::filter_stmt => parse_filter_pest(inner_stmt)?,
                 Rule::attach_stmt => parse_attach_pest(inner_stmt)?,
+                Rule::attach_to_join_stmt => parse_attach_to_join_pest(inner_stmt)?,
                 Rule::join_stmt => parse_join_pest(inner_stmt)?,
                 Rule::reindex_stmt => parse_reindex_pest(inner_stmt)?,
                 _ => return Err("Unexpected statement type".into()),
@@ -123,6 +124,34 @@ fn parse_attach_pest(
         .ok_or_else(|| -> BundlebaseError { "ATTACH statement missing path".into() })?;
 
     Ok(BundleCommand::Attach { path })
+}
+
+fn parse_attach_to_join_pest(
+    pair: pest::iterators::Pair<Rule>,
+) -> Result<BundleCommand, BundlebaseError> {
+    let mut path = None;
+    let mut join = None;
+
+    for inner_pair in pair.into_inner() {
+        match inner_pair.as_rule() {
+            Rule::quoted_string => {
+                // First quoted string is the path, second is the join name
+                if path.is_none() {
+                    path = Some(extract_string_content(inner_pair.as_str())?);
+                } else if join.is_none() {
+                    join = Some(extract_string_content(inner_pair.as_str())?);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let path = path
+        .ok_or_else(|| -> BundlebaseError { "ATTACH TO JOIN statement missing path".into() })?;
+    let join = join
+        .ok_or_else(|| -> BundlebaseError { "ATTACH TO JOIN statement missing join name".into() })?;
+
+    Ok(BundleCommand::AttachToJoin { join, path })
 }
 
 fn parse_join_pest(
@@ -344,6 +373,48 @@ mod tests {
                 assert_eq!(path, "path/with'quote.csv");
             }
             _ => panic!("Expected Attach variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_attach_to_join() {
+        let sql = "ATTACH 'more_users.parquet' TO JOIN 'users'";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::AttachToJoin { join, path }) => {
+                assert_eq!(join, "users");
+                assert_eq!(path, "more_users.parquet");
+            }
+            _ => panic!("Expected AttachToJoin variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_attach_to_join_double_quotes() {
+        let sql = "ATTACH \"data.csv\" TO JOIN \"additional\"";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::AttachToJoin { join, path }) => {
+                assert_eq!(join, "additional");
+                assert_eq!(path, "data.csv");
+            }
+            _ => panic!("Expected AttachToJoin variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_attach_to_join_case_insensitive() {
+        let sql = "attach 'file.json' to join 'joined_data'";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::AttachToJoin { join, path }) => {
+                assert_eq!(join, "joined_data");
+                assert_eq!(path, "file.json");
+            }
+            _ => panic!("Expected AttachToJoin variant"),
         }
     }
 
