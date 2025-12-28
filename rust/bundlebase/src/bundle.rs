@@ -323,6 +323,45 @@ impl Bundle {
         self.views.get(name)
     }
 
+    /// Get the view ID for a given view identifier (either name or ID)
+    ///
+    /// This method accepts either:
+    /// - A view ID (as a string representation of ObjectId)
+    /// - A view name
+    ///
+    /// Returns the ID and name if found, or an error if not found or ambiguous.
+    pub fn get_view_id_by_name_or_id(&self, identifier: &str) -> Result<(ObjectId, String), BundlebaseError> {
+        // Try to parse as ObjectId first
+        if let Ok(id) = ObjectId::try_from(identifier) {
+            // Look for this ID in the views map values
+            for (name, view_id) in &self.views {
+                if view_id == &id {
+                    return Ok((id, name.clone()));
+                }
+            }
+            return Err(format!("View with ID '{}' not found", identifier).into());
+        }
+
+        // Treat as name
+        if let Some(id) = self.views.get(identifier) {
+            Ok((id.clone(), identifier.to_string()))
+        } else {
+            // Provide helpful error message listing available views
+            if self.views.is_empty() {
+                Err(format!("View '{}' not found (no views exist)", identifier).into())
+            } else {
+                let available: Vec<String> = self.views.iter()
+                    .map(|(name, id)| format!("{} (id: {})", name, id))
+                    .collect();
+                Err(format!(
+                    "View '{}' not found. Available views:\n  {}",
+                    identifier,
+                    available.join("\n  ")
+                ).into())
+            }
+        }
+    }
+
     /// Get the base pack ID (for testing/debugging)
     pub fn base_pack(&self) -> Option<ObjectId> {
         self.base_pack.clone()
@@ -578,6 +617,14 @@ impl BundleFacade for Bundle {
         let bundle =
             BundleBuilder::extend(Arc::new(self.clone()), &self.data_dir.url().as_str())?;
         bundle.select(sql, params).await
+    }
+
+    fn views(&self) -> HashMap<ObjectId, String> {
+        // Reverse the name->id HashMap to id->name
+        self.views
+            .iter()
+            .map(|(name, id)| (id.clone(), name.clone()))
+            .collect()
     }
 }
 

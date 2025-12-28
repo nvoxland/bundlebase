@@ -1,9 +1,11 @@
 use crate::bundle::BundleCommit;
+use crate::io::ObjectId;
 use crate::{BundlebaseError, BundleBuilder};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::common::ScalarValue;
 use datafusion::dataframe::DataFrame;
+use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
@@ -57,4 +59,7 @@ pub trait BundleFacade {
         sql: &str,
         params: Vec<ScalarValue>,
     ) -> Result<BundleBuilder, BundlebaseError>;
+
+    /// Returns a map of view IDs to view names for all views in this container
+    fn views(&self) -> HashMap<ObjectId, String>;
 }

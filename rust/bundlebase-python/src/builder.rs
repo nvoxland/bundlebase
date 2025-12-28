@@ -6,6 +6,7 @@ use crate::utils::convert_py_params;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFunction};
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -790,27 +791,38 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Open a view by name, returning a read-only Bundle
+    /// Open a view by name or ID, returning a read-only Bundle
     fn view<'py>(
         slf: PyRef<'_, Self>,
-        name: &str,
+        identifier: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
-        let name = name.to_string();
+        let identifier = identifier.to_string();
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let builder = inner.lock().await;
             let bundle = builder
-                .view(&name)
+                .view(&identifier)
                 .await
-                .map_err(|e| to_py_error(&format!("Failed to open view '{}'", name), e))?;
+                .map_err(|e| to_py_error(&format!("Failed to open view '{}'", identifier), e))?;
             drop(builder);
 
             Python::attach(|py| {
                 Py::new(py, super::bundle::PyBundle::new(bundle))
                     .map_err(|e| to_py_error("Failed to create bundle", e))
             })
+        })
+    }
+
+    fn views(&self) -> HashMap<String, String> {
+        Python::with_gil(|_py| {
+            self.inner
+                .blocking_lock()
+                .views()
+                .into_iter()
+                .map(|(id, name)| (id.to_string(), name))
+                .collect()
         })
     }
 }

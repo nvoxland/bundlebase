@@ -1047,3 +1047,79 @@ async def test_view_chaining():
     # Both should have operations
     assert len(v1.operations()) >= 4
     assert len(v2.operations()) >= 4
+
+
+@pytest.mark.asyncio
+async def test_views_method():
+    """Test the views() method returns id->name mapping."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create multiple views
+    view1 = await c.select("select * where \"Index\" > 50")
+    c = await c.attach_view("high_index", view1)
+
+    view2 = await c.select("select * where \"Index\" < 30")
+    c = await c.attach_view("low_index", view2)
+
+    await c.commit("Add views")
+
+    # Get views map (id->name)
+    views_map = c.views()
+
+    assert isinstance(views_map, dict), "Should return a dictionary"
+    assert len(views_map) == 2, "Should have 2 views"
+
+    # Check that both view names are in the values
+    view_names = list(views_map.values())
+    assert "high_index" in view_names
+    assert "low_index" in view_names
+
+
+@pytest.mark.asyncio
+async def test_view_lookup_by_name_and_id():
+    """Test that view() can accept either a name or an ID."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create a view
+    high_index = await c.select("select * where \"Index\" > 50")
+    c = await c.attach_view("high_index", high_index)
+    await c.commit("Add view")
+
+    # Get the view ID
+    views_map = c.views()
+    assert len(views_map) == 1, "Should have 1 view"
+    view_id = list(views_map.keys())[0]
+    view_name = views_map[view_id]
+    assert view_name == "high_index"
+
+    # Test 1: Open view by name
+    view_by_name = await c.view("high_index")
+    assert view_by_name is not None, "Should open view by name"
+    assert view_by_name.url is not None, "View should have a URL"
+
+    # Test 2: Open view by ID
+    view_by_id = await c.view(view_id)
+    assert view_by_id is not None, "Should open view by ID"
+    assert view_by_id.url is not None, "View should have a URL"
+
+    # Test 3: Both views should point to the same location
+    assert view_by_name.url == view_by_id.url, \
+        "View opened by name and ID should have same URL"
+
+    # Test 4: Non-existent name should error with helpful message
+    with pytest.raises(Exception) as exc_info:
+        await c.view("nonexistent")
+    err_msg = str(exc_info.value)
+    assert "View 'nonexistent' not found" in err_msg, "Error should mention view not found"
+    assert "high_index" in err_msg, "Error should list available views"
+    assert view_id in err_msg, "Error should include view ID"
+
+    # Test 5: Non-existent ID should error
+    with pytest.raises(Exception) as exc_info:
+        await c.view("ff")
+    err_msg = str(exc_info.value)
+    assert "View with ID" in err_msg, "Error should mention ID not found"

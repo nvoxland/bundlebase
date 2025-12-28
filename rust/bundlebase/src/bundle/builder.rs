@@ -474,35 +474,35 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Open a view by name, returning a read-only Bundle
+    /// Open a view by name or ID, returning a read-only Bundle
     ///
-    /// Looks up the view by name and opens it as a Bundle. The view automatically
+    /// Looks up the view by name or ID and opens it as a Bundle. The view automatically
     /// inherits all changes from its parent bundle through the FROM mechanism.
     ///
     /// # Arguments
-    /// * `name` - Name of the view to open
+    /// * `identifier` - Name or ID of the view to open
     ///
     /// # Returns
     /// A read-only Bundle representing the view
     ///
     /// # Errors
-    /// Returns an error if the view doesn't exist
+    /// Returns an error if the view doesn't exist or if the identifier is ambiguous
     ///
     /// # Example
     /// ```no_run
     /// # use bundlebase::{Bundle, BundleBuilder, BundlebaseError};
     /// # async fn example(c: &BundleBuilder) -> Result<(), BundlebaseError> {
+    /// // Open by name
     /// let view = c.view("adults").await?;
-    /// let operations = view.operations();
+    ///
+    /// // Or open by ID
+    /// let view = c.view("abc123def456").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn view(&self, name: &str) -> Result<Bundle, BundlebaseError> {
-        // Look up view ID
-        let view_id = self
-            .bundle
-            .get_view_id(name)
-            .ok_or_else(|| format!("View '{}' not found", name))?;
+    pub async fn view(&self, identifier: &str) -> Result<Bundle, BundlebaseError> {
+        // Look up view by name or ID
+        let (view_id, _name) = self.bundle.get_view_id_by_name_or_id(identifier)?;
 
         // Construct view path: _manifest/view_{id}/
         let view_path = self
@@ -997,6 +997,10 @@ impl BundleFacade for BundleBuilder {
         }).await?;
 
         Ok(bundle)
+    }
+
+    fn views(&self) -> HashMap<ObjectId, String> {
+        self.bundle.views()
     }
 }
 
