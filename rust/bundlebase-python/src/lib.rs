@@ -1,6 +1,7 @@
 mod builder;
 mod commit;
 mod bundle;
+mod bundle_config;
 mod data_generator;
 mod function_impl;
 mod operation;
@@ -17,15 +18,21 @@ use pyo3::types::PyModule;
 use builder::{PyBundleBuilder, PyChange, PyBundleStatus};
 use commit::PyCommit;
 use bundle::PyBundle;
+use bundle_config::{PyBundleConfig, config_from_python};
 use operation::PyOperation;
 use record_batch_stream::PyRecordBatchStream;
 use schema::{PySchema, PySchemaField};
 use session_context::PySessionContext;
 
 #[pyfunction]
-pub fn create(data_dir: String, py: Python) -> PyResult<Bound<PyAny>> {
+#[pyo3(signature = (data_dir, config=None))]
+pub fn create<'py>(data_dir: String, config: Option<&Bound<'py, PyAny>>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let config_inner = config
+        .map(|c| config_from_python(c))
+        .transpose()?;
+
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        BundleBuilder::create(data_dir.as_str())
+        BundleBuilder::create(data_dir.as_str(), config_inner)
             .await
             .map(|o| PyBundleBuilder::new(o))
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
@@ -33,9 +40,14 @@ pub fn create(data_dir: String, py: Python) -> PyResult<Bound<PyAny>> {
 }
 
 #[pyfunction]
-pub fn open(url: String, py: Python) -> PyResult<Bound<PyAny>> {
+#[pyo3(signature = (url, config=None))]
+pub fn open<'py>(url: String, config: Option<&Bound<'py, PyAny>>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let config_inner = config
+        .map(|c| config_from_python(c))
+        .transpose()?;
+
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        Bundle::open(url.as_str())
+        Bundle::open(url.as_str(), config_inner)
             .await
             .map(|o| PyBundle::new(o))
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
@@ -64,6 +76,7 @@ fn bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyBundleBuilder>()?;
     m.add_class::<PyChange>()?;
     m.add_class::<PyBundleStatus>()?;
+    m.add_class::<PyBundleConfig>()?;
     m.add_class::<PySchema>()?;
     m.add_class::<PySchemaField>()?;
     m.add_class::<PyCommit>()?;

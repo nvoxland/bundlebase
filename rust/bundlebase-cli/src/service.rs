@@ -269,7 +269,7 @@ mod tests {
     #[tokio::test]
     async fn test_flight_service_with_memory_bundle() {
         // Create a bundle and wrap it in a Flight service
-        let builder = BundleBuilder::create("memory:///flight_test")
+        let builder = BundleBuilder::create("memory:///flight_test", None)
             .await
             .expect("Failed to create bundle");
 
@@ -298,7 +298,7 @@ mod tests {
         );
 
         // Create a new bundle (what happens with --create flag)
-        let builder = BundleBuilder::create(&url)
+        let builder = BundleBuilder::create(&url, None)
             .await
             .expect("Failed to create bundle");
 

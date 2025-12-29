@@ -5,7 +5,7 @@ use bundlebase::BundleBuilder;
 #[tokio::test]
 async fn test_bundle_data_table() {
     let data_dir = random_memory_dir();
-    let mut bundle = BundleBuilder::create(data_dir.url().as_str())
+    let mut bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
         .unwrap();
 
@@ -38,7 +38,7 @@ async fn test_bundle_data_table() {
 #[tokio::test]
 async fn test_data_table_schema() {
     let data_dir = random_memory_dir();
-    let mut bundle = BundleBuilder::create(data_dir.url().as_str())
+    let mut bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
         .unwrap();
 

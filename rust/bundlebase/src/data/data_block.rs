@@ -12,6 +12,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use parking_lot::RwLock;
 use std::any::Any;
 use std::sync::Arc;
+use crate::BundleConfig;
 
 /// Candidate index for a query with its estimated selectivity
 struct IndexCandidate<'a> {
@@ -30,6 +31,7 @@ pub struct DataBlock {
     reader: Arc<dyn DataReader>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     data_dir: Arc<ObjectStoreDir>,
+    config: Arc<BundleConfig>,
 }
 
 impl DataBlock {
@@ -53,6 +55,7 @@ impl DataBlock {
         reader: Arc<dyn DataReader>,
         indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
         data_dir: Arc<ObjectStoreDir>,
+        config: Arc<BundleConfig>,
     ) -> Self {
         Self {
             id,
@@ -61,6 +64,7 @@ impl DataBlock {
             reader,
             indexes,
             data_dir,
+            config,
         }
     }
 
@@ -82,7 +86,7 @@ impl DataBlock {
         predicate: &IndexPredicate,
     ) -> Result<Option<f64>, Box<dyn std::error::Error + Send + Sync>> {
         // Load index file from data directory
-        let index_file = ObjectStoreFile::from_str(index_path, &self.data_dir)?;
+        let index_file = ObjectStoreFile::from_str(index_path, &self.data_dir, self.config.clone())?;
 
         let index_bytes = index_file.read_bytes().await?
             .ok_or_else(|| format!("Index file not found: {}", index_path))?;
@@ -123,7 +127,7 @@ impl DataBlock {
         predicate: &IndexPredicate,
     ) -> Result<Vec<crate::data::RowId>, Box<dyn std::error::Error + Send + Sync>> {
         // Load index file from data directory
-        let index_file = ObjectStoreFile::from_str(index_path, &self.data_dir)?;
+        let index_file = ObjectStoreFile::from_str(index_path, &self.data_dir, self.config.clone())?;
 
         let index_bytes = index_file.read_bytes().await?
             .ok_or_else(|| format!("Index file not found: {}", index_path))?;

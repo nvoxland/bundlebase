@@ -89,7 +89,8 @@ impl SchemaProvider for BlockSchemaProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::BundleConfig;
+use super::*;
     use crate::data::MockReader;
     use arrow_schema::{DataType, Field, Schema};
     use parking_lot::RwLock;
@@ -134,7 +135,7 @@ mod tests {
 
         // Create empty indexes and data_dir for test
         let indexes = Arc::new(parking_lot::RwLock::new(Vec::new()));
-        let data_dir = Arc::new(crate::io::ObjectStoreDir::from_str("memory:///test").unwrap());
+        let data_dir = Arc::new(crate::io::ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap());
 
         let block11 = Arc::new(DataBlock::new(
             block11_id.clone(),
@@ -143,6 +144,7 @@ mod tests {
             Arc::new(MockReader::with_schema(schema1.clone())),
             indexes.clone(),
             data_dir.clone(),
+            BundleConfig::default().into(),
         ));
 
         let block12 = Arc::new(DataBlock::new(
@@ -152,6 +154,7 @@ mod tests {
             Arc::new(MockReader::with_schema(schema1.clone())),
             indexes.clone(),
             data_dir.clone(),
+            BundleConfig::default().into(),
         ));
 
         let block21 = Arc::new(DataBlock::new(
@@ -161,6 +164,7 @@ mod tests {
             Arc::new(MockReader::with_schema(schema2.clone())),
             indexes.clone(),
             data_dir.clone(),
+            BundleConfig::default().into(),
         ));
 
         let pack1 = Arc::new(DataPack::new(pack1_id.clone()));

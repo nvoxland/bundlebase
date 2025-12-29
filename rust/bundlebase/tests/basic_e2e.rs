@@ -1,3 +1,4 @@
+use bundlebase::BundleConfig;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use bundlebase;
 use bundlebase::bundle::{BundleFacade, INIT_FILENAME};
@@ -14,7 +15,7 @@ mod common;
 async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
     let mut bundle =
-        bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
+        bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("userdata.parquet"))
@@ -23,7 +24,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
         .await?
         .rename_column("first_name", "name")
         .await?;
-    let version = ObjectStoreFile::from_url(&Url::parse(test_datafile("userdata.parquet"))?)?
+    let version = ObjectStoreFile::from_url(&Url::parse(test_datafile("userdata.parquet"))?, BundleConfig::default().into())?
         .version()
         .await?;
 
@@ -182,7 +183,7 @@ changes:
     assert_eq!(contents, expected);
 
     // Open the saved bundle
-    let loaded_bundle = Bundle::open(data_dir.url().as_str()).await?;
+    let loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;
 
     assert_eq!(loaded_bundle.history().len(), 1);
     assert_eq!(loaded_bundle.history().get(0).unwrap().url, Some(url));
@@ -199,7 +200,7 @@ changes:
 #[tokio::test]
 async fn test_empty_bundle() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str()).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     assert_eq!(0, bundle.num_rows().await?);
 
@@ -210,7 +211,7 @@ async fn test_empty_bundle() -> Result<(), BundlebaseError> {
     assert_eq!(0, bundle.num_rows().await?);
 
     // Test loading the saved bundle
-    let loaded_bundle = Bundle::open(data_dir.as_str()).await?;
+    let loaded_bundle = Bundle::open(data_dir.as_str(), None).await?;
 
     // Verify it's empty
     assert_eq!(bundle.num_rows().await?, 0);
@@ -223,7 +224,7 @@ async fn test_save_multiple_operations() -> Result<(), BundlebaseError> {
     let temp_dir = random_memory_dir();
 
     let mut bundle =
-        bundlebase::BundleBuilder::create(temp_dir.url().as_str()).await?;
+        bundlebase::BundleBuilder::create(temp_dir.url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
     bundle.remove_column("title").await?;
     bundle.remove_column("comments").await?;
@@ -399,7 +400,7 @@ async fn test_open_with_function() -> Result<(), BundlebaseError> {
 
     // Create bundle with function definition
     let mut bundle =
-        bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
+        bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
     let schema = SchemaRef::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
         Field::new("value", DataType::Utf8, true),
@@ -411,7 +412,7 @@ async fn test_open_with_function() -> Result<(), BundlebaseError> {
     bundle.commit("Commit changes").await?;
 
     // Open the saved bundle
-    let _loaded_bundle = Bundle::open(data_dir.url().as_str()).await?;
+    let _loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;
 
     Ok(())
 }
@@ -419,7 +420,7 @@ async fn test_open_with_function() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_name_and_description() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str()).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Default should be None
     assert!(bundle.bundle.name().is_none());
@@ -438,7 +439,7 @@ async fn test_name_and_description() -> Result<(), BundlebaseError> {
     assert_eq!(bundle.bundle.description(), Some("My Bundle Desc"));
 
     // Open and verify
-    let loaded = Bundle::open(data_dir.as_str()).await?;
+    let loaded = Bundle::open(data_dir.as_str(), None).await?;
     assert_eq!(loaded.name(), Some("My Bundle"));
     assert_eq!(loaded.description(), Some("My Bundle Desc"));
 
@@ -449,7 +450,7 @@ async fn test_name_and_description() -> Result<(), BundlebaseError> {
 async fn test_attach_csv() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
     let mut bundle =
-        bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
+        bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"))
@@ -582,7 +583,7 @@ changes:
     );
 
     // Open the saved bundle
-    let loaded_bundle = Bundle::open(data_dir.url().as_str()).await?;
+    let loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;
 
     // Verify data can be queried
     let df = loaded_bundle.dataframe().await?;
@@ -593,7 +594,7 @@ changes:
     // Verify layout file exists
     let layout = op_field!(commit.operations()[1], AnyOperation::AttachBlock, layout)
         .unwrap();
-    let layout_file = ObjectStoreFile::from_str(&layout, loaded_bundle.data_dir())?;
+    let layout_file = ObjectStoreFile::from_str(&layout, loaded_bundle.data_dir(), BundleConfig::default().into())?;
     assert!(
         layout_file.exists().await?,
         "Layout file should exist at: {}",
@@ -607,7 +608,7 @@ changes:
 async fn test_attach_json() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
     let mut bundle =
-        bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
+        bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("objects.json"))
@@ -642,7 +643,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     }
 
     // Open the saved bundle
-    let loaded_bundle = Bundle::open(data_dir.url().as_str()).await?;
+    let loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;
 
     // Verify data can be queried
     let df = loaded_bundle.dataframe().await?;

@@ -9,7 +9,7 @@ mod common;
 #[tokio::test]
 async fn test_filter_basic() -> Result<(), BundlebaseError> {
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Filter: salary > 50000
@@ -30,7 +30,7 @@ async fn test_filter_basic() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_filter_multiple_parameters() -> Result<(), BundlebaseError> {
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Filter: salary > 50000 AND first_name = 'John'
@@ -53,7 +53,7 @@ async fn test_filter_multiple_parameters() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_filter_preserves_schema() -> Result<(), BundlebaseError> {
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Store schema before filter (bundle will be moved)
@@ -80,7 +80,7 @@ async fn test_filter_preserves_schema() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_filter_with_other_operations() -> Result<(), BundlebaseError> {
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply filter then remove a column
@@ -101,7 +101,7 @@ async fn test_filter_with_other_operations() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_select_limit() -> Result<(), BundlebaseError> {
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Query with LIMIT
@@ -125,7 +125,7 @@ async fn test_select_limit() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_select_with_filter() -> Result<(), BundlebaseError> {
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Query with WHERE clause

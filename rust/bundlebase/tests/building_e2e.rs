@@ -1,3 +1,4 @@
+use bundlebase::BundleConfig;
 use bundlebase;
 use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME};
 use bundlebase::io::ObjectStoreFile;
@@ -14,7 +15,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     let temp2 = random_memory_dir();
 
     // Create and commit first bundle
-    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string()).await?;
+    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
     assert_eq!(None, c1.bundle.from());
     assert_eq!(temp1.url(), c1.url());
     c1.attach(test_datafile("customers-0-100.csv")).await?;
@@ -27,7 +28,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     assert_eq!(None, c1.bundle.from());
 
     // Open first bundle and extend to new directory
-    let opened1 = Bundle::open(&temp1.to_string()).await?;
+    let opened1 = Bundle::open(&temp1.to_string(), None).await?;
     assert_eq!(opened1.operations().len(), 2);
     assert_eq!(None, opened1.from());
     assert_eq!(temp1.url(), opened1.url());
@@ -47,7 +48,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     assert_eq!(Some(temp1.url().clone()), init_commit.from);
 
     // Open the extended bundle
-    let reopened = Bundle::open(&temp2.to_string()).await?;
+    let reopened = Bundle::open(&temp2.to_string(), None).await?;
     assert_eq!(Some(temp1.url()), c2.bundle.from());
     assert_eq!(reopened.url(), c2.url());
 
@@ -66,19 +67,19 @@ async fn test_simple_extend_chain() -> Result<(), BundlebaseError> {
     let temp2 = random_memory_url();
 
     // Create base bundle
-    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string()).await?;
+    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
     c1.attach(test_datafile("customers-0-100.csv")).await?;
     c1.commit("Base commit").await?;
 
     // Extend and commit
-    let base1 = Bundle::open(&temp1.to_string()).await?;
+    let base1 = Bundle::open(&temp1.to_string(), None).await?;
     assert_eq!(1, base1.history().len());
     let mut c2 = base1.extend(&temp2.to_string())?;
     c2.remove_column("country").await?;
     c2.commit("Extended commit").await?;
 
     // Reopen extended bundle and verify history
-    let reopened = Bundle::open(&temp2.to_string()).await?;
+    let reopened = Bundle::open(&temp2.to_string(), None).await?;
     let history = reopened.history();
 
     assert_eq!(
@@ -100,21 +101,21 @@ async fn test_lazy_history_traversal() -> Result<(), BundlebaseError> {
     let temp3 = random_memory_url();
 
     // Create 3-level bundle chain
-    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string()).await?;
+    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
     c1.attach(test_datafile("customers-0-100.csv")).await?;
     c1.commit("Base commit").await?;
 
-    let base1 = Bundle::open(&temp1.to_string()).await?;
+    let base1 = Bundle::open(&temp1.to_string(), None).await?;
     let mut c2 = base1.extend(&temp2.to_string())?;
     c2.remove_column("country").await?;
     c2.commit("Second commit").await?;
 
-    let base2 = Bundle::open(&temp2.to_string()).await?;
+    let base2 = Bundle::open(&temp2.to_string(), None).await?;
     let mut c3 = base2.extend(&temp3.to_string())?;
     c3.remove_column("phone").await?;
     c3.commit("Third commit").await?;
 
-    let final_bundle = Bundle::open(&temp3.to_string()).await?;
+    let final_bundle = Bundle::open(&temp3.to_string(), None).await?;
 
     let history = final_bundle.history();
 
@@ -133,7 +134,7 @@ async fn test_lazy_history_traversal() -> Result<(), BundlebaseError> {
 async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
     let temp = random_memory_url();
 
-    let mut bundle = bundlebase::BundleBuilder::create(&temp.to_string()).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(&temp.to_string(), None).await?;
     bundle
         .attach(test_datafile("customers-0-100.csv"))
         .await?;
@@ -145,7 +146,7 @@ async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
     bundle.commit("Test commit").await?;
 
     // After commit, reopen the bundle
-    let reopened = Bundle::open(&temp.to_string()).await?;
+    let reopened = Bundle::open(&temp.to_string(), None).await?;
 
     // Operations should now be in state
     assert_eq!(reopened.operations().len(), 3);
@@ -159,14 +160,14 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     let temp2 = random_memory_dir();
 
     // Create Bundle A with attachment using RELATIVE path
-    let mut bundle_a = bundlebase::BundleBuilder::create(&temp1.to_string()).await?;
+    let mut bundle_a = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
 
     // Copy test data to bundle's directory with a local name
     let source_file = test_datafile("customers-0-100.csv");
     let local_file = temp1.file("local_data.csv")?;
 
     // Read source data and write to local location
-    let source_obj = ObjectStoreFile::from_url(&Url::parse(source_file)?)?;
+    let source_obj = ObjectStoreFile::from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
     let data = source_obj.read_bytes().await?.expect("Failed to read source file");
     local_file.write(data).await?;
 
@@ -175,13 +176,13 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     bundle_a.commit("Bundle A with relative path").await?;
 
     // Extend to Bundle B in different location
-    let bundle_a_reopened = Bundle::open(&temp1.to_string()).await?;
+    let bundle_a_reopened = Bundle::open(&temp1.to_string(), None).await?;
     let mut bundle_b = bundle_a_reopened.extend(&temp2.to_string())?;
     bundle_b.remove_column("country").await?;
     bundle_b.commit("Bundle B extends A").await?;
 
     // Reopen Bundle B - this should work without file-not-found errors
-    let bundle_b_reopened = Bundle::open(&temp2.to_string()).await?;
+    let bundle_b_reopened = Bundle::open(&temp2.to_string(), None).await?;
 
     // Verify data is accessible
     let df = bundle_b_reopened.dataframe().await?;

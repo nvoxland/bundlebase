@@ -579,7 +579,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_column_source_from_dataframe() -> Result<(), BundlebaseError>{
-        let mut bundle = BundleBuilder::create("memory:///test_bundle").await?;
+        let mut bundle = BundleBuilder::create("memory:///test_bundle", None).await?;
         bundle.attach(test_datafile("userdata.parquet")).await?;
 
         let df = bundle.dataframe().await?;

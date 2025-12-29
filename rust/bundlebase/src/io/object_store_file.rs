@@ -1,3 +1,4 @@
+use crate::BundleConfig;
 use object_store::path::Path as ObjectPath;
 use object_store::{ObjectMeta, ObjectStore};
 
@@ -8,6 +9,7 @@ use datafusion::execution::object_store::ObjectStoreUrl;
 use futures::stream::{StreamExt, TryStreamExt};
 use serde::ser;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 use url::Url;
@@ -20,17 +22,27 @@ pub struct ObjectStoreFile {
 }
 
 impl ObjectStoreFile {
-    pub fn from_url(url: &Url) -> Result<ObjectStoreFile, BundlebaseError> {
-        let (store, path) = parse_url(url)?;
+    pub fn from_url(
+        url: &Url,
+        config: Arc<BundleConfig>,
+    ) -> Result<ObjectStoreFile, BundlebaseError> {
+        let config_map = config.get_config_for_url(url);
+        let (store, path) = parse_url(url, &config_map)?;
 
         Self::new(&url, store, &path)
     }
 
     /// Creates a file from the passed string. The string can be either a URL or a path relative to the passed base_dir.
-    pub fn from_str(path: &str, base: &ObjectStoreDir) -> Result<ObjectStoreFile, BundlebaseError> {
+    pub fn from_str(
+        path: &str,
+        base: &ObjectStoreDir,
+        config: Arc<BundleConfig>,
+    ) -> Result<ObjectStoreFile, BundlebaseError> {
         if path.contains(":") {
-            Self::from_url(&Url::parse(path)?)
+            // Absolute URL - use provided config
+            Self::from_url(&Url::parse(path)?, config)
         } else {
+            // Relative path - config flows through base.file()
             base.file(path)
         }
     }
@@ -263,19 +275,25 @@ impl Display for ObjectStoreFile {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::BundleConfig;
+use super::*;
     use crate::test_utils::random_memory_file;
 
     #[test]
     fn test_filename() {
-        let file =
-            ObjectStoreFile::from_url(&Url::parse("memory:///test/test.json").unwrap()).unwrap();
+        let file = ObjectStoreFile::from_url(
+            &Url::parse("memory:///test/test.json").unwrap(),
+            BundleConfig::default().into(),
+        )
+        .unwrap();
         assert_eq!(file.filename(), "test.json");
         assert_eq!(file.url().to_string(), "memory:///test/test.json");
 
-        let file =
-            ObjectStoreFile::from_url(&Url::parse("memory:///test/dir/here/test.json").unwrap())
-                .unwrap();
+        let file = ObjectStoreFile::from_url(
+            &Url::parse("memory:///test/dir/here/test.json").unwrap(),
+            BundleConfig::default().into(),
+        )
+        .unwrap();
         assert_eq!("test/dir/here/test.json", file.path.to_string());
         assert_eq!(file.filename(), "test.json");
     }
@@ -297,7 +315,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_null() {
-        let file = ObjectStoreFile::from_url(&Url::parse("empty:///test.json").unwrap()).unwrap();
+        let file = ObjectStoreFile::from_url(
+            &Url::parse("empty:///test.json").unwrap(),
+            BundleConfig::default().into(),
+        )
+        .unwrap();
         assert!(!file.exists().await.unwrap());
 
         assert!(file.write(bytes::Bytes::from("hello world")).await.is_err());

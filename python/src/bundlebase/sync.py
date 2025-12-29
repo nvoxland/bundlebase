@@ -346,13 +346,14 @@ class SyncBundleBuilder(SyncBundle):
 # ======================== Factory Functions ========================
 
 
-def create(path: str = "") -> SyncBundleBuilder:
+def create(path: str = "", config: Optional[Any] = None) -> SyncBundleBuilder:
     """Create a new Bundle synchronously.
 
     Creates an empty bundle at the specified path. Use attach() to add data.
 
     Args:
         path: Optional path for bundle storage (default: random memory location)
+        config: Optional configuration (BundleConfig or dict) for cloud storage settings
 
     Returns:
         SyncBundleBuilder ready for immediate use
@@ -363,6 +364,10 @@ def create(path: str = "") -> SyncBundleBuilder:
         >>> c.attach("data.parquet")
         >>> df = c.to_pandas()
 
+        >>> # With config:
+        >>> config = {"region": "us-west-2"}
+        >>> c = dc.create("s3://bucket/", config=config)
+
     Raises:
         ValueError: If path is invalid
     """
@@ -370,19 +375,20 @@ def create(path: str = "") -> SyncBundleBuilder:
 
     # Call the underlying async create function directly (returns coroutine)
     async def _create_async():
-        return await _bundlebase.create(path)
+        return await _bundlebase.create(path, config)
 
     async_bundle = _loop_manager.run_sync(_create_async())
     return SyncBundleBuilder(async_bundle, _loop_manager)
 
 
-def open(path: str) -> SyncBundle:
+def open(path: str, config: Optional[Any] = None) -> SyncBundle:
     """Open an existing Bundle synchronously.
 
     Loads a previously saved bundle from disk.
 
     Args:
         path: Path to the saved bundle
+        config: Optional configuration (BundleConfig or dict) for cloud storage settings
 
     Returns:
         SyncBundle (read-only) with the loaded operations
@@ -392,6 +398,10 @@ def open(path: str) -> SyncBundle:
         >>> c = dc.open("/path/to/bundle")
         >>> df = c.to_pandas()
 
+        >>> # With config:
+        >>> config = {"region": "us-west-2"}
+        >>> c = dc.open("s3://bucket/container", config=config)
+
     Raises:
         ValueError: If bundle cannot be loaded
     """
@@ -399,7 +409,7 @@ def open(path: str) -> SyncBundle:
 
     # Call the underlying async open function directly (returns coroutine)
     async def _open_async():
-        return await _bundlebase.open(path)
+        return await _bundlebase.open(path, config)
 
     async_bundle = _loop_manager.run_sync(_open_async())
     return SyncBundle(async_bundle, _loop_manager)

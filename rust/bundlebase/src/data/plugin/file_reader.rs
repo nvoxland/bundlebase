@@ -54,7 +54,7 @@ impl<C: FileFormatConfig> FilePlugin<C> {
         schema: Option<SchemaRef>,
     ) -> Result<FileReader<C>, BundlebaseError> {
         Ok(FileReader::new(
-            &ObjectStoreFile::from_str(source, bundle.data_dir())?,
+            &ObjectStoreFile::from_str(source, bundle.data_dir(), bundle.config())?,
             self.config.clone(),
             bundle.ctx(),
             schema,

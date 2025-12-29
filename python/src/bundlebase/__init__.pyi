@@ -1,10 +1,27 @@
 """Type stubs for bundlebase module."""
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 __version__: str
 
-def create(path: str = ...) -> "CreateChain":
+class BundleConfig:
+    """Configuration for container storage and cloud providers."""
+
+    def __init__(self) -> None: ...
+
+    def set(self, key: str, value: str, url_prefix: Optional[str] = None) -> None:
+        """Set a configuration value.
+
+        Args:
+            key: Configuration key
+            value: Configuration value
+            url_prefix: Optional URL prefix for URL-specific config
+        """
+        ...
+
+ConfigType = Union[BundleConfig, Dict[str, Any]]
+
+def create(path: str = ..., config: Optional[ConfigType] = None) -> "CreateChain":
     """
     Create a new Bundle with fluent chaining support.
 
@@ -23,12 +40,13 @@ def create(path: str = ...) -> "CreateChain":
     """
     ...
 
-async def open(path: str) -> PyBundle:
+async def open(path: str, config: Optional[ConfigType] = None) -> PyBundle:
     """
     Load a bundle definition from a saved file.
 
     Args:
         path: Path to the saved bundle file (YAML format)
+        config: Optional configuration (BundleConfig or dict) for cloud storage settings
 
     Returns:
         A PyBundle with the loaded operations (read-only)
@@ -474,6 +492,24 @@ class PyBundleBuilder:
         """
         ...
 
+    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "OperationChain":
+        """
+        Queue a set_config operation.
+
+        Args:
+            key: Configuration key
+            value: Configuration value
+            url_prefix: Optional URL prefix for URL-specific config
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.set_config("region", "us-west-2")
+            c = await c.set_config("endpoint", "http://localhost:9000", url_prefix="s3://test-bucket/")
+        """
+        ...
+
     def filter(self, where_clause: str, params: Optional[List[Any]] = None) -> "OperationChain":
         """
         Queue a filter operation.
@@ -714,6 +750,10 @@ class OperationChain:
         """Queue a set_description operation."""
         ...
 
+    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "OperationChain":
+        """Queue a set_config operation."""
+        ...
+
     def define_function(
         self,
         name: str,
@@ -770,6 +810,10 @@ class CreateChain:
         """Queue a set_description operation."""
         ...
 
+    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "CreateChain":
+        """Queue a set_config operation."""
+        ...
+
     def define_function(
         self,
         name: str,
@@ -824,6 +868,10 @@ class ExtendChain:
 
     def set_description(self, description: str) -> "ExtendChain":
         """Queue a set_description operation."""
+        ...
+
+    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "ExtendChain":
+        """Queue a set_config operation."""
         ...
 
     def define_function(
