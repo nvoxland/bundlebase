@@ -852,6 +852,18 @@ impl PyBundleBuilder {
                 .collect()
         })
     }
+
+    fn operations(&self) -> Vec<super::operation::PyOperation> {
+        Python::with_gil(|_py| {
+            self.inner
+                .blocking_lock()
+                .bundle()
+                .operations()
+                .iter()
+                .map(|op| super::operation::PyOperation::new(op.clone()))
+                .collect()
+        })
+    }
 }
 
 impl PyBundleBuilder {

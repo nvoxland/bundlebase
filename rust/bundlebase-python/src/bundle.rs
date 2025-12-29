@@ -149,6 +149,14 @@ impl PyBundle {
             .map(|(id, name)| (id.to_string(), name))
             .collect()
     }
+
+    fn operations(&self) -> Vec<super::operation::PyOperation> {
+        self.inner
+            .operations()
+            .iter()
+            .map(|op| super::operation::PyOperation::new(op.clone()))
+            .collect()
+    }
 }
 
 impl PyBundle {
