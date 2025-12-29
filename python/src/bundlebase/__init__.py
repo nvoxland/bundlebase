@@ -1,7 +1,7 @@
 """Bundlebase - High-performance data processing library with Python bindings."""
 
 import logging
-from typing import Any, Callable, Optional, Dict, Awaitable
+from typing import Any, Callable, Optional, Dict, Awaitable, Union
 from ._bundlebase import create as _create
 from ._bundlebase import open as _open
 from ._bundlebase import test_datafile as test_datafile
@@ -10,6 +10,7 @@ from ._bundlebase import PyBundle as PyBundle
 from ._bundlebase import PyBundleBuilder as _PyBundleBuilder
 from ._bundlebase import PyChange as PyChange
 from ._bundlebase import PyBundleStatus as PyBundleStatus
+from ._bundlebase import BundleConfig as BundleConfig
 from .conversion import to_pandas, to_polars, to_numpy, to_dict, stream_batches
 from .chain import OperationChain, register_original_method, CreateChain, ExtendChain
 from . import progress
@@ -72,6 +73,7 @@ _original_methods = {
     # Metadata operations
     "set_name": _PyBundleBuilder.set_name,
     "set_description": _PyBundleBuilder.set_description,
+    "set_config": _PyBundleBuilder.set_config,
 
     # Custom function operations
     "define_function": _PyBundleBuilder.define_function,
@@ -127,7 +129,7 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 # (but NOT read-only methods like schema, num_rows, explain)
 mutation_methods = [
     "attach", "remove_column", "rename_column", "filter", "select", "join"
-    "set_name", "set_description", "define_function", "define_index",
+    "set_name", "set_description", "set_config", "define_function", "define_index",
     "rebuild_index", "reindex"
 ]
 for method_name in mutation_methods:
@@ -139,7 +141,9 @@ for method_name in mutation_methods:
 PyBundleBuilder = _PyBundleBuilder
 
 
-def create(path: str = "") -> CreateChain:
+ConfigType = Union[BundleConfig, Dict[str, Any]]
+
+def create(path: str = "", config: Optional[ConfigType] = None) -> CreateChain:
     """
     Create a new Bundle with fluent chaining support.
 
@@ -147,6 +151,7 @@ def create(path: str = "") -> CreateChain:
 
     Args:
         path: Optional path for bundle storage
+        config: Optional configuration (BundleConfig or dict) for cloud storage settings
 
     Returns:
         CreateChain that can be chained with operations
@@ -156,25 +161,37 @@ def create(path: str = "") -> CreateChain:
                   .attach("data.parquet")
                   .remove_column("unwanted")
                   .rename_column("old", "new"))
+
+        # With config:
+        config = {"region": "us-west-2", "s3://bucket/": {"endpoint": "http://localhost:9000"}}
+        c = await create("s3://my-bucket/", config=config)
     """
-    chain = CreateChain(_create, path)
+    chain = CreateChain(_create, path, config)
     return chain
 
 
-async def open(path: str) -> PyBundle:
+async def open(path: str, config: Optional[ConfigType] = None) -> PyBundle:
     """
     Load a bundle definition from a saved file.
 
     Args:
         path: Path to the saved bundle file (YAML format)
+        config: Optional configuration (BundleConfig or dict) for cloud storage settings
 
     Returns:
         A PyBundle with the loaded operations (read-only)
 
     Raises:
         ValueError: If the file cannot be loaded
+
+    Example:
+        bundle = await open("s3://my-bucket/container")
+
+        # With config:
+        config = {"region": "us-west-2"}
+        bundle = await open("s3://my-bucket/container", config=config)
     """
-    return await _open(path)
+    return await _open(path, config)
 
 # Add conversion methods to PyBundle
 PyBundle.to_pandas = lambda self: to_pandas(self)

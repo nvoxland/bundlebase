@@ -12,6 +12,7 @@ mod rebuild_index;
 mod remove_columns;
 mod rename_column;
 mod serde_util;
+mod set_config;
 mod set_description;
 mod set_name;
 
@@ -28,6 +29,7 @@ pub use crate::bundle::operation::select::SelectOp;
 pub use crate::bundle::operation::rebuild_index::RebuildIndexOp;
 pub use crate::bundle::operation::remove_columns::RemoveColumnsOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
+pub use crate::bundle::operation::set_config::SetConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
 use crate::{versioning, BundlebaseError, Bundle};
@@ -115,6 +117,7 @@ pub enum AnyOperation {
     RebuildIndex(RebuildIndexOp),
     Join(JoinOp),
     Select(SelectOp),
+    SetConfig(SetConfigOp),
     SetName(SetNameOp),
     SetDescription(SetDescriptionOp),
 }
@@ -136,6 +139,7 @@ impl Operation for AnyOperation {
             AnyOperation::RebuildIndex(op) => op.describe(),
             AnyOperation::Join(op) => op.describe(),
             AnyOperation::Select(op) => op.describe(),
+            AnyOperation::SetConfig(op) => op.describe(),
             AnyOperation::SetName(op) => op.describe(),
             AnyOperation::SetDescription(op) => op.describe(),
         }
@@ -156,6 +160,7 @@ impl Operation for AnyOperation {
             AnyOperation::RebuildIndex(op) => op.check(bundle).await,
             AnyOperation::Join(op) => op.check(bundle).await,
             AnyOperation::Select(op) => op.check(bundle).await,
+            AnyOperation::SetConfig(op) => op.check(bundle).await,
             AnyOperation::SetName(op) => op.check(bundle).await,
             AnyOperation::SetDescription(op) => op.check(bundle).await,
         }
@@ -176,6 +181,7 @@ impl Operation for AnyOperation {
             AnyOperation::RebuildIndex(op) => op.apply(bundle).await,
             AnyOperation::Join(op) => op.apply(bundle).await,
             AnyOperation::Select(op) => op.apply(bundle).await,
+            AnyOperation::SetConfig(op) => op.apply(bundle).await,
             AnyOperation::SetName(op) => op.apply(bundle).await,
             AnyOperation::SetDescription(op) => op.apply(bundle).await,
         }
@@ -200,6 +206,7 @@ impl Operation for AnyOperation {
             AnyOperation::RebuildIndex(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::Join(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::Select(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::SetConfig(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::SetName(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::SetDescription(op) => op.apply_dataframe(df, ctx).await,
         }
@@ -220,6 +227,7 @@ impl Operation for AnyOperation {
             AnyOperation::RebuildIndex(op) => op.version(),
             AnyOperation::Join(op) => op.version(),
             AnyOperation::Select(op) => op.version(),
+            AnyOperation::SetConfig(op) => op.version(),
             AnyOperation::SetName(op) => op.version(),
             AnyOperation::SetDescription(op) => op.version(),
         }
@@ -314,6 +322,12 @@ impl From<DropIndexOp> for AnyOperation {
 impl From<RebuildIndexOp> for AnyOperation {
     fn from(config: RebuildIndexOp) -> Self {
         AnyOperation::RebuildIndex(config)
+    }
+}
+
+impl From<SetConfigOp> for AnyOperation {
+    fn from(config: SetConfigOp) -> Self {
+        AnyOperation::SetConfig(config)
     }
 }
 

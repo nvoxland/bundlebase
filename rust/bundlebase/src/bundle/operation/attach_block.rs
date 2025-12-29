@@ -115,6 +115,7 @@ impl Operation for AttachBlockOp {
             reader,
             bundle.indexes().clone(),
             Arc::new(bundle.data_dir().clone()),
+            bundle.config()
         ));
 
         let pack = bundle.get_pack(&self.pack_id).expect("Cannot find pack");
@@ -126,7 +127,8 @@ impl Operation for AttachBlockOp {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::BundleConfig;
+use super::*;
     use crate::bundle::BundleFacade;
     use crate::io::ObjectStoreFile;
     use crate::test_utils::{empty_bundle, for_yaml, test_datafile};
@@ -155,7 +157,7 @@ mod tests {
             AttachBlockOp::setup(&ObjectId::generate(), datafile, &empty_bundle().await).await?;
         let block_id = String::from(op.id.clone());
         let pack_id = String::from(op.pack_id.clone());
-        let version = ObjectStoreFile::from_url(&Url::parse(datafile).unwrap())?
+        let version = ObjectStoreFile::from_url(&Url::parse(datafile).unwrap(), BundleConfig::default().into())?
             .version()
             .await?;
 
@@ -263,7 +265,7 @@ schema:
 
     #[tokio::test]
     async fn test_attach_dataframe_schema() -> Result<(), BundlebaseError> {
-        let mut bundle = crate::BundleBuilder::create("memory:///test_bundle").await?;
+        let mut bundle = crate::BundleBuilder::create("memory:///test_bundle", None).await?;
         bundle.attach(test_datafile("userdata.parquet")).await?;
 
         // Get the DataFrame from the bundle

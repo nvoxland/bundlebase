@@ -3,6 +3,7 @@ use crate::BundlebaseError;
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use object_store::path::Path;
 use object_store::{path::Path as ObjectPath, ObjectStore};
+use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
@@ -10,7 +11,15 @@ pub(super) fn compute_store_url(url: &Url) -> ObjectStoreUrl {
     ObjectStoreUrl::parse(format!("{}://{}", url.scheme(), url.authority())).unwrap()
 }
 
-pub(super) fn parse_url(url: &Url) -> Result<(Arc<dyn ObjectStore>, Path), BundlebaseError> {
+/// Parse a URL and return an ObjectStore and Path
+///
+/// # Arguments
+/// * `url` - The URL to parse
+/// * `config` - Optional configuration to apply to the ObjectStore
+pub(super) fn parse_url(
+    url: &Url,
+    config: &HashMap<String, String>,
+) -> Result<(Arc<dyn ObjectStore>, Path), BundlebaseError> {
     if url.scheme() == EMPTY_SCHEME {
         let store: Arc<dyn ObjectStore> = get_null_store();
 
@@ -23,9 +32,67 @@ pub(super) fn parse_url(url: &Url) -> Result<(Arc<dyn ObjectStore>, Path), Bundl
             return Err("Memory URL must be memory:///<path>".into());
         }
         Ok((get_memory_store(), url.path().into()))
+    } else if !config.is_empty() {
+        // Use config to build ObjectStore
+        let store = build_object_store(url, config)?;
+        let path = Path::from(url.path());
+        Ok((Arc::new(store), path))
     } else {
+        // Fallback to object_store::parse_url when no config
         let (store, path) = object_store::parse_url(url)?;
         Ok((Arc::new(store), path))
+    }
+}
+
+/// Build an ObjectStore with configuration
+///
+/// Starts with Builder::from_env() to pick up environment variables,
+/// then applies config values on top (config overrides env vars).
+fn build_object_store(
+    url: &Url,
+    config: &HashMap<String, String>,
+) -> Result<Box<dyn ObjectStore>, BundlebaseError> {
+    use object_store::aws::AmazonS3Builder;
+    use object_store::azure::MicrosoftAzureBuilder;
+    use object_store::gcp::GoogleCloudStorageBuilder;
+
+    match url.scheme() {
+        "s3" => {
+            let mut builder = AmazonS3Builder::from_env().with_url(url.as_str());
+
+            // Apply config values
+            for (key, value) in config {
+                builder = builder.with_config(key.parse()?, value);
+            }
+
+            Ok(Box::new(builder.build()?))
+        }
+        "gs" => {
+            let mut builder = GoogleCloudStorageBuilder::from_env().with_url(url.as_str());
+
+            // Apply config values
+            for (key, value) in config {
+                builder = builder.with_config(key.parse()?, value);
+            }
+
+            Ok(Box::new(builder.build()?))
+        }
+        "azure" | "az" => {
+            let mut builder = MicrosoftAzureBuilder::from_env().with_url(url.as_str());
+
+            // Apply config values
+            for (key, value) in config {
+                builder = builder.with_config(key.parse()?, value);
+            }
+
+            Ok(Box::new(builder.build()?))
+        }
+        scheme => {
+            // For unknown schemes, fall back to object_store::parse_url
+            let (store, _) = object_store::parse_url(url)
+                .map_err(|e| format!("Unsupported URL scheme '{}': {}", scheme, e))?;
+            Ok(Box::new(store))
+        }
     }
 }
 

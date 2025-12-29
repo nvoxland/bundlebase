@@ -95,12 +95,12 @@ async fn main() -> Result<(), BundlebaseError> {
     let bundle = if args.create {
         info!("Creating bundle at: {}", args.bundle);
         Arc::new(State::new(
-            BundleBuilder::create(&args.bundle).await?,
+            BundleBuilder::create(&args.bundle, None).await?,
         ))
     } else {
         info!("Loading bundle from: {}", args.bundle);
         Arc::new(State::new(
-            Bundle::open(&args.bundle)
+            Bundle::open(&args.bundle, None)
                 .await?
                 .extend(&args.bundle)?,
         ))
@@ -173,7 +173,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_bundle_with_memory_url() {
         // Create a new bundle using memory:// URL
-        let result = BundleBuilder::create("memory:///test_bundle").await;
+        let result = BundleBuilder::create("memory:///test_bundle", None).await;
         assert!(
             result.is_ok(),
             "Failed to create bundle with memory:// URL"
@@ -195,7 +195,7 @@ mod tests {
         );
 
         // Create a new bundle
-        let create_result = BundleBuilder::create(&url).await;
+        let create_result = BundleBuilder::create(&url, None).await;
         assert!(create_result.is_ok(), "Failed to create bundle");
 
         let mut builder = create_result.unwrap();
@@ -207,7 +207,7 @@ mod tests {
             .expect("Failed to commit");
 
         // Now try to open it
-        let open_result = Bundle::open(&url).await;
+        let open_result = Bundle::open(&url, None).await;
         assert!(
             open_result.is_ok(),
             "Failed to reopen bundle after commit"
@@ -225,7 +225,7 @@ mod tests {
             .collect();
 
         for url in bundles {
-            let result = BundleBuilder::create(&url).await;
+            let result = BundleBuilder::create(&url, None).await;
             assert!(result.is_ok(), "Failed to create bundle at {}", url);
 
             let builder = result.unwrap();
@@ -235,7 +235,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_bundle_creation() {
-        let builder = BundleBuilder::create("memory:///empty_test")
+        let builder = BundleBuilder::create("memory:///empty_test", None)
             .await
             .expect("Failed to create empty bundle");
 
@@ -252,7 +252,7 @@ mod tests {
     #[tokio::test]
     async fn test_file_url_path_handling() {
         // Relative path should work
-        let result = BundleBuilder::create("file:///tmp/bundle_test").await;
+        let result = BundleBuilder::create("file:///tmp/bundle_test", None).await;
         assert!(
             result.is_ok(),
             "Failed to create bundle with file:// URL"
@@ -265,7 +265,7 @@ mod tests {
     #[tokio::test]
     async fn test_url_conversion_from_filesystem_path() {
         // The create method should handle filesystem paths and convert them to URLs
-        let result = BundleBuilder::create("memory:///filesystem_compat_test").await;
+        let result = BundleBuilder::create("memory:///filesystem_compat_test", None).await;
         assert!(result.is_ok());
 
         let builder = result.unwrap();
@@ -283,7 +283,7 @@ mod tests {
         ];
 
         for (url, should_succeed) in test_cases {
-            let result = BundleBuilder::create(url).await;
+            let result = BundleBuilder::create(url, None).await;
             if should_succeed {
                 assert!(
                     result.is_ok(),

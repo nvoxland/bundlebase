@@ -20,6 +20,7 @@ impl PyOperation {
             AnyOperation::Filter(_) => "filter".to_string(),
             AnyOperation::Join(_) => "join".to_string(),
             AnyOperation::DefineFunction(_) => "defineFunction".to_string(),
+            AnyOperation::SetConfig(_) => "setConfig".to_string(),
             AnyOperation::SetName(_) => "setName".to_string(),
             AnyOperation::SetDescription(_) => "setDescription".to_string(),
             AnyOperation::IndexBlocks(_) => "indexBlocks".to_string(),

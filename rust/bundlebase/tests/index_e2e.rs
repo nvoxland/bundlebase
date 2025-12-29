@@ -10,7 +10,7 @@ mod common;
 async fn test_basic_indexing() -> Result<(), BundlebaseError> {
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle.attach(test_datafile("customers-0-100.csv")).await?;
     bundle.commit("No index").await?;
@@ -60,7 +60,7 @@ CoalesceBatchesExec: target_batch_size=8192
 
     bundle.commit("Created index").await?;
 
-    let bundle_loaded = Bundle::open(data_dir.url().as_str()).await?;
+    let bundle_loaded = Bundle::open(data_dir.url().as_str(), None).await?;
     let ops_description = bundle_loaded
         .operations()
         .iter()
@@ -108,7 +108,7 @@ CoalesceBatchesExec: target_batch_size=8192
 async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseError> {
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
     bundle.attach(test_datafile("customers-0-100.csv")).await?;
@@ -145,7 +145,7 @@ async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseE
 async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError> {
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
     bundle.attach(test_datafile("customers-0-100.csv")).await?;
@@ -179,7 +179,7 @@ async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError
 async fn test_select_without_index_falls_back() -> Result<(), BundlebaseError> {
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data but DON'T create index
     bundle.attach(test_datafile("customers-0-100.csv")).await?;
@@ -210,7 +210,7 @@ async fn test_select_without_index_falls_back() -> Result<(), BundlebaseError> {
 async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
     bundle.attach(test_datafile("customers-0-100.csv")).await?;
@@ -241,7 +241,7 @@ async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
 async fn test_index_selectivity() -> Result<(), BundlebaseError> {
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str()).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
     bundle.attach(test_datafile("customers-0-100.csv")).await?;

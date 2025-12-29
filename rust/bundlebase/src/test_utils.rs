@@ -2,7 +2,7 @@
 use crate::data::DataReaderFactory;
 use crate::io::{DataStorage, ObjectStoreDir, ObjectStoreFile};
 use crate::functions::FunctionRegistry;
-use crate::BundleBuilder;
+use crate::{BundleBuilder, BundleConfig};
 use arrow_schema::SchemaRef;
 use parking_lot::RwLock;
 use regex::Regex;
@@ -36,7 +36,7 @@ pub fn for_yaml(value: String) -> String {
 }
 
 pub async fn empty_bundle() -> BundleBuilder {
-    BundleBuilder::create(random_memory_url().as_str())
+    BundleBuilder::create(random_memory_url().as_str(), None)
         .await
         .unwrap()
 }
@@ -59,7 +59,7 @@ pub fn test_datafile(name: &str) -> &'static str {
                 let bytes = fs::read(os_path).unwrap();
 
                 let url = Url::parse(&format!("memory:///test_data/{}", filename)).unwrap();
-                let file = ObjectStoreFile::from_url(&url).unwrap();
+                let file = ObjectStoreFile::from_url(&url, BundleConfig::default().into()).unwrap();
 
                 rt.block_on(file.write(bytes.into())).unwrap();
 
@@ -82,7 +82,7 @@ pub fn random_memory_url() -> Url {
 }
 
 pub fn random_memory_dir() -> ObjectStoreDir {
-    ObjectStoreDir::from_url(&random_memory_url()).unwrap()
+    ObjectStoreDir::from_url(&random_memory_url(), BundleConfig::default().into()).unwrap()
 }
 
 pub fn random_memory_file(path: &str) -> ObjectStoreFile {

@@ -25,7 +25,7 @@ use crate::io::{DataStorage, ObjectStoreDir, ObjectStoreFile, EMPTY_URL};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
 use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
-use crate::BundlebaseError;
+use crate::{BundlebaseError, BundleConfig};
 use arrow::array::Array;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -74,6 +74,16 @@ pub struct Bundle {
     storage: Arc<DataStorage>,
     adapter_factory: Arc<DataReaderFactory>,
     function_registry: Arc<RwLock<FunctionRegistry>>,
+
+    /// Final merged configuration (explicit + stored), used for all operations
+    /// This is computed once and updated when SetConfigOp is applied
+    config: Arc<BundleConfig>,
+
+    /// Config passed to create()/open() (preserved for re-merging after SetConfigOp)
+    passed_config: Option<BundleConfig>,
+
+    /// Config stored via SetConfigOp operations (preserved for re-merging)
+    stored_config: BundleConfig,
 }
 
 impl Clone for Bundle {
@@ -111,6 +121,9 @@ impl Clone for Bundle {
             storage: Arc::clone(&self.storage),
             adapter_factory: Arc::clone(&self.adapter_factory),
             function_registry,
+            config: Arc::clone(&self.config),
+            passed_config: self.passed_config.clone(),
+            stored_config: self.stored_config.clone(),
         }
     }
 }
@@ -188,9 +201,12 @@ impl Bundle {
 
             last_manifest_version: 0,
             version: "empty".to_string(),
-            data_dir: ObjectStoreDir::from_url(&url)?,
+            data_dir: ObjectStoreDir::from_url(&url, BundleConfig::default().into())?,
             commits: vec![],
             dataframe,
+            config: Arc::new(crate::BundleConfig::new()),
+            passed_config: None,
+            stored_config: BundleConfig::new(),
         })
     }
 
@@ -209,11 +225,16 @@ impl Bundle {
     /// let bundle = Bundle::open("file:///data/my_bundle").await?;
     /// let schema = bundle.schema();
     /// ```
-    pub async fn open(path: &str) -> Result<Self, BundlebaseError> {
+    pub async fn open(path: &str, config: Option<BundleConfig>) -> Result<Self, BundlebaseError> {
         let mut visited = HashSet::new();
         let mut bundle = Bundle::empty().await?;
+
+        // Set explicit config if provided and recompute merged config
+        bundle.passed_config = config;
+        bundle.recompute_config()?;
+
         Self::open_internal(
-            ObjectStoreDir::from_str(path)?.url().as_str(),
+            ObjectStoreDir::from_str(path, BundleConfig::default().into())?.url().as_str(),
             &mut visited,
             &mut bundle,
         )
@@ -236,7 +257,7 @@ impl Bundle {
             .into());
         }
 
-        let data_dir = ObjectStoreDir::from_str(url)?;
+        let data_dir = ObjectStoreDir::from_str(url, bundle.config())?;
         let manifest_dir = data_dir.subdir("_manifest")?;
 
         let init_commit: Option<InitCommit> = manifest_dir.file(INIT_FILENAME)?.read_yaml().await?;
@@ -398,12 +419,42 @@ impl Bundle {
         &self.data_dir
     }
 
+    pub fn config(&self) -> Arc<BundleConfig> {
+        Arc::clone(&self.config)
+    }
+
+    /// Recompute the merged config and recreate data_dir with it
+    ///
+    /// Merges stored_config and explicit_config (with explicit taking priority),
+    /// then recreates data_dir with the new merged config.
+    ///
+    /// Priority order:
+    /// 1. Explicit config passed to create()/open() (highest)
+    /// 2. Config stored via SetConfigOp operations (lowest)
+    fn recompute_config(&mut self) -> Result<(), BundlebaseError> {
+        // Merge stored_config with explicit_config (explicit takes priority)
+        let merged = if let Some(ref explicit) = self.passed_config {
+            self.stored_config.merge(explicit)
+        } else {
+            self.stored_config.clone()
+        };
+
+        // Update the config field
+        self.config = Arc::new(merged);
+
+        // Recreate data_dir with the new config
+        let url = self.data_dir.url().clone();
+        self.data_dir = ObjectStoreDir::from_url(&url, self.config.clone())?;
+
+        Ok(())
+    }
+
     /// Opens a file relative to the bundle's data directory.
     ///
     /// # Arguments
     /// * `path` - Path relative to data_dir, or a full URL
     fn file(&self, path: &str) -> Result<ObjectStoreFile, BundlebaseError> {
-        ObjectStoreFile::from_str(path, self.data_dir())
+        ObjectStoreFile::from_str(path, self.data_dir(), BundleConfig::default().into())
     }
 
     pub fn ctx(&self) -> Arc<SessionContext> {

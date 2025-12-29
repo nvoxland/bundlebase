@@ -2,6 +2,7 @@
 extern crate core;
 
 pub mod bundle;
+pub mod bundle_config;
 mod data;
 pub mod io;
 pub mod functions;
@@ -16,6 +17,7 @@ pub use crate::bundle::{
     AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade,
     BundleStatus, JoinTypeOption, Operation,
 };
+pub use crate::bundle_config::BundleConfig;
 pub use crate::data::DataGenerator;
 pub use crate::progress::{get_tracker, set_tracker, with_tracker, ProgressId, ProgressTracker};
 pub use functions::{FunctionImpl, FunctionSignature};

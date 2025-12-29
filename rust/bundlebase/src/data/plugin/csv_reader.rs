@@ -72,7 +72,7 @@ impl ReaderPlugin for CsvPlugin {
         let reader = self.inner.reader(source, bundle, schema).await?;
         let layout = match layout {
             None => None,
-            Some(x) => Some(ObjectStoreFile::from_str(x.as_str(), bundle.data_dir())?),
+            Some(x) => Some(ObjectStoreFile::from_str(x.as_str(), bundle.data_dir(), bundle.config())?),
         };
         Ok(Some(Arc::new(CsvReader::new(reader, block_id, &layout))))
     }
@@ -461,7 +461,7 @@ mod tests {
         let block_id = ObjectId::from(1);
 
         // Create a bundle with a writable memory-based data directory
-        let builder = BundleBuilder::create("memory:///test_csv_extract").await?;
+        let builder = BundleBuilder::create("memory:///test_csv_extract", None).await?;
         let binding = builder.bundle();
 
         // First, create a reader to build the layout
@@ -558,7 +558,7 @@ mod tests {
         let block_id = ObjectId::from(1);
 
         // Create a bundle with a writable memory-based data directory
-        let builder = BundleBuilder::create("memory:///test_csv_extract_proj").await?;
+        let builder = BundleBuilder::create("memory:///test_csv_extract_proj", None).await?;
         let binding = builder.bundle();
 
         // First, create a reader to build the layout

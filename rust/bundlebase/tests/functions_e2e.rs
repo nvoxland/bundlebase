@@ -13,7 +13,7 @@ mod common;
 #[ignore] // TODO: Manifest verification with memory URLs needs proper storage access
 async fn function_datasource() -> Result<(), BundlebaseError> {
     let base_url = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(base_url.as_str()).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(base_url.as_str(), None).await?;
 
     // Define a function
     bundle
@@ -56,7 +56,7 @@ async fn function_datasource() -> Result<(), BundlebaseError> {
 async fn test_function_with_static_impl_basic() -> Result<(), BundlebaseError> {
     // Test 1: Define a function and attach it with StaticImpl
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Create schema for our function
     let schema = SchemaRef::new(Schema::new(vec![
@@ -94,7 +94,7 @@ async fn test_function_with_static_impl_basic() -> Result<(), BundlebaseError> {
 async fn test_function_with_multiple_pages() -> Result<(), BundlebaseError> {
     // Test 2: Function that returns data across multiple pages
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     let schema = SchemaRef::new(Schema::new(vec![Field::new(
         "page_num",
@@ -126,7 +126,7 @@ async fn test_function_with_multiple_pages() -> Result<(), BundlebaseError> {
 async fn test_function_in_pipeline_with_transformations() -> Result<(), BundlebaseError> {
     // Test 3: Function data in a transformation pipeline
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     let schema = SchemaRef::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
@@ -184,7 +184,7 @@ async fn test_function_in_pipeline_with_transformations() -> Result<(), Bundleba
 async fn test_multiple_functions_in_bundle() -> Result<(), BundlebaseError> {
     // Test 4: Multiple different functions defined and used
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Define first function
     let schema1 = SchemaRef::new(Schema::new(vec![
@@ -229,7 +229,7 @@ async fn test_multiple_functions_in_bundle() -> Result<(), BundlebaseError> {
 async fn test_function_with_metadata() -> Result<(), BundlebaseError> {
     // Test 5: Functions with name and description metadata
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     let schema = SchemaRef::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
@@ -272,7 +272,7 @@ async fn test_function_with_metadata() -> Result<(), BundlebaseError> {
 async fn test_function_error_no_implementation() -> Result<(), BundlebaseError> {
     // Test 6: Error handling when function implementation is not set
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     let schema = SchemaRef::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
 
@@ -292,7 +292,7 @@ async fn test_function_error_no_implementation() -> Result<(), BundlebaseError> 
 async fn test_function_error_unknown_function() -> Result<(), BundlebaseError> {
     // Test 7: Error handling when trying to attach unknown function
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Try to attach a function that was never defined
     let result = bundle.attach("function://undefined_func").await;
@@ -304,7 +304,7 @@ async fn test_function_error_unknown_function() -> Result<(), BundlebaseError> {
 async fn test_multiple_function_definitions() -> Result<(), BundlebaseError> {
     // Test 8: Define multiple functions and verify they're independent
     let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str()).await?;
+        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Define func1
     let schema1 = SchemaRef::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));

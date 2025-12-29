@@ -1,3 +1,4 @@
+use crate::BundleConfig;
 use object_store::{path::Path as ObjectPath, ObjectStore};
 use std::env;
 
@@ -5,6 +6,7 @@ use crate::io::util::{join_path, join_url, parse_url};
 use crate::io::{ObjectStoreFile, EMPTY_SCHEME, EMPTY_URL};
 use crate::BundlebaseError;
 use env::current_dir;
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,10 +17,14 @@ pub struct ObjectStoreDir {
     url: Url,
     store: Arc<dyn ObjectStore>,
     path: ObjectPath,
+    config: Arc<BundleConfig>,
 }
 
 impl ObjectStoreDir {
-    pub fn from_url(url: &Url) -> Result<ObjectStoreDir, BundlebaseError> {
+    pub fn from_url(
+        url: &Url,
+        config: Arc<BundleConfig>,
+    ) -> Result<ObjectStoreDir, BundlebaseError> {
         if url.scheme() == "memory" && !url.authority().is_empty() {
             return Err("Memory URL must be memory:///<path>".into());
         }
@@ -26,26 +32,32 @@ impl ObjectStoreDir {
             return Err(format!("Empty URL must be {}<path>", EMPTY_URL).into());
         }
 
-        let (store, path) = parse_url(url)?;
+        let config_map = config.get_config_for_url(url);
+        let (store, path) = parse_url(url, &config_map)?;
 
-        ObjectStoreDir::new(url, store, &path)
+        ObjectStoreDir::new(url, store, &path, config)
     }
 
     /// Creates a directory from the passed string. The string can be either a URL or a filesystem path (relative or absolute).
-    pub fn from_str(path: &str) -> Result<ObjectStoreDir, BundlebaseError> {
+    pub fn from_str(
+        path: &str,
+        config: Arc<BundleConfig>,
+    ) -> Result<ObjectStoreDir, BundlebaseError> {
         let url = str_to_url(path)?;
-        Self::from_url(&url)
+        Self::from_url(&url, config)
     }
 
     pub fn new(
         url: &Url,
         store: Arc<dyn ObjectStore>,
         path: &ObjectPath,
+        config: Arc<BundleConfig>,
     ) -> Result<Self, BundlebaseError> {
         Ok(Self {
             url: url.clone(),
             store,
             path: path.clone(),
+            config,
         })
     }
 
@@ -86,22 +98,25 @@ impl ObjectStoreDir {
             url: join_url(&self.url, subdir)?,
             store: self.store.clone(),
             path: join_path(&self.path, subdir)?,
+            config: self.config.clone(),
         })
     }
 
     pub fn file(&self, path: &str) -> Result<ObjectStoreFile, BundlebaseError> {
-        Ok(ObjectStoreFile::new(
-            &join_url(&self.url, path)?,
-            self.store.clone(),
-            &join_path(&self.path, path)?,
-        )?)
+        let file_url = join_url(&self.url, path)?;
+        let config_map = self
+            .config.get_config_for_url(&file_url);
+        let (store, object_path) = parse_url(&file_url, &config_map)?;
+
+        ObjectStoreFile::new(&file_url, store, &object_path)
     }
 
     /// Creates a memory-backed directory for storing index and metadata files
     pub fn new_memory() -> Result<ObjectStoreDir, BundlebaseError> {
         let url = Url::parse("memory:///_indexes")?;
-        let (store, path) = parse_url(&url)?;
-        ObjectStoreDir::new(&url, store, &path)
+        let config = HashMap::new();
+        let (store, path) = parse_url(&url, &config)?;
+        ObjectStoreDir::new(&url, store, &path, BundleConfig::default().into())
     }
 }
 
@@ -147,7 +162,7 @@ mod tests {
     #[case("s3://test", "")]
     #[case("s3://test/path/here", "path/here")]
     fn test_from_str(#[case] input: &str, #[case] expected_path: &str) {
-        let dir = ObjectStoreDir::from_str(input).unwrap();
+        let dir = ObjectStoreDir::from_str(input, BundleConfig::default().into()).unwrap();
         assert_eq!(dir.url.to_string(), input);
         assert_eq!(dir.path.to_string(), expected_path);
     }
@@ -155,15 +170,15 @@ mod tests {
     #[test]
     fn test_from_string_complex() {
         assert!(
-            ObjectStoreDir::from_str("memory://bucket/test").is_err(),
+            ObjectStoreDir::from_str("memory://bucket/test", BundleConfig::default().into()).is_err(),
             "Memory must start with :///"
         );
 
-        let dir = ObjectStoreDir::from_str("memory:///test/../test2").unwrap();
+        let dir = ObjectStoreDir::from_str("memory:///test/../test2", BundleConfig::default().into()).unwrap();
         assert_eq!(dir.path.to_string(), "test2");
         assert_eq!(dir.url.to_string(), "memory:///test2");
 
-        let dir = ObjectStoreDir::from_str("relative/path").unwrap();
+        let dir = ObjectStoreDir::from_str("relative/path", BundleConfig::default().into()).unwrap();
         assert_eq!(dir.url.to_string(), file_url("relative/path").to_string());
     }
 
@@ -184,7 +199,7 @@ mod tests {
         #[case] expected_url: Url,
         #[case] expected_path: &str,
     ) {
-        let dir = ObjectStoreDir::from_url(&base).unwrap();
+        let dir = ObjectStoreDir::from_url(&base, BundleConfig::default().into()).unwrap();
         let subdir = dir.subdir(subdir).unwrap();
         assert_eq!(subdir.url, expected_url);
         assert_eq!(subdir.path.to_string(), expected_path);
@@ -192,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_file() {
-        let dir = ObjectStoreDir::from_str("memory:///test").unwrap();
+        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap();
         let file = dir.file("other").unwrap();
         assert_eq!(file.url().to_string(), "memory:///test/other");
 
@@ -202,13 +217,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_files() {
-        let dir = ObjectStoreDir::from_str("memory:///test").unwrap();
+        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap();
         assert_eq!(0, dir.list_files().await.unwrap().len())
     }
 
     #[tokio::test]
     async fn test_null_url() {
-        let dir = ObjectStoreDir::from_str(EMPTY_URL).unwrap();
+        let dir = ObjectStoreDir::from_str(EMPTY_URL, BundleConfig::default().into()).unwrap();
         assert_eq!(0, dir.list_files().await.unwrap().len());
     }
 }

@@ -1,3 +1,4 @@
+use crate::BundleConfig;
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::{IndexBlocksOp, BundleChange, Operation};
@@ -5,7 +6,7 @@ use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, SelectOp};
 use crate::bundle::operation::{
     AttachBlockOp, CreateViewOp, DefineFunctionOp, DefinePackOp, FilterOp, JoinOp, RebuildIndexOp,
-    RemoveColumnsOp, RenameColumnOp, SetDescriptionOp,
+    RemoveColumnsOp, RenameColumnOp, SetConfigOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
 use crate::bundle::{commit, INIT_FILENAME};
@@ -124,7 +125,7 @@ impl std::fmt::Display for BundleStatus {
 /// - **Commit**: Call `commit()` to persist all operations to disk
 ///
 /// # Example
-/// let bundle = BundleBuilder::create("memory://work").await?;
+/// let bundle = BundleBuilder::create("memory://work", None).await?;
 /// bundle.attach("data.parquet").await?
 ///     .filter("amount > 100").await?
 ///     .commit("Filter high-value transactions").await?;
@@ -158,12 +159,14 @@ impl BundleBuilder {
     /// An empty bundle ready for data attachment and transformations.
     ///
     /// # Example
-    /// let bundle = BundleBuilder::create("memory://work").await?;
+    /// let bundle = BundleBuilder::create("memory://work", None).await?;
     /// bundle.attach("data.parquet").await?;
     /// ```
-    pub async fn create(path: &str) -> Result<BundleBuilder, BundlebaseError> {
+    pub async fn create(path: &str, config: Option<BundleConfig>) -> Result<BundleBuilder, BundlebaseError> {
         let mut existing = Bundle::empty().await?;
-        existing.data_dir = ObjectStoreDir::from_str(path)?;
+        existing.passed_config = config;
+        existing.recompute_config()?;
+        existing.data_dir = ObjectStoreDir::from_str(path, existing.config.clone())?;
         Ok(BundleBuilder {
             status: BundleStatus::new(),
             bundle: existing,
@@ -176,7 +179,7 @@ impl BundleBuilder {
         data_dir: &str,
     ) -> Result<BundleBuilder, BundlebaseError> {
         let mut new_bundle = bundle.deref().clone();
-        new_bundle.data_dir = ObjectStoreDir::from_str(data_dir)?;
+        new_bundle.data_dir = ObjectStoreDir::from_str(data_dir, bundle.config())?;
         if new_bundle.data_dir.url() != bundle.url() {
             new_bundle.last_manifest_version = 0;
         }
@@ -258,7 +261,9 @@ impl BundleBuilder {
         manifest_file.write_stream(stream).await?;
 
         // Update base to reflect the committed version
-        self.bundle = Bundle::open(self.url().as_str()).await?;
+        // Preserve explicit_config from current bundle
+        let config = self.bundle.passed_config.clone();
+        self.bundle = Bundle::open(self.url().as_str(), config).await?;
         // Clear status since the operations have been persisted
         self.status.clear();
 
@@ -331,10 +336,14 @@ impl BundleBuilder {
         let empty = self.bundle.commits.is_empty();
         self.bundle = if empty {
             let mut new = Bundle::empty().await?;
-            new.data_dir = ObjectStoreDir::from_url(self.url())?;
+            new.passed_config = self.bundle.passed_config.clone();
+            new.recompute_config()?;
+            new.data_dir = ObjectStoreDir::from_url(self.url(), new.config.clone())?;
             new
         } else {
-            Bundle::open(self.url().as_str()).await?
+            // Preserve explicit_config when reopening
+            let config = self.bundle.passed_config.clone();
+            Bundle::open(self.url().as_str(), config).await?
         };
         Ok(())
     }
@@ -442,7 +451,7 @@ impl BundleBuilder {
     /// ```no_run
     /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
     /// # async fn example() -> Result<(), BundlebaseError> {
-    /// let mut c = BundleBuilder::create("memory:///container").await?;
+    /// let mut c = BundleBuilder::create("memory:///container", None).await?;
     /// c.attach("data.csv").await?;
     /// c.commit("Initial").await?;
     ///
@@ -512,7 +521,9 @@ impl BundleBuilder {
             .to_string();
 
         // Open view as Bundle (automatically loads parent via FROM)
-        Bundle::open(&view_path).await
+        // Preserve explicit_config from current bundle
+        let config = self.bundle.passed_config.clone();
+        Bundle::open(&view_path, config).await
     }
 
     /// Attach a data block to the joined pack
@@ -710,6 +721,44 @@ impl BundleBuilder {
             Box::pin(async move {
                 builder.apply_operation(SetDescriptionOp::setup(&description).into())
                     .await?;
+                Ok(())
+            })
+        }).await?;
+
+        Ok(self)
+    }
+
+    /// Set a configuration value (mutates self)
+    ///
+    /// Config stored via this operation has the lowest priority:
+    /// 1. Explicit config passed to create()/open() (highest)
+    /// 2. Environment variables
+    /// 3. Config from set_config operations (lowest)
+    ///
+    /// # Arguments
+    /// * `key` - Configuration key (e.g., "region", "access_key_id")
+    /// * `value` - Configuration value
+    /// * `url_prefix` - Optional URL prefix for URL-specific config (e.g., "s3://bucket/")
+    pub async fn set_config(
+        &mut self,
+        key: &str,
+        value: &str,
+        url_prefix: Option<&str>,
+    ) -> Result<&mut Self, BundlebaseError> {
+        let key = key.to_string();
+        let value = value.to_string();
+        let url_prefix_owned = url_prefix.map(|s| s.to_string());
+
+        let description = match &url_prefix_owned {
+            Some(prefix) => format!("Set config [{}]: {}", prefix, key),
+            None => format!("Set config: {}", key),
+        };
+
+        self.do_change(&description, |builder| {
+            Box::pin(async move {
+                builder.apply_operation(
+                    SetConfigOp::setup(&key, &value, url_prefix_owned.as_deref()).into()
+                ).await?;
                 Ok(())
             })
         }).await?;
@@ -1011,7 +1060,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_empty_bundle() {
-        let bundle = BundleBuilder::create("memory:///test_bundle")
+        let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         assert_eq!(0, bundle.history().len());
@@ -1019,7 +1068,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_empty_bundle() {
-        let bundle = BundleBuilder::create("memory:///test_bundle")
+        let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         let schema = bundle.bundle.schema().await.unwrap();
@@ -1031,7 +1080,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_after_attach() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle")
+        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         bundle
@@ -1055,7 +1104,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_after_remove_column() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle")
+        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         bundle
@@ -1081,7 +1130,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_and_get_name() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle")
+        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         assert_eq!(
@@ -1096,7 +1145,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_and_get_description() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle")
+        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         assert_eq!(bundle.bundle.description, None);
@@ -1116,7 +1165,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_name_doesnt_affect_version() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle")
+        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         bundle
@@ -1143,7 +1192,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_operations_list() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle")
+        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         assert_eq!(
@@ -1164,7 +1213,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_version() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle")
+        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
 
@@ -1180,7 +1229,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_clone_independence() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle")
+        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         bundle
@@ -1225,7 +1274,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_operations_pipeline() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle")
+        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         bundle

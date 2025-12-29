@@ -180,6 +180,33 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Set a configuration value. Mutates the bundle in place and returns it for chaining.
+    #[pyo3(signature = (key, value, url_prefix=None))]
+    fn set_config<'py>(
+        slf: PyRef<'_, Self>,
+        key: &str,
+        value: &str,
+        url_prefix: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let key = key.to_string();
+        let value = value.to_string();
+        let url_prefix = url_prefix.map(|s| s.to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            builder
+                .set_config(key.as_str(), value.as_str(), url_prefix.as_deref())
+                .await
+                .map_err(|e| to_py_error(&format!("Failed to set config '{}' = '{}'", key, value), e))?;
+            drop(builder);
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner: inner.clone() })
+                    .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
     #[pyo3(signature = (name, output, func, version))]
     fn define_function<'py>(
         slf: PyRef<'_, Self>,
