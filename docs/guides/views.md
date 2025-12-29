@@ -11,7 +11,7 @@ A view captures uncommitted operations (like `select()`, `filter()`, etc.) from 
 ### What is a View?
 
 - A **named fork** of a container that captures a specific transformation pipeline
-- Stored in `_bundlebase/view_{id}/_bundlebase/` subdirectory within the parent container
+- Stored in `view_{id}/_bundlebase/` subdirectory within the parent container
 - Has its own commit history starting with an init commit that references the parent via `from` field
 - **Read-only** when opened - returns a `Bundle` not a `BundleBuilder`
 - **Dynamic inheritance** - automatically sees new commits from parent container
@@ -24,10 +24,10 @@ container/
 │   ├── 00000000000000000.yaml      # Parent init commit
 │   ├── 00001abc123.yaml            # Parent commit 1
 │   ├── 00002def456.yaml            # Parent commit 2 (contains CreateView op)
-│   └── view_{uuid}/                # View subdirectory
-│       └── _bundlebase/
-│           ├── 00000000000000000.yaml  # View init: from="../../../"
-│           └── 00001xyz789.yaml        # View commit with captured operations
+├── view_{uuid}/                    # View subdirectory
+│   └── _bundlebase/
+│       ├── 00000000000000000.yaml  # View init: from="../"
+│       └── 00001xyz789.yaml        # View commit with captured operations
 └── data/
 ```
 
@@ -144,7 +144,7 @@ The `CreateViewOp` operation is created when you call `create_view()`. It:
 
 1. **Captures operations** - Extracts all uncommitted operations from the source BundleBuilder
 2. **Generates view ID** - Creates unique ObjectId for the view directory
-3. **Creates view directory** - `_bundlebase/view_{id}/_bundlebase/`
+3. **Creates view directory** - `view_{id}/_bundlebase/`
 4. **Writes init commit** - With `from` field pointing to parent container URL
 5. **Writes first commit** - Contains the captured operations
 6. **Registers view** - Stores name→ID mapping in parent Bundle's `views` HashMap
@@ -158,7 +158,7 @@ When applied to a Bundle:
 When you call `view(name)`:
 
 1. Looks up view ID from `bundle.views` HashMap
-2. Constructs view path: `<parent>/_bundlebase/view_{id}/`
+2. Constructs view path: `<parent>/view_{id}/`
 3. Calls `Bundle::open()` on view path
 4. Bundle loading process:
    - Reads view's init commit

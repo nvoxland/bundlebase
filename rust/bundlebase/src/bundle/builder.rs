@@ -440,7 +440,7 @@ impl BundleBuilder {
     /// Attach a view from another BundleBuilder
     ///
     /// Creates a named view that captures all uncommitted operations from the source BundleBuilder.
-    /// The view is stored in a subdirectory under _bundlebase/view_{id}/ and automatically inherits
+    /// The view is stored in a subdirectory under view_{id}/ and automatically inherits
     /// changes from the parent bundle through the FROM mechanism.
     ///
     /// # Arguments
@@ -513,10 +513,10 @@ impl BundleBuilder {
         // Look up view by name or ID
         let (view_id, _name) = self.bundle.get_view_id_by_name_or_id(identifier)?;
 
-        // Construct view path: _bundlebase/view_{id}/
+        // Construct view path: view_{id}/
         let view_path = self
             .data_dir()
-            .subdir(&format!("{}/view_{}", META_DIR, view_id))?
+            .subdir(&format!("view_{}", view_id))?
             .url()
             .to_string();
 

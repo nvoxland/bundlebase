@@ -42,10 +42,10 @@ impl CreateViewOp {
             debug!("  Captured op {}: {}", i, op.describe());
         }
 
-        // 3. Create view directory: _bundlebase/view_{id}/_bundlebase/
+        // 3. Create view directory: view_{id}/_bundlebase/
         let view_dir = parent_builder
             .data_dir()
-            .subdir(&format!("{}/view_{}", META_DIR, view_id))?;
+            .subdir(&format!("view_{}", view_id))?;
         let view_meta_dir = view_dir.subdir(META_DIR)?;
         debug!("Creating view directory");
 
