@@ -10,7 +10,7 @@ Common interface for all container types (`rust/bundlebase/src/bundle.rs`):
 ### Bundlebase
 Read-only container loaded from disk:
 - Represents a committed snapshot of the container
-- Loaded from versioned manifests in `{data_dir}/_manifest/`
+- Loaded from versioned manifests in `{data_dir}/_bundlebase/`
 - Cannot be modified directly
 - Can be extended via `extend(new_data_dir)` to create a new BundlebaseBuilder
 - Immutable and thread-safe

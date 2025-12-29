@@ -1,6 +1,6 @@
 use bundlebase::BundleConfig;
 use bundlebase;
-use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME};
+use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME, META_DIR};
 use bundlebase::io::ObjectStoreFile;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::BundlebaseError;
@@ -21,7 +21,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     c1.attach(test_datafile("customers-0-100.csv")).await?;
     c1.commit("Initial commit").await?;
 
-    let init_commit = temp1.subdir("_manifest")?.file(INIT_FILENAME)?;
+    let init_commit = temp1.subdir(META_DIR)?.file(INIT_FILENAME)?;
     let init_commit: Option<InitCommit> = init_commit.read_yaml().await?;
     let init_commit = init_commit.expect("Failed to read init commit");
     assert_eq!(None, init_commit.from);
@@ -42,7 +42,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     c2.commit("Remove country column").await?;
     assert_eq!(Some(temp1.url()), c2.bundle.from());
 
-    let init_commit = temp2.subdir("_manifest")?.file(INIT_FILENAME)?;
+    let init_commit = temp2.subdir(META_DIR)?.file(INIT_FILENAME)?;
     let init_commit: Option<InitCommit> = init_commit.read_yaml().await?;
     let init_commit = init_commit.expect("Failed to read init commit");
     assert_eq!(Some(temp1.url().clone()), init_commit.from);

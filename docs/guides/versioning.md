@@ -5,7 +5,7 @@
 Bundlebase uses a versioned manifest system for persistence:
 
 **Manifest storage:**
-- Location: `{data_dir}/_manifest/` directory
+- Location: `{data_dir}/_bundlebase/` directory
 - Format: YAML files with 5-digit version + 12-character hash
 - Example: `00001-a1b2c3d4e5f6.yaml`
 
@@ -51,7 +51,7 @@ await c.remove_column("sensitive")
 
 # Commit creates versioned snapshot
 await c.commit("Cleaned sensitive data")
-# Creates: /my/container/_manifest/{version}-{hash}.yaml
+# Creates: /my/container/_bundlebase/{version}-{hash}.yaml
 
 # Later, open the container
 c = await Bundlebase.open("/my/container")

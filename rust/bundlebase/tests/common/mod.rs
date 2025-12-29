@@ -20,9 +20,9 @@ pub fn has_column(schema: &SchemaRef, name: &str) -> bool {
 pub async fn latest_commit(
     data_dir: &ObjectStoreDir,
 ) -> Result<Option<(String, BundleCommit, Url)>, BundlebaseError> {
-    let manifest_dir = data_dir.subdir("_manifest")?;
+    let meta_dir = data_dir.subdir("_bundlebase")?;
 
-    let files = manifest_dir.list_files().await?;
+    let files = meta_dir.list_files().await?;
     let files = files
         .iter()
         .filter(|x| x.filename() != INIT_FILENAME)
