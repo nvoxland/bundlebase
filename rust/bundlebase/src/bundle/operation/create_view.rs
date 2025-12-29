@@ -1,3 +1,4 @@
+use crate::bundle::META_DIR;
 use crate::bundle::commit::BundleCommit;
 use crate::bundle::init::{InitCommit, INIT_FILENAME};
 use crate::bundle::operation::{AnyOperation, BundleChange, Operation};
@@ -27,6 +28,7 @@ impl CreateViewOp {
         source_builder: &BundleBuilder,
         parent_builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
+        //TODO: Clean this up to use the normal FROM logic
         debug!("Setting up view '{}' from source builder", name);
 
         // 1. Generate view ID
@@ -40,18 +42,18 @@ impl CreateViewOp {
             debug!("  Captured op {}: {}", i, op.describe());
         }
 
-        // 3. Create view directory: _manifest/view_{id}/_manifest/
+        // 3. Create view directory: _bundlebase/view_{id}/_bundlebase/
         let view_dir = parent_builder
             .data_dir()
-            .subdir(&format!("_manifest/view_{}", view_id))?;
-        let view_manifest_dir = view_dir.subdir("_manifest")?;
-        debug!("Creating view manifest directory");
+            .subdir(&format!("{}/view_{}", META_DIR, view_id))?;
+        let view_meta_dir = view_dir.subdir(META_DIR)?;
+        debug!("Creating view directory");
 
         // 4. Create init commit with from pointing to parent container
         // Use parent's data_dir URL as the from reference
         let parent_url = parent_builder.data_dir().url().clone();
         let init = InitCommit::new(Some(&parent_url));
-        view_manifest_dir
+        view_meta_dir
             .file(INIT_FILENAME)?
             .write_yaml(&init)
             .await?;
@@ -92,7 +94,7 @@ impl CreateViewOp {
         let filename = format!("00001{}.yaml", hash_short);
         let data = bytes::Bytes::from(yaml);
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
-        view_manifest_dir.file(&filename)?.write_stream(stream).await?;
+        view_meta_dir.file(&filename)?.write_stream(stream).await?;
         debug!("Wrote view commit: {} with {} operations", filename, operations.len());
 
         Ok(CreateViewOp {

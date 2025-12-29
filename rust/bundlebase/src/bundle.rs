@@ -42,6 +42,8 @@ use std::sync::Arc;
 use url::Url;
 use uuid::Uuid;
 
+pub static META_DIR: &str = "_bundlebase";
+
 /// A read-only view of a Bundle loaded from persistent storage.
 ///
 /// `Bundle` represents a bundle that has been committed and persisted to disk.
@@ -258,11 +260,11 @@ impl Bundle {
         }
 
         let data_dir = ObjectStoreDir::from_str(url, bundle.config())?;
-        let manifest_dir = data_dir.subdir("_manifest")?;
+        let manifest_dir = data_dir.subdir(META_DIR)?;
 
         let init_commit: Option<InitCommit> = manifest_dir.file(INIT_FILENAME)?.read_yaml().await?;
         let init_commit =
-            init_commit.expect(format!("No _manifest/{} found in {}", INIT_FILENAME, url).as_str());
+            init_commit.expect(format!("No {}/{} found in {}", META_DIR, INIT_FILENAME, url).as_str());
 
         // Recursively load the base bundle and store the Arc reference
         if let Some(from_url) = &init_commit.from {

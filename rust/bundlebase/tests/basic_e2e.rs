@@ -1,7 +1,7 @@
 use bundlebase::BundleConfig;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use bundlebase;
-use bundlebase::bundle::{BundleFacade, INIT_FILENAME};
+use bundlebase::bundle::{BundleFacade, INIT_FILENAME, META_DIR};
 use bundlebase::io::ObjectStoreFile;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::FunctionSignature;
@@ -32,7 +32,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
 
     let init_content = bundle
         .data_dir()
-        .file(&format!("_manifest/{}", INIT_FILENAME))?
+        .file(&format!("{}/{}", META_DIR, INIT_FILENAME))?
         .read_str()
         .await?
         .expect("init commit doesn't exist");

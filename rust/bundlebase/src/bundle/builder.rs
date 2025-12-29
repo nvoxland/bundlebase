@@ -9,7 +9,7 @@ use crate::bundle::operation::{
     RemoveColumnsOp, RenameColumnOp, SetConfigOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
-use crate::bundle::{commit, INIT_FILENAME};
+use crate::bundle::{commit, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle};
 use crate::data::{DataBlock, DataPack, ObjectId, VersionedBlockId};
 use crate::io::ObjectStoreDir;
@@ -211,7 +211,7 @@ impl BundleBuilder {
     /// bundle.commit("Filter high-value transactions").await?;
     /// ```
     pub async fn commit(&mut self, message: &str) -> Result<(), BundlebaseError> {
-        let manifest_dir = self.bundle.data_dir.subdir("_manifest")?; //todo rename the dir
+        let manifest_dir = self.bundle.data_dir.subdir(META_DIR)?; //todo rename the dir
 
         if self.bundle.last_manifest_version == 0 {
             let from = self.bundle.from();
@@ -440,7 +440,7 @@ impl BundleBuilder {
     /// Attach a view from another BundleBuilder
     ///
     /// Creates a named view that captures all uncommitted operations from the source BundleBuilder.
-    /// The view is stored in a subdirectory under _manifest/view_{id}/ and automatically inherits
+    /// The view is stored in a subdirectory under _bundlebase/view_{id}/ and automatically inherits
     /// changes from the parent bundle through the FROM mechanism.
     ///
     /// # Arguments
@@ -513,10 +513,10 @@ impl BundleBuilder {
         // Look up view by name or ID
         let (view_id, _name) = self.bundle.get_view_id_by_name_or_id(identifier)?;
 
-        // Construct view path: _manifest/view_{id}/
+        // Construct view path: _bundlebase/view_{id}/
         let view_path = self
             .data_dir()
-            .subdir(&format!("_manifest/view_{}", view_id))?
+            .subdir(&format!("{}/view_{}", META_DIR, view_id))?
             .url()
             .to_string();
 

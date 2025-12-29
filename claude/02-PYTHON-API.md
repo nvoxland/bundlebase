@@ -70,7 +70,7 @@ c = await c.rename_column("name", "full_name")  # c continues to be modified
 
 **Directory-Based Persistence:**
 ```python
-# Container created with data_dir stores manifests in {data_dir}/_manifest/
+# Container created with data_dir stores manifests in {data_dir}/_bundlebase/
 c = await Bundlebase.create("/my/container/dir")
 await c.attach("data.parquet")
 await c.commit("Initial data load")  # Creates versioned manifest
