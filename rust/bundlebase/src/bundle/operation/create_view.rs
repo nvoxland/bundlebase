@@ -1,6 +1,6 @@
 use crate::bundle::META_DIR;
 use crate::bundle::commit::BundleCommit;
-use crate::bundle::init::{InitCommit, INIT_FILENAME};
+use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::{AnyOperation, BundleChange, Operation};
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use crate::data::ObjectId;
@@ -12,7 +12,6 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use url::Url;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -28,7 +27,6 @@ impl CreateViewOp {
         source_builder: &BundleBuilder,
         parent_builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
-        //TODO: Clean this up to use the normal FROM logic
         debug!("Setting up view '{}' from source builder", name);
 
         // 1. Generate view ID
@@ -42,24 +40,29 @@ impl CreateViewOp {
             debug!("  Captured op {}: {}", i, op.describe());
         }
 
-        // 3. Create view directory: view_{id}/_bundlebase/
-        let view_dir = parent_builder
+        // 3. Create view builder by extending parent to view location
+        // This handles bundle cloning, config preservation, and directory setup
+        let view_dir_path = parent_builder
             .data_dir()
-            .subdir(&format!("view_{}", view_id))?;
-        let view_meta_dir = view_dir.subdir(META_DIR)?;
-        debug!("Creating view directory");
+            .subdir(&format!("view_{}", view_id))?
+            .url()
+            .to_string();
 
-        // 4. Create init commit with from pointing to parent container
-        // Use parent's data_dir URL as the from reference
-        let parent_url = parent_builder.data_dir().url().clone();
-        let init = InitCommit::new(Some(&parent_url));
-        view_meta_dir
-            .file(INIT_FILENAME)?
-            .write_yaml(&init)
-            .await?;
-        debug!("Wrote init commit with from='../../..'");
+        let view_builder = BundleBuilder::extend(
+            Arc::new(parent_builder.bundle.clone()),
+            &view_dir_path
+        )?;
 
-        // 5. Create first commit with captured operations
+        // Note: We do NOT apply operations to the view bundle during setup.
+        // Operations are stored in the commit file and will be applied when
+        // the view is opened via Bundle::open().
+
+        // 4. Write view manifest files
+        // We manually write init and commit files since we can't access private
+        // status/do_change APIs. This follows the same pattern as commit() but
+        // simplified for the view creation case.
+
+        // Get timestamp and author
         let now = std::time::SystemTime::now();
         let timestamp = {
             use chrono::DateTime;
@@ -70,6 +73,7 @@ impl CreateViewOp {
         let author = std::env::var("BUNDLEBASE_AUTHOR")
             .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
 
+        // Create commit structure
         let commit = BundleCommit {
             url: None,
             data_dir: None,
@@ -83,7 +87,10 @@ impl CreateViewOp {
             }],
         };
 
-        // 6. Write commit: 00001{hash}.yaml
+        // Write commit and init files to view manifest directory
+        let manifest_dir = view_builder.data_dir().subdir(META_DIR)?;
+
+        // Write commit: 00001{hash}.yaml
         let yaml = serde_yaml::to_string(&commit)?;
         let mut hasher = Sha256::new();
         hasher.update(yaml.as_bytes());
@@ -94,8 +101,17 @@ impl CreateViewOp {
         let filename = format!("00001{}.yaml", hash_short);
         let data = bytes::Bytes::from(yaml);
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
-        view_meta_dir.file(&filename)?.write_stream(stream).await?;
+        manifest_dir.file(&filename)?.write_stream(stream).await?;
         debug!("Wrote view commit: {} with {} operations", filename, operations.len());
+
+        // Write init commit with FROM pointing to parent
+        use crate::bundle::init::{InitCommit, INIT_FILENAME};
+        let parent_from = view_builder.bundle.from();
+        let init = InitCommit::new(parent_from);
+        manifest_dir.file(INIT_FILENAME)?.write_yaml(&init).await?;
+        debug!("Wrote init commit with FROM={:?}", parent_from);
+
+        debug!("View '{}' created at {}", name, view_dir_path);
 
         Ok(CreateViewOp {
             name: name.to_string(),
@@ -112,6 +128,7 @@ impl Operation for CreateViewOp {
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Check view name doesn't already exist
+        debug!("Checking if view '{}' exists. Current views: {:?}", self.name, bundle.views.keys().collect::<Vec<_>>());
         if bundle.views.contains_key(&self.name) {
             return Err(format!("View '{}' already exists", self.name).into());
         }
