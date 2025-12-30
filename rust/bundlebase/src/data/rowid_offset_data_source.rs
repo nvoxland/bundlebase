@@ -1,22 +1,22 @@
 use crate::data::RowId;
+use crate::io::ObjectStoreFile;
 use arrow::csv::ReaderBuilder as CsvReaderBuilder;
-use arrow::json::ReaderBuilder as JsonReaderBuilder;
 use arrow::datatypes::SchemaRef;
+use arrow::json::ReaderBuilder as JsonReaderBuilder;
 use arrow::record_batch::RecordBatch;
+use datafusion::common::{project_schema, DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::TaskContext;
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::projection::ProjectionExpr;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayFormatType, Partitioning, SendableRecordBatchStream};
-use datafusion::common::{DataFusionError, Statistics, project_schema};
 use futures::stream::{self, StreamExt};
-use object_store::{ObjectStore, GetOptions, GetRange};
+use object_store::{GetOptions, GetRange, ObjectStore};
 use std::any::Any;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Cursor;
 use std::sync::Arc;
-use crate::io::ObjectStoreFile;
 
 /// File format for line-oriented data sources
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,8 +72,8 @@ impl RowIdOffsetDataSource {
 
         // Compute projected schema using DataFusion's utility
         // This ensures eq_properties() returns the correct schema that matches what open() produces
-        let projected_schema = project_schema(&schema, projection.as_ref())
-            .expect("Failed to project schema");
+        let projected_schema =
+            project_schema(&schema, projection.as_ref()).expect("Failed to project schema");
 
         Self {
             file: file.clone(),
@@ -115,7 +115,13 @@ impl RowIdOffsetDataSource {
         row_ids: Vec<RowId>,
         projection: Option<Vec<usize>>,
     ) -> Self {
-        Self::new(file, schema, row_ids, projection, LineOrientedFormat::JsonLines)
+        Self::new(
+            file,
+            schema,
+            row_ids,
+            projection,
+            LineOrientedFormat::JsonLines,
+        )
     }
 
     /// Extract all complete lines from a byte range
@@ -228,9 +234,16 @@ impl DataSource for RowIdOffsetDataSource {
         // This was computed in the constructor using project_schema()
         let output_schema = self.projected_schema.clone();
 
-        log::debug!("RowIdOffsetDataSource output schema has {} columns: {:?}",
+        log::debug!(
+            "RowIdOffsetDataSource output schema has {} columns: {:?}",
             output_schema.fields().len(),
-            output_schema.fields().iter().take(5).map(|f| format!("{}:{}", f.name(), f.data_type())).collect::<Vec<_>>());
+            output_schema
+                .fields()
+                .iter()
+                .take(5)
+                .map(|f| format!("{}:{}", f.name(), f.data_type()))
+                .collect::<Vec<_>>()
+        );
 
         let row_ids = self.row_ids.clone();
         let object_store = self.object_store.clone();
@@ -241,7 +254,11 @@ impl DataSource for RowIdOffsetDataSource {
         // Batch row IDs for efficient fetching
         let batches = Self::batch_row_ids(&row_ids);
 
-        log::debug!("Batched {} row IDs into {} fetch operations for streaming", row_ids.len(), batches.len());
+        log::debug!(
+            "Batched {} row IDs into {} fetch operations for streaming",
+            row_ids.len(),
+            batches.len()
+        );
 
         // Create async stream that yields one RecordBatch per fetch batch
         // This provides better memory usage than accumulating all data
@@ -260,7 +277,9 @@ impl DataSource for RowIdOffsetDataSource {
                 };
 
                 let bytes = match object_store.get_opts(&file_path, options).await {
-                    Ok(get_result) => get_result.bytes().await
+                    Ok(get_result) => get_result
+                        .bytes()
+                        .await
                         .map_err(|e| DataFusionError::External(Box::new(e)))?,
                     Err(e) => return Err(DataFusionError::External(Box::new(e))),
                 };
@@ -272,8 +291,11 @@ impl DataSource for RowIdOffsetDataSource {
                 if lines.is_empty() {
                     // Return empty batch with correct schema (projected if projection exists)
                     let empty_schema = if let Some(proj) = &projection {
-                        Arc::new(schema.project(proj)
-                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?)
+                        Arc::new(
+                            schema
+                                .project(proj)
+                                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
+                        )
                     } else {
                         schema.clone()
                     };
@@ -283,7 +305,9 @@ impl DataSource for RowIdOffsetDataSource {
                 let batch = match format {
                     LineOrientedFormat::Csv => {
                         // Prepend schema header to CSV data
-                        let header = schema.fields().iter()
+                        let header = schema
+                            .fields()
+                            .iter()
                             .map(|f| f.name().as_str())
                             .collect::<Vec<_>>()
                             .join(",");
@@ -301,8 +325,11 @@ impl DataSource for RowIdOffsetDataSource {
                             .build(cursor)
                             .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
 
-                        reader.next()
-                            .ok_or_else(|| DataFusionError::Internal("No batch produced".to_string()))?
+                        reader
+                            .next()
+                            .ok_or_else(|| {
+                                DataFusionError::Internal("No batch produced".to_string())
+                            })?
                             .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?
                     }
                     LineOrientedFormat::JsonLines => {
@@ -319,23 +346,35 @@ impl DataSource for RowIdOffsetDataSource {
                             .build(cursor)
                             .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
 
-                        reader.next()
-                            .ok_or_else(|| DataFusionError::Internal("No batch produced".to_string()))?
+                        reader
+                            .next()
+                            .ok_or_else(|| {
+                                DataFusionError::Internal("No batch produced".to_string())
+                            })?
                             .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?
                     }
                 };
 
                 // Apply projection if specified
                 let final_batch = if let Some(proj) = &projection {
-                    log::debug!("Applying projection {:?} to batch with {} columns", proj, batch.num_columns());
-                    let projected_columns: Vec<_> = proj.iter()
-                        .map(|&i| batch.column(i).clone())
-                        .collect();
-                    let projected_schema = Arc::new(schema.project(proj)
-                        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?);
+                    log::debug!(
+                        "Applying projection {:?} to batch with {} columns",
+                        proj,
+                        batch.num_columns()
+                    );
+                    let projected_columns: Vec<_> =
+                        proj.iter().map(|&i| batch.column(i).clone()).collect();
+                    let projected_schema = Arc::new(
+                        schema
+                            .project(proj)
+                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
+                    );
                     let result = RecordBatch::try_new(projected_schema, projected_columns)
                         .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
-                    log::debug!("Created projected batch with {} columns", result.num_columns());
+                    log::debug!(
+                        "Created projected batch with {} columns",
+                        result.num_columns()
+                    );
                     result
                 } else {
                     batch
@@ -346,7 +385,10 @@ impl DataSource for RowIdOffsetDataSource {
         });
 
         // Use output_schema which matches the actual schema of batches produced by the stream
-        Ok(Box::pin(RecordBatchStreamAdapter::new(output_schema, stream)))
+        Ok(Box::pin(RecordBatchStreamAdapter::new(
+            output_schema,
+            stream,
+        )))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -397,9 +439,9 @@ impl DataSource for RowIdOffsetDataSource {
 
 #[cfg(test)]
 mod tests {
-    use crate::BundleConfig;
-use super::*;
+    use super::*;
     use crate::data::ObjectId;
+    use crate::BundleConfig;
     use url::Url;
 
     #[test]
@@ -412,7 +454,11 @@ use super::*;
             RowId::new(&block_id, 500, 10),
         ];
 
-        let file = ObjectStoreFile::from_url(&Url::parse("memory:///test.csv").unwrap(), BundleConfig::default().into()).unwrap();
+        let file = ObjectStoreFile::from_url(
+            &Url::parse("memory:///test.csv").unwrap(),
+            BundleConfig::default().into(),
+        )
+        .unwrap();
         let schema = Arc::new(arrow::datatypes::Schema::empty());
         let source = RowIdOffsetDataSource::new_csv(&file, schema, row_ids, None);
 
@@ -430,7 +476,11 @@ use super::*;
             RowId::new(&block_id, 200, 10),
         ];
 
-        let file = ObjectStoreFile::from_url(&Url::parse("file:///test.csv").unwrap(), BundleConfig::default().into()).unwrap();
+        let file = ObjectStoreFile::from_url(
+            &Url::parse("file:///test.csv").unwrap(),
+            BundleConfig::default().into(),
+        )
+        .unwrap();
         let schema = Arc::new(arrow::datatypes::Schema::empty());
         let source = RowIdOffsetDataSource::new_csv(&file, schema, row_ids, None);
 
@@ -443,9 +493,9 @@ use super::*;
         // RowIds that are close together should be batched
         let block_id = ObjectId::from(42);
         let row_ids = vec![
-            RowId::new(&block_id, 1000, 1),  // offset 1000, size ~1MB
-            RowId::new(&block_id, 2000, 1),  // offset 2000, within 1MB range of first
-            RowId::new(&block_id, 3000, 1),  // offset 3000, within range
+            RowId::new(&block_id, 1000, 1), // offset 1000, size ~1MB
+            RowId::new(&block_id, 2000, 1), // offset 2000, within 1MB range of first
+            RowId::new(&block_id, 3000, 1), // offset 3000, within range
         ];
 
         let batches = RowIdOffsetDataSource::batch_row_ids(&row_ids);
@@ -463,9 +513,9 @@ use super::*;
         // RowIds that are far apart should be in separate batches
         let block_id = ObjectId::from(42);
         let row_ids = vec![
-            RowId::new(&block_id, 1000, 1),      // offset 1000, size ~1MB
-            RowId::new(&block_id, 5000000, 1),   // offset 5MB, far from first
-            RowId::new(&block_id, 10000000, 1),  // offset 10MB, far from second
+            RowId::new(&block_id, 1000, 1),     // offset 1000, size ~1MB
+            RowId::new(&block_id, 5000000, 1),  // offset 5MB, far from first
+            RowId::new(&block_id, 10000000, 1), // offset 10MB, far from second
         ];
 
         let batches = RowIdOffsetDataSource::batch_row_ids(&row_ids);

@@ -34,8 +34,8 @@ impl DataStorage {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::BundleConfig;
-use super::*;
     use url::Url;
 
     #[tokio::test]
@@ -180,10 +180,13 @@ use super::*;
         ] {
             assert_eq!(
                 expected,
-                ObjectStoreFile::from_url(&Url::parse(url).unwrap(), BundleConfig::default().into())
-                    .unwrap()
-                    .url()
-                    .to_string()
+                ObjectStoreFile::from_url(
+                    &Url::parse(url).unwrap(),
+                    BundleConfig::default().into()
+                )
+                .unwrap()
+                .url()
+                .to_string()
             );
         }
     }
@@ -199,10 +202,13 @@ use super::*;
         ] {
             assert_eq!(
                 expected,
-                ObjectStoreFile::from_url(&Url::parse(url).unwrap(), BundleConfig::default().into())
-                    .unwrap()
-                    .url()
-                    .to_string()
+                ObjectStoreFile::from_url(
+                    &Url::parse(url).unwrap(),
+                    BundleConfig::default().into()
+                )
+                .unwrap()
+                .url()
+                .to_string()
             );
         }
     }

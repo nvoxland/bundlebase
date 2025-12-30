@@ -9,7 +9,6 @@ use datafusion::execution::object_store::ObjectStoreUrl;
 use futures::stream::{StreamExt, TryStreamExt};
 use serde::ser;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 use url::Url;
@@ -275,9 +274,9 @@ impl Display for ObjectStoreFile {
 
 #[cfg(test)]
 mod tests {
-    use crate::BundleConfig;
-use super::*;
+    use super::*;
     use crate::test_utils::random_memory_file;
+    use crate::BundleConfig;
 
     #[test]
     fn test_filename() {

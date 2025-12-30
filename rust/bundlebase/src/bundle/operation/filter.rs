@@ -1,6 +1,7 @@
 use crate::bundle::operation::Operation;
-use crate::{BundlebaseError, Bundle};
-use crate::metrics::{OperationTimer, OperationCategory, OperationOutcome, start_span};
+use crate::bundle::sql::with_temp_table;
+use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
+use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -8,7 +9,6 @@ use datafusion::prelude::SessionContext;
 use datafusion::scalar::ScalarValue;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use crate::bundle::sql::with_temp_table;
 
 /// Serializable representation of a parameter value
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -101,21 +101,20 @@ impl Operation for FilterOp {
         let parameters = self.parameters.clone();
         let ctx_for_closure = ctx.clone();
 
-        let result = with_temp_table(&ctx, df, |temp_table| {
-            async move {
-                let mut substituted_clause = where_clause;
-                for (i, param) in parameters.iter().enumerate() {
-                    let placeholder = format!("${}", i + 1);
-                    let value_str =
-                        crate::bundle::scalar_value_to_sql_literal(&param.to_scalar_value());
-                    substituted_clause = substituted_clause.replace(&placeholder, &value_str);
-                }
-
-                let sql = format!("SELECT * FROM {} WHERE {}", temp_table, substituted_clause);
-                ctx_for_closure.sql(&sql)
-                    .await
-                    .map_err(|e| Box::new(e) as BundlebaseError)
+        let result = with_temp_table(&ctx, df, |temp_table| async move {
+            let mut substituted_clause = where_clause;
+            for (i, param) in parameters.iter().enumerate() {
+                let placeholder = format!("${}", i + 1);
+                let value_str =
+                    crate::bundle::scalar_value_to_sql_literal(&param.to_scalar_value());
+                substituted_clause = substituted_clause.replace(&placeholder, &value_str);
             }
+
+            let sql = format!("SELECT * FROM {} WHERE {}", temp_table, substituted_clause);
+            ctx_for_closure
+                .sql(&sql)
+                .await
+                .map_err(|e| Box::new(e) as BundlebaseError)
         })
         .await;
 

@@ -1,11 +1,10 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::{Bundle, BundleFacade};
-use crate::io::ObjectId;
 use crate::index::IndexDefinition;
+use crate::io::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -45,17 +44,17 @@ impl Operation for DefineIndexOp {
         // Check if an index already exists for this column
         let indexes = bundle.indexes().read();
         if indexes.iter().any(|idx| idx.column() == &self.column) {
-            return Err(format!(
-                "Index already exists for column '{}'",
-                self.column
-            ).into());
+            return Err(format!("Index already exists for column '{}'", self.column).into());
         }
 
         Ok(())
     }
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
-        bundle.indexes.write().push(Arc::new(IndexDefinition::new(&self.id, &self.column)));
+        bundle
+            .indexes
+            .write()
+            .push(Arc::new(IndexDefinition::new(&self.id, &self.column)));
 
         Ok(())
     }

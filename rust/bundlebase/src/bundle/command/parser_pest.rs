@@ -1,5 +1,5 @@
-use crate::bundle::operation::JoinTypeOption;
 use crate::bundle::command::BundleCommand;
+use crate::bundle::operation::JoinTypeOption;
 use crate::BundlebaseError;
 use pest::Parser;
 use pest_derive::Parser;
@@ -71,9 +71,7 @@ fn format_pest_error(error: pest::error::Error<Rule>, sql: &str) -> BundlebaseEr
     .into()
 }
 
-fn parse_filter_pest(
-    pair: pest::iterators::Pair<Rule>,
-) -> Result<BundleCommand, BundlebaseError> {
+fn parse_filter_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand, BundlebaseError> {
     let mut where_clause = None;
 
     for inner_pair in pair.into_inner() {
@@ -98,9 +96,7 @@ fn parse_filter_pest(
     })
 }
 
-fn parse_attach_pest(
-    pair: pest::iterators::Pair<Rule>,
-) -> Result<BundleCommand, BundlebaseError> {
+fn parse_attach_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand, BundlebaseError> {
     let mut path = None;
 
     for inner_pair in pair.into_inner() {
@@ -120,8 +116,7 @@ fn parse_attach_pest(
         }
     }
 
-    let path = path
-        .ok_or_else(|| -> BundlebaseError { "ATTACH statement missing path".into() })?;
+    let path = path.ok_or_else(|| -> BundlebaseError { "ATTACH statement missing path".into() })?;
 
     Ok(BundleCommand::Attach { path })
 }
@@ -146,17 +141,16 @@ fn parse_attach_to_join_pest(
         }
     }
 
-    let path = path
-        .ok_or_else(|| -> BundlebaseError { "ATTACH TO JOIN statement missing path".into() })?;
-    let join = join
-        .ok_or_else(|| -> BundlebaseError { "ATTACH TO JOIN statement missing join name".into() })?;
+    let path =
+        path.ok_or_else(|| -> BundlebaseError { "ATTACH TO JOIN statement missing path".into() })?;
+    let join = join.ok_or_else(|| -> BundlebaseError {
+        "ATTACH TO JOIN statement missing join name".into()
+    })?;
 
     Ok(BundleCommand::AttachToJoin { join, path })
 }
 
-fn parse_join_pest(
-    pair: pest::iterators::Pair<Rule>,
-) -> Result<BundleCommand, BundlebaseError> {
+fn parse_join_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand, BundlebaseError> {
     let mut join_type = JoinTypeOption::Inner;
     let mut source = None;
     let mut name = None;
@@ -184,10 +178,10 @@ fn parse_join_pest(
         }
     }
 
-    let source = source
-        .ok_or_else(|| -> BundlebaseError { "JOIN statement missing source file".into() })?;
-    let name = name
-        .ok_or_else(|| -> BundlebaseError { "JOIN statement missing AS name".into() })?;
+    let source =
+        source.ok_or_else(|| -> BundlebaseError { "JOIN statement missing source file".into() })?;
+    let name =
+        name.ok_or_else(|| -> BundlebaseError { "JOIN statement missing AS name".into() })?;
     let expression = expression
         .ok_or_else(|| -> BundlebaseError { "JOIN statement missing ON expression".into() })?;
 
@@ -282,9 +276,7 @@ fn parse_with_options(
     Ok(options)
 }
 
-fn extract_option_value(
-    pair: pest::iterators::Pair<Rule>,
-) -> Result<String, BundlebaseError> {
+fn extract_option_value(pair: pest::iterators::Pair<Rule>) -> Result<String, BundlebaseError> {
     let inner = pair.into_inner().next().unwrap();
 
     match inner.as_rule() {

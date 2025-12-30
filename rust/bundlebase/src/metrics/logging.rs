@@ -14,13 +14,13 @@
 /// // Metrics and traces will be logged automatically
 /// // Or call log_current_metrics() to log on-demand
 /// ```
-
 use opentelemetry::global;
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
     trace::{BatchSpanProcessor, TracerProvider},
 };
 use opentelemetry_stdout::{MetricsExporter, SpanExporter};
+
 
 /// Initialize logging-based metrics export with default settings
 ///
@@ -61,7 +61,8 @@ pub fn init_logging_metrics() -> bool {
 pub fn init_logging_metrics_with_interval(interval: std::time::Duration) -> bool {
     // Initialize tracing (spans)
     let span_exporter = SpanExporter::default();
-    let span_processor = BatchSpanProcessor::builder(span_exporter, opentelemetry_sdk::runtime::Tokio).build();
+    let span_processor =
+        BatchSpanProcessor::builder(span_exporter, opentelemetry_sdk::runtime::Tokio).build();
 
     let tracer_provider = TracerProvider::builder()
         .with_span_processor(span_processor)
@@ -76,9 +77,7 @@ pub fn init_logging_metrics_with_interval(interval: std::time::Duration) -> bool
         .with_interval(interval)
         .build();
 
-    let meter_provider = SdkMeterProvider::builder()
-        .with_reader(reader)
-        .build();
+    let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
 
     global::set_meter_provider(meter_provider);
 
@@ -112,7 +111,6 @@ pub fn log_current_metrics() {
     // at the configured interval. For immediate metrics, use a shorter interval.
     log::debug!("Metrics will be exported at the next periodic interval");
 }
-
 
 #[cfg(test)]
 mod tests {

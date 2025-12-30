@@ -74,7 +74,9 @@ impl PyRecordBatchStream {
                     // Convert the RecordBatch to PyArrow
                     use arrow::pyarrow::ToPyArrow;
                     Python::attach(|py| -> PyResult<Py<PyAny>> {
-                        batch.to_pyarrow(py).map(|obj: Bound<'_, PyAny>| obj.unbind())
+                        batch
+                            .to_pyarrow(py)
+                            .map(|obj: Bound<'_, PyAny>| obj.unbind())
                     })
                 }
                 Some(Err(e)) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
@@ -113,7 +115,9 @@ impl PyRecordBatchStream {
             // Convert all batches to PyArrow
             use arrow::pyarrow::ToPyArrow;
             Python::attach(|py| -> PyResult<Py<PyAny>> {
-                batches.to_pyarrow(py).map(|obj: Bound<'_, PyAny>| obj.unbind())
+                batches
+                    .to_pyarrow(py)
+                    .map(|obj: Bound<'_, PyAny>| obj.unbind())
             })
         })
     }

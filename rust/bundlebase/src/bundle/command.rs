@@ -1,5 +1,5 @@
-use datafusion::common::ScalarValue;
 use crate::{BundleBuilder, BundleFacade, BundlebaseError, JoinTypeOption};
+use datafusion::common::ScalarValue;
 
 pub mod parser;
 pub mod parser_pest;
@@ -35,10 +35,7 @@ pub enum BundleCommand {
 
     /// Rename a column
     /// Maps to: `bundle.rename_column(&old_name, &new_name)`
-    RenameColumn {
-        old_name: String,
-        new_name: String,
-    },
+    RenameColumn { old_name: String, new_name: String },
 
     /// Execute a full SQL query
     /// Maps to: `bundle.select(&sql, params)`
@@ -90,10 +87,7 @@ pub enum BundleCommand {
 
     /// Attach data to an existing join's pack
     /// Maps to: `bundle.attach_to_join(&join, &path)`
-    AttachToJoin {
-        join: String,
-        path: String,
-    },
+    AttachToJoin { join: String, path: String },
 }
 
 impl BundleCommand {
@@ -122,7 +116,10 @@ impl BundleCommand {
                 bundle.attach(&path).await?;
                 Ok(())
             }
-            BundleCommand::Filter { where_clause, params } => {
+            BundleCommand::Filter {
+                where_clause,
+                params,
+            } => {
                 bundle.filter(&where_clause, params).await?;
                 Ok(())
             }
@@ -144,9 +141,7 @@ impl BundleCommand {
                 expression,
                 join_type,
             } => {
-                bundle
-                    .join(&name, &source, &expression, join_type)
-                    .await?;
+                bundle.join(&name, &source, &expression, join_type).await?;
                 Ok(())
             }
             BundleCommand::Index { column } => {
@@ -227,8 +222,8 @@ impl BundleCommand {
 
 #[cfg(test)]
 mod tests {
+    use crate::bundle::command::BundleCommand;
     use crate::bundle::ScalarValue;
-use crate::bundle::command::BundleCommand;
     #[test]
     fn test_with_params_filter() {
         let cmd = BundleCommand::Filter {

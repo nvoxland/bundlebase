@@ -4,11 +4,11 @@ Tests the warning system that detects when async Bundle operations
 are called without await, which would otherwise silently fail.
 """
 
-import pytest
-import warnings
-import tempfile
 import asyncio
+import warnings
+
 import bundlebase
+import pytest
 from conftest import datafile, random_bundle
 
 
@@ -157,6 +157,7 @@ class TestWarningContent:
 
     def test_operation_chain_warning_format(self):
         """Test OperationChain warning message format."""
+
         async def test():
             c = await bundlebase.create(random_bundle())
             c = await c.attach(datafile("userdata.parquet"))

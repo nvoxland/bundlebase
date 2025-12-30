@@ -1,12 +1,12 @@
-use bundlebase::BundleConfig;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use bundlebase;
 use bundlebase::bundle::{BundleFacade, INIT_FILENAME, META_DIR};
 use bundlebase::io::ObjectStoreFile;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
+use bundlebase::BundleConfig;
 use bundlebase::FunctionSignature;
 use bundlebase::{op_field, AnyOperation};
-use bundlebase::{test_utils, BundlebaseError, Bundle};
+use bundlebase::{test_utils, Bundle, BundlebaseError};
 use url::Url;
 
 mod common;
@@ -14,8 +14,7 @@ mod common;
 #[tokio::test]
 async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
-    let mut bundle =
-        bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("userdata.parquet"))
@@ -24,9 +23,12 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
         .await?
         .rename_column("first_name", "name")
         .await?;
-    let version = ObjectStoreFile::from_url(&Url::parse(test_datafile("userdata.parquet"))?, BundleConfig::default().into())?
-        .version()
-        .await?;
+    let version = ObjectStoreFile::from_url(
+        &Url::parse(test_datafile("userdata.parquet"))?,
+        BundleConfig::default().into(),
+    )?
+    .version()
+    .await?;
 
     bundle.commit("First commit").await?;
 
@@ -223,8 +225,7 @@ async fn test_empty_bundle() -> Result<(), BundlebaseError> {
 async fn test_save_multiple_operations() -> Result<(), BundlebaseError> {
     let temp_dir = random_memory_dir();
 
-    let mut bundle =
-        bundlebase::BundleBuilder::create(temp_dir.url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(temp_dir.url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
     bundle.remove_column("title").await?;
     bundle.remove_column("comments").await?;
@@ -368,7 +369,9 @@ changes:
         commit.timestamp,
         commit.changes[0].id,
         commit.changes[0].description,
-        test_utils::for_yaml(op_field!(&commit.operations()[0], AnyOperation::DefinePack, id).into()),
+        test_utils::for_yaml(
+            op_field!(&commit.operations()[0], AnyOperation::DefinePack, id).into()
+        ),
         test_utils::for_yaml(op_field!(
             &commit.operations()[1],
             AnyOperation::AttachBlock,
@@ -399,8 +402,7 @@ async fn test_open_with_function() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
 
     // Create bundle with function definition
-    let mut bundle =
-        bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
     let schema = SchemaRef::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
         Field::new("value", DataType::Utf8, true),
@@ -449,12 +451,9 @@ async fn test_name_and_description() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_attach_csv() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
-    let mut bundle =
-        bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
-    bundle
-        .attach(test_datafile("customers-0-100.csv"))
-        .await?;
+    bundle.attach(test_datafile("customers-0-100.csv")).await?;
 
     bundle.commit("CSV commit").await?;
 
@@ -592,9 +591,12 @@ changes:
     assert!(batches[0].schema().column_with_name("Website").is_some());
 
     // Verify layout file exists
-    let layout = op_field!(commit.operations()[1], AnyOperation::AttachBlock, layout)
-        .unwrap();
-    let layout_file = ObjectStoreFile::from_str(&layout, loaded_bundle.data_dir(), BundleConfig::default().into())?;
+    let layout = op_field!(commit.operations()[1], AnyOperation::AttachBlock, layout).unwrap();
+    let layout_file = ObjectStoreFile::from_str(
+        &layout,
+        loaded_bundle.data_dir(),
+        BundleConfig::default().into(),
+    )?;
     assert!(
         layout_file.exists().await?,
         "Layout file should exist at: {}",
@@ -607,8 +609,7 @@ changes:
 #[tokio::test]
 async fn test_attach_json() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
-    let mut bundle =
-        bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("objects.json"))

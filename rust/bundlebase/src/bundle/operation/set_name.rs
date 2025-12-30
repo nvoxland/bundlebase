@@ -1,5 +1,5 @@
 use crate::bundle::operation::Operation;
-use crate::{BundlebaseError, Bundle};
+use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use serde::{Deserialize, Serialize};

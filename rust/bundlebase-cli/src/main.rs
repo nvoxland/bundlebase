@@ -5,8 +5,8 @@ mod state;
 use crate::service::BundlebaseFlightService;
 use crate::state::State;
 use arrow_flight::flight_service_server::FlightServiceServer;
+use bundlebase::{Bundle, BundleBuilder, BundlebaseError};
 use clap::Parser;
-use bundlebase::{BundlebaseError, Bundle, BundleBuilder};
 use std::sync::Arc;
 use tonic::transport::Server;
 use tracing::info;
@@ -94,9 +94,7 @@ async fn main() -> Result<(), BundlebaseError> {
 
     let bundle = if args.create {
         info!("Creating bundle at: {}", args.bundle);
-        Arc::new(State::new(
-            BundleBuilder::create(&args.bundle, None).await?,
-        ))
+        Arc::new(State::new(BundleBuilder::create(&args.bundle, None).await?))
     } else {
         info!("Loading bundle from: {}", args.bundle);
         Arc::new(State::new(
@@ -132,11 +130,10 @@ async fn main() -> Result<(), BundlebaseError> {
 
 fn int_logging(args: &Args) {
     // Parse log level from CLI argument
-    let log_config = parse_log_level(&args.log_level)
-        .unwrap_or_else(|e| {
-            eprintln!("Invalid log level '{}': {}", args.log_level, e);
-            std::process::exit(1);
-        });
+    let log_config = parse_log_level(&args.log_level).unwrap_or_else(|e| {
+        eprintln!("Invalid log level '{}': {}", args.log_level, e);
+        std::process::exit(1);
+    });
 
     // Bridge log crate to tracing (captures log::info!, etc.)
     // Ignore error if a logger is already set
@@ -174,10 +171,7 @@ mod tests {
     async fn test_create_bundle_with_memory_url() {
         // Create a new bundle using memory:// URL
         let result = BundleBuilder::create("memory:///test_bundle", None).await;
-        assert!(
-            result.is_ok(),
-            "Failed to create bundle with memory:// URL"
-        );
+        assert!(result.is_ok(), "Failed to create bundle with memory:// URL");
 
         let builder = result.unwrap();
         assert!(builder.bundle.url().to_string().starts_with("memory://"));
@@ -208,10 +202,7 @@ mod tests {
 
         // Now try to open it
         let open_result = Bundle::open(&url, None).await;
-        assert!(
-            open_result.is_ok(),
-            "Failed to reopen bundle after commit"
-        );
+        assert!(open_result.is_ok(), "Failed to reopen bundle after commit");
 
         let bundle = open_result.unwrap();
         assert_eq!(bundle.url().to_string(), url);
@@ -220,9 +211,7 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_bundles_with_memory_urls() {
         // Create multiple bundles with different memory:// URLs
-        let bundles: Vec<_> = (0..5)
-            .map(|i| format!("memory:///bundle_{}", i))
-            .collect();
+        let bundles: Vec<_> = (0..5).map(|i| format!("memory:///bundle_{}", i)).collect();
 
         for url in bundles {
             let result = BundleBuilder::create(&url, None).await;
@@ -239,11 +228,7 @@ mod tests {
             .await
             .expect("Failed to create empty bundle");
 
-        let schema = builder
-            .bundle
-            .schema()
-            .await
-            .expect("Failed to get schema");
+        let schema = builder.bundle.schema().await.expect("Failed to get schema");
 
         // Empty bundle should have no fields
         assert_eq!(schema.fields().len(), 0);
@@ -253,10 +238,7 @@ mod tests {
     async fn test_file_url_path_handling() {
         // Relative path should work
         let result = BundleBuilder::create("file:///tmp/bundle_test", None).await;
-        assert!(
-            result.is_ok(),
-            "Failed to create bundle with file:// URL"
-        );
+        assert!(result.is_ok(), "Failed to create bundle with file:// URL");
 
         let builder = result.unwrap();
         assert!(builder.bundle.url().to_string().starts_with("file://"));
@@ -285,11 +267,7 @@ mod tests {
         for (url, should_succeed) in test_cases {
             let result = BundleBuilder::create(url, None).await;
             if should_succeed {
-                assert!(
-                    result.is_ok(),
-                    "Failed to create bundle with URL: {}",
-                    url
-                );
+                assert!(result.is_ok(), "Failed to create bundle with URL: {}", url);
                 let builder = result.unwrap();
                 assert_eq!(builder.bundle.url().to_string(), url);
             } else {

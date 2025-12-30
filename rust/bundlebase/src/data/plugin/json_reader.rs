@@ -1,13 +1,12 @@
 use crate::data::object_id::ObjectId;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
-use crate::data::{DataReader, LineOrientedFormat, SendableRowIdBatchStream};
-use crate::io::ObjectStoreDir;
+use crate::data::{DataReader, LineOrientedFormat};
 use crate::index::RowIdIndex;
-use crate::{BundlebaseError, Bundle};
+use crate::io::ObjectStoreDir;
+use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
-use datafusion::catalog::Session;
 use datafusion::common::stats::Precision;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::file_format::json::JsonFormat;
@@ -62,7 +61,7 @@ impl ReaderPlugin for JsonPlugin {
         block_id: &ObjectId,
         bundle: &Bundle,
         schema: Option<SchemaRef>,
-        layout: Option<String>,
+        _layout: Option<String>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
         if !self.inner.handles(source) {
             return Ok(None);
@@ -234,7 +233,13 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let reader = plugin
-            .reader(test_datafile("objects.json"), &1.into(), &binding, None, None)
+            .reader(
+                test_datafile("objects.json"),
+                &1.into(),
+                &binding,
+                None,
+                None,
+            )
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
@@ -315,7 +320,13 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let reader = plugin
-            .reader(test_datafile("objects.json"), &1.into(), &binding, None, None)
+            .reader(
+                test_datafile("objects.json"),
+                &1.into(),
+                &binding,
+                None,
+                None,
+            )
             .await?
             .unwrap();
 

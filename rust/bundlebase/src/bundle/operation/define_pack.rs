@@ -1,7 +1,7 @@
 use crate::bundle::operation::Operation;
 use crate::data::DataPack;
 use crate::io::ObjectId;
-use crate::{BundlebaseError, Bundle};
+use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};

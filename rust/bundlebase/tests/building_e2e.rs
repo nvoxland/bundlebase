@@ -1,10 +1,10 @@
-use bundlebase::BundleConfig;
 use bundlebase;
 use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME, META_DIR};
 use bundlebase::io::ObjectStoreFile;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
-use bundlebase::BundlebaseError;
 use bundlebase::Bundle;
+use bundlebase::BundleConfig;
+use bundlebase::BundlebaseError;
 use url::Url;
 
 mod common;
@@ -135,9 +135,7 @@ async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
     let temp = random_memory_url();
 
     let mut bundle = bundlebase::BundleBuilder::create(&temp.to_string(), None).await?;
-    bundle
-        .attach(test_datafile("customers-0-100.csv"))
-        .await?;
+    bundle.attach(test_datafile("customers-0-100.csv")).await?;
     bundle.remove_column("country").await?;
 
     assert_eq!(bundle.bundle.operations().len(), 3);
@@ -167,8 +165,12 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     let local_file = temp1.file("local_data.csv")?;
 
     // Read source data and write to local location
-    let source_obj = ObjectStoreFile::from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
-    let data = source_obj.read_bytes().await?.expect("Failed to read source file");
+    let source_obj =
+        ObjectStoreFile::from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
+    let data = source_obj
+        .read_bytes()
+        .await?
+        .expect("Failed to read source file");
     local_file.write(data).await?;
 
     // Attach using relative path (no scheme separator)
@@ -187,10 +189,16 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     // Verify data is accessible
     let df = bundle_b_reopened.dataframe().await?;
     let batches = df.as_ref().clone().collect().await?;
-    assert!(batches[0].num_rows() > 0, "Should have rows from the attached file");
+    assert!(
+        batches[0].num_rows() > 0,
+        "Should have rows from the attached file"
+    );
 
     // Verify country column was removed
-    assert!(!common::has_column(&bundle_b_reopened.schema().await?, "country"));
+    assert!(!common::has_column(
+        &bundle_b_reopened.schema().await?,
+        "country"
+    ));
 
     let operations = bundle_b_reopened.operations();
     let attach_op = operations

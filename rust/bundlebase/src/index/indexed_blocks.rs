@@ -1,5 +1,5 @@
-use parking_lot::RwLock;
 use crate::data::{ObjectId, VersionedBlockId};
+use parking_lot::RwLock;
 
 /// Represents a set of indexed blocks with their versions.
 /// Tracks which blocks (and at which versions) are covered by a particular index.
@@ -32,7 +32,10 @@ impl IndexedBlocks {
 
     /// Checks if this index contains the specified block at the specified version
     pub fn contains(&self, block_id: &ObjectId, version: &str) -> bool {
-        self.blocks.read().iter().any(|vb| &vb.block == block_id && vb.version == version)
+        self.blocks
+            .read()
+            .iter()
+            .any(|vb| &vb.block == block_id && vb.version == version)
     }
 
     /// Returns the path to the index file

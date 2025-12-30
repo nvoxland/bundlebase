@@ -1,8 +1,9 @@
+use crate::bundle::Operation;
 /// Test utilities for data adapter tests
 use crate::data::DataReaderFactory;
-use crate::io::{DataStorage, ObjectStoreDir, ObjectStoreFile};
 use crate::functions::FunctionRegistry;
-use crate::{BundleBuilder, BundleConfig};
+use crate::io::{DataStorage, ObjectStoreDir, ObjectStoreFile};
+use crate::{BundleBuilder, BundleConfig, BundleFacade};
 use arrow_schema::SchemaRef;
 use parking_lot::RwLock;
 use regex::Regex;
@@ -10,7 +11,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::Builder;
 use url::Url;
 
 
@@ -121,7 +122,14 @@ macro_rules! assert_regexp {
     }};
 }
 
-pub fn assert_regexp(expected: Vec<&str>, actual: Vec<String>) {
+pub fn describe_ops(bundle: &dyn BundleFacade) -> Vec<String>{
+    bundle.operations()
+        .iter()
+        .map(|x| x.describe())
+        .collect::<Vec<_>>()
+}
+
+pub fn assert_vec_regexp(expected: Vec<&str>, actual: Vec<String>) {
     let patterns = expected
         .iter()
         .map(|x| Regex::new(x).unwrap())

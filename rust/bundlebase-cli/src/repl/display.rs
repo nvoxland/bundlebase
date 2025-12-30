@@ -1,9 +1,9 @@
-use std::sync::Arc;
 use arrow_schema::SchemaRef;
-use comfy_table::{presets::UTF8_FULL, Cell, Color, ContentArrangement, Table};
 use bundlebase::{bundle::BundleCommit, AnyOperation, BundlebaseError, Operation};
+use comfy_table::{presets::UTF8_FULL, Cell, Color, ContentArrangement, Table};
 use datafusion::prelude::DataFrame;
 use futures::StreamExt;
+use std::sync::Arc;
 
 /// Display a DataFrame as a formatted table
 pub async fn display_dataframe(
@@ -15,7 +15,8 @@ pub async fn display_dataframe(
     table.load_preset(UTF8_FULL);
     table.set_content_arrangement(ContentArrangement::Dynamic);
 
-    let stream: datafusion::execution::SendableRecordBatchStream = df.as_ref().clone().execute_stream().await?;
+    let stream: datafusion::execution::SendableRecordBatchStream =
+        df.as_ref().clone().execute_stream().await?;
     let mut row_count = 0;
 
     futures::pin_mut!(stream);

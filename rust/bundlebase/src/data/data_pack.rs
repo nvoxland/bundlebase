@@ -29,7 +29,7 @@ impl DataPack {
         let name = table_name.strip_prefix("packs.").unwrap_or(table_name);
         match name.strip_prefix("__pack_") {
             Some(id) => ObjectId::try_from(id).ok(),
-            None => None
+            None => None,
         }
     }
 

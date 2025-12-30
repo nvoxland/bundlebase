@@ -1,13 +1,13 @@
-use crate::bundle::META_DIR;
 use crate::bundle::commit::BundleCommit;
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::{AnyOperation, BundleChange, Operation};
-use crate::{Bundle, BundleBuilder, BundlebaseError};
+use crate::bundle::META_DIR;
 use crate::data::ObjectId;
+use crate::{Bundle, BundleBuilder, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
-use datafusion::prelude::DataFrame;
 use datafusion::execution::context::SessionContext;
+use datafusion::prelude::DataFrame;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -35,7 +35,10 @@ impl CreateViewOp {
 
         // 2. Extract uncommitted operations from source_builder
         let operations: Vec<AnyOperation> = source_builder.status().operations();
-        debug!("Captured {} operations from source builder", operations.len());
+        debug!(
+            "Captured {} operations from source builder",
+            operations.len()
+        );
         for (i, op) in operations.iter().enumerate() {
             debug!("  Captured op {}: {}", i, op.describe());
         }
@@ -48,10 +51,8 @@ impl CreateViewOp {
             .url()
             .to_string();
 
-        let view_builder = BundleBuilder::extend(
-            Arc::new(parent_builder.bundle.clone()),
-            &view_dir_path
-        )?;
+        let view_builder =
+            BundleBuilder::extend(Arc::new(parent_builder.bundle.clone()), &view_dir_path)?;
 
         // Note: We do NOT apply operations to the view bundle during setup.
         // Operations are stored in the commit file and will be applied when
@@ -102,7 +103,11 @@ impl CreateViewOp {
         let data = bytes::Bytes::from(yaml);
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
         manifest_dir.file(&filename)?.write_stream(stream).await?;
-        debug!("Wrote view commit: {} with {} operations", filename, operations.len());
+        debug!(
+            "Wrote view commit: {} with {} operations",
+            filename,
+            operations.len()
+        );
 
         // Write init commit with FROM pointing to parent
         use crate::bundle::init::{InitCommit, INIT_FILENAME};
@@ -128,7 +133,11 @@ impl Operation for CreateViewOp {
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Check view name doesn't already exist
-        debug!("Checking if view '{}' exists. Current views: {:?}", self.name, bundle.views.keys().collect::<Vec<_>>());
+        debug!(
+            "Checking if view '{}' exists. Current views: {:?}",
+            self.name,
+            bundle.views.keys().collect::<Vec<_>>()
+        );
         if bundle.views.contains_key(&self.name) {
             return Err(format!("View '{}' already exists", self.name).into());
         }

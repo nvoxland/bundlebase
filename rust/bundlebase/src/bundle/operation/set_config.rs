@@ -3,7 +3,6 @@ use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Operation to set configuration key-value pairs in the container
 ///
@@ -57,7 +56,8 @@ impl Operation for SetConfigOp {
             .set(&self.key, &self.value, self.url_prefix.as_deref());
 
         // Recompute merged config and recreate data_dir with new config
-        bundle.recompute_config()
+        bundle
+            .recompute_config()
             .map_err(|e| DataFusionError::External(e))?;
 
         Ok(())

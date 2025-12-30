@@ -1,19 +1,20 @@
 """Bundlebase - High-performance data processing library with Python bindings."""
 
 import logging
-from typing import Any, Callable, Optional, Dict, Awaitable, Union
-from ._bundlebase import create as _create
-from ._bundlebase import open as _open
-from ._bundlebase import test_datafile as test_datafile
-from ._bundlebase import random_memory_url as random_memory_url
+from typing import Any, Callable, Optional, Dict, Union
+
+from . import progress
+from ._bundlebase import BundleConfig as BundleConfig
 from ._bundlebase import PyBundle as PyBundle
 from ._bundlebase import PyBundleBuilder as _PyBundleBuilder
-from ._bundlebase import PyChange as PyChange
 from ._bundlebase import PyBundleStatus as PyBundleStatus
-from ._bundlebase import BundleConfig as BundleConfig
-from .conversion import to_pandas, to_polars, to_numpy, to_dict, stream_batches
+from ._bundlebase import PyChange as PyChange
+from ._bundlebase import create as _create
+from ._bundlebase import open as _open
+from ._bundlebase import random_memory_url as random_memory_url
+from ._bundlebase import test_datafile as test_datafile
 from .chain import OperationChain, register_original_method, CreateChain, ExtendChain
-from . import progress
+from .conversion import to_pandas, to_polars, to_numpy, to_dict, stream_batches
 
 # Configure Rust→Python logging bridge
 _rust_logger = logging.getLogger('bundlebase.rust')

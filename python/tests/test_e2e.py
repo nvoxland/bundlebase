@@ -965,6 +965,7 @@ async def test_view_dataframe_execution():
     view = await c.view("chile")
 
     # This should work if data is inherited correctly
+    assert view.operations() == ""
     schema = await view.schema()
     assert len(schema) > 0, "View should have schema"
 

@@ -1,8 +1,7 @@
-use crate::bundle::operation::*;
 use crate::bundle::command::parser_pest::parse_custom_pest;
 use crate::bundle::command::BundleCommand;
 use crate::BundlebaseError;
-use sqlparser::ast::{ObjectType, SelectItem, SetExpr, Statement};
+use sqlparser::ast::{ObjectType, Statement};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
@@ -58,7 +57,9 @@ pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError
     }
 
     if ast.len() > 1 {
-        return Err("Multiple statements not supported. Please execute one statement at a time.".into());
+        return Err(
+            "Multiple statements not supported. Please execute one statement at a time.".into(),
+        );
     }
 
     let stmt = &ast[0];
@@ -74,12 +75,10 @@ pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError
 fn dispatch_statement(stmt: &Statement) -> Result<BundleCommand, BundlebaseError> {
     match stmt {
         // SELECT statements -> Select
-        Statement::Query(query) => {
-            Ok(BundleCommand::Select {
-                sql: stmt.to_string(),
-                params: vec![],
-            })
-        }
+        Statement::Query(_query) => Ok(BundleCommand::Select {
+            sql: stmt.to_string(),
+            params: vec![],
+        }),
 
         // CREATE INDEX -> Index
         Statement::CreateIndex { .. } => {
@@ -103,7 +102,6 @@ fn dispatch_statement(stmt: &Statement) -> Result<BundleCommand, BundlebaseError
         _ => Err(format!("Unsupported SQL statement type: {:?}", stmt).into()),
     }
 }
-
 
 /// Extract column name from index name.
 ///

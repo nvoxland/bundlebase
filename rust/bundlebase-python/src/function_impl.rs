@@ -1,6 +1,6 @@
+use crate::data_generator::PythonDataGenerator;
 use ::bundlebase::functions::FunctionImpl;
 use ::bundlebase::functions::FunctionSignature;
-use crate::data_generator::PythonDataGenerator;
 use ::bundlebase::{BundlebaseError, DataGenerator};
 use pyo3::types::PyFunction;
 use pyo3::Py;

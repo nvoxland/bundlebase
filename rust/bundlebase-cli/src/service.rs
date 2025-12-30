@@ -8,9 +8,8 @@ use arrow_flight::{
     HandshakeRequest, HandshakeResponse, PollInfo, PutResult, Result as FlightResult, SchemaResult,
     Ticket,
 };
-use bytes::Bytes;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::{Bundle, BundleBuilder};
+use bytes::Bytes;
 use futures::stream::Stream;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -264,7 +263,8 @@ fn create_batch_message(batch: &RecordBatch) -> Result<FlightData, Status> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use bundlebase::BundleBuilder;
+use super::*;
 
     #[tokio::test]
     async fn test_flight_service_with_memory_bundle() {

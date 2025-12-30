@@ -2,7 +2,7 @@ use crate::bundle::operation::Operation;
 use crate::data::{DataBlock, ObjectId, RowId, VersionedBlockId};
 use crate::index::{ColumnIndex, IndexedValue};
 use crate::progress::ProgressScope;
-use crate::{BundlebaseError, Bundle};
+use crate::{Bundle, BundlebaseError};
 use arrow_schema::DataType;
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
@@ -23,10 +23,7 @@ pub struct IndexBlocksOp {
 }
 
 /// Finds a block by ID in the bundle's data packs.
-fn find_block(
-    bundle: &Bundle,
-    block_id: &ObjectId,
-) -> Result<Arc<DataBlock>, BundlebaseError> {
+fn find_block(bundle: &Bundle, block_id: &ObjectId) -> Result<Arc<DataBlock>, BundlebaseError> {
     for (_, pack) in &bundle.data_packs.read().clone() {
         for block in &pack.blocks() {
             if block.id() == block_id {
@@ -118,12 +115,15 @@ impl IndexBlocksOp {
             // Stream through block data
             let projection = Some(vec![col_idx]);
             let reader = block.reader();
-            let mut rowid_stream = reader.extract_rowids_stream(bundle.ctx(), projection.as_ref()).await.map_err(|e| {
-                BundlebaseError::from(format!(
-                    "Failed to stream data from block {} for indexing: {}",
-                    block_id, e
-                ))
-            })?;
+            let mut rowid_stream = reader
+                .extract_rowids_stream(bundle.ctx(), projection.as_ref())
+                .await
+                .map_err(|e| {
+                    BundlebaseError::from(format!(
+                        "Failed to stream data from block {} for indexing: {}",
+                        block_id, e
+                    ))
+                })?;
 
             while let Some(batch_result) = rowid_stream.next().await {
                 let rowid_batch = batch_result.map_err(|e| {
@@ -169,17 +169,14 @@ impl IndexBlocksOp {
         let total_cardinality = index.cardinality();
 
         let rel_path = format!("idx_{}_{}.idx", index_id, Uuid::new_v4());
-        let path = bundle.data_dir
-            .file(&rel_path)?;
+        let path = bundle.data_dir.file(&rel_path)?;
 
-        path.write(index.serialize()?)
-            .await
-            .map_err(|e| {
-                BundlebaseError::from(format!(
-                    "Failed to save index for column '{}': {}",
-                    column, e
-                ))
-            })?;
+        path.write(index.serialize()?).await.map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to save index for column '{}': {}",
+                column, e
+            ))
+        })?;
 
         log::debug!(
             "Successfully created index for column '{}' at {}",
@@ -227,14 +224,18 @@ impl Operation for IndexBlocksOp {
         // Find the corresponding IndexDefinition by index_id
         let index_def = {
             let indexes = bundle.indexes.read();
-            indexes.iter()
+            indexes
+                .iter()
                 .find(|idx| idx.id() == &self.index_id)
                 .cloned()
         };
 
         if let Some(index_def) = index_def {
             // Create IndexedBlocks instance with VersionedBlockId
-            let indexed_blocks = Arc::new(crate::index::IndexedBlocks::new(self.blocks.clone(), self.path.clone()));
+            let indexed_blocks = Arc::new(crate::index::IndexedBlocks::new(
+                self.blocks.clone(),
+                self.path.clone(),
+            ));
 
             // Add to the IndexDefinition
             index_def.add_indexed_blocks(indexed_blocks);

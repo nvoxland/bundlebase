@@ -1,6 +1,6 @@
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::test_utils::{assert_regexp, random_memory_url, test_datafile};
+use bundlebase::test_utils::{assert_vec_regexp, random_memory_url, test_datafile};
 use bundlebase::BundlebaseError;
 use bundlebase::Operation;
 
@@ -11,11 +11,9 @@ async fn test_adding_blocks() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
-    bundle
-        .attach(test_datafile("customers-0-100.csv"))
-        .await?;
+    bundle.attach(test_datafile("customers-0-100.csv")).await?;
 
-    assert_regexp(
+    assert_vec_regexp(
         vec![
             "CREATE PACK \\w+",
             "ATTACH: memory:///test_data/customers-0-100.csv",
@@ -35,7 +33,7 @@ async fn test_adding_blocks() -> Result<(), BundlebaseError> {
         .attach(test_datafile("customers-101-150.csv"))
         .await?;
 
-    assert_regexp(
+    assert_vec_regexp(
         vec![
             "CREATE PACK \\w+",
             "ATTACH: memory:///test_data/customers-0-100.csv",

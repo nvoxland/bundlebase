@@ -5,7 +5,7 @@ without async/await syntax.
 """
 
 import tempfile
-import pytest
+
 import bundlebase.sync as dc
 from conftest import datafile, random_bundle
 
@@ -88,7 +88,6 @@ class TestSyncOperations:
 
         results = c.to_dict()
         assert len(results["id"]) == 798  # 798 rows with salary > 50000
-
 
     def test_sync_set_name(self):
         """Test setting bundle name synchronously."""

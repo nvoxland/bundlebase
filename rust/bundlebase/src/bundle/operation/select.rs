@@ -1,7 +1,8 @@
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::Operation;
-use crate::{BundlebaseError, Bundle};
-use crate::metrics::{OperationTimer, OperationCategory, OperationOutcome, start_span};
+use crate::bundle::sql::with_temp_table;
+use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
+use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -9,7 +10,6 @@ use datafusion::prelude::SessionContext;
 use datafusion::scalar::ScalarValue;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use crate::bundle::sql::with_temp_table;
 
 /// Serializable representation of a select parameter value
 #[derive(Debug, Clone, PartialEq)]
@@ -236,7 +236,8 @@ impl Operation for SelectOp {
                 sql = sql.replace("data", &table_name);
 
                 // Execute the SQL query
-                ctx_for_closure.sql(&sql)
+                ctx_for_closure
+                    .sql(&sql)
                     .await
                     .map_err(|e| Box::new(e) as BundlebaseError)
             }

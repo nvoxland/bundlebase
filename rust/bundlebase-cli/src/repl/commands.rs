@@ -1,11 +1,11 @@
 use crate::state::State;
+use bundlebase::bundle::BundleCommand;
 use bundlebase::{
     bundle::{parse_command, BundleFacade},
     BundlebaseError,
 };
 use std::fmt::Display;
 use std::sync::Arc;
-use bundlebase::bundle::BundleCommand;
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -13,9 +13,7 @@ pub enum Command {
     Sql(BundleCommand),
 
     // REPL-only commands (not SQL)
-    Show {
-        limit: Option<usize>,
-    },
+    Show { limit: Option<usize> },
     Schema,
     Count,
     Explain,
@@ -98,7 +96,6 @@ pub fn parse(input: &str) -> Result<Command, String> {
 
     Ok(Command::Sql(sql_cmd))
 }
-
 
 /// Execute a command
 pub async fn execute(cmd: Command, state: &Arc<State>) -> Result<ExecuteResult, BundlebaseError> {
@@ -227,7 +224,6 @@ mod tests {
             _ => panic!("Expected Sql(Filter) command"),
         }
     }
-
 
     #[test]
     fn test_parse_meta_commands() {

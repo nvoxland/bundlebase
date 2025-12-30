@@ -18,6 +18,7 @@ For Jupyter notebooks, install with:
 """
 
 from typing import Any, Dict, List, Optional
+
 from bundlebase._loop_manager import EventLoopManager
 from bundlebase.chain import _ORIGINAL_METHODS
 

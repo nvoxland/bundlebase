@@ -25,7 +25,10 @@ struct StaticGenerator {
 }
 
 impl FunctionImpl for StaticImpl {
-    fn execute(&self, _: Arc<FunctionSignature>) -> Result<Arc<dyn DataGenerator>, BundlebaseError> {
+    fn execute(
+        &self,
+        _: Arc<FunctionSignature>,
+    ) -> Result<Arc<dyn DataGenerator>, BundlebaseError> {
         Ok(Arc::new(StaticGenerator {
             data: self.data.clone(),
         }))

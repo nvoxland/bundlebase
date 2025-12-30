@@ -9,12 +9,12 @@
 ///
 /// Metrics and traces are exported via OpenTelemetry and can be consumed by Prometheus,
 /// Jaeger, or any OTel-compatible backend.
-
 use opentelemetry::{
-    metrics::{Counter, Histogram, Meter, ObservableGauge},
-    trace::{Tracer, TracerProvider as _, Status, Span as OtelSpanTrait},
     global::BoxedSpan,
+    metrics::{Counter, Histogram, Meter, ObservableGauge},
+    trace::{Span as OtelSpanTrait, Status, Tracer},
 };
+
 
 use lazy_static::lazy_static;
 
@@ -27,7 +27,7 @@ pub use logging::{init_logging_metrics, init_logging_metrics_with_interval, log_
 // Progress tracking integration (when metrics feature enabled)
 pub mod progress;
 
-pub use progress::{SpanProgressTracker, CompositeTracker};
+pub use progress::{CompositeTracker, SpanProgressTracker};
 
 /// Generic outcome for all operations
 #[derive(Debug, Clone, Copy)]
@@ -135,39 +135,43 @@ impl Span {
 
     /// Add an attribute to the span
     pub fn set_attribute(&mut self, key: &str, value: impl Into<String>) {
-            self.inner.set_attribute(KeyValue::new(key.to_string(), value.into()));
+        self.inner
+            .set_attribute(KeyValue::new(key.to_string(), value.into()));
     }
 
     /// Record an event in the span
     pub fn add_event(&mut self, name: &str, attributes: Vec<KeyValue>) {
-            self.inner.add_event(name.to_string(), attributes);
+        self.inner.add_event(name.to_string(), attributes);
     }
 
     /// Set the span status based on operation outcome
     pub fn set_outcome(&mut self, outcome: OperationOutcome) {
-            let status = match outcome {
-                OperationOutcome::Success => Status::Ok,
-                OperationOutcome::Error => Status::error("Operation failed"),
-                OperationOutcome::Miss | OperationOutcome::Fallback | OperationOutcome::Skipped => Status::Unset,
-            };
-            self.inner.set_status(status);
-            self.inner.set_attribute(KeyValue::new("outcome", outcome.as_str()));
+        let status = match outcome {
+            OperationOutcome::Success => Status::Ok,
+            OperationOutcome::Error => Status::error("Operation failed"),
+            OperationOutcome::Miss | OperationOutcome::Fallback | OperationOutcome::Skipped => {
+                Status::Unset
+            }
+        };
+        self.inner.set_status(status);
+        self.inner
+            .set_attribute(KeyValue::new("outcome", outcome.as_str()));
     }
 
     /// Record an error in the span
     pub fn record_error(&mut self, error: &str) {
-            self.inner.set_status(Status::error(error.to_string()));
-            self.inner.add_event(
-                "exception",
-                vec![KeyValue::new("exception.message", error.to_string())],
-            );
+        self.inner.set_status(Status::error(error.to_string()));
+        self.inner.add_event(
+            "exception",
+            vec![KeyValue::new("exception.message", error.to_string())],
+        );
     }
 }
 
 impl Drop for Span {
     fn drop(&mut self) {
         // Span automatically ends when dropped (RAII pattern)
-            self.inner.end();
+        self.inner.end();
     }
 }
 
@@ -231,14 +235,14 @@ pub fn record_operation(
     operation: &str,
     labels: &[KeyValue],
 ) {
-        let mut attrs = vec![
-            KeyValue::new("category", category.as_str()),
-            KeyValue::new("outcome", outcome.as_str()),
-            KeyValue::new("operation", operation.to_string()),
-        ];
-        attrs.extend_from_slice(labels);
-        OPERATIONS.add(1, &attrs);
-    }
+    let mut attrs = vec![
+        KeyValue::new("category", category.as_str()),
+        KeyValue::new("outcome", outcome.as_str()),
+        KeyValue::new("operation", operation.to_string()),
+    ];
+    attrs.extend_from_slice(labels);
+    OPERATIONS.add(1, &attrs);
+}
 
 /// Records operation duration
 pub fn record_duration(
@@ -248,46 +252,41 @@ pub fn record_duration(
     outcome: OperationOutcome,
     labels: &[KeyValue],
 ) {
-        let mut attrs = vec![
-            KeyValue::new("category", category.as_str()),
-            KeyValue::new("operation", operation.to_string()),
-            KeyValue::new("outcome", outcome.as_str()),
-        ];
-        attrs.extend_from_slice(labels);
-        OPERATION_DURATION.record(duration_ms, &attrs);
+    let mut attrs = vec![
+        KeyValue::new("category", category.as_str()),
+        KeyValue::new("operation", operation.to_string()),
+        KeyValue::new("outcome", outcome.as_str()),
+    ];
+    attrs.extend_from_slice(labels);
+    OPERATION_DURATION.record(duration_ms, &attrs);
 }
 
 /// Records bytes processed (read/written)
-pub fn record_bytes(
-    category: OperationCategory,
-    bytes: u64,
-    operation: &str,
-    labels: &[KeyValue],
-) {
-        let mut attrs = vec![
-            KeyValue::new("category", category.as_str()),
-            KeyValue::new("operation", operation.to_string()),
-        ];
-        attrs.extend_from_slice(labels);
-        BYTES_PROCESSED.add(bytes, &attrs);
+pub fn record_bytes(category: OperationCategory, bytes: u64, operation: &str, labels: &[KeyValue]) {
+    let mut attrs = vec![
+        KeyValue::new("category", category.as_str()),
+        KeyValue::new("operation", operation.to_string()),
+    ];
+    attrs.extend_from_slice(labels);
+    BYTES_PROCESSED.add(bytes, &attrs);
 }
 
 /// Records a cache operation
 pub fn record_cache_operation(cache_name: &str, hit: bool) {
-        CACHE_OPERATIONS.add(
-            1,
-            &[
-                KeyValue::new("cache_name", cache_name.to_string()),
-                KeyValue::new("result", if hit { "hit" } else { "miss" }),
-            ],
-        );
+    CACHE_OPERATIONS.add(
+        1,
+        &[
+            KeyValue::new("cache_name", cache_name.to_string()),
+            KeyValue::new("result", if hit { "hit" } else { "miss" }),
+        ],
+    );
 }
 
 /// Updates the cache size gauge
 pub fn update_cache_size(cache_name: &str, size: u64) {
-        // For observable gauges, we need to register a callback
-        // This is typically done once at initialization
-        let _ = (cache_name, size); // Placeholder - actual implementation would use callback
+    // For observable gauges, we need to register a callback
+    // This is typically done once at initialization
+    let _ = (cache_name, size); // Placeholder - actual implementation would use callback
 }
 
 /// Generic operation timer that records duration and outcome
@@ -311,20 +310,21 @@ impl OperationTimer {
 
     /// Add a label to the timer
     pub fn with_label(mut self, key: &str, value: impl Into<String>) -> Self {
-        self.labels.push(KeyValue::new(key.to_string(), value.into()));
+        self.labels
+            .push(KeyValue::new(key.to_string(), value.into()));
         self
     }
 
     /// Finish timing and record the outcome
     pub fn finish(self, outcome: OperationOutcome) {
-            let duration_ms = self.start.elapsed().as_secs_f64() * 1000.0;
-            record_duration(
-                self.category,
-                duration_ms,
-                &self.operation,
-                outcome,
-                &self.labels,
-            );
+        let duration_ms = self.start.elapsed().as_secs_f64() * 1000.0;
+        record_duration(
+            self.category,
+            duration_ms,
+            &self.operation,
+            outcome,
+            &self.labels,
+        );
 
         record_operation(self.category, outcome, &self.operation, &self.labels);
     }

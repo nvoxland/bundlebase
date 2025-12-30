@@ -1,6 +1,6 @@
 use crate::bundle::BundleCommit;
 use crate::io::ObjectId;
-use crate::{BundlebaseError, BundleBuilder};
+use crate::{AnyOperation, BundleBuilder, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::common::ScalarValue;
@@ -31,6 +31,9 @@ pub trait BundleFacade {
 
     /// Returns the commit history for this bundle, including any base bundles
     fn history(&self) -> Vec<BundleCommit>;
+
+    /// All operations applied to this bundle
+    fn operations(&self) -> Vec<AnyOperation>;
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError>;
 

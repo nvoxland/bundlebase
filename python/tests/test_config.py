@@ -78,8 +78,8 @@ async def test_open_with_config():
 async def test_set_config_chaining():
     """Test that set_config supports fluent chaining."""
     c = await (bundlebase.create(random_bundle())
-              .set_config("region", "us-west-2")
-              .set_config("access_key_id", "TESTKEY"))
+               .set_config("region", "us-west-2")
+               .set_config("access_key_id", "TESTKEY"))
 
     assert c is not None
 

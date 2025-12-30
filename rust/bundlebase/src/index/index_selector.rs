@@ -123,9 +123,7 @@ mod tests {
     #[tokio::test]
     async fn test_select_index_found() {
         // Create a test bundle with an index
-        let bundle = Bundle::empty()
-            .await
-            .expect("Failed to create bundle");
+        let bundle = Bundle::empty().await.expect("Failed to create bundle");
 
         // Create an IndexDefinition for "email" column
         let index_id = ObjectId::from(1);
@@ -157,9 +155,7 @@ mod tests {
     #[tokio::test]
     async fn test_select_index_wrong_column() {
         // Create a test bundle with an index on "email"
-        let bundle = Bundle::empty()
-            .await
-            .expect("Failed to create bundle");
+        let bundle = Bundle::empty().await.expect("Failed to create bundle");
 
         let index_id = ObjectId::from(1);
         let index_def = Arc::new(IndexDefinition::new(&index_id, &"email".to_string()));
@@ -183,9 +179,7 @@ mod tests {
     #[tokio::test]
     async fn test_select_index_wrong_version() {
         // Create a test bundle with an index at version "v1"
-        let bundle = Bundle::empty()
-            .await
-            .expect("Failed to create bundle");
+        let bundle = Bundle::empty().await.expect("Failed to create bundle");
 
         let index_id = ObjectId::from(1);
         let index_def = Arc::new(IndexDefinition::new(&index_id, &"email".to_string()));
@@ -207,9 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_has_index_for_column() {
-        let bundle = Bundle::empty()
-            .await
-            .expect("Failed to create bundle");
+        let bundle = Bundle::empty().await.expect("Failed to create bundle");
 
         // Initially no indexes
         assert!(!IndexSelector::has_index_for_column("email", &bundle));

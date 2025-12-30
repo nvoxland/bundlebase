@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use crate::data::{ObjectId, RowId};
 use crate::io::{ObjectStoreDir, ObjectStoreFile};
 use crate::BundlebaseError;
@@ -11,13 +10,11 @@ const MAGIC_BYTES: &[u8; 8] = b"ROWIDIDX";
 /// - Version: 1 (1 byte)
 /// - Row count: u64 in little-endian (8 bytes)
 /// - RowId array: Each as u64 in little-endian
-pub struct RowIdIndex {
-}
+pub struct RowIdIndex {}
 
 impl RowIdIndex {
     pub(crate) fn new() -> Self {
-        Self {
-        }
+        Self {}
     }
 
     pub(crate) async fn build(
@@ -25,7 +22,7 @@ impl RowIdIndex {
         datafile: &ObjectStoreFile,
         data_dir: &ObjectStoreDir,
         block_id: &ObjectId,
-        skip_first_line: bool
+        skip_first_line: bool,
     ) -> Result<ObjectStoreFile, BundlebaseError> {
         // Read stream and collect all bytes
         let mut stream = datafile.read_existing().await?;
@@ -46,7 +43,12 @@ impl RowIdIndex {
     }
 
     /// Scan file bytes and build an index of row offsets
-    fn build_row_index(&self, bytes: &[u8], block_id: &ObjectId, skip_first_line: bool) -> Vec<RowId> {
+    fn build_row_index(
+        &self,
+        bytes: &[u8],
+        block_id: &ObjectId,
+        skip_first_line: bool,
+    ) -> Vec<RowId> {
         let mut row_ids = Vec::new();
         let mut row_start = 0u64;
         let mut skip_first = skip_first_line;

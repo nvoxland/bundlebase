@@ -1,7 +1,7 @@
 mod builder;
-mod commit;
 mod bundle;
 mod bundle_config;
+mod commit;
 mod data_generator;
 mod function_impl;
 mod operation;
@@ -15,10 +15,10 @@ use ::bundlebase::bundle::{Bundle, BundleBuilder};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
-use builder::{PyBundleBuilder, PyChange, PyBundleStatus};
-use commit::PyCommit;
+use builder::{PyBundleBuilder, PyBundleStatus, PyChange};
 use bundle::PyBundle;
-use bundle_config::{PyBundleConfig, config_from_python};
+use bundle_config::{config_from_python, PyBundleConfig};
+use commit::PyCommit;
 use operation::PyOperation;
 use record_batch_stream::PyRecordBatchStream;
 use schema::{PySchema, PySchemaField};
@@ -26,10 +26,12 @@ use session_context::PySessionContext;
 
 #[pyfunction]
 #[pyo3(signature = (data_dir, config=None))]
-pub fn create<'py>(data_dir: String, config: Option<&Bound<'py, PyAny>>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let config_inner = config
-        .map(|c| config_from_python(c))
-        .transpose()?;
+pub fn create<'py>(
+    data_dir: String,
+    config: Option<&Bound<'py, PyAny>>,
+    py: Python<'py>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let config_inner = config.map(|c| config_from_python(c)).transpose()?;
 
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         BundleBuilder::create(data_dir.as_str(), config_inner)
@@ -41,10 +43,12 @@ pub fn create<'py>(data_dir: String, config: Option<&Bound<'py, PyAny>>, py: Pyt
 
 #[pyfunction]
 #[pyo3(signature = (url, config=None))]
-pub fn open<'py>(url: String, config: Option<&Bound<'py, PyAny>>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let config_inner = config
-        .map(|c| config_from_python(c))
-        .transpose()?;
+pub fn open<'py>(
+    url: String,
+    config: Option<&Bound<'py, PyAny>>,
+    py: Python<'py>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let config_inner = config.map(|c| config_from_python(c)).transpose()?;
 
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         Bundle::open(url.as_str(), config_inner)

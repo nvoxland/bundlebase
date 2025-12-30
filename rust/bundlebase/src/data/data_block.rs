@@ -1,7 +1,10 @@
 use crate::data::{DataReader, VersionedBlockId};
+use crate::index::{
+    ColumnIndex, FilterAnalyzer, IndexDefinition, IndexPredicate, IndexSelector, IndexableFilter,
+};
 use crate::io::{ObjectId, ObjectStoreDir, ObjectStoreFile};
-use crate::index::{ColumnIndex, FilterAnalyzer, IndexableFilter, IndexDefinition, IndexPredicate, IndexSelector};
-use crate::metrics::{OperationTimer, OperationCategory, OperationOutcome, start_span};
+use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
+use crate::BundleConfig;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::memory::DataSourceExec;
@@ -12,7 +15,6 @@ use datafusion::physical_plan::ExecutionPlan;
 use parking_lot::RwLock;
 use std::any::Any;
 use std::sync::Arc;
-use crate::BundleConfig;
 
 /// Candidate index for a query with its estimated selectivity
 struct IndexCandidate<'a> {
@@ -44,7 +46,7 @@ impl DataBlock {
         let name = table_name.strip_prefix("blocks.").unwrap_or(table_name);
         match name.strip_prefix("__block_") {
             Some(id) => ObjectId::try_from(id).ok(),
-            None => None
+            None => None,
         }
     }
 
@@ -86,9 +88,12 @@ impl DataBlock {
         predicate: &IndexPredicate,
     ) -> Result<Option<f64>, Box<dyn std::error::Error + Send + Sync>> {
         // Load index file from data directory
-        let index_file = ObjectStoreFile::from_str(index_path, &self.data_dir, self.config.clone())?;
+        let index_file =
+            ObjectStoreFile::from_str(index_path, &self.data_dir, self.config.clone())?;
 
-        let index_bytes = index_file.read_bytes().await?
+        let index_bytes = index_file
+            .read_bytes()
+            .await?
             .ok_or_else(|| format!("Index file not found: {}", index_path))?;
 
         // Deserialize the index
@@ -127,9 +132,12 @@ impl DataBlock {
         predicate: &IndexPredicate,
     ) -> Result<Vec<crate::data::RowId>, Box<dyn std::error::Error + Send + Sync>> {
         // Load index file from data directory
-        let index_file = ObjectStoreFile::from_str(index_path, &self.data_dir, self.config.clone())?;
+        let index_file =
+            ObjectStoreFile::from_str(index_path, &self.data_dir, self.config.clone())?;
 
-        let index_bytes = index_file.read_bytes().await?
+        let index_bytes = index_file
+            .read_bytes()
+            .await?
             .ok_or_else(|| format!("Index file not found: {}", index_path))?;
 
         // Deserialize the index
@@ -137,9 +145,7 @@ impl DataBlock {
 
         // Perform lookup based on predicate type
         let row_ids = match predicate {
-            IndexPredicate::Exact(val) => {
-                index.lookup_exact(val)
-            }
+            IndexPredicate::Exact(val) => index.lookup_exact(val),
             IndexPredicate::In(vals) => {
                 // Process IN values in batches to bound memory usage
                 // Use HashSet for efficient O(1) deduplication
@@ -162,9 +168,7 @@ impl DataBlock {
                 row_ids.sort_unstable_by_key(|r| r.as_u64());
                 row_ids
             }
-            IndexPredicate::Range { min, max } => {
-                index.lookup_range(min, max)
-            }
+            IndexPredicate::Range { min, max } => index.lookup_range(min, max),
         };
 
         Ok(row_ids)
@@ -195,17 +199,18 @@ impl DataBlock {
         // Evaluate each indexable filter
         for filter in indexable_filters {
             // Try to find an index for this column
-            if let Some(index_def) = IndexSelector::select_index_from_ref(
-                &filter.column,
-                versioned_block,
-                &self.indexes,
-            ) {
+            if let Some(index_def) =
+                IndexSelector::select_index_from_ref(&filter.column, versioned_block, &self.indexes)
+            {
                 // Get the index file path
                 if let Some(indexed_blocks) = index_def.indexed_blocks(versioned_block) {
                     let index_path = indexed_blocks.path();
 
                     // Check selectivity
-                    match self.check_index_selectivity(index_path, &filter.column, &filter.predicate).await {
+                    match self
+                        .check_index_selectivity(index_path, &filter.column, &filter.predicate)
+                        .await
+                    {
                         Ok(Some(selectivity)) => {
                             // This index is usable - add to candidates
                             log::debug!(
@@ -242,7 +247,9 @@ impl DataBlock {
 
         // Choose the index with the lowest selectivity (most selective)
         candidates.into_iter().min_by(|a, b| {
-            a.selectivity.partial_cmp(&b.selectivity).unwrap_or(std::cmp::Ordering::Equal)
+            a.selectivity
+                .partial_cmp(&b.selectivity)
+                .unwrap_or(std::cmp::Ordering::Equal)
         })
     }
 }
@@ -263,7 +270,7 @@ impl TableProvider for DataBlock {
 
     async fn scan(
         &self,
-        state: &dyn Session,
+        _state: &dyn Session,
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
@@ -276,7 +283,10 @@ impl TableProvider for DataBlock {
             let versioned_block = VersionedBlockId::new(self.id.clone(), self.version.clone());
 
             // Evaluate all indexable filters and select the best index
-            if let Some(best) = self.select_best_index(&indexable_filters, &versioned_block).await {
+            if let Some(best) = self
+                .select_best_index(&indexable_filters, &versioned_block)
+                .await
+            {
                 // Start span and timer for index lookup
                 let mut span = start_span(OperationCategory::Index, "lookup");
                 span.set_attribute("column", &best.filter.column);
@@ -302,7 +312,14 @@ impl TableProvider for DataBlock {
                 );
 
                 // Load index from disk and perform lookup
-                match self.load_and_lookup_index(&best.index_path, &best.filter.column, &best.filter.predicate).await {
+                match self
+                    .load_and_lookup_index(
+                        &best.index_path,
+                        &best.filter.column,
+                        &best.filter.predicate,
+                    )
+                    .await
+                {
                     Ok(row_ids) => {
                         log::debug!(
                             "Index lookup found {} matching rows for column '{}'",
@@ -363,7 +380,6 @@ mod tests {
     fn test_table_name() {
         assert_eq!("__block_53", DataBlock::table_name(&ObjectId::from(83)))
     }
-
 
     #[test]
     fn test_parse_id() {

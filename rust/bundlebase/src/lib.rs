@@ -3,19 +3,19 @@ extern crate core;
 
 pub mod bundle;
 pub mod bundle_config;
+mod catalog;
 mod data;
-pub mod io;
 pub mod functions;
 mod index;
+pub mod io;
 pub mod metrics;
 pub mod progress;
-mod catalog;
 pub mod test_utils;
 mod versioning;
 
 pub use crate::bundle::{
-    AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade,
-    BundleStatus, JoinTypeOption, Operation,
+    AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade, BundleStatus,
+    JoinTypeOption, Operation,
 };
 pub use crate::bundle_config::BundleConfig;
 pub use crate::data::DataGenerator;

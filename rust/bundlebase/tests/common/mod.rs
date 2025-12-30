@@ -5,10 +5,10 @@ use bundlebase::io::ObjectStoreDir;
 use bundlebase::BundlebaseError;
 use url::Url;
 
+
 pub fn enable_logging() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
-
 
 /// Helper to check if schema has a column
 #[allow(dead_code)]

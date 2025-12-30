@@ -1,8 +1,8 @@
-use std::sync::Arc;
-use std::collections::HashMap;
-use parking_lot::RwLock;
 use crate::data::{ObjectId, VersionedBlockId};
 use crate::index::indexed_blocks::IndexedBlocks;
+use parking_lot::RwLock;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct IndexDefinition {
@@ -16,7 +16,7 @@ impl IndexDefinition {
         Self {
             id: id.clone(),
             column: column.clone(),
-            blocks: RwLock::new(Vec::new())
+            blocks: RwLock::new(Vec::new()),
         }
     }
 
@@ -62,7 +62,8 @@ impl IndexDefinition {
         blocks.retain(|indexed_blocks| {
             // Keep only blocks where ALL versioned blocks match current versions
             indexed_blocks.blocks().iter().all(|vb| {
-                current_versions.get(&vb.block)
+                current_versions
+                    .get(&vb.block)
                     .map(|current_ver| current_ver == &vb.version)
                     .unwrap_or(false) // Remove if block doesn't exist anymore
             })
@@ -81,5 +82,4 @@ impl IndexDefinition {
 
         removed_count
     }
-
 }

@@ -104,8 +104,7 @@ impl ObjectStoreDir {
 
     pub fn file(&self, path: &str) -> Result<ObjectStoreFile, BundlebaseError> {
         let file_url = join_url(&self.url, path)?;
-        let config_map = self
-            .config.get_config_for_url(&file_url);
+        let config_map = self.config.get_config_for_url(&file_url);
         let (store, object_path) = parse_url(&file_url, &config_map)?;
 
         ObjectStoreFile::new(&file_url, store, &object_path)
@@ -170,15 +169,19 @@ mod tests {
     #[test]
     fn test_from_string_complex() {
         assert!(
-            ObjectStoreDir::from_str("memory://bucket/test", BundleConfig::default().into()).is_err(),
+            ObjectStoreDir::from_str("memory://bucket/test", BundleConfig::default().into())
+                .is_err(),
             "Memory must start with :///"
         );
 
-        let dir = ObjectStoreDir::from_str("memory:///test/../test2", BundleConfig::default().into()).unwrap();
+        let dir =
+            ObjectStoreDir::from_str("memory:///test/../test2", BundleConfig::default().into())
+                .unwrap();
         assert_eq!(dir.path.to_string(), "test2");
         assert_eq!(dir.url.to_string(), "memory:///test2");
 
-        let dir = ObjectStoreDir::from_str("relative/path", BundleConfig::default().into()).unwrap();
+        let dir =
+            ObjectStoreDir::from_str("relative/path", BundleConfig::default().into()).unwrap();
         assert_eq!(dir.url.to_string(), file_url("relative/path").to_string());
     }
 
@@ -207,7 +210,8 @@ mod tests {
 
     #[test]
     fn test_file() {
-        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap();
+        let dir =
+            ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap();
         let file = dir.file("other").unwrap();
         assert_eq!(file.url().to_string(), "memory:///test/other");
 
@@ -217,7 +221,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_files() {
-        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap();
+        let dir =
+            ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap();
         assert_eq!(0, dir.list_files().await.unwrap().len())
     }
 

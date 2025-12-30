@@ -1,10 +1,10 @@
 use crate::data::object_id::ObjectId;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
-use crate::data::{LayoutRowIdProvider, DataReader, LineOrientedFormat, RowIdProvider, RowIdStreamAdapter, SendableRowIdBatchStream, RowId};
-use crate::io::{ObjectStoreDir, ObjectStoreFile};
+use crate::data::{DataReader, LayoutRowIdProvider, LineOrientedFormat, RowId, RowIdProvider};
 use crate::index::RowIdIndex;
-use crate::{BundlebaseError, Bundle};
+use crate::io::{ObjectStoreDir, ObjectStoreFile};
+use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::Session;
@@ -17,7 +17,6 @@ use datafusion::datasource::source::DataSource;
 use datafusion::logical_expr::Expr;
 use futures::stream::StreamExt;
 use std::sync::Arc;
-use datafusion::prelude::SessionContext;
 use url::Url;
 
 /// Configuration for CSV format
@@ -72,7 +71,11 @@ impl ReaderPlugin for CsvPlugin {
         let reader = self.inner.reader(source, bundle, schema).await?;
         let layout = match layout {
             None => None,
-            Some(x) => Some(ObjectStoreFile::from_str(x.as_str(), bundle.data_dir(), bundle.config())?),
+            Some(x) => Some(ObjectStoreFile::from_str(
+                x.as_str(),
+                bundle.data_dir(),
+                bundle.config(),
+            )?),
         };
         Ok(Some(Arc::new(CsvReader::new(reader, block_id, &layout))))
     }
@@ -86,7 +89,11 @@ pub struct CsvReader {
 }
 
 impl CsvReader {
-    pub fn new(inner: FileReader<CsvFormatConfig>, block_id: &ObjectId, layout: &Option<ObjectStoreFile>) -> Self {
+    pub fn new(
+        inner: FileReader<CsvFormatConfig>,
+        block_id: &ObjectId,
+        layout: &Option<ObjectStoreFile>,
+    ) -> Self {
         // Create provider if layout file exists
         let row_id_provider = layout.as_ref().map(|layout_file| {
             Arc::new(LayoutRowIdProvider::new(layout_file.clone())) as Arc<dyn RowIdProvider>
@@ -165,7 +172,10 @@ impl DataReader for CsvReader {
     }
 
     fn rowid_provider(&self) -> Result<Arc<dyn RowIdProvider>, BundlebaseError> {
-        Ok(self.rowid_provider.clone().expect("CSV rowid_generator requires a layout file".into()))
+        Ok(self
+            .rowid_provider
+            .clone()
+            .expect("CSV rowid_generator requires a layout file".into()))
     }
 }
 
@@ -217,7 +227,6 @@ mod tests {
     use crate::test_utils::test_datafile;
     use crate::Bundle;
     use arrow::array::{downcast_array, Array, StringArray};
-    use datafusion::prelude::SessionContext;
     use futures::stream::StreamExt;
 
     #[tokio::test]
@@ -467,19 +476,15 @@ mod tests {
         // First, create a reader to build the layout
         let csv_url = test_datafile("customers-0-100.csv");
         let temp_reader = plugin
-            .reader(
-                csv_url,
-                &block_id,
-                binding,
-                None,
-                None,
-            )
+            .reader(csv_url, &block_id, binding, None, None)
             .await?
             .unwrap();
 
         // Build the layout file
         let data_dir = binding.data_dir();
-        let layout_filename = temp_reader.build_layout(data_dir).await?
+        let layout_filename = temp_reader
+            .build_layout(data_dir)
+            .await?
             .ok_or_else(|| BundlebaseError::from("Layout should be built for CSV"))?;
         let layout_file = data_dir.file(&layout_filename)?;
 
@@ -564,19 +569,15 @@ mod tests {
         // First, create a reader to build the layout
         let csv_url = test_datafile("customers-0-100.csv");
         let temp_reader = plugin
-            .reader(
-                csv_url,
-                &block_id,
-                binding,
-                None,
-                None,
-            )
+            .reader(csv_url, &block_id, binding, None, None)
             .await?
             .unwrap();
 
         // Build the layout file
         let data_dir = binding.data_dir();
-        let layout_filename = temp_reader.build_layout(data_dir).await?
+        let layout_filename = temp_reader
+            .build_layout(data_dir)
+            .await?
             .ok_or_else(|| BundlebaseError::from("Layout should be built for CSV"))?;
         let layout_file = data_dir.file(&layout_filename)?;
 
@@ -602,7 +603,9 @@ mod tests {
         let projection = vec![0, 1, 2];
 
         // Extract rowids stream with projection
-        let mut stream = reader.extract_rowids_stream(binding.ctx(), Some(&projection)).await?;
+        let mut stream = reader
+            .extract_rowids_stream(binding.ctx(), Some(&projection))
+            .await?;
 
         let mut total_rows = 0;
 

@@ -1,7 +1,7 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 // use crate::progress::ProgressScope; // Temporarily commented out
-use crate::{BundlebaseError, Bundle};
+use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};

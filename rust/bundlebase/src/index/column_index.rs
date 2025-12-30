@@ -197,7 +197,7 @@ impl Ord for IndexedValue {
                 if a.0.is_nan() && b.0.is_nan() {
                     Ordering::Equal
                 } else if a.0.is_nan() {
-                    Ordering::Greater  // NaN sorts last
+                    Ordering::Greater // NaN sorts last
                 } else if b.0.is_nan() {
                     Ordering::Less
                 } else {
@@ -382,8 +382,8 @@ pub struct ColumnIndex {
     data_type: DataType,
     blocks: Vec<IndexBlock>,
     directory: BlockDirectory,
-    total_entries: u64,  // Number of distinct values
-    total_rows: u64,     // Total number of rows indexed
+    total_entries: u64, // Number of distinct values
+    total_rows: u64,    // Total number of rows indexed
 }
 
 impl ColumnIndex {
@@ -398,7 +398,8 @@ impl ColumnIndex {
         sorted_entries.sort_by(|a, b| a.0.cmp(&b.0));
 
         let total_entries = sorted_entries.len() as u64;
-        let total_rows = sorted_entries.iter()
+        let total_rows = sorted_entries
+            .iter()
             .map(|(_, row_ids)| row_ids.len() as u64)
             .sum();
 
@@ -804,7 +805,9 @@ mod tests {
         // Build index with 100 rows across 10 distinct values
         let mut value_map = HashMap::new();
         for i in 0..10 {
-            let row_ids: Vec<RowId> = (i*10..(i+1)*10).map(|r| RowId::from(r as u64)).collect();
+            let row_ids: Vec<RowId> = (i * 10..(i + 1) * 10)
+                .map(|r| RowId::from(r as u64))
+                .collect();
             value_map.insert(IndexedValue::Int64(i as i64), row_ids);
         }
 
@@ -828,10 +831,8 @@ mod tests {
         assert!((in_sel - 0.3).abs() < 0.01);
 
         // Test range selectivity (harder to verify exactly, but should be reasonable)
-        let range_sel = index.estimate_range_selectivity(
-            &IndexedValue::Int64(3),
-            &IndexedValue::Int64(7),
-        );
+        let range_sel =
+            index.estimate_range_selectivity(&IndexedValue::Int64(3), &IndexedValue::Int64(7));
         assert!(range_sel > 0.0 && range_sel <= 1.0);
     }
 
@@ -841,7 +842,9 @@ mod tests {
 
         let mut value_map = HashMap::new();
         for i in 0..20 {
-            let row_ids: Vec<RowId> = (i*5..(i+1)*5).map(|r| RowId::from(r as u64)).collect();
+            let row_ids: Vec<RowId> = (i * 5..(i + 1) * 5)
+                .map(|r| RowId::from(r as u64))
+                .collect();
             value_map.insert(IndexedValue::Int64(i as i64), row_ids);
         }
 
@@ -853,10 +856,7 @@ mod tests {
         assert!((sel - 0.05).abs() < 0.01); // 1/20 = 0.05
 
         // Test with In predicate
-        let in_pred = IndexPredicate::In(vec![
-            IndexedValue::Int64(1),
-            IndexedValue::Int64(2),
-        ]);
+        let in_pred = IndexPredicate::In(vec![IndexedValue::Int64(1), IndexedValue::Int64(2)]);
         let sel = index.estimate_selectivity(&in_pred);
         assert!((sel - 0.1).abs() < 0.01); // 2/20 = 0.1
 

@@ -1,12 +1,11 @@
-use bundlebase::test_utils::{random_memory_url, test_datafile};
-use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade, Operation};
+use bundlebase::test_utils::{assert_vec_regexp, random_memory_url, test_datafile, describe_ops, field_names};
+use bundlebase::{Bundle, BundleBuilder, BundleFacade, BundlebaseError, Operation};
 
 #[tokio::test]
 async fn test_create_view_basic() -> Result<(), BundlebaseError> {
     // Create container and attach data
     let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"))
-        .await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
     c.commit("Initial data").await?;
 
     // Create view with select
@@ -17,21 +16,17 @@ async fn test_create_view_basic() -> Result<(), BundlebaseError> {
     // Open view
     let view = c.view("adults").await?;
 
-    // Verify view has expected operations
-    let operations = view.operations();
-    println!("View has {} operations", operations.len());
-    for (i, op) in operations.iter().enumerate() {
-        println!("  Op {}: {}", i, op.describe());
-    }
+    assert_vec_regexp(
+        vec![
+            "CREATE PACK \\w+",
+            "ATTACH: memory:///test_data/customers-0-100.csv",
+            "CREATE VIEW: 'adults'",
+            "select \\* where age > 21",
+        ],
+        describe_ops(&view),
+    );
 
-    // View should have: CREATE PACK, ATTACH, CREATE VIEW (from parent), SELECT (from view)
-    assert!(operations.len() >= 4, "View should have at least 4 operations");
-
-    // Verify SELECT operation is present
-    let has_select = operations
-        .iter()
-        .any(|op| op.describe().to_lowercase().contains("select") && op.describe().contains("age > 21"));
-    assert!(has_select, "View should have select operation");
+    assert_eq!(vec![""], field_names(&view.schema().await?));
 
     Ok(())
 }
@@ -54,8 +49,7 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
     // Create container and view
     let container_url = random_memory_url().to_string();
     let mut c = BundleBuilder::create(&container_url, None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"))
-        .await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
     c.commit("v1").await?;
 
     let active_rs = c.select("select * where age > 21", vec![]).await?;
@@ -93,8 +87,7 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
 async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
     // Create container
     let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"))
-        .await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
     c.commit("Initial data").await?;
 
     // Create view with multiple operations (select + filter)
@@ -133,8 +126,7 @@ async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_duplicate_view_name() -> Result<(), BundlebaseError> {
     let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"))
-        .await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
     c.commit("Initial").await?;
 
     // Create first view
@@ -158,8 +150,7 @@ async fn test_view_from_field_points_to_parent() -> Result<(), BundlebaseError> 
     // Create container and view
     let container_url = random_memory_url().to_string();
     let mut c = BundleBuilder::create(&container_url, None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"))
-        .await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
     c.commit("v1").await?;
 
     let active = c.select("select * where age > 21", vec![]).await?;
@@ -186,8 +177,7 @@ async fn test_view_from_field_points_to_parent() -> Result<(), BundlebaseError> 
 #[tokio::test]
 async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
     let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"))
-        .await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
     c.commit("Initial data").await?;
 
     let high_index = c.select("select * where \"Index\" > 50", vec![]).await?;
@@ -199,11 +189,23 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
     // Debug assertions
     println!("View base_pack: {:?}", view.base_pack());
     println!("View data_packs count: {}", view.data_packs_count());
-    println!("View operations: {:?}", view.operations().iter().map(|o| o.describe()).collect::<Vec<_>>());
+    println!(
+        "View operations: {:?}",
+        view.operations()
+            .iter()
+            .map(|o| o.describe())
+            .collect::<Vec<_>>()
+    );
 
     // Verify data is present
-    assert!(view.base_pack().is_some(), "View should have base_pack from parent");
-    assert!(view.data_packs_count() > 0, "View should have data_packs from parent");
+    assert!(
+        view.base_pack().is_some(),
+        "View should have base_pack from parent"
+    );
+    assert!(
+        view.data_packs_count() > 0,
+        "View should have data_packs from parent"
+    );
 
     Ok(())
 }
@@ -224,8 +226,14 @@ async fn test_regular_container_select() -> Result<(), BundlebaseError> {
     let schema = df.schema();
 
     println!("Regular container schema: {:?}", schema);
-    assert!(schema.fields().len() > 0, "Container should have schema after select");
-    assert!(schema.field_with_name(None, "Country").is_ok(), "Container should have 'Country' column");
+    assert!(
+        schema.fields().len() > 0,
+        "Container should have schema after select"
+    );
+    assert!(
+        schema.field_with_name(None, "Country").is_ok(),
+        "Container should have 'Country' column"
+    );
 
     Ok(())
 }
@@ -233,11 +241,12 @@ async fn test_regular_container_select() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
     let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    c.attach(&test_datafile("customers-0-100.csv"))
-        .await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
     c.commit("Initial data").await?;
 
-    let chile = c.select("select * from data where Country = 'Chile'", vec![]).await?;
+    let chile = c
+        .select("select * from data where Country = 'Chile'", vec![])
+        .await?;
     c.create_view("chile", &chile).await?;
     c.commit("Add view").await?;
 
@@ -247,8 +256,14 @@ async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
     let df = view.dataframe().await?;
     let schema = df.schema();
 
-    assert!(schema.fields().len() > 0, "View dataframe should have schema");
-    assert!(schema.field_with_name(None, "Country").is_ok(), "View should have 'Country' column");
+    assert!(
+        schema.fields().len() > 0,
+        "View dataframe should have schema"
+    );
+    assert!(
+        schema.field_with_name(None, "Country").is_ok(),
+        "View should have 'Country' column"
+    );
 
     Ok(())
 }
@@ -300,11 +315,17 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
 
     // Test 1: Open view by name
     let view_by_name = c.view("adults").await?;
-    assert!(view_by_name.operations().len() >= 4, "View should have operations");
+    assert!(
+        view_by_name.operations().len() >= 4,
+        "View should have operations"
+    );
 
     // Test 2: Open view by ID
     let view_by_id = c.view(&view_id.to_string()).await?;
-    assert!(view_by_id.operations().len() >= 4, "View should have operations");
+    assert!(
+        view_by_id.operations().len() >= 4,
+        "View should have operations"
+    );
 
     // Test 3: Both should return the same view (same number of operations)
     assert_eq!(
@@ -317,15 +338,27 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
     let result = c.view("nonexistent").await;
     assert!(result.is_err());
     let err_msg = result.err().unwrap().to_string();
-    assert!(err_msg.contains("View 'nonexistent' not found"), "Error should mention view not found");
-    assert!(err_msg.contains("adults"), "Error should list available views");
-    assert!(err_msg.contains(&view_id.to_string()), "Error should include view ID");
+    assert!(
+        err_msg.contains("View 'nonexistent' not found"),
+        "Error should mention view not found"
+    );
+    assert!(
+        err_msg.contains("adults"),
+        "Error should list available views"
+    );
+    assert!(
+        err_msg.contains(&view_id.to_string()),
+        "Error should include view ID"
+    );
 
     // Test 5: Non-existent ID should error
     let result = c.view("00000000000000000000000000000000").await;
     assert!(result.is_err());
     let err_msg = result.err().unwrap().to_string();
-    assert!(err_msg.contains("View with ID"), "Error should mention ID not found");
+    assert!(
+        err_msg.contains("View with ID"),
+        "Error should mention ID not found"
+    );
 
     Ok(())
 }

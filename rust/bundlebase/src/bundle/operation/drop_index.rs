@@ -37,9 +37,11 @@ impl Operation for DropIndexOp {
     }
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
-
         // Remove index definition from bundle
-        bundle.indexes.write().retain(|idx| idx.id() != &self.index_id);
+        bundle
+            .indexes
+            .write()
+            .retain(|idx| idx.id() != &self.index_id);
 
         log::info!("Dropped index {}", self.index_id);
 

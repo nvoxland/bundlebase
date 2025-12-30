@@ -1,14 +1,14 @@
 use crate::bundle::JoinTypeOption;
 use crate::data::{DataBlock, DataPack, PackJoin};
-use crate::{bundle, catalog, BundlebaseError};
+use crate::{catalog, BundlebaseError};
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::{Expr, LogicalPlan, Operator};
 use datafusion::prelude::Expr::BinaryExpr;
 use datafusion::prelude::SessionContext;
 use datafusion::sql::TableReference;
-use std::sync::{Arc, OnceLock};
 use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, OnceLock};
 
 static TEMP_COUNTER: OnceLock<AtomicU64> = OnceLock::new();
 
@@ -31,7 +31,13 @@ static TEMP_COUNTER: OnceLock<AtomicU64> = OnceLock::new();
 pub(crate) async fn column_sources_from_df(
     column_name: &str,
     df: &DataFrame,
-    data_packs: Option<&Arc<parking_lot::RwLock<std::collections::HashMap<crate::io::ObjectId, Arc<crate::data::DataPack>>>>>,
+    data_packs: Option<
+        &Arc<
+            parking_lot::RwLock<
+                std::collections::HashMap<crate::io::ObjectId, Arc<crate::data::DataPack>>,
+            >,
+        >,
+    >,
 ) -> Result<Option<Vec<(String, String)>>, BundlebaseError> {
     let plan = df.logical_plan();
 
@@ -52,7 +58,7 @@ pub(crate) async fn column_sources_from_df(
                         if block_schema.column_with_name(&col_name).is_some() {
                             result.push((
                                 format!("blocks.{}", DataBlock::table_name(block.id())),
-                                col_name.clone()
+                                col_name.clone(),
                             ));
                         }
                     }
@@ -208,10 +214,7 @@ fn find_orig(plan: &LogicalPlan, target: &str, sources: &mut Vec<(String, String
                     }
                     None => {
                         // No relation specified - use the dataframe alias as source
-                        sources.push((
-                            catalog::DATAFRAME_ALIAS.to_string(),
-                            col.name.clone(),
-                        ));
+                        sources.push((catalog::DATAFRAME_ALIAS.to_string(), col.name.clone()));
                         return;
                     }
                 }
@@ -313,13 +316,23 @@ where
         let table_name = match &table_scan.table_name {
             TableReference::Bare { table } => table.to_string(),
             TableReference::Partial { schema, table } => format!("{}.{}", schema, table),
-            TableReference::Full { catalog, schema, table } => format!("{}.{}.{}", catalog, schema, table),
+            TableReference::Full {
+                catalog,
+                schema,
+                table,
+            } => format!("{}.{}.{}", catalog, schema, table),
         };
 
         // If this is a pack table with no transformations, use it directly
         // This enables DataFusion's optimizer to push filters down to DataBlock.scan()
-        if table_name.starts_with("packs.") && table_scan.projection.is_none() && table_scan.filters.is_empty() {
-            log::debug!("Using pack table directly for filter pushdown: {}", table_name);
+        if table_name.starts_with("packs.")
+            && table_scan.projection.is_none()
+            && table_scan.filters.is_empty()
+        {
+            log::debug!(
+                "Using pack table directly for filter pushdown: {}",
+                table_name
+            );
             return f(table_name).await;
         }
     }
@@ -346,14 +359,14 @@ where
 
 mod tests {
     use super::*;
+    use crate::bundle::facade::BundleFacade;
     use crate::io::ObjectId;
+    use crate::test_utils::test_datafile;
+    use crate::BundleBuilder;
     use arrow_schema::{DataType, Field, Schema, SchemaRef};
     use datafusion::catalog::SchemaProvider;
     use datafusion::datasource::empty::EmptyTable;
     use std::sync::Arc;
-    use crate::bundle::BundleFacade;
-    use crate::{catalog, BundleBuilder};
-    use crate::test_utils::test_datafile;
 
     #[tokio::test]
     async fn test_parse_join() {
@@ -365,7 +378,7 @@ mod tests {
                 Field::new("b", DataType::Utf8, false),
             ])))),
         )
-            .unwrap();
+        .unwrap();
 
         let join_id: ObjectId = 5.into();
 
@@ -393,12 +406,12 @@ mod tests {
             "t",
             &PackJoin::new(&join_id, "test_join", &JoinTypeOption::Inner, "a=x"),
         )
-            .await
-            .unwrap()
-            .iter()
-            .map(|pred| format!("{:?}", pred))
-            .collect::<Vec<_>>()
-            .join("\n");
+        .await
+        .unwrap()
+        .iter()
+        .map(|pred| format!("{:?}", pred))
+        .collect::<Vec<_>>()
+        .join("\n");
         assert_eq!("BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"t\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) })",
                    preds.as_str());
 
@@ -412,12 +425,12 @@ mod tests {
                 "a=x and x > 3",
             ),
         )
-            .await
-            .unwrap()
-            .iter()
-            .map(|pred| format!("{:?}", pred))
-            .collect::<Vec<_>>()
-            .join("\n");
+        .await
+        .unwrap()
+        .iter()
+        .map(|pred| format!("{:?}", pred))
+        .collect::<Vec<_>>()
+        .join("\n");
         assert_eq!("BinaryExpr(BinaryExpr { left: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"t\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) }), op: And, right: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }), op: Gt, right: Literal(Int64(3), None) }) })",
                    preds.as_str());
     }
@@ -435,7 +448,7 @@ mod tests {
                 Field::new("name", DataType::Utf8, false),
             ])))),
         )
-            .unwrap();
+        .unwrap();
 
         let result = column_sources("id", &ctx).await.unwrap();
         assert!(result.is_some());
@@ -458,7 +471,7 @@ mod tests {
                 Field::new("name", DataType::Utf8, false),
             ])))),
         )
-            .unwrap();
+        .unwrap();
 
         let result = column_sources("nonexistent", &ctx).await;
         // Should return None when column doesn't exist
@@ -478,7 +491,7 @@ mod tests {
                 Field::new("original_name", DataType::Utf8, false),
             ])))),
         )
-            .unwrap();
+        .unwrap();
 
         // Create a view that renames columns
         let df = ctx
@@ -513,7 +526,7 @@ mod tests {
                 Field::new("col3", DataType::Float64, false),
             ])))),
         )
-            .unwrap();
+        .unwrap();
 
         // Test each column
         for col_name in &["col1", "col2", "col3"] {
@@ -539,7 +552,7 @@ mod tests {
                 Field::new("name", DataType::Utf8, false),
             ])))),
         )
-            .unwrap();
+        .unwrap();
 
         ctx.register_table(
             "table2",
@@ -548,7 +561,7 @@ mod tests {
                 Field::new("value", DataType::Float64, false),
             ])))),
         )
-            .unwrap();
+        .unwrap();
 
         // Create a union of both tables
         let df = ctx
@@ -578,22 +591,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_column_source_from_dataframe() -> Result<(), BundlebaseError>{
+    async fn test_column_source_from_dataframe() -> Result<(), BundlebaseError> {
         let mut bundle = BundleBuilder::create("memory:///test_bundle", None).await?;
         bundle.attach(test_datafile("userdata.parquet")).await?;
 
         let df = bundle.dataframe().await?;
 
         // Test with pack expansion - should return only blocks that have the column
-        let sources = column_sources_from_df("first_name", &df, Some(&bundle.bundle().data_packs)).await?.ok_or("Could not find columns")?;
+        let sources = column_sources_from_df("first_name", &df, Some(&bundle.bundle().data_packs))
+            .await?
+            .ok_or("Could not find columns")?;
 
         assert!(!sources.is_empty(), "Expected at least one source");
         let (table, col) = sources.get(0).unwrap();
         // The table should be in the blocks schema
-        assert!(table.starts_with("blocks.__block_"), "Expected table to start with 'blocks.__block_' but got: '{}'", table);
+        assert!(
+            table.starts_with("blocks.__block_"),
+            "Expected table to start with 'blocks.__block_' but got: '{}'",
+            table
+        );
         assert_eq!("first_name", col);
 
         Ok(())
-
     }
 }

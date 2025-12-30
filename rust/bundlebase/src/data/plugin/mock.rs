@@ -3,7 +3,6 @@ use crate::BundlebaseError;
 use arrow::array::RecordBatch;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
-use datafusion::catalog::Session;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::execution::TaskContext;

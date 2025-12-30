@@ -22,7 +22,11 @@ pub struct RowIdStreamAdapter {
     row_id_provider: Arc<dyn RowIdProvider>,
     global_row_num: usize,
     // Pending state: we're waiting for the RowId generation to complete
-    pending: Option<(BoxFuture<'static, Result<Vec<RowId>, BundlebaseError>>, RecordBatch, usize)>,
+    pending: Option<(
+        BoxFuture<'static, Result<Vec<RowId>, BundlebaseError>>,
+        RecordBatch,
+        usize,
+    )>,
 }
 
 impl RowIdStreamAdapter {
@@ -72,9 +76,10 @@ impl futures::stream::Stream for RowIdStreamAdapter {
 
                 // Call the trait method to get RowIds
                 let provider = self.row_id_provider.clone();
-                let mut fut = Box::pin(async move {
-                    provider.get_row_ids(start_row, start_row + num_rows).await
-                });
+                let mut fut =
+                    Box::pin(
+                        async move { provider.get_row_ids(start_row, start_row + num_rows).await },
+                    );
 
                 // Try to poll it immediately (might complete synchronously if cached)
                 match fut.as_mut().poll(cx) {
@@ -83,9 +88,7 @@ impl futures::stream::Stream for RowIdStreamAdapter {
                         self.global_row_num = start_row + num_rows;
                         Poll::Ready(Some(Ok(RowIdBatch::new(batch, batch_row_ids))))
                     }
-                    Poll::Ready(Err(e)) => {
-                        Poll::Ready(Some(Err(e)))
-                    }
+                    Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
                     Poll::Pending => {
                         // Need to wait for it, store as pending
                         self.pending = Some((fut, batch, start_row));
@@ -93,9 +96,7 @@ impl futures::stream::Stream for RowIdStreamAdapter {
                     }
                 }
             }
-            Poll::Ready(Some(Err(e))) => {
-                Poll::Ready(Some(Err(Box::new(e) as BundlebaseError)))
-            }
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(Box::new(e) as BundlebaseError))),
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }
