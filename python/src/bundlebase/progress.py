@@ -25,8 +25,8 @@ Example:
     bundlebase.progress.set_callback(my_progress)
 """
 
-from typing import Optional, Callable
 import sys
+from typing import Optional, Callable
 
 
 def _has_tqdm() -> bool:

@@ -1,9 +1,9 @@
-use ::bundlebase::bundle::BundleBuilder;
-use ::bundlebase::bundle::{BundleFacade, JoinTypeOption, BundleChange, BundleStatus};
-use ::bundlebase::functions::FunctionSignature;
 use crate::function_impl::PythonFunctionImpl;
 use crate::utils::convert_py_params;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use ::bundlebase::bundle::BundleBuilder;
+use ::bundlebase::bundle::{BundleChange, BundleFacade, BundleStatus, JoinTypeOption};
+use ::bundlebase::functions::FunctionSignature;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFunction};
 use std::collections::HashMap;
@@ -66,11 +66,7 @@ impl PyBundleStatus {
 
 impl PyBundleStatus {
     fn from_rust(status: &BundleStatus) -> Self {
-        let changes: Vec<PyChange> = status
-            .changes()
-            .iter()
-            .map(PyChange::from_rust)
-            .collect();
+        let changes: Vec<PyChange> = status.changes().iter().map(PyChange::from_rust).collect();
         let change_count = changes.len();
         let total_operations = status.operations_count();
 
@@ -144,8 +140,13 @@ impl PyBundleBuilder {
                 .map_err(|e| to_py_error(&format!("Failed to set bundle name '{}'", name), e))?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -174,8 +175,13 @@ impl PyBundleBuilder {
                 .map_err(|e| to_py_error("Failed to set bundle description", e))?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -198,11 +204,18 @@ impl PyBundleBuilder {
             builder
                 .set_config(key.as_str(), value.as_str(), url_prefix.as_deref())
                 .await
-                .map_err(|e| to_py_error(&format!("Failed to set config '{}' = '{}'", key, value), e))?;
+                .map_err(|e| {
+                    to_py_error(&format!("Failed to set config '{}' = '{}'", key, value), e)
+                })?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -270,8 +283,13 @@ impl PyBundleBuilder {
             drop(builder);
 
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -291,8 +309,13 @@ impl PyBundleBuilder {
                 .map_err(|e| to_py_error(&format!("Failed to attach '{}'", url), e))?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -312,8 +335,13 @@ impl PyBundleBuilder {
                 .map_err(|e| to_py_error(&format!("Failed to remove column '{}'", name), e))?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -340,8 +368,13 @@ impl PyBundleBuilder {
                 })?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -378,8 +411,13 @@ impl PyBundleBuilder {
                 .map_err(|e| to_py_error(&format!("Failed to join with '{}'", url), e))?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -403,8 +441,13 @@ impl PyBundleBuilder {
                 })?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -413,9 +456,7 @@ impl PyBundleBuilder {
     fn as_pyarrow<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let builder = inner
-                .lock()
-                .await;
+            let builder = inner.lock().await;
 
             let df_future = builder.bundle.dataframe();
             let dataframe = df_future
@@ -439,9 +480,7 @@ impl PyBundleBuilder {
     fn as_pyarrow_stream<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let builder = inner
-                .lock()
-                .await;
+            let builder = inner.lock().await;
 
             let df_future = builder.bundle.dataframe();
             let dataframe = df_future
@@ -484,7 +523,7 @@ impl PyBundleBuilder {
                 vec![]
             };
 
-            let mut builder = inner.lock().await;
+            let builder = inner.lock().await;
             let modified_bundle = builder
                 .select(sql.as_str(), params_vec)
                 .await
@@ -525,19 +564,21 @@ impl PyBundleBuilder {
                 .map_err(|e| to_py_error("Failed to apply filter", e))?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
 
-
     fn num_rows<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let builder = inner
-                .lock()
-                .await;
+            let builder = inner.lock().await;
 
             let num_rows_future = builder.bundle.num_rows();
             num_rows_future
@@ -550,9 +591,7 @@ impl PyBundleBuilder {
     fn schema<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let builder = inner
-                .lock()
-                .await;
+            let builder = inner.lock().await;
 
             let schema_future = builder.bundle.schema();
             let schema = schema_future
@@ -570,12 +609,9 @@ impl PyBundleBuilder {
         let message = message.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
-            builder
-                .commit(&message)
-                .await
-                .map_err(|e| {
-                    to_py_error(&format!("Failed to commit with message '{}'", message), e)
-                })?;
+            builder.commit(&message).await.map_err(|e| {
+                to_py_error(&format!("Failed to commit with message '{}'", message), e)
+            })?;
             Ok(())
         })
     }
@@ -591,8 +627,13 @@ impl PyBundleBuilder {
                 .map_err(|e| to_py_error("Failed to reset uncommitted operations", e))?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -608,8 +649,13 @@ impl PyBundleBuilder {
                 .map_err(|e| to_py_error("Failed to undo last operation", e))?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -617,9 +663,7 @@ impl PyBundleBuilder {
     fn explain<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let builder = inner
-                .lock()
-                .await;
+            let builder = inner.lock().await;
 
             let explain_future = builder.bundle.explain();
             explain_future
@@ -673,16 +717,18 @@ impl PyBundleBuilder {
         let column = column.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
-            builder
-                .index(&column)
-                .await
-                .map_err(|e| {
-                    to_py_error(&format!("Failed to create index on column '{}'", column), e)
-                })?;
+            builder.index(&column).await.map_err(|e| {
+                to_py_error(&format!("Failed to create index on column '{}'", column), e)
+            })?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -697,19 +743,21 @@ impl PyBundleBuilder {
         let column = column.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
-            builder
-                .rebuild_index(&column)
-                .await
-                .map_err(|e| {
-                    to_py_error(
-                        &format!("Failed to rebuild index on column '{}'", column),
-                        e,
-                    )
-                })?;
+            builder.rebuild_index(&column).await.map_err(|e| {
+                to_py_error(
+                    &format!("Failed to rebuild index on column '{}'", column),
+                    e,
+                )
+            })?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -724,16 +772,18 @@ impl PyBundleBuilder {
         let column = column.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
-            builder
-                .drop_index(&column)
-                .await
-                .map_err(|e| {
-                    to_py_error(&format!("Failed to drop index on column '{}'", column), e)
-                })?;
+            builder.drop_index(&column).await.map_err(|e| {
+                to_py_error(&format!("Failed to drop index on column '{}'", column), e)
+            })?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -753,8 +803,13 @@ impl PyBundleBuilder {
                 .map_err(|e| to_py_error("Failed to reindex", e))?;
             drop(builder);
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }
@@ -762,9 +817,7 @@ impl PyBundleBuilder {
     fn ctx<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let builder = inner
-                .lock()
-                .await;
+            let builder = inner.lock().await;
 
             let ctx = builder.bundle.ctx();
 
@@ -812,8 +865,13 @@ impl PyBundleBuilder {
             drop(source_builder);
 
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: inner.clone() })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
             })
         })
     }

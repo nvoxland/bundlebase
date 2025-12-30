@@ -2,10 +2,9 @@ use crate::data::object_id::ObjectId;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
 use crate::data::{DataReader, RowId, RowIdBatch, SendableRowIdBatchStream};
-use crate::{BundlebaseError, Bundle};
+use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
-use datafusion::catalog::Session;
 use datafusion::common::stats::Precision;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::file_format::parquet::ParquetFormat;
@@ -16,10 +15,10 @@ use datafusion::logical_expr::Expr;
 use datafusion::parquet::arrow::async_reader::{
     ParquetObjectReader, ParquetRecordBatchStreamBuilder,
 };
+use datafusion::prelude::SessionContext;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
-use datafusion::prelude::SessionContext;
 use url::Url;
 
 /// Configuration for Parquet format
@@ -60,7 +59,7 @@ impl ReaderPlugin for ParquetPlugin {
         block_id: &ObjectId,
         bundle: &Bundle,
         schema: Option<SchemaRef>,
-        layout: Option<String>,
+        _layout: Option<String>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
         if !self.inner.handles(&source) {
             return Ok(None);
@@ -150,8 +149,8 @@ impl DataReader for ParquetDataReader {
 
     async fn extract_rowids_stream(
         &self,
-        ctx: Arc<SessionContext>,
-        projection: Option<&Vec<usize>>,
+        _ctx: Arc<SessionContext>,
+        _projection: Option<&Vec<usize>>,
     ) -> Result<SendableRowIdBatchStream, BundlebaseError> {
         // Get object store components
         let store = self.inner.file().store();
@@ -164,7 +163,9 @@ impl DataReader for ParquetDataReader {
             .await
             .map_err(|e| Box::new(e) as BundlebaseError)?;
 
-        let inner_stream = builder.build().map_err(|e| Box::new(e) as BundlebaseError)?;
+        let inner_stream = builder
+            .build()
+            .map_err(|e| Box::new(e) as BundlebaseError)?;
 
         // Transform stream to add RowId information using a wrapper struct
         // that implements Stream
@@ -228,7 +229,7 @@ impl futures::stream::Stream for RowIdStreamWrapper {
 mod tests {
     use super::*;
     use crate::test_utils::test_datafile;
-    use crate::{BundlebaseError, Bundle};
+    use crate::{Bundle, BundlebaseError};
     use arrow::array::{downcast_array, StringViewArray};
     use futures::stream::StreamExt;
 
@@ -275,7 +276,13 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let reader = plugin
-            .reader(test_datafile("userdata.parquet"), &1.into(), &binding, None, None)
+            .reader(
+                test_datafile("userdata.parquet"),
+                &1.into(),
+                &binding,
+                None,
+                None,
+            )
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
@@ -363,7 +370,13 @@ mod tests {
         let plugin = ParquetPlugin::default();
         let binding = Bundle::empty().await?;
         let reader = plugin
-            .reader(test_datafile("userdata.parquet"), &1.into(), &binding, None, None)
+            .reader(
+                test_datafile("userdata.parquet"),
+                &1.into(),
+                &binding,
+                None,
+                None,
+            )
             .await?
             .unwrap();
 
@@ -403,7 +416,13 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let reader = plugin
-            .reader(test_datafile("userdata.parquet"), &1.into(), &binding, None, None)
+            .reader(
+                test_datafile("userdata.parquet"),
+                &1.into(),
+                &binding,
+                None,
+                None,
+            )
             .await?
             .unwrap();
 

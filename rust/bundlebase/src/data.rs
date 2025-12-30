@@ -22,6 +22,7 @@ use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::logical_expr::Expr;
 pub use datafusion::physical_plan::SendableRecordBatchStream;
+use datafusion::prelude::SessionContext;
 pub use object_id::ObjectId;
 pub use pack_join::PackJoin;
 pub use plugin::DataGenerator;
@@ -31,11 +32,10 @@ pub use rowid_batch::{RowIdBatch, SendableRowIdBatchStream};
 pub use rowid_offset_data_source::{LineOrientedFormat, RowIdOffsetDataSource};
 pub use rowid_provider::{LayoutRowIdProvider, RowIdProvider};
 pub use rowid_stream::RowIdStreamAdapter;
-pub use versioned_blockid::VersionedBlockId;
 use std::fmt::Debug;
 use std::sync::Arc;
-use datafusion::prelude::SessionContext;
 use url::Url;
+pub use versioned_blockid::VersionedBlockId;
 
 #[cfg(test)]
 pub use plugin::MockReader;
@@ -89,13 +89,20 @@ pub trait DataReader: Sync + Send + Debug {
         ctx: Arc<SessionContext>,
         projection: Option<&Vec<usize>>,
     ) -> Result<SendableRowIdBatchStream, BundlebaseError> {
-        let data_source = self.data_source(projection, &[], None, None).await
+        let data_source = self
+            .data_source(projection, &[], None, None)
+            .await
             .map_err(|e| Box::new(e) as BundlebaseError)?;
 
-        let record_batch_stream = data_source.open(0, ctx.task_ctx())
+        let record_batch_stream = data_source
+            .open(0, ctx.task_ctx())
             .map_err(|e| Box::new(e) as BundlebaseError)?;
 
         let provider = self.rowid_provider()?;
 
-        Ok(Box::pin(RowIdStreamAdapter::new(record_batch_stream, provider)))    }
+        Ok(Box::pin(RowIdStreamAdapter::new(
+            record_batch_stream,
+            provider,
+        )))
+    }
 }

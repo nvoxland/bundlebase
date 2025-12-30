@@ -7,11 +7,8 @@ mod common;
 
 #[tokio::test]
 async fn test_join_basic() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle
-        .attach(test_datafile("customers-0-100.csv"))
-        .await?;
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    bundle.attach(test_datafile("customers-0-100.csv")).await?;
 
     // Get schema before join
     let schema_before = &bundle.schema().await?;
@@ -72,11 +69,8 @@ async fn test_join_basic() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_join_appending() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle
-        .attach(test_datafile("customers-0-100.csv"))
-        .await?;
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    bundle.attach(test_datafile("customers-0-100.csv")).await?;
 
     // Join with sales regions on Country
     let bundle = bundle
@@ -101,11 +95,8 @@ async fn test_join_appending() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_join_with_left_join_type() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle
-        .attach(test_datafile("customers-0-100.csv"))
-        .await?;
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    bundle.attach(test_datafile("customers-0-100.csv")).await?;
 
     // Join with a left join
     let bundle = bundle

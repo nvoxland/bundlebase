@@ -1,9 +1,8 @@
-use crate::data::{ObjectId, RowId};
-use crate::io::ObjectStoreFile;
+use crate::data::RowId;
 use crate::index::{RowIdIndex, GLOBAL_ROWID_CACHE};
+use crate::io::ObjectStoreFile;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use parking_lot::RwLock;
 use std::sync::Arc;
 
 /// Trait for providing RowIds within a specific range

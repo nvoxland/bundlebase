@@ -7,10 +7,10 @@ mod drop_index;
 mod filter;
 mod index_blocks;
 mod join;
-mod select;
 mod rebuild_index;
 mod remove_columns;
 mod rename_column;
+mod select;
 mod serde_util;
 mod set_config;
 mod set_description;
@@ -25,14 +25,14 @@ pub use crate::bundle::operation::drop_index::DropIndexOp;
 pub use crate::bundle::operation::filter::FilterOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
 pub use crate::bundle::operation::join::{JoinOp, JoinTypeOption};
-pub use crate::bundle::operation::select::SelectOp;
 pub use crate::bundle::operation::rebuild_index::RebuildIndexOp;
 pub use crate::bundle::operation::remove_columns::RemoveColumnsOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
+pub use crate::bundle::operation::select::SelectOp;
 pub use crate::bundle::operation::set_config::SetConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
-use crate::{versioning, BundlebaseError, Bundle};
+use crate::{versioning, Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use datafusion::prelude::{DataFrame, SessionContext};
@@ -62,7 +62,7 @@ impl BundleChange {
 
 impl Display for BundleChange {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f,"Change: {}", self.description,)
+        write!(f, "Change: {}", self.description,)
     }
 }
 
@@ -96,7 +96,6 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
     fn version(&self) -> String {
         versioning::hash_config(self)
     }
-
 }
 
 /// Enum wrapping all concrete operation types

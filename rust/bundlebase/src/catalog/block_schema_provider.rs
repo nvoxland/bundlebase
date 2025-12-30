@@ -89,9 +89,9 @@ impl SchemaProvider for BlockSchemaProvider {
 
 #[cfg(test)]
 mod tests {
-    use crate::BundleConfig;
-use super::*;
+    use super::*;
     use crate::data::MockReader;
+    use crate::BundleConfig;
     use arrow_schema::{DataType, Field, Schema};
     use parking_lot::RwLock;
     use std::collections::HashMap;
@@ -135,7 +135,10 @@ use super::*;
 
         // Create empty indexes and data_dir for test
         let indexes = Arc::new(parking_lot::RwLock::new(Vec::new()));
-        let data_dir = Arc::new(crate::io::ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap());
+        let data_dir = Arc::new(
+            crate::io::ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into())
+                .unwrap(),
+        );
 
         let block11 = Arc::new(DataBlock::new(
             block11_id.clone(),

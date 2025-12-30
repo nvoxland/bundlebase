@@ -1,31 +1,30 @@
-use crate::BundleConfig;
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
-use crate::bundle::operation::{IndexBlocksOp, BundleChange, Operation};
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, SelectOp};
 use crate::bundle::operation::{
     AttachBlockOp, CreateViewOp, DefineFunctionOp, DefinePackOp, FilterOp, JoinOp, RebuildIndexOp,
     RemoveColumnsOp, RenameColumnOp, SetConfigOp, SetDescriptionOp,
 };
+use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
 use crate::bundle::{commit, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle};
-use crate::data::{DataBlock, DataPack, ObjectId, VersionedBlockId};
-use crate::io::ObjectStoreDir;
+use crate::data::{DataBlock, ObjectId, VersionedBlockId};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
+use crate::io::ObjectStoreDir;
+use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use chrono::DateTime;
-use datafusion::prelude::{col, DataFrame};
+use datafusion::prelude::DataFrame;
 use datafusion::scalar::ScalarValue;
 use log::{debug, info};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fmt::format;
 use std::future::Future;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -102,7 +101,11 @@ impl std::fmt::Display for BundleStatus {
                     idx + 1,
                     change.description,
                     change.operations.len(),
-                    if change.operations.len() == 1 { "" } else { "s" }
+                    if change.operations.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    }
                 )?;
                 if idx < self.changes.len() - 1 {
                     write!(f, "\n")?;
@@ -162,7 +165,10 @@ impl BundleBuilder {
     /// let bundle = BundleBuilder::create("memory://work", None).await?;
     /// bundle.attach("data.parquet").await?;
     /// ```
-    pub async fn create(path: &str, config: Option<BundleConfig>) -> Result<BundleBuilder, BundlebaseError> {
+    pub async fn create(
+        path: &str,
+        config: Option<BundleConfig>,
+    ) -> Result<BundleBuilder, BundlebaseError> {
         let mut existing = Bundle::empty().await?;
         existing.passed_config = config;
         existing.recompute_config()?;
@@ -174,10 +180,7 @@ impl BundleBuilder {
         })
     }
 
-    pub fn extend(
-        bundle: Arc<Bundle>,
-        data_dir: &str,
-    ) -> Result<BundleBuilder, BundlebaseError> {
+    pub fn extend(bundle: Arc<Bundle>, data_dir: &str) -> Result<BundleBuilder, BundlebaseError> {
         let mut new_bundle = bundle.deref().clone();
         new_bundle.data_dir = ObjectStoreDir::from_str(data_dir, bundle.config())?;
         if new_bundle.data_dir.url() != bundle.url() {
@@ -230,7 +233,7 @@ impl BundleBuilder {
         let author = std::env::var("BUNDLEBASE_AUTHOR")
             .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
 
-        let mut changes = self.status.changes().clone();
+        let changes = self.status.changes().clone();
 
         let commit_struct = commit::BundleCommit {
             url: None, //no need to set, we're just writing it and then will re-read it back
@@ -379,12 +382,15 @@ impl BundleBuilder {
         // Check for nested changes
         match &self.in_progress_change {
             Some(in_progress) => {
-                debug!("Change {} already in progress, not going to separately track {}", in_progress.description, description);
-            },
+                debug!(
+                    "Change {} already in progress, not going to separately track {}",
+                    in_progress.description, description
+                );
+            }
             None => {
                 let change = BundleChange::new(description);
                 self.in_progress_change = Some(change);
-            },
+            }
         };
 
         // Execute the closure
@@ -412,27 +418,33 @@ impl BundleBuilder {
         self.do_change(&format!("Attach {}", path), |builder| {
             Box::pin(async move {
                 if builder.bundle.base_pack.is_none() {
-                    builder.apply_operation(DefinePackOp::setup(&ObjectId::generate()).await?.into())
+                    builder
+                        .apply_operation(DefinePackOp::setup(&ObjectId::generate()).await?.into())
                         .await?;
-                    info!("Created base pack {}", builder.bundle.base_pack.expect("Base pack not set"));
+                    info!(
+                        "Created base pack {}",
+                        builder.bundle.base_pack.expect("Base pack not set")
+                    );
                 }
 
-                builder.apply_operation(
-                    AttachBlockOp::setup(
-                        &builder.bundle.base_pack.expect("Base pack not set"),
-                        &path,
-                        builder,
+                builder
+                    .apply_operation(
+                        AttachBlockOp::setup(
+                            &builder.bundle.base_pack.expect("Base pack not set"),
+                            &path,
+                            builder,
+                        )
+                        .await?
+                        .into(),
                     )
-                    .await?
-                    .into(),
-                )
-                .await?;
+                    .await?;
 
                 info!("Attached {} to bundle", path);
 
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -545,16 +557,18 @@ impl BundleBuilder {
 
         self.do_change(&format!("Attach {} to join '{}'", path, join), |builder| {
             Box::pin(async move {
-                builder.apply_operation(
-                    AttachBlockOp::setup(&pack_join_id, &path, builder)
-                        .await?
-                        .into(),
-                )
-                .await?;
+                builder
+                    .apply_operation(
+                        AttachBlockOp::setup(&pack_join_id, &path, builder)
+                            .await?
+                            .into(),
+                    )
+                    .await?;
 
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -565,14 +579,16 @@ impl BundleBuilder {
 
         self.do_change(&format!("Remove column {}", name), |builder| {
             Box::pin(async move {
-                builder.apply_operation(RemoveColumnsOp::setup(vec![name.as_str()]).into())
+                builder
+                    .apply_operation(RemoveColumnsOp::setup(vec![name.as_str()]).into())
                     .await?;
 
                 info!("Removed column \"{}\"", name);
 
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -588,14 +604,19 @@ impl BundleBuilder {
         let old_name = old_name.to_string();
         let new_name = new_name.to_string();
 
-        self.do_change(&format!("Rename column '{}' to '{}'", old_name, new_name), |builder| {
-            Box::pin(async move {
-                builder.apply_operation(RenameColumnOp::setup(&old_name, &new_name).into())
-                    .await?;
-                info!("Renamed \"{}\" to \"{}\"", old_name, new_name);
-                Ok(())
-            })
-        }).await?;
+        self.do_change(
+            &format!("Rename column '{}' to '{}'", old_name, new_name),
+            |builder| {
+                Box::pin(async move {
+                    builder
+                        .apply_operation(RenameColumnOp::setup(&old_name, &new_name).into())
+                        .await?;
+                    info!("Renamed \"{}\" to \"{}\"", old_name, new_name);
+                    Ok(())
+                })
+            },
+        )
+        .await?;
 
         Ok(self)
     }
@@ -611,12 +632,14 @@ impl BundleBuilder {
 
         self.do_change(&format!("Filter: {}", where_clause), |builder| {
             Box::pin(async move {
-                builder.apply_operation(FilterOp::setup(&where_clause, params).await?.into())
+                builder
+                    .apply_operation(FilterOp::setup(&where_clause, params).await?.into())
                     .await?;
                 info!("Filtered by {}", where_clause);
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -637,30 +660,34 @@ impl BundleBuilder {
             Box::pin(async move {
                 // Step 1: Create a new pack for the joined data
                 let join_pack_id = ObjectId::generate();
-                builder.apply_operation(DefinePackOp::setup(&join_pack_id).await?.into())
+                builder
+                    .apply_operation(DefinePackOp::setup(&join_pack_id).await?.into())
                     .await?;
 
                 // Step 2: Attach the source data to the join pack
-                builder.apply_operation(
-                    AttachBlockOp::setup(&join_pack_id, &source, builder)
-                        .await?
-                        .into(),
-                )
-                .await?;
+                builder
+                    .apply_operation(
+                        AttachBlockOp::setup(&join_pack_id, &source, builder)
+                            .await?
+                            .into(),
+                    )
+                    .await?;
 
                 // Step 3: Create JoinOp that references the pack
-                builder.apply_operation(
-                    JoinOp::setup(&name, join_pack_id, &expression, join_type, builder)
-                        .await?
-                        .into(),
-                )
-                .await?;
+                builder
+                    .apply_operation(
+                        JoinOp::setup(&name, join_pack_id, &expression, join_type, builder)
+                            .await?
+                            .into(),
+                    )
+                    .await?;
 
                 info!("Joined: {} as \"{}\"", source, name);
 
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -674,11 +701,13 @@ impl BundleBuilder {
 
         self.do_change(&format!("Define function {}", name), |builder| {
             Box::pin(async move {
-                builder.apply_operation(DefineFunctionOp::setup(signature).into())
+                builder
+                    .apply_operation(DefineFunctionOp::setup(signature).into())
                     .await?;
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -689,10 +718,7 @@ impl BundleBuilder {
         name: &str,
         def: Arc<dyn FunctionImpl>,
     ) -> Result<&mut Self, BundlebaseError> {
-        self.bundle
-            .function_registry
-            .write()
-            .set_impl(name, def)?;
+        self.bundle.function_registry.write().set_impl(name, def)?;
         Ok(self)
     }
 
@@ -702,10 +728,13 @@ impl BundleBuilder {
 
         self.do_change(&format!("Set name to {}", name), |builder| {
             Box::pin(async move {
-                builder.apply_operation(SetNameOp::setup(&name).into()).await?;
+                builder
+                    .apply_operation(SetNameOp::setup(&name).into())
+                    .await?;
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -719,11 +748,13 @@ impl BundleBuilder {
 
         self.do_change(&format!("Set description to {}", description), |builder| {
             Box::pin(async move {
-                builder.apply_operation(SetDescriptionOp::setup(&description).into())
+                builder
+                    .apply_operation(SetDescriptionOp::setup(&description).into())
                     .await?;
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -756,12 +787,15 @@ impl BundleBuilder {
 
         self.do_change(&description, |builder| {
             Box::pin(async move {
-                builder.apply_operation(
-                    SetConfigOp::setup(&key, &value, url_prefix_owned.as_deref()).into()
-                ).await?;
+                builder
+                    .apply_operation(
+                        SetConfigOp::setup(&key, &value, url_prefix_owned.as_deref()).into(),
+                    )
+                    .await?;
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -772,7 +806,8 @@ impl BundleBuilder {
 
         self.do_change(&format!("Index column {}", column), |builder| {
             Box::pin(async move {
-                builder.apply_operation(DefineIndexOp::setup(&column).await?.into())
+                builder
+                    .apply_operation(DefineIndexOp::setup(&column).await?.into())
                     .await?;
 
                 builder.reindex().await?;
@@ -781,7 +816,8 @@ impl BundleBuilder {
 
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -805,14 +841,16 @@ impl BundleBuilder {
                     }
                 };
 
-                builder.apply_operation(DropIndexOp::setup(&index_id).await?.into())
+                builder
+                    .apply_operation(DropIndexOp::setup(&index_id).await?.into())
                     .await?;
 
                 info!("Dropped index on: \"{}\"", column);
 
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -850,7 +888,8 @@ impl BundleBuilder {
                 let df = builder.dataframe().await?;
 
                 // Collect index definitions before the loop to avoid holding the lock across awaits
-                let index_defs: Vec<Arc<IndexDefinition>> = builder.bundle.indexes.read().iter().cloned().collect();
+                let index_defs: Vec<Arc<IndexDefinition>> =
+                    builder.bundle.indexes.read().iter().cloned().collect();
 
                 for index_def in &index_defs {
                     let logical_col = index_def.column().to_string();
@@ -858,27 +897,52 @@ impl BundleBuilder {
                     debug!("Checking index on {}", &logical_col);
 
                     // Pass data_packs to expand pack tables into block tables
-                    let sources = match sql::column_sources_from_df(logical_col.as_str(), &df, Some(&builder.bundle.data_packs)).await {
+                    let sources = match sql::column_sources_from_df(
+                        logical_col.as_str(),
+                        &df,
+                        Some(&builder.bundle.data_packs),
+                    )
+                    .await
+                    {
                         Ok(Some(s)) => s,
                         Ok(None) => {
-                            return Err(format!("No physical sources found for column '{}'", logical_col).into());
+                            return Err(format!(
+                                "No physical sources found for column '{}'",
+                                logical_col
+                            )
+                            .into());
                         }
                         Err(e) => {
-                            return Err(format!("Failed to find source for column '{}': {}", logical_col, e).into());
+                            return Err(format!(
+                                "Failed to find source for column '{}': {}",
+                                logical_col, e
+                            )
+                            .into());
                         }
                     };
 
                     for (source_table, source_col) in sources {
                         // Extract block ID from table name "blocks.__block_{hex_id}"
-                        let block_id = DataBlock::parse_id(&source_table).ok_or_else(|| BundlebaseError::from(format!("Invalid table: {}", source_table)))?;
+                        let block_id = DataBlock::parse_id(&source_table).ok_or_else(|| {
+                            BundlebaseError::from(format!("Invalid table: {}", source_table))
+                        })?;
 
                         // Find the block and get its version
-                        let block_version = builder.find_block_version(&block_id).ok_or_else(|| format!("Block {} not found in data_packs", block_id))?;
-                        debug!("Physical source: block {} version {}", &block_id, &block_version);
+                        let block_version = builder
+                            .find_block_version(&block_id)
+                            .ok_or_else(|| format!("Block {} not found in data_packs", block_id))?;
+                        debug!(
+                            "Physical source: block {} version {}",
+                            &block_id, &block_version
+                        );
 
                         // Check if index already exists at this version
-                        let versioned_block = VersionedBlockId::new(block_id.clone(), block_version.clone());
-                        let needs_index = builder.bundle().get_index(&source_col, &versioned_block).is_none();
+                        let versioned_block =
+                            VersionedBlockId::new(block_id.clone(), block_version.clone());
+                        let needs_index = builder
+                            .bundle()
+                            .get_index(&source_col, &versioned_block)
+                            .is_none();
                         debug!("Needs index? {}", needs_index);
 
                         if needs_index {
@@ -893,14 +957,19 @@ impl BundleBuilder {
                 // Create IndexBlocksOp for each group of blocks
                 for ((index_id, column), blocks) in blocks_to_index {
                     if !blocks.is_empty() {
-                        debug!("Creating IndexBlocksOp for column {} with {} blocks", column, blocks.len());
+                        debug!(
+                            "Creating IndexBlocksOp for column {} with {} blocks",
+                            column,
+                            blocks.len()
+                        );
 
-                        builder.apply_operation(IndexBlocksOp::setup(
-                            &index_id,
-                            &column,
-                            blocks,
-                            &builder.bundle,
-                        ).await?.into()).await?;
+                        builder
+                            .apply_operation(
+                                IndexBlocksOp::setup(&index_id, &column, blocks, &builder.bundle)
+                                    .await?
+                                    .into(),
+                            )
+                            .await?;
                     }
                 }
 
@@ -908,7 +977,8 @@ impl BundleBuilder {
 
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -925,18 +995,19 @@ impl BundleBuilder {
         None
     }
 
-
     /// Rebuild an index on a column (mutates self)
     pub async fn rebuild_index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
         let column = column.to_string();
 
         self.do_change(&format!("Rebuild index on column {}", column), |builder| {
             Box::pin(async move {
-                builder.apply_operation(RebuildIndexOp::setup(column).await?.into())
+                builder
+                    .apply_operation(RebuildIndexOp::setup(column).await?.into())
                     .await?;
                 Ok(())
             })
-        }).await?;
+        })
+        .await?;
 
         Ok(self)
     }
@@ -1014,6 +1085,14 @@ impl BundleFacade for BundleBuilder {
         self.bundle.history()
     }
 
+    fn operations(&self) -> Vec<AnyOperation> {
+        let mut ops = self.bundle.operations.clone();
+        ops.append(&mut self.status.operations().clone());
+
+        ops
+    }
+
+
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {
         self.bundle.schema().await
     }
@@ -1029,21 +1108,23 @@ impl BundleFacade for BundleBuilder {
     async fn select(&self, sql: &str, params: Vec<ScalarValue>) -> Result<Self, BundlebaseError> {
         let mut bundle = self.clone();
         let sql = sql.to_string();
-        let sql = if (!sql.to_lowercase().starts_with("select ")) {
-          format!("SELECT {}", sql)
+        let sql = if !sql.to_lowercase().starts_with("select ") {
+            format!("SELECT {}", sql)
         } else {
             sql
         };
 
-        bundle.do_change(&format!("Query: {}", sql), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(SelectOp::setup(sql, params).await?.into())
-                    .await?;
-                info!("Created query");
-                Ok(())
+        bundle
+            .do_change(&format!("Query: {}", sql), |builder| {
+                Box::pin(async move {
+                    builder
+                        .apply_operation(SelectOp::setup(sql, params).await?.into())
+                        .await?;
+                    info!("Created query");
+                    Ok(())
+                })
             })
-        }).await?;
+            .await?;
 
         Ok(bundle)
     }
@@ -1133,10 +1214,7 @@ mod tests {
         let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
-        assert_eq!(
-            bundle.bundle.name, None,
-            "Empty bundle should have no name"
-        );
+        assert_eq!(bundle.bundle.name, None, "Empty bundle should have no name");
 
         let bundle = bundle.set_name("My Bundle").await.unwrap();
         let name = bundle.bundle.name.as_ref().unwrap();
@@ -1155,10 +1233,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            bundle
-                .bundle
-                .description
-                .unwrap_or("NOT SET".to_string()),
+            bundle.bundle.description.unwrap_or("NOT SET".to_string()),
             "This is a test bundle"
         );
     }
@@ -1184,10 +1259,7 @@ mod tests {
             "Name should be tracked as an operation and change version"
         );
         // Verify the name was actually set
-        assert_eq!(
-            bundle_with_name.bundle.name(),
-            Some("Named Bundle")
-        );
+        assert_eq!(bundle_with_name.bundle.name(), Some("Named Bundle"));
     }
 
     #[tokio::test]
@@ -1268,7 +1340,10 @@ mod tests {
         // Original should still have 0 indexes, clone should have 1
         let orig_indexes_after = bundle.bundle.indexes.read().len();
         let clone_indexes_after = bundle_clone.bundle.indexes.read().len();
-        assert_eq!(0, orig_indexes_after, "Original should have 0 indexes after clone modifies");
+        assert_eq!(
+            0, orig_indexes_after,
+            "Original should have 0 indexes after clone modifies"
+        );
         assert_eq!(1, clone_indexes_after, "Clone should have 1 index");
     }
 

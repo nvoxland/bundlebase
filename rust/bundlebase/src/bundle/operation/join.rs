@@ -1,6 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::data::{ObjectId, PackJoin};
-use crate::{BundlebaseError, Bundle, BundleBuilder};
+use crate::{Bundle, BundleBuilder, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::prelude::JoinType;

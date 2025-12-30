@@ -69,7 +69,8 @@ impl TableProvider for PackUnionTable {
     fn supports_filters_pushdown(
         &self,
         filters: &[&Expr],
-    ) -> datafusion::common::Result<Vec<datafusion::logical_expr::TableProviderFilterPushDown>> {
+    ) -> datafusion::common::Result<Vec<datafusion::logical_expr::TableProviderFilterPushDown>>
+    {
         use datafusion::logical_expr::TableProviderFilterPushDown;
 
         // Return Inexact for all filters - this tells DataFusion:
@@ -77,7 +78,10 @@ impl TableProvider for PackUnionTable {
         // - "But still apply them afterwards to ensure correctness"
         //
         // This enables index-based query optimization while maintaining correctness.
-        Ok(filters.iter().map(|_| TableProviderFilterPushDown::Inexact).collect())
+        Ok(filters
+            .iter()
+            .map(|_| TableProviderFilterPushDown::Inexact)
+            .collect())
     }
 
     async fn scan(
@@ -87,7 +91,11 @@ impl TableProvider for PackUnionTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        log::debug!("PackUnionTable.scan() called with projection: {:?}, filters: {:?}", projection, filters);
+        log::debug!(
+            "PackUnionTable.scan() called with projection: {:?}, filters: {:?}",
+            projection,
+            filters
+        );
         let blocks = self.pack.blocks();
 
         // Scan each block to get its physical plan

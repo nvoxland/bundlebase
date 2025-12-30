@@ -2,12 +2,12 @@
 ///
 /// This module provides progress trackers that feed updates into OpenTelemetry spans,
 /// allowing progress information to appear in distributed traces.
-
-use crate::metrics::{start_span, OperationCategory, OperationOutcome, Span, KeyValue};
-use crate::progress::{ProgressTracker, ProgressId};
+use crate::metrics::{start_span, KeyValue, OperationCategory, OperationOutcome, Span};
+use crate::progress::{ProgressId, ProgressTracker};
+use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use parking_lot::RwLock;
+
 
 /// Progress tracker that feeds updates to OpenTelemetry spans
 ///
@@ -53,9 +53,7 @@ impl ProgressTracker for SpanProgressTracker {
     fn update(&self, id: ProgressId, current: u64, message: Option<&str>) {
         if let Some(span) = self.spans.write().get_mut(&id) {
             // Add progress update as span event (not attribute - prevents cardinality explosion)
-            let mut attrs = vec![
-                KeyValue::new("progress.current", current.to_string())
-            ];
+            let mut attrs = vec![KeyValue::new("progress.current", current.to_string())];
             if let Some(msg) = message {
                 attrs.push(KeyValue::new("progress.message", msg.to_string()));
             }
@@ -82,7 +80,10 @@ pub struct CompositeTracker {
 impl CompositeTracker {
     /// Create a new CompositeTracker from a list of trackers
     pub fn new(trackers: Vec<Arc<dyn ProgressTracker>>) -> Self {
-        assert!(!trackers.is_empty(), "CompositeTracker requires at least one tracker");
+        assert!(
+            !trackers.is_empty(),
+            "CompositeTracker requires at least one tracker"
+        );
         Self { trackers }
     }
 }

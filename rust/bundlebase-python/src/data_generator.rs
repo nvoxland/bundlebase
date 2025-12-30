@@ -1,8 +1,8 @@
-use ::bundlebase::DataGenerator;
-use ::bundlebase::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use arrow::pyarrow::{FromPyArrow, ToPyArrow};
 use arrow::record_batch::RecordBatch;
+use ::bundlebase::BundlebaseError;
+use ::bundlebase::DataGenerator;
 use pyo3::prelude::PyDictMethods;
 use pyo3::types::{PyDict, PyFunction, PyTuple};
 use pyo3::{Py, Python};

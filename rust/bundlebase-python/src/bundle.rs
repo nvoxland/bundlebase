@@ -1,7 +1,7 @@
 use super::commit::PyCommit;
+use arrow::pyarrow::ToPyArrow;
 use ::bundlebase::bundle::BundleFacade;
 use ::bundlebase::Bundle;
-use arrow::pyarrow::ToPyArrow;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 

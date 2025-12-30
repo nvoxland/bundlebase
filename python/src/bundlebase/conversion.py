@@ -21,7 +21,8 @@ Example:
     >>>     process(batch)
 """
 
-from typing import TYPE_CHECKING, Any, Optional, Dict, AsyncIterator
+from typing import TYPE_CHECKING, Dict, AsyncIterator
+
 import pyarrow as pa
 
 if TYPE_CHECKING:

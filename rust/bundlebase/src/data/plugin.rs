@@ -21,7 +21,7 @@ use std::sync::Arc;
 pub use mock::MockReader;
 
 use crate::data::object_id::ObjectId;
-use crate::{BundlebaseError, Bundle};
+use crate::{Bundle, BundlebaseError};
 
 #[async_trait]
 pub trait ReaderPlugin: Send + Sync {

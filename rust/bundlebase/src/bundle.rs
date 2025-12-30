@@ -1,31 +1,31 @@
 mod builder;
 mod column_lineage;
+mod command;
 mod commit;
 mod facade;
 mod init;
 mod operation;
 mod sql;
-mod command;
 
 use crate::io::EMPTY_SCHEME;
 pub use builder::{BundleBuilder, BundleStatus};
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
+pub use command::parser::parse_command;
+pub use command::BundleCommand;
 pub use commit::BundleCommit;
 pub use facade::BundleFacade;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::JoinTypeOption;
 pub use operation::{AnyOperation, BundleChange, Operation};
-pub use command::parser::parse_command;
-pub use command::BundleCommand;
 use std::collections::{HashMap, HashSet};
 
 use crate::bundle::commit::manifest_version;
+use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
 use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBlockId};
-use crate::io::{DataStorage, ObjectStoreDir, ObjectStoreFile, EMPTY_URL};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
-use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
-use crate::{BundlebaseError, BundleConfig};
+use crate::io::{DataStorage, ObjectStoreDir, ObjectStoreFile, EMPTY_URL};
+use crate::{BundleConfig, BundlebaseError};
 use arrow::array::Array;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -117,7 +117,7 @@ impl Clone for Bundle {
             indexes,
             views: self.views.clone(),
             dataframe: DataFrameHolder {
-                dataframe: Arc::new(RwLock::new(self.dataframe.dataframe.read().clone()))
+                dataframe: Arc::new(RwLock::new(self.dataframe.dataframe.read().clone())),
             },
             ctx: Arc::clone(&self.ctx),
             storage: Arc::clone(&self.storage),
@@ -137,7 +137,8 @@ impl Bundle {
         let storage = Arc::new(DataStorage::new());
         let function_registry = Arc::new(RwLock::new(FunctionRegistry::new()));
 
-        let mut config = SessionConfig::new().with_default_catalog_and_schema(CATALOG_NAME, "public");
+        let mut config =
+            SessionConfig::new().with_default_catalog_and_schema(CATALOG_NAME, "public");
         let options = config.options_mut();
         options.sql_parser.enable_ident_normalization = false;
         let ctx = Arc::new(SessionContext::new_with_config(config));
@@ -236,7 +237,9 @@ impl Bundle {
         bundle.recompute_config()?;
 
         Self::open_internal(
-            ObjectStoreDir::from_str(path, BundleConfig::default().into())?.url().as_str(),
+            ObjectStoreDir::from_str(path, BundleConfig::default().into())?
+                .url()
+                .as_str(),
             &mut visited,
             &mut bundle,
         )
@@ -252,19 +255,17 @@ impl Bundle {
         bundle: &mut Bundle,
     ) -> Result<(), BundlebaseError> {
         if !visited.insert(url.to_string()) {
-            return Err(format!(
-                "Circular dependency detected in bundle from chain: {}",
-                url
-            )
-            .into());
+            return Err(
+                format!("Circular dependency detected in bundle from chain: {}", url).into(),
+            );
         }
 
         let data_dir = ObjectStoreDir::from_str(url, bundle.config())?;
         let manifest_dir = data_dir.subdir(META_DIR)?;
 
         let init_commit: Option<InitCommit> = manifest_dir.file(INIT_FILENAME)?.read_yaml().await?;
-        let init_commit =
-            init_commit.expect(format!("No {}/{} found in {}", META_DIR, INIT_FILENAME, url).as_str());
+        let init_commit = init_commit
+            .expect(format!("No {}/{} found in {}", META_DIR, INIT_FILENAME, url).as_str());
 
         // Recursively load the base bundle and store the Arc reference
         if let Some(from_url) = &init_commit.from {
@@ -319,13 +320,21 @@ impl Bundle {
             commit.url = Some(manifest_file.url().clone());
             commit.data_dir = Some(data_dir.url().clone());
 
-            debug!("Loading commit from {}: {} changes", manifest_file.filename(), commit.changes.len());
+            debug!(
+                "Loading commit from {}: {} changes",
+                manifest_file.filename(),
+                commit.changes.len()
+            );
 
             bundle.commits.push(commit.clone());
 
             // Apply operations from this manifest's changes
             for change in commit.changes {
-                debug!("  Change: {} with {} operations", change.description, change.operations.len());
+                debug!(
+                    "  Change: {} with {} operations",
+                    change.description,
+                    change.operations.len()
+                );
                 for op in change.operations {
                     debug!("    Applying: {}", op.describe());
                     bundle.apply_operation(op).await?;
@@ -353,7 +362,10 @@ impl Bundle {
     /// - A view name
     ///
     /// Returns the ID and name if found, or an error if not found or ambiguous.
-    pub fn get_view_id_by_name_or_id(&self, identifier: &str) -> Result<(ObjectId, String), BundlebaseError> {
+    pub fn get_view_id_by_name_or_id(
+        &self,
+        identifier: &str,
+    ) -> Result<(ObjectId, String), BundlebaseError> {
         // Try to parse as ObjectId first
         if let Ok(id) = ObjectId::try_from(identifier) {
             // Look for this ID in the views map values
@@ -373,14 +385,17 @@ impl Bundle {
             if self.views.is_empty() {
                 Err(format!("View '{}' not found (no views exist)", identifier).into())
             } else {
-                let available: Vec<String> = self.views.iter()
+                let available: Vec<String> = self
+                    .views
+                    .iter()
                     .map(|(name, id)| format!("{} (id: {})", name, id))
                     .collect();
                 Err(format!(
                     "View '{}' not found. Available views:\n  {}",
                     identifier,
                     available.join("\n  ")
-                ).into())
+                )
+                .into())
             }
         }
     }
@@ -463,11 +478,6 @@ impl Bundle {
         self.ctx.clone()
     }
 
-    /// All operations applied to this bundle
-    pub fn operations(&self) -> &Vec<AnyOperation> {
-        &self.operations
-    }
-
     pub async fn explain(&self) -> Result<String, BundlebaseError> {
         let mut result = String::new();
 
@@ -548,13 +558,17 @@ impl Bundle {
     }
 
     /// Check if an index already exists at the correct version
-    pub(crate) fn get_index(&self, column: &str, block: &VersionedBlockId) -> Option<Arc<IndexedBlocks>> {
+    pub(crate) fn get_index(
+        &self,
+        column: &str,
+        block: &VersionedBlockId,
+    ) -> Option<Arc<IndexedBlocks>> {
         for index in self.indexes.read().iter() {
             if index.column() == column {
                 let indexed_blocks = index.indexed_blocks(block);
 
                 if indexed_blocks.is_some() {
-                    return Some(indexed_blocks.unwrap())
+                    return Some(indexed_blocks.unwrap());
                 }
             }
         }
@@ -600,6 +614,10 @@ impl BundleFacade for Bundle {
         self.commits.clone()
     }
 
+    fn operations(&self) -> Vec<AnyOperation> {
+        self.operations.clone()
+    }
+
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {
         Ok(Arc::new(
             self.dataframe().await?.schema().clone().as_arrow().clone(),
@@ -625,10 +643,7 @@ impl BundleFacade for Bundle {
         let df = match self.base_pack {
             Some(base_pack) => {
                 let table_name = format!("packs.{}", DataPack::table_name(&base_pack));
-                let mut df = self
-                    .ctx
-                    .table(&table_name)
-                    .await?;
+                let mut df = self.ctx.table(&table_name).await?;
 
                 for (_, pack_join) in &self.joins {
                     debug!("Executing join with pack {}", pack_join.pack_id());
@@ -636,13 +651,19 @@ impl BundleFacade for Bundle {
                 }
 
                 // Apply operations to the base DataFrame
-                debug!("dataframe: Applying {} operations to dataframe...", self.operations().len());
+                debug!(
+                    "dataframe: Applying {} operations to dataframe...",
+                    self.operations().len()
+                );
 
                 for op in self.operations().iter() {
                     debug!("Applying to dataframe: {}", &op.describe());
                     df = op.apply_dataframe(df, self.ctx.clone()).await?;
                 }
-                debug!("dataframe: Applying {} operations to dataframe...DONE", self.operations().len());
+                debug!(
+                    "dataframe: Applying {} operations to dataframe...DONE",
+                    self.operations().len()
+                );
 
                 df
             }
@@ -655,7 +676,7 @@ impl BundleFacade for Bundle {
                         schema: DFSchemaRef::new(DFSchema::empty()),
                     }),
                 )
-            },
+            }
         };
         self.dataframe.replace(df);
         debug!("Building dataframe...DONE");
@@ -667,8 +688,7 @@ impl BundleFacade for Bundle {
         sql: &str,
         params: Vec<ScalarValue>,
     ) -> Result<BundleBuilder, BundlebaseError> {
-        let bundle =
-            BundleBuilder::extend(Arc::new(self.clone()), &self.data_dir.url().as_str())?;
+        let bundle = BundleBuilder::extend(Arc::new(self.clone()), &self.data_dir.url().as_str())?;
         bundle.select(sql, params).await
     }
 
@@ -715,7 +735,7 @@ impl DataFrameHolder {
 impl Clone for DataFrameHolder {
     fn clone(&self) -> Self {
         Self {
-            dataframe: Arc::clone(&self.dataframe)
+            dataframe: Arc::clone(&self.dataframe),
         }
     }
 }

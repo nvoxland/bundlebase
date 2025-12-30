@@ -1,9 +1,9 @@
 """Tests for Rust→Python logging bridge."""
 
 import logging
-import maturin_import_hook
 from io import StringIO
 
+import maturin_import_hook
 import pytest
 
 maturin_import_hook.install()

@@ -31,7 +31,6 @@ lazy_static! {
         .into_iter()
         .collect()
     };
-
     static ref VALID_GCS_KEYS: HashSet<&'static str> = {
         vec![
             "service_account_key",
@@ -42,7 +41,6 @@ lazy_static! {
         .into_iter()
         .collect()
     };
-
     static ref VALID_AZURE_KEYS: HashSet<&'static str> = {
         vec![
             "account",
@@ -172,7 +170,8 @@ impl BundleConfig {
         merged.url_overrides = self.url_overrides.clone();
         // Add/override with other's URL overrides
         for (url_prefix, override_map) in &other.url_overrides {
-            merged.url_overrides
+            merged
+                .url_overrides
                 .entry(url_prefix.clone())
                 .or_insert_with(HashMap::new)
                 .extend(override_map.clone());
@@ -262,7 +261,6 @@ impl BundleConfig {
 
         Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -280,7 +278,10 @@ mod tests {
     fn test_set_default() {
         let mut config = BundleConfig::new();
         config.set("region", "us-west-2", None);
-        assert_eq!(config.defaults.get("region"), Some(&"us-west-2".to_string()));
+        assert_eq!(
+            config.defaults.get("region"),
+            Some(&"us-west-2".to_string())
+        );
     }
 
     #[test]
@@ -381,7 +382,10 @@ mod tests {
 
         let merged = config1.merge(&config2);
 
-        assert_eq!(merged.defaults.get("region"), Some(&"us-east-1".to_string()));
+        assert_eq!(
+            merged.defaults.get("region"),
+            Some(&"us-east-1".to_string())
+        );
         assert_eq!(
             merged.defaults.get("access_key_id"),
             Some(&"KEY123".to_string())

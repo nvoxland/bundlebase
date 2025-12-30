@@ -1,10 +1,8 @@
-use crate::data::plugin::{
-    CsvPlugin, FunctionPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin,
-};
+use crate::data::plugin::{CsvPlugin, FunctionPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin};
 use crate::data::{DataReader, ObjectId};
-use crate::io::DataStorage;
 use crate::functions::FunctionRegistry;
-use crate::{BundlebaseError, Bundle};
+use crate::io::DataStorage;
+use crate::{Bundle, BundlebaseError};
 use arrow_schema::SchemaRef;
 use datafusion::common::DataFusionError;
 use parking_lot::RwLock;

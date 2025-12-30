@@ -1,7 +1,7 @@
 use crate::bundle::operation::Operation;
 use crate::data::{DataBlock, ObjectId};
 use crate::progress::ProgressScope;
-use crate::{BundlebaseError, Bundle, BundleBuilder};
+use crate::{Bundle, BundleBuilder, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
@@ -115,7 +115,7 @@ impl Operation for AttachBlockOp {
             reader,
             bundle.indexes().clone(),
             Arc::new(bundle.data_dir().clone()),
-            bundle.config()
+            bundle.config(),
         ));
 
         let pack = bundle.get_pack(&self.pack_id).expect("Cannot find pack");
@@ -127,11 +127,11 @@ impl Operation for AttachBlockOp {
 
 #[cfg(test)]
 mod tests {
-    use crate::BundleConfig;
-use super::*;
+    use super::*;
     use crate::bundle::BundleFacade;
     use crate::io::ObjectStoreFile;
     use crate::test_utils::{empty_bundle, for_yaml, test_datafile};
+    use crate::BundleConfig;
     use url::Url;
 
     #[tokio::test]
@@ -157,9 +157,12 @@ use super::*;
             AttachBlockOp::setup(&ObjectId::generate(), datafile, &empty_bundle().await).await?;
         let block_id = String::from(op.id.clone());
         let pack_id = String::from(op.pack_id.clone());
-        let version = ObjectStoreFile::from_url(&Url::parse(datafile).unwrap(), BundleConfig::default().into())?
-            .version()
-            .await?;
+        let version = ObjectStoreFile::from_url(
+            &Url::parse(datafile).unwrap(),
+            BundleConfig::default().into(),
+        )?
+        .version()
+        .await?;
 
         assert_eq!(
             format!(

@@ -1,7 +1,6 @@
 use crate::index::IndexedValue;
 use crate::BundlebaseError;
 use datafusion::logical_expr::{expr, BinaryExpr, Expr, Operator};
-use datafusion::scalar::ScalarValue;
 
 /// Represents the type of index predicate extracted from a filter expression
 #[derive(Debug, Clone, PartialEq)]
@@ -223,11 +222,28 @@ impl FilterAnalyzer {
                 // Both sides are indexable - check if they can be combined into a range
                 if left_f.column == right_f.column {
                     match (&left_f.predicate, &right_f.predicate) {
-                        (IndexPredicate::Range { min: min1, max: max1 }, IndexPredicate::Range { min: min2, max: max2 }) => {
+                        (
+                            IndexPredicate::Range {
+                                min: min1,
+                                max: max1,
+                            },
+                            IndexPredicate::Range {
+                                min: min2,
+                                max: max2,
+                            },
+                        ) => {
                             // Combine two range predicates
                             // Use the more restrictive min and max
-                            let min = if min1 > min2 { min1.clone() } else { min2.clone() };
-                            let max = if max1 < max2 { max1.clone() } else { max2.clone() };
+                            let min = if min1 > min2 {
+                                min1.clone()
+                            } else {
+                                min2.clone()
+                            };
+                            let max = if max1 < max2 {
+                                max1.clone()
+                            } else {
+                                max2.clone()
+                            };
 
                             return Ok(IndexableFilter {
                                 column: left_f.column,
@@ -255,12 +271,16 @@ mod tests {
     use super::*;
     use crate::index::column_index::OrderedFloat;
     use datafusion::common::Column;
+    use datafusion::common::ScalarValue;
     use datafusion::logical_expr::col;
 
     #[test]
     fn test_extract_equality_column_first() {
         // Test: email = 'test@example.com'
-        let expr = col("email").eq(Expr::Literal(ScalarValue::Utf8(Some("test@example.com".to_string())), None));
+        let expr = col("email").eq(Expr::Literal(
+            ScalarValue::Utf8(Some("test@example.com".to_string())),
+            None,
+        ));
 
         let filters = vec![expr];
         let indexable = FilterAnalyzer::extract_indexable(&filters);
@@ -274,7 +294,10 @@ mod tests {
     fn test_extract_equality_literal_first() {
         // Test: 'value' = column (reversed)
         let expr = Expr::BinaryExpr(BinaryExpr {
-            left: Box::new(Expr::Literal(ScalarValue::Utf8(Some("value".to_string())), None)),
+            left: Box::new(Expr::Literal(
+                ScalarValue::Utf8(Some("value".to_string())),
+                None,
+            )),
             op: Operator::Eq,
             right: Box::new(Expr::Column(Column::from_name("name"))),
         });
@@ -354,9 +377,15 @@ mod tests {
     fn test_multiple_filters() {
         // Test: Multiple filters, some indexable, some not
         let filters = vec![
-            col("email").eq(Expr::Literal(ScalarValue::Utf8(Some("test@example.com".to_string())), None)),
+            col("email").eq(Expr::Literal(
+                ScalarValue::Utf8(Some("test@example.com".to_string())),
+                None,
+            )),
             col("age").gt(Expr::Literal(ScalarValue::Int64(Some(18)), None)), // Now supported as range
-            col("status").eq(Expr::Literal(ScalarValue::Utf8(Some("active".to_string())), None)),
+            col("status").eq(Expr::Literal(
+                ScalarValue::Utf8(Some("active".to_string())),
+                None,
+            )),
         ];
 
         let indexable = FilterAnalyzer::extract_indexable(&filters);
@@ -426,7 +455,10 @@ mod tests {
             assert_eq!(*min, IndexedValue::Int64(18));
             assert_eq!(*max, IndexedValue::Int64(65));
         } else {
-            panic!("Expected IndexPredicate::Range, got {:?}", indexable[0].predicate);
+            panic!(
+                "Expected IndexPredicate::Range, got {:?}",
+                indexable[0].predicate
+            );
         }
     }
 

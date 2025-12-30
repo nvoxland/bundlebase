@@ -4,11 +4,14 @@ mod display;
 mod progress_impl;
 
 use crate::state::State;
-use commands::{Command, ExecuteResult};
-use completion::BundleCompleter;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::BundlebaseError;
-use reedline::{default_emacs_keybindings, DefaultPrompt, DefaultPromptSegment, Emacs, FileBackedHistory, Reedline, Signal};
+use commands::{Command, ExecuteResult};
+use completion::BundleCompleter;
+use reedline::{
+    default_emacs_keybindings, DefaultPrompt, DefaultPromptSegment, Emacs, FileBackedHistory,
+    Reedline, Signal,
+};
 use std::sync::Arc;
 use tracing::{error, info};
 

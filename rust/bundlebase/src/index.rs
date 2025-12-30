@@ -1,16 +1,16 @@
 pub mod column_index;
+mod filter_analyzer;
 mod index_definition;
 pub mod index_scan_exec;
-mod rowid_index;
-mod rowid_cache;
-mod indexed_blocks;
-mod filter_analyzer;
 mod index_selector;
+mod indexed_blocks;
+mod rowid_cache;
+mod rowid_index;
 
 pub use column_index::{ColumnIndex, IndexedValue};
+pub use filter_analyzer::{FilterAnalyzer, IndexPredicate, IndexableFilter};
 pub use index_definition::IndexDefinition;
-pub use rowid_index::RowIdIndex;
-pub use rowid_cache::{RowIdCache, CacheStats, GLOBAL_ROWID_CACHE};
-pub use indexed_blocks::IndexedBlocks;
-pub use filter_analyzer::{FilterAnalyzer, IndexableFilter, IndexPredicate};
 pub use index_selector::IndexSelector;
+pub use indexed_blocks::IndexedBlocks;
+pub use rowid_cache::GLOBAL_ROWID_CACHE;
+pub use rowid_index::RowIdIndex;

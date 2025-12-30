@@ -3,10 +3,10 @@
 This module tests the streaming API which enables processing large datasets
 without loading everything into memory.
 """
-import pytest
-import pyarrow as pa
-import pandas as pd
 import bundlebase
+import pandas as pd
+import pyarrow as pa
+import pytest
 
 
 @pytest.mark.asyncio

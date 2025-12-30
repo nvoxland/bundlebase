@@ -8,8 +8,7 @@ mod common;
 
 #[tokio::test]
 async fn test_select_basic_filter() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply SQL query to filter results
@@ -31,11 +30,9 @@ async fn test_select_basic_filter() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
-
 #[tokio::test]
 async fn test_select_is_not_required() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply SQL query to filter results
@@ -57,11 +54,9 @@ async fn test_select_is_not_required() -> Result<(), BundlebaseError> {
     Ok(())
 }
 
-
 #[tokio::test]
 async fn test_select_multiple_parameters() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply SQL query with multiple parameters
@@ -88,14 +83,11 @@ async fn test_select_multiple_parameters() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_select_no_parameters() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply SQL query without parameters
-    let queried = bundle
-        .select("SELECT * FROM data LIMIT 10", vec![])
-        .await?;
+    let queried = bundle.select("SELECT * FROM data LIMIT 10", vec![]).await?;
 
     let df = queried.dataframe().await?;
     let result = df.as_ref().clone().collect().await?;
@@ -107,8 +99,7 @@ async fn test_select_no_parameters() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_select_with_aggregation() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply SQL query with GROUP BY
@@ -131,8 +122,7 @@ async fn test_select_with_aggregation() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_explain_basic() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Explain should return a non-empty string
@@ -152,8 +142,7 @@ async fn test_explain_basic() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_explain_with_filter() -> Result<(), BundlebaseError> {
-    let mut bundle =
-        bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply a filter and explain

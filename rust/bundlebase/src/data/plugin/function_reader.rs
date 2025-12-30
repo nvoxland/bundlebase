@@ -3,11 +3,10 @@ use crate::data::{DataReader, ObjectId, RowId};
 use crate::functions::FunctionDataSource;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionRegistry;
-use crate::{BundlebaseError, Bundle};
+use crate::{Bundle, BundlebaseError};
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
-use datafusion::catalog::Session;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::logical_expr::Expr;
@@ -32,9 +31,9 @@ impl ReaderPlugin for FunctionPlugin {
         &self,
         source: &str,
         block_id: &ObjectId,
-        bundle: &Bundle,
-        schema: Option<SchemaRef>,
-        layout: Option<String>,
+        _bundle: &Bundle,
+        _schema: Option<SchemaRef>,
+        _layout: Option<String>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
         if !source.starts_with("function://") {
             return Ok(None);
@@ -130,8 +129,8 @@ impl DataReader for FunctionDataReader {
     async fn data_source(
         &self,
         projection: Option<&Vec<usize>>,
-        filters: &[Expr],
-        limit: Option<usize>,
+        _filters: &[Expr],
+        _limit: Option<usize>,
         _row_ids: Option<&[RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
         let generator = self
@@ -159,7 +158,7 @@ pub trait DataGenerator: Debug + Sync + Send {
 mod tests {
     use super::*;
     use crate::functions::{FunctionSignature, StaticImpl};
-    use crate::{BundlebaseError, Bundle};
+    use crate::{Bundle, BundlebaseError};
     use arrow::array::{downcast_array, record_batch, Int32Array, StringArray};
     use arrow::datatypes::{DataType, Field};
     use arrow_schema::Schema;

@@ -1,13 +1,12 @@
 use crate::bundle::operation::Operation;
-use crate::{BundlebaseError, Bundle};
+use crate::bundle::BundleFacade;
+use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use log::debug;
-use crate::bundle::BundleFacade;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -43,7 +42,8 @@ impl Operation for RenameColumnOp {
         df: DataFrame,
         _ctx: Arc<SessionContext>,
     ) -> Result<DataFrame, BundlebaseError> {
-        let df = df.with_column_renamed(&self.old_name, &self.new_name)
+        let df = df
+            .with_column_renamed(&self.old_name, &self.new_name)
             .map_err(|e| Box::new(e) as BundlebaseError)?;
         Ok(df)
     }
