@@ -150,6 +150,33 @@ impl PyBundle {
             .collect()
     }
 
+    fn view<'py>(&self, identifier: &str, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let identifier = identifier.to_string();
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let bundle = inner
+                .view(&identifier)
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to open view '{}': {}",
+                        identifier, e
+                    ))
+                })?;
+
+            Python::attach(|py| {
+                Py::new(py, PyBundle::new(bundle))
+                    .map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                            "Failed to create bundle: {}",
+                            e
+                        ))
+                    })
+            })
+        })
+    }
+
     fn operations(&self) -> Vec<super::operation::PyOperation> {
         self.inner
             .operations()

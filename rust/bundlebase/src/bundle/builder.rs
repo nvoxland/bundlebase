@@ -495,49 +495,6 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Open a view by name or ID, returning a read-only Bundle
-    ///
-    /// Looks up the view by name or ID and opens it as a Bundle. The view automatically
-    /// inherits all changes from its parent bundle through the FROM mechanism.
-    ///
-    /// # Arguments
-    /// * `identifier` - Name or ID of the view to open
-    ///
-    /// # Returns
-    /// A read-only Bundle representing the view
-    ///
-    /// # Errors
-    /// Returns an error if the view doesn't exist or if the identifier is ambiguous
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use bundlebase::{Bundle, BundleBuilder, BundlebaseError};
-    /// # async fn example(c: &BundleBuilder) -> Result<(), BundlebaseError> {
-    /// // Open by name
-    /// let view = c.view("adults").await?;
-    ///
-    /// // Or open by ID
-    /// let view = c.view("abc123def456").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn view(&self, identifier: &str) -> Result<Bundle, BundlebaseError> {
-        // Look up view by name or ID
-        let (view_id, _name) = self.bundle.get_view_id_by_name_or_id(identifier)?;
-
-        // Construct view path: view_{id}/
-        let view_path = self
-            .data_dir()
-            .subdir(&format!("view_{}", view_id))?
-            .url()
-            .to_string();
-
-        // Open view as Bundle (automatically loads parent via FROM)
-        // Preserve explicit_config from current bundle
-        let config = self.bundle.passed_config.clone();
-        Bundle::open(&view_path, config).await
-    }
-
     /// Attach a data block to the joined pack
     pub async fn attach_to_join(
         &mut self,
@@ -1131,6 +1088,10 @@ impl BundleFacade for BundleBuilder {
 
     fn views(&self) -> HashMap<ObjectId, String> {
         self.bundle.views()
+    }
+
+    async fn view(&self, identifier: &str) -> Result<Bundle, BundlebaseError> {
+        self.bundle.view(identifier).await
     }
 }
 

@@ -957,7 +957,7 @@ async def test_view_dataframe_execution():
     await c.commit("Initial data")
 
     # Create view with country filter
-    chile = await c.select("select * where Country = 'Chile'")
+    chile = await c.select("select * from data where Country = 'Chile'")
     c = await c.create_view("chile", chile)
     await c.commit("Add chile view")
 
@@ -965,7 +965,6 @@ async def test_view_dataframe_execution():
     view = await c.view("chile")
 
     # This should work if data is inherited correctly
-    assert view.operations() == ""
     schema = await view.schema()
     assert len(schema) > 0, "View should have schema"
 
@@ -983,7 +982,7 @@ async def test_view_to_polars():
     await c.commit("Initial data")
 
     # Create view with a simple filter
-    high_idx = await c.select("select * where \"Index\" > 50")
+    high_idx = await c.select("select * from data where \"Index\" > 50")
     c = await c.create_view("high_index_polars", high_idx)
     await c.commit("Add high_index_polars view")
 
@@ -1008,7 +1007,7 @@ async def test_view_to_pandas():
     await c.commit("Initial data")
 
     # Create view for high index values
-    high_idx = await c.select("select * where \"Index\" > 80")
+    high_idx = await c.select("select * from data where \"Index\" > 80")
     c = await c.create_view("high_index", high_idx)
     await c.commit("Add high_index view")
 
