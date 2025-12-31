@@ -281,7 +281,12 @@ impl Bundle {
             // Box the recursive call to avoid infinite future size
             Box::pin(Self::open_internal(resolved_url.as_str(), visited, bundle)).await?;
         };
-        bundle.id = init_commit.id;
+
+        // Only set id if provided in init_commit
+        // If id is None (extending case), keep the id inherited from parent bundle
+        if let Some(id) = init_commit.id {
+            bundle.id = id;
+        }
         bundle.data_dir = data_dir.clone();
 
         // List files in the manifest directory

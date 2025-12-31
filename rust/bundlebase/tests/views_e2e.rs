@@ -550,3 +550,31 @@ async fn test_rename_view_commit_and_reopen() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_create_view_with_uncommitted_operations() -> Result<(), BundlebaseError> {
+    // This test verifies that create_view properly captures operations from source
+    // Note: The Python test test_sync_create_view_no_double_commit verifies the fix
+    // for the double-commit issue, which we cannot test in Rust due to borrow checker
+    // limitations (can't pass &c to c.create_view() which requires &mut c).
+
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial").await?;
+
+    // Select creates uncommitted operations in the builder
+    let view_source = c.select("select * from data limit 10", vec![]).await?;
+
+    // Create view from the builder with select operation
+    c.create_view("limited", &view_source).await?;
+    c.commit("Added view").await?;
+
+    // Verify the view itself has the select operation
+    let bundle = Bundle::open(c.url().as_str(), None).await?;
+    let view = bundle.view("limited").await?;
+    let view_ops = view.operations();
+    let has_select = view_ops.iter().any(|op| op.describe().to_lowercase().contains("select"));
+    assert!(has_select, "View should contain the select operation");
+
+    Ok(())
+}

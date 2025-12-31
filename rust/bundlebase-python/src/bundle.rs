@@ -14,6 +14,11 @@ pub struct PyBundle {
 #[pymethods]
 impl PyBundle {
     #[getter]
+    fn id(&self) -> String {
+        self.inner.id().to_string()
+    }
+
+    #[getter]
     fn name(&self) -> Option<String> {
         self.inner.name().map(|s| s.to_string())
     }

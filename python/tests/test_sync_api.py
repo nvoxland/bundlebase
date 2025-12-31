@@ -403,6 +403,69 @@ class TestSyncSelect:
         assert len(plan) > 0
 
 
+class TestSyncCreateView:
+    """Test synchronous create_view operations."""
+
+    def test_sync_create_view_basic(self):
+        """Test creating a view synchronously (no deadlock)."""
+        c = dc.create(random_bundle())
+        c.attach(datafile("customers-0-100.csv"))
+
+        # select() modifies c in place, so filtered is the same object as c
+        # This used to cause a deadlock in the Python bindings
+        filtered = c.select("select * from data limit 10")
+        c.create_view("limited", filtered)
+
+        # If we get here, create_view completed successfully (no deadlock)
+        assert True
+
+    def test_sync_create_view_with_commit(self):
+        """Test creating a view and committing synchronously."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            c = dc.create(tmpdir)
+            c.attach(datafile("customers-0-100.csv"))
+
+            # Create view from select
+            filtered = c.select("select * from data limit 10")
+            c.create_view("limited", filtered)
+            c.commit("Added limited view")
+
+            # If we get here without deadlock, test passes
+            assert True
+
+    def test_sync_create_view_chaining(self):
+        """Test chaining operations with create_view."""
+        c = dc.create(random_bundle())
+        c.attach(datafile("customers-0-100.csv"))
+
+        filtered = c.select("select * from data limit 10")
+        c.create_view("limited", filtered).set_name("Customer Data")
+
+        assert c.name == "Customer Data"
+
+    def test_sync_create_view_no_double_commit(self):
+        """Verify select operation is not committed to main container."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            c = dc.create(tmpdir)
+            c.attach(datafile("customers-0-100.csv"))
+            c.commit("Initial data")
+
+            # select modifies c in place in sync wrapper
+            rs = c.select("select * from data limit 10")
+            c.create_view("limited", rs)
+            c.commit("Added view")
+
+            # Reopen and check commit history
+            c2 = dc.open(tmpdir)
+            history = c2.history()
+
+            # Last commit should only have CreateViewOp, not SelectOp
+            last_commit = history[-1]
+            assert last_commit.message == "Added view"
+            assert len(last_commit.changes) == 1, f"Expected 1 change but got {len(last_commit.changes)}"
+            assert last_commit.changes[0].description == "Create view 'limited'"
+
+
 class TestSyncStatus:
     """Test synchronous status() operations."""
 

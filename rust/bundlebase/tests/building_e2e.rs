@@ -216,3 +216,82 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
+    let temp1 = random_memory_dir();
+    let temp2 = random_memory_dir();
+    let temp3 = random_memory_dir();
+
+    // Create base bundle
+    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
+    c1.attach(test_datafile("customers-0-100.csv")).await?;
+    c1.commit("Initial commit").await?;
+
+    // Get the ID from the base bundle's InitCommit
+    let init_commit1: InitCommit = temp1
+        .subdir(META_DIR)?
+        .file(INIT_FILENAME)?
+        .read_yaml()
+        .await?
+        .expect("Should have init commit");
+    let base_id = init_commit1.id.expect("Base bundle should have id");
+    assert!(init_commit1.from.is_none(), "Base bundle should not have 'from'");
+
+    // Extend to second bundle
+    let base1 = Bundle::open(&temp1.to_string(), None).await?;
+    assert_eq!(base_id, base1.id(), "Opened bundle should have same ID as InitCommit");
+
+    let mut c2 = base1.extend(&temp2.to_string())?;
+    c2.remove_column("country").await?;
+    c2.commit("Second commit").await?;
+
+    // Verify extended bundle's InitCommit has only 'from', not 'id'
+    let init_commit2: InitCommit = temp2
+        .subdir(META_DIR)?
+        .file(INIT_FILENAME)?
+        .read_yaml()
+        .await?
+        .expect("Should have init commit");
+    assert!(init_commit2.id.is_none(), "Extended bundle should NOT have 'id' in InitCommit");
+    assert_eq!(
+        Some(temp1.url().clone()),
+        init_commit2.from,
+        "Extended bundle should have 'from' pointing to parent"
+    );
+
+    // Verify the opened extended bundle has the SAME id as the base bundle
+    let base2 = Bundle::open(&temp2.to_string(), None).await?;
+    assert_eq!(
+        base_id,
+        base2.id(),
+        "Extended bundle should inherit the same ID as base bundle"
+    );
+
+    // Extend again to third bundle and verify ID is still the same
+    let mut c3 = base2.extend(&temp3.to_string())?;
+    c3.remove_column("phone").await?;
+    c3.commit("Third commit").await?;
+
+    let init_commit3: InitCommit = temp3
+        .subdir(META_DIR)?
+        .file(INIT_FILENAME)?
+        .read_yaml()
+        .await?
+        .expect("Should have init commit");
+    assert!(init_commit3.id.is_none(), "Extended bundle should NOT have 'id' in InitCommit");
+    assert_eq!(
+        Some(temp2.url().clone()),
+        init_commit3.from,
+        "Extended bundle should have 'from' pointing to parent"
+    );
+
+    let base3 = Bundle::open(&temp3.to_string(), None).await?;
+    assert_eq!(
+        base_id,
+        base3.id(),
+        "Third extended bundle should still have the same ID as base bundle"
+    );
+
+    Ok(())
+}

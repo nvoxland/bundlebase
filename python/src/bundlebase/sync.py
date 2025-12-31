@@ -286,6 +286,20 @@ class SyncBundleBuilder(SyncBundle):
         self._async = self._loop.run_sync(coro)
         return self
 
+    def create_view(self, name: str, source: "SyncBundleBuilder") -> "SyncBundleBuilder":
+        """Create a view from another bundle.
+
+        Args:
+            name: Name for the new view
+            source: SyncBundleBuilder to use as the view source
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "create_view", name, source._async)
+        self._async = self._loop.run_sync(coro)
+        return self
+
     def set_name(self, name: str) -> "SyncBundleBuilder":
         """Set the bundle name."""
         coro = _call_original_method(self._async, "set_name", name)

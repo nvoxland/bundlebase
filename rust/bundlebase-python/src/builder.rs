@@ -117,6 +117,14 @@ fn to_py_error<E: std::fmt::Display>(context: &str, err: E) -> PyErr {
 #[pymethods]
 impl PyBundleBuilder {
     #[getter]
+    fn id(&self) -> Option<String> {
+        self.inner
+            .try_lock()
+            .ok()
+            .map(|builder| builder.bundle.id().to_string())
+    }
+
+    #[getter]
     fn name(&self) -> Option<String> {
         self.inner
             .try_lock()
@@ -853,16 +861,20 @@ impl PyBundleBuilder {
         let name = name.to_string();
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let mut builder = inner.lock().await;
-            let source_builder = source_inner.lock().await;
+            // Clone the source builder first to avoid deadlock if source == self
+            // The Rust create_view will clone it anyway (builder.rs:483)
+            let source_builder_clone = {
+                let source_guard = source_inner.lock().await;
+                source_guard.clone()
+            };
 
+            let mut builder = inner.lock().await;
             builder
-                .create_view(&name, &*source_builder)
+                .create_view(&name, &source_builder_clone)
                 .await
                 .map_err(|e| to_py_error(&format!("Failed to create view '{}'", name), e))?;
 
             drop(builder);
-            drop(source_builder);
 
             Python::attach(|py| {
                 Py::new(
