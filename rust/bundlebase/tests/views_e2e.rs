@@ -396,3 +396,157 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_rename_view_basic() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create a view
+    let adults = c
+        .select("select * from data where \"Index\" > 21", vec![])
+        .await?;
+    c.create_view("adults", &adults).await?;
+    c.commit("Add adults view").await?;
+
+    // Rename the view
+    c.rename_view("adults", "adults_view").await?;
+    c.commit("Renamed view").await?;
+
+    // Verify old name doesn't work
+    let result = c.view("adults").await;
+    assert!(result.is_err());
+    assert!(result.err().unwrap().to_string().contains("not found"));
+
+    // Verify new name works
+    let view = c.view("adults_view").await?;
+    assert!(view.operations().len() >= 4);
+
+    // Verify views() returns new name
+    let views_map = c.views();
+    assert_eq!(views_map.len(), 1);
+    let view_name = views_map.values().next().unwrap();
+    assert_eq!(view_name, "adults_view");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_rename_view_old_name_not_found() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Try to rename non-existent view
+    let result = c.rename_view("nonexistent", "new_name").await;
+    assert!(result.is_err());
+    let err_msg = result.err().unwrap().to_string();
+    assert!(
+        err_msg.contains("View 'nonexistent' not found"),
+        "Error should mention view not found"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_rename_view_new_name_exists() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create two views
+    let view1 = c
+        .select("select * from data where \"Index\" > 21", vec![])
+        .await?;
+    c.create_view("view1", &view1).await?;
+
+    let view2 = c
+        .select("select * from data where \"Index\" < 30", vec![])
+        .await?;
+    c.create_view("view2", &view2).await?;
+    c.commit("Add two views").await?;
+
+    // Try to rename view1 to view2 (conflict)
+    let result = c.rename_view("view1", "view2").await;
+    assert!(result.is_err());
+    let err_msg = result.err().unwrap().to_string();
+    assert!(
+        err_msg.contains("already exists"),
+        "Error should mention view already exists"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_rename_view_preserves_view_data() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create a view and get its dataframe
+    let high_index = c
+        .select("select * from data where \"Index\" > 50", vec![])
+        .await?;
+    c.create_view("high_index", &high_index).await?;
+    c.commit("Add view").await?;
+
+    let view_before = c.view("high_index").await?;
+    let df_before = view_before.dataframe().await?;
+    let rows_before = (*df_before).clone().count().await?;
+
+    // Rename the view
+    c.rename_view("high_index", "high_values").await?;
+    c.commit("Renamed view").await?;
+
+    // Verify data is still accessible under new name
+    let view_after = c.view("high_values").await?;
+    let df_after = view_after.dataframe().await?;
+    let rows_after = (*df_after).clone().count().await?;
+
+    assert_eq!(
+        rows_before, rows_after,
+        "View should have same row count after rename"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_rename_view_commit_and_reopen() -> Result<(), BundlebaseError> {
+    let container_url = random_memory_url().to_string();
+    let mut c = BundleBuilder::create(&container_url, None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create and rename a view
+    let adults = c
+        .select("select * from data where \"Index\" > 21", vec![])
+        .await?;
+    c.create_view("adults", &adults).await?;
+    c.commit("Add adults view").await?;
+
+    c.rename_view("adults", "adults_renamed").await?;
+    c.commit("Renamed view").await?;
+
+    // Reopen the bundle
+    let bundle = Bundle::open(&container_url, None).await?;
+
+    // Verify old name doesn't exist
+    let result = bundle.view("adults").await;
+    assert!(result.is_err());
+
+    // Verify new name works
+    let view = bundle.view("adults_renamed").await?;
+    assert!(view.operations().len() >= 4);
+
+    // Verify views() shows correct name
+    let views_map = bundle.views();
+    assert_eq!(views_map.len(), 1);
+    let view_name = views_map.values().next().unwrap();
+    assert_eq!(view_name, "adults_renamed");
+
+    Ok(())
+}

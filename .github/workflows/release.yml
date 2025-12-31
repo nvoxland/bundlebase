@@ -2,13 +2,12 @@
 # Automatically builds and publishes releases when version tags are pushed
 #
 # To create a release:
-# 1. Update version in BOTH files:
+# 1. Tag: git tag vX.Y.Z
+# 2. Push tag: git push origin vX.Y.Z
+# 3. Update to next version in BOTH files:
 #    - Cargo.toml: [workspace.package] version = "X.Y.Z"
 #    - pyproject.toml: [tool.poetry] version = "X.Y.Z"
-# 2. Commit: git commit -am "Bump version to X.Y.Z"
-# 3. Push: git push
-# 4. Tag: git tag vX.Y.Z
-# 5. Push tag: git push origin vX.Y.Z
+#
 #
 # Required secrets:
 # - PYPI_API_TOKEN: PyPI API token for publishing

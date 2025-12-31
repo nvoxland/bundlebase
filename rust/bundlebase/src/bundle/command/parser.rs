@@ -47,6 +47,21 @@ pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError
         return Ok(op);
     }
 
+    // Check for RENAME VIEW command: RENAME VIEW old_name TO new_name
+    if command_str.trim().to_uppercase().starts_with("RENAME VIEW") {
+        let parts: Vec<&str> = command_str.split_whitespace().collect();
+        if parts.len() == 5 && parts[3].eq_ignore_ascii_case("TO") {
+            return Ok(BundleCommand::RenameView {
+                old_name: parts[2].trim_matches(|c| c == '"' || c == '\'').to_string(),
+                new_name: parts[4].trim_matches(|c| c == '"' || c == '\'').to_string(),
+            });
+        } else {
+            return Err(
+                "Invalid RENAME VIEW syntax. Expected: RENAME VIEW old_name TO new_name".into(),
+            );
+        }
+    }
+
     // Otherwise, use sqlparser-rs for standard SQL (SELECT, CREATE INDEX, etc.)
     let dialect = GenericDialect {};
     let ast = Parser::parse_sql(&dialect, command_str)

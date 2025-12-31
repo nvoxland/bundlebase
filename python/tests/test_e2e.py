@@ -1123,3 +1123,134 @@ async def test_view_lookup_by_name_and_id():
         await c.view("ff")
     err_msg = str(exc_info.value)
     assert "View with ID" in err_msg, "Error should mention ID not found"
+
+
+@pytest.mark.asyncio
+async def test_rename_view_basic():
+    """Test basic rename_view functionality."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create a view
+    adults = await c.select("select * from data where \"Index\" > 21")
+    c = await c.create_view("adults", adults)
+    await c.commit("Add adults view")
+
+    # Rename the view
+    c = await c.rename_view("adults", "adults_view")
+    await c.commit("Renamed view")
+
+    # Verify old name doesn't work
+    with pytest.raises(Exception) as exc_info:
+        await c.view("adults")
+    assert "not found" in str(exc_info.value)
+
+    # Verify new name works
+    view = await c.view("adults_view")
+    assert view is not None
+
+    # Verify views() returns new name
+    views_map = c.views()
+    assert len(views_map) == 1
+    view_name = list(views_map.values())[0]
+    assert view_name == "adults_view"
+
+
+@pytest.mark.asyncio
+async def test_rename_view_old_name_not_found():
+    """Test error when trying to rename non-existent view."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Try to rename non-existent view
+    with pytest.raises(Exception) as exc_info:
+        await c.rename_view("nonexistent", "new_name")
+    err_msg = str(exc_info.value)
+    assert "View 'nonexistent' not found" in err_msg
+
+
+@pytest.mark.asyncio
+async def test_rename_view_new_name_exists():
+    """Test error when renaming to an existing view name."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create two views
+    view1 = await c.select("select * from data where \"Index\" > 21")
+    c = await c.create_view("view1", view1)
+
+    view2 = await c.select("select * from data where \"Index\" < 30")
+    c = await c.create_view("view2", view2)
+    await c.commit("Add two views")
+
+    # Try to rename view1 to view2 (conflict)
+    with pytest.raises(Exception) as exc_info:
+        await c.rename_view("view1", "view2")
+    err_msg = str(exc_info.value)
+    assert "already exists" in err_msg
+
+
+@pytest.mark.asyncio
+async def test_rename_view_preserves_view_data():
+    """Test that renaming a view preserves its data."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create a view
+    high_index = await c.select("select * from data where \"Index\" > 50")
+    c = await c.create_view("high_index", high_index)
+    await c.commit("Add view")
+
+    # Get data before rename
+    view_before = await c.view("high_index")
+    df_before = await view_before.to_pandas()
+    rows_before = len(df_before)
+
+    # Rename the view
+    c = await c.rename_view("high_index", "high_values")
+    await c.commit("Renamed view")
+
+    # Get data after rename
+    view_after = await c.view("high_values")
+    df_after = await view_after.to_pandas()
+    rows_after = len(df_after)
+
+    assert rows_before == rows_after, "View should have same row count after rename"
+
+
+@pytest.mark.asyncio
+async def test_rename_view_commit_and_reopen():
+    """Test that renamed views persist after commit and reopen."""
+    bundle_url = random_bundle()
+    c = await bundlebase.create(bundle_url)
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create and rename a view
+    adults = await c.select("select * from data where \"Index\" > 21")
+    c = await c.create_view("adults", adults)
+    await c.commit("Add adults view")
+
+    c = await c.rename_view("adults", "adults_renamed")
+    await c.commit("Renamed view")
+
+    # Reopen the bundle
+    bundle = await bundlebase.open(bundle_url)
+
+    # Verify old name doesn't exist
+    with pytest.raises(Exception):
+        await bundle.view("adults")
+
+    # Verify new name works
+    view = await bundle.view("adults_renamed")
+    assert view is not None
+
+    # Verify views() shows correct name
+    views_map = bundle.views()
+    assert len(views_map) == 1
+    view_name = list(views_map.values())[0]
+    assert view_name == "adults_renamed"

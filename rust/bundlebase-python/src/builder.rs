@@ -876,6 +876,38 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Rename an existing view
+    fn rename_view<'py>(
+        slf: PyRef<'_, Self>,
+        old_name: &str,
+        new_name: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let old_name = old_name.to_string();
+        let new_name = new_name.to_string();
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            builder
+                .rename_view(old_name.as_str(), new_name.as_str())
+                .await
+                .map_err(|e| to_py_error(&format!("Failed to rename view '{}'", old_name), e))?;
+
+            drop(builder);
+
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
     /// Open a view by name or ID, returning a read-only Bundle
     fn view<'py>(
         slf: PyRef<'_, Self>,

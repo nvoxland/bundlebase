@@ -4,7 +4,7 @@ use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, SelectOp};
 use crate::bundle::operation::{
     AttachBlockOp, CreateViewOp, DefineFunctionOp, DefinePackOp, FilterOp, JoinOp, RebuildIndexOp,
-    RemoveColumnsOp, RenameColumnOp, SetConfigOp, SetDescriptionOp,
+    RemoveColumnsOp, RenameColumnOp, RenameViewOp, SetConfigOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
@@ -490,6 +490,50 @@ impl BundleBuilder {
                 Ok(())
             })
         })
+        .await?;
+
+        Ok(self)
+    }
+
+    /// Rename an existing view
+    ///
+    /// # Arguments
+    /// * `old_name` - The current name of the view
+    /// * `new_name` - The new name for the view
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
+    /// # async fn example() -> Result<(), BundlebaseError> {
+    /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
+    /// # c.attach("data.csv").await?;
+    /// let adults = c.select("select * from data where age > 21", vec![]).await?;
+    /// c.create_view("adults", &adults).await?;
+    /// c.rename_view("adults", "adults_view").await?;
+    /// c.commit("Renamed view").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn rename_view(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<&mut Self, BundlebaseError> {
+        let old_name = old_name.to_string();
+        let new_name = new_name.to_string();
+
+        self.do_change(
+            &format!("Rename view '{}' to '{}'", old_name, new_name),
+            |builder| {
+                Box::pin(async move {
+                    // Call setup() with bundle reference to look up view_id
+                    let op =
+                        RenameViewOp::setup(&old_name, &new_name, &builder.bundle).await?;
+                    builder.apply_operation(op.into()).await?;
+                    Ok(())
+                })
+            },
+        )
         .await?;
 
         Ok(self)
