@@ -37,6 +37,10 @@ pub enum BundleCommand {
     /// Maps to: `bundle.rename_column(&old_name, &new_name)`
     RenameColumn { old_name: String, new_name: String },
 
+    /// Rename a view
+    /// Maps to: `bundle.rename_view(&old_name, &new_name)`
+    RenameView { old_name: String, new_name: String },
+
     /// Execute a full SQL query
     /// Maps to: `bundle.select(&sql, params)`
     Select {
@@ -129,6 +133,10 @@ impl BundleCommand {
             }
             BundleCommand::RenameColumn { old_name, new_name } => {
                 bundle.rename_column(&old_name, &new_name).await?;
+                Ok(())
+            }
+            BundleCommand::RenameView { old_name, new_name } => {
+                bundle.rename_view(&old_name, &new_name).await?;
                 Ok(())
             }
             BundleCommand::Select { sql, params } => {

@@ -17,6 +17,7 @@ impl PyOperation {
             AnyOperation::CreateView(_) => "CreateView".to_string(),
             AnyOperation::RemoveColumns(_) => "removeColumns".to_string(),
             AnyOperation::RenameColumn(_) => "renameColumn".to_string(),
+            AnyOperation::RenameView(_) => "renameView".to_string(),
             AnyOperation::Filter(_) => "filter".to_string(),
             AnyOperation::Join(_) => "join".to_string(),
             AnyOperation::DefineFunction(_) => "defineFunction".to_string(),

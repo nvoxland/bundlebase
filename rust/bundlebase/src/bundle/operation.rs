@@ -10,6 +10,7 @@ mod join;
 mod rebuild_index;
 mod remove_columns;
 mod rename_column;
+mod rename_view;
 mod select;
 mod serde_util;
 mod set_config;
@@ -28,6 +29,7 @@ pub use crate::bundle::operation::join::{JoinOp, JoinTypeOption};
 pub use crate::bundle::operation::rebuild_index::RebuildIndexOp;
 pub use crate::bundle::operation::remove_columns::RemoveColumnsOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
+pub use crate::bundle::operation::rename_view::RenameViewOp;
 pub use crate::bundle::operation::select::SelectOp;
 pub use crate::bundle::operation::set_config::SetConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
@@ -105,6 +107,7 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
 pub enum AnyOperation {
     RemoveColumns(RemoveColumnsOp),
     RenameColumn(RenameColumnOp),
+    RenameView(RenameViewOp),
     AttachBlock(AttachBlockOp),
     CreateView(CreateViewOp),
     DefineFunction(DefineFunctionOp),
@@ -127,6 +130,7 @@ impl Operation for AnyOperation {
         match self {
             AnyOperation::RemoveColumns(op) => op.describe(),
             AnyOperation::RenameColumn(op) => op.describe(),
+            AnyOperation::RenameView(op) => op.describe(),
             AnyOperation::AttachBlock(op) => op.describe(),
             AnyOperation::CreateView(op) => op.describe(),
             AnyOperation::DefineFunction(op) => op.describe(),
@@ -148,6 +152,7 @@ impl Operation for AnyOperation {
         match self {
             AnyOperation::RemoveColumns(op) => op.check(bundle).await,
             AnyOperation::RenameColumn(op) => op.check(bundle).await,
+            AnyOperation::RenameView(op) => op.check(bundle).await,
             AnyOperation::AttachBlock(op) => op.check(bundle).await,
             AnyOperation::CreateView(op) => op.check(bundle).await,
             AnyOperation::DefineFunction(op) => op.check(bundle).await,
@@ -169,6 +174,7 @@ impl Operation for AnyOperation {
         match self {
             AnyOperation::RemoveColumns(op) => op.apply(bundle).await,
             AnyOperation::RenameColumn(op) => op.apply(bundle).await,
+            AnyOperation::RenameView(op) => op.apply(bundle).await,
             AnyOperation::AttachBlock(op) => op.apply(bundle).await,
             AnyOperation::CreateView(op) => op.apply(bundle).await,
             AnyOperation::DefineFunction(op) => op.apply(bundle).await,
@@ -194,6 +200,7 @@ impl Operation for AnyOperation {
         match self {
             AnyOperation::RemoveColumns(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::RenameColumn(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::RenameView(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::AttachBlock(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::CreateView(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DefineFunction(op) => op.apply_dataframe(df, ctx).await,
@@ -215,6 +222,7 @@ impl Operation for AnyOperation {
         match self {
             AnyOperation::RemoveColumns(op) => op.version(),
             AnyOperation::RenameColumn(op) => op.version(),
+            AnyOperation::RenameView(op) => op.version(),
             AnyOperation::AttachBlock(op) => op.version(),
             AnyOperation::CreateView(op) => op.version(),
             AnyOperation::DefineFunction(op) => op.version(),
@@ -243,6 +251,12 @@ impl From<RemoveColumnsOp> for AnyOperation {
 impl From<RenameColumnOp> for AnyOperation {
     fn from(config: RenameColumnOp) -> Self {
         AnyOperation::RenameColumn(config)
+    }
+}
+
+impl From<RenameViewOp> for AnyOperation {
+    fn from(config: RenameViewOp) -> Self {
+        AnyOperation::RenameView(config)
     }
 }
 
