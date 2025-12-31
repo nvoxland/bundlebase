@@ -71,6 +71,9 @@ _original_methods = {
     # Query operations
     "select": _PyBundleBuilder.select,
 
+    # View operations
+    "create_view": _PyBundleBuilder.create_view,
+
     # Metadata operations
     "set_name": _PyBundleBuilder.set_name,
     "set_description": _PyBundleBuilder.set_description,
@@ -129,9 +132,9 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 # Wrap mutation methods to return OperationChain
 # (but NOT read-only methods like schema, num_rows, explain)
 mutation_methods = [
-    "attach", "remove_column", "rename_column", "filter", "select", "join"
-    "set_name", "set_description", "set_config", "define_function", "define_index",
-    "rebuild_index", "reindex"
+    "attach", "remove_column", "rename_column", "filter", "select", "join",
+    "create_view", "set_name", "set_description", "set_config", "define_function",
+    "define_index", "rebuild_index", "reindex"
 ]
 for method_name in mutation_methods:
     wrapped = _wrap_mutation_method(method_name)

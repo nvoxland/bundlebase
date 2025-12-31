@@ -479,6 +479,15 @@ impl BundleBuilder {
         source: &BundleBuilder,
     ) -> Result<&mut Self, BundlebaseError> {
         let name = name.to_string();
+
+        // Check if source has uncommitted operations that will be captured for the view
+        let source_ops_count = source.status().operations().len();
+        let changes_before = self.status.changes.len();
+
+        // Detect if source and self share the same underlying bundle by comparing bundle IDs
+        // This is important for the Python case where source and self share the same Arc<Mutex<BundleBuilder>>
+        let source_is_self = self.bundle.id() == source.bundle.id();
+
         // Clone source to avoid lifetime issues in async move
         let source_clone = source.clone();
 
@@ -491,6 +500,24 @@ impl BundleBuilder {
             })
         })
         .await?;
+
+        // After creating view, if source had uncommitted operations and source is the same
+        // as self, we need to remove those operations to prevent double-commit.
+        if source_is_self && source_ops_count > 0 && changes_before >= source_ops_count {
+            // Source and self share the same bundle - the source operations are in self's status
+            // Remove the captured operations (keep only changes before source ops + CreateViewOp)
+            let create_view_change = self.status.changes.pop(); // Remove CreateViewOp
+            let keep_count = changes_before - source_ops_count; // Changes before source operations
+            self.status.changes.truncate(keep_count); // Remove source ops
+            if let Some(create_view_change) = create_view_change {
+                self.status.changes.push(create_view_change); // Add back CreateViewOp
+            }
+
+            debug!(
+                "Removed {} changes that were captured for view (prevents double-commit)",
+                source_ops_count
+            );
+        }
 
         Ok(self)
     }

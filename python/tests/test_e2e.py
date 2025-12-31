@@ -556,6 +556,71 @@ async def test_extend_bundle_conversion():
 
 
 @pytest.mark.asyncio
+async def test_extend_bundle_inherits_id():
+    """Test that extended bundles inherit the same ID as the parent and 0000000.yaml is correct"""
+    import tempfile
+    import yaml
+    import os
+
+    with tempfile.TemporaryDirectory() as temp1:
+        with tempfile.TemporaryDirectory() as temp2:
+            with tempfile.TemporaryDirectory() as temp3:
+                # Create and commit first bundle
+                c1 = await bundlebase.create(temp1)
+                c1 = await c1.attach(datafile("userdata.parquet"))
+                await c1.commit("Initial commit")
+
+                # Read the ID from the base bundle's 00000000000000000.yaml (17 zeros)
+                init_file_1 = os.path.join(temp1, "_bundlebase", "00000000000000000.yaml")
+                with open(init_file_1, "r") as f:
+                    init_data_1 = yaml.safe_load(f)
+
+                base_id = init_data_1["id"]
+                assert "id" in init_data_1, "Base bundle should have 'id' in InitCommit"
+                assert "from" not in init_data_1, "Base bundle should NOT have 'from' in InitCommit"
+
+                # Open and verify ID
+                c1_opened = await bundlebase.open(temp1)
+                assert c1_opened.id == base_id, "Opened bundle should have same ID as InitCommit"
+
+                # Extend to second bundle
+                c2 = await c1_opened.extend(temp2)
+                c2 = await c2.remove_column("country")
+                await c2.commit("Second commit")
+
+                # Verify extended bundle's 00000000000000000.yaml has only 'from', not 'id'
+                init_file_2 = os.path.join(temp2, "_bundlebase", "00000000000000000.yaml")
+                with open(init_file_2, "r") as f:
+                    init_data_2 = yaml.safe_load(f)
+
+                assert "id" not in init_data_2, "Extended bundle should NOT have 'id' in InitCommit"
+                assert "from" in init_data_2, "Extended bundle should have 'from' in InitCommit"
+                assert temp1 in init_data_2["from"], "Extended bundle 'from' should point to parent"
+
+                # Verify the opened extended bundle has the SAME id as the base bundle
+                c2_opened = await bundlebase.open(temp2)
+                assert c2_opened.id == base_id, "Extended bundle should inherit the same ID as base bundle"
+
+                # Extend again to third bundle and verify ID is still the same
+                c3 = await c2_opened.extend(temp3)
+                c3 = await c3.remove_column("phone")
+                await c3.commit("Third commit")
+
+                # Verify third bundle's 00000000000000000.yaml
+                init_file_3 = os.path.join(temp3, "_bundlebase", "00000000000000000.yaml")
+                with open(init_file_3, "r") as f:
+                    init_data_3 = yaml.safe_load(f)
+
+                assert "id" not in init_data_3, "Third extended bundle should NOT have 'id' in InitCommit"
+                assert "from" in init_data_3, "Third extended bundle should have 'from' in InitCommit"
+                assert temp2 in init_data_3["from"], "Third bundle 'from' should point to second bundle"
+
+                # Verify all bundles in the chain have the same ID
+                c3_opened = await bundlebase.open(temp3)
+                assert c3_opened.id == base_id, "Third extended bundle should still have the same ID as base bundle"
+
+
+@pytest.mark.asyncio
 async def test_define_index():
     """Test creating an index on a column"""
     c = await bundlebase.create(random_bundle())

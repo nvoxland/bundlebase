@@ -6,14 +6,22 @@ pub static INIT_FILENAME: &str = "00000000000000000.yaml";
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct InitCommit {
-    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<Url>,
 }
 
 impl InitCommit {
     pub fn new(from: Option<&Url>) -> Self {
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
+            // Only set id when creating a new bundle (from is None)
+            // When extending (from is Some), id should be None and inherited from parent
+            id: if from.is_none() {
+                Some(uuid::Uuid::new_v4().to_string())
+            } else {
+                None
+            },
             from: from.cloned(),
         }
     }
