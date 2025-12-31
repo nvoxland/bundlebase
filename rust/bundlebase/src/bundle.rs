@@ -692,6 +692,23 @@ impl BundleFacade for Bundle {
         bundle.select(sql, params).await
     }
 
+    async fn view(&self, identifier: &str) -> Result<Bundle, BundlebaseError> {
+        // Look up view by name or ID
+        let (view_id, _name) = self.get_view_id_by_name_or_id(identifier)?;
+
+        // Construct view path: view_{id}/
+        let view_path = self
+            .data_dir()
+            .subdir(&format!("view_{}", view_id))?
+            .url()
+            .to_string();
+
+        // Open view as Bundle (automatically loads parent via FROM)
+        // Preserve explicit_config from current bundle
+        let config = self.passed_config.clone();
+        Bundle::open(&view_path, config).await
+    }
+
     fn views(&self) -> HashMap<ObjectId, String> {
         // Reverse the name->id HashMap to id->name
         self.views

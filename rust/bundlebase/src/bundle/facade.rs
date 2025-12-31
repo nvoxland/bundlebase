@@ -1,6 +1,6 @@
 use crate::bundle::BundleCommit;
 use crate::io::ObjectId;
-use crate::{AnyOperation, BundleBuilder, BundlebaseError};
+use crate::{AnyOperation, Bundle, BundleBuilder, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::common::ScalarValue;
@@ -65,4 +65,32 @@ pub trait BundleFacade {
 
     /// Returns a map of view IDs to view names for all views in this container
     fn views(&self) -> HashMap<ObjectId, String>;
+
+    /// Open a view by name or ID, returning a read-only Bundle
+    ///
+    /// Looks up the view by name or ID and opens it as a Bundle. The view automatically
+    /// inherits all changes from its parent bundle through the FROM mechanism.
+    ///
+    /// # Arguments
+    /// * `identifier` - Name or ID of the view to open
+    ///
+    /// # Returns
+    /// A read-only Bundle representing the view
+    ///
+    /// # Errors
+    /// Returns an error if the view doesn't exist or if the identifier is ambiguous
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade};
+    /// # async fn example(c: &BundleBuilder) -> Result<(), BundlebaseError> {
+    /// // Open by name
+    /// let view = c.view("adults").await?;
+    ///
+    /// // Or open by ID
+    /// let view = c.view("abc123def456").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn view(&self, identifier: &str) -> Result<Bundle, BundlebaseError>;
 }

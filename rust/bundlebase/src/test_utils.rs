@@ -14,7 +14,6 @@ use std::sync::{Arc, OnceLock};
 use tokio::runtime::Builder;
 use url::Url;
 
-
 /// Singleton test DataAdapterFactory for use across all tests
 static TEST_FACTORY: OnceLock<Arc<DataReaderFactory>> = OnceLock::new();
 static TEST_DATAFILE_RESPONSES: OnceLock<HashMap<String, String>> = OnceLock::new();
@@ -122,8 +121,9 @@ macro_rules! assert_regexp {
     }};
 }
 
-pub fn describe_ops(bundle: &dyn BundleFacade) -> Vec<String>{
-    bundle.operations()
+pub fn describe_ops(bundle: &dyn BundleFacade) -> Vec<String> {
+    bundle
+        .operations()
         .iter()
         .map(|x| x.describe())
         .collect::<Vec<_>>()
