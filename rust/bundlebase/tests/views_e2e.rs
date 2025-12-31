@@ -578,3 +578,156 @@ async fn test_create_view_with_uncommitted_operations() -> Result<(), Bundlebase
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_drop_view_basic() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create a view
+    let adults = c
+        .select("select * from data where \"Index\" > 21", vec![])
+        .await?;
+    c.create_view("adults", &adults).await?;
+    c.commit("Add adults view").await?;
+
+    // Verify view exists
+    assert!(c.view("adults").await.is_ok());
+    let views_map = c.views();
+    assert_eq!(views_map.len(), 1);
+
+    // Drop the view
+    c.drop_view("adults").await?;
+    c.commit("Dropped view").await?;
+
+    // Verify view no longer exists
+    let result = c.view("adults").await;
+    assert!(result.is_err());
+    assert!(result.err().unwrap().to_string().contains("not found"));
+
+    // Verify views map is empty
+    let views_map = c.views();
+    assert_eq!(views_map.len(), 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_drop_view_not_found() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Try to drop non-existent view
+    let result = c.drop_view("nonexistent").await;
+    assert!(result.is_err());
+    let err_msg = result.err().unwrap().to_string();
+    assert!(
+        err_msg.contains("View 'nonexistent' not found"),
+        "Error should mention view not found"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_drop_view_commit_and_reopen() -> Result<(), BundlebaseError> {
+    let container_url = random_memory_url().to_string();
+    let mut c = BundleBuilder::create(&container_url, None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create and drop a view
+    let adults = c
+        .select("select * from data where \"Index\" > 21", vec![])
+        .await?;
+    c.create_view("adults", &adults).await?;
+    c.commit("Add adults view").await?;
+
+    c.drop_view("adults").await?;
+    c.commit("Dropped view").await?;
+
+    // Reopen the bundle
+    let bundle = Bundle::open(&container_url, None).await?;
+
+    // Verify view doesn't exist
+    let result = bundle.view("adults").await;
+    assert!(result.is_err());
+
+    // Verify views map is empty
+    let views_map = bundle.views();
+    assert_eq!(views_map.len(), 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_drop_view_preserves_other_views() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create two views
+    let view1 = c
+        .select("select * from data where \"Index\" > 21", vec![])
+        .await?;
+    c.create_view("view1", &view1).await?;
+
+    let view2 = c
+        .select("select * from data where \"Index\" < 30", vec![])
+        .await?;
+    c.create_view("view2", &view2).await?;
+    c.commit("Add two views").await?;
+
+    // Verify both views exist
+    assert_eq!(c.views().len(), 2);
+
+    // Drop one view
+    c.drop_view("view1").await?;
+    c.commit("Dropped view1").await?;
+
+    // Verify view1 is gone but view2 remains
+    let result = c.view("view1").await;
+    assert!(result.is_err());
+
+    let view2_after = c.view("view2").await?;
+    assert!(view2_after.operations().len() >= 4);
+
+    // Verify views map only contains view2
+    let views_map = c.views();
+    assert_eq!(views_map.len(), 1);
+    let remaining_view = views_map.values().next().unwrap();
+    assert_eq!(remaining_view, "view2");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_drop_view_twice_fails() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create a view
+    let adults = c
+        .select("select * from data where \"Index\" > 21", vec![])
+        .await?;
+    c.create_view("adults", &adults).await?;
+    c.commit("Add adults view").await?;
+
+    // Drop the view
+    c.drop_view("adults").await?;
+    c.commit("Dropped view").await?;
+
+    // Try to drop it again
+    let result = c.drop_view("adults").await;
+    assert!(result.is_err());
+    let err_msg = result.err().unwrap().to_string();
+    assert!(
+        err_msg.contains("View 'adults' not found"),
+        "Error should mention view not found"
+    );
+
+    Ok(())
+}

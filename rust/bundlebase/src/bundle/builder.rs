@@ -3,8 +3,8 @@ use crate::bundle::init::InitCommit;
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, SelectOp};
 use crate::bundle::operation::{
-    AttachBlockOp, CreateViewOp, DefineFunctionOp, DefinePackOp, FilterOp, JoinOp, RebuildIndexOp,
-    RemoveColumnsOp, RenameColumnOp, RenameViewOp, SetConfigOp, SetDescriptionOp,
+    AttachBlockOp, CreateViewOp, DefineFunctionOp, DefinePackOp, DropViewOp, FilterOp, JoinOp,
+    RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp, SetConfigOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
@@ -556,6 +556,46 @@ impl BundleBuilder {
                     // Call setup() with bundle reference to look up view_id
                     let op =
                         RenameViewOp::setup(&old_name, &new_name, &builder.bundle).await?;
+                    builder.apply_operation(op.into()).await?;
+                    Ok(())
+                })
+            },
+        )
+        .await?;
+
+        Ok(self)
+    }
+
+    /// Drop an existing view
+    ///
+    /// # Arguments
+    /// * `view_name` - The name of the view to drop
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
+    /// # async fn example() -> Result<(), BundlebaseError> {
+    /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
+    /// # c.attach("data.csv").await?;
+    /// let adults = c.select("select * from data where age > 21", vec![]).await?;
+    /// c.create_view("adults", &adults).await?;
+    /// c.drop_view("adults").await?;
+    /// c.commit("Dropped view").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn drop_view(
+        &mut self,
+        view_name: &str,
+    ) -> Result<&mut Self, BundlebaseError> {
+        let view_name = view_name.to_string();
+
+        self.do_change(
+            &format!("Drop view '{}'", view_name),
+            |builder| {
+                Box::pin(async move {
+                    // Call setup() with bundle reference to look up view_id
+                    let op = DropViewOp::setup(&view_name, &builder.bundle).await?;
                     builder.apply_operation(op.into()).await?;
                     Ok(())
                 })

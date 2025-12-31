@@ -1,0 +1,114 @@
+use crate::bundle::operation::Operation;
+use crate::data::ObjectId;
+use crate::{Bundle, BundlebaseError};
+use async_trait::async_trait;
+use datafusion::common::DataFusionError;
+use datafusion::dataframe::DataFrame;
+use datafusion::prelude::SessionContext;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DropViewOp {
+    pub view_id: ObjectId,
+}
+
+impl DropViewOp {
+    pub async fn setup(view_name: &str, bundle: &Bundle) -> Result<Self, BundlebaseError> {
+        // Look up the view ID from the name
+        let view_id = bundle
+            .views
+            .get(view_name)
+            .ok_or_else(|| {
+                let available_views: Vec<String> = bundle
+                    .views
+                    .iter()
+                    .map(|(name, id)| format!("{} ({})", name, id))
+                    .collect();
+                let available_list = if available_views.is_empty() {
+                    "none".to_string()
+                } else {
+                    available_views.join(", ")
+                };
+                BundlebaseError::from(format!(
+                    "View '{}' not found. Available views: {}",
+                    view_name, available_list
+                ))
+            })?
+            .clone();
+
+        Ok(Self { view_id })
+    }
+}
+
+#[async_trait]
+impl Operation for DropViewOp {
+    async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
+        // Check that the view_id exists
+        let view_exists = bundle.views.values().any(|id| id == &self.view_id);
+        if !view_exists {
+            return Err(format!("View with ID '{}' not found", self.view_id).into());
+        }
+
+        Ok(())
+    }
+
+    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+        // Find and remove the name->id mapping
+        bundle.views.retain(|_, id| id != &self.view_id);
+
+        log::info!("Dropped view {}", self.view_id);
+
+        Ok(())
+    }
+
+    async fn apply_dataframe(
+        &self,
+        df: DataFrame,
+        _ctx: Arc<SessionContext>,
+    ) -> Result<DataFrame, BundlebaseError> {
+        // DropViewOp doesn't modify the dataframe (metadata-only operation)
+        Ok(df)
+    }
+
+    fn describe(&self) -> String {
+        format!("DROP VIEW {}", self.view_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_describe() {
+        let view_id = ObjectId::generate();
+        let op = DropViewOp {
+            view_id: view_id.clone(),
+        };
+        assert_eq!(op.describe(), format!("DROP VIEW {}", view_id));
+    }
+
+    #[test]
+    fn test_serialization() {
+        let view_id: ObjectId = "a5".try_into().unwrap();
+        let op = DropViewOp {
+            view_id: view_id.clone(),
+        };
+
+        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let expected = format!("viewId: {}\n", view_id.to_string());
+        assert_eq!(serialized, expected);
+    }
+
+    #[test]
+    fn test_deserialization() {
+        let view_id_str = "a5";
+        let yaml = format!("viewId: {}\n", view_id_str);
+
+        let op: DropViewOp = serde_yaml::from_str(&yaml).expect("Failed to deserialize");
+
+        assert_eq!(op.view_id.to_string(), view_id_str);
+    }
+}

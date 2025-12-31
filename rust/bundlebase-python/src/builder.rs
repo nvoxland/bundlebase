@@ -920,6 +920,36 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Drop an existing view
+    fn drop_view<'py>(
+        slf: PyRef<'_, Self>,
+        view_name: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let view_name = view_name.to_string();
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            builder
+                .drop_view(view_name.as_str())
+                .await
+                .map_err(|e| to_py_error(&format!("Failed to drop view '{}'", view_name), e))?;
+
+            drop(builder);
+
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
     /// Open a view by name or ID, returning a read-only Bundle
     fn view<'py>(
         slf: PyRef<'_, Self>,

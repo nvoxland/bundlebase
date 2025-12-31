@@ -1319,3 +1319,136 @@ async def test_rename_view_commit_and_reopen():
     assert len(views_map) == 1
     view_name = list(views_map.values())[0]
     assert view_name == "adults_renamed"
+
+
+@pytest.mark.asyncio
+async def test_drop_view_basic():
+    """Test basic drop_view functionality."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create a view
+    adults = await c.select("select * from data where \"Index\" > 21")
+    c = await c.create_view("adults", adults)
+    await c.commit("Add adults view")
+
+    # Verify view exists
+    view = await c.view("adults")
+    assert view is not None
+    assert len(c.views()) == 1
+
+    # Drop the view
+    c = await c.drop_view("adults")
+    await c.commit("Dropped view")
+
+    # Verify view no longer exists
+    with pytest.raises(Exception) as exc_info:
+        await c.view("adults")
+    assert "not found" in str(exc_info.value)
+
+    # Verify views map is empty
+    views_map = c.views()
+    assert len(views_map) == 0
+
+
+@pytest.mark.asyncio
+async def test_drop_view_not_found():
+    """Test error when trying to drop non-existent view."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Try to drop non-existent view
+    with pytest.raises(Exception) as exc_info:
+        await c.drop_view("nonexistent")
+    err_msg = str(exc_info.value)
+    assert "View 'nonexistent' not found" in err_msg
+
+
+@pytest.mark.asyncio
+async def test_drop_view_commit_and_reopen():
+    """Test that dropped views persist after commit and reopen."""
+    bundle_url = random_bundle()
+    c = await bundlebase.create(bundle_url)
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create and drop a view
+    adults = await c.select("select * from data where \"Index\" > 21")
+    c = await c.create_view("adults", adults)
+    await c.commit("Add adults view")
+
+    c = await c.drop_view("adults")
+    await c.commit("Dropped view")
+
+    # Reopen the bundle
+    bundle = await bundlebase.open(bundle_url)
+
+    # Verify view doesn't exist
+    with pytest.raises(Exception):
+        await bundle.view("adults")
+
+    # Verify views map is empty
+    views_map = bundle.views()
+    assert len(views_map) == 0
+
+
+@pytest.mark.asyncio
+async def test_drop_view_preserves_other_views():
+    """Test that dropping one view doesn't affect other views."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create two views
+    view1 = await c.select("select * from data where \"Index\" > 21")
+    c = await c.create_view("view1", view1)
+
+    view2 = await c.select("select * from data where \"Index\" < 30")
+    c = await c.create_view("view2", view2)
+    await c.commit("Add two views")
+
+    # Verify both views exist
+    assert len(c.views()) == 2
+
+    # Drop one view
+    c = await c.drop_view("view1")
+    await c.commit("Dropped view1")
+
+    # Verify view1 is gone
+    with pytest.raises(Exception):
+        await c.view("view1")
+
+    # Verify view2 still exists
+    view2_after = await c.view("view2")
+    assert view2_after is not None
+
+    # Verify views map only contains view2
+    views_map = c.views()
+    assert len(views_map) == 1
+    view_name = list(views_map.values())[0]
+    assert view_name == "view2"
+
+
+@pytest.mark.asyncio
+async def test_drop_view_twice_fails():
+    """Test error when trying to drop the same view twice."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    await c.commit("Initial data")
+
+    # Create a view
+    adults = await c.select("select * from data where \"Index\" > 21")
+    c = await c.create_view("adults", adults)
+    await c.commit("Add adults view")
+
+    # Drop the view
+    c = await c.drop_view("adults")
+    await c.commit("Dropped view")
+
+    # Try to drop it again
+    with pytest.raises(Exception) as exc_info:
+        await c.drop_view("adults")
+    err_msg = str(exc_info.value)
+    assert "View 'adults' not found" in err_msg
