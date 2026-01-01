@@ -352,6 +352,14 @@ impl BundleBuilder {
     }
 
     async fn apply_operation(&mut self, op: AnyOperation) -> Result<(), BundlebaseError> {
+        if self.bundle.is_view() && !op.allowed_on_view() {
+            return Err(format!(
+                "Operation '{}' is not allowed on a view",
+                op.describe()
+            )
+            .into());
+        }
+
         self.bundle.apply_operation(op.clone()).await?;
 
         self.in_progress_change
