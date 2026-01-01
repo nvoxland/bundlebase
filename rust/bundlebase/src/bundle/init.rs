@@ -10,6 +10,8 @@ pub struct InitCommit {
     pub id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<Url>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
 }
 
 impl InitCommit {
@@ -23,6 +25,15 @@ impl InitCommit {
                 None
             },
             from: from.cloned(),
+            view: None,
+        }
+    }
+
+    pub fn new_view(view_id: &str) -> Self {
+        Self {
+            id: None,
+            from: None,
+            view: Some(view_id.to_string()),
         }
     }
 }

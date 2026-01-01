@@ -176,7 +176,10 @@ async fn test_duplicate_view_name() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_view_from_field_points_to_parent() -> Result<(), BundlebaseError> {
+async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
+    use bundlebase::bundle::{InitCommit, INIT_FILENAME, META_DIR};
+    use bundlebase::io::ObjectStoreFile;
+
     // Create container and view
     let container_url = random_memory_url().to_string();
     let mut c = BundleBuilder::create(&container_url, None).await?;
@@ -189,19 +192,30 @@ async fn test_view_from_field_points_to_parent() -> Result<(), BundlebaseError> 
     c.create_view("active", &active).await?;
     c.commit("v2").await?;
 
-    // Open the view
-    let view = c.view("active").await?;
+    // Get the view ID
+    let views_map = c.views();
+    let (view_id, _) = views_map.iter().next().unwrap();
 
-    // View's from() should point to the parent container
-    let from_url = view.from();
-    assert!(from_url.is_some(), "View should have a 'from' URL");
+    // Read the view's init file
+    let view_dir = c
+        .data_dir()
+        .subdir(&format!("view_{}", view_id))?;
+    let init_file = view_dir.subdir(META_DIR)?.file(INIT_FILENAME)?;
+    let init_commit: Option<InitCommit> = init_file.read_yaml().await?;
+    let init_commit = init_commit.expect("View should have init file");
 
-    // The from URL should match the parent container URL
-    let from_str = from_url.unwrap().to_string();
+    // View should have view field set, not from field
+    assert!(init_commit.view.is_some(), "View should have 'view' field");
     assert_eq!(
-        from_str, container_url,
-        "View's from URL should point to parent container"
+        init_commit.view.unwrap(),
+        view_id.to_string(),
+        "View field should match view ID"
     );
+    assert!(
+        init_commit.from.is_none(),
+        "View should not have 'from' field"
+    );
+    assert!(init_commit.id.is_none(), "View should not have 'id' field");
 
     Ok(())
 }
@@ -238,6 +252,34 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
         view.data_packs_count() > 0,
         "View should have data_packs from parent"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_view_is_marked_as_view() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Container should not be marked as a view
+    assert!(!c.bundle.is_view(), "Container should not be marked as view");
+
+    // Create a view
+    let filtered = c.select("select * from data limit 10", vec![]).await?;
+    c.create_view("filtered", &filtered).await?;
+    c.commit("Add view").await?;
+
+    // Open the view
+    let view = c.view("filtered").await?;
+
+    // View should be marked as a view
+    assert!(view.is_view(), "View should be marked as view");
+
+    // Verify view has access to data (even though it's marked as a view)
+    let df = view.dataframe().await?;
+    let count = (*df).clone().count().await?;
+    assert!(count > 0, "View should have access to data");
 
     Ok(())
 }

@@ -40,7 +40,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
         .expect("init commit doesn't exist");
     assert_eq!(
         init_content.trim(),
-        format!("id: {}\nfrom: null", bundle.bundle.id()).trim()
+        format!("id: {}", bundle.bundle.id()).trim()
     );
 
     // Find and read the versioned manifest file
