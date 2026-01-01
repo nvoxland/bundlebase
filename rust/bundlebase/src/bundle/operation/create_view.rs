@@ -109,12 +109,11 @@ impl CreateViewOp {
             operations.len()
         );
 
-        // Write init commit with FROM pointing to parent
+        // Write init commit with VIEW field
         use crate::bundle::init::{InitCommit, INIT_FILENAME};
-        let parent_from = view_builder.bundle.from();
-        let init = InitCommit::new(parent_from);
+        let init = InitCommit::new_view(&view_id.to_string());
         manifest_dir.file(INIT_FILENAME)?.write_yaml(&init).await?;
-        debug!("Wrote init commit with FROM={:?}", parent_from);
+        debug!("Wrote init commit with VIEW={}", view_id);
 
         debug!("View '{}' created at {}", name, view_dir_path);
 

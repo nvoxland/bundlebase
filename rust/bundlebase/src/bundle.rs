@@ -86,6 +86,9 @@ pub struct Bundle {
 
     /// Config stored via SetConfigOp operations (preserved for re-merging)
     stored_config: BundleConfig,
+
+    /// True if this bundle is a view (has a view field in init commit)
+    is_view: bool,
 }
 
 impl Clone for Bundle {
@@ -126,6 +129,7 @@ impl Clone for Bundle {
             config: Arc::clone(&self.config),
             passed_config: self.passed_config.clone(),
             stored_config: self.stored_config.clone(),
+            is_view: self.is_view,
         }
     }
 }
@@ -210,6 +214,7 @@ impl Bundle {
             config: Arc::new(crate::BundleConfig::new()),
             passed_config: None,
             stored_config: BundleConfig::new(),
+            is_view: false,
         })
     }
 
@@ -268,7 +273,22 @@ impl Bundle {
             .expect(format!("No {}/{} found in {}", META_DIR, INIT_FILENAME, url).as_str());
 
         // Recursively load the base bundle and store the Arc reference
-        if let Some(from_url) = &init_commit.from {
+        // Handle views: if view field is set, load parent from "../"
+        // Otherwise, use the from field if present
+        let parent_url = if init_commit.view.is_some() {
+            // For views, parent is always in the parent directory
+            // Ensure the URL has a trailing slash so "../" joins correctly
+            let mut current_url_str = data_dir.url().to_string();
+            if !current_url_str.ends_with('/') {
+                current_url_str.push('/');
+            }
+            let current_url = Url::parse(&current_url_str)?;
+            Some(current_url.join("../")?)
+        } else {
+            init_commit.from.clone()
+        };
+
+        if let Some(from_url) = parent_url {
             // Resolve relative URLs against current data_dir
             let resolved_url = if from_url.path().starts_with("..") {
                 // Join relative path with current directory
@@ -288,6 +308,9 @@ impl Bundle {
             bundle.id = id;
         }
         bundle.data_dir = data_dir.clone();
+
+        // Mark this bundle as a view if it has a view field in the init commit
+        bundle.is_view = init_commit.view.is_some();
 
         // List files in the manifest directory
         let manifest_files = manifest_dir.list_files().await?;
@@ -341,6 +364,16 @@ impl Bundle {
                     change.operations.len()
                 );
                 for op in change.operations {
+                    // Skip view-related operations when loading a view
+                    if bundle.is_view {
+                        match &op {
+                            AnyOperation::CreateView(_) | AnyOperation::RenameView(_) | AnyOperation::DropView(_) => {
+                                debug!("    Skipping (view operation in view): {}", op.describe());
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
                     debug!("    Applying: {}", op.describe());
                     bundle.apply_operation(op).await?;
                 }
@@ -413,6 +446,11 @@ impl Bundle {
     /// Get the number of data packs (for testing/debugging)
     pub fn data_packs_count(&self) -> usize {
         self.data_packs.read().len()
+    }
+
+    /// Check if this bundle is a view
+    pub fn is_view(&self) -> bool {
+        self.is_view
     }
 
     /// Modifies this bundle with the given operation
