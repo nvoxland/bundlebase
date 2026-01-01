@@ -285,6 +285,108 @@ async fn test_view_is_marked_as_view() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
+async fn test_cannot_attach_to_view() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create a view
+    let filtered = c.select("select * from data limit 10", vec![]).await?;
+    c.create_view("filtered", &filtered).await?;
+    c.commit("Add view").await?;
+
+    // Open the view
+    let view_bundle = Bundle::open(
+        &c.data_dir().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
+        None,
+    ).await?;
+    let mut view_builder = view_bundle.extend(random_memory_url().as_str())?;
+
+    // Try to attach data to the view - should fail
+    let result = view_builder.attach(&test_datafile("customers-101-150.csv")).await;
+    assert!(result.is_err(), "Should not be able to attach to a view");
+
+    let err_msg = result.err().unwrap().to_string();
+    assert!(
+        err_msg.contains("is not allowed on a view"),
+        "Error message should mention operation not allowed on view, got: {}",
+        err_msg
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create a view
+    let filtered = c.select("select * from data limit 10", vec![]).await?;
+    c.create_view("filtered", &filtered).await?;
+    c.commit("Add view").await?;
+
+    // Open the view
+    let view_bundle = Bundle::open(
+        &c.data_dir().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
+        None,
+    ).await?;
+    let mut view_builder = view_bundle.extend(random_memory_url().as_str())?;
+
+    // Try to create a view on the view - should fail
+    let sub_view = view_builder.select("select * limit 5", vec![]).await?;
+    let result = view_builder.create_view("subview", &sub_view).await;
+    assert!(result.is_err(), "Should not be able to create view on a view");
+
+    let err_msg = result.err().unwrap().to_string();
+    assert!(
+        err_msg.contains("is not allowed on a view"),
+        "Error message should mention operation not allowed on view, got: {}",
+        err_msg
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_cannot_drop_view_from_view() -> Result<(), BundlebaseError> {
+    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    c.attach(&test_datafile("customers-0-100.csv")).await?;
+    c.commit("Initial data").await?;
+
+    // Create two views
+    let view1 = c.select("select * from data limit 10", vec![]).await?;
+    c.create_view("view1", &view1).await?;
+    let view2 = c.select("select * from data limit 20", vec![]).await?;
+    c.create_view("view2", &view2).await?;
+    c.commit("Add views").await?;
+
+    // Open view1
+    // views() returns HashMap<ObjectId, String> where key is ID and value is name
+    let views = c.views();
+    let view1_id = views.iter().find(|(_, name)| name.as_str() == "view1").map(|(id, _)| id).unwrap();
+    let view_bundle = Bundle::open(
+        &c.data_dir().subdir(&format!("view_{}", view1_id))?.url().to_string(),
+        None,
+    ).await?;
+    let mut view_builder = view_bundle.extend(random_memory_url().as_str())?;
+
+    // Try to drop view2 from view1 - should fail
+    let result = view_builder.drop_view("view2").await;
+    assert!(result.is_err(), "Should not be able to drop view from a view");
+
+    let err_msg = result.err().unwrap().to_string();
+    assert!(
+        err_msg.contains("is not allowed on a view"),
+        "Error message should mention operation not allowed on view, got: {}",
+        err_msg
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_regular_container_select() -> Result<(), BundlebaseError> {
     // Test SELECT on a regular container (not a view) to isolate the issue
     let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;

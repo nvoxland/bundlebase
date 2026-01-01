@@ -143,6 +143,10 @@ impl Operation for CreateViewOp {
         Ok(())
     }
 
+    fn allowed_on_view(&self) -> bool {
+        false
+    }
+
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         // Store view name->id mapping
         bundle.views.insert(self.name.clone(), self.view_id.clone());

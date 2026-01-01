@@ -100,6 +100,13 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
     fn version(&self) -> String {
         versioning::hash_config(self)
     }
+
+    /// Returns whether this operation is allowed to be executed on a view.
+    /// Default implementation returns true (operation is allowed on views).
+    /// Override to return false for operations that should not be allowed on views.
+    fn allowed_on_view(&self) -> bool {
+        true
+    }
 }
 
 /// Enum wrapping all concrete operation types
@@ -245,6 +252,29 @@ impl Operation for AnyOperation {
             AnyOperation::SetConfig(op) => op.version(),
             AnyOperation::SetName(op) => op.version(),
             AnyOperation::SetDescription(op) => op.version(),
+        }
+    }
+
+    fn allowed_on_view(&self) -> bool {
+        match self {
+            AnyOperation::RemoveColumns(op) => op.allowed_on_view(),
+            AnyOperation::RenameColumn(op) => op.allowed_on_view(),
+            AnyOperation::RenameView(op) => op.allowed_on_view(),
+            AnyOperation::AttachBlock(op) => op.allowed_on_view(),
+            AnyOperation::CreateView(op) => op.allowed_on_view(),
+            AnyOperation::DefineFunction(op) => op.allowed_on_view(),
+            AnyOperation::Filter(op) => op.allowed_on_view(),
+            AnyOperation::IndexBlocks(op) => op.allowed_on_view(),
+            AnyOperation::DefineIndex(op) => op.allowed_on_view(),
+            AnyOperation::DefinePack(op) => op.allowed_on_view(),
+            AnyOperation::DropIndex(op) => op.allowed_on_view(),
+            AnyOperation::DropView(op) => op.allowed_on_view(),
+            AnyOperation::RebuildIndex(op) => op.allowed_on_view(),
+            AnyOperation::Join(op) => op.allowed_on_view(),
+            AnyOperation::Select(op) => op.allowed_on_view(),
+            AnyOperation::SetConfig(op) => op.allowed_on_view(),
+            AnyOperation::SetName(op) => op.allowed_on_view(),
+            AnyOperation::SetDescription(op) => op.allowed_on_view(),
         }
     }
 }

@@ -96,6 +96,10 @@ impl Operation for AttachBlockOp {
         Ok(())
     }
 
+    fn allowed_on_view(&self) -> bool {
+        false
+    }
+
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         let reader = bundle
             .adapter_factory
