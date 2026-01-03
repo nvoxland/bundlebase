@@ -5,10 +5,10 @@ without requiring explicit async/await syntax. Works seamlessly in both
 Python scripts and Jupyter notebooks.
 
 Example:
-    >>> import bundlebase.sync as dc
+    >>> import bundlebase.sync as bb
     >>>
     >>> # Create and process data without async/await
-    >>> c = dc.create()
+    >>> c = bb.create()
     >>> c.attach("data.parquet")
     >>> c.filter("salary > 50000")
     >>> df = c.to_pandas()
@@ -63,15 +63,13 @@ class SyncBundle:
     All async operations are automatically executed synchronously.
     """
 
-    def __init__(self, async_bundle: Any, loop_manager: EventLoopManager) -> None:
+    def __init__(self, async_bundle: Any) -> None:
         """Initialize synchronous bundle wrapper.
 
         Args:
             async_bundle: The underlying PyBundle instance
-            loop_manager: EventLoopManager for executing async operations
         """
         self._async = async_bundle
-        self._loop = loop_manager
 
     # ======================== Properties ========================
     # These are already synchronous in the async bundle
@@ -84,7 +82,7 @@ class SyncBundle:
             PySchema object representing the current column structure
         """
         coro = _call_original_method(self._async, "schema")
-        return self._loop.run_sync(coro)
+        return _loop_manager.run_sync(coro)
 
     @property
     def name(self) -> Optional[str]:
@@ -145,37 +143,37 @@ class SyncBundle:
     def num_rows(self) -> int:
         """Get the number of rows in the bundle."""
         coro = _call_original_method(self._async, "num_rows")
-        return self._loop.run_sync(coro)
+        return _loop_manager.run_sync(coro)
 
     def explain(self) -> str:
         """Get the query execution plan."""
         coro = _call_original_method(self._async, "explain")
-        return self._loop.run_sync(coro)
+        return _loop_manager.run_sync(coro)
 
     def to_pandas(self) -> Any:
         """Convert bundle data to pandas DataFrame."""
         coro = _call_original_method(self._async, "to_pandas")
-        return self._loop.run_sync(coro)
+        return _loop_manager.run_sync(coro)
 
     def to_polars(self) -> Any:
         """Convert bundle data to Polars DataFrame."""
         coro = _call_original_method(self._async, "to_polars")
-        return self._loop.run_sync(coro)
+        return _loop_manager.run_sync(coro)
 
     def to_numpy(self) -> Dict[str, Any]:
         """Convert bundle data to dict of numpy arrays."""
         coro = _call_original_method(self._async, "to_numpy")
-        return self._loop.run_sync(coro)
+        return _loop_manager.run_sync(coro)
 
     def to_dict(self) -> Dict[str, List[Any]]:
         """Convert bundle data to dict of lists."""
         coro = _call_original_method(self._async, "to_dict")
-        return self._loop.run_sync(coro)
+        return _loop_manager.run_sync(coro)
 
     def as_pyarrow(self) -> Any:
         """Get all data as PyArrow Table."""
         coro = _call_original_method(self._async, "as_pyarrow")
-        return self._loop.run_sync(coro)
+        return _loop_manager.run_sync(coro)
 
     def extend(self, data_dir: str) -> "SyncBundleBuilder":
         """Extend this bundle to a new directory.
@@ -193,8 +191,8 @@ class SyncBundle:
             ValueError: If data_dir is invalid
         """
         coro = _call_original_method(self._async, "extend", data_dir)
-        async_extended = self._loop.run_sync(coro)
-        return SyncBundleBuilder(async_extended, self._loop)
+        async_extended = _loop_manager.run_sync(coro)
+        return SyncBundleBuilder(async_extended)
 
 
 class SyncBundleBuilder(SyncBundle):
@@ -215,13 +213,13 @@ class SyncBundleBuilder(SyncBundle):
     def attach(self, url: str) -> "SyncBundleBuilder":
         """Attach a data source to the bundle."""
         coro = _call_original_method(self._async, "attach", url)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def remove_column(self, name: str) -> "SyncBundleBuilder":
         """Remove a column from the bundle."""
         coro = _call_original_method(self._async, "remove_column", name)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def rename_column(self, old_name: str, new_name: str) -> "SyncBundleBuilder":
@@ -235,7 +233,7 @@ class SyncBundleBuilder(SyncBundle):
             Self for fluent chaining
         """
         coro = _call_original_method(self._async, "rename_column", old_name, new_name)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def filter(self, where_clause: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
@@ -252,7 +250,7 @@ class SyncBundleBuilder(SyncBundle):
         if params is None:
             params = []
         coro = _call_original_method(self._async, "filter", where_clause, params)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def join(
@@ -260,17 +258,19 @@ class SyncBundleBuilder(SyncBundle):
     ) -> "SyncBundleBuilder":
         """Join with another data source."""
         coro = _call_original_method(self._async, "join", name, url, on, how)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def attach_to_join(self, name: str, url: str) -> "SyncBundleBuilder":
         """Attach a data source for joining."""
         coro = _call_original_method(self._async, "attach_to_join", name, url)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
         """Execute a SQL query on the data.
+
+        Creates a new forked bundle with the query applied, leaving the original unchanged.
 
         Args:
             sql: SQL query string
@@ -278,13 +278,13 @@ class SyncBundleBuilder(SyncBundle):
                     If None, defaults to empty list.
 
         Returns:
-            Self for fluent chaining
+            New SyncBundleBuilder with the query applied
         """
         if params is None:
             params = []
         coro = _call_original_method(self._async, "select", sql, params)
-        self._async = self._loop.run_sync(coro)
-        return self
+        async_forked = _loop_manager.run_sync(coro)
+        return SyncBundleBuilder(async_forked)
 
     def create_view(self, name: str, source: "SyncBundleBuilder") -> "SyncBundleBuilder":
         """Create a view from another bundle.
@@ -297,19 +297,19 @@ class SyncBundleBuilder(SyncBundle):
             Self for fluent chaining
         """
         coro = _call_original_method(self._async, "create_view", name, source._async)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def set_name(self, name: str) -> "SyncBundleBuilder":
         """Set the bundle name."""
         coro = _call_original_method(self._async, "set_name", name)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def set_description(self, desc: str) -> "SyncBundleBuilder":
         """Set the bundle description."""
         coro = _call_original_method(self._async, "set_description", desc)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def define_function(
@@ -317,25 +317,25 @@ class SyncBundleBuilder(SyncBundle):
     ) -> "SyncBundleBuilder":
         """Define a custom Python function as a data source."""
         coro = _call_original_method(self._async, "define_function", name, output, func, version)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def define_index(self, column: str) -> "SyncBundleBuilder":
         """Create an index on a column for faster lookups."""
         coro = _call_original_method(self._async, "define_index", column)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def drop_index(self, column: str) -> "SyncBundleBuilder":
         """Drop an index from a column."""
         coro = _call_original_method(self._async, "drop_index", column)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def rebuild_index(self, column: str) -> "SyncBundleBuilder":
         """Rebuild an existing index on a column."""
         coro = _call_original_method(self._async, "rebuild_index", column)
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def reindex(self) -> "SyncBundleBuilder":
@@ -349,13 +349,13 @@ class SyncBundleBuilder(SyncBundle):
             Self for fluent chaining
         """
         coro = _call_original_method(self._async, "reindex")
-        self._async = self._loop.run_sync(coro)
+        self._async = _loop_manager.run_sync(coro)
         return self
 
     def commit(self, message: str) -> Any:
         """Commit changes to persistent storage."""
         coro = _call_original_method(self._async, "commit", message)
-        return self._loop.run_sync(coro)
+        return _loop_manager.run_sync(coro)
 
 
 # ======================== Factory Functions ========================
@@ -374,8 +374,8 @@ def create(path: str = "", config: Optional[Any] = None) -> SyncBundleBuilder:
         SyncBundleBuilder ready for immediate use
 
     Example:
-        >>> import bundlebase.sync as dc
-        >>> c = dc.create()
+        >>> import bundlebase.sync as bb
+        >>> c = bb.create()
         >>> c.attach("data.parquet")
         >>> df = c.to_pandas()
 
@@ -393,7 +393,7 @@ def create(path: str = "", config: Optional[Any] = None) -> SyncBundleBuilder:
         return await _bundlebase.create(path, config)
 
     async_bundle = _loop_manager.run_sync(_create_async())
-    return SyncBundleBuilder(async_bundle, _loop_manager)
+    return SyncBundleBuilder(async_bundle)
 
 
 def open(path: str, config: Optional[Any] = None) -> SyncBundle:
@@ -409,8 +409,8 @@ def open(path: str, config: Optional[Any] = None) -> SyncBundle:
         SyncBundle (read-only) with the loaded operations
 
     Example:
-        >>> import bundlebase.sync as dc
-        >>> c = dc.open("/path/to/bundle")
+        >>> import bundlebase.sync as bb
+        >>> c = bb.open("/path/to/bundle")
         >>> df = c.to_pandas()
 
         >>> # With config:
@@ -427,7 +427,7 @@ def open(path: str, config: Optional[Any] = None) -> SyncBundle:
         return await _bundlebase.open(path, config)
 
     async_bundle = _loop_manager.run_sync(_open_async())
-    return SyncBundle(async_bundle, _loop_manager)
+    return SyncBundle(async_bundle)
 
 
 def stream_batches(bundle: SyncBundle) -> Any:
@@ -451,9 +451,9 @@ def stream_batches(bundle: SyncBundle) -> Any:
         pyarrow.RecordBatch objects (all loaded into memory first)
 
     Example:
-        >>> import bundlebase.sync as dc
-        >>> c = dc.create().attach("data.parquet")
-        >>> for batch in dc.stream_batches(c):
+        >>> import bundlebase.sync as bb
+        >>> c = bb.create().attach("data.parquet")
+        >>> for batch in bb.stream_batches(c):
         ...     print(f"Processing {batch.num_rows} rows")
 
     Raises:

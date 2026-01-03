@@ -116,6 +116,7 @@ class TestUnawaitedCreateChain:
             assert "3 operation(s)" in str(w[0].message)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_awaited_create_chain_no_warning(self):
         """Test that properly awaited create chains don't trigger warnings."""
         with warnings.catch_warnings(record=True) as w:
@@ -155,27 +156,24 @@ class TestUnawaitedExtendChain:
 class TestWarningContent:
     """Test the content and clarity of warning messages."""
 
-    def test_operation_chain_warning_format(self):
+    @pytest.mark.asyncio
+    async def test_operation_chain_warning_format(self):
         """Test OperationChain warning message format."""
+        c = await bundlebase.create(random_bundle())
+        c = await c.attach(datafile("userdata.parquet"))
 
-        async def test():
-            c = await bundlebase.create(random_bundle())
-            c = await c.attach(datafile("userdata.parquet"))
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            chain = c.remove_column("country").rename_column("id", "user_id")
+            del chain
 
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                chain = c.remove_column("country").rename_column("id", "user_id")
-                del chain
-
-                assert len(w) == 1
-                msg = str(w[0].message)
-                assert "OperationChain" in msg
-                assert "2 operation(s)" in msg
-                assert "remove_column" in msg
-                assert "rename_column" in msg
-                assert "Did you forget to add 'await'" in msg
-
-        asyncio.run(test())
+            assert len(w) == 1
+            msg = str(w[0].message)
+            assert "OperationChain" in msg
+            assert "2 operation(s)" in msg
+            assert "remove_column" in msg
+            assert "rename_column" in msg
+            assert "Did you forget to add 'await'" in msg
 
     def test_create_chain_with_ops_warning_format(self):
         """Test CreateChain with operations warning message format."""

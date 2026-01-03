@@ -1,6 +1,6 @@
 /// Shared test utilities for integration tests
 use arrow::datatypes::SchemaRef;
-use bundlebase::bundle::{BundleCommit, INIT_FILENAME};
+use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
 use bundlebase::io::ObjectStoreDir;
 use bundlebase::BundlebaseError;
 use url::Url;
@@ -23,10 +23,11 @@ pub async fn latest_commit(
     let meta_dir = data_dir.subdir("_bundlebase")?;
 
     let files = meta_dir.list_files().await?;
-    let files = files
+    let mut files = files
         .iter()
         .filter(|x| x.filename() != INIT_FILENAME)
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+        .sort_by_key(|f| manifest_version(f.filename()));
 
     let last_file = files.iter().last();
 
