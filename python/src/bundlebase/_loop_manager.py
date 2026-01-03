@@ -17,7 +17,7 @@ class EventLoopManager:
 
     This class handles:
     - Detecting whether we're running in Jupyter/IPython
-    - Using persistent asyncio.Runner() for scripts (Python 3.11+)
+    - Using persistent asyncio.Runner() for scripts
     - Using nest_asyncio for Jupyter's nested event loops
     - Executing coroutines synchronously with appropriate strategy
     - Automatically cleaning up resources on application exit
@@ -101,8 +101,7 @@ class EventLoopManager:
     def _run_in_script(self, coro: Coroutine[Any, Any, T]) -> T:
         """Run coroutine in script environment using persistent Runner.
 
-        Uses asyncio.Runner (Python 3.11+) for efficiency, with fallback
-        to asyncio.run() for older Python versions.
+        Uses asyncio.Runner for efficiency.
 
         Args:
             coro: The coroutine to execute
@@ -110,14 +109,10 @@ class EventLoopManager:
         Returns:
             The result of the coroutine
         """
-        if sys.version_info >= (3, 11):
-            # Use persistent Runner for efficiency (avoids creating new loop each time)
-            if self._runner is None:
-                self._runner = asyncio.Runner()
-            return self._runner.run(coro)
-        else:
-            # Fallback for Python < 3.11
-            return asyncio.run(coro)
+        # Use persistent Runner for efficiency (avoids creating new loop each time)
+        if self._runner is None:
+            self._runner = asyncio.Runner(debug=True)
+        return self._runner.run(coro)
 
     def cleanup(self) -> None:
         """Clean up resources.

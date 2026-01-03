@@ -12,14 +12,13 @@ pub use builder::{BundleBuilder, BundleStatus};
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
 pub use command::parser::parse_command;
 pub use command::BundleCommand;
-pub use commit::BundleCommit;
+pub use commit::{manifest_version, BundleCommit};
 pub use facade::BundleFacade;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::JoinTypeOption;
 pub use operation::{AnyOperation, BundleChange, Operation};
 use std::collections::{HashMap, HashSet};
 
-use crate::bundle::commit::manifest_version;
 use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
 use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBlockId};
 use crate::functions::FunctionRegistry;
@@ -268,6 +267,8 @@ impl Bundle {
         let data_dir = ObjectStoreDir::from_str(url, bundle.config())?;
         let manifest_dir = data_dir.subdir(META_DIR)?;
 
+        debug!("Loading initial commit from {}", INIT_FILENAME);
+
         let init_commit: Option<InitCommit> = manifest_dir.file(INIT_FILENAME)?.read_yaml().await?;
         let init_commit = init_commit
             .expect(format!("No {}/{} found in {}", META_DIR, INIT_FILENAME, url).as_str());
@@ -340,6 +341,11 @@ impl Bundle {
         if manifest_files.is_empty() {
             return Err(format!("No data bundle in: {}", url).into());
         }
+
+        // Sort manifest files by version to ensure commits are loaded in chronological order
+        // ObjectStore.list() does not guarantee any particular ordering
+        let mut manifest_files = manifest_files.into_iter().cloned().collect::<Vec<_>>();
+        manifest_files.sort_by_key(|f| manifest_version(f.filename()));
 
         // Load and apply each manifest in order
         for manifest_file in manifest_files {

@@ -77,7 +77,7 @@ jobs:
         run: poetry run maturin develop
 
       - name: Run Python tests
-        run: poetry run pytest -v
+        run: poetry run pytest -v --timeout=300
 
       - name: Build Python wheel (release)
         run: poetry run maturin build --release
