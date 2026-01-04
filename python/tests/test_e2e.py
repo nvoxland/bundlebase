@@ -1,9 +1,11 @@
+import os
 import tempfile
 
 import maturin_import_hook
 import polars
 import pyarrow as pa
 import pytest
+import yaml
 
 maturin_import_hook.install()
 
@@ -558,10 +560,6 @@ async def test_extend_bundle_conversion():
 @pytest.mark.asyncio
 async def test_extend_bundle_inherits_id():
     """Test that extended bundles inherit the same ID as the parent and 0000000.yaml is correct"""
-    import tempfile
-    import yaml
-    import os
-
     with tempfile.TemporaryDirectory() as temp1:
         with tempfile.TemporaryDirectory() as temp2:
             with tempfile.TemporaryDirectory() as temp3:
