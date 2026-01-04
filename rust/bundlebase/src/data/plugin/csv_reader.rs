@@ -7,7 +7,6 @@ use crate::io::{ObjectStoreDir, ObjectStoreFile};
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
-use datafusion::catalog::Session;
 use datafusion::common::stats::Precision;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::file_format::csv::CsvFormat;

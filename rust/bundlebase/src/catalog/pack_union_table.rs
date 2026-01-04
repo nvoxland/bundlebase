@@ -111,7 +111,7 @@ impl TableProvider for PackUnionTable {
         }
 
         // Create a UnionExec to combine all block plans
-        Ok(Arc::new(UnionExec::new(inputs)))
+        Ok(UnionExec::try_new(inputs)?)
     }
 }
 

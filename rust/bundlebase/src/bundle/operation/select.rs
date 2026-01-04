@@ -1,4 +1,3 @@
-use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::Operation;
 use crate::bundle::sql::with_temp_table;
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
@@ -262,16 +261,6 @@ impl Operation for SelectOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::datatypes::{DataType, Field, Schema};
-    use arrow_schema::SchemaRef;
-
-    fn create_test_schema() -> SchemaRef {
-        SchemaRef::new(Schema::new(vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("name", DataType::Utf8, true),
-            Field::new("salary", DataType::Float64, true),
-        ]))
-    }
 
     #[test]
     fn test_describe() {

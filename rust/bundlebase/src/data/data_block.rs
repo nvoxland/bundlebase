@@ -70,11 +70,6 @@ impl DataBlock {
         }
     }
 
-    /// Returns a reference to the indexes
-    pub fn indexes(&self) -> &Arc<RwLock<Vec<Arc<IndexDefinition>>>> {
-        &self.indexes
-    }
-
     pub fn id(&self) -> &ObjectId {
         &self.id
     }

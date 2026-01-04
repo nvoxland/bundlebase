@@ -59,9 +59,9 @@ impl DataReader for MockReader {
 
     async fn data_source(
         &self,
-        projection: Option<&Vec<usize>>,
-        filters: &[Expr],
-        limit: Option<usize>,
+        _projection: Option<&Vec<usize>>,
+        _filters: &[Expr],
+        _limit: Option<usize>,
         _row_ids: Option<&[crate::data::RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
         Ok(Arc::new(MockDataSource::new(self.schema.clone())))

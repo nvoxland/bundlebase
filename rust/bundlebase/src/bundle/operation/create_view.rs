@@ -1,5 +1,4 @@
 use crate::bundle::commit::BundleCommit;
-use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::{AnyOperation, BundleChange, Operation};
 use crate::bundle::META_DIR;
 use crate::data::ObjectId;

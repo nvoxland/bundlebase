@@ -243,48 +243,6 @@ fn parse_join_type(s: &str) -> Result<JoinTypeOption, BundlebaseError> {
     })
 }
 
-fn parse_with_options(
-    pair: pest::iterators::Pair<Rule>,
-) -> Result<std::collections::HashMap<String, String>, BundlebaseError> {
-    let mut options = std::collections::HashMap::new();
-
-    for inner_pair in pair.into_inner() {
-        if inner_pair.as_rule() == Rule::option_pair {
-            let mut key = None;
-            let mut value = None;
-
-            for opt_inner in inner_pair.into_inner() {
-                match opt_inner.as_rule() {
-                    Rule::identifier => {
-                        if key.is_none() {
-                            key = Some(opt_inner.as_str().to_string());
-                        }
-                    }
-                    Rule::option_value => {
-                        value = Some(extract_option_value(opt_inner)?);
-                    }
-                    _ => {}
-                }
-            }
-
-            if let (Some(k), Some(v)) = (key, value) {
-                options.insert(k, v);
-            }
-        }
-    }
-
-    Ok(options)
-}
-
-fn extract_option_value(pair: pest::iterators::Pair<Rule>) -> Result<String, BundlebaseError> {
-    let inner = pair.into_inner().next().unwrap();
-
-    match inner.as_rule() {
-        Rule::quoted_string => extract_string_content(inner.as_str()),
-        Rule::number | Rule::boolean | Rule::identifier => Ok(inner.as_str().to_string()),
-        _ => Err(format!("Invalid option value: {}", inner.as_str()).into()),
-    }
-}
 
 #[cfg(test)]
 mod tests {

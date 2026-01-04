@@ -17,7 +17,6 @@ use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
 pub use data_block::DataBlock;
 pub use data_pack::DataPack;
-use datafusion::catalog::Session;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
 use datafusion::logical_expr::Expr;

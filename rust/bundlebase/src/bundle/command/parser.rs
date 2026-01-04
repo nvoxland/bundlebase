@@ -155,12 +155,4 @@ mod tests {
             .to_string()
             .contains("Multiple statements"));
     }
-
-    #[test]
-    fn test_parse_sql_valid_select() {
-        // This will fail until we implement SelectOp::from_sql
-        let result = parse_command("SELECT name, email FROM data");
-        // For now, we expect this to fail since we haven't implemented the operation parsers yet
-        // Once implemented, this should succeed
-    }
 }
