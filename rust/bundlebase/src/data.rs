@@ -82,7 +82,7 @@ pub trait DataReader: Sync + Send + Debug {
 
     /// Stream data with RowIds for index building
     /// Each batch is paired with RowIds indicating the file position of each row
-    /// Used by DefineIndexOp to build indexes that reference actual file positions
+    /// Used by CreateIndexOp to build indexes that reference actual file positions
     async fn extract_rowids_stream(
         &self,
         ctx: Arc<SessionContext>,

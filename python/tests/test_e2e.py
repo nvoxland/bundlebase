@@ -619,13 +619,13 @@ async def test_extend_bundle_inherits_id():
 
 
 @pytest.mark.asyncio
-async def test_define_index():
+async def test_create_index():
     """Test creating an index on a column"""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("userdata.parquet"))
 
     # Create an index on the id column
-    c = await c.define_index("id")
+    c = await c.create_index("id")
 
     # Verify bundle still works
     assert await c.num_rows() == 1000
@@ -640,7 +640,7 @@ async def test_rebuild_index():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Create and rebuild an index
-    c = await c.define_index("id")
+    c = await c.create_index("id")
     c = await c.rebuild_index("id")
 
     # Verify bundle still works
@@ -656,7 +656,7 @@ async def test_multiple_indexes():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Create indexes on multiple columns
-    c = await c.define_index("id").define_index("salary")
+    c = await c.create_index("id").create_index("salary")
 
     # Verify bundle still works
     assert await c.num_rows() == 1000
@@ -671,7 +671,7 @@ async def test_index_with_operations():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Create index and apply filter
-    c = await c.define_index("salary").filter("salary > $1", [50000.0])
+    c = await c.create_index("salary").filter("salary > $1", [50000.0])
 
     # Verify filtering still works
     results = await c.to_polars()
@@ -686,8 +686,8 @@ async def test_index_chaining():
 
     # Test chaining multiple index operations
     c = await (c.attach(datafile("userdata.parquet"))
-               .define_index("id")
-               .define_index("salary"))
+               .create_index("id")
+               .create_index("salary"))
 
     assert await c.num_rows() == 1000
     results = await c.to_polars()
@@ -701,7 +701,7 @@ async def test_index_numeric_columns():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Create indexes on numeric columns
-    c = await c.define_index("id").define_index("salary")
+    c = await c.create_index("id").create_index("salary")
 
     assert await c.num_rows() == 1000
     results = await c.to_polars()
@@ -715,7 +715,7 @@ async def test_index_string_columns():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Create indexes on numeric columns (string columns use Utf8View which is not yet supported)
-    c = await c.define_index("id").define_index("salary")
+    c = await c.create_index("id").create_index("salary")
 
     assert await c.num_rows() == 1000
     results = await c.to_polars()
@@ -731,7 +731,7 @@ async def test_index_operations_with_commit():
         # Create, attach, index, and commit
         c = await bundlebase.create(temp_path)
         c = await c.attach(datafile("userdata.parquet"))
-        c = await c.define_index("id")
+        c = await c.create_index("id")
         await c.commit("Added index on id column")
 
         # Verify original bundle
@@ -751,7 +751,7 @@ async def test_drop_index():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Create an index on the id column
-    c = await c.define_index("id")
+    c = await c.create_index("id")
 
     # Drop the index
     c = await c.drop_index("id")
@@ -762,7 +762,7 @@ async def test_drop_index():
     assert len(results) == 1000
 
     # Should be able to recreate the index after dropping
-    c = await c.define_index("id")
+    c = await c.create_index("id")
     assert await c.num_rows() == 1000
 
 

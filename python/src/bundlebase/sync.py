@@ -320,9 +320,9 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def define_index(self, column: str) -> "SyncBundleBuilder":
+    def create_index(self, column: str) -> "SyncBundleBuilder":
         """Create an index on a column for faster lookups."""
-        coro = _call_original_method(self._async, "define_index", column)
+        coro = _call_original_method(self._async, "create_index", column)
         self._async = _loop_manager.run_sync(coro)
         return self
 

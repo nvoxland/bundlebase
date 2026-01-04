@@ -83,7 +83,7 @@ _original_methods = {
     "define_function": _PyBundleBuilder.define_function,
 
     # Index operations
-    "define_index": _PyBundleBuilder.index,  # Rust: "index", Python API: "define_index"
+    "create_index": _PyBundleBuilder.index,  # Rust: "index", Python API: "create_index"
     "rebuild_index": _PyBundleBuilder.rebuild_index,
     "reindex": _PyBundleBuilder.reindex,
 
@@ -134,7 +134,7 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 mutation_methods = [
     "attach", "remove_column", "rename_column", "filter", "select", "join",
     "create_view", "set_name", "set_description", "set_config", "define_function",
-    "define_index", "rebuild_index", "reindex"
+    "create_index", "rebuild_index", "reindex"
 ]
 for method_name in mutation_methods:
     wrapped = _wrap_mutation_method(method_name)

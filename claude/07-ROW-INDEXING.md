@@ -135,14 +135,14 @@ c = await bundlebase.create("/path/to/container")
 await c.attach("users.csv")
 
 # Define index on email column
-await c.define_index("email")
+await c.create_index("email")
 
 # Build index for all blocks
 await c.index_blocks()
 ```
 
 **Rust operations applied:**
-1. `DefineIndexOp` - Creates IndexDefinition, assigns unique ID
+1. `CreateIndexOp` - Creates IndexDefinition, assigns unique ID
 2. `IndexBlocksOp` - Scans each block, builds ColumnIndex, saves to disk
 
 ### Dropping an Index

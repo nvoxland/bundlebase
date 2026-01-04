@@ -259,11 +259,11 @@ class TestSyncCommit:
 class TestSyncIndex:
     """Test synchronous index operations."""
 
-    def test_sync_define_index(self):
+    def test_sync_create_index(self):
         """Test creating an index synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.define_index("id")
+        c.create_index("id")
 
         # Verify bundle still works
         assert c.num_rows() == 1000
@@ -272,7 +272,7 @@ class TestSyncIndex:
         """Test rebuilding an index synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.define_index("id")
+        c.create_index("id")
         c.rebuild_index("id")
 
         assert c.num_rows() == 1000
@@ -281,7 +281,7 @@ class TestSyncIndex:
         """Test creating multiple indexes."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.define_index("id").define_index("salary")
+        c.create_index("id").create_index("salary")
 
         assert c.num_rows() == 1000
 
@@ -289,14 +289,14 @@ class TestSyncIndex:
         """Test dropping an index synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.define_index("id")
+        c.create_index("id")
         c.drop_index("id")
 
         # Verify bundle still works
         assert c.num_rows() == 1000
 
         # Should be able to recreate the index after dropping
-        c.define_index("id")
+        c.create_index("id")
         assert c.num_rows() == 1000
 
 

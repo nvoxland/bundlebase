@@ -49,7 +49,7 @@ CoalesceBatchesExec: target_batch_size=8192
     );
 
     assert_eq!(
-        "DEFINE INDEX on Email, INDEX BLOCKS",
+        "CREATE INDEX on Email, INDEX BLOCKS",
         bundle.status().changes()[0]
             .operations
             .iter()
@@ -68,8 +68,8 @@ CoalesceBatchesExec: target_batch_size=8192
         .collect::<Vec<_>>()
         .join(", ");
     assert!(
-        ops_description.contains("DEFINE INDEX on Email"),
-        "Expected operations to contain 'DEFINE INDEX on Email', got: {}",
+        ops_description.contains("CREATE INDEX on Email"),
+        "Expected operations to contain 'CREATE INDEX on Email', got: {}",
         ops_description
     );
     assert!(

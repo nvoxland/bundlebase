@@ -7,7 +7,7 @@ use crate::bundle::operation::{
     RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp, SetConfigOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
-use crate::bundle::operation::{DefineIndexOp, DropIndexOp, JoinTypeOption};
+use crate::bundle::operation::{CreateIndexOp, DropIndexOp, JoinTypeOption};
 use crate::bundle::{commit, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle};
 use crate::data::{DataBlock, ObjectId, VersionedBlockId};
@@ -883,7 +883,7 @@ impl BundleBuilder {
         self.do_change(&format!("Index column {}", column), |builder| {
             Box::pin(async move {
                 builder
-                    .apply_operation(DefineIndexOp::setup(&column).await?.into())
+                    .apply_operation(CreateIndexOp::setup(&column).await?.into())
                     .await?;
 
                 builder.reindex().await?;

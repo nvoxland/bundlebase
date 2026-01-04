@@ -150,7 +150,7 @@ All operations work synchronously without `await`:
 
 - **`set_name(name: str)`** - Set container name
 - **`set_description(desc: str)`** - Set description
-- **`define_index(column: str)`** - Create index
+- **`create_index(column: str)`** - Create index
 - **`drop_index(column: str)`** - Drop index
 - **`rebuild_index(column: str)`** - Rebuild index
 
