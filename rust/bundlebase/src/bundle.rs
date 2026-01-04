@@ -23,7 +23,7 @@ use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvid
 use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBlockId};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
-use crate::io::{DataStorage, ObjectStoreDir, ObjectStoreFile, EMPTY_URL};
+use crate::io::{DataStorage, ObjectStoreDir, EMPTY_URL};
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::Array;
 use arrow_schema::SchemaRef;
@@ -513,14 +513,6 @@ impl Bundle {
         self.data_dir = ObjectStoreDir::from_url(&url, self.config.clone())?;
 
         Ok(())
-    }
-
-    /// Opens a file relative to the bundle's data directory.
-    ///
-    /// # Arguments
-    /// * `path` - Path relative to data_dir, or a full URL
-    fn file(&self, path: &str) -> Result<ObjectStoreFile, BundlebaseError> {
-        ObjectStoreFile::from_str(path, self.data_dir(), BundleConfig::default().into())
     }
 
     pub fn ctx(&self) -> Arc<SessionContext> {

@@ -1,5 +1,5 @@
 use crate::bundle::operation::Operation;
-use crate::bundle::{Bundle, BundleFacade};
+use crate::bundle::Bundle;
 use crate::io::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;

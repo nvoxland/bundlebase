@@ -31,7 +31,6 @@ async fn test_create_view_basic() -> Result<(), BundlebaseError> {
     );
 
     let schema = view.schema().await?;
-    let fields = field_names(&schema);
     assert_eq!(
         vec![
             "Index",
@@ -178,7 +177,6 @@ async fn test_duplicate_view_name() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
     use bundlebase::bundle::{InitCommit, INIT_FILENAME, META_DIR};
-    use bundlebase::io::ObjectStoreFile;
 
     // Create container and view
     let container_url = random_memory_url().to_string();

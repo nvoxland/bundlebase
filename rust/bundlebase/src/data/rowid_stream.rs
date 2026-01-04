@@ -4,7 +4,6 @@ use crate::BundlebaseError;
 use arrow::record_batch::RecordBatch;
 use datafusion::physical_plan::SendableRecordBatchStream;
 use futures::future::{BoxFuture, Future};
-use futures::stream::StreamExt;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};

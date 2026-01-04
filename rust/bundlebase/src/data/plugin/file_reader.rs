@@ -2,7 +2,6 @@ use crate::data::{LineOrientedFormat, RowId, RowIdOffsetDataSource};
 use crate::io::ObjectStoreFile;
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
-use datafusion::catalog::Session;
 use datafusion::common::DataFusionError;
 use datafusion::datasource::file_format::FileFormat;
 use datafusion::datasource::listing::PartitionedFile;
@@ -105,11 +104,6 @@ impl<C: FileFormatConfig> FileReader<C> {
     /// Get the object store
     pub fn object_store(&self) -> Arc<dyn object_store::ObjectStore> {
         self.file.store()
-    }
-
-    /// Get the SessionContext
-    pub fn ctx(&self) -> &Arc<SessionContext> {
-        &self.ctx
     }
 
     /// Get the schema of the file

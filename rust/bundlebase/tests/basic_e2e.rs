@@ -216,7 +216,7 @@ async fn test_empty_bundle() -> Result<(), BundlebaseError> {
     let loaded_bundle = Bundle::open(data_dir.as_str(), None).await?;
 
     // Verify it's empty
-    assert_eq!(bundle.num_rows().await?, 0);
+    assert_eq!(loaded_bundle.num_rows().await?, 0);
 
     Ok(())
 }
