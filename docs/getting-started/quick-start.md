@@ -448,7 +448,7 @@ Create indexes for faster lookups:
 
     ```python
     # Create index on email column
-    c = await c.define_index("email")
+    c = await c.create_index("email")
 
     # Rebuild if needed
     c = await c.rebuild_index("email")
@@ -458,7 +458,7 @@ Create indexes for faster lookups:
 
     ```python
     # Create index on email column
-    c = c.define_index("email")
+    c = c.create_index("email")
 
     # Rebuild if needed
     c = c.rebuild_index("email")

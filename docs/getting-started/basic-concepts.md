@@ -155,7 +155,7 @@ Indexes enable fast lookups on specific columns:
 
 ```python
 # Define an index on a column
-c = await c.define_index("email")
+c = await c.create_index("email")
 
 # Now queries on email will be faster
 c = await c.filter("email = 'user@example.com'")

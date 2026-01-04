@@ -105,7 +105,7 @@ data = await c.to_dict()    # → Python dict
 
 ### Indexing
 ```python
-c = c.define_index("email")        # Create index for fast lookups
+c = c.create_index("email")        # Create index for fast lookups
 c = c.rebuild_index("email")       # Rebuild existing index
 ```
 

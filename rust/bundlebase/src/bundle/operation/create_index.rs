@@ -10,12 +10,12 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct DefineIndexOp {
+pub struct CreateIndexOp {
     pub column: String,
     pub id: ObjectId,
 }
 
-impl DefineIndexOp {
+impl CreateIndexOp {
     pub async fn setup(column: &str) -> Result<Self, BundlebaseError> {
         Ok(Self {
             id: ObjectId::generate(),
@@ -25,9 +25,9 @@ impl DefineIndexOp {
 }
 
 #[async_trait]
-impl Operation for DefineIndexOp {
+impl Operation for CreateIndexOp {
     fn describe(&self) -> String {
-        format!("DEFINE INDEX on {}", self.column)
+        format!("CREATE INDEX on {}", self.column)
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {

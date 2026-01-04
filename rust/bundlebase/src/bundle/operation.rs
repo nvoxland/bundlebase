@@ -1,7 +1,7 @@
 mod attach_block;
 mod create_view;
 mod define_function;
-mod define_index;
+mod create_index;
 mod define_pack;
 mod drop_index;
 mod drop_view;
@@ -21,7 +21,7 @@ mod set_name;
 pub use crate::bundle::operation::attach_block::AttachBlockOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
 pub use crate::bundle::operation::define_function::DefineFunctionOp;
-pub use crate::bundle::operation::define_index::DefineIndexOp;
+pub use crate::bundle::operation::create_index::CreateIndexOp;
 pub use crate::bundle::operation::define_pack::DefinePackOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
 pub use crate::bundle::operation::drop_view::DropViewOp;
@@ -122,7 +122,7 @@ pub enum AnyOperation {
     DefineFunction(DefineFunctionOp),
     Filter(FilterOp),
     IndexBlocks(IndexBlocksOp),
-    DefineIndex(DefineIndexOp),
+    CreateIndex(CreateIndexOp),
     DefinePack(DefinePackOp),
     DropIndex(DropIndexOp),
     DropView(DropViewOp),
@@ -146,7 +146,7 @@ impl Operation for AnyOperation {
             AnyOperation::DefineFunction(op) => op.describe(),
             AnyOperation::Filter(op) => op.describe(),
             AnyOperation::IndexBlocks(op) => op.describe(),
-            AnyOperation::DefineIndex(op) => op.describe(),
+            AnyOperation::CreateIndex(op) => op.describe(),
             AnyOperation::DefinePack(op) => op.describe(),
             AnyOperation::DropIndex(op) => op.describe(),
             AnyOperation::DropView(op) => op.describe(),
@@ -169,7 +169,7 @@ impl Operation for AnyOperation {
             AnyOperation::DefineFunction(op) => op.check(bundle).await,
             AnyOperation::Filter(op) => op.check(bundle).await,
             AnyOperation::IndexBlocks(op) => op.check(bundle).await,
-            AnyOperation::DefineIndex(op) => op.check(bundle).await,
+            AnyOperation::CreateIndex(op) => op.check(bundle).await,
             AnyOperation::DefinePack(op) => op.check(bundle).await,
             AnyOperation::DropIndex(op) => op.check(bundle).await,
             AnyOperation::DropView(op) => op.check(bundle).await,
@@ -192,7 +192,7 @@ impl Operation for AnyOperation {
             AnyOperation::DefineFunction(op) => op.apply(bundle).await,
             AnyOperation::Filter(op) => op.apply(bundle).await,
             AnyOperation::IndexBlocks(op) => op.apply(bundle).await,
-            AnyOperation::DefineIndex(op) => op.apply(bundle).await,
+            AnyOperation::CreateIndex(op) => op.apply(bundle).await,
             AnyOperation::DefinePack(op) => op.apply(bundle).await,
             AnyOperation::DropIndex(op) => op.apply(bundle).await,
             AnyOperation::DropView(op) => op.apply(bundle).await,
@@ -219,7 +219,7 @@ impl Operation for AnyOperation {
             AnyOperation::DefineFunction(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::Filter(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::IndexBlocks(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::DefineIndex(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::CreateIndex(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DefinePack(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DropIndex(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DropView(op) => op.apply_dataframe(df, ctx).await,
@@ -242,7 +242,7 @@ impl Operation for AnyOperation {
             AnyOperation::DefineFunction(op) => op.version(),
             AnyOperation::Filter(op) => op.version(),
             AnyOperation::IndexBlocks(op) => op.version(),
-            AnyOperation::DefineIndex(op) => op.version(),
+            AnyOperation::CreateIndex(op) => op.version(),
             AnyOperation::DefinePack(op) => op.version(),
             AnyOperation::DropIndex(op) => op.version(),
             AnyOperation::DropView(op) => op.version(),
@@ -265,7 +265,7 @@ impl Operation for AnyOperation {
             AnyOperation::DefineFunction(op) => op.allowed_on_view(),
             AnyOperation::Filter(op) => op.allowed_on_view(),
             AnyOperation::IndexBlocks(op) => op.allowed_on_view(),
-            AnyOperation::DefineIndex(op) => op.allowed_on_view(),
+            AnyOperation::CreateIndex(op) => op.allowed_on_view(),
             AnyOperation::DefinePack(op) => op.allowed_on_view(),
             AnyOperation::DropIndex(op) => op.allowed_on_view(),
             AnyOperation::DropView(op) => op.allowed_on_view(),
@@ -352,9 +352,9 @@ impl From<SetDescriptionOp> for AnyOperation {
     }
 }
 
-impl From<DefineIndexOp> for AnyOperation {
-    fn from(config: DefineIndexOp) -> Self {
-        AnyOperation::DefineIndex(config)
+impl From<CreateIndexOp> for AnyOperation {
+    fn from(config: CreateIndexOp) -> Self {
+        AnyOperation::CreateIndex(config)
     }
 }
 

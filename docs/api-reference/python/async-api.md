@@ -60,7 +60,7 @@ Mutable bundle class returned by `create()` and transformation methods.
         - set_name
         - set_description
         - define_function
-        - define_index
+        - create_index
         - rebuild_index
         - reindex
         - commit
