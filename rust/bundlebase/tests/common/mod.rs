@@ -26,8 +26,9 @@ pub async fn latest_commit(
     let mut files = files
         .iter()
         .filter(|x| x.filename() != INIT_FILENAME)
-        .collect::<Vec<_>>()
-        .sort_by_key(|f| manifest_version(f.filename()));
+        .collect::<Vec<_>>();
+
+    files.sort_by_key(|f| manifest_version(f.filename()));
 
     let last_file = files.iter().last();
 
