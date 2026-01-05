@@ -1,70 +1,82 @@
 # Bundlebase Project Overview
 
-Bundlebase is a high-performance data processing library written in Rust with Python bindings. It provides a flexible, operation-based framework for loading, transforming, and querying data from various sources using Apache Arrow and DataFusion.
+Bundlebase is like Docker, but for data. It allows you to bundle up existing data into a standard interface which can be queries with SQL and interacted with via Python.
 
-## Documentation
+## Documentation Index
 
-For detailed documentation, see the modular guides in the `claude/` directory:
+For detailed documentation, see the modular guides in the `.context/` directory:
 
-- **[00-OVERVIEW.md](claude/00-OVERVIEW.md)** - Project purpose, structure, and development guidelines
-- **[01-ARCHITECTURE.md](claude/01-ARCHITECTURE.md)** - Three-tier architecture, operations, adapters, function system
-- **[02-PYTHON-API.md](claude/02-PYTHON-API.md)** - Complete Python API reference with examples
-- **[03-PYTHON-BINDINGS.md](claude/03-PYTHON-BINDINGS.md)** - PyO3 integration and async bridge
-- **[04-VERSIONING.md](claude/04-VERSIONING.md)** - Commit-based versioning and path handling
-- **[05-TESTING.md](claude/05-TESTING.md)** - Testing strategy and execution
-- **[06-DEVELOPMENT.md](claude/06-DEVELOPMENT.md)** - Setup, build, and development workflow
-- **[07-ROW-INDEXING.md](claude/07-ROW-INDEXING.md)** - Row indexing system
-- **[08-PROGRESS-TRACKING.md](claude/08-PROGRESS-TRACKING.md)** - Progress tracking for long-running operations
+**Start Here:**
+- **[README.md](.context/README.md)** - Project overview, navigation hub, and documentation standards
 
-## Quick Start
+**Core Architecture:**
+- **[overview.md](.context/overview.md)** - Project purpose, structure, and development guidelines
+- **[architecture.md](.context/architecture.md)** - Three-tier architecture, operations, adapters, function system
+- **[versioning.md](.context/versioning.md)** - Commit-based versioning and path handling
 
-### Basic Python Usage
+**Python API:**
+- **[python-api.md](.context/python-api.md)** - Complete Python API reference with examples
+- **[python-bindings.md](.context/python-bindings.md)** - PyO3 integration and async bridge
+- **[sync-api.md](.context/sync-api.md)** - Synchronous wrapper API for scripts and Jupyter notebooks
 
-```python
-import bundlebase
+**Infrastructure:**
+- **[indexing.md](.context/indexing.md)** - Row indexing system
+- **[progress.md](.context/progress.md)** - Progress tracking for long-running operations
+- **[logging.md](.context/logging.md)** - Logging configuration
+- **[views.md](.context/views.md)** - Views system
 
-# Create a new container
-c = await bundlebase.create("/path/to/container")
+**Development:**
+- **[testing.md](.context/testing.md)** - Testing strategy and execution
+- **[development.md](.context/development.md)** - Setup, build, and development workflow
+- **[code-review.md](.context/code-review.md)** - Code review guidelines and checklists
+- **[debt.md](.context/debt.md)** - Technical debt tracking and prioritization
 
-# Attach data
-await c.attach("data.parquet")
+**AI & Project Rules:**
+- **[ai-rules.md](.context/ai-rules.md)** - Hard constraints for AI code generation (streaming, no unwrap, etc.)
+- **[anti-patterns.md](.context/anti-patterns.md)** - What NOT to do with concrete examples
+- **[glossary.md](.context/glossary.md)** - Domain terminology and definitions
+- **[workflows.md](.context/workflows.md)** - Step-by-step procedures for common development tasks
 
-# Transform data (mutations are in-place)
-await c.remove_column("unwanted")
-await c.filter("active = true")
+**Architecture Decisions:**
+- **[decisions/](.context/decisions/)** - Architecture Decision Records (ADRs)
+  - [README.md](.context/decisions/README.md) - ADR template and index
+  - [001-rust-core.md](.context/decisions/001-rust-core.md) - Rust core library decision
+  - [002-datafusion-arrow.md](.context/decisions/002-datafusion-arrow.md) - DataFusion and Arrow choice
+  - [003-streaming-only.md](.context/decisions/003-streaming-only.md) - Streaming execution mandate
+  - [004-three-tier-architecture.md](.context/decisions/004-three-tier-architecture.md) - Three-tier design
+  - [005-mutable-operations.md](.context/decisions/005-mutable-operations.md) - `&mut Self` return pattern
+  - [006-lazy-evaluation.md](.context/decisions/006-lazy-evaluation.md) - Three-phase operation pattern
+  - [007-no-unwrap.md](.context/decisions/007-no-unwrap.md) - No `.unwrap()` allowed
+  - [008-no-mod-rs.md](.context/decisions/008-no-mod-rs.md) - Named module files convention
 
-# Export results
-df = await c.to_pandas()
+**AI Prompt Templates:**
+- **[prompts/](.context/prompts/)** - Task-specific templates for AI-assisted development
+  - [new-feature.md](.context/prompts/new-feature.md) - Template for adding new features
+  - [add-operation.md](.context/prompts/add-operation.md) - Template for adding operations (most common)
+  - [add-python-binding.md](.context/prompts/add-python-binding.md) - Template for Python bindings
+  - [fix-bug.md](.context/prompts/fix-bug.md) - Template for bug fixing
+  - [performance-review.md](.context/prompts/performance-review.md) - Template for performance optimization
 
-# Commit changes
-await c.commit("Data transformation")
-```
+**System Boundaries & Constraints:**
+- **[boundaries.md](.context/boundaries.md)** - System boundaries and integration points
+- **[errors.md](.context/errors.md)** - Error handling patterns and Python error mapping
+- **[performance.md](.context/performance.md)** - Performance characteristics and benchmarks
+- **[dependencies.md](.context/dependencies.md)** - External dependencies and version management
 
-### Building and Testing
+## End User Documentation
 
-```bash
-# Setup
-poetry install
-
-# Build Rust extension
-maturin develop
-
-# Run tests
-cargo test                # Rust tests
-poetry run pytest         # Python tests
-```
+The published end-user facing documentation is manged in the `docs` directory.
 
 ## Key Principles
 
 - **Always start with Rust**, then write Python bindings
-- **All operations mutate in place** - modification methods return `&mut self`
+- **All Operations mutate in place** - modification methods return `&mut self`
 - **Lazy evaluation** - queries execute on demand, not when operations are recorded
 - **Streaming execution** - use `execute_stream()`, never `collect()` for memory efficiency
 - **Three phases** - operations validate, reconfigure state, then apply to DataFrames
-- **Shared state via Arc** - cheap cloning with efficient reference counting
 - **E2E Python tests** - test the Python binding, not underlying Rust logic
 
-See [claude/06-DEVELOPMENT.md](claude/06-DEVELOPMENT.md) for full development workflow.
+See [.context/development.md](.context/development.md) for full development workflow.
 
 ## Performance Guidelines
 
@@ -79,5 +91,15 @@ Bundlebase uses streaming execution throughout to handle datasets larger than RA
 - ❌ **Python**: Avoid `as_pyarrow()` for large datasets - use `stream_batches()` instead
 
 **See:**
-- [claude/01-ARCHITECTURE.md](claude/01-ARCHITECTURE.md#streaming-execution-architecture) for architectural details
-- [claude/02-PYTHON-API.md](claude/02-PYTHON-API.md#streaming-api-for-large-datasets) for Python streaming API
+- [.context/architecture.md](.context/architecture.md#streaming-execution-architecture) for architectural details
+- [.context/python-api.md](.context/python-api.md#streaming-api-for-large-datasets) for Python streaming API
+
+### Do Not
+- Generate code without reading relevant context files first
+- Create new architectural patterns without documentation
+- Override established conventions without clear rationale
+
+### When Making Changes
+- Update relevant `.context/` files when making architectural decisions
+- Document trade-offs and rationale in "Decision History" sections
+- Keep code examples in documentation current and functional

@@ -4,7 +4,7 @@
 name = "appnope"
 version = "0.1.4"
 description = "Disable App Nap on macOS >= 10.9"
-optional = false
+optional = true
 python-versions = ">=3.6"
 groups = ["main"]
 markers = "platform_system == \"Darwin\""
@@ -17,7 +17,7 @@ files = [
 name = "asttokens"
 version = "3.0.1"
 description = "Annotate AST trees with source code positions"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
@@ -80,7 +80,7 @@ files = [
 name = "cffi"
 version = "2.0.0"
 description = "Foreign Function Interface for Python calling C code."
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
 markers = "implementation_name == \"pypy\""
@@ -329,7 +329,7 @@ markers = {main = "sys_platform == \"win32\"", dev = "sys_platform == \"win32\""
 name = "comm"
 version = "0.2.3"
 description = "Jupyter Python Comm implementation, for usage in ipykernel, xeus-python etc."
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
@@ -344,7 +344,7 @@ test = ["pytest"]
 name = "debugpy"
 version = "1.8.19"
 description = "An implementation of the Debug Adapter Protocol for Python"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
@@ -384,7 +384,7 @@ files = [
 name = "decorator"
 version = "5.2.1"
 description = "Decorators for Humans"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
@@ -396,7 +396,7 @@ files = [
 name = "executing"
 version = "2.2.1"
 description = "Get the currently executing AST node of a frame, and other information"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
@@ -486,7 +486,7 @@ files = [
 name = "ipykernel"
 version = "7.1.0"
 description = "IPython Kernel for Jupyter"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
@@ -520,7 +520,7 @@ test = ["flaky", "ipyparallel", "pre-commit", "pytest (>=7.0,<9)", "pytest-async
 name = "ipython"
 version = "9.8.0"
 description = "IPython: Productive Interactive Computing"
-optional = false
+optional = true
 python-versions = ">=3.11"
 groups = ["main"]
 files = [
@@ -552,7 +552,7 @@ test-extra = ["curio", "ipykernel (>6.30)", "ipython[matplotlib]", "ipython[test
 name = "ipython-pygments-lexers"
 version = "1.1.1"
 description = "Defines a variety of Pygments lexers for highlighting IPython code."
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
@@ -567,7 +567,7 @@ pygments = "*"
 name = "jedi"
 version = "0.19.2"
 description = "An autocompletion tool for Python that can be used for text editors."
-optional = false
+optional = true
 python-versions = ">=3.6"
 groups = ["main"]
 files = [
@@ -605,7 +605,7 @@ i18n = ["Babel (>=2.7)"]
 name = "jupyter-client"
 version = "8.7.0"
 description = "Jupyter protocol implementation and client libraries"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
@@ -628,7 +628,7 @@ test = ["anyio", "coverage", "ipykernel (>=6.14)", "mypy", "paramiko ; sys_platf
 name = "jupyter-core"
 version = "5.9.1"
 description = "Jupyter core package. A base package on which Jupyter projects rely."
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
@@ -850,7 +850,7 @@ files = [
 name = "matplotlib-inline"
 version = "0.2.1"
 description = "Inline Matplotlib backend for Jupyter"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
@@ -1396,7 +1396,7 @@ xml = ["lxml (>=4.9.2)"]
 name = "parso"
 version = "0.8.5"
 description = "A Python Parser"
-optional = false
+optional = true
 python-versions = ">=3.6"
 groups = ["main"]
 files = [
@@ -1424,7 +1424,7 @@ files = [
 name = "pexpect"
 version = "4.9.0"
 description = "Pexpect allows easy control of interactive console applications."
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
 markers = "sys_platform != \"win32\" and sys_platform != \"emscripten\""
@@ -1534,7 +1534,7 @@ files = [
 name = "prompt-toolkit"
 version = "3.0.52"
 description = "Library for building powerful interactive command lines in Python"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
@@ -1549,7 +1549,7 @@ wcwidth = "*"
 name = "psutil"
 version = "7.2.1"
 description = "Cross-platform lib for process and system monitoring."
-optional = false
+optional = true
 python-versions = ">=3.6"
 groups = ["main"]
 files = [
@@ -1584,7 +1584,7 @@ test = ["psleak", "pytest", "pytest-instafail", "pytest-xdist", "setuptools"]
 name = "ptyprocess"
 version = "0.7.0"
 description = "Run a subprocess in a pseudo terminal"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
 markers = "sys_platform != \"win32\" and sys_platform != \"emscripten\""
@@ -1597,7 +1597,7 @@ files = [
 name = "pure-eval"
 version = "0.2.3"
 description = "Safely evaluate AST nodes without side effects"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
 files = [
@@ -1672,7 +1672,7 @@ files = [
 name = "pycparser"
 version = "2.23"
 description = "C parser in Python"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 markers = "implementation_name == \"pypy\""
@@ -1900,7 +1900,7 @@ pyyaml = "*"
 name = "pyzmq"
 version = "27.1.0"
 description = "Python bindings for 0MQ"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
@@ -2054,7 +2054,7 @@ tornado = ">=2.0"
 name = "stack-data"
 version = "0.6.3"
 description = "Extract data from python stack frames and tracebacks for informative displays"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
 files = [
@@ -2096,7 +2096,7 @@ files = [
 name = "traitlets"
 version = "5.14.3"
 description = "Traitlets Python configuration system"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
@@ -2197,7 +2197,7 @@ watchmedo = ["PyYAML (>=3.10)"]
 name = "wcwidth"
 version = "0.2.14"
 description = "Measures the displayed width of unicode strings in a terminal"
-optional = false
+optional = true
 python-versions = ">=3.6"
 groups = ["main"]
 files = [
@@ -2211,4 +2211,4 @@ jupyter = ["nest-asyncio"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "bcc2792393fd0d1f82f99563d13131ad2ee9f5039a2808406b5a87149843559a"
+content-hash = "4d394e2c4d4789d23ebbe64aeeb3da9b076356402be5bb7641897cd2af752a71"
