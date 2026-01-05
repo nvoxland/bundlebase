@@ -100,7 +100,7 @@ async fn main() -> Result<(), BundlebaseError> {
         Arc::new(State::new(
             Bundle::open(&args.bundle, None)
                 .await?
-                .extend(&args.bundle)?,
+                .extend(None)?,
         ))
     };
 

@@ -180,12 +180,19 @@ impl BundleBuilder {
         })
     }
 
-    pub fn extend(bundle: Arc<Bundle>, data_dir: &str) -> Result<BundleBuilder, BundlebaseError> {
+    pub fn extend(bundle: Arc<Bundle>, data_dir: Option<&str>) -> Result<BundleBuilder, BundlebaseError> {
         let mut new_bundle = bundle.deref().clone();
-        new_bundle.data_dir = ObjectStoreDir::from_str(data_dir, bundle.config())?;
-        if new_bundle.data_dir.url() != bundle.url() {
-            new_bundle.last_manifest_version = 0;
+
+        // If data_dir is provided and not empty, use it; otherwise keep the current bundle's data_dir
+        if let Some(dir) = data_dir {
+            if !dir.is_empty() {
+                new_bundle.data_dir = ObjectStoreDir::from_str(dir, bundle.config())?;
+                if new_bundle.data_dir.url() != bundle.url() {
+                    new_bundle.last_manifest_version = 0;
+                }
+            }
         }
+
         Ok(BundleBuilder {
             bundle: new_bundle,
             status: BundleStatus::new(),
@@ -1211,6 +1218,16 @@ impl BundleFacade for BundleBuilder {
 
     async fn view(&self, identifier: &str) -> Result<Bundle, BundlebaseError> {
         self.bundle.view(identifier).await
+    }
+
+    async fn export_tar(&self, tar_path: &str) -> Result<String, BundlebaseError> {
+        // Check for uncommitted changes
+        if !self.status().is_empty() {
+            return Err("Cannot export tar with uncommitted changes. Please commit first.".into());
+        }
+
+        // Delegate to the Bundle's implementation via BundleFacade
+        self.bundle.export_tar(tar_path).await
     }
 }
 

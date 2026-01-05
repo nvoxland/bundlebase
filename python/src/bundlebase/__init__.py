@@ -89,6 +89,7 @@ _original_methods = {
 
     # Persistence operations
     "commit": _PyBundleBuilder.commit,
+    "export_tar": _PyBundleBuilder.export_tar,
 
     # Note: schema, num_rows, explain are NOT in this dict because they:
     # - Return data rather than mutate the bundle
@@ -211,17 +212,21 @@ PyBundleBuilder.to_dict = lambda self: to_dict(self)
 
 # Wrap extend() on PyBundle to return an ExtendChain
 _original_extend = PyBundle.extend
-def _wrapped_extend(self, data_dir: str) -> ExtendChain:
-    """Extend a bundle to a new directory with chainable operations.
+def _wrapped_extend(self, data_dir: Optional[str] = None) -> ExtendChain:
+    """Extend a bundle with chainable operations.
 
     Args:
-        data_dir: Path to the new directory for the extended bundle
+        data_dir: Optional path to a new directory for the extended bundle.
+                  If None, uses the current bundle's data_dir.
 
     Returns:
         ExtendChain that can be chained with operations
 
     Example:
         c = await bundlebase.open(path)
+        # Extend in same location
+        extended = await c.extend().attach("data.parquet")
+        # Extend to new location
         extended = await c.extend(new_path).attach("data.parquet")
     """
     return ExtendChain(_original_extend, self, data_dir)

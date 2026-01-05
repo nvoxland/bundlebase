@@ -93,4 +93,33 @@ pub trait BundleFacade {
     /// # }
     /// ```
     async fn view(&self, identifier: &str) -> Result<Bundle, BundlebaseError>;
+
+    /// Exports the bundle's data directory to an uncompressed tar archive.
+    ///
+    /// Creates a tar file containing all bundle data including:
+    /// - `_bundlebase/` directory with all commit manifests
+    /// - All data files (parquet, CSV, etc.)
+    /// - All index files
+    /// - All layout files
+    ///
+    /// The resulting tar file can be opened as a bundle and supports
+    /// further commits via append-only mode since bundlebase never modifies
+    /// existing files.
+    ///
+    /// # Arguments
+    /// * `tar_path` - Path where the tar file should be created
+    ///
+    /// # Returns
+    /// Success message with the tar file path
+    ///
+    /// # Errors
+    /// Returns an error if the tar file cannot be created or if there are
+    /// uncommitted changes (for BundleBuilder instances).
+    ///
+    /// # Example
+    /// ```ignore
+    /// bundle.export_tar("archive.tar").await?;
+    /// let archived = Bundle::open("archive.tar", None).await?;
+    /// ```
+    async fn export_tar(&self, tar_path: &str) -> Result<String, BundlebaseError>;
 }

@@ -104,10 +104,12 @@ impl ObjectStoreDir {
 
     pub fn file(&self, path: &str) -> Result<ObjectStoreFile, BundlebaseError> {
         let file_url = join_url(&self.url, path)?;
-        let config_map = self.config.get_config_for_url(&file_url);
-        let (store, object_path) = parse_url(&file_url, &config_map)?;
+        let object_path = join_path(&self.path, path)?;
 
-        ObjectStoreFile::new(&file_url, store, &object_path)
+        // Reuse the existing store instead of creating a new one
+        // This is important for stores like TarObjectStore where the URL might not
+        // indicate the store type (e.g., file:///path.tar/subdir/file.txt)
+        ObjectStoreFile::new(&file_url, self.store.clone(), &object_path)
     }
 
     /// Creates a memory-backed directory for storing index and metadata files
