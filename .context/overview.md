@@ -40,6 +40,45 @@ Bundlebase is a high-performance data processing library written in Rust with Py
 - **Arc-Based Sharing**: Efficient cloning with shared state
 - **Manifest-Based Versioning**: Commit history with 'from' chain support
 
+
+## Quick Start
+
+### Basic Python Usage
+
+```python
+import bundlebase
+
+# Create a new container
+c = await bundlebase.create("/path/to/container")
+
+# Attach data
+await c.attach("data.parquet")
+
+# Transform data (mutations are in-place)
+await c.remove_column("unwanted")
+await c.filter("active = true")
+
+# Export results
+df = await c.to_pandas()
+
+# Commit changes
+await c.commit("Data transformation")
+```
+
+### Building and Testing
+
+```bash
+# Setup
+poetry install
+
+# Build Rust extension
+maturin develop
+
+# Run tests
+cargo test                # Rust tests
+poetry run pytest         # Python tests
+```
+
 ## Current State
 
 **Major Features Implemented:**
