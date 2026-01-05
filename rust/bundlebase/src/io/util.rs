@@ -1,4 +1,4 @@
-use crate::io::{get_memory_store, get_null_store, EMPTY_SCHEME};
+use crate::io::{get_memory_store, get_null_store, TarObjectStore, EMPTY_SCHEME};
 use crate::BundlebaseError;
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use object_store::path::Path;
@@ -20,6 +20,18 @@ pub(super) fn parse_url(
     url: &Url,
     config: &HashMap<String, String>,
 ) -> Result<(Arc<dyn ObjectStore>, Path), BundlebaseError> {
+    // Check for .tar file extension first (before other file:// handling)
+    if url.scheme() == "file" {
+        if let Ok(path) = url.to_file_path() {
+            if path.extension().and_then(|s| s.to_str()) == Some("tar") {
+                let store = TarObjectStore::new(path).map_err(|e| {
+                    format!("Failed to create TarObjectStore: {}", e)
+                })?;
+                return Ok((Arc::new(store), ObjectPath::from("/")));
+            }
+        }
+    }
+
     if url.scheme() == EMPTY_SCHEME {
         let store: Arc<dyn ObjectStore> = get_null_store();
 

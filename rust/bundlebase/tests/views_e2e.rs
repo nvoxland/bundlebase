@@ -86,7 +86,7 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
 
     // Reopen container and add more data to parent
     let c_bundle = Bundle::open(&container_url, None).await?;
-    let mut c_reopened = c_bundle.extend(&container_url)?;
+    let mut c_reopened = c_bundle.extend(None)?;
     c_reopened
         .attach(&test_datafile("customers-101-150.csv"))
         .await?;
@@ -298,7 +298,7 @@ async fn test_cannot_attach_to_view() -> Result<(), BundlebaseError> {
         &c.data_dir().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
         None,
     ).await?;
-    let mut view_builder = view_bundle.extend(random_memory_url().as_str())?;
+    let mut view_builder = view_bundle.extend(Some(random_memory_url().as_str()))?;
 
     // Try to attach data to the view - should fail
     let result = view_builder.attach(&test_datafile("customers-101-150.csv")).await;
@@ -330,7 +330,7 @@ async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
         &c.data_dir().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
         None,
     ).await?;
-    let mut view_builder = view_bundle.extend(random_memory_url().as_str())?;
+    let mut view_builder = view_bundle.extend(Some(random_memory_url().as_str()))?;
 
     // Try to create a view on the view - should fail
     let sub_view = view_builder.select("select * limit 5", vec![]).await?;
@@ -368,7 +368,7 @@ async fn test_cannot_drop_view_from_view() -> Result<(), BundlebaseError> {
         &c.data_dir().subdir(&format!("view_{}", view1_id))?.url().to_string(),
         None,
     ).await?;
-    let mut view_builder = view_bundle.extend(random_memory_url().as_str())?;
+    let mut view_builder = view_bundle.extend(Some(random_memory_url().as_str()))?;
 
     // Try to drop view2 from view1 - should fail
     let result = view_builder.drop_view("view2").await;

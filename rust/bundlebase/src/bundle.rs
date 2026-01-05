@@ -34,7 +34,7 @@ use datafusion::datasource::object_store::ObjectStoreUrl;
 use datafusion::logical_expr::{EmptyRelation, ExplainFormat, ExplainOption, LogicalPlan};
 use datafusion::prelude::*;
 use datafusion::scalar::ScalarValue;
-use log::debug;
+use log::{debug, info};
 use parking_lot::RwLock;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -389,8 +389,8 @@ impl Bundle {
     }
 
     /// Creates a BundleBuilder that extends this bundle.
-    /// Will store the new bundle in the passed data_dir.
-    pub fn extend(&self, data_dir: &str) -> Result<BundleBuilder, BundlebaseError> {
+    /// If data_dir is provided, stores the new bundle there; otherwise uses the current bundle's data_dir.
+    pub fn extend(&self, data_dir: Option<&str>) -> Result<BundleBuilder, BundlebaseError> {
         BundleBuilder::extend(Arc::new(self.clone()), data_dir)
     }
 
@@ -729,7 +729,7 @@ impl BundleFacade for Bundle {
         sql: &str,
         params: Vec<ScalarValue>,
     ) -> Result<BundleBuilder, BundlebaseError> {
-        let bundle = BundleBuilder::extend(Arc::new(self.clone()), &self.data_dir.url().as_str())?;
+        let bundle = BundleBuilder::extend(Arc::new(self.clone()), None)?;
         bundle.select(sql, params).await
     }
 
@@ -756,6 +756,80 @@ impl BundleFacade for Bundle {
             .iter()
             .map(|(name, id)| (id.clone(), name.clone()))
             .collect()
+    }
+
+    async fn export_tar(&self, tar_path: &str) -> Result<String, BundlebaseError> {
+        use futures::StreamExt;
+        use std::fs::File;
+        use tar::{Builder, Header};
+
+        let tar_file = File::create(tar_path).map_err(|e| {
+            format!("Failed to create tar file '{}': {}", tar_path, e)
+        })?;
+        let mut builder = Builder::new(tar_file);
+
+        // Get all files from the bundle's data_dir
+        let files = self.data_dir.list_files().await?;
+
+        debug!("Exporting {} files to tar archive", files.len());
+
+        for file in files {
+            // Extract relative path from file URL
+            let file_url = file.url();
+            let base_url = self.data_dir.url();
+
+            let relative_path = if file_url.as_str().starts_with(base_url.as_str()) {
+                &file_url.as_str()[base_url.as_str().len()..]
+            } else {
+                return Err(format!(
+                    "File URL '{}' is not under base URL '{}'",
+                    file_url, base_url
+                )
+                .into());
+            };
+
+            // Remove leading slash if present
+            let relative_path = relative_path.trim_start_matches('/');
+
+            debug!("Adding file to tar: {}", relative_path);
+
+            // Read file contents via stream
+            let mut stream = file.read_existing().await?;
+
+            // Collect stream into buffer (tar API requires &[u8])
+            let mut buffer = Vec::new();
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result?;
+                buffer.extend_from_slice(&chunk);
+            }
+
+            // Create tar header
+            let mut header = Header::new_gnu();
+            header.set_size(buffer.len() as u64);
+            header.set_mode(0o644);
+            header.set_mtime(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            );
+            header.set_cksum();
+
+            // Append to tar
+            builder
+                .append_data(&mut header, relative_path, &buffer[..])
+                .map_err(|e| {
+                    format!("Failed to append file '{}' to tar: {}", relative_path, e)
+                })?;
+        }
+
+        // Finish writing tar (writes footer)
+        builder.finish().map_err(|e| {
+            format!("Failed to finalize tar archive: {}", e)
+        })?;
+
+        info!("Exported bundle to tar archive: {}", tar_path);
+        Ok(format!("Exported bundle to {}", tar_path))
     }
 }
 

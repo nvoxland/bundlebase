@@ -26,6 +26,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util
 tonic = "0.14"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
+tar = "0.4"
 rstest = "0.26"
 
 [profile.dev]

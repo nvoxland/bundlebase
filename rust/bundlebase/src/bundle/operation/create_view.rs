@@ -51,7 +51,7 @@ impl CreateViewOp {
             .to_string();
 
         let view_builder =
-            BundleBuilder::extend(Arc::new(parent_builder.bundle.clone()), &view_dir_path)?;
+            BundleBuilder::extend(Arc::new(parent_builder.bundle.clone()), Some(&view_dir_path))?;
 
         // Note: We do NOT apply operations to the view bundle during setup.
         // Operations are stored in the commit file and will be applied when

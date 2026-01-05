@@ -624,6 +624,32 @@ impl PyBundleBuilder {
         })
     }
 
+    fn export_tar<'py>(
+        slf: PyRef<'_, Self>,
+        tar_path: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let tar_path = tar_path.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let builder = inner.lock().await;
+            builder
+                .export_tar(&tar_path)
+                .await
+                .map_err(|e| to_py_error(&format!("Failed to export to tar '{}'", tar_path), e))?;
+            drop(builder);
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
     /// Reset all uncommitted operations, reverting to the last committed state.
     fn reset<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();

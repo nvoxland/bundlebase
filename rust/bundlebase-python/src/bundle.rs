@@ -126,7 +126,8 @@ impl PyBundle {
         self.inner.url().to_string()
     }
 
-    fn extend(&self, data_dir: &str) -> PyResult<super::builder::PyBundleBuilder> {
+    #[pyo3(signature = (data_dir=None))]
+    fn extend(&self, data_dir: Option<&str>) -> PyResult<super::builder::PyBundleBuilder> {
         let builder = self.inner.extend(data_dir).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Failed to extend bundle: {}",
@@ -188,6 +189,26 @@ impl PyBundle {
             .iter()
             .map(|op| super::operation::PyOperation::new(op.clone()))
             .collect()
+    }
+
+    fn export_tar<'py>(
+        &self,
+        tar_path: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let tar_path = tar_path.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .export_tar(&tar_path)
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to export to tar '{}': {}",
+                        tar_path, e
+                    ))
+                })
+        })
     }
 }
 
