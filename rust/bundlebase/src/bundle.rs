@@ -385,22 +385,6 @@ impl Bundle {
                 }
             }
         }
-
-        // Discover mirrored files and add to config
-        let mirrored_files = discover_mirrored_files(&data_dir).await?;
-        if !mirrored_files.is_empty() {
-            // Create mirror mappings (filename -> "mirrored/{filename}")
-            let mirror_mappings: HashMap<String, String> = mirrored_files
-                .into_iter()
-                .map(|filename| (filename.clone(), format!("mirrored/{}", filename)))
-                .collect();
-
-            // Update bundle config with mirrors (only add new mappings, newest bundle wins)
-            bundle.config = Arc::new(bundle.config.as_ref().with_mirror_mappings(mirror_mappings));
-
-            debug!("Discovered {} mirrored files in {}", bundle.config.as_ref().get_mirror_path("").map_or(0, |_| 1), data_dir.url());
-        }
-
         Ok(())
     }
 
@@ -923,34 +907,6 @@ pub fn scalar_value_to_sql_literal(value: &ScalarValue) -> String {
         // For other types, convert to string representation
         _ => value.to_string(),
     }
-}
-
-/// Discover mirrored files in a bundle's data directory
-///
-/// Lists all files in the mirrored/ subdirectory and returns their filenames.
-///
-/// # Arguments
-/// * `data_dir` - The bundle's data directory to check for mirrored files
-///
-/// # Returns
-/// Vec of filenames found in the mirrored/ directory (empty if directory doesn't exist)
-async fn discover_mirrored_files(
-    data_dir: &ObjectStoreDir
-) -> Result<Vec<String>, BundlebaseError> {
-    let mirrored_dir = data_dir.subdir("mirrored")?;
-
-    // Try to list files in mirrored/ directory
-    // If directory doesn't exist, list_files will return empty or error
-    let files = match mirrored_dir.list_files().await {
-        Ok(files) => files,
-        Err(_) => return Ok(Vec::new()), // Directory doesn't exist or can't be read
-    };
-
-    let filenames = files.iter()
-        .map(|file| file.filename().to_string())
-        .collect();
-
-    Ok(filenames)
 }
 
 #[cfg(test)]

@@ -32,24 +32,11 @@ impl ObjectStoreFile {
     }
 
     /// Creates a file from the passed string. The string can be either a URL or a path relative to the passed base_dir.
-    ///
-    /// This method checks for mirrored files first. If a mirror exists for the filename,
-    /// it returns the mirrored file instead of the original source.
     pub fn from_str(
         path: &str,
         base: &ObjectStoreDir,
         config: Arc<BundleConfig>,
     ) -> Result<ObjectStoreFile, BundlebaseError> {
-        // Extract filename from path (handles URLs and relative paths)
-        let filename = extract_filename_from_path(path);
-
-        // Check if there's a mirrored copy first
-        if let Some(mirror_path) = config.get_mirror_path(&filename) {
-            // Mirror found - use relative path from base directory
-            return base.file(mirror_path);
-        }
-
-        // No mirror - normal resolution
         if path.contains(":") {
             // Absolute URL - use provided config
             Self::from_url(&Url::parse(path)?, config)
@@ -282,29 +269,6 @@ impl ObjectStoreFile {
 impl Display for ObjectStoreFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ObjectStoreFile({} {})", self.store, self.path)
-    }
-}
-
-/// Extract filename from a path or URL
-///
-/// This handles both URLs (like "s3://bucket/path/file.parquet") and
-/// relative paths (like "path/to/file.txt").
-fn extract_filename_from_path(path: &str) -> String {
-    if path.contains(":") {
-        // URL path - extract last segment
-        if let Ok(url) = Url::parse(path) {
-            if let Some(segments) = url.path_segments() {
-                if let Some(last) = segments.last() {
-                    return last.to_string();
-                }
-            }
-        }
-        "file".to_string()
-    } else {
-        // Relative path - extract filename
-        path.split('/').last()
-            .unwrap_or(path)
-            .to_string()
     }
 }
 

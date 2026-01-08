@@ -83,11 +83,6 @@ pub struct BundleConfig {
     /// URL-specific overrides (key is URL prefix like "s3://bucket/")
     #[serde(default)]
     url_overrides: HashMap<String, HashMap<String, String>>,
-
-    /// Maps filename -> mirror path (e.g., "data.parquet" -> "mirrored/data.parquet")
-    /// Populated during bundle loading by discovering mirrored files
-    #[serde(default)]
-    mirror_mappings: HashMap<String, String>,
 }
 
 impl BundleConfig {
@@ -183,44 +178,6 @@ impl BundleConfig {
         }
 
         merged
-    }
-
-    /// Get mirror path for a filename if available
-    ///
-    /// # Arguments
-    /// * `filename` - The filename to check for a mirror
-    ///
-    /// # Returns
-    /// Optional reference to the mirror path (e.g., "mirrored/data.parquet")
-    pub fn get_mirror_path(&self, filename: &str) -> Option<&String> {
-        self.mirror_mappings.get(filename)
-    }
-
-    /// Add a mirror mapping
-    ///
-    /// # Arguments
-    /// * `filename` - The filename that has been mirrored
-    /// * `mirror_path` - The path to the mirrored file (e.g., "mirrored/data.parquet")
-    pub fn add_mirror_mapping(&mut self, filename: String, mirror_path: String) {
-        self.mirror_mappings.insert(filename, mirror_path);
-    }
-
-    /// Create a new config with mirror mappings added
-    ///
-    /// # Arguments
-    /// * `mappings` - HashMap of filename -> mirror path to add
-    ///
-    /// # Returns
-    /// A new BundleConfig with the mirror mappings included (existing mappings are preserved)
-    pub fn with_mirror_mappings(&self, mappings: HashMap<String, String>) -> BundleConfig {
-        let mut config = self.clone();
-
-        // Only add new mappings (existing ones are preserved - first wins)
-        for (filename, mirror_path) in mappings {
-            config.mirror_mappings.entry(filename).or_insert(mirror_path);
-        }
-
-        config
     }
 
     /// Get config for a specific URL using longest prefix matching
