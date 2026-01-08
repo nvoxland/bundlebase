@@ -230,6 +230,6 @@ Bundlebase supports [Apache Datafusion SQL syntax](https://datafusion.apache.org
 ## Next Steps
 
 - **[Basic Concepts](basic-concepts.md)** - Learn about bundles, operations, and versioning
-- **[User Guide](../guides/architecture.md)** - Deep dive into advanced topics
+- **[User Guide](../guide/attaching.md)** - Deep dive into advanced topics
 - **[API Reference](../api/python/index.md)** - Complete API documentation
 - **[Examples](../examples/basic-operations.md)** - More examples

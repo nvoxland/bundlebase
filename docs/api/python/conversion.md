@@ -223,4 +223,3 @@ final_result = combine_results(results)
 
 - **[Async API](async-api.md)** - Bundle operations
 - **[Progress Tracking](progress.md)** - Monitor streaming operations
-- **[Basic Concepts](../../getting-started/basic-concepts.md#streaming-execution)** - Streaming architecture

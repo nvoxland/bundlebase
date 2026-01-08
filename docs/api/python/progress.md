@@ -228,5 +228,5 @@ async for batch in bundlebase.stream_batches(c, progress=progress):
 ## See Also
 
 - **[Conversion Functions](conversion.md)** - `stream_batches()` usage
-- **[Progress Tracking Guide](../../guides/progress-tracking.md)** - Detailed guide
+- **[Logging](../../guide/logging.md)** - Detailed guide
 - **[Async API](async-api.md)** - Core bundle operations

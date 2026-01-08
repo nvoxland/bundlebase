@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+PYTHONWARNINGS="ignore::DeprecationWarning:mkdocstrings.plugin,ignore::DeprecationWarning:mkdocstrings.handlers.base"
+
 echo "Building Bundlebase documentation..."
 
 # Ensure docs dependencies are installed
