@@ -101,39 +101,6 @@ markdown_extensions:
       custom_checkbox: true
   - pymdownx.tilde
 
-#nav:
-#  - Home: index.md
-#  - Getting Started:
-#      - Installation: getting-started/install.md
-#      - Quick Start: getting-started/quick-start.md
-#      - Basic Concepts: getting-started/basic-concepts.md
-#  - User Guide:
-#      - Architecture: guides/architecture.md
-#      - Versioning: guides/versioning.md
-#      - Row Indexing: guides/row-indexing.md
-#      - Progress Tracking: guides/progress-tracking.md
-#      - Logging: guides/logging.md
-#      - Views: guides/views.md
-#      - ...
-#  - API Reference:
-#      - Python:
-#          - Overview: api-reference/python/index.md
-#          - Async API: api-reference/python/async-api.md
-#          - Sync API: api-reference/python/sync-api.md
-#          - Conversion: api-reference/python/conversion.md
-#          - Progress: api-reference/python/progress.md
-#          - Chains: api-reference/python/chain.md
-#      - Rust:
-#          - Overview: api-reference/rust/index.md
-#  - Examples:
-#      - Basic Operations: examples/basic-operations.md
-#      - Metrics & Monitoring: examples/metrics.md
-#  - Development:
-#      - Setup: development/setup.md
-#      - Testing: development/testing.md
-#      - Python Bindings: development/python-bindings.md
-#      - Contributing: development/contributing.md
-
 extra:
   social:
     - icon: fontawesome/brands/github

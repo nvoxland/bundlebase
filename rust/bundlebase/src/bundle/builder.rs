@@ -1136,41 +1136,6 @@ impl BundleBuilder {
     pub fn data_dir(&self) -> &ObjectStoreDir {
         &self.bundle.data_dir
     }
-
-    /// Creates a local mirror of remote files from parent bundles.
-    ///
-    /// This operation eagerly copies all remote files (s3://, https://, etc.) from
-    /// the FROM chain to the local mirrored/ directory. Local file:// paths are not copied.
-    /// Files use original filenames, with first-encountered (newest ancestor) winning on conflicts.
-    ///
-    /// # Returns
-    /// Self for method chaining
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use bundlebase::BundleBuilder;
-    /// # async fn example() -> Result<(), bundlebase::BundlebaseError> {
-    /// let mut bundle = BundleBuilder::create("memory:///test", None).await?;
-    /// bundle.create_mirror().await?;
-    /// bundle.commit("Mirrored remote files").await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn create_mirror(&mut self) -> Result<&mut Self, BundlebaseError> {
-        use crate::bundle::operation::create_mirror::CreateMirrorOp;
-
-        self.do_change("Create mirror", |builder| {
-            Box::pin(async move {
-                let op = CreateMirrorOp::mirror_files_atomic(&builder.bundle).await?;
-                builder.apply_operation(op.into()).await?;
-
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
-    }
 }
 
 #[async_trait]
