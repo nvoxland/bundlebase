@@ -257,6 +257,6 @@ await c.commit("Data cleaning pipeline v1.0")
 
 ## See Also
 
-- [Getting Started](../../getting-started/quick-start/)
-- [User Guide](../../guide/attaching/) 
-- [API Reference](../../api/python/)
+- [Getting Started](../getting-started/quick-start.md)
+- [User Guide](../guide/attaching.md) 
+- [API Reference](../api/python/index.md)

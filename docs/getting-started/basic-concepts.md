@@ -152,4 +152,4 @@ Bundlebase uses a sophisticated indexing system that:
 - Uses cost-based optimization to decide when to use indexes
 - Supports multiple index types for different data types
 
-Learn more in the [Indexing Guide](../guides/indexing.md).
+Learn more in the [Indexing Guide](../guide/indexing.md).

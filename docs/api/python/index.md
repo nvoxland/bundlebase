@@ -135,4 +135,4 @@ async def process_data(path: str) -> pd.DataFrame:
 - **[Async API Reference](async-api.md)** - Complete async API documentation
 - **[Sync API Reference](sync-api.md)** - Complete sync API documentation
 - **[Examples](../../examples/basic-operations.md)** - Practical code examples
-- **[Guides](../../guides/architecture.md)** - Deep dives into advanced topics
+- **[Guides](../../guide/attaching.md)** - Deep dives into advanced topics
