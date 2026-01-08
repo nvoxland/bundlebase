@@ -33,5 +33,5 @@ test_data/*.dbc
 *.swo
 *~
 
-examples
+./examples
 site

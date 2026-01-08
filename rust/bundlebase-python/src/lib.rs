@@ -12,6 +12,7 @@ mod session_context;
 mod utils;
 
 use ::bundlebase::bundle::{Bundle, BundleBuilder};
+use ::bundlebase::metrics::init_logging_metrics;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
@@ -58,6 +59,11 @@ pub fn open<'py>(
     })
 }
 
+#[pyfunction]
+fn log_metrics() {
+    init_logging_metrics();
+}
+
 /// Get memory URL for test data file
 #[pyfunction]
 pub fn test_datafile(name: String) -> PyResult<String> {
@@ -73,6 +79,7 @@ pub fn random_memory_url() -> PyResult<String> {
 #[pymodule(name = "_bundlebase")]
 fn bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(create, m)?)?;
+    m.add_function(wrap_pyfunction!(log_metrics, m)?)?;
     m.add_function(wrap_pyfunction!(open, m)?)?;
     m.add_function(wrap_pyfunction!(test_datafile, m)?)?;
     m.add_function(wrap_pyfunction!(random_memory_url, m)?)?;
