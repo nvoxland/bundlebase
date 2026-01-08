@@ -650,6 +650,35 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Creates a local mirror of remote files from parent bundles.
+    ///
+    /// This operation eagerly copies all remote files (s3://, https://, etc.) from
+    /// the FROM chain to the local mirrored/ directory. Local file:// paths are not copied.
+    /// Files use original filenames, with first-encountered (newest ancestor) winning on conflicts.
+    fn create_mirror<'py>(
+        slf: PyRef<'_, Self>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            builder
+                .create_mirror()
+                .await
+                .map_err(|e| to_py_error("Failed to create mirror", e))?;
+            drop(builder);
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
     /// Reset all uncommitted operations, reverting to the last committed state.
     fn reset<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();

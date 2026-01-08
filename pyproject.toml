@@ -59,6 +59,7 @@ pymdown-extensions = "^10.12.0"
 mkdocs-gen-files = "^0.5.0"
 mkdocs-literate-nav = "^0.6.0"
 mkdocs-autorefs = "^1.2.0"
+mkdocs-awesome-pages-plugin = "^2.10.1"
 
 [tool.poetry.extras]
 jupyter = ["nest-asyncio"]

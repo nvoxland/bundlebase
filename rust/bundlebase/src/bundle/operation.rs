@@ -1,4 +1,5 @@
 mod attach_block;
+pub mod create_mirror;
 mod create_view;
 mod define_function;
 mod create_index;
@@ -19,6 +20,7 @@ mod set_description;
 mod set_name;
 
 pub use crate::bundle::operation::attach_block::AttachBlockOp;
+pub use crate::bundle::operation::create_mirror::CreateMirrorOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
 pub use crate::bundle::operation::define_function::DefineFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
@@ -123,6 +125,7 @@ pub enum AnyOperation {
     Filter(FilterOp),
     IndexBlocks(IndexBlocksOp),
     CreateIndex(CreateIndexOp),
+    CreateMirror(CreateMirrorOp),
     DefinePack(DefinePackOp),
     DropIndex(DropIndexOp),
     DropView(DropViewOp),
@@ -147,6 +150,7 @@ impl Operation for AnyOperation {
             AnyOperation::Filter(op) => op.describe(),
             AnyOperation::IndexBlocks(op) => op.describe(),
             AnyOperation::CreateIndex(op) => op.describe(),
+            AnyOperation::CreateMirror(op) => op.describe(),
             AnyOperation::DefinePack(op) => op.describe(),
             AnyOperation::DropIndex(op) => op.describe(),
             AnyOperation::DropView(op) => op.describe(),
@@ -170,6 +174,7 @@ impl Operation for AnyOperation {
             AnyOperation::Filter(op) => op.check(bundle).await,
             AnyOperation::IndexBlocks(op) => op.check(bundle).await,
             AnyOperation::CreateIndex(op) => op.check(bundle).await,
+            AnyOperation::CreateMirror(op) => op.check(bundle).await,
             AnyOperation::DefinePack(op) => op.check(bundle).await,
             AnyOperation::DropIndex(op) => op.check(bundle).await,
             AnyOperation::DropView(op) => op.check(bundle).await,
@@ -193,6 +198,7 @@ impl Operation for AnyOperation {
             AnyOperation::Filter(op) => op.apply(bundle).await,
             AnyOperation::IndexBlocks(op) => op.apply(bundle).await,
             AnyOperation::CreateIndex(op) => op.apply(bundle).await,
+            AnyOperation::CreateMirror(op) => op.apply(bundle).await,
             AnyOperation::DefinePack(op) => op.apply(bundle).await,
             AnyOperation::DropIndex(op) => op.apply(bundle).await,
             AnyOperation::DropView(op) => op.apply(bundle).await,
@@ -220,6 +226,7 @@ impl Operation for AnyOperation {
             AnyOperation::Filter(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::IndexBlocks(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::CreateIndex(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::CreateMirror(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DefinePack(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DropIndex(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DropView(op) => op.apply_dataframe(df, ctx).await,
@@ -243,6 +250,7 @@ impl Operation for AnyOperation {
             AnyOperation::Filter(op) => op.version(),
             AnyOperation::IndexBlocks(op) => op.version(),
             AnyOperation::CreateIndex(op) => op.version(),
+            AnyOperation::CreateMirror(op) => op.version(),
             AnyOperation::DefinePack(op) => op.version(),
             AnyOperation::DropIndex(op) => op.version(),
             AnyOperation::DropView(op) => op.version(),
@@ -266,6 +274,7 @@ impl Operation for AnyOperation {
             AnyOperation::Filter(op) => op.allowed_on_view(),
             AnyOperation::IndexBlocks(op) => op.allowed_on_view(),
             AnyOperation::CreateIndex(op) => op.allowed_on_view(),
+            AnyOperation::CreateMirror(op) => op.allowed_on_view(),
             AnyOperation::DefinePack(op) => op.allowed_on_view(),
             AnyOperation::DropIndex(op) => op.allowed_on_view(),
             AnyOperation::DropView(op) => op.allowed_on_view(),
@@ -355,6 +364,12 @@ impl From<SetDescriptionOp> for AnyOperation {
 impl From<CreateIndexOp> for AnyOperation {
     fn from(config: CreateIndexOp) -> Self {
         AnyOperation::CreateIndex(config)
+    }
+}
+
+impl From<CreateMirrorOp> for AnyOperation {
+    fn from(config: CreateMirrorOp) -> Self {
+        AnyOperation::CreateMirror(config)
     }
 }
 

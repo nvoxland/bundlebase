@@ -21,6 +21,8 @@ use opentelemetry_sdk::{
 };
 use opentelemetry_stdout::{MetricsExporter, SpanExporter};
 
+// Add tokio runtime handling to avoid panics when called without an existing runtime
+use std::thread;
 
 /// Initialize logging-based metrics export with default settings
 ///
@@ -59,34 +61,70 @@ pub fn init_logging_metrics() -> bool {
 /// init_logging_metrics_with_interval(Duration::from_secs(30));
 /// ```
 pub fn init_logging_metrics_with_interval(interval: std::time::Duration) -> bool {
-    // Initialize tracing (spans)
-    let span_exporter = SpanExporter::default();
-    let span_processor =
-        BatchSpanProcessor::builder(span_exporter, opentelemetry_sdk::runtime::Tokio).build();
+    // Helper closure to build and register the providers. This will be called
+    // either with an existing Tokio context (no-op), or while a newly-created
+    // runtime is entered to ensure tokio::spawn / tokio::time work correctly.
+    let build_providers = || {
+        // Initialize tracing (spans)
+        let span_exporter = SpanExporter::default();
+        let span_processor =
+            BatchSpanProcessor::builder(span_exporter, opentelemetry_sdk::runtime::Tokio).build();
 
-    let tracer_provider = TracerProvider::builder()
-        .with_span_processor(span_processor)
-        .build();
+        let tracer_provider = TracerProvider::builder()
+            .with_span_processor(span_processor)
+            .build();
 
-    global::set_tracer_provider(tracer_provider);
+        global::set_tracer_provider(tracer_provider);
 
-    // Initialize metrics
-    let metrics_exporter = MetricsExporter::default();
+        // Initialize metrics
+        let metrics_exporter = MetricsExporter::default();
 
-    let reader = PeriodicReader::builder(metrics_exporter, opentelemetry_sdk::runtime::Tokio)
-        .with_interval(interval)
-        .build();
+        let reader = PeriodicReader::builder(metrics_exporter, opentelemetry_sdk::runtime::Tokio)
+            .with_interval(interval)
+            .build();
 
-    let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let meter_provider = SdkMeterProvider::builder().with_reader(reader).build();
 
-    global::set_meter_provider(meter_provider);
+        global::set_meter_provider(meter_provider);
 
-    log::info!(
-        "Initialized logging-based metrics and tracing exporters (interval: {:?})",
-        interval
-    );
+        log::info!(
+            "Initialized logging-based metrics and tracing exporters (interval: {:?})",
+            interval
+        );
+    };
 
-    true
+    // If there's already a current Tokio runtime, just build providers normally.
+    if tokio::runtime::Handle::try_current().is_ok() {
+        build_providers();
+        return true;
+    }
+
+    // No Tokio runtime currently running on this thread. Create a dedicated runtime,
+    // enter it while building the providers (so tokio::spawn attaches to it), then
+    // move the runtime into a background thread to keep it alive for the process
+    // lifetime so the periodic reader's timers can run.
+    match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+        Ok(rt) => {
+            // Enter the runtime so any tokio::spawn calls below attach to it
+            let handle = rt.handle().clone();
+            let _enter = handle.enter();
+
+            // Build providers while the runtime is entered
+            build_providers();
+
+            // Move runtime into background thread and keep it alive by blocking on a pending future.
+            thread::spawn(move || {
+                // Keep the runtime running forever (until process exit)
+                rt.block_on(async { std::future::pending::<()>().await });
+            });
+
+            true
+        }
+        Err(e) => {
+            log::warn!("Failed to create Tokio runtime for metrics: {}", e);
+            false
+        }
+    }
 }
 
 /// Log current metrics immediately (on-demand)

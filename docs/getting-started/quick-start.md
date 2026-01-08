@@ -2,114 +2,142 @@
 
 This guide will get you started with Bundlebase in just a few minutes. We'll cover both the async and sync APIs.
 
+## Installation
+
+To install Bundlebase, see [the installation guide](install.md)
+
 ## Choose Your API Style
 
 Bundlebase offers two API styles for maximum flexibility:
 
+- Async/await interface - ideal for concurrent operations and production code.
+- Synchronous interface - perfect for scripts and Jupyter notebooks.
+
+Make sure you are importing the version you want to use
+
 === "Async API"
 
-    Modern async/await interface - ideal for concurrent operations and production code.
-
     ```python
-    import bundlebase
+    import bundlebase as bb
 
     # All operations use await
-    c = await bundlebase.create()
+    c = await bb.create()
     c = await c.attach("data.parquet")
     df = await c.to_pandas()
     ```
 
 === "Sync API"
 
-    Synchronous interface - perfect for scripts and Jupyter notebooks.
-
     ```python
-    import bundlebase.sync as dc
+    import bundlebase.sync as bb
 
     # No await needed!
-    c = dc.create()
-    c = c.attach("data.parquet")
-    df = c.to_pandas()
+    c = bb.create()
+    c = bb.attach("data.parquet")
+    df = bb.to_pandas()
     ```
-
-Choose the tab above that matches your preferred style - all examples below will update accordingly.
 
 ## Creating Your First Bundle
 
+You create your bundle in a given directory where all data will be saved. 
+
+The data_dir can be a local filepath or a remote URL (S3, Azure, GCS)
+
 === "Async API"
 
     ```python
-    import bundlebase
+    import bundlebase as bb
 
     # Create a new bundle
-    c = await bundlebase.create()
+    c = await bb.create("s3://mybucket/path")
     ```
 
 === "Sync API"
 
     ```python
-    import bundlebase.sync as dc
+    import bundlebase.sync as bb
 
     # Create a new bundle
-    c = dc.create()
+    c = bb.create("s3://mybucket/path")
     ```
 
-## Loading Data
+## Attaching Data
 
-Bundlebase supports multiple data formats: Parquet, CSV, JSON, and more.
+A bundle is no use without data, add it with `attach()`.
+
+- Bundlebase supports multiple data formats: Parquet, CSV, and JSON.
+- Attaching multiple files unions the data together -- even across data types
+- Datafile paths can be relative to the data_dir OR an absolute URL to anywhere
 
 === "Async API"
 
     ```python
     # Attach data sources
-    c = await c.attach("data.parquet")
-    c = await c.attach("more_data.csv")
-    c = await c.attach("additional.json")
+    await c.attach("local_data.parquet")
+    await c.attach("s3://other_bucket/more_data.csv")
+    await c.attach("https://example.com/additional.json")
     ```
 
 === "Sync API"
 
     ```python
     # Attach data sources
-    c = c.attach("data.parquet")
-    c = c.attach("more_data.csv")
-    c = c.attach("additional.json")
+    c.attach("local_data.parquet")
+    c.attach("s3://other_bucket/more_data.csv")
+    c.attach("https://example.com/additional.json")
     ```
 
 ## Transforming Data
 
-Bundlebase provides a fluent API for transforming your data:
+Bundlebase provides APIs for transforming your data:
 
 === "Async API"
 
     ```python
     # Filter rows
-    c = await c.filter("age >= 18")
-
-    # Select specific columns
-    c = await c.select(["id", "name", "email"])
+    await c.filter("age >= 18")
 
     # Remove columns
-    c = await c.remove_column("ssn")
+    await c.remove_column("ssn")
 
     # Rename columns
-    c = await c.rename_column("fname", "first_name")
+    await c.rename_column("fname", "first_name")
     ```
 
 === "Sync API"
 
     ```python
     # Filter rows
-    c = c.filter("age >= 18")
-
-    # Select specific columns
-    c = c.select(["id", "name", "email"])
+    c.filter("age >= 18")
 
     # Remove columns
-    c = c.remove_column("ssn")
+    c.remove_column("ssn")
 
     # Rename columns
-    c = c.rename_column("fname", "first_name")
+    c.rename_column("fname", "first_name")
+    ```
+
+## Committing Changes
+
+When you are happy with your bundle, commit the state to disk so it can be re-opened and shared:
+
+
+=== "Async API"
+
+    ```python
+    await c.commit("Initial commit")
+
+    ## then later...
+    c = bb.open("s3://mybucket/path")
+    ```
+
+=== "Sync API"
+
+    ```python
+    c.commit("Initial commit")
+
+    ## then later...
+    c = bb.open("s3://mybucket/path")
     ```
 
 ## Method Chaining
@@ -119,27 +147,23 @@ All mutation methods return `self`, enabling clean method chaining:
 === "Async API"
 
     ```python
-    import bundlebase
-
-    c = await (bundlebase.create()
+    c = await (bb.create()
         .attach("data.parquet")
         .filter("active = true")
         .remove_column("temp_field")
-        .rename_column("old_name", "new_name")
-        .select(["id", "name", "value"]))
+        .rename_column("old_name", "new_name"))
     ```
 
 === "Sync API"
 
     ```python
-    import bundlebase.sync as dc
+    import bundlebase.sync as bb
 
-    c = (dc.create()
+    c = (bb.create()
         .attach("data.parquet")
         .filter("active = true")
         .remove_column("temp_field")
-        .rename_column("old_name", "new_name")
-        .select(["id", "name", "value"]))
+        .rename_column("old_name", "new_name"))
     ```
 
 ## Exporting Results
@@ -178,288 +202,34 @@ Convert your bundle to your preferred data format:
     data = c.to_dict()
     ```
 
-## Complete Example: Data Cleaning Pipeline
+## Querying the Bundle
 
-Here's a complete example showing a typical data cleaning workflow:
+You can run standard SQL queries against your bundle. 
+
+Bundlebase supports [Apache Datafusion SQL syntax](https://datafusion.apache.org/user-guide/sql/index.html)
+
 
 === "Async API"
 
     ```python
-    import bundlebase
-
-    # Create and chain operations
-    c = await (bundlebase.create()
-        .attach("raw_customers.csv")
-        .filter("status = 'active'")
-        .remove_column("email")      # Remove PII
-        .remove_column("phone")      # Remove PII
-        .rename_column("fname", "first_name")
-        .rename_column("lname", "last_name")
-        .select(["id", "first_name", "last_name", "country"]))
-
-    # Convert to pandas and save
-    df = await c.to_pandas()
-    print(f"Processed {len(df)} active customers")
-
-    # Commit changes for versioning
-    await c.commit("Cleaned customer data, removed PII")
+    rs = await c.select("select * from data where revenue > 100")
+    
+    # Can export the rs like a bundle
+    df = rs.to_polars()
     ```
 
 === "Sync API"
 
     ```python
-    import bundlebase.sync as dc
-
-    # Create and chain operations
-    c = (dc.create()
-        .attach("raw_customers.csv")
-        .filter("status = 'active'")
-        .remove_column("email")      # Remove PII
-        .remove_column("phone")      # Remove PII
-        .rename_column("fname", "first_name")
-        .rename_column("lname", "last_name")
-        .select(["id", "first_name", "last_name", "country"]))
-
-    # Convert to pandas and save
-    df = c.to_pandas()
-    print(f"Processed {len(df)} active customers")
-
-    # Commit changes for versioning
-    c.commit("Cleaned customer data, removed PII")
+    rs = c.select("select * from data where revenue > 100")
+    
+    # Can export the rs like a bundle
+    df = rs.to_polars()
     ```
-
-## Joining Data
-
-Combine multiple datasets with joins:
-
-=== "Async API"
-
-    ```python
-    import bundlebase
-
-    # Start with customers
-    c = await (bundlebase.create()
-        .attach("customers.parquet"))
-
-    # Join with orders
-    c = await c.join(
-        "orders.parquet",
-        left_on="customer_id",
-        right_on="id",
-        join_type="inner"
-    )
-
-    # Export joined data
-    df = await c.to_pandas()
-    ```
-
-=== "Sync API"
-
-    ```python
-    import bundlebase.sync as dc
-
-    # Start with customers
-    c = (dc.create()
-        .attach("customers.parquet"))
-
-    # Join with orders
-    c = c.join(
-        "orders.parquet",
-        left_on="customer_id",
-        right_on="id",
-        join_type="inner"
-    )
-
-    # Export joined data
-    df = c.to_pandas()
-    ```
-
-## Working with Large Datasets
-
-For datasets larger than RAM, use streaming:
-
-=== "Async API"
-
-    ```python
-    import bundlebase
-
-    # Open large dataset
-    c = await bundlebase.open("huge_dataset.parquet")
-
-    # Stream batches instead of loading everything
-    total_rows = 0
-    async for batch in bundlebase.stream_batches(c):
-        # Each batch is ~100MB, not entire dataset
-        total_rows += batch.num_rows
-        # Memory is freed after each iteration
-
-    print(f"Processed {total_rows} rows")
-    ```
-
-=== "Sync API"
-
-    ```python
-    import bundlebase.sync as dc
-
-    # Open large dataset
-    c = dc.create().attach("huge_dataset.parquet")
-
-    # Stream batches instead of loading everything
-    total_rows = 0
-    for batch in dc.stream_batches(c):
-        # Each batch is ~100MB, not entire dataset
-        total_rows += batch.num_rows
-        # Memory is freed after each iteration
-
-    print(f"Processed {total_rows} rows")
-    ```
-
-## Version Control with Commits
-
-Bundlebase includes built-in versioning similar to Git:
-
-=== "Async API"
-
-    ```python
-    import bundlebase
-
-    # Create and process data
-    c = await (bundlebase.create("/path/to/bundle")
-        .attach("data.parquet")
-        .filter("year >= 2020"))
-
-    # Commit changes
-    await c.commit("Filtered to 2020 and later")
-
-    # Later, load the saved bundle
-    c = await bundlebase.open("/path/to/bundle")
-    df = await c.to_pandas()
-    ```
-
-=== "Sync API"
-
-    ```python
-    import bundlebase.sync as dc
-
-    # Create and process data
-    c = (dc.create("/path/to/bundle")
-        .attach("data.parquet")
-        .filter("year >= 2020"))
-
-    # Commit changes
-    c.commit("Filtered to 2020 and later")
-
-    # Later, load the saved bundle
-    c = dc.open("/path/to/bundle")
-    df = c.to_pandas()
-    ```
-
-## Using in Jupyter Notebooks
-
-For Jupyter notebooks, use the sync API with the jupyter extra:
-
-```bash
-pip install "bundlebase[jupyter]"
-```
-
-Then in your notebook:
-
-```python
-import bundlebase.sync as dc
-
-c = (dc.create()
-    .attach("data.parquet")
-    .filter("active = true"))
-
-# Display results
-display(c.to_pandas())
-```
 
 ## Next Steps
 
-Now that you understand the basics:
-
 - **[Basic Concepts](basic-concepts.md)** - Learn about bundles, operations, and versioning
-- **[API Reference](../api-reference/python/index.md)** - Complete API documentation
-- **[Guides](../guides/architecture.md)** - Deep dive into advanced topics
-- **[Examples](../examples/basic-operations.md)** - More practical examples
-
-## Common Patterns
-
-### Parameterized Filters
-
-Use parameters to make your queries safe and reusable:
-
-=== "Async API"
-
-    ```python
-    # Using parameterized queries (prevents SQL injection)
-    min_age = 18
-    c = await c.filter("age >= $1", [min_age])
-    ```
-
-=== "Sync API"
-
-    ```python
-    # Using parameterized queries (prevents SQL injection)
-    min_age = 18
-    c = c.filter("age >= $1", [min_age])
-    ```
-
-### SQL Queries
-
-For complex transformations, use SQL:
-
-=== "Async API"
-
-    ```python
-    # Execute SQL query
-    c = await c.select("""
-        SELECT
-            id,
-            name,
-            CASE WHEN age >= 18 THEN 'adult' ELSE 'minor' END as age_group
-        FROM self
-        WHERE active = true
-        LIMIT 100
-    """)
-    ```
-
-=== "Sync API"
-
-    ```python
-    # Execute SQL query
-    c = c.select("""
-        SELECT
-            id,
-            name,
-            CASE WHEN age >= 18 THEN 'adult' ELSE 'minor' END as age_group
-        FROM self
-        WHERE active = true
-        LIMIT 100
-    """)
-    ```
-
-### Indexing for Performance
-
-Create indexes for faster lookups:
-
-=== "Async API"
-
-    ```python
-    # Create index on email column
-    c = await c.create_index("email")
-
-    # Rebuild if needed
-    c = await c.rebuild_index("email")
-    ```
-
-=== "Sync API"
-
-    ```python
-    # Create index on email column
-    c = c.create_index("email")
-
-    # Rebuild if needed
-    c = c.rebuild_index("email")
-    ```
+- **[User Guide](../guides/architecture.md)** - Deep dive into advanced topics
+- **[API Reference](../api/python/index.md)** - Complete API documentation
+- **[Examples](../examples/basic-operations.md)** - More examples
