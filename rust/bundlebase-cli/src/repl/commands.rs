@@ -146,17 +146,17 @@ Data Operations:
   SHOW [LIMIT <n>]                     Display rows (default: 10)
 
 Query & Transform:
-  SELECT col1, col2, ... FROM data     Select columns (supports full SQL)
+  SELECT col1, col2, ... FROM bundle     Select columns (supports full SQL)
   FILTER WHERE <condition>             Filter rows by condition
-  ALTER TABLE data DROP COLUMN <col>   Remove column
-  ALTER TABLE data RENAME COLUMN <old> TO <new>  Rename column
+  ALTER TABLE bundle DROP COLUMN <col>   Remove column
+  ALTER TABLE bundle RENAME COLUMN <old> TO <new>  Rename column
 
 Join Data:
   [LEFT|RIGHT|FULL|INNER] JOIN AS <name> ON <expression>
-    Example: LEFT JOIN AS users ON data.user_id = users.id
+    Example: LEFT JOIN AS users ON bundle.user_id = users.id
 
 Indexing:
-  CREATE INDEX ON data(<column>)       Create index on column
+  CREATE INDEX ON bundle(<column>)       Create index on column
   REINDEX                              Rebuild all indexes
 
 Persistence:
@@ -179,9 +179,9 @@ Meta Commands:
 Examples:
   ATTACH 'users.parquet'
   FILTER WHERE age > 21 AND country = 'USA'
-  SELECT name, email, salary * 1.1 AS new_salary FROM data
-  LEFT JOIN AS departments ON data.dept_id = departments.id
-  CREATE INDEX ON data(email)
+  SELECT name, email, salary * 1.1 AS new_salary FROM bundle
+  LEFT JOIN AS departments ON bundle.dept_id = departments.id
+  CREATE INDEX ON bundle(email)
   COMMIT 'Added filtering and joined departments'
 "#;
             Ok(ExecuteResult::Message(help_text.to_string()))

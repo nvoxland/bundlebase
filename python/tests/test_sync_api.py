@@ -393,7 +393,7 @@ class TestSyncSelect:
         c.attach(datafile("userdata.parquet"))
 
         # select() returns a new forked bundle
-        c2 = c.select("SELECT * FROM data LIMIT 10")
+        c2 = c.select("SELECT * FROM bundle LIMIT 10")
 
         # Original bundle should be unchanged
         results_original = c.to_dict()

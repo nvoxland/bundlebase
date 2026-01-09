@@ -281,8 +281,8 @@ polars = "^1.0.0"
 
 **Usage:**
 ```bash
-poetry run maturin develop  # Dev build
-poetry run maturin build    # Release build
+poetry run ./scripts/maturin-dev.sh  # Dev build
+poetry run ./scripts/maturin-build.sh    # Release build
 ```
 
 **Rationale:** Standard tool for PyO3 projects

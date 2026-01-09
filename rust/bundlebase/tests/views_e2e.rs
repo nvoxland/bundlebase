@@ -12,7 +12,7 @@ async fn test_create_view_basic() -> Result<(), BundlebaseError> {
 
     // Create view with select
     let adults = c
-        .select("select * from data where Country = 'Chile'", vec![])
+        .select("select * from bundle where Country = 'Chile'", vec![])
         .await?;
     c.create_view("chile", &adults).await?;
     c.commit("Add chile view").await?;
@@ -25,7 +25,7 @@ async fn test_create_view_basic() -> Result<(), BundlebaseError> {
             "CREATE PACK \\w+",
             "ATTACH: memory:///test_data/customers-0-100.csv",
             "CREATE VIEW: 'chile'",
-            "select \\* from data where Country = 'Chile'",
+            "select \\* from bundle where Country = 'Chile'",
         ],
         describe_ops(&view),
     );
@@ -74,7 +74,7 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
     c.commit("v1").await?;
 
     let active_rs = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("active", &active_rs).await?;
     c.commit("v2").await?;
@@ -115,7 +115,7 @@ async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
 
     // Create view with multiple operations (select + filter)
     let mut filtered = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     filtered.filter("\"Index\" < 65", vec![]).await?;
 
@@ -156,14 +156,14 @@ async fn test_duplicate_view_name() -> Result<(), BundlebaseError> {
 
     // Create first view
     let adults1 = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("adults", &adults1).await?;
     c.commit("Add first adults view").await?;
 
     // Try to create view with same name
     let adults2 = c
-        .select("select * from data where \"Index\" > 30", vec![])
+        .select("select * from bundle where \"Index\" > 30", vec![])
         .await?;
     let result = c.create_view("adults", &adults2).await;
 
@@ -185,7 +185,7 @@ async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
     c.commit("v1").await?;
 
     let active = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("active", &active).await?;
     c.commit("v2").await?;
@@ -264,7 +264,7 @@ async fn test_view_is_marked_as_view() -> Result<(), BundlebaseError> {
     assert!(!c.bundle.is_view(), "Container should not be marked as view");
 
     // Create a view
-    let filtered = c.select("select * from data limit 10", vec![]).await?;
+    let filtered = c.select("select * from bundle limit 10", vec![]).await?;
     c.create_view("filtered", &filtered).await?;
     c.commit("Add view").await?;
 
@@ -289,7 +289,7 @@ async fn test_cannot_attach_to_view() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    let filtered = c.select("select * from data limit 10", vec![]).await?;
+    let filtered = c.select("select * from bundle limit 10", vec![]).await?;
     c.create_view("filtered", &filtered).await?;
     c.commit("Add view").await?;
 
@@ -321,7 +321,7 @@ async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    let filtered = c.select("select * from data limit 10", vec![]).await?;
+    let filtered = c.select("select * from bundle limit 10", vec![]).await?;
     c.create_view("filtered", &filtered).await?;
     c.commit("Add view").await?;
 
@@ -354,9 +354,9 @@ async fn test_cannot_drop_view_from_view() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create two views
-    let view1 = c.select("select * from data limit 10", vec![]).await?;
+    let view1 = c.select("select * from bundle limit 10", vec![]).await?;
     c.create_view("view1", &view1).await?;
-    let view2 = c.select("select * from data limit 20", vec![]).await?;
+    let view2 = c.select("select * from bundle limit 20", vec![]).await?;
     c.create_view("view2", &view2).await?;
     c.commit("Add views").await?;
 
@@ -419,7 +419,7 @@ async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     let chile = c
-        .select("select * from data where Country = 'Chile'", vec![])
+        .select("select * from bundle where Country = 'Chile'", vec![])
         .await?;
     c.create_view("chile", &chile).await?;
     c.commit("Add view").await?;
@@ -478,7 +478,7 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
 
     // Create a view
     let adults = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("adults", &adults).await?;
     c.commit("Add adults view").await?;
@@ -547,7 +547,7 @@ async fn test_rename_view_basic() -> Result<(), BundlebaseError> {
 
     // Create a view
     let adults = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("adults", &adults).await?;
     c.commit("Add adults view").await?;
@@ -600,12 +600,12 @@ async fn test_rename_view_new_name_exists() -> Result<(), BundlebaseError> {
 
     // Create two views
     let view1 = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("view1", &view1).await?;
 
     let view2 = c
-        .select("select * from data where \"Index\" < 30", vec![])
+        .select("select * from bundle where \"Index\" < 30", vec![])
         .await?;
     c.create_view("view2", &view2).await?;
     c.commit("Add two views").await?;
@@ -630,7 +630,7 @@ async fn test_rename_view_preserves_view_data() -> Result<(), BundlebaseError> {
 
     // Create a view and get its dataframe
     let high_index = c
-        .select("select * from data where \"Index\" > 50", vec![])
+        .select("select * from bundle where \"Index\" > 50", vec![])
         .await?;
     c.create_view("high_index", &high_index).await?;
     c.commit("Add view").await?;
@@ -665,7 +665,7 @@ async fn test_rename_view_commit_and_reopen() -> Result<(), BundlebaseError> {
 
     // Create and rename a view
     let adults = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("adults", &adults).await?;
     c.commit("Add adults view").await?;
@@ -705,7 +705,7 @@ async fn test_create_view_with_uncommitted_operations() -> Result<(), Bundlebase
     c.commit("Initial").await?;
 
     // Select creates uncommitted operations in the builder
-    let view_source = c.select("select * from data limit 10", vec![]).await?;
+    let view_source = c.select("select * from bundle limit 10", vec![]).await?;
 
     // Create view from the builder with select operation
     c.create_view("limited", &view_source).await?;
@@ -729,7 +729,7 @@ async fn test_drop_view_basic() -> Result<(), BundlebaseError> {
 
     // Create a view
     let adults = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("adults", &adults).await?;
     c.commit("Add adults view").await?;
@@ -782,7 +782,7 @@ async fn test_drop_view_commit_and_reopen() -> Result<(), BundlebaseError> {
 
     // Create and drop a view
     let adults = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("adults", &adults).await?;
     c.commit("Add adults view").await?;
@@ -812,12 +812,12 @@ async fn test_drop_view_preserves_other_views() -> Result<(), BundlebaseError> {
 
     // Create two views
     let view1 = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("view1", &view1).await?;
 
     let view2 = c
-        .select("select * from data where \"Index\" < 30", vec![])
+        .select("select * from bundle where \"Index\" < 30", vec![])
         .await?;
     c.create_view("view2", &view2).await?;
     c.commit("Add two views").await?;
@@ -853,7 +853,7 @@ async fn test_drop_view_twice_fails() -> Result<(), BundlebaseError> {
 
     // Create a view
     let adults = c
-        .select("select * from data where \"Index\" > 21", vec![])
+        .select("select * from bundle where \"Index\" > 21", vec![])
         .await?;
     c.create_view("adults", &adults).await?;
     c.commit("Add adults view").await?;

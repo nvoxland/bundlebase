@@ -247,7 +247,7 @@ c = c.deduplicate(["id", "email"])
 cargo test
 
 # Build Python extension
-maturin develop
+./scripts/maturin-dev.sh
 
 # Test Python bindings
 poetry run pytest
@@ -360,10 +360,10 @@ poetry run ptw
 **Quick rebuild** (during development):
 ```bash
 # Build Rust extension and install in dev mode
-maturin develop
+./scripts/maturin-dev.sh
 
 # Or via Poetry
-poetry run maturin develop
+poetry run ./scripts/maturin-dev.sh
 ```
 
 **Clean build** (after major changes):
@@ -372,7 +372,7 @@ poetry run maturin develop
 cargo clean
 
 # Rebuild everything
-maturin develop
+./scripts/maturin-dev.sh
 ```
 
 ### Release Build
@@ -380,7 +380,7 @@ maturin develop
 **Build Python wheel**:
 ```bash
 # Build release wheel
-maturin build --release
+./scripts/maturin-build.sh --release
 
 # Output: target/wheels/bundlebase-*.whl
 ```
@@ -388,7 +388,7 @@ maturin build --release
 **Build for multiple Python versions**:
 ```bash
 # Build for all installed Python versions
-maturin build --release --interpreter python3.9 python3.10 python3.11
+./scripts/maturin-build.sh --release --interpreter python3.9 python3.10 python3.11
 ```
 
 **Build source distribution**:
@@ -402,7 +402,7 @@ maturin sdist
 **Install wheel locally**:
 ```bash
 # Build wheel
-maturin build --release
+./scripts/maturin-build.sh --release
 
 # Install in fresh environment
 python -m venv test_env
@@ -670,7 +670,7 @@ cargo fmt
 **Python import error**:
 ```bash
 # Rebuild extension
-maturin develop
+./scripts/maturin-dev.sh
 
 # Verify installation
 python -c "import bundlebase; print(bundlebase._bundlebase)"
@@ -712,7 +712,7 @@ poetry env remove python
 poetry install
 
 # Rebuild extension
-maturin develop
+./scripts/maturin-dev.sh
 ```
 
 ---

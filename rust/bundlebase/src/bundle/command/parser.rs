@@ -33,7 +33,7 @@ use sqlparser::parser::Parser;
 /// let cmd = parse_command("FILTER WHERE country = 'USA'").unwrap();
 ///
 /// // Parse a SELECT statement
-/// let cmd = parse_command("SELECT name, email FROM data").unwrap();
+/// let cmd = parse_command("SELECT name, email FROM bundle").unwrap();
 ///
 /// // Parse an ATTACH statement
 /// let cmd = parse_command("ATTACH 'data.parquet'").unwrap();
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_parse_sql_multiple_statements() {
-        let result = parse_command("SELECT * FROM data; SELECT * FROM data2;");
+        let result = parse_command("SELECT * FROM bundle; SELECT * FROM bundle2;");
         assert!(result.is_err());
         assert!(result
             .unwrap_err()

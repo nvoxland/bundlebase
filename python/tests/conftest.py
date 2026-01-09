@@ -1,5 +1,12 @@
 """Shared pytest fixtures and utilities for Bundlebase tests."""
 
+import os
+
+# CRITICAL: Set CARGO_TARGET_DIR before any imports that might trigger maturin_import_hook
+# This ensures maturin_import_hook uses target/maturin/ instead of target/debug/,
+# preventing full rebuilds when switching between maturin-dev.sh and cargo builds
+os.environ['CARGO_TARGET_DIR'] = 'target/maturin'
+
 import bundlebase
 
 

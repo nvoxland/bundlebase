@@ -1,4 +1,5 @@
 use crate::bundle::DataFrameHolder;
+use crate::catalog;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, Session, TableProvider};
@@ -7,7 +8,7 @@ use datafusion::logical_expr::{Expr, TableType};
 use datafusion::physical_plan::ExecutionPlan;
 use std::sync::Arc;
 
-/// SchemaProvider that exposes the bundle's cached dataframe as a "data" table
+/// SchemaProvider that exposes the bundle's cached dataframe as a "bundle" table
 #[derive(Debug)]
 pub struct BundleSchemaProvider {
     dataframe: DataFrameHolder,
@@ -26,11 +27,11 @@ impl SchemaProvider for BundleSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        vec!["data".to_string()]
+        vec![catalog::DATAFRAME_ALIAS.to_string()]
     }
 
     async fn table(&self, name: &str) -> datafusion::error::Result<Option<Arc<dyn TableProvider>>> {
-        if name == "data" {
+        if name == catalog::DATAFRAME_ALIAS {
             Ok(Some(Arc::new(CachedDataFrameTable::new(
                 self.dataframe.clone(),
             ))))
@@ -40,7 +41,7 @@ impl SchemaProvider for BundleSchemaProvider {
     }
 
     fn table_exist(&self, name: &str) -> bool {
-        name == "data"
+        name == catalog::DATAFRAME_ALIAS
     }
 }
 

@@ -212,7 +212,7 @@ Bundlebase supports [Apache Datafusion SQL syntax](https://datafusion.apache.org
 === "Async API"
 
     ```python
-    rs = await c.select("select * from data where revenue > 100")
+    rs = await c.select("select * from bundle where revenue > 100")
     
     # Can export the rs like a bundle
     df = rs.to_polars()
@@ -221,7 +221,7 @@ Bundlebase supports [Apache Datafusion SQL syntax](https://datafusion.apache.org
 === "Sync API"
 
     ```python
-    rs = c.select("select * from data where revenue > 100")
+    rs = c.select("select * from bundle where revenue > 100")
     
     # Can export the rs like a bundle
     df = rs.to_polars()

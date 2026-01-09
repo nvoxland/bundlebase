@@ -72,7 +72,7 @@ await c.commit("Data transformation")
 poetry install
 
 # Build Rust extension
-maturin develop
+./scripts/maturin-dev.sh
 
 # Run tests
 cargo test                # Rust tests

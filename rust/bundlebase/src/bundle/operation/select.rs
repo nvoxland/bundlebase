@@ -231,8 +231,8 @@ impl Operation for SelectOp {
                     sql = sql.replace(&placeholder, &value_str);
                 }
 
-                // Replace "data" references with table_name in user SQL
-                sql = sql.replace("data", &table_name);
+                // Replace "bundle" references with table_name in user SQL
+                sql = sql.replace("bundle", &table_name);
 
                 // Execute the SQL query
                 ctx_for_closure
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let sql = "SELECT * FROM data WHERE salary > $1";
+        let sql = "SELECT * FROM bundle WHERE salary > $1";
         let op = SelectOp {
             sql: sql.to_string(),
             parameters: vec![ParameterValue::Float64(50000.0)],
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_config_serialization() {
-        let sql = "SELECT * FROM data WHERE salary > $1 AND name = $2";
+        let sql = "SELECT * FROM bundle WHERE salary > $1 AND name = $2";
         let config = SelectOp {
             sql: sql.to_string(),
             parameters: vec![
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn test_version() {
         let op = SelectOp {
-            sql: "SELECT * FROM data".to_string(),
+            sql: "SELECT * FROM bundle".to_string(),
             parameters: vec![],
         };
         let version = op.version();

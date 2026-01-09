@@ -549,14 +549,14 @@ class PyBundleBuilder:
         Queue a select operation.
 
         Args:
-            sql: SQL query string (e.g., "SELECT * FROM data LIMIT 10")
+            sql: SQL query string (e.g., "SELECT * FROM bundle LIMIT 10")
             params: Optional list of parameters for parameterized queries
 
         Returns:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.select("SELECT * FROM data LIMIT 10")
+            c = await c.select("SELECT * FROM bundle LIMIT 10")
         """
         ...
 

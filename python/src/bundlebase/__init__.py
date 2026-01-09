@@ -91,7 +91,6 @@ _original_methods = {
     # Persistence operations
     "commit": _PyBundleBuilder.commit,
     "export_tar": _PyBundleBuilder.export_tar,
-    "create_mirror": _PyBundleBuilder.create_mirror,
 
     # Note: schema, num_rows, explain are NOT in this dict because they:
     # - Return data rather than mutate the bundle
@@ -137,7 +136,7 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 mutation_methods = [
     "attach", "remove_column", "rename_column", "filter", "select", "join",
     "create_view", "set_name", "set_description", "set_config", "define_function",
-    "create_index", "rebuild_index", "reindex", "create_mirror"
+    "create_index", "rebuild_index", "reindex"
 ]
 for method_name in mutation_methods:
     wrapped = _wrap_mutation_method(method_name)

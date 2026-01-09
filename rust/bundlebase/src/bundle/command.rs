@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn test_with_params_select() {
         let cmd = BundleCommand::Select {
-            sql: "SELECT * FROM data WHERE id = $1".to_string(),
+            sql: "SELECT * FROM bundle WHERE id = $1".to_string(),
             params: vec![],
         };
 
@@ -274,7 +274,7 @@ mod tests {
 
         match cmd_with_params {
             BundleCommand::Select { sql, params: p } => {
-                assert_eq!(sql, "SELECT * FROM data WHERE id = $1");
+                assert_eq!(sql, "SELECT * FROM bundle WHERE id = $1");
                 assert_eq!(p.len(), 1);
             }
             _ => panic!("Expected Query variant"),

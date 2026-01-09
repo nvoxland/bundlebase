@@ -237,7 +237,7 @@ async def test_select():
 @pytest.mark.asyncio
 async def test_select():
     c = await (bundlebase.create().attach(datafile("userdata.parquet")))
-    q = c.select("SELECT * FROM data LIMIT 10")
+    q = c.select("SELECT * FROM bundle LIMIT 10")
 
     results = await q.to_dict()
     assert len(results["id"]) == 10
@@ -1020,7 +1020,7 @@ async def test_view_dataframe_execution():
     await c.commit("Initial data")
 
     # Create view with country filter
-    chile = await c.select("select * from data where Country = 'Chile'")
+    chile = await c.select("select * from bundle where Country = 'Chile'")
     c = await c.create_view("chile", chile)
     await c.commit("Add chile view")
 
@@ -1045,7 +1045,7 @@ async def test_view_to_polars():
     await c.commit("Initial data")
 
     # Create view with a simple filter
-    high_idx = await c.select("select * from data where \"Index\" > 50")
+    high_idx = await c.select("select * from bundle where \"Index\" > 50")
     c = await c.create_view("high_index_polars", high_idx)
     await c.commit("Add high_index_polars view")
 
@@ -1070,7 +1070,7 @@ async def test_view_to_pandas():
     await c.commit("Initial data")
 
     # Create view for high index values
-    high_idx = await c.select("select * from data where \"Index\" > 80")
+    high_idx = await c.select("select * from bundle where \"Index\" > 80")
     c = await c.create_view("high_index", high_idx)
     await c.commit("Add high_index view")
 
@@ -1196,7 +1196,7 @@ async def test_rename_view_basic():
     await c.commit("Initial data")
 
     # Create a view
-    adults = await c.select("select * from data where \"Index\" > 21")
+    adults = await c.select("select * from bundle where \"Index\" > 21")
     c = await c.create_view("adults", adults)
     await c.commit("Add adults view")
 
@@ -1242,10 +1242,10 @@ async def test_rename_view_new_name_exists():
     await c.commit("Initial data")
 
     # Create two views
-    view1 = await c.select("select * from data where \"Index\" > 21")
+    view1 = await c.select("select * from bundle where \"Index\" > 21")
     c = await c.create_view("view1", view1)
 
-    view2 = await c.select("select * from data where \"Index\" < 30")
+    view2 = await c.select("select * from bundle where \"Index\" < 30")
     c = await c.create_view("view2", view2)
     await c.commit("Add two views")
 
@@ -1264,7 +1264,7 @@ async def test_rename_view_preserves_view_data():
     await c.commit("Initial data")
 
     # Create a view
-    high_index = await c.select("select * from data where \"Index\" > 50")
+    high_index = await c.select("select * from bundle where \"Index\" > 50")
     c = await c.create_view("high_index", high_index)
     await c.commit("Add view")
 
@@ -1294,7 +1294,7 @@ async def test_rename_view_commit_and_reopen():
     await c.commit("Initial data")
 
     # Create and rename a view
-    adults = await c.select("select * from data where \"Index\" > 21")
+    adults = await c.select("select * from bundle where \"Index\" > 21")
     c = await c.create_view("adults", adults)
     await c.commit("Add adults view")
 
@@ -1327,7 +1327,7 @@ async def test_drop_view_basic():
     await c.commit("Initial data")
 
     # Create a view
-    adults = await c.select("select * from data where \"Index\" > 21")
+    adults = await c.select("select * from bundle where \"Index\" > 21")
     c = await c.create_view("adults", adults)
     await c.commit("Add adults view")
 
@@ -1373,7 +1373,7 @@ async def test_drop_view_commit_and_reopen():
     await c.commit("Initial data")
 
     # Create and drop a view
-    adults = await c.select("select * from data where \"Index\" > 21")
+    adults = await c.select("select * from bundle where \"Index\" > 21")
     c = await c.create_view("adults", adults)
     await c.commit("Add adults view")
 
@@ -1400,10 +1400,10 @@ async def test_drop_view_preserves_other_views():
     await c.commit("Initial data")
 
     # Create two views
-    view1 = await c.select("select * from data where \"Index\" > 21")
+    view1 = await c.select("select * from bundle where \"Index\" > 21")
     c = await c.create_view("view1", view1)
 
-    view2 = await c.select("select * from data where \"Index\" < 30")
+    view2 = await c.select("select * from bundle where \"Index\" < 30")
     c = await c.create_view("view2", view2)
     await c.commit("Add two views")
 
@@ -1437,7 +1437,7 @@ async def test_drop_view_twice_fails():
     await c.commit("Initial data")
 
     # Create a view
-    adults = await c.select("select * from data where \"Index\" > 21")
+    adults = await c.select("select * from bundle where \"Index\" > 21")
     c = await c.create_view("adults", adults)
     await c.commit("Add adults view")
 
