@@ -22,7 +22,7 @@ async def test_define_source_binding():
     """Test that define_source Python binding works."""
     with tempfile.TemporaryDirectory() as temp_dir:
         c = await bundlebase.create(temp_dir)
-        c = await c.define_source("file:///some/path/")
+        c = await c.define_source("file:///some/path/", function="data_directory")
         assert c is not None
 
 
@@ -31,7 +31,7 @@ async def test_define_source_with_patterns_binding():
     """Test that define_source with patterns Python binding works."""
     with tempfile.TemporaryDirectory() as temp_dir:
         c = await bundlebase.create(temp_dir)
-        c = await c.define_source("file:///data/", patterns=["**/*.parquet", "**/*.csv"])
+        c = await c.define_source("file:///data/", patterns=["**/*.parquet", "**/*.csv"], function="data_directory")
         assert c is not None
 
 
@@ -41,7 +41,7 @@ async def test_define_source_chaining():
     with tempfile.TemporaryDirectory() as temp_dir:
         c = await (bundlebase.create(temp_dir)
                    .set_name("Test Bundle")
-                   .define_source("file:///data/", patterns=["**/*.parquet"]))
+                   .define_source("file:///data/", patterns=["**/*.parquet"], function="data_directory"))
         assert c is not None
         assert c.name == "Test Bundle"
 
@@ -53,7 +53,7 @@ async def test_refresh_binding():
         with tempfile.TemporaryDirectory() as source_dir:
             c = await bundlebase.create(bundle_dir)
             source_url = f"file://{source_dir}/"
-            c = await c.define_source(source_url, patterns=["**/*.parquet"])
+            c = await c.define_source(source_url, patterns=["**/*.parquet"], function="data_directory")
 
             # refresh should return an integer
             count = await c.refresh()
@@ -68,7 +68,7 @@ async def test_check_refresh_binding():
         with tempfile.TemporaryDirectory() as source_dir:
             c = await bundlebase.create(bundle_dir)
             source_url = f"file://{source_dir}/"
-            c = await c.define_source(source_url, patterns=["**/*.parquet"])
+            c = await c.define_source(source_url, patterns=["**/*.parquet"], function="data_directory")
 
             # check_refresh should return a list
             pending = await c.check_refresh()
@@ -91,7 +91,7 @@ async def test_define_source_auto_refresh():
 
                 c = await bundlebase.create(bundle_dir)
                 source_url = f"file://{source_dir}/"
-                c = await c.define_source(source_url, patterns=["**/*.parquet"])
+                c = await c.define_source(source_url, patterns=["**/*.parquet"], function="data_directory")
 
                 # Data should be auto-attached
                 assert await c.num_rows() == 1000
@@ -104,7 +104,7 @@ async def test_refresh_returns_count():
         with tempfile.TemporaryDirectory() as source_dir:
             c = await bundlebase.create(bundle_dir)
             source_url = f"file://{source_dir}/"
-            c = await c.define_source(source_url, patterns=["**/*"])
+            c = await c.define_source(source_url, patterns=["**/*"], function="data_directory")
 
             # Add a file after define_source
             src_path = os.path.join(
@@ -126,7 +126,7 @@ async def test_check_refresh_returns_pending():
         with tempfile.TemporaryDirectory() as source_dir:
             c = await bundlebase.create(bundle_dir)
             source_url = f"file://{source_dir}/"
-            c = await c.define_source(source_url, patterns=["**/*"])
+            c = await c.define_source(source_url, patterns=["**/*"], function="data_directory")
 
             # Add a file after define_source
             src_path = os.path.join(

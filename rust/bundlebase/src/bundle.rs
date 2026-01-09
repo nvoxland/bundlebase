@@ -20,7 +20,7 @@ pub use operation::{AnyOperation, BundleChange, DefineSourceOp, Operation};
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
-use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, Source, VersionedBlockId};
+use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, Source, SourceFunctionRegistry, VersionedBlockId};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
 use crate::io::{DataStorage, ObjectStoreDir, EMPTY_URL};
@@ -75,6 +75,7 @@ pub struct Bundle {
     storage: Arc<DataStorage>,
     adapter_factory: Arc<DataReaderFactory>,
     function_registry: Arc<RwLock<FunctionRegistry>>,
+    source_function_registry: Arc<RwLock<SourceFunctionRegistry>>,
 
     /// Final merged configuration (explicit + stored), used for all operations
     /// This is computed once and updated when SetConfigOp is applied
@@ -125,6 +126,7 @@ impl Clone for Bundle {
             storage: Arc::clone(&self.storage),
             adapter_factory: Arc::clone(&self.adapter_factory),
             function_registry,
+            source_function_registry: Arc::clone(&self.source_function_registry),
             config: Arc::clone(&self.config),
             passed_config: self.passed_config.clone(),
             stored_config: self.stored_config.clone(),
@@ -139,6 +141,7 @@ impl Bundle {
 
         let storage = Arc::new(DataStorage::new());
         let function_registry = Arc::new(RwLock::new(FunctionRegistry::new()));
+        let source_function_registry = Arc::new(RwLock::new(SourceFunctionRegistry::new()));
 
         let mut config =
             SessionConfig::new().with_default_catalog_and_schema(CATALOG_NAME, "public");
@@ -201,6 +204,7 @@ impl Bundle {
             )
                 .into(),
             function_registry,
+            source_function_registry,
             name: None,
             description: None,
             operations: vec![],
@@ -613,8 +617,9 @@ impl Bundle {
     }
 
     /// Add a source definition to the bundle
-    pub(crate) fn add_source(&mut self, op: operation::DefineSourceOp) {
-        if let Ok(source) = Source::from_op(&op) {
+    pub(crate) fn add_source(&mut self, op: DefineSourceOp) {
+        let registry = self.source_function_registry.read();
+        if let Ok(source) = Source::from_op(&op, &registry) {
             self.sources.insert(op.id.clone(), Arc::new(source));
         }
     }
@@ -635,6 +640,11 @@ impl Bundle {
     /// Get all sources
     pub(crate) fn sources(&self) -> &HashMap<ObjectId, Arc<Source>> {
         &self.sources
+    }
+
+    /// Get the source function registry
+    pub(crate) fn source_function_registry(&self) -> Arc<RwLock<SourceFunctionRegistry>> {
+        Arc::clone(&self.source_function_registry)
     }
 }
 

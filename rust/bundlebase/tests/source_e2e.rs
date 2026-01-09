@@ -31,7 +31,7 @@ async fn test_define_source_basic() -> Result<(), BundlebaseError> {
 
     // Define a source with default patterns
     bundle
-        .define_source("memory:///some/path/", None)
+        .define_source("memory:///some/path/", None, "data_directory", None)
         .await?;
 
     // Commit and verify
@@ -58,6 +58,8 @@ async fn test_define_source_with_patterns() -> Result<(), BundlebaseError> {
         .define_source(
             "memory:///data/",
             Some(vec!["**/*.parquet", "**/*.csv"]),
+            "data_directory",
+            None,
         )
         .await?;
 
@@ -79,7 +81,7 @@ async fn test_define_source_default_patterns() -> Result<(), BundlebaseError> {
 
     // Define source without patterns (should default to **/* )
     bundle
-        .define_source("memory:///data/", None)
+        .define_source("memory:///data/", None, "data_directory", None)
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -111,7 +113,7 @@ async fn test_define_source_auto_attaches_files() -> Result<(), BundlebaseError>
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]))
+        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]), "data_directory", None)
         .await?;
 
     // Verify file was auto-attached (define_source calls refresh automatically)
@@ -135,7 +137,7 @@ async fn test_refresh_attaches_new_files() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]))
+        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]), "data_directory", None)
         .await?;
 
     // Verify no data yet by checking pending files is empty
@@ -178,7 +180,7 @@ async fn test_refresh_idempotent() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]))
+        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]), "data_directory", None)
         .await?;
 
     // First explicit refresh should find nothing (already attached by define_source)
@@ -213,7 +215,7 @@ async fn test_refresh_incremental() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(source_dir.url().as_str(), Some(vec!["**/*"]))
+        .define_source(source_dir.url().as_str(), Some(vec!["**/*"]), "data_directory", None)
         .await?;
 
     // First file should be auto-attached
@@ -244,7 +246,7 @@ async fn test_check_refresh() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]))
+        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]), "data_directory", None)
         .await?;
 
     // check_refresh should return empty (no files)
@@ -306,7 +308,7 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]))
+        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]), "data_directory", None)
         .await?;
 
     // Only parquet should be attached (1000 rows)
@@ -337,7 +339,7 @@ async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]))
+        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]), "data_directory", None)
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -369,7 +371,7 @@ async fn test_source_id_in_attach_op() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]))
+        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]), "data_directory", None)
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -390,7 +392,7 @@ async fn test_define_source_serialization() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("memory:///data/", Some(vec!["**/*.parquet"]))
+        .define_source("memory:///data/", Some(vec!["**/*.parquet"]), "data_directory", None)
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -425,7 +427,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir1.url().as_str(), None).await?;
 
     bundle
-        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]))
+        .define_source(source_dir.url().as_str(), Some(vec!["**/*.parquet"]), "data_directory", None)
         .await?;
 
     bundle.commit("Defined source").await?;
