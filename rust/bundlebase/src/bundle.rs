@@ -16,11 +16,11 @@ pub use commit::{manifest_version, BundleCommit};
 pub use facade::BundleFacade;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::JoinTypeOption;
-pub use operation::{AnyOperation, BundleChange, Operation};
+pub use operation::{AnyOperation, BundleChange, DefineSourceOp, Operation};
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
-use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBlockId};
+use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, Source, VersionedBlockId};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
 use crate::io::{DataStorage, ObjectStoreDir, EMPTY_URL};
@@ -67,6 +67,7 @@ pub struct Bundle {
     data_packs: Arc<RwLock<HashMap<ObjectId, Arc<DataPack>>>>,
     base_pack: Option<ObjectId>,
     joins: HashMap<String, PackJoin>,
+    sources: HashMap<ObjectId, Arc<Source>>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     pub(crate) views: HashMap<String, ObjectId>,
     dataframe: DataFrameHolder,
@@ -116,6 +117,7 @@ impl Clone for Bundle {
             base_pack: self.base_pack.clone(),
             data_packs: Arc::clone(&self.data_packs),
             joins: self.joins.clone(),
+            sources: self.sources.clone(),
             indexes,
             views: self.views.clone(),
             dataframe: DataFrameHolder {
@@ -192,6 +194,7 @@ impl Bundle {
             base_pack: None,
             data_packs,
             joins: HashMap::new(),
+            sources: HashMap::new(),
             indexes: Arc::new(RwLock::new(Vec::new())),
             views: HashMap::new(),
             storage: Arc::clone(&storage),
@@ -614,6 +617,31 @@ impl Bundle {
             }
         }
         None
+    }
+
+    /// Add a source definition to the bundle
+    pub(crate) fn add_source(&mut self, op: operation::DefineSourceOp) {
+        if let Ok(source) = Source::from_op(&op) {
+            self.sources.insert(op.id.clone(), Arc::new(source));
+        }
+    }
+
+    /// Get a source by its ID
+    pub(crate) fn get_source(&self, source_id: &ObjectId) -> Option<Arc<Source>> {
+        self.sources.get(source_id).cloned()
+    }
+
+    /// Get the source defined for a specific pack
+    pub(crate) fn get_source_for_pack(&self, pack_id: &ObjectId) -> Option<Arc<Source>> {
+        self.sources
+            .values()
+            .find(|s| s.pack_id() == pack_id)
+            .cloned()
+    }
+
+    /// Get all sources
+    pub(crate) fn sources(&self) -> &HashMap<ObjectId, Arc<Source>> {
+        &self.sources
     }
 }
 

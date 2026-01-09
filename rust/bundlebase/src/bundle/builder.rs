@@ -1,7 +1,7 @@
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::SetNameOp;
-use crate::bundle::operation::{AnyOperation, SelectOp};
+use crate::bundle::operation::{AnyOperation, DefineSourceOp, SelectOp};
 use crate::bundle::operation::{
     AttachBlockOp, CreateViewOp, DefineFunctionOp, DefinePackOp, DropViewOp, FilterOp, JoinOp,
     RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp, SetConfigOp, SetDescriptionOp,
@@ -173,11 +173,27 @@ impl BundleBuilder {
         existing.passed_config = config;
         existing.recompute_config()?;
         existing.data_dir = ObjectStoreDir::from_str(path, existing.config.clone())?;
-        Ok(BundleBuilder {
+
+        let mut builder = BundleBuilder {
             status: BundleStatus::new(),
             bundle: existing,
             in_progress_change: None,
-        })
+        };
+
+        // Automatically create the base pack with a well-known ID
+        builder
+            .do_change("Initialize bundle", |b| {
+                Box::pin(async move {
+                    b.apply_operation(
+                        DefinePackOp::setup(&ObjectId::BASE_PACK).await?.into(),
+                    )
+                    .await?;
+                    Ok(())
+                })
+            })
+            .await?;
+
+        Ok(builder)
     }
 
     pub fn extend(bundle: Arc<Bundle>, data_dir: Option<&str>) -> Result<BundleBuilder, BundlebaseError> {
@@ -462,6 +478,171 @@ impl BundleBuilder {
         .await?;
 
         Ok(self)
+    }
+
+    /// Define a data source for the base pack.
+    ///
+    /// A source specifies where to look for data files (e.g., S3 bucket prefix)
+    /// and patterns to filter which files to include. This enables the `refresh()`
+    /// functionality to discover and auto-attach new files.
+    ///
+    /// # Arguments
+    /// * `url` - URL prefix for file discovery (e.g., "s3://bucket/data/")
+    /// * `patterns` - Optional glob patterns for filtering files. Defaults to ["**/*"] (all files).
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use bundlebase::{BundleBuilder, BundlebaseError};
+    /// # async fn example() -> Result<(), BundlebaseError> {
+    /// let mut bundle = BundleBuilder::create("memory:///work", None).await?;
+    /// bundle.define_source("s3://bucket/data/", Some(vec!["**/*.parquet"])).await?;
+    /// bundle.refresh().await?;
+    /// bundle.commit("Initial data from source").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn define_source(
+        &mut self,
+        url: &str,
+        patterns: Option<Vec<&str>>,
+    ) -> Result<&mut Self, BundlebaseError> {
+        let url = url.to_string();
+        let patterns: Option<Vec<String>> = patterns.map(|p| p.iter().map(|s| s.to_string()).collect());
+
+        self.do_change(&format!("Define source at {}", url), |builder| {
+            Box::pin(async move {
+                let pack_id = builder
+                    .bundle
+                    .base_pack
+                    .ok_or("Cannot define source: no base pack exists")?;
+
+                let source_id = ObjectId::generate();
+                let op = DefineSourceOp::setup(source_id, pack_id, url, patterns);
+
+                builder.apply_operation(op.into()).await?;
+
+                Ok(())
+            })
+        })
+        .await?;
+
+        // Automatically refresh to attach any existing files
+        self.refresh().await?;
+
+        Ok(self)
+    }
+
+    /// Define a data source for a joined pack.
+    ///
+    /// # Arguments
+    /// * `join_name` - Name of the join to define a source for
+    /// * `url` - URL prefix for file discovery
+    /// * `patterns` - Optional glob patterns for filtering files
+    pub async fn define_source_for_join(
+        &mut self,
+        join_name: &str,
+        url: &str,
+        patterns: Option<Vec<&str>>,
+    ) -> Result<&mut Self, BundlebaseError> {
+        let url = url.to_string();
+        let join_name = join_name.to_string();
+        let patterns: Option<Vec<String>> = patterns.map(|p| p.iter().map(|s| s.to_string()).collect());
+
+        self.do_change(&format!("Define source for join '{}' at {}", join_name, url), |builder| {
+            Box::pin(async move {
+                let pack_join = builder
+                    .bundle
+                    .joins
+                    .get(&join_name)
+                    .ok_or(format!("Unknown join '{}'", join_name))?;
+                let pack_id = pack_join.pack_id().clone();
+
+                let source_id = ObjectId::generate();
+                let op = DefineSourceOp::setup(source_id, pack_id, url, patterns);
+
+                builder.apply_operation(op.into()).await?;
+
+                Ok(())
+            })
+        })
+        .await?;
+
+        // Automatically refresh to attach any existing files
+        self.refresh().await?;
+
+        Ok(self)
+    }
+
+    /// Refresh from all defined sources - discover and attach new files.
+    ///
+    /// Lists files from each source URL, compares with already-attached files,
+    /// and auto-attaches any new files.
+    ///
+    /// # Returns
+    /// The number of new files that were attached.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use bundlebase::{BundleBuilder, BundlebaseError};
+    /// # async fn example() -> Result<(), BundlebaseError> {
+    /// let mut bundle = BundleBuilder::create("memory:///work", None).await?;
+    /// bundle.define_source("s3://bucket/data/", Some(vec!["**/*.parquet"])).await?;
+    /// let count = bundle.refresh().await?;
+    /// println!("Attached {} new files", count);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn refresh(&mut self) -> Result<usize, BundlebaseError> {
+        let mut attached_count = 0;
+
+        // Collect sources to avoid borrow issues
+        let sources: Vec<_> = self.bundle.sources().values().cloned().collect();
+
+        for source in sources {
+            let pending = source
+                .pending_files(&self.bundle.operations, self.bundle.config())
+                .await?;
+
+            for file in pending {
+                let pack_id = source.pack_id().clone();
+                let source_id = source.id().clone();
+                let file_url = file.url().to_string();
+
+                self.do_change(&format!("Refresh: attach {}", file_url), |builder| {
+                    Box::pin(async move {
+                        let mut op = AttachBlockOp::setup(&pack_id, &file_url, builder).await?;
+                        op.source_id = Some(source_id);
+                        builder.apply_operation(op.into()).await?;
+                        Ok(())
+                    })
+                })
+                .await?;
+
+                attached_count += 1;
+            }
+        }
+
+        Ok(attached_count)
+    }
+
+    /// Check for new files in sources without attaching them.
+    ///
+    /// # Returns
+    /// A list of (source_id, file_url) tuples for files that would be attached.
+    pub async fn check_refresh(&self) -> Result<Vec<(ObjectId, String)>, BundlebaseError> {
+        let mut pending_files = Vec::new();
+
+        for source in self.bundle.sources().values() {
+            let pending = source
+                .pending_files(&self.bundle.operations, self.bundle.config())
+                .await?;
+
+            for file in pending {
+                pending_files.push((source.id().clone(), file.url().to_string()));
+            }
+        }
+
+        Ok(pending_files)
     }
 
     /// Attach a view from another BundleBuilder

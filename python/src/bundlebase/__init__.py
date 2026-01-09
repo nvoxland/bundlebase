@@ -59,6 +59,10 @@ def set_rust_log_level(level: int) -> None:
 _original_methods = {
     # Data source operations
     "attach": _PyBundleBuilder.attach,
+    "define_source": _PyBundleBuilder.define_source,
+    "define_source_for_join": _PyBundleBuilder.define_source_for_join,
+    "refresh": _PyBundleBuilder.refresh,
+    "check_refresh": _PyBundleBuilder.check_refresh,
 
     # Column operations
     "remove_column": _PyBundleBuilder.remove_column,
@@ -133,8 +137,10 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 
 # Wrap mutation methods to return OperationChain
 # (but NOT read-only methods like schema, num_rows, explain)
+# Note: refresh and check_refresh are NOT here because they return values, not PyBundleBuilder
 mutation_methods = [
-    "attach", "remove_column", "rename_column", "filter", "select", "join",
+    "attach", "define_source", "define_source_for_join",
+    "remove_column", "rename_column", "filter", "select", "join",
     "create_view", "set_name", "set_description", "set_config", "define_function",
     "create_index", "rebuild_index", "reindex"
 ]

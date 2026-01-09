@@ -460,6 +460,114 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Define a data source for the base pack.
+    ///
+    /// A source specifies where to look for data files (e.g., S3 bucket prefix)
+    /// and patterns to filter which files to include.
+    #[pyo3(signature = (url, patterns=None))]
+    fn define_source<'py>(
+        slf: PyRef<'_, Self>,
+        url: &str,
+        patterns: Option<Vec<String>>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let url = url.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            let patterns_ref: Option<Vec<&str>> = patterns
+                .as_ref()
+                .map(|p| p.iter().map(|s| s.as_str()).collect());
+            builder
+                .define_source(&url, patterns_ref)
+                .await
+                .map_err(|e| to_py_error(&format!("Failed to define source at '{}'", url), e))?;
+            drop(builder);
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
+    /// Define a data source for a joined pack.
+    #[pyo3(signature = (join_name, url, patterns=None))]
+    fn define_source_for_join<'py>(
+        slf: PyRef<'_, Self>,
+        join_name: &str,
+        url: &str,
+        patterns: Option<Vec<String>>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let join_name = join_name.to_string();
+        let url = url.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            let patterns_ref: Option<Vec<&str>> = patterns
+                .as_ref()
+                .map(|p| p.iter().map(|s| s.as_str()).collect());
+            builder
+                .define_source_for_join(&join_name, &url, patterns_ref)
+                .await
+                .map_err(|e| {
+                    to_py_error(
+                        &format!("Failed to define source for join '{}' at '{}'", join_name, url),
+                        e,
+                    )
+                })?;
+            drop(builder);
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
+    /// Refresh from all defined sources - discover and attach new files.
+    ///
+    /// Returns the number of new files that were attached.
+    fn refresh<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            let count = builder
+                .refresh()
+                .await
+                .map_err(|e| to_py_error("Failed to refresh from sources", e))?;
+            Ok(count)
+        })
+    }
+
+    /// Check for new files in sources without attaching them.
+    ///
+    /// Returns a list of (source_id, file_url) tuples for files that would be attached.
+    fn check_refresh<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let builder = inner.lock().await;
+            let pending = builder
+                .check_refresh()
+                .await
+                .map_err(|e| to_py_error("Failed to check refresh", e))?;
+            let result: Vec<(String, String)> = pending
+                .into_iter()
+                .map(|(id, url)| (String::from(id), url))
+                .collect();
+            Ok(result)
+        })
+    }
+
     #[doc = "Returns a reference to the underlying PyArrow record batches for manual conversion to pandas, polars, numpy, etc."]
     fn as_pyarrow<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
