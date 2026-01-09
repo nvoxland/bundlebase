@@ -560,7 +560,7 @@ class PyBundleBuilder:
         """
         ...
 
-    def define_source(self, url: str, patterns: Optional[List[str]] = None) -> "OperationChain":
+    def define_source(self, url: str, patterns: Optional[List[str]] = None, function: str = "data_directory", args: Optional[Dict[str, str]] = None) -> "OperationChain":
         """
         Define a data source for the base pack.
 
@@ -570,16 +570,18 @@ class PyBundleBuilder:
         Args:
             url: Source URL prefix (e.g., "s3://bucket/data/")
             patterns: Optional glob patterns to filter files (defaults to ["**/*"])
+            function: Source function name (e.g., "data_directory")
+            args: Optional function-specific configuration arguments
 
         Returns:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.define_source("s3://bucket/data/", patterns=["**/*.parquet"])
+            c = await c.define_source("s3://bucket/data/", patterns=["**/*.parquet"], function="data_directory")
         """
         ...
 
-    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None) -> "OperationChain":
+    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None, function: str = "data_directory", args: Optional[Dict[str, str]] = None) ->"OperationChain":
         """
         Define a data source for a joined pack.
 
@@ -589,6 +591,8 @@ class PyBundleBuilder:
             join_name: Name of the join to associate the source with
             url: Source URL prefix (e.g., "s3://bucket/joined/")
             patterns: Optional glob patterns to filter files (defaults to ["**/*"])
+            function: Source function name (e.g., "data_directory")
+            args: Optional function-specific configuration arguments
 
         Returns:
             OperationChain for fluent chaining
@@ -834,11 +838,11 @@ class OperationChain:
         """Queue a define_function operation."""
         ...
 
-    def define_source(self, url: str, patterns: Optional[List[str]] = None) -> "OperationChain":
+    def define_source(self, url: str, patterns: Optional[List[str]] = None, function: str = "data_directory", args: Optional[Dict[str, str]] = None) -> "OperationChain":
         """Queue a define_source operation."""
         ...
 
-    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None) -> "OperationChain":
+    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None, function: str = "data_directory", args: Optional[Dict[str, str]] = None) ->"OperationChain":
         """Queue a define_source_for_join operation."""
         ...
 
@@ -902,11 +906,11 @@ class CreateChain:
         """Queue a define_function operation."""
         ...
 
-    def define_source(self, url: str, patterns: Optional[List[str]] = None) -> "CreateChain":
+    def define_source(self, url: str, patterns: Optional[List[str]] = None, function: str = ..., args: Optional[Dict[str, str]] = None) -> "CreateChain":
         """Queue a define_source operation."""
         ...
 
-    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None) -> "CreateChain":
+    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None, function: str = "data_directory", args: Optional[Dict[str, str]] = None) ->"CreateChain":
         """Queue a define_source_for_join operation."""
         ...
 
@@ -970,11 +974,11 @@ class ExtendChain:
         """Queue a define_function operation."""
         ...
 
-    def define_source(self, url: str, patterns: Optional[List[str]] = None) -> "ExtendChain":
+    def define_source(self, url: str, patterns: Optional[List[str]] = None, function: str = ..., args: Optional[Dict[str, str]] = None) -> "ExtendChain":
         """Queue a define_source operation."""
         ...
 
-    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None) -> "ExtendChain":
+    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None, function: str = "data_directory", args: Optional[Dict[str, str]] = None) ->"ExtendChain":
         """Queue a define_source_for_join operation."""
         ...
 

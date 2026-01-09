@@ -495,14 +495,17 @@ impl BundleBuilder {
         &mut self,
         url: &str,
         patterns: Option<Vec<&str>>,
+        function: &str,
+        args: Option<HashMap<String, String>>,
     ) -> Result<&mut Self, BundlebaseError> {
         let url = url.to_string();
+        let function = function.to_string();
         let patterns: Option<Vec<String>> = patterns.map(|p| p.iter().map(|s| s.to_string()).collect());
 
         self.do_change(&format!("Define source at {}", url), |builder| {
             Box::pin(async move {
                 let source_id = ObjectId::generate();
-                let op = DefineSourceOp::setup(source_id, ObjectId::BASE_PACK, url, patterns);
+                let op = DefineSourceOp::setup(source_id, ObjectId::BASE_PACK, url, patterns, function, args);
 
                 builder.apply_operation(op.into()).await?;
 
@@ -528,9 +531,12 @@ impl BundleBuilder {
         join_name: &str,
         url: &str,
         patterns: Option<Vec<&str>>,
+        function: &str,
+        args: Option<HashMap<String, String>>,
     ) -> Result<&mut Self, BundlebaseError> {
         let url = url.to_string();
         let join_name = join_name.to_string();
+        let function = function.to_string();
         let patterns: Option<Vec<String>> = patterns.map(|p| p.iter().map(|s| s.to_string()).collect());
 
         self.do_change(&format!("Define source for join '{}' at {}", join_name, url), |builder| {
@@ -543,7 +549,7 @@ impl BundleBuilder {
                 let pack_id = pack_join.pack_id().clone();
 
                 let source_id = ObjectId::generate();
-                let op = DefineSourceOp::setup(source_id, pack_id, url, patterns);
+                let op = DefineSourceOp::setup(source_id, pack_id, url, patterns, function, args);
 
                 builder.apply_operation(op.into()).await?;
 
@@ -584,8 +590,9 @@ impl BundleBuilder {
         let sources: Vec<_> = self.bundle.sources().values().cloned().collect();
 
         for source in sources {
+            let registry = self.bundle.source_function_registry();
             let pending = source
-                .pending_files(&self.bundle.operations, self.bundle.config())
+                .pending_files(&self.bundle.operations, self.bundle.config(), &registry)
                 .await?;
 
             for file in pending {
@@ -616,10 +623,11 @@ impl BundleBuilder {
     /// A list of (source_id, file_url) tuples for files that would be attached.
     pub async fn check_refresh(&self) -> Result<Vec<(ObjectId, String)>, BundlebaseError> {
         let mut pending_files = Vec::new();
+        let registry = self.bundle.source_function_registry();
 
         for source in self.bundle.sources().values() {
             let pending = source
-                .pending_files(&self.bundle.operations, self.bundle.config())
+                .pending_files(&self.bundle.operations, self.bundle.config(), &registry)
                 .await?;
 
             for file in pending {
