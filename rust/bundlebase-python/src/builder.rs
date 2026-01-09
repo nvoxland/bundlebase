@@ -304,17 +304,17 @@ impl PyBundleBuilder {
 
     fn attach<'py>(
         slf: PyRef<'_, Self>,
-        url: &str,
+        location: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
-        let url = url.to_string();
+        let location = location.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
             builder
-                .attach(url.as_str())
+                .attach(location.as_str())
                 .await
-                .map_err(|e| to_py_error(&format!("Failed to attach '{}'", url), e))?;
+                .map_err(|e| to_py_error(&format!("Failed to attach '{}'", location), e))?;
             drop(builder);
             Python::attach(|py| {
                 Py::new(
@@ -387,18 +387,18 @@ impl PyBundleBuilder {
         })
     }
 
-    #[pyo3(signature = (name, url, expression, join_type=None))]
+    #[pyo3(signature = (name, location, expression, join_type=None))]
     fn join<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
-        url: &str,
+        location: &str,
         expression: &str,
         join_type: Option<&str>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let name = name.to_string();
-        let url = url.to_string();
+        let location = location.to_string();
         let expression = expression.to_string();
         let join_type = join_type.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -411,12 +411,12 @@ impl PyBundleBuilder {
             builder
                 .join(
                     name.as_str(),
-                    url.as_str(),
+                    location.as_str(),
                     expression.as_str(),
                     join_type_option,
                 )
                 .await
-                .map_err(|e| to_py_error(&format!("Failed to join with '{}'", url), e))?;
+                .map_err(|e| to_py_error(&format!("Failed to join with '{}'", location), e))?;
             drop(builder);
             Python::attach(|py| {
                 Py::new(
@@ -433,19 +433,19 @@ impl PyBundleBuilder {
     fn attach_to_join<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
-        url: &str,
+        location: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let name = name.to_string();
-        let url = url.to_string();
+        let location = location.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
             builder
-                .attach_to_join(name.as_str(), url.as_str())
+                .attach_to_join(name.as_str(), location.as_str())
                 .await
                 .map_err(|e| {
-                    to_py_error(&format!("Failed to attach join source from '{}'", url), e)
+                    to_py_error(&format!("Failed to attach join location from '{}'", location), e)
                 })?;
             drop(builder);
             Python::attach(|py| {

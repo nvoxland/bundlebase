@@ -404,21 +404,21 @@ class PyBundleBuilder:
         """
         ...
 
-    def attach(self, url: str) -> "OperationChain":
+    def attach(self, location: str) -> "OperationChain":
         """
-        Attach data from a source URL.
+        Attach data from a file location.
 
         Queues an attach operation that will be executed when the chain is awaited.
         Supports CSV, JSON, Parquet files, and function:// URLs for custom functions.
 
         Args:
-            url: Data source URL (e.g., "data.csv", "data.parquet", "function://my_data")
+            location: Data file location (e.g., "data.csv", "data.parquet", "function://my_data")
 
         Returns:
             OperationChain for fluent chaining
 
         Raises:
-            ValueError: If the URL is invalid or data cannot be loaded
+            ValueError: If the location is invalid or data cannot be loaded
 
         Example:
             c = await c.attach("data.parquet")
@@ -527,12 +527,12 @@ class PyBundleBuilder:
         ...
 
 
-    def join(self, url: str, expression: str, join_type: Optional[str] = None) -> "OperationChain":
+    def join(self, location: str, expression: str, join_type: Optional[str] = None) -> "OperationChain":
         """
         Queue a join operation.
 
         Args:
-            url: Data source URL to join with
+            location: Data file location to join with
             expression: Join condition expression
             join_type: Type of join ("Inner", "Left", "Right", "Full")
 
@@ -792,7 +792,7 @@ class OperationChain:
     chain executes sequentially when awaited.
     """
 
-    def attach(self, url: str) -> "OperationChain":
+    def attach(self, location: str) -> "OperationChain":
         """Queue an attach operation."""
         ...
 
@@ -808,7 +808,7 @@ class OperationChain:
         """Queue a filter operation."""
         ...
 
-    def join(self, url: str, expression: str, join_type: Optional[str] = None) -> "OperationChain":
+    def join(self, location: str, expression: str, join_type: Optional[str] = None) -> "OperationChain":
         """Queue a join operation."""
         ...
 
@@ -876,7 +876,7 @@ class CreateChain:
         """Queue a filter operation."""
         ...
 
-    def join(self, url: str, expression: str, join_type: Optional[str] = None) -> "CreateChain":
+    def join(self, location: str, expression: str, join_type: Optional[str] = None) -> "CreateChain":
         """Queue a join operation."""
         ...
 
@@ -944,7 +944,7 @@ class ExtendChain:
         """Queue a filter operation."""
         ...
 
-    def join(self, url: str, expression: str, join_type: Optional[str] = None) -> "ExtendChain":
+    def join(self, location: str, expression: str, join_type: Optional[str] = None) -> "ExtendChain":
         """Queue a join operation."""
         ...
 

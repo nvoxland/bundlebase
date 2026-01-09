@@ -209,10 +209,10 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
         })
         .expect("Should have AttachBlock operation");
 
-    assert!(!attach_op.source.contains(':'));
+    assert!(!attach_op.location.contains(':'));
 
     // Path should point to Bundle A's location
-    assert_eq!("local_data.csv", attach_op.source);
+    assert_eq!("local_data.csv", attach_op.location);
 
     Ok(())
 }

@@ -12,7 +12,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachBlockOp {
-    pub source: String, //todo: rename so it doesn't confuse us with source_id. Rename source_id below to source
+    pub location: String,
     pub version: String,
     pub id: ObjectId,
     pub pack_id: ObjectId,
@@ -36,12 +36,12 @@ pub struct AttachBlockOp {
 impl AttachBlockOp {
     pub async fn setup(
         pack_id: &ObjectId,
-        source: &str,
+        location: &str,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         // Create progress scope (indeterminate - we don't know how many steps)
         let _progress = ProgressScope::new(
-            &format!("Attaching '{}'", source),
+            &format!("Attaching '{}'", location),
             None, // indeterminate progress
         );
 
@@ -51,7 +51,7 @@ impl AttachBlockOp {
         let adapter = builder
             .bundle
             .adapter_factory
-            .reader(source, &block_id, builder.bundle(), None, None)
+            .reader(location, &block_id, builder.bundle(), None, None)
             .await?;
 
         _progress.update(2, Some("Reading version"));
@@ -61,7 +61,7 @@ impl AttachBlockOp {
         let schema = adapter.read_schema().await?;
 
         let mut op = AttachBlockOp {
-            source: source.to_string(),
+            location: location.to_string(),
             num_rows: None,
             bytes: None,
             version,
@@ -93,7 +93,7 @@ impl AttachBlockOp {
 #[async_trait]
 impl Operation for AttachBlockOp {
     fn describe(&self) -> String {
-        format!("ATTACH: {}", self.source)
+        format!("ATTACH: {}", self.location)
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -108,7 +108,7 @@ impl Operation for AttachBlockOp {
         let reader = bundle
             .adapter_factory
             .reader(
-                self.source.as_str(),
+                self.location.as_str(),
                 &self.id,
                 bundle,
                 self.schema.clone(),
@@ -145,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn test_describe() {
         let op = AttachBlockOp {
-            source: "file:///test/data.csv".to_string(),
+            location: "file:///test/data.csv".to_string(),
             version: "test-version".to_string(),
             id: ObjectId::from(1),
             pack_id: ObjectId::from(2),
@@ -175,7 +175,7 @@ mod tests {
 
         assert_eq!(
             format!(
-                r#"source: memory:///test_data/userdata.parquet
+                r#"location: memory:///test_data/userdata.parquet
 version: {}
 id: {}
 packId: {}
@@ -315,7 +315,7 @@ schema:
     #[tokio::test]
     async fn test_version() {
         let op = AttachBlockOp {
-            source: "file:///test/data.csv".to_string(),
+            location: "file:///test/data.csv".to_string(),
             version: "test-version".to_string(),
             id: ObjectId::from(1),
             pack_id: ObjectId::from(2),
