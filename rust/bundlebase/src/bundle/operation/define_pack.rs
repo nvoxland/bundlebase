@@ -35,9 +35,6 @@ impl Operation for DefinePackOp {
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         bundle.add_pack(self.id.clone(), Arc::new(DataPack::new(self.id.clone())));
-        if bundle.base_pack.is_none() {
-            bundle.base_pack = Some(self.id.clone());
-        }
 
         Ok(())
     }
