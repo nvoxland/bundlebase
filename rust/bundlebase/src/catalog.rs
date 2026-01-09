@@ -9,6 +9,6 @@ pub use pack_schema_provider::PackSchemaProvider;
 pub use pack_union_table::PackUnionTable;
 
 /// Alias dataframe is registered in the ctx under. User can select from this
-pub static DATAFRAME_ALIAS: &str = "data";
+pub static DATAFRAME_ALIAS: &str = "bundle";
 /// Datafusion catalog name used
 pub static CATALOG_NAME: &str = "bundlebase";

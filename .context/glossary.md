@@ -515,7 +515,7 @@ for batch in batches {
 
 **Version**: 1.10.2+
 
-**Usage**: `maturin develop` - Build and install in development mode
+**Usage**: `./scripts/maturin-dev.sh` - Build and install in development mode
 
 **See Also**: [development.md](development.md)
 

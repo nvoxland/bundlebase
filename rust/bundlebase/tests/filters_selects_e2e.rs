@@ -99,7 +99,7 @@ async fn test_select_limit() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Query with LIMIT
-    let queried = bundle.select("SELECT * FROM data LIMIT 10", vec![]).await?;
+    let queried = bundle.select("SELECT * FROM bundle LIMIT 10", vec![]).await?;
 
     // Check that the result is actually limited
     let df = queried.dataframe().await?;
@@ -122,7 +122,7 @@ async fn test_select_with_filter() -> Result<(), BundlebaseError> {
     // Query with WHERE clause
     let queried = bundle
         .select(
-            "SELECT id, salary FROM data WHERE salary > $1",
+            "SELECT id, salary FROM bundle WHERE salary > $1",
             vec![ScalarValue::Float64(Some(50000.0))],
         )
         .await?;

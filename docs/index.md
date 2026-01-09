@@ -37,7 +37,7 @@
 
     c = bb.open("s3://mybucket/path")
     print(c.to_pandas())
-    print(bb.select("select * from data where revenue > 100"))
+    print(bb.select("select * from bundle where revenue > 100"))
     ```
 
 === "Async API"
@@ -64,7 +64,7 @@
     c = await bb.open("s3://mybucket/path")
 
     print(await c.to_pandas())
-    print(await bb.select("select * from data where revenue > 100"))
+    print(await bb.select("select * from bundle where revenue > 100"))
     ```
 
 ## Next Steps

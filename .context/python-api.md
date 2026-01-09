@@ -323,7 +323,7 @@ filtered = await c.filter("salary > $1 AND department = $2", [50000.0, "Engineer
 
 # Parameterized SQL query
 results = await c.query(
-    "SELECT name, salary FROM data WHERE salary > $1 AND active = $2",
+    "SELECT name, salary FROM bundle WHERE salary > $1 AND active = $2",
     [50000.0, True]
 )
 ```

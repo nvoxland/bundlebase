@@ -22,7 +22,7 @@ async fn test_bundle_data_table() {
     assert!(df_fields > 0, "DataFrame should have fields");
 
     // Query via ctx - should return the cached dataframe
-    let result = bundle.bundle.ctx().sql("SELECT * FROM data").await.unwrap();
+    let result = bundle.bundle.ctx().sql("SELECT * FROM bundle").await.unwrap();
 
     // Verify it works
     let schema = result.schema();
@@ -48,7 +48,7 @@ async fn test_data_table_schema() {
     let df_schema = df.schema();
 
     // Query via data table
-    let result = bundle.bundle.ctx().sql("SELECT * FROM data").await.unwrap();
+    let result = bundle.bundle.ctx().sql("SELECT * FROM bundle").await.unwrap();
     let result_schema = result.schema();
 
     // Schemas should match

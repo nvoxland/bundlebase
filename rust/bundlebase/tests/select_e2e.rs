@@ -14,7 +14,7 @@ async fn test_select_basic_filter() -> Result<(), BundlebaseError> {
     // Apply SQL query to filter results
     let queried = bundle
         .select(
-            "SELECT first_name, last_name FROM data WHERE salary > $1",
+            "SELECT first_name, last_name FROM bundle WHERE salary > $1",
             vec![ScalarValue::Float64(Some(50000.0))],
         )
         .await?;
@@ -38,7 +38,7 @@ async fn test_select_is_not_required() -> Result<(), BundlebaseError> {
     // Apply SQL query to filter results
     let queried = bundle
         .select(
-            "first_name, last_name FROM data WHERE salary > $1",
+            "first_name, last_name FROM bundle WHERE salary > $1",
             vec![ScalarValue::Float64(Some(50000.0))],
         )
         .await?;
@@ -62,7 +62,7 @@ async fn test_select_multiple_parameters() -> Result<(), BundlebaseError> {
     // Apply SQL query with multiple parameters
     let queried = bundle
         .select(
-            "SELECT id, first_name FROM data WHERE salary > $1 OR gender = $2",
+            "SELECT id, first_name FROM bundle WHERE salary > $1 OR gender = $2",
             vec![
                 ScalarValue::Float64(Some(100000.0)),
                 ScalarValue::Utf8(Some("F".to_string())),
@@ -87,7 +87,7 @@ async fn test_select_no_parameters() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("userdata.parquet")).await?;
 
     // Apply SQL query without parameters
-    let queried = bundle.select("SELECT * FROM data LIMIT 10", vec![]).await?;
+    let queried = bundle.select("SELECT * FROM bundle LIMIT 10", vec![]).await?;
 
     let df = queried.dataframe().await?;
     let result = df.as_ref().clone().collect().await?;
@@ -105,7 +105,7 @@ async fn test_select_with_aggregation() -> Result<(), BundlebaseError> {
     // Apply SQL query with GROUP BY
     let queried = bundle
         .select(
-            "SELECT gender, COUNT(*) as count FROM data GROUP BY gender",
+            "SELECT gender, COUNT(*) as count FROM bundle GROUP BY gender",
             vec![],
         )
         .await?;

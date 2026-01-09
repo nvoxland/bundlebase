@@ -242,7 +242,7 @@ async fn select_best_index<'a>(
 When a query has multiple indexed columns:
 
 ```sql
-SELECT * FROM data WHERE email = 'test@example.com' AND status = 'active';
+SELECT * FROM bundle WHERE email = 'test@example.com' AND status = 'active';
 ```
 
 **Process:**

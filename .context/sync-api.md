@@ -145,7 +145,7 @@ All operations work synchronously without `await`:
 
 - **`select(sql: str, params: List = [])`** - Execute SQL
   ```python
-  c.select("SELECT * FROM data WHERE id = $1 LIMIT 10", [42])
+  c.select("SELECT * FROM bundle WHERE id = $1 LIMIT 10", [42])
   ```
 
 - **`set_name(name: str)`** - Set container name

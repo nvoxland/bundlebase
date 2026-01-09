@@ -78,6 +78,34 @@ The published end-user facing documentation is manged in the `docs` directory.
 
 See [.context/development.md](.context/development.md) for full development workflow.
 
+## Build Tools
+
+**CRITICAL: Always use the correct build script for Python package builds**
+
+- ✅ **Python package**: Use `./scripts/maturin-dev.sh` (NOT `maturin develop`)
+- ✅ **Rust only**: Use `cargo build --package bundlebase`
+- ❌ **Never**: Use `maturin develop` directly (causes full rebuilds)
+- ❌ **Never**: Use `cargo build --all` for routine development (conflicts with maturin)
+
+**Why?** Maturin and cargo use different feature flags (`extension-module`), causing full rebuilds when switching between them. The `maturin-dev.sh` script uses a separate target directory (`target/maturin/`) to prevent this.
+
+**Quick Reference:**
+```bash
+# Python development (use this instead of maturin develop)
+./scripts/maturin-dev.sh
+
+# Rust development
+cargo build --package bundlebase
+cargo test --package bundlebase
+
+# Run Python tests (automatically uses same target-dir as maturin-dev.sh)
+poetry run pytest python/tests/
+```
+
+**Note:** Python tests use `maturin_import_hook` for auto-rebuild. The test suite sets `CARGO_TARGET_DIR=target/maturin` in `conftest.py` to match `maturin-dev.sh`, preventing rebuilds.
+
+See [scripts/README.md](scripts/README.md) for detailed explanation.
+
 ## Performance Guidelines
 
 **Memory-Efficient Data Processing:**

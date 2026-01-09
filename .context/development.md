@@ -19,22 +19,33 @@ poetry install  # Install Python dependencies
 
 ### Build for Development
 
+**CRITICAL: Always use the maturin wrapper scripts**
+
 Compile Rust extension and install locally:
 
 ```bash
-# Using maturin directly
-maturin develop
+# CORRECT: Use the wrapper script (prevents full rebuilds)
+./scripts/maturin-dev.sh
 
-# Or using Poetry
-poetry run maturin develop
+# WRONG: Never use maturin directly - causes full rebuilds when switching with cargo
+# maturin develop  ❌ DO NOT USE
 ```
 
-This builds the Rust code and installs the Python extension in development mode.
+**Why the script?** Maturin and cargo use different feature flags (`extension-module`), causing full rebuilds of 200+ crates when switching between them. The wrapper script uses `target/maturin/` instead of `target/debug/` to keep build artifacts separate.
+
+**For Rust-only development:**
+```bash
+# Fast, doesn't trigger Python rebuilds
+cargo build --package bundlebase
+cargo test --package bundlebase
+```
+
+See [scripts/README.md](../scripts/README.md) for technical details.
 
 ### Build Release Version
 
 ```bash
-maturin build --release
+./scripts/maturin-build.sh --release
 ```
 
 ## Development Workflow
@@ -64,8 +75,12 @@ maturin build --release
 ### Step 4: Verify All Tests Pass
 
 ```bash
-cargo test              # Rust tests
-poetry run pytest       # Python E2E tests
+# Test Rust code
+cargo test --package bundlebase
+
+# Build Python package and run tests
+./scripts/maturin-dev.sh
+poetry run pytest python/tests/
 ```
 
 ## Dependency Management

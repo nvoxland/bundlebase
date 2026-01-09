@@ -549,7 +549,7 @@ impl BundleBuilder {
     /// # async fn example() -> Result<(), BundlebaseError> {
     /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
     /// # c.attach("data.csv").await?;
-    /// let adults = c.select("select * from data where age > 21", vec![]).await?;
+    /// let adults = c.select("select * from bundle where age > 21", vec![]).await?;
     /// c.create_view("adults", &adults).await?;
     /// c.rename_view("adults", "adults_view").await?;
     /// c.commit("Renamed view").await?;
@@ -592,7 +592,7 @@ impl BundleBuilder {
     /// # async fn example() -> Result<(), BundlebaseError> {
     /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
     /// # c.attach("data.csv").await?;
-    /// let adults = c.select("select * from data where age > 21", vec![]).await?;
+    /// let adults = c.select("select * from bundle where age > 21", vec![]).await?;
     /// c.create_view("adults", &adults).await?;
     /// c.drop_view("adults").await?;
     /// c.commit("Dropped view").await?;

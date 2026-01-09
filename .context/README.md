@@ -283,14 +283,14 @@ Each domain documentation file follows a consistent structure:
 
 ```bash
 # Setup environment
-poetry install && maturin develop
+poetry install && ./scripts/maturin-dev.sh
 
 # Run tests
 cargo test              # Rust tests
 poetry run pytest       # Python tests
 
 # Build for development
-maturin develop         # Build and install in dev mode
+./scripts/maturin-dev.sh         # Build and install in dev mode
 
 # Check code
 cargo clippy            # Rust linting

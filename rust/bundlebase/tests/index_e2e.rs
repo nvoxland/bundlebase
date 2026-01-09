@@ -17,7 +17,7 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
 
     let rs = bundle
         .select(
-            "select Index, City from data where Email='elizabethbarr@ewing.com'",
+            "select Index, City from bundle where Email='elizabethbarr@ewing.com'",
             vec![],
         )
         .await?;
@@ -80,7 +80,7 @@ CoalesceBatchesExec: target_batch_size=8192
 
     let rs = bundle
         .select(
-            "select Index, City from data where Email='elizabethbarr@ewing.com'",
+            "select Index, City from bundle where Email='elizabethbarr@ewing.com'",
             vec![],
         )
         .await?;
