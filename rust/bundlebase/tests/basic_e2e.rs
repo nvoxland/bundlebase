@@ -52,10 +52,13 @@ message: First commit
 timestamp: {}
 changes:
 - id: {}
-  description: {}
+  description: Initialize bundle
   operations:
   - type: definePack
     id: {}
+- id: {}
+  description: {}
+  operations:
   - type: attachBlock
     source: memory:///test_data/userdata.parquet
     version: {}
@@ -163,11 +166,12 @@ changes:
         commit.author,
         commit.timestamp,
         commit.changes[0].id,
-        commit.changes[0].description,
         match &commit.operations()[0] {
             AnyOperation::DefinePack(op) => test_utils::for_yaml(String::from(op.id.clone())),
             _ => panic!("Expected first operation to be DefinePack"),
         },
+        commit.changes[1].id,
+        commit.changes[1].description,
         test_utils::for_yaml(version),
         test_utils::for_yaml(String::from(op_field!(
             &commit.operations()[1],
@@ -179,8 +183,8 @@ changes:
             AnyOperation::AttachBlock,
             pack_id
         ))),
-        commit.changes[1].id,
         commit.changes[2].id,
+        commit.changes[3].id,
     );
     assert_eq!(contents, expected);
 
@@ -245,10 +249,13 @@ message: Commit changes
 timestamp: {}
 changes:
 - id: {}
-  description: {}
+  description: Initialize bundle
   operations:
   - type: definePack
     id: {}
+- id: {}
+  description: {}
+  operations:
   - type: attachBlock
     source: memory:///test_data/userdata.parquet
     version: {}
@@ -368,10 +375,11 @@ changes:
         commit.author,
         commit.timestamp,
         commit.changes[0].id,
-        commit.changes[0].description,
         test_utils::for_yaml(
             op_field!(&commit.operations()[0], AnyOperation::DefinePack, id).into()
         ),
+        commit.changes[1].id,
+        commit.changes[1].description,
         test_utils::for_yaml(op_field!(
             &commit.operations()[1],
             AnyOperation::AttachBlock,
@@ -387,10 +395,10 @@ changes:
             AnyOperation::AttachBlock,
             pack_id
         ))),
-        commit.changes[1].id,
         commit.changes[2].id,
         commit.changes[3].id,
         commit.changes[4].id,
+        commit.changes[5].id,
     );
     assert_eq!(contents.trim(), expected.trim());
 
@@ -468,10 +476,13 @@ message: CSV commit
 timestamp: {}
 changes:
 - id: {}
-  description: {}
+  description: Initialize bundle
   operations:
   - type: definePack
     id: {}
+- id: {}
+  description: {}
+  operations:
   - type: attachBlock
     source: memory:///test_data/customers-0-100.csv
     version: {}
@@ -558,10 +569,11 @@ changes:
             commit.author,
             commit.timestamp,
             commit.changes[0].id,
-            commit.changes[0].description,
             test_utils::for_yaml(
                 op_field!(commit.operations()[0], AnyOperation::DefinePack, id).into()
             ),
+            commit.changes[1].id,
+            commit.changes[1].description,
             test_utils::for_yaml(op_field!(
                 commit.operations()[1],
                 AnyOperation::AttachBlock,

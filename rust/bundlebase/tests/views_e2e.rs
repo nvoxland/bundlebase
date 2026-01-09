@@ -231,7 +231,6 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
     let view = c.view("high_index").await?;
 
     // Debug assertions
-    println!("View base_pack: {:?}", view.base_pack());
     println!("View data_packs count: {}", view.data_packs_count());
     println!(
         "View operations: {:?}",
@@ -241,11 +240,6 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
             .collect::<Vec<_>>()
     );
 
-    // Verify data is present
-    assert!(
-        view.base_pack().is_some(),
-        "View should have base_pack from parent"
-    );
     assert!(
         view.data_packs_count() > 0,
         "View should have data_packs from parent"

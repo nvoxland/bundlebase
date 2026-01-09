@@ -294,39 +294,41 @@ async fn test_function_error_unknown_function() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_multiple_function_definitions() -> Result<(), BundlebaseError> {
     // Test 8: Define multiple functions and verify they're independent
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    // Create first bundle for func1
+    let mut bundle1 = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Define func1
     let schema1 = SchemaRef::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
     let sig1 = FunctionSignature::new("func1", schema1);
-    bundle.define_function(sig1).await?;
-
-    // Define func2
-    let schema2 = SchemaRef::new(Schema::new(vec![Field::new("y", DataType::Utf8, true)]));
-    let sig2 = FunctionSignature::new("func2", schema2);
-    bundle.define_function(sig2).await?;
+    bundle1.define_function(sig1).await?;
 
     // Set implementation for func1
     let data1 = vec![record_batch!(("x", Int32, [1_i32, 2_i32, 3_i32]))?];
     let impl1 = Arc::new(StaticImpl::new(data1, "v1".to_string()));
-    bundle.set_impl("func1", impl1).await?;
+    bundle1.set_impl("func1", impl1).await?;
+
+    // Attach and query func1
+    bundle1.attach("function://func1").await?;
+    let df1 = bundle1.dataframe().await?;
+    let result1 = df1.as_ref().clone().collect().await?;
+    assert_eq!(result1[0].num_rows(), 3, "func1 should have 3 rows");
+
+    // Create second bundle for func2
+    let mut bundle2 = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+
+    // Define func2
+    let schema2 = SchemaRef::new(Schema::new(vec![Field::new("y", DataType::Utf8, true)]));
+    let sig2 = FunctionSignature::new("func2", schema2);
+    bundle2.define_function(sig2).await?;
 
     // Set implementation for func2
     let data2 = vec![record_batch!(("y", Utf8, ["a", "b"]))?];
     let impl2 = Arc::new(StaticImpl::new(data2, "v1".to_string()));
-    bundle.set_impl("func2", impl2).await?;
-
-    // Attach and query func1
-    let mut cloned_c1 = bundle.clone();
-    let c1 = cloned_c1.attach("function://func1").await?;
-    let df1 = c1.dataframe().await?;
-    let result1 = df1.as_ref().clone().collect().await?;
-    assert_eq!(result1[0].num_rows(), 3, "func1 should have 3 rows");
+    bundle2.set_impl("func2", impl2).await?;
 
     // Attach and query func2
-    let mut cloned_c2 = bundle.clone();
-    let c2 = cloned_c2.attach("function://func2").await?;
-    let df2 = c2.dataframe().await?;
+    bundle2.attach("function://func2").await?;
+    let df2 = bundle2.dataframe().await?;
     let result2 = df2.as_ref().clone().collect().await?;
     assert_eq!(result2[0].num_rows(), 2, "func2 should have 2 rows");
 

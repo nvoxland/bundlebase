@@ -448,20 +448,10 @@ impl BundleBuilder {
 
         self.do_change(&format!("Attach {}", path), |builder| {
             Box::pin(async move {
-                if builder.bundle.base_pack.is_none() {
-                    builder
-                        .apply_operation(DefinePackOp::setup(&ObjectId::generate()).await?.into())
-                        .await?;
-                    info!(
-                        "Created base pack {}",
-                        builder.bundle.base_pack.expect("Base pack not set")
-                    );
-                }
-
                 builder
                     .apply_operation(
                         AttachBlockOp::setup(
-                            &builder.bundle.base_pack.expect("Base pack not set"),
+                            &ObjectId::BASE_PACK,
                             &path,
                             builder,
                         )
@@ -511,13 +501,8 @@ impl BundleBuilder {
 
         self.do_change(&format!("Define source at {}", url), |builder| {
             Box::pin(async move {
-                let pack_id = builder
-                    .bundle
-                    .base_pack
-                    .ok_or("Cannot define source: no base pack exists")?;
-
                 let source_id = ObjectId::generate();
-                let op = DefineSourceOp::setup(source_id, pack_id, url, patterns);
+                let op = DefineSourceOp::setup(source_id, ObjectId::BASE_PACK, url, patterns);
 
                 builder.apply_operation(op.into()).await?;
 
@@ -1296,9 +1281,7 @@ impl BundleBuilder {
         let mut analyzer = crate::bundle::ColumnLineageAnalyzer::new();
 
         // Register base pack
-        if self.bundle.base_pack.is_some() {
-            analyzer.register_table("__base_0".to_string(), "base".to_string());
-        }
+        analyzer.register_table("__base_0".to_string(), "base".to_string());
 
         // Register joined packs
         for (join_name, _join) in &self.bundle.joins {
@@ -1547,8 +1530,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             bundle.bundle.operations().len(),
-            0,
-            "Empty bundle has no operations"
+            1,
         );
 
         let bundle = bundle
@@ -1567,14 +1549,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!("empty", bundle.version());
+        let init_version = bundle.version();
 
         bundle
             .attach(test_datafile("userdata.parquet"))
             .await
             .unwrap();
 
-        assert_ne!("empty", bundle.version());
+        assert_ne!(init_version, bundle.version());
     }
 
     #[tokio::test]

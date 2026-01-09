@@ -65,7 +65,6 @@ pub struct Bundle {
     operations: Vec<AnyOperation>,
 
     data_packs: Arc<RwLock<HashMap<ObjectId, Arc<DataPack>>>>,
-    base_pack: Option<ObjectId>,
     joins: HashMap<String, PackJoin>,
     sources: HashMap<ObjectId, Arc<Source>>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
@@ -114,7 +113,6 @@ impl Clone for Bundle {
             operations: self.operations.clone(),
             version: self.version.clone(),
             last_manifest_version: self.last_manifest_version,
-            base_pack: self.base_pack.clone(),
             data_packs: Arc::clone(&self.data_packs),
             joins: self.joins.clone(),
             sources: self.sources.clone(),
@@ -191,7 +189,6 @@ impl Bundle {
         Ok(Self {
             ctx,
             id: Uuid::new_v4().to_string(),
-            base_pack: None,
             data_packs,
             joins: HashMap::new(),
             sources: HashMap::new(),
@@ -202,7 +199,7 @@ impl Bundle {
                 Arc::clone(&function_registry),
                 Arc::clone(&storage),
             )
-            .into(),
+                .into(),
             function_registry,
             name: None,
             description: None,
@@ -250,7 +247,7 @@ impl Bundle {
             &mut visited,
             &mut bundle,
         )
-        .await?;
+            .await?;
 
         Ok(bundle)
     }
@@ -442,16 +439,12 @@ impl Bundle {
                     identifier,
                     available.join("\n  ")
                 )
-                .into())
+                    .into())
             }
         }
     }
 
     /// Get the base pack ID (for testing/debugging)
-    pub fn base_pack(&self) -> Option<ObjectId> {
-        self.base_pack.clone()
-    }
-
     /// Get the number of data packs (for testing/debugging)
     pub fn data_packs_count(&self) -> usize {
         self.data_packs.read().len()
@@ -565,7 +558,7 @@ impl Bundle {
     ) -> Result<DataFrame, BundlebaseError> {
         let base_table = format!(
             "packs.{}",
-            DataPack::table_name(&self.base_pack.expect("Missing base pack"))
+            DataPack::table_name(&ObjectId::BASE_PACK)
         );
         let join_table = format!("packs.{}", DataPack::table_name(pack_join.pack_id()));
 
@@ -709,43 +702,49 @@ impl BundleFacade for Bundle {
         }
 
         debug!("Building dataframe...");
-        let df = match self.base_pack {
-            Some(base_pack) => {
-                let table_name = format!("packs.{}", DataPack::table_name(&base_pack));
-                let mut df = self.ctx.table(&table_name).await?;
 
-                for (_, pack_join) in &self.joins {
-                    debug!("Executing join with pack {}", pack_join.pack_id());
-                    df = self.dataframe_join(df, pack_join).await?;
-                }
+        // Check if base pack exists and has data
+        let base_pack_has_data = self
+            .data_packs
+            .read()
+            .get(&ObjectId::BASE_PACK)
+            .is_some_and(|p| !p.is_empty());
 
-                // Apply operations to the base DataFrame
-                debug!(
+        let df = if base_pack_has_data {
+            let table_name = format!("packs.{}", DataPack::table_name(&ObjectId::BASE_PACK));
+            let mut df = self.ctx.table(&table_name).await?;
+
+            for (_, pack_join) in &self.joins {
+                debug!("Executing join with pack {}", pack_join.pack_id());
+                df = self.dataframe_join(df, pack_join).await?;
+            }
+
+            // Apply operations to the base DataFrame
+            debug!(
                     "dataframe: Applying {} operations to dataframe...",
                     self.operations().len()
                 );
 
-                for op in self.operations().iter() {
-                    debug!("Applying to dataframe: {}", &op.describe());
-                    df = op.apply_dataframe(df, self.ctx.clone()).await?;
-                }
-                debug!(
+            for op in self.operations().iter() {
+                debug!("Applying to dataframe: {}", &op.describe());
+                df = op.apply_dataframe(df, self.ctx.clone()).await?;
+            }
+            debug!(
                     "dataframe: Applying {} operations to dataframe...DONE",
                     self.operations().len()
                 );
 
-                df
-            }
-            None => {
-                debug!("No base pack, using empty dataframe");
-                DataFrame::new(
-                    self.ctx().state(),
-                    LogicalPlan::EmptyRelation(EmptyRelation {
-                        produce_one_row: false,
-                        schema: DFSchemaRef::new(DFSchema::empty()),
-                    }),
-                )
-            }
+            df
+        } else {
+            // No base pack, or base pack has no data yet
+            debug!("No base pack or empty base pack, using empty dataframe");
+            DataFrame::new(
+                self.ctx().state(),
+                LogicalPlan::EmptyRelation(EmptyRelation {
+                    produce_one_row: false,
+                    schema: DFSchemaRef::new(DFSchema::empty()),
+                }),
+            )
         };
         self.dataframe.replace(df);
         debug!("Building dataframe...DONE");
@@ -813,7 +812,7 @@ impl BundleFacade for Bundle {
                     "File URL '{}' is not under base URL '{}'",
                     file_url, base_url
                 )
-                .into());
+                    .into());
             };
 
             // Remove leading slash if present
@@ -950,14 +949,14 @@ mod tests {
         c.apply_operation(AnyOperation::SetName(SetNameOp {
             name: "New Name".to_string(),
         }))
-        .await?;
+            .await?;
 
         assert_eq!(c.version(), "ead23fcd0c25".to_string());
 
         c.apply_operation(AnyOperation::SetName(SetNameOp {
             name: "Other Name".to_string(),
         }))
-        .await?;
+            .await?;
 
         assert_eq!(c.version(), "b4ef54330e9a".to_string());
 

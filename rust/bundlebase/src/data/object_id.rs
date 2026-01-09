@@ -11,7 +11,7 @@ pub struct ObjectId(u8);
 
 impl ObjectId {
     /// Well-known ID for the base pack, always created when a bundle is created.
-    pub const BASE_PACK: ObjectId = ObjectId(1);
+    pub const BASE_PACK: ObjectId = ObjectId(0);
 
     pub fn generate() -> ObjectId {
         let mut rng = rand::rng();
