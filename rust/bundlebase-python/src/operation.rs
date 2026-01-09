@@ -31,6 +31,7 @@ impl PyOperation {
             AnyOperation::DropView(_) => "dropView".to_string(),
             AnyOperation::RebuildIndex(_) => "rebuildIndex".to_string(),
             AnyOperation::Select(_) => "select".to_string(),
+            AnyOperation::DefineSource(_) => "defineSource".to_string(),
         }
     }
 

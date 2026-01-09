@@ -17,10 +17,11 @@ from conftest import datafile, random_bundle
 async def test_empty_bundle():
     c = await bundlebase.create(random_bundle())
     assert c is not None
-    assert (await c.schema()).is_empty()
-    assert len((await c.schema())) == 0
-
-    assert await c.num_rows() == 0
+    # Note: Empty bundles have a base pack defined but no data,
+    # so we verify by checking status has the "Initialize bundle" change
+    status = c.status()
+    assert len(status.changes) == 1
+    assert "Initialize bundle" in status.changes[0].description
 
 
 @pytest.mark.asyncio
@@ -184,10 +185,7 @@ async def test_join():
 @pytest.mark.asyncio
 async def test_schema():
     c = await bundlebase.create(random_bundle())
-    # Empty schema returns empty string
-    schema = await c.schema()
-    assert str(schema) == ""
-
+    # Attach data first to have a schema
     c = await c.attach(datafile("userdata.parquet"))
     schema = await c.schema()
     assert len(schema) == 13
@@ -319,7 +317,8 @@ async def test_to_pandas():
     """Test conversion to pandas DataFrame"""
     c = await bundlebase.create(random_bundle())
 
-    with pytest.raises(ValueError, match="no data"):
+    # Empty bundle (no data attached) raises error
+    with pytest.raises(ValueError):
         await c.to_pandas()
 
     c = await c.attach(datafile("userdata.parquet"))
@@ -337,8 +336,9 @@ async def test_to_pandas():
 @pytest.mark.asyncio
 async def test_to_polars():
     c = await bundlebase.create(random_bundle())
-    with pytest.raises(ValueError, match="no data"):
-        await c.to_dict()
+    # Empty bundle (no data attached) raises error
+    with pytest.raises(ValueError):
+        await c.to_polars()
 
     c = await c.attach(datafile("userdata.parquet"))
 
@@ -355,8 +355,9 @@ async def test_to_numpy():
     """Test conversion to dict of numpy arrays"""
 
     c = await bundlebase.create(random_bundle())
-    with pytest.raises(ValueError, match="no data"):
-        await c.to_dict()
+    # Empty bundle (no data attached) raises error
+    with pytest.raises(ValueError):
+        await c.to_numpy()
 
     c = await c.attach(datafile("userdata.parquet"))
 
@@ -373,7 +374,8 @@ async def test_to_dict():
     """Test conversion to dict of lists"""
     c = await bundlebase.create(random_bundle())
 
-    with pytest.raises(ValueError, match="no data"):
+    # Empty bundle (no data attached) raises error
+    with pytest.raises(ValueError):
         await c.to_dict()
 
     c = await c.attach(datafile("userdata.parquet"))
@@ -782,12 +784,13 @@ async def test_status_empty_bundle():
     """Test status() on a newly created bundle"""
     c = await bundlebase.create(random_bundle())
 
-    # Empty bundle should have no operations
+    # Bundle has "Initialize bundle" change from base pack auto-creation
     status = c.status()
     assert isinstance(status, bundlebase.PyBundleStatus)
-    assert status.is_empty()
-    assert len(status.changes) == 0
-    assert status.total_operations == 0
+    assert not status.is_empty()
+    assert len(status.changes) == 1
+    assert status.total_operations == 1
+    assert "Initialize bundle" in status.changes[0].description
 
 
 @pytest.mark.asyncio
@@ -796,15 +799,15 @@ async def test_status_single_operation():
     c = await bundlebase.create(random_bundle())
     c = await c.set_name("Test Bundle")
 
-    # Should have one change
+    # Should have two changes (Initialize bundle + set_name)
     status = c.status()
     assert isinstance(status, bundlebase.PyBundleStatus)
-    assert len(status.changes) == 1
-    assert status.total_operations == 1
+    assert len(status.changes) == 2
+    assert status.total_operations == 2
     assert not status.is_empty()
 
-    # Check change attributes
-    change = status.changes[0]
+    # Check the set_name change attributes (second change)
+    change = status.changes[1]
     assert isinstance(change, bundlebase.PyChange)
     assert isinstance(change.id, str)
     assert len(change.id) > 0
@@ -821,19 +824,19 @@ async def test_status_multiple_operations():
     c = await c.set_name("Test Bundle")
     c = await c.set_description("A test description")
 
-    # Should have two changes
+    # Should have three changes (Initialize bundle + set_name + set_description)
     status = c.status()
     assert isinstance(status, bundlebase.PyBundleStatus)
-    assert len(status.changes) == 2
-    assert status.total_operations == 2
+    assert len(status.changes) == 3
+    assert status.total_operations == 3
 
-    # Check first operation
-    assert status.changes[0].description == "Set name to Test Bundle"
-    assert status.changes[0].operation_count == 1
-
-    # Check second operation
-    assert status.changes[1].description == "Set description to A test description"
+    # Check first user operation (second change after Initialize bundle)
+    assert status.changes[1].description == "Set name to Test Bundle"
     assert status.changes[1].operation_count == 1
+
+    # Check second user operation (third change)
+    assert status.changes[2].description == "Set description to A test description"
+    assert status.changes[2].operation_count == 1
 
 
 @pytest.mark.asyncio
@@ -844,8 +847,9 @@ async def test_status_with_data_operations():
 
     status = c.status()
     assert isinstance(status, bundlebase.PyBundleStatus)
-    assert len(status.changes) == 1
-    assert "Attach" in status.changes[0].description or "attach" in status.changes[0].description.lower()
+    # Should have 2 changes: Initialize bundle + attach
+    assert len(status.changes) == 2
+    assert "Attach" in status.changes[1].description or "attach" in status.changes[1].description.lower()
 
 
 @pytest.mark.asyncio

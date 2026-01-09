@@ -10,6 +10,9 @@ static KNOWN_IDS: OnceLock<RwLock<HashSet<u8>>> = OnceLock::new();
 pub struct ObjectId(u8);
 
 impl ObjectId {
+    /// Well-known ID for the base pack, always created when a bundle is created.
+    pub const BASE_PACK: ObjectId = ObjectId(1);
+
     pub fn generate() -> ObjectId {
         let mut rng = rand::rng();
         let mut id = rng.random::<u8>();

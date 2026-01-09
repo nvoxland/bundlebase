@@ -3,6 +3,7 @@ mod create_view;
 mod define_function;
 mod create_index;
 mod define_pack;
+mod define_source;
 mod drop_index;
 mod drop_view;
 mod filter;
@@ -23,6 +24,7 @@ pub use crate::bundle::operation::create_view::CreateViewOp;
 pub use crate::bundle::operation::define_function::DefineFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
 pub use crate::bundle::operation::define_pack::DefinePackOp;
+pub use crate::bundle::operation::define_source::DefineSourceOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
 pub use crate::bundle::operation::drop_view::DropViewOp;
 pub use crate::bundle::operation::filter::FilterOp;
@@ -120,6 +122,7 @@ pub enum AnyOperation {
     AttachBlock(AttachBlockOp),
     CreateView(CreateViewOp),
     DefineFunction(DefineFunctionOp),
+    DefineSource(DefineSourceOp),
     Filter(FilterOp),
     IndexBlocks(IndexBlocksOp),
     CreateIndex(CreateIndexOp),
@@ -144,6 +147,7 @@ impl Operation for AnyOperation {
             AnyOperation::AttachBlock(op) => op.describe(),
             AnyOperation::CreateView(op) => op.describe(),
             AnyOperation::DefineFunction(op) => op.describe(),
+            AnyOperation::DefineSource(op) => op.describe(),
             AnyOperation::Filter(op) => op.describe(),
             AnyOperation::IndexBlocks(op) => op.describe(),
             AnyOperation::CreateIndex(op) => op.describe(),
@@ -167,6 +171,7 @@ impl Operation for AnyOperation {
             AnyOperation::AttachBlock(op) => op.check(bundle).await,
             AnyOperation::CreateView(op) => op.check(bundle).await,
             AnyOperation::DefineFunction(op) => op.check(bundle).await,
+            AnyOperation::DefineSource(op) => op.check(bundle).await,
             AnyOperation::Filter(op) => op.check(bundle).await,
             AnyOperation::IndexBlocks(op) => op.check(bundle).await,
             AnyOperation::CreateIndex(op) => op.check(bundle).await,
@@ -190,6 +195,7 @@ impl Operation for AnyOperation {
             AnyOperation::AttachBlock(op) => op.apply(bundle).await,
             AnyOperation::CreateView(op) => op.apply(bundle).await,
             AnyOperation::DefineFunction(op) => op.apply(bundle).await,
+            AnyOperation::DefineSource(op) => op.apply(bundle).await,
             AnyOperation::Filter(op) => op.apply(bundle).await,
             AnyOperation::IndexBlocks(op) => op.apply(bundle).await,
             AnyOperation::CreateIndex(op) => op.apply(bundle).await,
@@ -217,6 +223,7 @@ impl Operation for AnyOperation {
             AnyOperation::AttachBlock(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::CreateView(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DefineFunction(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::DefineSource(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::Filter(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::IndexBlocks(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::CreateIndex(op) => op.apply_dataframe(df, ctx).await,
@@ -240,6 +247,7 @@ impl Operation for AnyOperation {
             AnyOperation::AttachBlock(op) => op.version(),
             AnyOperation::CreateView(op) => op.version(),
             AnyOperation::DefineFunction(op) => op.version(),
+            AnyOperation::DefineSource(op) => op.version(),
             AnyOperation::Filter(op) => op.version(),
             AnyOperation::IndexBlocks(op) => op.version(),
             AnyOperation::CreateIndex(op) => op.version(),
@@ -263,6 +271,7 @@ impl Operation for AnyOperation {
             AnyOperation::AttachBlock(op) => op.allowed_on_view(),
             AnyOperation::CreateView(op) => op.allowed_on_view(),
             AnyOperation::DefineFunction(op) => op.allowed_on_view(),
+            AnyOperation::DefineSource(op) => op.allowed_on_view(),
             AnyOperation::Filter(op) => op.allowed_on_view(),
             AnyOperation::IndexBlocks(op) => op.allowed_on_view(),
             AnyOperation::CreateIndex(op) => op.allowed_on_view(),
@@ -313,6 +322,12 @@ impl From<CreateViewOp> for AnyOperation {
 impl From<DefineFunctionOp> for AnyOperation {
     fn from(config: DefineFunctionOp) -> Self {
         AnyOperation::DefineFunction(config)
+    }
+}
+
+impl From<DefineSourceOp> for AnyOperation {
+    fn from(config: DefineSourceOp) -> Self {
+        AnyOperation::DefineSource(config)
     }
 }
 

@@ -551,6 +551,7 @@ changes:
             source: "memory:///test".to_string(),
             version: "v1".to_string(),
             id: ObjectId::from(42u8),
+            source_id: None,
             pack_id: ObjectId::from(53u8),
             layout: None,
             num_rows: Some(100),

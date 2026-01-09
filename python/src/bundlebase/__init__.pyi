@@ -1,6 +1,6 @@
 """Type stubs for bundlebase module."""
 
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 __version__: str
 
@@ -560,6 +560,76 @@ class PyBundleBuilder:
         """
         ...
 
+    def define_source(self, url: str, patterns: Optional[List[str]] = None) -> "OperationChain":
+        """
+        Define a data source for the base pack.
+
+        Queues an operation to define a source URL from which files can be
+        automatically attached via refresh().
+
+        Args:
+            url: Source URL prefix (e.g., "s3://bucket/data/")
+            patterns: Optional glob patterns to filter files (defaults to ["**/*"])
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.define_source("s3://bucket/data/", patterns=["**/*.parquet"])
+        """
+        ...
+
+    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None) -> "OperationChain":
+        """
+        Define a data source for a joined pack.
+
+        Queues an operation to define a source URL for a specific join's pack.
+
+        Args:
+            join_name: Name of the join to associate the source with
+            url: Source URL prefix (e.g., "s3://bucket/joined/")
+            patterns: Optional glob patterns to filter files (defaults to ["**/*"])
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.define_source_for_join("customers", "s3://bucket/customers/")
+        """
+        ...
+
+    async def refresh(self) -> int:
+        """
+        Refresh data from all defined sources.
+
+        Compares files in each source with already-attached files and
+        auto-attaches any new files found.
+
+        Returns:
+            Number of files attached
+
+        Example:
+            count = await c.refresh()
+            print(f"Attached {count} new files")
+        """
+        ...
+
+    async def check_refresh(self) -> List[Tuple[str, str]]:
+        """
+        Check for new files in defined sources without attaching.
+
+        Returns a list of pending files that would be attached by refresh().
+
+        Returns:
+            List of (source_id, url) tuples for pending files
+
+        Example:
+            pending = await c.check_refresh()
+            for source_id, url in pending:
+                print(f"Pending: {url} from source {source_id}")
+        """
+        ...
+
     async def commit(self, message: str) -> "PyBundleBuilder":
         """
         Commit the current state of the bundle.
@@ -764,6 +834,14 @@ class OperationChain:
         """Queue a define_function operation."""
         ...
 
+    def define_source(self, url: str, patterns: Optional[List[str]] = None) -> "OperationChain":
+        """Queue a define_source operation."""
+        ...
+
+    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None) -> "OperationChain":
+        """Queue a define_source_for_join operation."""
+        ...
+
 
 class CreateChain:
     """
@@ -824,6 +902,14 @@ class CreateChain:
         """Queue a define_function operation."""
         ...
 
+    def define_source(self, url: str, patterns: Optional[List[str]] = None) -> "CreateChain":
+        """Queue a define_source operation."""
+        ...
+
+    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None) -> "CreateChain":
+        """Queue a define_source_for_join operation."""
+        ...
+
 
 class ExtendChain:
     """
@@ -882,6 +968,14 @@ class ExtendChain:
         version: str = ...,
     ) -> "ExtendChain":
         """Queue a define_function operation."""
+        ...
+
+    def define_source(self, url: str, patterns: Optional[List[str]] = None) -> "ExtendChain":
+        """Queue a define_source operation."""
+        ...
+
+    def define_source_for_join(self, join_name: str, url: str, patterns: Optional[List[str]] = None) -> "ExtendChain":
+        """Queue a define_source_for_join operation."""
         ...
 
 
