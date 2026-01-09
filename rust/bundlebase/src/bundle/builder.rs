@@ -485,7 +485,7 @@ impl BundleBuilder {
     /// # use bundlebase::{BundleBuilder, BundlebaseError};
     /// # async fn example() -> Result<(), BundlebaseError> {
     /// let mut bundle = BundleBuilder::create("memory:///work", None).await?;
-    /// bundle.define_source("s3://bucket/data/", Some(vec!["**/*.parquet"])).await?;
+    /// bundle.define_source("s3://bucket/data/", Some(vec!["**/*.parquet"]), "data_directory", None).await?;
     /// bundle.refresh().await?;
     /// bundle.commit("Initial data from source").await?;
     /// # Ok(())
@@ -577,7 +577,7 @@ impl BundleBuilder {
     /// # use bundlebase::{BundleBuilder, BundlebaseError};
     /// # async fn example() -> Result<(), BundlebaseError> {
     /// let mut bundle = BundleBuilder::create("memory:///work", None).await?;
-    /// bundle.define_source("s3://bucket/data/", Some(vec!["**/*.parquet"])).await?;
+    /// bundle.define_source("s3://bucket/data/", Some(vec!["**/*.parquet"]), "data_directory", None).await?;
     /// let count = bundle.refresh().await?;
     /// println!("Attached {} new files", count);
     /// # Ok(())
@@ -905,12 +905,12 @@ impl BundleBuilder {
     pub async fn join(
         &mut self,
         name: &str,
-        source: &str,
+        location: &str,
         expression: &str,
         join_type: JoinTypeOption,
     ) -> Result<&mut Self, BundlebaseError> {
         let name = name.to_string();
-        let source = source.to_string();
+        let location = location.to_string();
         let expression = expression.to_string();
 
         self.do_change(&format!("Join '{}' on {}", name, expression), |builder| {
@@ -921,10 +921,10 @@ impl BundleBuilder {
                     .apply_operation(DefinePackOp::setup(&join_pack_id).await?.into())
                     .await?;
 
-                // Step 2: Attach the source data to the join pack
+                // Step 2: Attach the location data to the join pack
                 builder
                     .apply_operation(
-                        AttachBlockOp::setup(&join_pack_id, &source, builder)
+                        AttachBlockOp::setup(&join_pack_id, &location, builder)
                             .await?
                             .into(),
                     )
@@ -939,7 +939,7 @@ impl BundleBuilder {
                     )
                     .await?;
 
-                info!("Joined: {} as \"{}\"", source, name);
+                info!("Joined: {} as \"{}\"", location, name);
 
                 Ok(())
             })

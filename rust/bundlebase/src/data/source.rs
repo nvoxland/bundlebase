@@ -110,7 +110,7 @@ impl Source {
             .iter()
             .filter_map(|op| match op {
                 AnyOperation::AttachBlock(attach) if attach.source_id.as_ref() == Some(&self.id) => {
-                    Some(attach.source.clone())
+                    Some(attach.location.clone())
                 }
                 _ => None,
             })

@@ -60,7 +60,7 @@ changes:
   description: {}
   operations:
   - type: attachBlock
-    source: memory:///test_data/userdata.parquet
+    location: memory:///test_data/userdata.parquet
     version: {}
     id: {}
     packId: {}
@@ -257,7 +257,7 @@ changes:
   description: {}
   operations:
   - type: attachBlock
-    source: memory:///test_data/userdata.parquet
+    location: memory:///test_data/userdata.parquet
     version: {}
     id: {}
     packId: {}
@@ -484,7 +484,7 @@ changes:
   description: {}
   operations:
   - type: attachBlock
-    source: memory:///test_data/customers-0-100.csv
+    location: memory:///test_data/customers-0-100.csv
     version: {}
     id: {}
     packId: {}
@@ -638,7 +638,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     assert!(contents.contains("author: "));
     assert!(contents.contains("message: JSON commit"));
     assert!(contents.contains("type: attachBlock"));
-    assert!(contents.contains("source: memory:///test_data/objects.json"));
+    assert!(contents.contains("location: memory:///test_data/objects.json"));
     assert!(contents.contains("type: renameColumn"));
     assert!(contents.contains("oldName: score"));
     assert!(contents.contains("newName: points"));
@@ -647,7 +647,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     // Verify the attach operation metadata
     match &commit.operations()[1] {
         AnyOperation::AttachBlock(op) => {
-            assert_eq!(op.source, "memory:///test_data/objects.json");
+            assert_eq!(op.location, "memory:///test_data/objects.json");
             assert_eq!(op.num_rows, Some(4));
             // Version is present and not empty
             assert!(!op.version.is_empty());

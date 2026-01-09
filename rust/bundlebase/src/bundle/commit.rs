@@ -548,7 +548,7 @@ changes:
         ]));
 
         let attach_config = AttachBlockOp {
-            source: "memory:///test".to_string(),
+            location: "memory:///test".to_string(),
             version: "v1".to_string(),
             id: ObjectId::from(42u8),
             source_id: None,
@@ -613,7 +613,7 @@ changes:
   operations:
   - type: attachBlock
     packId: '3b'
-    source: memory:///test_data/userdata.parquet
+    location: memory:///test_data/userdata.parquet
     version: test-version
     id: '2a'
     numRows: 100
@@ -635,7 +635,7 @@ changes:
 
         match &commit.operations()[0] {
             AnyOperation::AttachBlock(config) => {
-                assert_eq!(config.source, "memory:///test_data/userdata.parquet");
+                assert_eq!(config.location, "memory:///test_data/userdata.parquet");
                 assert_eq!(config.version, "test-version");
             }
             _ => panic!("Expected AttachBlock operation"),
@@ -653,7 +653,7 @@ changes:
   description: Attach and transform data
   operations:
   - type: attachBlock
-    source: memory:///test_data/userdata.parquet
+    location: memory:///test_data/userdata.parquet
     version: '2'
     id: cc
     packId: dd
@@ -699,7 +699,7 @@ changes:
         // Verify AttachBlock operation
         match &commit.operations()[0] {
             AnyOperation::AttachBlock(config) => {
-                assert_eq!(config.source, "memory:///test_data/userdata.parquet");
+                assert_eq!(config.location, "memory:///test_data/userdata.parquet");
                 assert_eq!(config.version, "2");
                 assert!(config.schema.is_some());
                 let schema = config.schema.as_ref().unwrap();
