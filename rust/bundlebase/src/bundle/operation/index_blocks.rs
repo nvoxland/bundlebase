@@ -1,6 +1,7 @@
 use crate::bundle::operation::Operation;
 use crate::data::{DataBlock, ObjectId, RowId, VersionedBlockId};
 use crate::index::{ColumnIndex, IndexedValue};
+use crate::io::IOWriter;
 use crate::progress::ProgressScope;
 use crate::{Bundle, BundlebaseError};
 use arrow_schema::DataType;
@@ -169,7 +170,7 @@ impl IndexBlocksOp {
         let total_cardinality = column_index.cardinality();
 
         let rel_path = format!("idx_{}_{}.idx", index, Uuid::new_v4());
-        let path = bundle.data_dir.file(&rel_path)?;
+        let path = bundle.data_dir.io_file(&rel_path)?;
 
         path.write(column_index.serialize()?).await.map_err(|e| {
             BundlebaseError::from(format!(

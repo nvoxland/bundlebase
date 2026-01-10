@@ -2,6 +2,7 @@ use crate::bundle::commit::BundleCommit;
 use crate::bundle::operation::{AnyOperation, BundleChange, Operation};
 use crate::bundle::META_DIR;
 use crate::data::ObjectId;
+use crate::io::{IOLister, IOReader, IOWriter};
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
@@ -46,7 +47,7 @@ impl CreateViewOp {
         // This handles bundle cloning, config preservation, and directory setup
         let view_dir_path = parent_builder
             .data_dir()
-            .subdir(&format!("view_{}", view_id))?
+            .io_subdir(&format!("view_{}", view_id))?
             .url()
             .to_string();
 
@@ -88,7 +89,7 @@ impl CreateViewOp {
         };
 
         // Write commit and init files to view manifest directory
-        let manifest_dir = view_builder.data_dir().subdir(META_DIR)?;
+        let manifest_dir = view_builder.data_dir().io_subdir(META_DIR)?;
 
         // Write commit: 00001{hash}.yaml
         let yaml = serde_yaml::to_string(&commit)?;
@@ -101,7 +102,7 @@ impl CreateViewOp {
         let filename = format!("00001{}.yaml", hash_short);
         let data = bytes::Bytes::from(yaml);
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
-        manifest_dir.file(&filename)?.write_stream(stream).await?;
+        manifest_dir.io_file(&filename)?.write_stream_boxed(Box::pin(stream)).await?;
         debug!(
             "Wrote view commit: {} with {} operations",
             filename,
@@ -111,7 +112,7 @@ impl CreateViewOp {
         // Write init commit with VIEW field
         use crate::bundle::init::{InitCommit, INIT_FILENAME};
         let init = InitCommit::new_view(&view_id.to_string());
-        manifest_dir.file(INIT_FILENAME)?.write_yaml(&init).await?;
+        manifest_dir.io_file(INIT_FILENAME)?.write_yaml(&init).await?;
         debug!("Wrote init commit with VIEW={}", view_id);
 
         debug!("View '{}' created at {}", name, view_dir_path);

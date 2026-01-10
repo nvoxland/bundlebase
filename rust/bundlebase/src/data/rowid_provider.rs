@@ -1,6 +1,6 @@
 use crate::data::RowId;
 use crate::index::{RowIdIndex, GLOBAL_ROWID_CACHE};
-use crate::io::ObjectStoreFile;
+use crate::io::{IOReader, IOFile};
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -26,11 +26,11 @@ pub trait RowIdProvider: Send + Sync {
 /// when accessing many files. The cache automatically evicts least-recently-used
 /// entries when it reaches capacity.
 pub struct LayoutRowIdProvider {
-    layout: ObjectStoreFile,
+    layout: IOFile,
 }
 
 impl LayoutRowIdProvider {
-    pub fn new(layout: ObjectStoreFile) -> Self {
+    pub fn new(layout: IOFile) -> Self {
         Self { layout }
     }
 }

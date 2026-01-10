@@ -2,6 +2,7 @@ use crate::data::object_id::ObjectId;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
 use crate::data::{DataReader, RowId, RowIdBatch, SendableRowIdBatchStream};
+use crate::io::IOReader;
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
@@ -124,7 +125,7 @@ impl DataReader for ParquetDataReader {
         let object_meta = self
             .inner
             .file()
-            .metadata()
+            .object_meta()
             .await?
             .ok_or_else(|| BundlebaseError::from("Parquet file not found"))?;
         let file_size = object_meta.size as usize;

@@ -15,7 +15,7 @@ mod source;
 mod source_function;
 mod versioned_blockid;
 
-use crate::io::ObjectStoreDir;
+use crate::io::IODir;
 use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
@@ -69,7 +69,7 @@ pub trait DataReader: Sync + Send + Debug {
 
     async fn build_layout(
         &self,
-        _data_dir: &ObjectStoreDir,
+        _data_dir: &IODir,
     ) -> Result<Option<String>, BundlebaseError> {
         Ok(None)
     }

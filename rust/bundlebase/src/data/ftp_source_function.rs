@@ -1,7 +1,7 @@
 //! FTP source function for listing files from remote FTP directories.
 
 use crate::data::source_function::SourceFunction;
-use crate::io::{parse_ftp_url, FtpClient, ObjectStoreFile};
+use crate::io::{parse_ftp_url, FtpDir, IOFile, IOLister};
 use crate::BundlebaseError;
 use crate::BundleConfig;
 use async_trait::async_trait;
@@ -56,8 +56,8 @@ impl SourceFunction for FtpDirectoryFunction {
     async fn list_files(
         &self,
         args: &HashMap<String, String>,
-        _config: Arc<BundleConfig>,
-    ) -> Result<Vec<ObjectStoreFile>, BundlebaseError> {
+        config: Arc<BundleConfig>,
+    ) -> Result<Vec<IOFile>, BundlebaseError> {
         // Get URL from args
         let url_str = args.get("url").ok_or_else(|| {
             BundlebaseError::from(format!(
@@ -81,55 +81,28 @@ impl SourceFunction for FtpDirectoryFunction {
             .filter_map(|p| Pattern::new(p).ok())
             .collect();
 
-        // Connect to FTP
-        let mut ftp = FtpClient::connect(&host, port, &user, &password).await?;
+        // List files using FtpDir with IOLister interface
+        let ftp_dir = FtpDir::from_url(&url)?;
+        let all_files = ftp_dir.list_files().await?;
 
-        // List all files recursively
-        let all_files = ftp.list_files_recursive(&remote_path).await?;
-
-        // Close connection (we only need the listing; files will be downloaded during refresh)
-        ftp.close().await?;
-
-        // Filter files by pattern and convert to ObjectStoreFile
-        // We use the original ftp:// URL as the file location
-        let matching_files: Vec<ObjectStoreFile> = all_files
+        // Filter files by pattern and convert FileInfo to IOFile
+        // Note: FTP files will be downloaded during refresh since they can't be directly referenced
+        let matching_files: Vec<IOFile> = all_files
             .into_iter()
             .filter(|file| {
-                let relative_path = Self::relative_path(&remote_path, &file.path);
+                let relative_path = Self::relative_path(&remote_path, file.url.path());
                 compiled_patterns
                     .iter()
                     .any(|pattern| pattern.matches(&relative_path))
             })
             .filter_map(|file| {
-                // Construct the full FTP URL for this file
-                let file_url = if password.is_empty() {
-                    if user == "anonymous" {
-                        format!("ftp://{}:{}{}", host, port, file.path)
-                    } else {
-                        format!("ftp://{}@{}:{}{}", user, host, port, file.path)
-                    }
-                } else {
-                    format!("ftp://{}:{}@{}:{}{}", user, password, host, port, file.path)
-                };
-
-                match url::Url::parse(&file_url) {
-                    Ok(url) => {
-                        // Create a placeholder ObjectStoreFile
-                        // This file can't be read directly - it will be downloaded during refresh
-                        // We use the memory store with a temporary path
-                        let _memory_url = url::Url::parse(&format!(
-                            "memory:///ftp-pending/{}",
-                            file.path.trim_start_matches('/')
-                        )).ok()?;
-
-                        ObjectStoreFile::new(
-                            &url,
-                            crate::io::get_memory_store(),
-                            &object_store::path::Path::from(file.path.trim_start_matches('/')),
-                        ).ok()
-                    }
-                    Err(_) => None,
-                }
+                // Create IOFile from the FTP URL
+                // This file stores the URL for later download during refresh
+                IOFile::new(
+                    &file.url,
+                    crate::io::get_memory_store(),
+                    &object_store::path::Path::from(file.url.path().trim_start_matches('/')),
+                ).ok()
             })
             .collect();
 

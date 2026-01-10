@@ -1,5 +1,5 @@
 use crate::data::RowId;
-use crate::io::ObjectStoreFile;
+use crate::io::{IOReader, IOFile};
 use arrow::csv::ReaderBuilder as CsvReaderBuilder;
 use arrow::datatypes::SchemaRef;
 use arrow::json::ReaderBuilder as JsonReaderBuilder;
@@ -32,7 +32,7 @@ pub enum LineOrientedFormat {
 /// Supports both CSV and JSON Lines formats
 pub struct RowIdOffsetDataSource {
     /// The source file
-    file: ObjectStoreFile,
+    file: IOFile,
     /// Schema of the data (original full schema)
     schema: SchemaRef,
     /// Schema after projection is applied (computed at construction time)
@@ -57,7 +57,7 @@ impl RowIdOffsetDataSource {
     /// * `projection` - Optional column projection
     /// * `format` - File format (CSV or JSON Lines)
     pub fn new(
-        file: &ObjectStoreFile,
+        file: &IOFile,
         schema: SchemaRef,
         row_ids: Vec<RowId>,
         projection: Option<Vec<usize>>,
@@ -94,7 +94,7 @@ impl RowIdOffsetDataSource {
     /// * `row_ids` - List of RowIds to read
     /// * `projection` - Optional column projection
     pub fn new_csv(
-        file: &ObjectStoreFile,
+        file: &IOFile,
         schema: SchemaRef,
         row_ids: Vec<RowId>,
         projection: Option<Vec<usize>>,
@@ -110,7 +110,7 @@ impl RowIdOffsetDataSource {
     /// * `row_ids` - List of RowIds to read
     /// * `projection` - Optional column projection
     pub fn new_json_lines(
-        file: &ObjectStoreFile,
+        file: &IOFile,
         schema: SchemaRef,
         row_ids: Vec<RowId>,
         projection: Option<Vec<usize>>,
@@ -454,7 +454,7 @@ mod tests {
             RowId::new(&block_id, 500, 10),
         ];
 
-        let file = ObjectStoreFile::from_url(
+        let file = IOFile::from_url(
             &Url::parse("memory:///test.csv").unwrap(),
             BundleConfig::default().into(),
         )
@@ -476,7 +476,7 @@ mod tests {
             RowId::new(&block_id, 200, 10),
         ];
 
-        let file = ObjectStoreFile::from_url(
+        let file = IOFile::from_url(
             &Url::parse("file:///test.csv").unwrap(),
             BundleConfig::default().into(),
         )

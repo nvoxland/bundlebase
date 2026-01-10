@@ -142,7 +142,7 @@ impl Operation for AttachBlockOp {
 mod tests {
     use super::*;
     use crate::bundle::BundleFacade;
-    use crate::io::ObjectStoreFile;
+    use crate::io::{IOReader, IOFile};
     use crate::test_utils::{empty_bundle, for_yaml, test_datafile};
     use crate::BundleConfig;
     use url::Url;
@@ -172,7 +172,7 @@ mod tests {
             AttachBlockOp::setup(&ObjectId::generate(), datafile, &empty_bundle().await).await?;
         let block_id = String::from(op.id.clone());
         let pack = String::from(op.pack.clone());
-        let version = ObjectStoreFile::from_url(
+        let version = IOFile::from_url(
             &Url::parse(datafile).unwrap(),
             BundleConfig::default().into(),
         )?

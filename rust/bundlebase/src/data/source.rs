@@ -1,6 +1,6 @@
 use crate::bundle::{AnyOperation, DefineSourceOp};
 use crate::data::{ObjectId, SourceFunctionRegistry};
-use crate::io::ObjectStoreFile;
+use crate::io::{IOReader, IOFile};
 use crate::BundlebaseError;
 use crate::BundleConfig;
 use parking_lot::RwLock;
@@ -85,7 +85,7 @@ impl Source {
         &self,
         config: Arc<BundleConfig>,
         registry: &Arc<RwLock<SourceFunctionRegistry>>,
-    ) -> Result<Vec<ObjectStoreFile>, BundlebaseError> {
+    ) -> Result<Vec<IOFile>, BundlebaseError> {
         let func = {
             let reg = registry.read();
             reg.get(&self.function)
@@ -120,7 +120,7 @@ impl Source {
         operations: &[AnyOperation],
         config: Arc<BundleConfig>,
         registry: &Arc<RwLock<SourceFunctionRegistry>>,
-    ) -> Result<Vec<ObjectStoreFile>, BundlebaseError> {
+    ) -> Result<Vec<IOFile>, BundlebaseError> {
         let all_files = self.list_files(config, registry).await?;
         let attached = self.attached_files(operations);
 

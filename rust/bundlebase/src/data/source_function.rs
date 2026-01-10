@@ -1,4 +1,4 @@
-use crate::io::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::{IODir, IOFile, IOLister};
 use crate::{BundlebaseError, BundleConfig};
 use async_trait::async_trait;
 use glob::Pattern;
@@ -31,7 +31,7 @@ pub trait SourceFunction: Send + Sync {
         &self,
         args: &HashMap<String, String>,
         config: Arc<BundleConfig>,
-    ) -> Result<Vec<ObjectStoreFile>, BundlebaseError>;
+    ) -> Result<Vec<IOFile>, BundlebaseError>;
 }
 
 /// Registry for source functions.
@@ -136,7 +136,7 @@ impl SourceFunction for DataDirectoryFunction {
         &self,
         args: &HashMap<String, String>,
         config: Arc<BundleConfig>,
-    ) -> Result<Vec<ObjectStoreFile>, BundlebaseError> {
+    ) -> Result<Vec<IOFile>, BundlebaseError> {
         // Get URL from args
         let url_str = args.get("url").ok_or_else(|| {
             BundlebaseError::from(format!(
@@ -154,7 +154,7 @@ impl SourceFunction for DataDirectoryFunction {
         let patterns: Vec<&str> = patterns_str.split(',').map(|s| s.trim()).collect();
 
         // List all files from the directory
-        let dir = ObjectStoreDir::from_url(&url, config)?;
+        let dir = IODir::from_url(&url, config.clone())?;
         let all_files = dir.list_files().await?;
 
         // Compile glob patterns
@@ -163,15 +163,16 @@ impl SourceFunction for DataDirectoryFunction {
             .filter_map(|p| Pattern::new(p).ok())
             .collect();
 
-        // Filter files by pattern
-        let matching_files: Vec<ObjectStoreFile> = all_files
+        // Filter files by pattern and convert FileInfo to IOFile
+        let matching_files: Vec<IOFile> = all_files
             .into_iter()
             .filter(|file| {
-                let relative_path = Self::relative_path(&url, file.url());
+                let relative_path = Self::relative_path(&url, &file.url);
                 compiled_patterns
                     .iter()
                     .any(|pattern| pattern.matches(&relative_path))
             })
+            .filter_map(|file| IOFile::from_url(&file.url, config.clone()).ok())
             .collect();
 
         Ok(matching_files)

@@ -1,7 +1,7 @@
 //! SCP/SFTP source function for listing files from remote directories via SSH.
 
 use crate::data::source_function::SourceFunction;
-use crate::io::{parse_scp_url, ObjectStoreFile, SftpClient};
+use crate::io::{parse_scp_url, IOFile, SftpClient};
 use crate::BundlebaseError;
 use crate::BundleConfig;
 use async_trait::async_trait;
@@ -77,7 +77,7 @@ impl SourceFunction for ScpDirectoryFunction {
         &self,
         args: &HashMap<String, String>,
         _config: Arc<BundleConfig>,
-    ) -> Result<Vec<ObjectStoreFile>, BundlebaseError> {
+    ) -> Result<Vec<IOFile>, BundlebaseError> {
         // Get URL from args
         let url_str = args.get("url").ok_or_else(|| {
             BundlebaseError::from(format!(
@@ -120,9 +120,9 @@ impl SourceFunction for ScpDirectoryFunction {
         // Close connection (we only need the listing; files will be downloaded during refresh)
         sftp.close().await?;
 
-        // Filter files by pattern and convert to ObjectStoreFile
+        // Filter files by pattern and convert to IOFile
         // We use the original scp:// URL as the file location
-        let matching_files: Vec<ObjectStoreFile> = all_files
+        let matching_files: Vec<IOFile> = all_files
             .into_iter()
             .filter(|file| {
                 let relative_path = Self::relative_path(&remote_path, &file.path);
@@ -135,17 +135,10 @@ impl SourceFunction for ScpDirectoryFunction {
                 let file_url = format!("scp://{}@{}:{}{}", user, host, port, file.path);
                 match url::Url::parse(&file_url) {
                     Ok(url) => {
-                        // Create a placeholder ObjectStoreFile
+                        // Create a placeholder IOFile
                         // This file can't be read directly - it will be downloaded during refresh
                         // We use the memory store with a temporary path
-                        let _memory_url = url::Url::parse(&format!(
-                            "memory:///scp-pending/{}",
-                            file.path.trim_start_matches('/')
-                        )).ok()?;
-
-                        // We store the actual SCP URL in a way the refresh method can retrieve it
-                        // The ObjectStoreFile will have the original scp:// URL
-                        ObjectStoreFile::new(
+                        IOFile::new(
                             &url,
                             crate::io::get_memory_store(),
                             &object_store::path::Path::from(file.path.trim_start_matches('/')),

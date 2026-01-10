@@ -14,7 +14,7 @@ use crate::data::{DataBlock, ObjectId, VersionedBlockId};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
-use crate::io::{parse_ftp_url, parse_scp_url, FtpClient, ObjectStoreDir, ObjectStoreFile, SftpClient};
+use crate::io::{parse_scp_url, FtpFile, IODir, IOFile, IOLister, IOReader, IOWriter, SftpClient};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
@@ -172,7 +172,7 @@ impl BundleBuilder {
         let mut existing = Bundle::empty().await?;
         existing.passed_config = config;
         existing.recompute_config()?;
-        existing.data_dir = ObjectStoreDir::from_str(path, existing.config.clone())?;
+        existing.data_dir = IODir::from_str(path, existing.config.clone())?;
 
         let mut builder = BundleBuilder {
             status: BundleStatus::new(),
@@ -202,7 +202,7 @@ impl BundleBuilder {
         // If data_dir is provided and not empty, use it; otherwise keep the current bundle's data_dir
         if let Some(dir) = data_dir {
             if !dir.is_empty() {
-                new_bundle.data_dir = ObjectStoreDir::from_str(dir, bundle.config())?;
+                new_bundle.data_dir = IODir::from_str(dir, bundle.config())?;
                 if new_bundle.data_dir.url() != bundle.url() {
                     new_bundle.last_manifest_version = 0;
                 }
@@ -237,11 +237,11 @@ impl BundleBuilder {
     /// bundle.commit("Filter high-value transactions").await?;
     /// ```
     pub async fn commit(&mut self, message: &str) -> Result<(), BundlebaseError> {
-        let manifest_dir = self.bundle.data_dir.subdir(META_DIR)?;
+        let manifest_dir = self.bundle.data_dir.io_subdir(META_DIR)?;
 
         if self.bundle.last_manifest_version == 0 {
             let from = self.bundle.from();
-            let init_file = manifest_dir.file(INIT_FILENAME)?;
+            let init_file = manifest_dir.io_file(INIT_FILENAME)?;
             init_file.write_yaml(&InitCommit::new(from)).await?;
         };
 
@@ -279,12 +279,12 @@ impl BundleBuilder {
 
         // Create versioned filename: {5-digit-version}{12-char-hash}.yaml
         let filename = format!("{:05}{}.yaml", next_version, hash_short);
-        let manifest_file = manifest_dir.file(filename.as_str())?;
+        let manifest_file = manifest_dir.io_file(filename.as_str())?;
 
         // Write as stream
         let data = bytes::Bytes::from(yaml);
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
-        manifest_file.write_stream(stream).await?;
+        manifest_file.write_stream_boxed(Box::pin(stream)).await?;
 
         // Update base to reflect the committed version
         // Preserve explicit_config from current bundle
@@ -364,7 +364,7 @@ impl BundleBuilder {
             let mut new = Bundle::empty().await?;
             new.passed_config = self.bundle.passed_config.clone();
             new.recompute_config()?;
-            new.data_dir = ObjectStoreDir::from_url(self.url(), new.config.clone())?;
+            new.data_dir = IODir::from_url(self.url(), new.config.clone())?;
             new
         } else {
             // Preserve explicit_config when reopening
@@ -653,34 +653,36 @@ impl BundleBuilder {
                                 .unwrap_or_else(|| "data".to_string());
                             let block_id = ObjectId::generate();
                             let target_name = format!("{}_{}", block_id, filename);
-                            let target_file = builder.data_dir().file(&target_name)?;
+                            let target_file = builder.data_dir().io_file(&target_name)?;
                             target_file.write(data).await?;
 
                             target_file.url().to_string()
                         } else if scheme == "ftp" {
-                            // Download file via FTP
-                            let (user, password, host, port, remote_path) = parse_ftp_url(&parsed_url)?;
-
-                            let mut ftp = FtpClient::connect(&host, port, &user, &password).await?;
-                            let data = ftp.read_file(&remote_path).await?;
-                            ftp.close().await?;
+                            // Download file via FTP using IOReader
+                            let ftp_file = FtpFile::from_url(&parsed_url)?;
+                            let data = ftp_file.read_bytes().await?.ok_or_else(|| {
+                                BundlebaseError::from(format!(
+                                    "FTP file not found: {}",
+                                    original_url
+                                ))
+                            })?;
 
                             // Generate unique filename in data_dir
-                            let filename = std::path::Path::new(&remote_path)
-                                .file_name()
-                                .and_then(|s| s.to_str())
+                            let filename = parsed_url
+                                .path_segments()
+                                .and_then(|s| s.last())
                                 .map(|s| s.to_string())
                                 .unwrap_or_else(|| "data".to_string());
                             let block_id = ObjectId::generate();
                             let target_name = format!("{}_{}", block_id, filename);
-                            let target_file = builder.data_dir().file(&target_name)?;
+                            let target_file = builder.data_dir().io_file(&target_name)?;
                             target_file.write(data).await?;
 
                             target_file.url().to_string()
                         } else if should_copy {
                             // Copy file to data_dir (local/cloud files)
                             let source_file =
-                                ObjectStoreFile::from_url(&parsed_url, config)?;
+                                IOFile::from_url(&parsed_url, config)?;
                             let data = source_file.read_bytes().await?.ok_or_else(|| {
                                 BundlebaseError::from(format!(
                                     "Source file not found: {}",
@@ -696,7 +698,7 @@ impl BundleBuilder {
                                 .unwrap_or_else(|| "data".to_string());
                             let block_id = ObjectId::generate();
                             let target_name = format!("{}_{}", block_id, filename);
-                            let target_file = builder.data_dir().file(&target_name)?;
+                            let target_file = builder.data_dir().io_file(&target_name)?;
                             target_file.write(data).await?;
 
                             target_file.url().to_string()
@@ -1409,7 +1411,7 @@ impl BundleBuilder {
         Ok(analyzer.get_source(logical_name))
     }
 
-    pub fn data_dir(&self) -> &ObjectStoreDir {
+    pub fn data_dir(&self) -> &IODir {
         &self.bundle.data_dir
     }
 }

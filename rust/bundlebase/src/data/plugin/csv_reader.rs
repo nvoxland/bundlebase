@@ -3,7 +3,7 @@ use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader}
 use crate::data::plugin::ReaderPlugin;
 use crate::data::{DataReader, LayoutRowIdProvider, LineOrientedFormat, RowId, RowIdProvider};
 use crate::index::RowIdIndex;
-use crate::io::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::{IODir, IOFile};
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
@@ -70,7 +70,7 @@ impl ReaderPlugin for CsvPlugin {
         let reader = self.inner.reader(source, bundle, schema).await?;
         let layout = match layout {
             None => None,
-            Some(x) => Some(ObjectStoreFile::from_str(
+            Some(x) => Some(IOFile::from_str(
                 x.as_str(),
                 bundle.data_dir(),
                 bundle.config(),
@@ -83,7 +83,7 @@ impl ReaderPlugin for CsvPlugin {
 pub struct CsvReader {
     inner: FileReader<CsvFormatConfig>,
     block_id: ObjectId,
-    layout: Option<ObjectStoreFile>,
+    layout: Option<IOFile>,
     rowid_provider: Option<Arc<dyn RowIdProvider>>,
 }
 
@@ -91,7 +91,7 @@ impl CsvReader {
     pub fn new(
         inner: FileReader<CsvFormatConfig>,
         block_id: &ObjectId,
-        layout: &Option<ObjectStoreFile>,
+        layout: &Option<IOFile>,
     ) -> Self {
         // Create provider if layout file exists
         let row_id_provider = layout.as_ref().map(|layout_file| {
@@ -161,7 +161,7 @@ impl DataReader for CsvReader {
 
     async fn build_layout(
         &self,
-        data_dir: &ObjectStoreDir,
+        data_dir: &IODir,
     ) -> Result<Option<String>, BundlebaseError> {
         let index = RowIdIndex::new()
             .build(&self.inner.file(), data_dir, &self.block_id(), true)
@@ -223,6 +223,7 @@ impl CsvReader {
 mod tests {
     use super::*;
     use crate::data::plugin::ReaderPlugin;
+    use crate::io::IOLister;
     use crate::test_utils::test_datafile;
     use crate::Bundle;
     use arrow::array::{downcast_array, Array, StringArray};

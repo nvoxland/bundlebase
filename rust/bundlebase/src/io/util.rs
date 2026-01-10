@@ -20,6 +20,30 @@ pub(super) fn parse_url(
     url: &Url,
     config: &HashMap<String, String>,
 ) -> Result<(Arc<dyn ObjectStore>, Path), BundlebaseError> {
+    // Handle tar:// scheme - format is tar:///path/to/archive.tar or tar:///path/to/archive.tar/internal/path
+    if url.scheme() == "tar" {
+        let full_path = url.path();
+        // Find where the .tar file ends and internal path begins
+        let (tar_path, internal_path) = if let Some(tar_idx) = full_path.find(".tar") {
+            let tar_end = tar_idx + 4; // ".tar" is 4 chars
+            let tar_file = &full_path[..tar_end];
+            let internal = if tar_end < full_path.len() {
+                &full_path[tar_end..]
+            } else {
+                "/"
+            };
+            (tar_file, internal)
+        } else {
+            // No .tar found, treat entire path as tar file
+            (full_path, "/")
+        };
+
+        let store = TarObjectStore::new(std::path::PathBuf::from(tar_path)).map_err(|e| {
+            format!("Failed to create TarObjectStore for {}: {}", tar_path, e)
+        })?;
+        return Ok((Arc::new(store), ObjectPath::from(internal_path)));
+    }
+
     // Check for .tar file extension first (before other file:// handling)
     if url.scheme() == "file" {
         if let Ok(path) = url.to_file_path() {

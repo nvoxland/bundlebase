@@ -2,7 +2,7 @@ use crate::data::{DataReader, VersionedBlockId};
 use crate::index::{
     ColumnIndex, FilterAnalyzer, IndexDefinition, IndexPredicate, IndexSelector, IndexableFilter,
 };
-use crate::io::{ObjectId, ObjectStoreDir, ObjectStoreFile};
+use crate::io::{IOReader, ObjectId, IODir, IOFile};
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
 use crate::BundleConfig;
 use arrow_schema::SchemaRef;
@@ -32,7 +32,7 @@ pub struct DataBlock {
     schema: SchemaRef,
     reader: Arc<dyn DataReader>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
-    data_dir: Arc<ObjectStoreDir>,
+    data_dir: Arc<IODir>,
     config: Arc<BundleConfig>,
 }
 
@@ -56,7 +56,7 @@ impl DataBlock {
         version: &str,
         reader: Arc<dyn DataReader>,
         indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
-        data_dir: Arc<ObjectStoreDir>,
+        data_dir: Arc<IODir>,
         config: Arc<BundleConfig>,
     ) -> Self {
         Self {
@@ -84,7 +84,7 @@ impl DataBlock {
     ) -> Result<Option<f64>, Box<dyn std::error::Error + Send + Sync>> {
         // Load index file from data directory
         let index_file =
-            ObjectStoreFile::from_str(index_path, &self.data_dir, self.config.clone())?;
+            IOFile::from_str(index_path, &self.data_dir, self.config.clone())?;
 
         let index_bytes = index_file
             .read_bytes()
@@ -128,7 +128,7 @@ impl DataBlock {
     ) -> Result<Vec<crate::data::RowId>, Box<dyn std::error::Error + Send + Sync>> {
         // Load index file from data directory
         let index_file =
-            ObjectStoreFile::from_str(index_path, &self.data_dir, self.config.clone())?;
+            IOFile::from_str(index_path, &self.data_dir, self.config.clone())?;
 
         let index_bytes = index_file
             .read_bytes()
