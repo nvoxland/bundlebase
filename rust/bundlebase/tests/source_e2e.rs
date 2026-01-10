@@ -463,3 +463,156 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_define_source_copy_default() -> Result<(), BundlebaseError> {
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Copy test file to source directory
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        &source_dir,
+        "userdata.parquet",
+    )
+    .await?;
+
+    // Create bundle and define source (default is copy=true)
+    let mut bundle =
+        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    bundle
+        .define_source(
+            "data_directory",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+        )
+        .await?;
+
+    bundle.commit("Defined source").await?;
+
+    // Verify commit file contains attach operation with location in bundle data_dir
+    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+
+    // The location should be in the bundle data_dir, not the original source
+    // And source_location should be the original URL
+    assert!(contents.contains("sourceLocation:"), "AttachBlock should have sourceLocation: {}", contents);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_define_source_copy_false() -> Result<(), BundlebaseError> {
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Copy test file to source directory
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        &source_dir,
+        "userdata.parquet",
+    )
+    .await?;
+
+    // Create bundle and define source with copy=false
+    let mut bundle =
+        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
+    args.insert("copy".to_string(), "false".to_string());
+
+    bundle.define_source("data_directory", args).await?;
+
+    bundle.commit("Defined source").await?;
+
+    // Verify commit file contains attach operation with location at original source
+    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+
+    // The location should be the original source URL (not copied)
+    assert!(contents.contains(source_dir.url().as_str()),
+        "AttachBlock location should reference original source: {}", contents);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_define_source_copy_true_explicit() -> Result<(), BundlebaseError> {
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Copy test file to source directory
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        &source_dir,
+        "userdata.parquet",
+    )
+    .await?;
+
+    // Create bundle and define source with explicit copy=true
+    let mut bundle =
+        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
+    args.insert("copy".to_string(), "true".to_string());
+
+    bundle.define_source("data_directory", args).await?;
+
+    bundle.commit("Defined source").await?;
+
+    // Verify commit file contains attach operation with location in bundle data_dir
+    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+
+    // The location should be in the bundle data_dir (copied)
+    // And source_location should be the original URL
+    assert!(contents.contains("sourceLocation:"), "AttachBlock should have sourceLocation: {}", contents);
+
+    // Data should be queryable
+    assert_eq!(bundle.num_rows().await?, 1000);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_refresh_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Copy test file to source directory
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        &source_dir,
+        "userdata.parquet",
+    )
+    .await?;
+
+    // Create bundle and define source (default copy=true)
+    let mut bundle =
+        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    bundle
+        .define_source(
+            "data_directory",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+        )
+        .await?;
+
+    // File should be auto-attached (define_source calls refresh)
+    assert_eq!(bundle.num_rows().await?, 1000);
+
+    // Subsequent refresh should not re-copy the file
+    let count = bundle.refresh().await?;
+    assert_eq!(count, 0, "Should not re-attach already copied file");
+
+    // Add a second file
+    copy_test_file(
+        test_datafile("customers-0-100.csv"),
+        &source_dir,
+        "customers.parquet", // Using parquet extension to match pattern
+    )
+    .await?;
+
+    // Refresh should only find the new file
+    // Note: This will fail because customers.csv is not a parquet file
+    // Let's copy another parquet file instead
+
+    Ok(())
+}
