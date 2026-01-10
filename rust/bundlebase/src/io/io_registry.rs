@@ -4,6 +4,9 @@
 
 use crate::io::io_dir::IODir;
 use crate::io::io_file::IOFile;
+use crate::io::io_ftp::FtpIOFactory;
+use crate::io::io_sftp::SftpIOFactory;
+use crate::io::io_tar::TarIOFactory;
 use crate::io::io_traits::{IOLister, IOReader, IOWriter};
 use crate::BundleConfig;
 use crate::BundlebaseError;
@@ -101,6 +104,9 @@ impl IORegistry {
 
         // Register built-in factories
         registry.register(Arc::new(ObjectStoreIOFactory));
+        registry.register(Arc::new(FtpIOFactory));
+        registry.register(Arc::new(SftpIOFactory));
+        registry.register(Arc::new(TarIOFactory));
 
         registry
     }
