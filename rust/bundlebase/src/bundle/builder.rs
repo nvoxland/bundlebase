@@ -14,7 +14,7 @@ use crate::data::{DataBlock, ObjectId, VersionedBlockId};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
-use crate::io::ObjectStoreDir;
+use crate::io::{ObjectStoreDir, ObjectStoreFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
@@ -605,16 +605,52 @@ impl BundleBuilder {
                 .pending_files(&self.bundle.operations, self.bundle.config(), &registry)
                 .await?;
 
+            // Check if we should copy files (default: true)
+            let should_copy = source
+                .args()
+                .get("copy")
+                .map(|s| s != "false")
+                .unwrap_or(true);
+
             for file in pending {
                 let pack_id = source.pack_id().clone();
                 let source_id = source.id().clone();
-                let file_url = file.url().to_string();
+                let original_url = file.url().to_string();
+                let config = self.bundle.config();
 
-                self.do_change(&format!("Refresh: attach {}", file_url), |builder| {
+                self.do_change(&format!("Refresh: attach {}", original_url), |builder| {
                     Box::pin(async move {
-                        let mut op = AttachBlockOp::setup(&pack_id, &file_url, builder).await?;
+                        let attach_location = if should_copy {
+                            // Copy file to data_dir
+                            let source_file =
+                                ObjectStoreFile::from_url(&Url::parse(&original_url)?, config)?;
+                            let data = source_file.read_bytes().await?.ok_or_else(|| {
+                                BundlebaseError::from(format!(
+                                    "Source file not found: {}",
+                                    original_url
+                                ))
+                            })?;
+
+                            // Generate unique filename in data_dir
+                            let filename = Url::parse(&original_url)?
+                                .path_segments()
+                                .and_then(|s| s.last())
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| "data".to_string());
+                            let block_id = ObjectId::generate();
+                            let target_name = format!("{}_{}", block_id, filename);
+                            let target_file = builder.data_dir().file(&target_name)?;
+                            target_file.write(data).await?;
+
+                            target_file.url().to_string()
+                        } else {
+                            original_url.clone()
+                        };
+
+                        let mut op =
+                            AttachBlockOp::setup(&pack_id, &attach_location, builder).await?;
                         op.source = Some(source_id);
-                        op.source_location = Some(file_url.clone());
+                        op.source_location = Some(original_url); // Always original URL
                         builder.apply_operation(op.into()).await?;
                         Ok(())
                     })

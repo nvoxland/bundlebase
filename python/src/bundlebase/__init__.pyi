@@ -572,6 +572,7 @@ class PyBundleBuilder:
             args: Function-specific configuration arguments. For "data_directory":
                 - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
                 - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
+                - "copy" (optional): "true" to copy files into bundle (default), "false" to reference in place
 
         Returns:
             OperationChain for fluent chaining
@@ -593,6 +594,7 @@ class PyBundleBuilder:
             args: Function-specific configuration arguments. For "data_directory":
                 - "url" (required): Directory URL to list
                 - "patterns" (optional): Comma-separated glob patterns
+                - "copy" (optional): "true" to copy files into bundle (default), "false" to reference in place
 
         Returns:
             OperationChain for fluent chaining

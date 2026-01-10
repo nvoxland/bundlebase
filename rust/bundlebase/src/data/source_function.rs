@@ -86,6 +86,8 @@ impl Default for SourceFunctionRegistry {
 /// - `url` (required): The directory URL to list (e.g., "s3://bucket/data/")
 /// - `patterns` (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
 ///   Defaults to "**/*" (all files)
+/// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
+///   "false" to reference files at their original URL
 pub struct DataDirectoryFunction;
 
 #[async_trait]
@@ -109,6 +111,18 @@ impl SourceFunction for DataDirectoryFunction {
         Url::parse(url_str).map_err(|e| {
             BundlebaseError::from(format!("Invalid URL '{}': {}", url_str, e))
         })?;
+
+        // Validate "copy" argument if present (must be "true" or "false")
+        if let Some(copy_val) = args.get("copy") {
+            if copy_val != "true" && copy_val != "false" {
+                return Err(format!(
+                    "Function '{}': 'copy' argument must be 'true' or 'false', got '{}'",
+                    self.name(),
+                    copy_val
+                )
+                .into());
+            }
+        }
 
         Ok(())
     }
@@ -238,5 +252,38 @@ mod tests {
 
         let relative = DataDirectoryFunction::relative_path(&source_url, &file_url);
         assert_eq!(relative, "file.parquet");
+    }
+
+    #[test]
+    fn test_data_directory_validate_args_copy_true() {
+        let func = DataDirectoryFunction;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/data/".to_string());
+        args.insert("copy".to_string(), "true".to_string());
+        assert!(func.validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn test_data_directory_validate_args_copy_false() {
+        let func = DataDirectoryFunction;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/data/".to_string());
+        args.insert("copy".to_string(), "false".to_string());
+        assert!(func.validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn test_data_directory_validate_args_copy_invalid() {
+        let func = DataDirectoryFunction;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/data/".to_string());
+        args.insert("copy".to_string(), "invalid".to_string());
+
+        let result = func.validate_args(&args);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("'copy' argument must be 'true' or 'false'"));
     }
 }
