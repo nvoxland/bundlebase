@@ -464,25 +464,26 @@ impl PyBundleBuilder {
     ///
     /// A source specifies where to look for data files (e.g., S3 bucket prefix)
     /// and patterns to filter which files to include.
-    #[pyo3(signature = (url, patterns=None, function="data_directory", args=None))]
+    ///
+    /// # Arguments
+    /// * `function` - Source function name (e.g., "data_directory")
+    /// * `args` - Function-specific arguments. For "data_directory":
+    ///   - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
+    ///   - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
+    #[pyo3(signature = (function, args))]
     fn define_source<'py>(
         slf: PyRef<'_, Self>,
-        url: &str,
-        patterns: Option<Vec<String>>,
         function: &str,
-        args: Option<HashMap<String, String>>,
+        args: HashMap<String, String>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
-        let url = url.to_string();
         let function = function.to_string();
+        let url = args.get("url").cloned().unwrap_or_else(|| "<no url>".to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
-            let patterns_ref: Option<Vec<&str>> = patterns
-                .as_ref()
-                .map(|p| p.iter().map(|s| s.as_str()).collect());
             builder
-                .define_source(&url, patterns_ref, &function, args)
+                .define_source(&function, args)
                 .await
                 .map_err(|e| to_py_error(&format!("Failed to define source at '{}'", url), e))?;
             drop(builder);
@@ -499,27 +500,29 @@ impl PyBundleBuilder {
     }
 
     /// Define a data source for a joined pack.
-    #[pyo3(signature = (join_name, url, patterns=None, function="data_directory", args=None))]
+    ///
+    /// # Arguments
+    /// * `join_name` - Name of the join to define a source for
+    /// * `function` - Source function name (e.g., "data_directory")
+    /// * `args` - Function-specific arguments. For "data_directory":
+    ///   - "url" (required): Directory URL to list
+    ///   - "patterns" (optional): Comma-separated glob patterns
+    #[pyo3(signature = (join_name, function, args))]
     fn define_source_for_join<'py>(
         slf: PyRef<'_, Self>,
         join_name: &str,
-        url: &str,
-        patterns: Option<Vec<String>>,
         function: &str,
-        args: Option<HashMap<String, String>>,
+        args: HashMap<String, String>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let join_name = join_name.to_string();
-        let url = url.to_string();
         let function = function.to_string();
+        let url = args.get("url").cloned().unwrap_or_else(|| "<no url>".to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
-            let patterns_ref: Option<Vec<&str>> = patterns
-                .as_ref()
-                .map(|p| p.iter().map(|s| s.as_str()).collect());
             builder
-                .define_source_for_join(&join_name, &url, patterns_ref, &function, args)
+                .define_source_for_join(&join_name, &function, args)
                 .await
                 .map_err(|e| {
                     to_py_error(

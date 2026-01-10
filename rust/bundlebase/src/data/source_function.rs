@@ -8,22 +8,27 @@ use url::Url;
 
 /// Trait for source function implementations.
 ///
-/// Source functions define how files are discovered and listed from a source URL.
+/// Source functions define how files are discovered and listed.
 /// Different implementations can provide different strategies (e.g., directory listing,
 /// S3 inventory, database queries, etc.).
+///
+/// Each function defines its own required and optional arguments. For example,
+/// "data_directory" requires:
+/// - "url": Directory URL to list
+/// - "patterns": Comma-separated glob patterns (optional, defaults to "**/*")
 #[async_trait]
 pub trait SourceFunction: Send + Sync {
     /// Name of this source function
     fn name(&self) -> &str;
 
-    /// Validate arguments for this function
+    /// Validate arguments for this function.
+    /// Should check for required arguments and validate their values.
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError>;
 
-    /// List files from the source URL with function-specific logic
+    /// List files using function-specific logic.
+    /// Arguments contain all configuration needed by the function.
     async fn list_files(
         &self,
-        url: &Url,
-        patterns: &[String],
         args: &HashMap<String, String>,
         config: Arc<BundleConfig>,
     ) -> Result<Vec<ObjectStoreFile>, BundlebaseError>;
@@ -76,7 +81,11 @@ impl Default for SourceFunctionRegistry {
 ///
 /// Lists files from a directory URL using standard object store listing.
 /// Supports glob patterns for filtering files.
-/// Takes no arguments.
+///
+/// Arguments:
+/// - `url` (required): The directory URL to list (e.g., "s3://bucket/data/")
+/// - `patterns` (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
+///   Defaults to "**/*" (all files)
 pub struct DataDirectoryFunction;
 
 #[async_trait]
@@ -86,27 +95,47 @@ impl SourceFunction for DataDirectoryFunction {
     }
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        // data_directory takes no arguments
-        if !args.is_empty() {
+        // data_directory requires a "url" argument
+        if !args.contains_key("url") {
             return Err(format!(
-                "Function '{}' takes no arguments, but {} were provided",
-                self.name(),
-                args.len()
+                "Function '{}' requires a 'url' argument",
+                self.name()
             )
             .into());
         }
+
+        // Validate the URL is parseable
+        let url_str = args.get("url").expect("checked above");
+        Url::parse(url_str).map_err(|e| {
+            BundlebaseError::from(format!("Invalid URL '{}': {}", url_str, e))
+        })?;
+
         Ok(())
     }
 
     async fn list_files(
         &self,
-        url: &Url,
-        patterns: &[String],
-        _args: &HashMap<String, String>,
+        args: &HashMap<String, String>,
         config: Arc<BundleConfig>,
     ) -> Result<Vec<ObjectStoreFile>, BundlebaseError> {
+        // Get URL from args
+        let url_str = args.get("url").ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "Function '{}' requires a 'url' argument",
+                self.name()
+            ))
+        })?;
+        let url = Url::parse(url_str)?;
+
+        // Get patterns from args, defaulting to "**/*"
+        let patterns_str = args
+            .get("patterns")
+            .map(|s| s.as_str())
+            .unwrap_or("**/*");
+        let patterns: Vec<&str> = patterns_str.split(',').map(|s| s.trim()).collect();
+
         // List all files from the directory
-        let dir = ObjectStoreDir::from_url(url, config)?;
+        let dir = ObjectStoreDir::from_url(&url, config)?;
         let all_files = dir.list_files().await?;
 
         // Compile glob patterns
@@ -119,7 +148,7 @@ impl SourceFunction for DataDirectoryFunction {
         let matching_files: Vec<ObjectStoreFile> = all_files
             .into_iter()
             .filter(|file| {
-                let relative_path = Self::relative_path(url, file.url());
+                let relative_path = Self::relative_path(&url, file.url());
                 compiled_patterns
                     .iter()
                     .any(|pattern| pattern.matches(&relative_path))
@@ -162,24 +191,35 @@ mod tests {
     }
 
     #[test]
-    fn test_data_directory_validate_args_empty() {
+    fn test_data_directory_validate_args_with_url() {
         let func = DataDirectoryFunction;
-        let args = HashMap::new();
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/data/".to_string());
         assert!(func.validate_args(&args).is_ok());
     }
 
     #[test]
-    fn test_data_directory_validate_args_non_empty() {
+    fn test_data_directory_validate_args_missing_url() {
         let func = DataDirectoryFunction;
-        let mut args = HashMap::new();
-        args.insert("invalid".to_string(), "arg".to_string());
+        let args = HashMap::new();
 
         let result = func.validate_args(&args);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("takes no arguments"));
+            .contains("requires a 'url' argument"));
+    }
+
+    #[test]
+    fn test_data_directory_validate_args_invalid_url() {
+        let func = DataDirectoryFunction;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "not-a-valid-url".to_string());
+
+        let result = func.validate_args(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid URL"));
     }
 
     #[test]

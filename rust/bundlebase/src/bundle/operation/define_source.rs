@@ -8,9 +8,13 @@ use std::collections::HashMap;
 
 /// Operation that defines a data source for a pack.
 ///
-/// A source specifies where to look for data files (e.g., S3 bucket prefix)
-/// and patterns to filter which files to include. This enables the `refresh()`
+/// A source specifies where to look for data files and enables the `refresh()`
 /// functionality to discover and auto-attach new files.
+///
+/// The source function is responsible for file discovery. Each function may require
+/// different arguments. For example, "data_directory" requires:
+/// - "url": Directory URL to list (e.g., "s3://bucket/data/")
+/// - "patterns": Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DefineSourceOp {
@@ -20,20 +24,13 @@ pub struct DefineSourceOp {
     /// The pack this source is associated with
     pub pack: ObjectId,
 
-    /// URL prefix for file discovery (e.g., "s3://bucket/data/")
-    pub url: String,
-
-    /// Glob patterns for filtering files. Defaults to ["**/*"] (all files).
-    /// Examples:
-    /// - ["**/*"] - all files recursively
-    /// - ["**/*.parquet"] - all parquet files recursively
-    /// - ["2024/**/*.csv"] - CSV files in 2024 directory
-    pub patterns: Vec<String>,
-
     /// Source function name (e.g., "data_directory")
     pub function: String,
 
-    /// Function-specific configuration arguments
+    /// Function-specific configuration arguments.
+    /// For "data_directory":
+    /// - "url": Directory URL (required)
+    /// - "patterns": Comma-separated glob patterns (optional, defaults to "**/*")
     #[serde(default)]
     pub args: HashMap<String, String>,
 }
@@ -42,18 +39,14 @@ impl DefineSourceOp {
     pub fn setup(
         id: ObjectId,
         pack: ObjectId,
-        url: String,
-        patterns: Option<Vec<String>>,
         function: String,
-        args: Option<HashMap<String, String>>,
+        args: HashMap<String, String>,
     ) -> Self {
         Self {
             id,
             pack,
-            url,
-            patterns: patterns.unwrap_or_else(|| vec!["**/*".to_string()]),
             function,
-            args: args.unwrap_or_default(),
+            args,
         }
     }
 }
@@ -61,7 +54,8 @@ impl DefineSourceOp {
 #[async_trait]
 impl Operation for DefineSourceOp {
     fn describe(&self) -> String {
-        format!("DEFINE SOURCE {} at {} for pack {}", self.id, self.url, self.pack)
+        let url = self.args.get("url").map(|s| s.as_str()).unwrap_or("<no url>");
+        format!("DEFINE SOURCE {} at {} for pack {}", self.id, url, self.pack)
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -101,15 +95,22 @@ impl Operation for DefineSourceOp {
 mod tests {
     use super::*;
 
+    fn make_args(url: &str, patterns: Option<&str>) -> HashMap<String, String> {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), url.to_string());
+        if let Some(p) = patterns {
+            args.insert("patterns".to_string(), p.to_string());
+        }
+        args
+    }
+
     #[test]
     fn test_describe() {
         let op = DefineSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
-            url: "s3://bucket/data/".to_string(),
-            patterns: vec!["**/*.parquet".to_string()],
             function: "data_directory".to_string(),
-            args: HashMap::new(),
+            args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
         assert_eq!(
@@ -119,51 +120,59 @@ mod tests {
     }
 
     #[test]
-    fn test_setup_default_patterns() {
-        let op = DefineSourceOp::setup(
-            ObjectId::from(1),
-            ObjectId::from(2),
-            "s3://bucket/".to_string(),
-            None,
-            "data_directory".to_string(),
-            None,
-        );
-
-        assert_eq!(op.patterns, vec!["**/*".to_string()]);
-        assert_eq!(op.function, "data_directory");
-        assert!(op.args.is_empty());
-    }
-
-    #[test]
-    fn test_setup_custom_patterns() {
-        let op = DefineSourceOp::setup(
-            ObjectId::from(1),
-            ObjectId::from(2),
-            "s3://bucket/".to_string(),
-            Some(vec!["**/*.parquet".to_string(), "**/*.csv".to_string()]),
-            "data_directory".to_string(),
-            None,
-        );
+    fn test_describe_no_url() {
+        let op = DefineSourceOp {
+            id: ObjectId::from(1),
+            pack: ObjectId::from(2),
+            function: "custom_function".to_string(),
+            args: HashMap::new(),
+        };
 
         assert_eq!(
-            op.patterns,
-            vec!["**/*.parquet".to_string(), "**/*.csv".to_string()]
+            op.describe(),
+            "DEFINE SOURCE 01 at <no url> for pack 02"
         );
-        assert_eq!(op.function, "data_directory");
     }
 
     #[test]
-    fn test_setup_with_args() {
-        let mut args = HashMap::new();
+    fn test_setup() {
+        let op = DefineSourceOp::setup(
+            ObjectId::from(1),
+            ObjectId::from(2),
+            "data_directory".to_string(),
+            make_args("s3://bucket/", None),
+        );
+
+        assert_eq!(op.function, "data_directory");
+        assert_eq!(op.args.get("url"), Some(&"s3://bucket/".to_string()));
+    }
+
+    #[test]
+    fn test_setup_with_patterns() {
+        let op = DefineSourceOp::setup(
+            ObjectId::from(1),
+            ObjectId::from(2),
+            "data_directory".to_string(),
+            make_args("s3://bucket/", Some("**/*.parquet,**/*.csv")),
+        );
+
+        assert_eq!(op.function, "data_directory");
+        assert_eq!(
+            op.args.get("patterns"),
+            Some(&"**/*.parquet,**/*.csv".to_string())
+        );
+    }
+
+    #[test]
+    fn test_setup_with_extra_args() {
+        let mut args = make_args("s3://bucket/", Some("**/*"));
         args.insert("key".to_string(), "value".to_string());
 
         let op = DefineSourceOp::setup(
             ObjectId::from(1),
             ObjectId::from(2),
-            "s3://bucket/".to_string(),
-            None,
             "custom_function".to_string(),
-            Some(args.clone()),
+            args.clone(),
         );
 
         assert_eq!(op.function, "custom_function");
@@ -175,17 +184,15 @@ mod tests {
         let op = DefineSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
-            url: "s3://bucket/data/".to_string(),
-            patterns: vec!["**/*.parquet".to_string()],
             function: "data_directory".to_string(),
-            args: HashMap::new(),
+            args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
         let yaml = serde_yaml::to_string(&op).unwrap();
         assert!(yaml.contains("id: '01'"));
         assert!(yaml.contains("pack: '02'"));
-        assert!(yaml.contains("url: s3://bucket/data/"));
-        assert!(yaml.contains("'**/*.parquet'"));
         assert!(yaml.contains("function: data_directory"));
+        assert!(yaml.contains("url: s3://bucket/data/"));
+        assert!(yaml.contains("patterns: '**/*.parquet'"));
     }
 }
