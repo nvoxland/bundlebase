@@ -11,7 +11,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RenameViewOp {
-    pub view_id: ObjectId,
+    pub id: ObjectId,
     pub new_name: String,
 }
 
@@ -44,7 +44,7 @@ impl RenameViewOp {
             .clone();
 
         Ok(Self {
-            view_id,
+            id: view_id,
             new_name: new_name.to_string(),
         })
     }
@@ -53,10 +53,10 @@ impl RenameViewOp {
 #[async_trait]
 impl Operation for RenameViewOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        // Check that the view_id exists
-        let view_exists = bundle.views.values().any(|id| id == &self.view_id);
+        // Check that the view id exists
+        let view_exists = bundle.views.values().any(|id| id == &self.id);
         if !view_exists {
-            return Err(format!("View with ID '{}' not found", self.view_id).into());
+            return Err(format!("View with ID '{}' not found", self.id).into());
         }
 
         // Check that new_name doesn't already exist
@@ -72,7 +72,7 @@ impl Operation for RenameViewOp {
         let old_name = bundle
             .views
             .iter()
-            .find(|(_, id)| *id == &self.view_id)
+            .find(|(_, id)| *id == &self.id)
             .map(|(name, _)| name.clone());
 
         if let Some(old_name) = old_name {
@@ -80,7 +80,7 @@ impl Operation for RenameViewOp {
         }
 
         // Insert new name->id mapping
-        bundle.views.insert(self.new_name.clone(), self.view_id.clone());
+        bundle.views.insert(self.new_name.clone(), self.id.clone());
 
         Ok(())
     }
@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn test_describe() {
         let op = RenameViewOp {
-            view_id: ObjectId::generate(),
+            id: ObjectId::generate(),
             new_name: "new_view_name".to_string(),
         };
         assert_eq!(op.describe(), "RENAME VIEW to 'new_view_name'");
@@ -122,7 +122,7 @@ mod tests {
 
         for (new_name, expected) in cases {
             let op = RenameViewOp {
-                view_id: ObjectId::generate(),
+                id: ObjectId::generate(),
                 new_name: new_name.to_string(),
             };
             assert_eq!(op.describe(), expected);
@@ -133,23 +133,23 @@ mod tests {
     fn test_serialization() {
         let view_id: ObjectId = "a5".try_into().unwrap();
         let op = RenameViewOp {
-            view_id: view_id.clone(),
+            id: view_id.clone(),
             new_name: "new_view".to_string(),
         };
 
         let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
-        let expected = format!("viewId: {}\nnewName: new_view\n", view_id.to_string());
+        let expected = format!("id: {}\nnewName: new_view\n", view_id.to_string());
         assert_eq!(serialized, expected);
     }
 
     #[test]
     fn test_deserialization() {
         let view_id_str = "a5";
-        let yaml = format!("viewId: {}\nnewName: renamed_view\n", view_id_str);
+        let yaml = format!("id: {}\nnewName: renamed_view\n", view_id_str);
 
         let op: RenameViewOp = serde_yaml::from_str(&yaml).expect("Failed to deserialize");
 
-        assert_eq!(op.view_id.to_string(), view_id_str);
+        assert_eq!(op.id.to_string(), view_id_str);
         assert_eq!(op.new_name, "renamed_view");
     }
 }

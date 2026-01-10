@@ -56,7 +56,7 @@ impl Source {
 
         Ok(Self::new(
             op.id.clone(),
-            op.pack_id.clone(),
+            op.pack.clone(),
             url,
             op.patterns.clone(),
             op.function.clone(),
@@ -109,7 +109,7 @@ impl Source {
         operations
             .iter()
             .filter_map(|op| match op {
-                AnyOperation::AttachBlock(attach) if attach.source_id.as_ref() == Some(&self.id) => {
+                AnyOperation::AttachBlock(attach) if attach.source.as_ref() == Some(&self.id) => {
                     Some(attach.location.clone())
                 }
                 _ => None,
@@ -163,7 +163,7 @@ mod tests {
 
         let op = DefineSourceOp {
             id: ObjectId::from(1),
-            pack_id: ObjectId::from(2),
+            pack: ObjectId::from(2),
             url: "s3://bucket/data/".to_string(),
             patterns: vec!["**/*.parquet".to_string()],
             function: "data_directory".to_string(),
@@ -188,7 +188,7 @@ mod tests {
 
         let op = DefineSourceOp {
             id: ObjectId::from(1),
-            pack_id: ObjectId::from(2),
+            pack: ObjectId::from(2),
             url: "s3://bucket/data/".to_string(),
             patterns: vec!["**/*".to_string()],
             function: "data_directory".to_string(),
@@ -208,7 +208,7 @@ mod tests {
 
         let op = DefineSourceOp {
             id: ObjectId::from(1),
-            pack_id: ObjectId::from(2),
+            pack: ObjectId::from(2),
             url: "s3://bucket/data/".to_string(),
             patterns: vec!["**/*".to_string()],
             function: "unknown_function".to_string(),

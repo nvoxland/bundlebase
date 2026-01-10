@@ -9,13 +9,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DropIndexOp {
-    pub index_id: ObjectId,
+    pub id: ObjectId,
 }
 
 impl DropIndexOp {
-    pub async fn setup(index_id: &ObjectId) -> Result<Self, BundlebaseError> {
+    pub async fn setup(id: &ObjectId) -> Result<Self, BundlebaseError> {
         Ok(Self {
-            index_id: index_id.clone(),
+            id: id.clone(),
         })
     }
 }
@@ -23,14 +23,14 @@ impl DropIndexOp {
 #[async_trait]
 impl Operation for DropIndexOp {
     fn describe(&self) -> String {
-        format!("DROP INDEX {}", self.index_id)
+        format!("DROP INDEX {}", self.id)
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Verify index exists
         let indexes = bundle.indexes().read();
-        if !indexes.iter().any(|idx| idx.id() == &self.index_id) {
-            return Err(format!("Index with ID '{}' not found", self.index_id).into());
+        if !indexes.iter().any(|idx| idx.id() == &self.id) {
+            return Err(format!("Index with ID '{}' not found", self.id).into());
         }
 
         Ok(())
@@ -41,9 +41,9 @@ impl Operation for DropIndexOp {
         bundle
             .indexes
             .write()
-            .retain(|idx| idx.id() != &self.index_id);
+            .retain(|idx| idx.id() != &self.id);
 
-        log::info!("Dropped index {}", self.index_id);
+        log::info!("Dropped index {}", self.id);
 
         Ok(())
     }
@@ -57,7 +57,7 @@ mod tests {
     fn test_drop_index_describe() {
         let index_id = ObjectId::generate();
         let op = DropIndexOp {
-            index_id: index_id.clone(),
+            id: index_id.clone(),
         };
 
         assert_eq!(op.describe(), format!("DROP INDEX {}", index_id));
@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn test_drop_index_serialization() {
         let index_id = ObjectId::generate();
-        let op = DropIndexOp { index_id };
+        let op = DropIndexOp { id: index_id };
 
         let json = serde_json::to_string(&op).unwrap();
         let deserialized: DropIndexOp = serde_json::from_str(&json).unwrap();

@@ -16,7 +16,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexBlocksOp {
-    pub index_id: ObjectId,
+    pub index: ObjectId,
     pub blocks: Vec<VersionedBlockId>,
     pub path: String,
     pub cardinality: u64,
@@ -45,7 +45,7 @@ impl IndexBlocksOp {
     /// registered with the IndexManager and saved to disk.
     ///
     /// # Arguments
-    /// * `index_id` - Unique identifier for this index operation
+    /// * `index` - Unique identifier for this index operation
     /// * `column` - Column name to build index for
     /// * `blocks` - Vec of (block_id, version) tuples to index
     /// * `bundle` - Bundle providing block access and index management
@@ -62,7 +62,7 @@ impl IndexBlocksOp {
     /// - Data types differ between blocks for the same column
     /// - Streaming or index building fails
     pub async fn setup(
-        index_id: &ObjectId,
+        index: &ObjectId,
         column: &str,
         blocks: Vec<(ObjectId, String)>,
         bundle: &Bundle,
@@ -158,7 +158,7 @@ impl IndexBlocksOp {
         // Now guaranteed to have data_type if we reach here (blocks is non-empty)
         let data_type_ref = data_type.as_ref().ok_or("No data type found for column")?;
 
-        let index =
+        let column_index =
             ColumnIndex::build(column, data_type_ref, all_value_to_rowids).map_err(|e| {
                 BundlebaseError::from(format!(
                     "Failed to build index for column '{}': {}",
@@ -166,12 +166,12 @@ impl IndexBlocksOp {
                 ))
             })?;
 
-        let total_cardinality = index.cardinality();
+        let total_cardinality = column_index.cardinality();
 
-        let rel_path = format!("idx_{}_{}.idx", index_id, Uuid::new_v4());
+        let rel_path = format!("idx_{}_{}.idx", index, Uuid::new_v4());
         let path = bundle.data_dir.file(&rel_path)?;
 
-        path.write(index.serialize()?).await.map_err(|e| {
+        path.write(column_index.serialize()?).await.map_err(|e| {
             BundlebaseError::from(format!(
                 "Failed to save index for column '{}': {}",
                 column, e
@@ -185,7 +185,7 @@ impl IndexBlocksOp {
         );
 
         Ok(Self {
-            index_id: index_id.clone(),
+            index: index.clone(),
             blocks: blocks
                 .into_iter()
                 .map(|(block, version)| VersionedBlockId { block, version })
@@ -209,7 +209,7 @@ impl Operation for IndexBlocksOp {
             find_block(bundle, &block_and_version.block).map_err(|_| {
                 BundlebaseError::from(format!(
                     "Block {} referenced in index {} not found in bundle",
-                    block_and_version, self.index_id
+                    block_and_version, self.index
                 ))
             })?;
         }
@@ -221,12 +221,12 @@ impl Operation for IndexBlocksOp {
     }
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
-        // Find the corresponding IndexDefinition by index_id
+        // Find the corresponding IndexDefinition by index
         let index_def = {
             let indexes = bundle.indexes.read();
             indexes
                 .iter()
-                .find(|idx| idx.id() == &self.index_id)
+                .find(|idx| idx.id() == &self.index)
                 .cloned()
         };
 
@@ -242,7 +242,7 @@ impl Operation for IndexBlocksOp {
 
             log::debug!(
                 "Added indexed blocks to index {} (column '{}'): {} blocks",
-                self.index_id,
+                self.index,
                 index_def.column(),
                 self.blocks.len()
             );
@@ -252,7 +252,7 @@ impl Operation for IndexBlocksOp {
             Err(DataFusionError::Internal(format!(
                 "IndexDefinition {} not found when applying IndexBlocksOp. \
                  The index may have been dropped or the manifest may be corrupted.",
-                self.index_id
+                self.index
             )))
         }
     }
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn test_index_blocks_op_serialization() {
         let op = IndexBlocksOp {
-            index_id: ObjectId::from(1),
+            index: ObjectId::from(1),
             blocks: vec![
                 VersionedBlockId::new(ObjectId::from(10), "v1".to_string()),
                 VersionedBlockId::new(ObjectId::from(20), "v2".to_string()),

@@ -47,7 +47,7 @@ impl JoinTypeOption {
 #[serde(rename_all = "camelCase")]
 pub struct JoinOp {
     pub name: String,
-    pub pack_id: ObjectId,
+    pub pack: ObjectId,
     pub join_type: JoinTypeOption,
     pub expression: String,
 }
@@ -55,24 +55,23 @@ pub struct JoinOp {
 impl PartialEq for JoinOp {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
-            && self.pack_id == other.pack_id
+            && self.pack == other.pack
             && self.join_type == other.join_type
             && self.expression == other.expression
-            && self.pack_id == other.pack_id
     }
 }
 
 impl JoinOp {
     pub async fn setup(
         name: &str,
-        pack_id: ObjectId,
+        pack: ObjectId,
         expression: &str,
         join_type: JoinTypeOption,
         _bundle: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         Ok(Self {
             name: name.to_string(),
-            pack_id,
+            pack,
             expression: expression.to_string(),
             join_type,
         })
@@ -97,7 +96,7 @@ impl Operation for JoinOp {
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         bundle.joins.insert(
             self.name.clone(),
-            PackJoin::new(&self.pack_id, &self.name, &self.join_type, &self.expression),
+            PackJoin::new(&self.pack, &self.name, &self.join_type, &self.expression),
         );
 
         Ok(())
@@ -112,7 +111,7 @@ mod tests {
     async fn test_describe() {
         let op = JoinOp {
             name: "test".to_string(),
-            pack_id: ObjectId::from(1),
+            pack: ObjectId::from(1),
             join_type: JoinTypeOption::Inner,
             expression: "id = other.id".to_string(),
         };
@@ -157,7 +156,7 @@ mod tests {
     async fn test_version() {
         let op = JoinOp {
             name: "test".to_string(),
-            pack_id: ObjectId::from(3),
+            pack: ObjectId::from(3),
             join_type: JoinTypeOption::Inner,
             expression: "users.id = orders.user_id".to_string(),
         };
@@ -165,6 +164,6 @@ mod tests {
         let version = op.version();
 
         // Exact value for this specific config (first 12 chars of SHA256)
-        assert_eq!(version, "3e6cd5d2e901");
+        assert_eq!(version, "cc574537831a");
     }
 }

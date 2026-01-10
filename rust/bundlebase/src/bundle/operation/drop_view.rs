@@ -11,7 +11,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DropViewOp {
-    pub view_id: ObjectId,
+    pub id: ObjectId,
 }
 
 impl DropViewOp {
@@ -38,17 +38,17 @@ impl DropViewOp {
             })?
             .clone();
 
-        Ok(Self { view_id })
+        Ok(Self { id: view_id })
     }
 }
 
 #[async_trait]
 impl Operation for DropViewOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        // Check that the view_id exists
-        let view_exists = bundle.views.values().any(|id| id == &self.view_id);
+        // Check that the view id exists
+        let view_exists = bundle.views.values().any(|id| id == &self.id);
         if !view_exists {
-            return Err(format!("View with ID '{}' not found", self.view_id).into());
+            return Err(format!("View with ID '{}' not found", self.id).into());
         }
 
         Ok(())
@@ -60,9 +60,9 @@ impl Operation for DropViewOp {
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         // Find and remove the name->id mapping
-        bundle.views.retain(|_, id| id != &self.view_id);
+        bundle.views.retain(|_, id| id != &self.id);
 
-        log::info!("Dropped view {}", self.view_id);
+        log::info!("Dropped view {}", self.id);
 
         Ok(())
     }
@@ -77,7 +77,7 @@ impl Operation for DropViewOp {
     }
 
     fn describe(&self) -> String {
-        format!("DROP VIEW {}", self.view_id)
+        format!("DROP VIEW {}", self.id)
     }
 }
 
@@ -89,7 +89,7 @@ mod tests {
     fn test_describe() {
         let view_id = ObjectId::generate();
         let op = DropViewOp {
-            view_id: view_id.clone(),
+            id: view_id.clone(),
         };
         assert_eq!(op.describe(), format!("DROP VIEW {}", view_id));
     }
@@ -98,21 +98,21 @@ mod tests {
     fn test_serialization() {
         let view_id: ObjectId = "a5".try_into().unwrap();
         let op = DropViewOp {
-            view_id: view_id.clone(),
+            id: view_id.clone(),
         };
 
         let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
-        let expected = format!("viewId: {}\n", view_id.to_string());
+        let expected = format!("id: {}\n", view_id.to_string());
         assert_eq!(serialized, expected);
     }
 
     #[test]
     fn test_deserialization() {
         let view_id_str = "a5";
-        let yaml = format!("viewId: {}\n", view_id_str);
+        let yaml = format!("id: {}\n", view_id_str);
 
         let op: DropViewOp = serde_yaml::from_str(&yaml).expect("Failed to deserialize");
 
-        assert_eq!(op.view_id.to_string(), view_id_str);
+        assert_eq!(op.id.to_string(), view_id_str);
     }
 }

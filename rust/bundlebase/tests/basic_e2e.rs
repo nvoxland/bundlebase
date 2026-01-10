@@ -63,7 +63,7 @@ changes:
     location: memory:///test_data/userdata.parquet
     version: {}
     id: {}
-    packId: {}
+    pack: {}
     numRows: 1000
     bytes: 113629
     schema:
@@ -181,7 +181,7 @@ changes:
         test_utils::for_yaml(String::from(op_field!(
             &commit.operations()[1],
             AnyOperation::AttachBlock,
-            pack_id
+            pack
         ))),
         commit.changes[2].id,
         commit.changes[3].id,
@@ -260,7 +260,7 @@ changes:
     location: memory:///test_data/userdata.parquet
     version: {}
     id: {}
-    packId: {}
+    pack: {}
     numRows: 1000
     bytes: 113629
     schema:
@@ -393,7 +393,7 @@ changes:
         test_utils::for_yaml(String::from(op_field!(
             &commit.operations()[1],
             AnyOperation::AttachBlock,
-            pack_id
+            pack
         ))),
         commit.changes[2].id,
         commit.changes[3].id,
@@ -487,7 +487,7 @@ changes:
     location: memory:///test_data/customers-0-100.csv
     version: {}
     id: {}
-    packId: {}
+    pack: {}
     layout: {}
     numRows: 100
     bytes: 17160
@@ -583,7 +583,7 @@ changes:
                 op_field!(commit.operations()[1], AnyOperation::AttachBlock, id).into()
             ),
             test_utils::for_yaml(
-                op_field!(commit.operations()[1], AnyOperation::AttachBlock, pack_id).into()
+                op_field!(commit.operations()[1], AnyOperation::AttachBlock, pack).into()
             ),
             test_utils::for_yaml(
                 op_field!(commit.operations()[1], AnyOperation::AttachBlock, layout).unwrap()

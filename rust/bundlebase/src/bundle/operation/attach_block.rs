@@ -15,7 +15,7 @@ pub struct AttachBlockOp {
     pub location: String,
     pub version: String,
     pub id: ObjectId,
-    pub pack_id: ObjectId,
+    pub pack: ObjectId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30,12 +30,12 @@ pub struct AttachBlockOp {
     pub schema: Option<SchemaRef>,
     /// If this block was attached via a source refresh, the source ID
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_id: Option<ObjectId>, //todo: make an option that copies the files over and tracks the source_data
+    pub source: Option<ObjectId>,
 }
 
 impl AttachBlockOp {
     pub async fn setup(
-        pack_id: &ObjectId,
+        pack: &ObjectId,
         location: &str,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
@@ -67,9 +67,9 @@ impl AttachBlockOp {
             version,
             schema,
             id: block_id,
-            pack_id: pack_id.clone(),
+            pack: pack.clone(),
             layout: None,
-            source_id: None,
+            source: None,
         };
 
         _progress.update(4, Some("Reading statistics"));
@@ -126,7 +126,7 @@ impl Operation for AttachBlockOp {
             bundle.config(),
         ));
 
-        let pack = bundle.get_pack(&self.pack_id).expect("Cannot find pack");
+        let pack = bundle.get_pack(&self.pack).expect("Cannot find pack");
         pack.add_block(block);
 
         Ok(())
@@ -148,12 +148,12 @@ mod tests {
             location: "file:///test/data.csv".to_string(),
             version: "test-version".to_string(),
             id: ObjectId::from(1),
-            pack_id: ObjectId::from(2),
+            pack: ObjectId::from(2),
             num_rows: None,
             bytes: None,
             schema: None,
             layout: None,
-            source_id: None,
+            source: None,
         };
 
         assert_eq!(op.describe(), "ATTACH: file:///test/data.csv");
@@ -165,7 +165,7 @@ mod tests {
         let op =
             AttachBlockOp::setup(&ObjectId::generate(), datafile, &empty_bundle().await).await?;
         let block_id = String::from(op.id.clone());
-        let pack_id = String::from(op.pack_id.clone());
+        let pack = String::from(op.pack.clone());
         let version = ObjectStoreFile::from_url(
             &Url::parse(datafile).unwrap(),
             BundleConfig::default().into(),
@@ -178,7 +178,7 @@ mod tests {
                 r#"location: memory:///test_data/userdata.parquet
 version: {}
 id: {}
-packId: {}
+pack: {}
 numRows: 1000
 bytes: 113629
 schema:
@@ -268,7 +268,7 @@ schema:
 "#,
                 for_yaml(version),
                 for_yaml(block_id),
-                for_yaml(pack_id),
+                for_yaml(pack),
             ),
             serde_yaml::to_string(&op)?
         );
@@ -318,12 +318,12 @@ schema:
             location: "file:///test/data.csv".to_string(),
             version: "test-version".to_string(),
             id: ObjectId::from(1),
-            pack_id: ObjectId::from(2),
+            pack: ObjectId::from(2),
             num_rows: None,
             bytes: None,
             schema: None,
             layout: None,
-            source_id: None,
+            source: None,
         };
 
         let version = op.version();

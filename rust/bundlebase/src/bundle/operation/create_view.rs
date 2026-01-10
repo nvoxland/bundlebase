@@ -17,7 +17,7 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 pub struct CreateViewOp {
     pub name: String,
-    pub view_id: ObjectId,
+    pub id: ObjectId,
 }
 
 impl CreateViewOp {
@@ -118,7 +118,7 @@ impl CreateViewOp {
 
         Ok(CreateViewOp {
             name: name.to_string(),
-            view_id,
+            id: view_id,
         })
     }
 }
@@ -148,7 +148,7 @@ impl Operation for CreateViewOp {
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         // Store view name->id mapping
-        bundle.views.insert(self.name.clone(), self.view_id.clone());
+        bundle.views.insert(self.name.clone(), self.id.clone());
         Ok(())
     }
 
@@ -165,7 +165,7 @@ impl Operation for CreateViewOp {
         // Compute version hash based on the operation's content
         let mut hasher = Sha256::new();
         hasher.update(self.name.as_bytes());
-        hasher.update(self.view_id.to_string().as_bytes());
+        hasher.update(self.id.to_string().as_bytes());
         let hash_bytes = hasher.finalize();
         hex::encode(hash_bytes)
     }
