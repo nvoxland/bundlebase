@@ -39,10 +39,15 @@ rand = "0.9.2"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.18.1", features = ["v4"] }
 regex = "1.12.2"
+shellexpand = "3.1"
 lru = "0.12"
 opentelemetry = { version = "0.24"}
 opentelemetry_sdk = { version = "0.24", features = ["metrics", "trace", "rt-tokio"]}
 opentelemetry-stdout = { version = "0.5", features = ["metrics", "trace"]}
+russh = "0.46"
+russh-sftp = "2.0"
+russh-keys = "0.46"
+suppaftp = { version = "7.1", features = ["tokio"] }
 
 [dev-dependencies]
 tempfile = "3.23"

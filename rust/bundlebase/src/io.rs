@@ -1,11 +1,15 @@
+mod ftp_client;
 mod object_store_dir;
 mod object_store_file;
+mod sftp_client;
 mod tar_object_store;
 mod util;
 
 pub use crate::data::ObjectId;
+pub use crate::io::ftp_client::{parse_ftp_url, FtpClient, FtpFileInfo};
 pub use crate::io::object_store_dir::ObjectStoreDir;
 pub use crate::io::object_store_file::ObjectStoreFile;
+pub use crate::io::sftp_client::{parse_scp_url, SftpClient, SftpFileInfo};
 pub use crate::io::tar_object_store::TarObjectStore;
 use object_store::memory::InMemory;
 use std::sync::{Arc, OnceLock};
