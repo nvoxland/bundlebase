@@ -477,15 +477,21 @@ impl BundleBuilder {
     /// functionality to discover and auto-attach new files.
     ///
     /// # Arguments
-    /// * `url` - URL prefix for file discovery (e.g., "s3://bucket/data/")
-    /// * `patterns` - Optional glob patterns for filtering files. Defaults to ["**/*"] (all files).
+    /// * `function` - Source function name (e.g., "data_directory")
+    /// * `args` - Function-specific arguments. For "data_directory":
+    ///   - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
+    ///   - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
     ///
     /// # Example
     /// ```no_run
     /// # use bundlebase::{BundleBuilder, BundlebaseError};
+    /// # use std::collections::HashMap;
     /// # async fn example() -> Result<(), BundlebaseError> {
     /// let mut bundle = BundleBuilder::create("memory:///work", None).await?;
-    /// bundle.define_source("s3://bucket/data/", Some(vec!["**/*.parquet"]), "data_directory", None).await?;
+    /// let mut args = HashMap::new();
+    /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
+    /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
+    /// bundle.define_source("data_directory", args).await?;
     /// bundle.refresh().await?;
     /// bundle.commit("Initial data from source").await?;
     /// # Ok(())
@@ -493,19 +499,17 @@ impl BundleBuilder {
     /// ```
     pub async fn define_source(
         &mut self,
-        url: &str,
-        patterns: Option<Vec<&str>>,
         function: &str,
-        args: Option<HashMap<String, String>>,
+        args: HashMap<String, String>,
     ) -> Result<&mut Self, BundlebaseError> {
-        let url = url.to_string();
         let function = function.to_string();
-        let patterns: Option<Vec<String>> = patterns.map(|p| p.iter().map(|s| s.to_string()).collect());
+        let url = args.get("url").cloned().unwrap_or_else(|| "<no url>".to_string());
 
         self.do_change(&format!("Define source at {}", url), |builder| {
             Box::pin(async move {
                 let source_id = ObjectId::generate();
-                let op = DefineSourceOp::setup(source_id, ObjectId::BASE_PACK, url, patterns, function, args);
+                let op =
+                    DefineSourceOp::setup(source_id, ObjectId::BASE_PACK, function, args);
 
                 builder.apply_operation(op.into()).await?;
 
@@ -524,38 +528,40 @@ impl BundleBuilder {
     ///
     /// # Arguments
     /// * `join_name` - Name of the join to define a source for
-    /// * `url` - URL prefix for file discovery
-    /// * `patterns` - Optional glob patterns for filtering files
+    /// * `function` - Source function name (e.g., "data_directory")
+    /// * `args` - Function-specific arguments. For "data_directory":
+    ///   - "url" (required): Directory URL to list
+    ///   - "patterns" (optional): Comma-separated glob patterns
     pub async fn define_source_for_join(
         &mut self,
         join_name: &str,
-        url: &str,
-        patterns: Option<Vec<&str>>,
         function: &str,
-        args: Option<HashMap<String, String>>,
+        args: HashMap<String, String>,
     ) -> Result<&mut Self, BundlebaseError> {
-        let url = url.to_string();
         let join_name = join_name.to_string();
         let function = function.to_string();
-        let patterns: Option<Vec<String>> = patterns.map(|p| p.iter().map(|s| s.to_string()).collect());
+        let url = args.get("url").cloned().unwrap_or_else(|| "<no url>".to_string());
 
-        self.do_change(&format!("Define source for join '{}' at {}", join_name, url), |builder| {
-            Box::pin(async move {
-                let pack_join = builder
-                    .bundle
-                    .joins
-                    .get(&join_name)
-                    .ok_or(format!("Unknown join '{}'", join_name))?;
-                let pack_id = pack_join.pack_id().clone();
+        self.do_change(
+            &format!("Define source for join '{}' at {}", join_name, url),
+            |builder| {
+                Box::pin(async move {
+                    let pack_join = builder
+                        .bundle
+                        .joins
+                        .get(&join_name)
+                        .ok_or(format!("Unknown join '{}'", join_name))?;
+                    let pack_id = pack_join.pack_id().clone();
 
-                let source_id = ObjectId::generate();
-                let op = DefineSourceOp::setup(source_id, pack_id, url, patterns, function, args);
+                    let source_id = ObjectId::generate();
+                    let op = DefineSourceOp::setup(source_id, pack_id, function, args);
 
-                builder.apply_operation(op.into()).await?;
+                    builder.apply_operation(op.into()).await?;
 
-                Ok(())
-            })
-        })
+                    Ok(())
+                })
+            },
+        )
         .await?;
 
         // Automatically refresh to attach any existing files
@@ -575,9 +581,13 @@ impl BundleBuilder {
     /// # Example
     /// ```no_run
     /// # use bundlebase::{BundleBuilder, BundlebaseError};
+    /// # use std::collections::HashMap;
     /// # async fn example() -> Result<(), BundlebaseError> {
     /// let mut bundle = BundleBuilder::create("memory:///work", None).await?;
-    /// bundle.define_source("s3://bucket/data/", Some(vec!["**/*.parquet"]), "data_directory", None).await?;
+    /// let mut args = HashMap::new();
+    /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
+    /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
+    /// bundle.define_source("data_directory", args).await?;
     /// let count = bundle.refresh().await?;
     /// println!("Attached {} new files", count);
     /// # Ok(())

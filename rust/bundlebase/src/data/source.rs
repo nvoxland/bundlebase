@@ -6,21 +6,19 @@ use crate::BundleConfig;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use url::Url;
 
 /// Represents a data source definition for a pack.
 ///
-/// A source specifies where to look for data files (e.g., S3 bucket prefix)
-/// and patterns to filter which files to include.
+/// A source specifies how to discover and list data files.
+/// All configuration is stored in function-specific arguments.
 #[derive(Debug, Clone)]
 pub struct Source {
     id: ObjectId,
     pack_id: ObjectId,
-    url: Url,
-    patterns: Vec<String>,
     /// Source function name (e.g., "data_directory")
     function: String,
     /// Function-specific configuration arguments
+    /// For "data_directory": "url" (required), "patterns" (optional)
     args: HashMap<String, String>,
 }
 
@@ -28,16 +26,12 @@ impl Source {
     pub fn new(
         id: ObjectId,
         pack_id: ObjectId,
-        url: Url,
-        patterns: Vec<String>,
         function: String,
         args: HashMap<String, String>,
     ) -> Self {
         Self {
             id,
             pack_id,
-            url,
-            patterns,
             function,
             args,
         }
@@ -47,8 +41,6 @@ impl Source {
         op: &DefineSourceOp,
         registry: &SourceFunctionRegistry,
     ) -> Result<Self, BundlebaseError> {
-        let url = Url::parse(&op.url)?;
-
         // Validate function exists
         registry
             .get(&op.function)
@@ -57,8 +49,6 @@ impl Source {
         Ok(Self::new(
             op.id.clone(),
             op.pack.clone(),
-            url,
-            op.patterns.clone(),
             op.function.clone(),
             op.args.clone(),
         ))
@@ -72,12 +62,14 @@ impl Source {
         &self.pack_id
     }
 
-    pub fn url(&self) -> &Url {
-        &self.url
+    /// Get the URL from args, if present (e.g., for data_directory function).
+    pub fn url(&self) -> Option<&str> {
+        self.args.get("url").map(|s| s.as_str())
     }
 
-    pub fn patterns(&self) -> &[String] {
-        &self.patterns
+    /// Get patterns from args, if present (e.g., for data_directory function).
+    pub fn patterns(&self) -> Option<&str> {
+        self.args.get("patterns").map(|s| s.as_str())
     }
 
     pub fn function(&self) -> &str {
@@ -88,7 +80,7 @@ impl Source {
         &self.args
     }
 
-    /// List all files from the source URL that match the patterns.
+    /// List all files from the source using the configured function.
     pub async fn list_files(
         &self,
         config: Arc<BundleConfig>,
@@ -100,8 +92,7 @@ impl Source {
                 .ok_or_else(|| format!("Unknown source function '{}'", self.function))?
         };
 
-        func.list_files(&self.url, &self.patterns, &self.args, config)
-            .await
+        func.list_files(&self.args, config).await
     }
 
     /// Get URLs of files that have been attached from this source.
@@ -144,23 +135,29 @@ impl Source {
 mod tests {
     use super::*;
 
+    fn make_args(url: &str, patterns: Option<&str>) -> HashMap<String, String> {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), url.to_string());
+        if let Some(p) = patterns {
+            args.insert("patterns".to_string(), p.to_string());
+        }
+        args
+    }
+
     #[test]
     fn test_new_source() {
         let source = Source::new(
             ObjectId::from(1),
             ObjectId::from(2),
-            Url::parse("s3://bucket/data/").unwrap(),
-            vec!["**/*".to_string()],
             "data_directory".to_string(),
-            HashMap::new(),
+            make_args("s3://bucket/data/", Some("**/*")),
         );
 
         assert_eq!(source.id(), &ObjectId::from(1));
         assert_eq!(source.pack_id(), &ObjectId::from(2));
-        assert_eq!(source.url().as_str(), "s3://bucket/data/");
-        assert_eq!(source.patterns(), &["**/*".to_string()]);
+        assert_eq!(source.url(), Some("s3://bucket/data/"));
+        assert_eq!(source.patterns(), Some("**/*"));
         assert_eq!(source.function(), "data_directory");
-        assert!(source.args().is_empty());
     }
 
     #[test]
@@ -170,40 +167,35 @@ mod tests {
         let op = DefineSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
-            url: "s3://bucket/data/".to_string(),
-            patterns: vec!["**/*.parquet".to_string()],
             function: "data_directory".to_string(),
-            args: HashMap::new(),
+            args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
         let source = Source::from_op(&op, &registry).unwrap();
         assert_eq!(source.id(), &ObjectId::from(1));
         assert_eq!(source.pack_id(), &ObjectId::from(2));
-        assert_eq!(source.url().as_str(), "s3://bucket/data/");
-        assert_eq!(source.patterns(), &["**/*.parquet".to_string()]);
+        assert_eq!(source.url(), Some("s3://bucket/data/"));
+        assert_eq!(source.patterns(), Some("**/*.parquet"));
         assert_eq!(source.function(), "data_directory");
-        assert!(source.args().is_empty());
     }
 
     #[test]
-    fn test_from_op_with_args() {
+    fn test_from_op_with_extra_args() {
         let registry = SourceFunctionRegistry::new();
 
-        let mut args = HashMap::new();
+        let mut args = make_args("s3://bucket/data/", None);
         args.insert("key".to_string(), "value".to_string());
 
         let op = DefineSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
-            url: "s3://bucket/data/".to_string(),
-            patterns: vec!["**/*".to_string()],
             function: "data_directory".to_string(),
             args: args.clone(),
         };
 
-        // This should fail because data_directory doesn't accept arguments
+        // from_op succeeds, validation happens in check()
         let result = Source::from_op(&op, &registry);
-        assert!(result.is_ok()); // from_op succeeds, validation happens elsewhere
+        assert!(result.is_ok());
         let source = result.unwrap();
         assert_eq!(source.args(), &args);
     }
@@ -215,8 +207,6 @@ mod tests {
         let op = DefineSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
-            url: "s3://bucket/data/".to_string(),
-            patterns: vec!["**/*".to_string()],
             function: "unknown_function".to_string(),
             args: HashMap::new(),
         };
