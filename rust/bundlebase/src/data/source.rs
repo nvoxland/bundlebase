@@ -105,12 +105,18 @@ impl Source {
     }
 
     /// Get URLs of files that have been attached from this source.
+    /// Uses source_location if present (original URL from source), otherwise falls back to location.
     pub fn attached_files(&self, operations: &[AnyOperation]) -> HashSet<String> {
         operations
             .iter()
             .filter_map(|op| match op {
                 AnyOperation::AttachBlock(attach) if attach.source.as_ref() == Some(&self.id) => {
-                    Some(attach.location.clone())
+                    Some(
+                        attach
+                            .source_location
+                            .clone()
+                            .unwrap_or_else(|| attach.location.clone()),
+                    )
                 }
                 _ => None,
             })

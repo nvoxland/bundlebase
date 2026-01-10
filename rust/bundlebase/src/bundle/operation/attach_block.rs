@@ -31,6 +31,10 @@ pub struct AttachBlockOp {
     /// If this block was attached via a source refresh, the source ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<ObjectId>,
+    /// If this block was attached via a source refresh, the original source URL
+    /// Used to track which files have been attached when checking for new files
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_location: Option<String>,
 }
 
 impl AttachBlockOp {
@@ -70,6 +74,7 @@ impl AttachBlockOp {
             pack: pack.clone(),
             layout: None,
             source: None,
+            source_location: None,
         };
 
         _progress.update(4, Some("Reading statistics"));
@@ -154,6 +159,7 @@ mod tests {
             schema: None,
             layout: None,
             source: None,
+            source_location: None,
         };
 
         assert_eq!(op.describe(), "ATTACH: file:///test/data.csv");
@@ -324,6 +330,7 @@ schema:
             schema: None,
             layout: None,
             source: None,
+            source_location: None,
         };
 
         let version = op.version();

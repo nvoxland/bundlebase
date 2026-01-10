@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 
+// TODO: get rid of
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RebuildIndexOp {

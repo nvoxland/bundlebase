@@ -237,7 +237,7 @@ impl BundleBuilder {
     /// bundle.commit("Filter high-value transactions").await?;
     /// ```
     pub async fn commit(&mut self, message: &str) -> Result<(), BundlebaseError> {
-        let manifest_dir = self.bundle.data_dir.subdir(META_DIR)?; //todo rename the dir
+        let manifest_dir = self.bundle.data_dir.subdir(META_DIR)?;
 
         if self.bundle.last_manifest_version == 0 {
             let from = self.bundle.from();
@@ -604,6 +604,7 @@ impl BundleBuilder {
                     Box::pin(async move {
                         let mut op = AttachBlockOp::setup(&pack_id, &file_url, builder).await?;
                         op.source = Some(source_id);
+                        op.source_location = Some(file_url.clone());
                         builder.apply_operation(op.into()).await?;
                         Ok(())
                     })
