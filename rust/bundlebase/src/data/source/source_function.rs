@@ -4,15 +4,12 @@
 //! Different implementations can provide different strategies (e.g., directory listing,
 //! S3 inventory, database queries, etc.).
 
-mod data_directory;
-
+use super::data_directory::DataDirectoryFunction;
 use crate::io::IOFile;
 use crate::{BundlebaseError, BundleConfig};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-
-pub use data_directory::DataDirectoryFunction;
 
 /// Trait for source function implementations.
 ///
