@@ -1,11 +1,19 @@
+//! Source module for data source definitions and discovery functions.
+
+mod data_directory;
+mod source_function;
+
 use crate::bundle::{AnyOperation, DefineSourceOp};
-use crate::data::{ObjectId, SourceFunctionRegistry};
-use crate::io::{IOReader, IOFile};
+use crate::data::ObjectId;
+use crate::io::{IOFile, IOReader};
 use crate::BundlebaseError;
 use crate::BundleConfig;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+
+pub use data_directory::DataDirectoryFunction;
+pub use source_function::{SourceFunction, SourceFunctionRegistry};
 
 /// Represents a data source definition for a pack.
 ///

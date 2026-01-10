@@ -3,7 +3,7 @@
 //! Lists files from a directory URL using the IO registry to support
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
-use super::SourceFunction;
+use super::source_function::SourceFunction;
 use crate::io::{io_registry, IOFile};
 use crate::{BundlebaseError, BundleConfig};
 use async_trait::async_trait;
