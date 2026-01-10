@@ -568,17 +568,44 @@ class PyBundleBuilder:
         automatically attached via refresh().
 
         Args:
-            function: Source function name (e.g., "data_directory")
-            args: Function-specific configuration arguments. For "data_directory":
-                - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
-                - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
-                - "copy" (optional): "true" to copy files into bundle (default), "false" to reference in place
+            function: Source function name. Available functions:
+
+                "data_directory" - List files from a local or cloud directory:
+                    - "url" (required): Directory URL (e.g., "s3://bucket/data/", "file:///path/to/data/")
+                    - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
+                    - "copy" (optional): "true" to copy files into bundle (default), "false" to reference in place
+
+                "ftp_directory" - List files from a remote FTP directory:
+                    - "url" (required): FTP URL (e.g., "ftp://user:pass@ftp.example.com:21/path/to/data")
+                    - "patterns" (optional): Comma-separated glob patterns (defaults to "**/*")
+                    Supports anonymous FTP (just omit user/pass), custom ports, and authenticated access.
+                    Note: Files are always copied into the bundle (remote files cannot be directly referenced)
+
+                "scp_directory" - List files from a remote directory via SSH/SFTP:
+                    - "url" (required): SCP or SFTP URL. Both schemes are supported:
+                        - "scp://user@host:22/path/to/data"
+                        - "sftp://user@host:22/path/to/data"
+                    - "key_path" (required): Path to SSH private key file (e.g., "~/.ssh/id_rsa")
+                    - "patterns" (optional): Comma-separated glob patterns (defaults to "**/*")
+                    Note: Files are always copied into the bundle (remote files cannot be directly referenced)
+
+            args: Function-specific configuration arguments as described above.
 
         Returns:
             OperationChain for fluent chaining
 
-        Example:
+        Examples:
+            # Local/cloud directory
             c = await c.define_source("data_directory", {"url": "s3://bucket/data/", "patterns": "**/*.parquet"})
+
+            # FTP directory (anonymous)
+            c = await c.define_source("ftp_directory", {"url": "ftp://ftp.example.com/pub/data/"})
+
+            # FTP directory (authenticated)
+            c = await c.define_source("ftp_directory", {"url": "ftp://user:pass@ftp.example.com/data/"})
+
+            # Remote directory via SSH (scp:// or sftp:// both work)
+            c = await c.define_source("scp_directory", {"url": "sftp://user@host/data/", "key_path": "~/.ssh/id_rsa"})
         """
         ...
 
@@ -590,11 +617,11 @@ class PyBundleBuilder:
 
         Args:
             join_name: Name of the join to associate the source with
-            function: Source function name (e.g., "data_directory")
-            args: Function-specific configuration arguments. For "data_directory":
-                - "url" (required): Directory URL to list
-                - "patterns" (optional): Comma-separated glob patterns
-                - "copy" (optional): "true" to copy files into bundle (default), "false" to reference in place
+            function: Source function name. See define_source() for available functions:
+                - "data_directory": List files from local/cloud directories
+                - "ftp_directory": List files from remote FTP directories
+                - "scp_directory": List files from remote directories via SSH/SFTP
+            args: Function-specific configuration arguments. See define_source() for details.
 
         Returns:
             OperationChain for fluent chaining

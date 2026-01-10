@@ -14,7 +14,7 @@ use crate::data::{DataBlock, ObjectId, VersionedBlockId};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
-use crate::io::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::{parse_ftp_url, parse_scp_url, FtpClient, ObjectStoreDir, ObjectStoreFile, SftpClient};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
@@ -612,18 +612,75 @@ impl BundleBuilder {
                 .map(|s| s != "false")
                 .unwrap_or(true);
 
+            // Get key_path for SCP sources (needed for downloading files)
+            let key_path = source.args().get("key_path").cloned();
+
             for file in pending {
                 let pack_id = source.pack_id().clone();
                 let source_id = source.id().clone();
                 let original_url = file.url().to_string();
                 let config = self.bundle.config();
+                let key_path_clone = key_path.clone();
 
                 self.do_change(&format!("Refresh: attach {}", original_url), |builder| {
                     Box::pin(async move {
-                        let attach_location = if should_copy {
-                            // Copy file to data_dir
+                        let parsed_url = Url::parse(&original_url)?;
+                        let scheme = parsed_url.scheme();
+
+                        // Remote files (SCP/SFTP/FTP) must always be copied (they can't be directly referenced)
+                        let attach_location = if scheme == "scp" || scheme == "sftp" {
+                            // Download file via SFTP
+                            let (user, host, port, remote_path) = parse_scp_url(&parsed_url)?;
+                            let key_path_str = key_path_clone.ok_or_else(|| {
+                                BundlebaseError::from(
+                                    "SCP/SFTP source requires 'key_path' argument for downloading files",
+                                )
+                            })?;
+                            let key_path_expanded =
+                                shellexpand::tilde(&key_path_str).to_string();
+
+                            let sftp =
+                                SftpClient::connect(&host, port, &user, std::path::Path::new(&key_path_expanded))
+                                    .await?;
+                            let data = sftp.read_file(&remote_path).await?;
+                            sftp.close().await?;
+
+                            // Generate unique filename in data_dir
+                            let filename = std::path::Path::new(&remote_path)
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| "data".to_string());
+                            let block_id = ObjectId::generate();
+                            let target_name = format!("{}_{}", block_id, filename);
+                            let target_file = builder.data_dir().file(&target_name)?;
+                            target_file.write(data).await?;
+
+                            target_file.url().to_string()
+                        } else if scheme == "ftp" {
+                            // Download file via FTP
+                            let (user, password, host, port, remote_path) = parse_ftp_url(&parsed_url)?;
+
+                            let mut ftp = FtpClient::connect(&host, port, &user, &password).await?;
+                            let data = ftp.read_file(&remote_path).await?;
+                            ftp.close().await?;
+
+                            // Generate unique filename in data_dir
+                            let filename = std::path::Path::new(&remote_path)
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| "data".to_string());
+                            let block_id = ObjectId::generate();
+                            let target_name = format!("{}_{}", block_id, filename);
+                            let target_file = builder.data_dir().file(&target_name)?;
+                            target_file.write(data).await?;
+
+                            target_file.url().to_string()
+                        } else if should_copy {
+                            // Copy file to data_dir (local/cloud files)
                             let source_file =
-                                ObjectStoreFile::from_url(&Url::parse(&original_url)?, config)?;
+                                ObjectStoreFile::from_url(&parsed_url, config)?;
                             let data = source_file.read_bytes().await?.ok_or_else(|| {
                                 BundlebaseError::from(format!(
                                     "Source file not found: {}",
@@ -632,7 +689,7 @@ impl BundleBuilder {
                             })?;
 
                             // Generate unique filename in data_dir
-                            let filename = Url::parse(&original_url)?
+                            let filename = parsed_url
                                 .path_segments()
                                 .and_then(|s| s.last())
                                 .map(|s| s.to_string())

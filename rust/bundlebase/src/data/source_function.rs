@@ -45,12 +45,17 @@ pub struct SourceFunctionRegistry {
 impl SourceFunctionRegistry {
     /// Create a new registry with built-in functions registered.
     pub fn new() -> Self {
+        use crate::data::FtpDirectoryFunction;
+        use crate::data::ScpDirectoryFunction;
+
         let mut registry = Self {
             functions: HashMap::new(),
         };
 
-        // Register built-in "data_directory" function
+        // Register built-in functions
         registry.register(Arc::new(DataDirectoryFunction));
+        registry.register(Arc::new(FtpDirectoryFunction));
+        registry.register(Arc::new(ScpDirectoryFunction));
 
         registry
     }
@@ -195,6 +200,8 @@ mod tests {
     fn test_registry_new() {
         let registry = SourceFunctionRegistry::new();
         assert!(registry.get("data_directory").is_some());
+        assert!(registry.get("ftp_directory").is_some());
+        assert!(registry.get("scp_directory").is_some());
     }
 
     #[test]
@@ -202,6 +209,20 @@ mod tests {
         let registry = SourceFunctionRegistry::new();
         let func = registry.get("data_directory").unwrap();
         assert_eq!(func.name(), "data_directory");
+    }
+
+    #[test]
+    fn test_registry_get_ftp() {
+        let registry = SourceFunctionRegistry::new();
+        let func = registry.get("ftp_directory").unwrap();
+        assert_eq!(func.name(), "ftp_directory");
+    }
+
+    #[test]
+    fn test_registry_get_scp() {
+        let registry = SourceFunctionRegistry::new();
+        let func = registry.get("scp_directory").unwrap();
+        assert_eq!(func.name(), "scp_directory");
     }
 
     #[test]
