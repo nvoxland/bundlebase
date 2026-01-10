@@ -251,15 +251,13 @@ impl SftpFile {
     pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<Self, BundlebaseError> {
         let (user, host, port, path) = parse_scp_url(url)?;
 
-        // Get key_path from config
+        // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
             .get_config_for_url(url)
             .get("key_path")
             .cloned()
             .or_else(|| std::env::var("SSH_KEY_PATH").ok())
-            .ok_or_else(|| {
-                BundlebaseError::from("SFTP requires 'key_path' configuration or SSH_KEY_PATH environment variable")
-            })?;
+            .unwrap_or_else(|| "~/.ssh/id_rsa".to_string());
 
         Ok(Self {
             url: url.clone(),
@@ -383,14 +381,13 @@ impl SftpDir {
     pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<Self, BundlebaseError> {
         let (user, host, port, path) = parse_scp_url(url)?;
 
+        // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
             .get_config_for_url(url)
             .get("key_path")
             .cloned()
             .or_else(|| std::env::var("SSH_KEY_PATH").ok())
-            .ok_or_else(|| {
-                BundlebaseError::from("SFTP requires 'key_path' configuration or SSH_KEY_PATH environment variable")
-            })?;
+            .unwrap_or_else(|| "~/.ssh/id_rsa".to_string());
 
         Ok(Self {
             url: url.clone(),
