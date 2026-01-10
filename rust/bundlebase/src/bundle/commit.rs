@@ -557,6 +557,7 @@ changes:
             num_rows: Some(100),
             bytes: Some(1000),
             schema: Some(schema),
+            source_location: None,
         };
 
         let remove_config = RemoveColumnsOp {
