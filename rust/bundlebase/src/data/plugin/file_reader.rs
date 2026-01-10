@@ -1,5 +1,5 @@
 use crate::data::{LineOrientedFormat, RowId, RowIdOffsetDataSource};
-use crate::io::ObjectStoreFile;
+use crate::io::{IOReader, IOFile};
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use datafusion::common::DataFusionError;
@@ -53,7 +53,7 @@ impl<C: FileFormatConfig> FilePlugin<C> {
         schema: Option<SchemaRef>,
     ) -> Result<FileReader<C>, BundlebaseError> {
         Ok(FileReader::new(
-            &ObjectStoreFile::from_str(source, bundle.data_dir(), bundle.config())?,
+            &IOFile::from_str(source, bundle.data_dir(), bundle.config())?,
             self.config.clone(),
             bundle.ctx(),
             schema,
@@ -68,7 +68,7 @@ impl<C: FileFormatConfig> Default for FilePlugin<C> {
 }
 
 pub struct FileReader<C: FileFormatConfig> {
-    file: ObjectStoreFile,
+    file: IOFile,
     config: C,
     ctx: Arc<SessionContext>,
     schema: Option<SchemaRef>,
@@ -76,7 +76,7 @@ pub struct FileReader<C: FileFormatConfig> {
 
 impl<C: FileFormatConfig> FileReader<C> {
     pub fn new(
-        file: &ObjectStoreFile,
+        file: &IOFile,
         config: C,
         ctx: Arc<SessionContext>,
         schema: Option<SchemaRef>,
@@ -91,8 +91,8 @@ impl<C: FileFormatConfig> FileReader<C> {
 }
 
 impl<C: FileFormatConfig> FileReader<C> {
-    /// Get the ObjectStoreFile
-    pub fn file(&self) -> &ObjectStoreFile {
+    /// Get the IOFile
+    pub fn file(&self) -> &IOFile {
         &self.file
     }
 
@@ -110,7 +110,7 @@ impl<C: FileFormatConfig> FileReader<C> {
     pub async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
         let metadata = self
             .file
-            .metadata()
+            .object_meta()
             .await?
             .ok_or(format!("File not found: {}", self.file.url()))?;
 
@@ -150,7 +150,7 @@ impl<C: FileFormatConfig> FileReader<C> {
             // This can happen with Parquet files
         }
 
-        let metadata = self.file.metadata().await?.ok_or_else(|| {
+        let metadata = self.file.object_meta().await?.ok_or_else(|| {
             DataFusionError::Internal(format!(
                 "File metadata not available for: {}",
                 self.file.url()

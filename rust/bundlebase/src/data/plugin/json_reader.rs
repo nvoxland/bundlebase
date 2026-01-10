@@ -3,7 +3,7 @@ use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader}
 use crate::data::plugin::ReaderPlugin;
 use crate::data::{DataReader, LineOrientedFormat};
 use crate::index::RowIdIndex;
-use crate::io::ObjectStoreDir;
+use crate::io::IODir;
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
@@ -127,7 +127,7 @@ impl DataReader for JsonReader {
 
     async fn build_layout(
         &self,
-        data_dir: &ObjectStoreDir,
+        data_dir: &IODir,
     ) -> Result<Option<String>, BundlebaseError> {
         let index = RowIdIndex::new()
             .build(&self.inner.file(), data_dir, &self.block_id(), false)

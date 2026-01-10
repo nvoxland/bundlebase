@@ -136,7 +136,7 @@ mod tests {
         // Create empty indexes and data_dir for test
         let indexes = Arc::new(parking_lot::RwLock::new(Vec::new()));
         let data_dir = Arc::new(
-            crate::io::ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into())
+            crate::io::IODir::from_str("memory:///test", BundleConfig::default().into())
                 .unwrap(),
         );
 

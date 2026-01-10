@@ -1,3 +1,4 @@
+use bundlebase::io::IOLister;
 use bundlebase::test_utils::{
     assert_vec_regexp, describe_ops, field_names, random_memory_url, test_datafile,
 };
@@ -197,8 +198,8 @@ async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
     // Read the view's init file
     let view_dir = c
         .data_dir()
-        .subdir(&format!("view_{}", view_id))?;
-    let init_file = view_dir.subdir(META_DIR)?.file(INIT_FILENAME)?;
+        .io_subdir(&format!("view_{}", view_id))?;
+    let init_file = view_dir.io_subdir(META_DIR)?.io_file(INIT_FILENAME)?;
     let init_commit: Option<InitCommit> = init_file.read_yaml().await?;
     let init_commit = init_commit.expect("View should have init file");
 

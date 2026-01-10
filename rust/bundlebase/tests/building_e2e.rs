@@ -1,6 +1,6 @@
 use bundlebase;
 use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME, META_DIR};
-use bundlebase::io::ObjectStoreFile;
+use bundlebase::io::{IOLister, IOReader, IOWriter, IOFile};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::Bundle;
 use bundlebase::BundleConfig;
@@ -21,7 +21,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     c1.attach(test_datafile("customers-0-100.csv")).await?;
     c1.commit("Initial commit").await?;
 
-    let init_commit = temp1.subdir(META_DIR)?.file(INIT_FILENAME)?;
+    let init_commit = temp1.io_subdir(META_DIR)?.io_file(INIT_FILENAME)?;
     let init_commit: Option<InitCommit> = init_commit.read_yaml().await?;
     let init_commit = init_commit.expect("Failed to read init commit");
     assert_eq!(None, init_commit.from);
@@ -42,7 +42,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     c2.commit("Remove country column").await?;
     assert_eq!(Some(temp1.url()), c2.bundle.from());
 
-    let init_commit = temp2.subdir(META_DIR)?.file(INIT_FILENAME)?;
+    let init_commit = temp2.io_subdir(META_DIR)?.io_file(INIT_FILENAME)?;
     let init_commit: Option<InitCommit> = init_commit.read_yaml().await?;
     let init_commit = init_commit.expect("Failed to read init commit");
     assert_eq!(Some(temp1.url().clone()), init_commit.from);
@@ -162,11 +162,11 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
     // Copy test data to bundle's directory with a local name
     let source_file = test_datafile("customers-0-100.csv");
-    let local_file = temp1.file("local_data.csv")?;
+    let local_file = temp1.io_file("local_data.csv")?;
 
     // Read source data and write to local location
     let source_obj =
-        ObjectStoreFile::from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
+        IOFile::from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
     let data = source_obj
         .read_bytes()
         .await?
@@ -230,8 +230,8 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
 
     // Get the ID from the base bundle's InitCommit
     let init_commit1: InitCommit = temp1
-        .subdir(META_DIR)?
-        .file(INIT_FILENAME)?
+        .io_subdir(META_DIR)?
+        .io_file(INIT_FILENAME)?
         .read_yaml()
         .await?
         .expect("Should have init commit");
@@ -248,8 +248,8 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
 
     // Verify extended bundle's InitCommit has only 'from', not 'id'
     let init_commit2: InitCommit = temp2
-        .subdir(META_DIR)?
-        .file(INIT_FILENAME)?
+        .io_subdir(META_DIR)?
+        .io_file(INIT_FILENAME)?
         .read_yaml()
         .await?
         .expect("Should have init commit");
@@ -274,8 +274,8 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     c3.commit("Third commit").await?;
 
     let init_commit3: InitCommit = temp3
-        .subdir(META_DIR)?
-        .file(INIT_FILENAME)?
+        .io_subdir(META_DIR)?
+        .io_file(INIT_FILENAME)?
         .read_yaml()
         .await?
         .expect("Should have init commit");

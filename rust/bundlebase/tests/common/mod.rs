@@ -1,8 +1,8 @@
 /// Shared test utilities for integration tests
 use arrow::datatypes::SchemaRef;
 use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
-use bundlebase::io::ObjectStoreDir;
-use bundlebase::BundlebaseError;
+use bundlebase::io::{IOFile, IOLister, IOReader, IODir};
+use bundlebase::{BundlebaseError, BundleConfig};
 use url::Url;
 
 
@@ -18,9 +18,9 @@ pub fn has_column(schema: &SchemaRef, name: &str) -> bool {
 
 #[allow(dead_code)]
 pub async fn latest_commit(
-    data_dir: &ObjectStoreDir,
+    data_dir: &IODir,
 ) -> Result<Option<(String, BundleCommit, Url)>, BundlebaseError> {
-    let meta_dir = data_dir.subdir("_bundlebase")?;
+    let meta_dir = data_dir.io_subdir("_bundlebase")?;
 
     let files = meta_dir.list_files().await?;
     let mut files = files
@@ -34,12 +34,16 @@ pub async fn latest_commit(
 
     match last_file {
         None => Ok(None),
-        Some(file) => file.read_str().await.map(|yaml| {
-            Some((
-                yaml.as_ref().unwrap().to_string(),
-                serde_yaml::from_str(yaml.as_ref().unwrap()).unwrap(),
-                file.url().clone(),
-            ))
-        }),
+        Some(file) => {
+            let io_file = IOFile::from_url(&file.url, BundleConfig::default().into())?;
+            let yaml = io_file.read_str().await?;
+            Ok(yaml.map(|content| {
+                (
+                    content.clone(),
+                    serde_yaml::from_str(&content).unwrap(),
+                    file.url.clone(),
+                )
+            }))
+        }
     }
 }

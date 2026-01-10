@@ -1,4 +1,5 @@
 use bundlebase::bundle::{BundleBuilder, BundleFacade};
+use bundlebase::io::IOLister;
 use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase::Bundle;
 use tempfile::TempDir;
@@ -342,7 +343,7 @@ async fn test_tar_file_listing() {
     // Verify _bundlebase directory exists
     let manifest_count = files
         .iter()
-        .filter(|f| f.url().as_str().contains("_bundlebase"))
+        .filter(|f| f.url.as_str().contains("_bundlebase"))
         .count();
     assert!(
         manifest_count > 0,

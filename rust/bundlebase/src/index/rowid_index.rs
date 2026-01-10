@@ -1,5 +1,5 @@
 use crate::data::{ObjectId, RowId};
-use crate::io::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::{IOLister, IOReader, IOWriter, IODir, IOFile};
 use crate::BundlebaseError;
 use futures::stream::StreamExt;
 
@@ -19,11 +19,11 @@ impl RowIdIndex {
 
     pub(crate) async fn build(
         &self,
-        datafile: &ObjectStoreFile,
-        data_dir: &ObjectStoreDir,
+        datafile: &IOFile,
+        data_dir: &IODir,
         block_id: &ObjectId,
         skip_first_line: bool,
-    ) -> Result<ObjectStoreFile, BundlebaseError> {
+    ) -> Result<IOFile, BundlebaseError> {
         // Read stream and collect all bytes
         let mut stream = datafile.read_existing().await?;
         let mut buffer = Vec::new();
@@ -36,7 +36,7 @@ impl RowIdIndex {
         let block_id: String = (*block_id).into();
         let index_filename = format!("{}-{}.rowid.idx", block_id, datafile.version().await?);
 
-        let index_file = data_dir.file(&index_filename)?;
+        let index_file = data_dir.io_file(&index_filename)?;
         self.save_index(&data, &index_file).await?;
 
         Ok(index_file)
@@ -74,7 +74,7 @@ impl RowIdIndex {
     async fn save_index(
         &self,
         data: &[RowId],
-        file: &ObjectStoreFile,
+        file: &IOFile,
     ) -> Result<(), BundlebaseError> {
         let mut buffer = Vec::new();
 
@@ -101,14 +101,14 @@ impl RowIdIndex {
     /// Load an index from disk
     ///
     /// # Arguments
-    /// * `file` - ObjectStoreFile pointing to the layout file
+    /// * `file` - IOFile pointing to the layout file
     ///
     /// # Returns
     /// A Vec of RowId values loaded from the index file
     ///
     /// # Errors
     /// Returns an error if the file doesn't exist, is corrupted, has wrong magic bytes, or has an invalid version
-    pub async fn load_index(&self, file: &ObjectStoreFile) -> Result<Vec<RowId>, BundlebaseError> {
+    pub async fn load_index(&self, file: &IOFile) -> Result<Vec<RowId>, BundlebaseError> {
         let mut stream = file.read_existing().await?;
         let mut buffer = Vec::new();
         while let Some(chunk_result) = stream.next().await {
@@ -248,7 +248,7 @@ mod tests {
     #[tokio::test]
     async fn test_save_and_load_index_single_row() {
         let dir = random_memory_dir();
-        let file = dir.file("single_row.idx").unwrap();
+        let file = dir.io_file("single_row.idx").unwrap();
         let block_id = ObjectId::from(50u8);
 
         let index = RowIdIndex::new();
@@ -267,7 +267,7 @@ mod tests {
     #[tokio::test]
     async fn test_save_and_load_index_multiple_rows() {
         let dir = random_memory_dir();
-        let file = dir.file("multi_row.idx").unwrap();
+        let file = dir.io_file("multi_row.idx").unwrap();
         let block_id = ObjectId::from(60u8);
 
         let index = RowIdIndex::new();
@@ -293,7 +293,7 @@ mod tests {
     async fn test_index_format_binary_layout() {
         // Verify the exact binary format of saved index
         let dir = random_memory_dir();
-        let file = dir.file("format_check.idx").unwrap();
+        let file = dir.io_file("format_check.idx").unwrap();
         let block_id = ObjectId::from(110u8);
 
         let index = RowIdIndex::new();
