@@ -18,7 +18,7 @@ pub struct DefineSourceOp {
     pub id: ObjectId,
 
     /// The pack this source is associated with
-    pub pack_id: ObjectId,
+    pub pack: ObjectId,
 
     /// URL prefix for file discovery (e.g., "s3://bucket/data/")
     pub url: String,
@@ -41,7 +41,7 @@ pub struct DefineSourceOp {
 impl DefineSourceOp {
     pub fn setup(
         id: ObjectId,
-        pack_id: ObjectId,
+        pack: ObjectId,
         url: String,
         patterns: Option<Vec<String>>,
         function: String,
@@ -49,7 +49,7 @@ impl DefineSourceOp {
     ) -> Self {
         Self {
             id,
-            pack_id,
+            pack,
             url,
             patterns: patterns.unwrap_or_else(|| vec!["**/*".to_string()]),
             function,
@@ -61,18 +61,18 @@ impl DefineSourceOp {
 #[async_trait]
 impl Operation for DefineSourceOp {
     fn describe(&self) -> String {
-        format!("DEFINE SOURCE {} at {} for pack {}", self.id, self.url, self.pack_id)
+        format!("DEFINE SOURCE {} at {} for pack {}", self.id, self.url, self.pack)
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Verify pack exists
-        if bundle.get_pack(&self.pack_id).is_none() {
-            return Err(format!("Pack {} not found", self.pack_id).into());
+        if bundle.get_pack(&self.pack).is_none() {
+            return Err(format!("Pack {} not found", self.pack).into());
         }
 
         // Verify no source already defined for this pack
-        if bundle.get_source_for_pack(&self.pack_id).is_some() {
-            return Err(format!("Pack {} already has a source defined", self.pack_id).into());
+        if bundle.get_source_for_pack(&self.pack).is_some() {
+            return Err(format!("Pack {} already has a source defined", self.pack).into());
         }
 
         // Verify function exists and validate arguments
@@ -105,7 +105,7 @@ mod tests {
     fn test_describe() {
         let op = DefineSourceOp {
             id: ObjectId::from(1),
-            pack_id: ObjectId::from(2),
+            pack: ObjectId::from(2),
             url: "s3://bucket/data/".to_string(),
             patterns: vec!["**/*.parquet".to_string()],
             function: "data_directory".to_string(),
@@ -174,7 +174,7 @@ mod tests {
     fn test_serialization() {
         let op = DefineSourceOp {
             id: ObjectId::from(1),
-            pack_id: ObjectId::from(2),
+            pack: ObjectId::from(2),
             url: "s3://bucket/data/".to_string(),
             patterns: vec!["**/*.parquet".to_string()],
             function: "data_directory".to_string(),
@@ -183,7 +183,7 @@ mod tests {
 
         let yaml = serde_yaml::to_string(&op).unwrap();
         assert!(yaml.contains("id: '01'"));
-        assert!(yaml.contains("packId: '02'"));
+        assert!(yaml.contains("pack: '02'"));
         assert!(yaml.contains("url: s3://bucket/data/"));
         assert!(yaml.contains("'**/*.parquet'"));
         assert!(yaml.contains("function: data_directory"));

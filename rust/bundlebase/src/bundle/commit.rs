@@ -551,8 +551,8 @@ changes:
             location: "memory:///test".to_string(),
             version: "v1".to_string(),
             id: ObjectId::from(42u8),
-            source_id: None,
-            pack_id: ObjectId::from(53u8),
+            source: None,
+            pack: ObjectId::from(53u8),
             layout: None,
             num_rows: Some(100),
             bytes: Some(1000),
@@ -612,7 +612,7 @@ changes:
   description: Attach block
   operations:
   - type: attachBlock
-    packId: '3b'
+    pack: '3b'
     location: memory:///test_data/userdata.parquet
     version: test-version
     id: '2a'
@@ -656,7 +656,7 @@ changes:
     location: memory:///test_data/userdata.parquet
     version: '2'
     id: cc
-    packId: dd
+    pack: dd
     numRows: 1000
     bytes: 113629
     schema:

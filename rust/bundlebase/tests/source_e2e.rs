@@ -354,7 +354,7 @@ async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_source_id_in_attach_op() -> Result<(), BundlebaseError> {
+async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -376,11 +376,11 @@ async fn test_source_id_in_attach_op() -> Result<(), BundlebaseError> {
 
     bundle.commit("Defined source").await?;
 
-    // Verify commit file contains sourceId in attach operation
+    // Verify commit file contains source in attach operation
     let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
 
-    // The attach operation should have a sourceId field
-    assert!(contents.contains("sourceId:"), "AttachBlock should have sourceId: {}", contents);
+    // The attach operation should have a source field
+    assert!(contents.contains("source:"), "AttachBlock should have source: {}", contents);
 
     Ok(())
 }

@@ -603,7 +603,7 @@ impl BundleBuilder {
                 self.do_change(&format!("Refresh: attach {}", file_url), |builder| {
                     Box::pin(async move {
                         let mut op = AttachBlockOp::setup(&pack_id, &file_url, builder).await?;
-                        op.source_id = Some(source_id);
+                        op.source = Some(source_id);
                         builder.apply_operation(op.into()).await?;
                         Ok(())
                     })
@@ -620,7 +620,7 @@ impl BundleBuilder {
     /// Check for new files in sources without attaching them.
     ///
     /// # Returns
-    /// A list of (source_id, file_url) tuples for files that would be attached.
+    /// A list of (source, file_url) tuples for files that would be attached.
     pub async fn check_refresh(&self) -> Result<Vec<(ObjectId, String)>, BundlebaseError> {
         let mut pending_files = Vec::new();
         let registry = self.bundle.source_function_registry();

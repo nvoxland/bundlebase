@@ -557,7 +557,7 @@ impl PyBundleBuilder {
 
     /// Check for new files in sources without attaching them.
     ///
-    /// Returns a list of (source_id, file_url) tuples for files that would be attached.
+    /// Returns a list of (source, file_url) tuples for files that would be attached.
     fn check_refresh<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
