@@ -1,24 +1,35 @@
-//! Source function system for file discovery.
+//! Source function system for data discovery and materialization.
 //!
-//! Source functions define how files are discovered and listed.
+//! Source functions define how data is discovered and materialized into files.
 //! Different implementations can provide different strategies (e.g., directory listing,
-//! S3 inventory, database queries, etc.).
+//! database queries, API pagination, etc.).
 
-use super::data_directory::DataDirectoryFunction;
-use crate::io::IOFile;
+use super::remote_dir::RemoteDirFunction;
+use crate::io::IODir;
 use crate::{BundlebaseError, BundleConfig};
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+
+/// Result of materializing a single data unit from a source.
+#[derive(Debug, Clone)]
+pub struct MaterializedData {
+    /// Location of the materialized file (URL in data_dir or original if not copied)
+    pub attach_location: String,
+    /// Original source location identifier (file URL, row range, etc.)
+    pub source_location: String,
+}
 
 /// Trait for source function implementations.
 ///
-/// Source functions define how files are discovered and listed.
-/// Different implementations can provide different strategies (e.g., directory listing,
-/// S3 inventory, database queries, etc.).
+/// Source functions define how data is discovered and materialized.
+/// Each source function controls:
+/// - What "location" means (file URL, row range, API cursor, etc.)
+/// - How to materialize data into files
+/// - What data to return for attachment
 ///
 /// Each function defines its own required and optional arguments. For example,
-/// "data_directory" requires:
+/// "remote_dir" requires:
 /// - "url": Directory URL to list
 /// - "patterns": Comma-separated glob patterns (optional, defaults to "**/*")
 #[async_trait]
@@ -30,13 +41,23 @@ pub trait SourceFunction: Send + Sync {
     /// Should check for required arguments and validate their values.
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError>;
 
-    /// List files using function-specific logic.
-    /// Arguments contain all configuration needed by the function.
-    async fn list_files(
+    /// Refresh the source: find new data and materialize it.
+    ///
+    /// # Arguments
+    /// * `args` - Source configuration
+    /// * `attached_locations` - Locations already attached from this source
+    /// * `data_dir` - Where to write materialized files
+    /// * `config` - Bundle configuration
+    ///
+    /// # Returns
+    /// List of materialized data ready for attachment
+    async fn refresh(
         &self,
         args: &HashMap<String, String>,
+        attached_locations: HashSet<String>,
+        data_dir: &IODir,
         config: Arc<BundleConfig>,
-    ) -> Result<Vec<IOFile>, BundlebaseError>;
+    ) -> Result<Vec<MaterializedData>, BundlebaseError>;
 }
 
 /// Registry for source functions.
@@ -55,8 +76,8 @@ impl SourceFunctionRegistry {
         };
 
         // Register built-in functions
-        // DataDirectoryFunction now handles all URL schemes via IORegistry
-        registry.register(Arc::new(DataDirectoryFunction));
+        // RemoteDirFunction handles all URL schemes via IORegistry
+        registry.register(Arc::new(RemoteDirFunction));
 
         registry
     }
@@ -90,13 +111,13 @@ mod tests {
     #[test]
     fn test_registry_new() {
         let registry = SourceFunctionRegistry::new();
-        assert!(registry.get("data_directory").is_some());
+        assert!(registry.get("remote_dir").is_some());
     }
 
     #[test]
     fn test_registry_get() {
         let registry = SourceFunctionRegistry::new();
-        let func = registry.get("data_directory").unwrap();
-        assert_eq!(func.name(), "data_directory");
+        let func = registry.get("remote_dir").unwrap();
+        assert_eq!(func.name(), "remote_dir");
     }
 }

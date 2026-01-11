@@ -8,7 +8,7 @@ use url::Url;
 
 mod common;
 
-/// Helper to create args for data_directory source function
+/// Helper to create args for remote_dir source function
 fn make_source_args(url: &str, patterns: Option<&str>) -> HashMap<String, String> {
     let mut args = HashMap::new();
     args.insert("url".to_string(), url.to_string());
@@ -42,7 +42,7 @@ async fn test_define_source_basic() -> Result<(), BundlebaseError> {
 
     // Define a source with default patterns
     bundle
-        .define_source("data_directory", make_source_args("memory:///some/path/", None))
+        .define_source("remote_dir", make_source_args("memory:///some/path/", None))
         .await?;
 
     // Commit and verify
@@ -67,7 +67,7 @@ async fn test_define_source_with_patterns() -> Result<(), BundlebaseError> {
     // Define source with specific patterns
     bundle
         .define_source(
-            "data_directory",
+            "remote_dir",
             make_source_args("memory:///data/", Some("**/*.parquet,**/*.csv")),
         )
         .await?;
@@ -88,13 +88,13 @@ async fn test_define_source_default_patterns() -> Result<(), BundlebaseError> {
 
     // Define source without patterns (function defaults to **/* internally)
     bundle
-        .define_source("data_directory", make_source_args("memory:///data/", None))
+        .define_source("remote_dir", make_source_args("memory:///data/", None))
         .await?;
 
     bundle.commit("Defined source").await?;
 
     // When patterns are not provided, they are not included in args
-    // The data_directory function defaults to "**/*" internally
+    // The remote_dir function defaults to "**/*" internally
     let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
     assert!(contents.contains("type: defineSource"));
     assert!(contents.contains("url: memory:///data/"));
@@ -123,7 +123,7 @@ async fn test_define_source_auto_attaches_files() -> Result<(), BundlebaseError>
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("data_directory", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
+        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
         .await?;
 
     // Verify file was auto-attached (define_source calls refresh automatically)
@@ -147,12 +147,12 @@ async fn test_refresh_attaches_new_files() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("data_directory", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
+        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
         .await?;
 
-    // Verify no data yet by checking pending files is empty
-    let pending = bundle.check_refresh().await?;
-    assert!(pending.is_empty());
+    // Verify no data yet by refreshing (should attach nothing)
+    let count = bundle.refresh().await?;
+    assert_eq!(count, 0);
 
     // Now add a file to the source directory
     copy_test_file(
@@ -190,7 +190,7 @@ async fn test_refresh_idempotent() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("data_directory", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
+        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
         .await?;
 
     // First explicit refresh should find nothing (already attached by define_source)
@@ -225,7 +225,7 @@ async fn test_refresh_incremental() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("data_directory", make_source_args(source_dir.url().as_str(), Some("**/*")))
+        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*")))
         .await?;
 
     // First file should be auto-attached
@@ -242,52 +242,6 @@ async fn test_refresh_incremental() -> Result<(), BundlebaseError> {
     // Refresh should only attach the new file
     let count = bundle.refresh().await?;
     assert_eq!(count, 1);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_check_refresh() -> Result<(), BundlebaseError> {
-    let source_dir = random_memory_dir();
-    let bundle_dir = random_memory_dir();
-
-    // Create bundle and define source (empty directory)
-    let mut bundle =
-        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
-
-    bundle
-        .define_source("data_directory", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
-        .await?;
-
-    // check_refresh should return empty (no files)
-    let pending = bundle.check_refresh().await?;
-    assert!(pending.is_empty());
-
-    // Add a file
-    copy_test_file(
-        test_datafile("userdata.parquet"),
-        &source_dir,
-        "userdata.parquet",
-    )
-    .await?;
-
-    // check_refresh should find the pending file
-    let pending = bundle.check_refresh().await?;
-    assert_eq!(pending.len(), 1);
-    assert!(pending[0].1.contains("userdata.parquet"));
-
-    // check_refresh should NOT attach the file - verify by checking pending again
-    let pending_again = bundle.check_refresh().await?;
-    assert_eq!(pending_again.len(), 1); // Still 1 pending file
-
-    // Now refresh to actually attach
-    let count = bundle.refresh().await?;
-    assert_eq!(count, 1);
-    assert_eq!(bundle.num_rows().await?, 1000);
-
-    // Now check_refresh should return empty
-    let pending_after = bundle.check_refresh().await?;
-    assert!(pending_after.is_empty());
 
     Ok(())
 }
@@ -318,7 +272,7 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("data_directory", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
+        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
         .await?;
 
     // Only parquet should be attached (1000 rows)
@@ -349,7 +303,7 @@ async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("data_directory", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
+        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -381,7 +335,7 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("data_directory", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
+        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -402,7 +356,7 @@ async fn test_define_source_serialization() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("data_directory", make_source_args("memory:///data/", Some("**/*.parquet")))
+        .define_source("remote_dir", make_source_args("memory:///data/", Some("**/*.parquet")))
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -436,7 +390,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir1.url().as_str(), None).await?;
 
     bundle
-        .define_source("data_directory", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
+        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -483,7 +437,7 @@ async fn test_define_source_copy_default() -> Result<(), BundlebaseError> {
 
     bundle
         .define_source(
-            "data_directory",
+            "remote_dir",
             make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
         )
         .await?;
@@ -520,7 +474,7 @@ async fn test_define_source_copy_false() -> Result<(), BundlebaseError> {
     let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
     args.insert("copy".to_string(), "false".to_string());
 
-    bundle.define_source("data_directory", args).await?;
+    bundle.define_source("remote_dir", args).await?;
 
     bundle.commit("Defined source").await?;
 
@@ -554,7 +508,7 @@ async fn test_define_source_copy_true_explicit() -> Result<(), BundlebaseError> 
     let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
     args.insert("copy".to_string(), "true".to_string());
 
-    bundle.define_source("data_directory", args).await?;
+    bundle.define_source("remote_dir", args).await?;
 
     bundle.commit("Defined source").await?;
 
@@ -590,7 +544,7 @@ async fn test_refresh_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
 
     bundle
         .define_source(
-            "data_directory",
+            "remote_dir",
             make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
         )
         .await?;

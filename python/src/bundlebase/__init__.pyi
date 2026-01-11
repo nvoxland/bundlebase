@@ -570,7 +570,7 @@ class PyBundleBuilder:
         Args:
             function: Source function name. Available functions:
 
-                "data_directory" - List files from a local or cloud directory:
+                "remote_dir" - List files from a local or cloud directory:
                     - "url" (required): Directory URL (e.g., "s3://bucket/data/", "file:///path/to/data/")
                     - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
                     - "copy" (optional): "true" to copy files into bundle (default), "false" to reference in place
@@ -596,7 +596,7 @@ class PyBundleBuilder:
 
         Examples:
             # Local/cloud directory
-            c = await c.define_source("data_directory", {"url": "s3://bucket/data/", "patterns": "**/*.parquet"})
+            c = await c.define_source("remote_dir", {"url": "s3://bucket/data/", "patterns": "**/*.parquet"})
 
             # FTP directory (anonymous)
             c = await c.define_source("ftp_directory", {"url": "ftp://ftp.example.com/pub/data/"})
@@ -618,7 +618,7 @@ class PyBundleBuilder:
         Args:
             join_name: Name of the join to associate the source with
             function: Source function name. See define_source() for available functions:
-                - "data_directory": List files from local/cloud directories
+                - "remote_dir": List files from local/cloud directories
                 - "ftp_directory": List files from remote FTP directories
                 - "scp_directory": List files from remote directories via SSH/SFTP
             args: Function-specific configuration arguments. See define_source() for details.
@@ -627,7 +627,7 @@ class PyBundleBuilder:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.define_source_for_join("customers", "data_directory", {"url": "s3://bucket/customers/"})
+            c = await c.define_source_for_join("customers", "remote_dir", {"url": "s3://bucket/customers/"})
         """
         ...
 
@@ -644,22 +644,6 @@ class PyBundleBuilder:
         Example:
             count = await c.refresh()
             print(f"Attached {count} new files")
-        """
-        ...
-
-    async def check_refresh(self) -> List[Tuple[str, str]]:
-        """
-        Check for new files in defined sources without attaching.
-
-        Returns a list of pending files that would be attached by refresh().
-
-        Returns:
-            List of (source_id, url) tuples for pending files
-
-        Example:
-            pending = await c.check_refresh()
-            for source_id, url in pending:
-                print(f"Pending: {url} from source {source_id}")
         """
         ...
 

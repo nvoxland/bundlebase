@@ -12,7 +12,7 @@ use std::collections::HashMap;
 /// functionality to discover and auto-attach new files.
 ///
 /// The source function is responsible for file discovery. Each function may require
-/// different arguments. For example, "data_directory" requires:
+/// different arguments. For example, "remote_dir" requires:
 /// - "url": Directory URL to list (e.g., "s3://bucket/data/")
 /// - "patterns": Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -24,11 +24,11 @@ pub struct DefineSourceOp {
     /// The pack this source is associated with
     pub pack: ObjectId,
 
-    /// Source function name (e.g., "data_directory")
+    /// Source function name (e.g., "remote_dir")
     pub function: String,
 
     /// Function-specific configuration arguments.
-    /// For "data_directory":
+    /// For "remote_dir":
     /// - "url": Directory URL (required)
     /// - "patterns": Comma-separated glob patterns (optional, defaults to "**/*")
     #[serde(default)]
@@ -109,7 +109,7 @@ mod tests {
         let op = DefineSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
-            function: "data_directory".to_string(),
+            function: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
@@ -139,11 +139,11 @@ mod tests {
         let op = DefineSourceOp::setup(
             ObjectId::from(1),
             ObjectId::from(2),
-            "data_directory".to_string(),
+            "remote_dir".to_string(),
             make_args("s3://bucket/", None),
         );
 
-        assert_eq!(op.function, "data_directory");
+        assert_eq!(op.function, "remote_dir");
         assert_eq!(op.args.get("url"), Some(&"s3://bucket/".to_string()));
     }
 
@@ -152,11 +152,11 @@ mod tests {
         let op = DefineSourceOp::setup(
             ObjectId::from(1),
             ObjectId::from(2),
-            "data_directory".to_string(),
+            "remote_dir".to_string(),
             make_args("s3://bucket/", Some("**/*.parquet,**/*.csv")),
         );
 
-        assert_eq!(op.function, "data_directory");
+        assert_eq!(op.function, "remote_dir");
         assert_eq!(
             op.args.get("patterns"),
             Some(&"**/*.parquet,**/*.csv".to_string())
@@ -184,14 +184,14 @@ mod tests {
         let op = DefineSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
-            function: "data_directory".to_string(),
+            function: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
         let yaml = serde_yaml::to_string(&op).unwrap();
         assert!(yaml.contains("id: '01'"));
         assert!(yaml.contains("pack: '02'"));
-        assert!(yaml.contains("function: data_directory"));
+        assert!(yaml.contains("function: remote_dir"));
         assert!(yaml.contains("url: s3://bucket/data/"));
         assert!(yaml.contains("patterns: '**/*.parquet'"));
     }
