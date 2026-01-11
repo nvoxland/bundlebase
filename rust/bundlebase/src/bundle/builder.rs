@@ -14,7 +14,7 @@ use crate::data::{DataBlock, ObjectId, VersionedBlockId};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
-use crate::io::{parse_scp_url, FtpFile, IODir, IOFile, IOLister, IOReader, IOWriter, SftpClient};
+use crate::io::{IODir, IOFile, IOLister, IOWriter};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
@@ -477,8 +477,8 @@ impl BundleBuilder {
     /// functionality to discover and auto-attach new files.
     ///
     /// # Arguments
-    /// * `function` - Source function name (e.g., "data_directory")
-    /// * `args` - Function-specific arguments. For "data_directory":
+    /// * `function` - Source function name (e.g., "remote_dir")
+    /// * `args` - Function-specific arguments. For "remote_dir":
     ///   - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
     ///   - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
     ///
@@ -491,7 +491,7 @@ impl BundleBuilder {
     /// let mut args = HashMap::new();
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
-    /// bundle.define_source("data_directory", args).await?;
+    /// bundle.define_source("remote_dir", args).await?;
     /// bundle.refresh().await?;
     /// bundle.commit("Initial data from source").await?;
     /// # Ok(())
@@ -528,8 +528,8 @@ impl BundleBuilder {
     ///
     /// # Arguments
     /// * `join_name` - Name of the join to define a source for
-    /// * `function` - Source function name (e.g., "data_directory")
-    /// * `args` - Function-specific arguments. For "data_directory":
+    /// * `function` - Source function name (e.g., "remote_dir")
+    /// * `args` - Function-specific arguments. For "remote_dir":
     ///   - "url" (required): Directory URL to list
     ///   - "patterns" (optional): Comma-separated glob patterns
     pub async fn define_source_for_join(
@@ -587,7 +587,7 @@ impl BundleBuilder {
     /// let mut args = HashMap::new();
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
-    /// bundle.define_source("data_directory", args).await?;
+    /// bundle.define_source("remote_dir", args).await?;
     /// let count = bundle.refresh().await?;
     /// println!("Attached {} new files", count);
     /// # Ok(())
@@ -601,115 +601,34 @@ impl BundleBuilder {
 
         for source in sources {
             let registry = self.bundle.source_function_registry();
-            let pending = source
-                .pending_files(&self.bundle.operations, self.bundle.config(), &registry)
+            let pack_id = source.pack_id().clone();
+            let source_id = source.id().clone();
+
+            // Get materialized data from the source function
+            let materialized = source
+                .refresh(
+                    &self.bundle.operations,
+                    self.data_dir(),
+                    self.bundle.config(),
+                    &registry,
+                )
                 .await?;
 
-            // Check if we should copy files (default: true)
-            let should_copy = source
-                .args()
-                .get("copy")
-                .map(|s| s != "false")
-                .unwrap_or(true);
+            for data in materialized {
+                let attach_location = data.attach_location;
+                let source_location = data.source_location.clone();
 
-            // Get key_path for SCP sources (needed for downloading files)
-            let key_path = source.args().get("key_path").cloned();
+                self.do_change(&format!("Refresh: attach {}", data.source_location), |builder| {
+                    let pack_id = pack_id.clone();
+                    let source_id = source_id.clone();
+                    let attach_location = attach_location.clone();
+                    let source_location = source_location.clone();
 
-            for file in pending {
-                let pack_id = source.pack_id().clone();
-                let source_id = source.id().clone();
-                let original_url = file.url().to_string();
-                let config = self.bundle.config();
-                let key_path_clone = key_path.clone();
-
-                self.do_change(&format!("Refresh: attach {}", original_url), |builder| {
                     Box::pin(async move {
-                        let parsed_url = Url::parse(&original_url)?;
-                        let scheme = parsed_url.scheme();
-
-                        // Remote files (SCP/SFTP/FTP) must always be copied (they can't be directly referenced)
-                        let attach_location = if scheme == "scp" || scheme == "sftp" {
-                            // Download file via SFTP
-                            let (user, host, port, remote_path) = parse_scp_url(&parsed_url)?;
-                            let key_path_str = key_path_clone.ok_or_else(|| {
-                                BundlebaseError::from(
-                                    "SCP/SFTP source requires 'key_path' argument for downloading files",
-                                )
-                            })?;
-                            let key_path_expanded =
-                                shellexpand::tilde(&key_path_str).to_string();
-
-                            let sftp =
-                                SftpClient::connect(&host, port, &user, std::path::Path::new(&key_path_expanded))
-                                    .await?;
-                            let data = sftp.read_file(&remote_path).await?;
-                            sftp.close().await?;
-
-                            // Generate unique filename in data_dir
-                            let filename = std::path::Path::new(&remote_path)
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| "data".to_string());
-                            let block_id = ObjectId::generate();
-                            let target_name = format!("{}_{}", block_id, filename);
-                            let target_file = builder.data_dir().io_file(&target_name)?;
-                            target_file.write(data).await?;
-
-                            target_file.url().to_string()
-                        } else if scheme == "ftp" {
-                            // Download file via FTP using IOReader
-                            let ftp_file = FtpFile::from_url(&parsed_url)?;
-                            let data = ftp_file.read_bytes().await?.ok_or_else(|| {
-                                BundlebaseError::from(format!(
-                                    "FTP file not found: {}",
-                                    original_url
-                                ))
-                            })?;
-
-                            // Generate unique filename in data_dir
-                            let filename = parsed_url
-                                .path_segments()
-                                .and_then(|s| s.last())
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| "data".to_string());
-                            let block_id = ObjectId::generate();
-                            let target_name = format!("{}_{}", block_id, filename);
-                            let target_file = builder.data_dir().io_file(&target_name)?;
-                            target_file.write(data).await?;
-
-                            target_file.url().to_string()
-                        } else if should_copy {
-                            // Copy file to data_dir (local/cloud files)
-                            let source_file =
-                                IOFile::from_url(&parsed_url, config)?;
-                            let data = source_file.read_bytes().await?.ok_or_else(|| {
-                                BundlebaseError::from(format!(
-                                    "Source file not found: {}",
-                                    original_url
-                                ))
-                            })?;
-
-                            // Generate unique filename in data_dir
-                            let filename = parsed_url
-                                .path_segments()
-                                .and_then(|s| s.last())
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| "data".to_string());
-                            let block_id = ObjectId::generate();
-                            let target_name = format!("{}_{}", block_id, filename);
-                            let target_file = builder.data_dir().io_file(&target_name)?;
-                            target_file.write(data).await?;
-
-                            target_file.url().to_string()
-                        } else {
-                            original_url.clone()
-                        };
-
                         let mut op =
                             AttachBlockOp::setup(&pack_id, &attach_location, builder).await?;
                         op.source = Some(source_id);
-                        op.source_location = Some(original_url); // Always original URL
+                        op.source_location = Some(source_location);
                         builder.apply_operation(op.into()).await?;
                         Ok(())
                     })
@@ -721,27 +640,6 @@ impl BundleBuilder {
         }
 
         Ok(attached_count)
-    }
-
-    /// Check for new files in sources without attaching them.
-    ///
-    /// # Returns
-    /// A list of (source, file_url) tuples for files that would be attached.
-    pub async fn check_refresh(&self) -> Result<Vec<(ObjectId, String)>, BundlebaseError> {
-        let mut pending_files = Vec::new();
-        let registry = self.bundle.source_function_registry();
-
-        for source in self.bundle.sources().values() {
-            let pending = source
-                .pending_files(&self.bundle.operations, self.bundle.config(), &registry)
-                .await?;
-
-            for file in pending {
-                pending_files.push((source.id().clone(), file.url().to_string()));
-            }
-        }
-
-        Ok(pending_files)
     }
 
     /// Attach a view from another BundleBuilder

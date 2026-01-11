@@ -1,19 +1,19 @@
 //! Source module for data source definitions and discovery functions.
 
-mod data_directory;
+mod remote_dir;
 mod source_function;
 
 use crate::bundle::{AnyOperation, DefineSourceOp};
 use crate::data::ObjectId;
-use crate::io::{IOFile, IOReader};
+use crate::io::IODir;
 use crate::BundlebaseError;
 use crate::BundleConfig;
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-pub use data_directory::DataDirectoryFunction;
-pub use source_function::{SourceFunction, SourceFunctionRegistry};
+pub use remote_dir::RemoteDirFunction;
+pub use source_function::{MaterializedData, SourceFunction, SourceFunctionRegistry};
 
 /// Represents a data source definition for a pack.
 ///
@@ -78,54 +78,38 @@ impl Source {
         &self.args
     }
 
-    /// List all files from the source using the configured function.
-    pub async fn list_files(
+    /// Refresh this source: find new data and materialize it.
+    ///
+    /// Returns a list of materialized data ready for attachment.
+    pub async fn refresh(
         &self,
+        operations: &[AnyOperation],
+        data_dir: &IODir,
         config: Arc<BundleConfig>,
         registry: &Arc<RwLock<SourceFunctionRegistry>>,
-    ) -> Result<Vec<IOFile>, BundlebaseError> {
+    ) -> Result<Vec<MaterializedData>, BundlebaseError> {
         let func = {
             let reg = registry.read();
             reg.get(&self.function)
                 .ok_or_else(|| format!("Unknown source function '{}'", self.function))?
         };
 
-        func.list_files(&self.args, config).await
+        let attached = self.attached_locations(operations);
+
+        func.refresh(&self.args, attached, data_dir, config).await
     }
 
-    /// Get URLs of files that have been attached from this source.
-    /// Uses source_location if present (original URL from source), otherwise falls back to location.
-    pub fn attached_files(&self, operations: &[AnyOperation]) -> HashSet<String> {
+    /// Get locations already attached from this source.
+    fn attached_locations(&self, operations: &[AnyOperation]) -> HashSet<String> {
         operations
             .iter()
             .filter_map(|op| match op {
                 AnyOperation::AttachBlock(attach) if attach.source.as_ref() == Some(&self.id) => {
-                    Some(
-                        attach
-                            .source_location
-                            .clone()
-                            .unwrap_or_else(|| attach.location.clone()),
-                    )
+                    attach.source_location.clone()
                 }
                 _ => None,
             })
             .collect()
-    }
-
-    /// Get files that exist in the source but haven't been attached yet.
-    pub async fn pending_files(
-        &self,
-        operations: &[AnyOperation],
-        config: Arc<BundleConfig>,
-        registry: &Arc<RwLock<SourceFunctionRegistry>>,
-    ) -> Result<Vec<IOFile>, BundlebaseError> {
-        let all_files = self.list_files(config, registry).await?;
-        let attached = self.attached_files(operations);
-
-        Ok(all_files
-            .into_iter()
-            .filter(|f| !attached.contains(f.url().as_str()))
-            .collect())
     }
 }
 

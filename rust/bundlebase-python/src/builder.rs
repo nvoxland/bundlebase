@@ -466,8 +466,8 @@ impl PyBundleBuilder {
     /// and patterns to filter which files to include.
     ///
     /// # Arguments
-    /// * `function` - Source function name (e.g., "data_directory")
-    /// * `args` - Function-specific arguments. For "data_directory":
+    /// * `function` - Source function name (e.g., "remote_dir")
+    /// * `args` - Function-specific arguments. For "remote_dir":
     ///   - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
     ///   - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
     #[pyo3(signature = (function, args))]
@@ -503,8 +503,8 @@ impl PyBundleBuilder {
     ///
     /// # Arguments
     /// * `join_name` - Name of the join to define a source for
-    /// * `function` - Source function name (e.g., "data_directory")
-    /// * `args` - Function-specific arguments. For "data_directory":
+    /// * `function` - Source function name (e.g., "remote_dir")
+    /// * `args` - Function-specific arguments. For "remote_dir":
     ///   - "url" (required): Directory URL to list
     ///   - "patterns" (optional): Comma-separated glob patterns
     #[pyo3(signature = (join_name, function, args))]
@@ -555,25 +555,6 @@ impl PyBundleBuilder {
                 .await
                 .map_err(|e| to_py_error("Failed to refresh from sources", e))?;
             Ok(count)
-        })
-    }
-
-    /// Check for new files in sources without attaching them.
-    ///
-    /// Returns a list of (source, file_url) tuples for files that would be attached.
-    fn check_refresh<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let inner = slf.inner.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let builder = inner.lock().await;
-            let pending = builder
-                .check_refresh()
-                .await
-                .map_err(|e| to_py_error("Failed to check refresh", e))?;
-            let result: Vec<(String, String)> = pending
-                .into_iter()
-                .map(|(id, url)| (String::from(id), url))
-                .collect();
-            Ok(result)
         })
     }
 
