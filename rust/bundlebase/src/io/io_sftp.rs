@@ -1,4 +1,8 @@
 //! SFTP IO backend - read-only file and directory operations via SSH/SFTP.
+//!
+//! Note: FTP and SFTP backends share similar patterns (connect → operate → close)
+//! but use different underlying libraries (suppaftp vs russh_sftp) with incompatible
+//! types. Extracting a common abstraction would add complexity without clear benefit.
 
 use crate::io::io_registry::IOFactory;
 use crate::io::io_traits::{FileInfo, IOLister, IOReader};
@@ -78,6 +82,16 @@ pub fn parse_scp_url(url: &Url) -> Result<(String, String, u16, String), Bundleb
     }
 
     Ok((user, host.to_string(), port, path))
+}
+
+/// Build an SFTP URL from components.
+///
+/// Constructs a URL in the format: `sftp://user@host:port/path`
+fn build_sftp_url(user: &str, host: &str, port: u16, path: &str) -> Result<Url, BundlebaseError> {
+    Url::parse(&format!(
+        "sftp://{}@{}:{}{}",
+        user, host, port, path
+    )).map_err(|e| format!("Failed to build SFTP URL: {}", e).into())
 }
 
 /// SFTP client for SSH file operations.
@@ -303,8 +317,11 @@ impl IOReader for SftpFile {
             }
             Err(e) => {
                 client.close().await?;
-                let err_str = e.to_string();
-                if err_str.contains("No such file") || err_str.contains("not found") {
+                // Check if it's a file not found error
+                // SFTP uses SSH_FX_NO_SUCH_FILE (code 2) for missing files
+                // We check common error message patterns as a fallback
+                let err_str = e.to_string().to_lowercase();
+                if err_str.contains("no such file") || err_str.contains("not found") || err_str.contains("error code: 2") {
                     Ok(None)
                 } else {
                     Err(e)
@@ -426,8 +443,7 @@ impl IOLister for SftpDir {
         let files = sftp_files
             .into_iter()
             .filter_map(|f| {
-                let file_url = format!("sftp://{}@{}:{}{}", self.user, self.host, self.port, f.path);
-                Url::parse(&file_url)
+                build_sftp_url(&self.user, &self.host, self.port, &f.path)
                     .ok()
                     .map(|url| FileInfo::new(url).with_size(f.size))
             })
@@ -443,10 +459,7 @@ impl IOLister for SftpDir {
             format!("{}/{}", self.path, name.trim_start_matches('/'))
         };
 
-        let new_url = Url::parse(&format!(
-            "sftp://{}@{}:{}{}",
-            self.user, self.host, self.port, new_path
-        ))?;
+        let new_url = build_sftp_url(&self.user, &self.host, self.port, &new_path)?;
 
         Ok(Box::new(SftpDir {
             url: new_url,
@@ -465,10 +478,7 @@ impl IOLister for SftpDir {
             format!("{}/{}", self.path, name.trim_start_matches('/'))
         };
 
-        let new_url = Url::parse(&format!(
-            "sftp://{}@{}:{}{}",
-            self.user, self.host, self.port, new_path
-        ))?;
+        let new_url = build_sftp_url(&self.user, &self.host, self.port, &new_path)?;
 
         Ok(Box::new(SftpFile {
             url: new_url,
@@ -490,8 +500,18 @@ impl IOFactory for SftpIOFactory {
         &["scp", "sftp"]
     }
 
-    fn supports_write(&self) -> bool {
+    fn supports_write(&self, _url: &Url) -> bool {
         false // SFTP is read-only in this implementation
+    }
+
+    fn supports_streaming_read(&self) -> bool {
+        // SFTP reads entire file into memory before returning a stream
+        false
+    }
+
+    fn supports_versioning(&self) -> bool {
+        // SFTP uses file size as a synthetic version, not native versioning
+        false
     }
 
     async fn create_reader(
@@ -552,5 +572,83 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Expected 'scp' or 'sftp'"));
+    }
+
+    #[test]
+    fn test_parse_scp_url_missing_path() {
+        let url = Url::parse("sftp://user@example.com").unwrap();
+        let result = parse_scp_url(&url);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must include a path"));
+    }
+
+    #[test]
+    fn test_parse_scp_url_defaults_user() {
+        // When no username is provided, it defaults to $USER or "root"
+        let url = Url::parse("sftp://example.com/data").unwrap();
+        let result = parse_scp_url(&url);
+        assert!(result.is_ok());
+        let (user, host, _, _) = result.unwrap();
+        assert_eq!(host, "example.com");
+        // User defaults to either $USER env var or "root"
+        assert!(!user.is_empty());
+    }
+
+    #[test]
+    fn test_build_sftp_url() {
+        let url = build_sftp_url("user", "example.com", 22, "/data").unwrap();
+        assert_eq!(url.scheme(), "sftp");
+        assert_eq!(url.username(), "user");
+        assert_eq!(url.host_str(), Some("example.com"));
+        // Note: port() returns None for default ports (22 for SFTP)
+        assert_eq!(url.port_or_known_default(), Some(22));
+        assert_eq!(url.path(), "/data");
+    }
+
+    #[test]
+    fn test_build_sftp_url_custom_port() {
+        let url = build_sftp_url("user", "example.com", 2222, "/data").unwrap();
+        assert_eq!(url.port(), Some(2222));
+    }
+
+    #[test]
+    fn test_sftp_factory_schemes() {
+        let factory = SftpIOFactory;
+        let schemes = factory.schemes();
+        assert_eq!(schemes, &["scp", "sftp"]);
+    }
+
+    #[test]
+    fn test_sftp_factory_supports_write_returns_false() {
+        let factory = SftpIOFactory;
+        let url = Url::parse("sftp://user@example.com/data").unwrap();
+        assert!(!factory.supports_write(&url));
+    }
+
+    #[test]
+    fn test_sftp_factory_supports_write_scp_returns_false() {
+        let factory = SftpIOFactory;
+        let url = Url::parse("scp://user@example.com/data").unwrap();
+        assert!(!factory.supports_write(&url));
+    }
+
+    #[test]
+    fn test_sftp_file_from_url() {
+        let url = Url::parse("sftp://testuser@example.com:2222/home/data/file.txt").unwrap();
+        let sftp_file = SftpFile::from_url(&url, BundleConfig::default().into()).unwrap();
+        assert_eq!(sftp_file.host, "example.com");
+        assert_eq!(sftp_file.port, 2222);
+        assert_eq!(sftp_file.user, "testuser");
+        assert_eq!(sftp_file.path, "/home/data/file.txt");
+    }
+
+    #[test]
+    fn test_sftp_dir_from_url() {
+        let url = Url::parse("sftp://testuser@example.com/data/").unwrap();
+        let sftp_dir = SftpDir::from_url(&url, BundleConfig::default().into()).unwrap();
+        assert_eq!(sftp_dir.host, "example.com");
+        assert_eq!(sftp_dir.port, 22);
+        assert_eq!(sftp_dir.user, "testuser");
+        assert_eq!(sftp_dir.path, "/data/");
     }
 }

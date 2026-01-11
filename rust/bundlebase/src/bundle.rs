@@ -334,7 +334,7 @@ impl Bundle {
                 // Get the path after the manifest dir
                 let relative_path = &file_url[manifest_dir_url_str.len()..];
                 // Skip init file
-                if x.filename() == INIT_FILENAME {
+                if x.filename() == Some(INIT_FILENAME) {
                     return false;
                 }
                 // Only include files directly in manifest dir (no "/" in relative path except leading one)
@@ -349,11 +349,11 @@ impl Bundle {
         // Sort manifest files by version to ensure commits are loaded in chronological order
         // ObjectStore.list() does not guarantee any particular ordering
         let mut manifest_files = manifest_files.into_iter().cloned().collect::<Vec<_>>();
-        manifest_files.sort_by_key(|f| manifest_version(f.filename()));
+        manifest_files.sort_by_key(|f| manifest_version(f.filename().unwrap_or("")));
 
         // Load and apply each manifest in order
         for manifest_file_info in manifest_files {
-            bundle.last_manifest_version = manifest_version(manifest_file_info.filename());
+            bundle.last_manifest_version = manifest_version(manifest_file_info.filename().unwrap_or(""));
             // Create IOFile from FileInfo to read the manifest
             let manifest_file = IOFile::from_url(&manifest_file_info.url, bundle.config())?;
             let mut commit: BundleCommit = manifest_file.read_yaml().await?.ok_or_else(|| {
@@ -364,7 +364,7 @@ impl Bundle {
 
             debug!(
                 "Loading commit from {}: {} changes",
-                manifest_file_info.filename(),
+                manifest_file_info.filename().unwrap_or("<unknown>"),
                 commit.changes.len()
             );
 

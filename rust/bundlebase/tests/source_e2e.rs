@@ -602,17 +602,24 @@ async fn test_refresh_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     let count = bundle.refresh().await?;
     assert_eq!(count, 0, "Should not re-attach already copied file");
 
-    // Add a second file
+    // Add a second parquet file (same data, different name)
     copy_test_file(
-        test_datafile("customers-0-100.csv"),
+        test_datafile("userdata.parquet"),
         &source_dir,
-        "customers.parquet", // Using parquet extension to match pattern
+        "userdata2.parquet",
     )
     .await?;
 
     // Refresh should only find the new file
-    // Note: This will fail because customers.csv is not a parquet file
-    // Let's copy another parquet file instead
+    let count = bundle.refresh().await?;
+    assert_eq!(count, 1, "Should attach only the new file");
+
+    // Now we should have 2000 rows (1000 from each file)
+    assert_eq!(bundle.num_rows().await?, 2000);
+
+    // Another refresh should find nothing
+    let count = bundle.refresh().await?;
+    assert_eq!(count, 0, "Should not re-attach already copied files");
 
     Ok(())
 }

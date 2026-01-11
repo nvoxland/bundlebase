@@ -22,8 +22,33 @@ pub trait IOFactory: Send + Sync {
     /// URL schemes this factory handles (e.g., ["ftp"], ["scp", "sftp"], ["tar"]).
     fn schemes(&self) -> &[&str];
 
-    /// Whether this backend supports write operations.
-    fn supports_write(&self) -> bool;
+    /// Whether this backend supports write operations for the given URL.
+    /// Default implementation returns true; override for scheme-specific behavior.
+    fn supports_write(&self, url: &Url) -> bool {
+        let _ = url; // Default ignores URL
+        true
+    }
+
+    /// Whether the backend supports true streaming reads.
+    /// When false, `read_stream()` buffers the entire content in memory first.
+    /// Default: true. FTP returns false because it buffers before streaming.
+    fn supports_streaming_read(&self) -> bool {
+        true
+    }
+
+    /// Whether the backend supports true streaming writes.
+    /// When false, `write_stream_boxed()` buffers the entire content in memory first.
+    /// Default: true. Tar returns false because tar format requires knowing size upfront.
+    fn supports_streaming_write(&self) -> bool {
+        true
+    }
+
+    /// Whether the backend has native version/ETag support.
+    /// When false, version() may return a synthetic version (e.g., based on size).
+    /// Default: true. FTP/SFTP return false.
+    fn supports_versioning(&self) -> bool {
+        true
+    }
 
     /// Create a reader for a file URL.
     async fn create_reader(
@@ -57,8 +82,9 @@ impl IOFactory for ObjectStoreIOFactory {
         &["file", "s3", "gs", "azure", "az", "memory", "empty"]
     }
 
-    fn supports_write(&self) -> bool {
-        true
+    fn supports_write(&self, url: &Url) -> bool {
+        // empty:// is read-only
+        url.scheme() != "empty"
     }
 
     async fn create_reader(
@@ -123,11 +149,38 @@ impl IORegistry {
         self.factories.get(scheme).cloned()
     }
 
-    /// Check if a scheme supports write operations.
-    pub fn supports_write(&self, scheme: &str) -> bool {
+    /// Check if a URL supports write operations.
+    pub fn supports_write(&self, url: &Url) -> bool {
+        self.factories
+            .get(url.scheme())
+            .map(|f| f.supports_write(url))
+            .unwrap_or(false)
+    }
+
+    /// Check if a URL scheme supports true streaming reads.
+    /// When false, `read_stream()` buffers the entire content in memory first.
+    pub fn supports_streaming_read(&self, scheme: &str) -> bool {
         self.factories
             .get(scheme)
-            .map(|f| f.supports_write())
+            .map(|f| f.supports_streaming_read())
+            .unwrap_or(false)
+    }
+
+    /// Check if a URL scheme supports true streaming writes.
+    /// When false, `write_stream_boxed()` buffers the entire content in memory first.
+    pub fn supports_streaming_write(&self, scheme: &str) -> bool {
+        self.factories
+            .get(scheme)
+            .map(|f| f.supports_streaming_write())
+            .unwrap_or(false)
+    }
+
+    /// Check if a URL scheme has native version/ETag support.
+    /// When false, version() may return a synthetic version (e.g., based on size).
+    pub fn supports_versioning(&self, scheme: &str) -> bool {
+        self.factories
+            .get(scheme)
+            .map(|f| f.supports_versioning())
             .unwrap_or(false)
     }
 
@@ -207,14 +260,14 @@ mod tests {
     fn test_supports_write() {
         let registry = IORegistry::new();
 
-        assert!(registry.supports_write("file"));
-        assert!(registry.supports_write("s3"));
-        assert!(registry.supports_write("memory"));
-        // empty:// is handled by ObjectStoreIOFactory but returns None for writer
-        assert!(registry.supports_write("empty")); // Factory says yes, but create_writer returns None
+        assert!(registry.supports_write(&Url::parse("file:///test").unwrap()));
+        assert!(registry.supports_write(&Url::parse("s3://bucket/key").unwrap()));
+        assert!(registry.supports_write(&Url::parse("memory:///test").unwrap()));
+        // empty:// is read-only
+        assert!(!registry.supports_write(&Url::parse("empty:///test").unwrap()));
 
         // Unknown scheme
-        assert!(!registry.supports_write("unknown"));
+        assert!(!registry.supports_write(&Url::parse("unknown:///test").unwrap()));
     }
 
     #[tokio::test]
@@ -236,5 +289,89 @@ mod tests {
         let result = registry.create_reader(&url, config).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Unsupported URL scheme"));
+    }
+
+    #[test]
+    fn test_registry_has_ftp_factory() {
+        let registry = IORegistry::new();
+        assert!(registry.get_factory("ftp").is_some());
+        // FTP is read-only
+        assert!(!registry.supports_write(&Url::parse("ftp://example.com/test").unwrap()));
+    }
+
+    #[test]
+    fn test_registry_has_sftp_factory() {
+        let registry = IORegistry::new();
+        assert!(registry.get_factory("sftp").is_some());
+        assert!(registry.get_factory("scp").is_some());
+        // SFTP/SCP is read-only
+        assert!(!registry.supports_write(&Url::parse("sftp://user@example.com/test").unwrap()));
+        assert!(!registry.supports_write(&Url::parse("scp://user@example.com/test").unwrap()));
+    }
+
+    #[test]
+    fn test_registry_has_tar_factory() {
+        let registry = IORegistry::new();
+        assert!(registry.get_factory("tar").is_some());
+        // TAR supports writes
+        assert!(registry.supports_write(&Url::parse("tar:///data.tar/file.txt").unwrap()));
+    }
+
+    #[test]
+    fn test_supports_streaming_read() {
+        let registry = IORegistry::new();
+
+        // Object store backends support streaming reads
+        assert!(registry.supports_streaming_read("file"));
+        assert!(registry.supports_streaming_read("s3"));
+        assert!(registry.supports_streaming_read("memory"));
+
+        // FTP and SFTP do not support true streaming reads
+        assert!(!registry.supports_streaming_read("ftp"));
+        assert!(!registry.supports_streaming_read("sftp"));
+        assert!(!registry.supports_streaming_read("scp"));
+
+        // Tar supports streaming reads (via object_store)
+        assert!(registry.supports_streaming_read("tar"));
+
+        // Unknown scheme returns false
+        assert!(!registry.supports_streaming_read("unknown"));
+    }
+
+    #[test]
+    fn test_supports_streaming_write() {
+        let registry = IORegistry::new();
+
+        // Object store backends support streaming writes
+        assert!(registry.supports_streaming_write("file"));
+        assert!(registry.supports_streaming_write("s3"));
+        assert!(registry.supports_streaming_write("memory"));
+
+        // Tar does not support true streaming writes (needs size upfront)
+        assert!(!registry.supports_streaming_write("tar"));
+
+        // Unknown scheme returns false
+        assert!(!registry.supports_streaming_write("unknown"));
+    }
+
+    #[test]
+    fn test_supports_versioning() {
+        let registry = IORegistry::new();
+
+        // Object store backends support versioning (ETag, etc.)
+        assert!(registry.supports_versioning("file"));
+        assert!(registry.supports_versioning("s3"));
+        assert!(registry.supports_versioning("memory"));
+
+        // FTP and SFTP use synthetic versions (based on size)
+        assert!(!registry.supports_versioning("ftp"));
+        assert!(!registry.supports_versioning("sftp"));
+        assert!(!registry.supports_versioning("scp"));
+
+        // Tar supports versioning (via object_store)
+        assert!(registry.supports_versioning("tar"));
+
+        // Unknown scheme returns false
+        assert!(!registry.supports_versioning("unknown"));
     }
 }

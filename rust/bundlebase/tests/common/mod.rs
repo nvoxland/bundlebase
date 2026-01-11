@@ -25,10 +25,10 @@ pub async fn latest_commit(
     let files = meta_dir.list_files().await?;
     let mut files = files
         .iter()
-        .filter(|x| x.filename() != INIT_FILENAME)
+        .filter(|x| x.filename() != Some(INIT_FILENAME))
         .collect::<Vec<_>>();
 
-    files.sort_by_key(|f| manifest_version(f.filename()));
+    files.sort_by_key(|f| manifest_version(f.filename().unwrap_or("")));
 
     let last_file = files.iter().last();
 
