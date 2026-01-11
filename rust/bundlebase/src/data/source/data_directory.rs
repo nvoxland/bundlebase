@@ -87,11 +87,15 @@ impl SourceFunction for DataDirectoryFunction {
         let lister = io_registry().create_lister(&url, config.clone()).await?;
         let all_files = lister.list_files().await?;
 
-        // Compile glob patterns
+        // Compile glob patterns - fail on invalid patterns instead of silently ignoring
         let compiled_patterns: Vec<Pattern> = patterns
             .iter()
-            .filter_map(|p| Pattern::new(p).ok())
-            .collect();
+            .map(|p| {
+                Pattern::new(p).map_err(|e| {
+                    BundlebaseError::from(format!("Invalid glob pattern '{}': {}", p, e))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         // Filter files by pattern and convert FileInfo to IOFile
         let matching_files: Vec<IOFile> = all_files

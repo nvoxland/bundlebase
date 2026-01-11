@@ -1,4 +1,8 @@
 //! FTP IO backend - read-only file and directory operations via FTP.
+//!
+//! Note: FTP and SFTP backends share similar patterns (connect → operate → close)
+//! but use different underlying libraries (suppaftp vs russh_sftp) with incompatible
+//! types. Extracting a common abstraction would add complexity without clear benefit.
 
 use crate::io::io_registry::IOFactory;
 use crate::io::io_traits::{FileInfo, IOLister, IOReader};
@@ -7,6 +11,7 @@ use crate::BundlebaseError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
+use log::debug;
 use suppaftp::tokio::AsyncFtpStream;
 use suppaftp::types::FileType;
 use std::fmt::Debug;
@@ -64,6 +69,16 @@ pub fn parse_ftp_url(url: &Url) -> Result<(String, String, String, u16, String),
     }
 
     Ok((user, password, host.to_string(), port, path))
+}
+
+/// Build an FTP URL from components.
+///
+/// Constructs a URL in the format: `ftp://user:password@host:port/path`
+fn build_ftp_url(user: &str, password: &str, host: &str, port: u16, path: &str) -> Result<Url, BundlebaseError> {
+    Url::parse(&format!(
+        "ftp://{}:{}@{}:{}{}",
+        user, password, host, port, path
+    )).map_err(|e| format!("Failed to build FTP URL: {}", e).into())
 }
 
 /// FTP file reader - read-only access to a single FTP file.
@@ -134,7 +149,9 @@ impl IOReader for FtpFile {
     async fn exists(&self) -> Result<bool, BundlebaseError> {
         let mut stream = self.connect().await?;
         let result = stream.size(&self.path).await;
-        let _ = stream.quit().await;
+        if let Err(e) = stream.quit().await {
+            debug!("Error closing FTP connection: {}", e);
+        }
         Ok(result.is_ok())
     }
 
@@ -155,14 +172,20 @@ impl IOReader for FtpFile {
                         self.path, e
                     ))
                 })?;
-                let _ = stream.quit().await;
+                if let Err(e) = stream.quit().await {
+                    debug!("Error closing FTP connection: {}", e);
+                }
                 Ok(Some(Bytes::from(buffer)))
             }
             Err(e) => {
-                let _ = stream.quit().await;
+                if let Err(e) = stream.quit().await {
+                    debug!("Error closing FTP connection: {}", e);
+                }
                 // Check if it's a file not found error
-                let err_str = e.to_string();
-                if err_str.contains("550") || err_str.contains("not found") {
+                // FTP error 550 = "Requested action not taken. File unavailable"
+                // This is the standard FTP response for file not found
+                let err_str = e.to_string().to_lowercase();
+                if err_str.contains("550") || err_str.contains("not found") || err_str.contains("no such file") {
                     Ok(None)
                 } else {
                     Err(format!("Failed to download FTP file '{}': {}", self.path, e).into())
@@ -188,11 +211,15 @@ impl IOReader for FtpFile {
         let mut stream = self.connect().await?;
         match stream.size(&self.path).await {
             Ok(size) => {
-                let _ = stream.quit().await;
+                if let Err(e) = stream.quit().await {
+                    debug!("Error closing FTP connection: {}", e);
+                }
                 Ok(Some(FileInfo::new(self.url.clone()).with_size(size as u64)))
             }
             Err(_) => {
-                let _ = stream.quit().await;
+                if let Err(e) = stream.quit().await {
+                    debug!("Error closing FTP connection: {}", e);
+                }
                 Ok(None)
             }
         }
@@ -203,11 +230,15 @@ impl IOReader for FtpFile {
         let mut stream = self.connect().await?;
         match stream.size(&self.path).await {
             Ok(size) => {
-                let _ = stream.quit().await;
+                if let Err(e) = stream.quit().await {
+                    debug!("Error closing FTP connection: {}", e);
+                }
                 Ok(format!("size-{}", size))
             }
             Err(e) => {
-                let _ = stream.quit().await;
+                if let Err(e) = stream.quit().await {
+                    debug!("Error closing FTP connection: {}", e);
+                }
                 Err(format!("Failed to get FTP file version: {}", e).into())
             }
         }
@@ -331,7 +362,9 @@ impl IOLister for FtpDir {
         let mut ftp_files = Vec::new();
         self.list_files_recursive_internal(&mut stream, &self.path, &mut ftp_files)
             .await?;
-        let _ = stream.quit().await;
+        if let Err(e) = stream.quit().await {
+            debug!("Error closing FTP connection: {}", e);
+        }
 
         // Convert to FileInfo
         let files = ftp_files
@@ -362,10 +395,7 @@ impl IOLister for FtpDir {
             format!("{}/{}", self.path, name.trim_start_matches('/'))
         };
 
-        let new_url = Url::parse(&format!(
-            "ftp://{}:{}@{}:{}{}",
-            self.user, self.password, self.host, self.port, new_path
-        ))?;
+        let new_url = build_ftp_url(&self.user, &self.password, &self.host, self.port, &new_path)?;
 
         Ok(Box::new(FtpDir {
             url: new_url,
@@ -384,10 +414,7 @@ impl IOLister for FtpDir {
             format!("{}/{}", self.path, name.trim_start_matches('/'))
         };
 
-        let new_url = Url::parse(&format!(
-            "ftp://{}:{}@{}:{}{}",
-            self.user, self.password, self.host, self.port, new_path
-        ))?;
+        let new_url = build_ftp_url(&self.user, &self.password, &self.host, self.port, &new_path)?;
 
         Ok(Box::new(FtpFile {
             url: new_url,
@@ -409,8 +436,18 @@ impl IOFactory for FtpIOFactory {
         &["ftp"]
     }
 
-    fn supports_write(&self) -> bool {
+    fn supports_write(&self, _url: &Url) -> bool {
         false // FTP is read-only in this implementation
+    }
+
+    fn supports_streaming_read(&self) -> bool {
+        // FTP reads entire file into memory before returning a stream
+        false
+    }
+
+    fn supports_versioning(&self) -> bool {
+        // FTP uses file size as a synthetic version, not native versioning
+        false
     }
 
     async fn create_reader(
@@ -470,5 +507,67 @@ mod tests {
         let result = parse_ftp_url(&url);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Expected 'ftp'"));
+    }
+
+    #[test]
+    fn test_parse_ftp_url_missing_path() {
+        let url = Url::parse("ftp://ftp.example.com").unwrap();
+        let result = parse_ftp_url(&url);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must include a path"));
+    }
+
+    #[test]
+    fn test_build_ftp_url() {
+        let url = build_ftp_url("user", "pass", "example.com", 21, "/data").unwrap();
+        assert_eq!(url.scheme(), "ftp");
+        assert_eq!(url.username(), "user");
+        assert_eq!(url.password(), Some("pass"));
+        assert_eq!(url.host_str(), Some("example.com"));
+        // Note: port() returns None for default ports (21 for FTP)
+        assert_eq!(url.port_or_known_default(), Some(21));
+        assert_eq!(url.path(), "/data");
+    }
+
+    #[test]
+    fn test_build_ftp_url_custom_port() {
+        let url = build_ftp_url("user", "pass", "example.com", 2121, "/data").unwrap();
+        assert_eq!(url.port(), Some(2121));
+    }
+
+    #[test]
+    fn test_ftp_factory_schemes() {
+        let factory = FtpIOFactory;
+        let schemes = factory.schemes();
+        assert_eq!(schemes, &["ftp"]);
+    }
+
+    #[test]
+    fn test_ftp_factory_supports_write_returns_false() {
+        let factory = FtpIOFactory;
+        let url = Url::parse("ftp://ftp.example.com/data").unwrap();
+        assert!(!factory.supports_write(&url));
+    }
+
+    #[test]
+    fn test_ftp_file_from_url() {
+        let url = Url::parse("ftp://user:pass@ftp.example.com:2121/data/file.txt").unwrap();
+        let ftp_file = FtpFile::from_url(&url).unwrap();
+        assert_eq!(ftp_file.host, "ftp.example.com");
+        assert_eq!(ftp_file.port, 2121);
+        assert_eq!(ftp_file.user, "user");
+        assert_eq!(ftp_file.password, "pass");
+        assert_eq!(ftp_file.path, "/data/file.txt");
+    }
+
+    #[test]
+    fn test_ftp_dir_from_url() {
+        let url = Url::parse("ftp://anonymous@ftp.example.com/pub/data/").unwrap();
+        let ftp_dir = FtpDir::from_url(&url).unwrap();
+        assert_eq!(ftp_dir.host, "ftp.example.com");
+        assert_eq!(ftp_dir.port, 21);
+        assert_eq!(ftp_dir.user, "anonymous");
+        assert_eq!(ftp_dir.password, "");
+        assert_eq!(ftp_dir.path, "/pub/data/");
     }
 }

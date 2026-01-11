@@ -191,7 +191,9 @@ impl IOWriter for TarFile {
         &self,
         mut source: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>>,
     ) -> Result<(), BundlebaseError> {
-        // Collect stream into a single buffer
+        // NOTE: Tar format requires knowing file size before writing the entry header.
+        // True streaming is not possible without significant protocol changes.
+        // We must buffer the entire content to determine size.
         let mut buffer = Vec::new();
         while let Some(chunk_result) = source.next().await {
             let chunk = chunk_result?;
@@ -344,8 +346,14 @@ impl IOFactory for TarIOFactory {
         &["tar"]
     }
 
-    fn supports_write(&self) -> bool {
+    fn supports_write(&self, _url: &Url) -> bool {
         true // Tar supports append-only writes
+    }
+
+    fn supports_streaming_write(&self) -> bool {
+        // Tar format requires knowing file size upfront for the entry header,
+        // so we must buffer the entire stream content before writing.
+        false
     }
 
     async fn create_reader(

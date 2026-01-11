@@ -70,16 +70,6 @@ impl Source {
         &self.pack_id
     }
 
-    /// Get the URL from args, if present (e.g., for data_directory function).
-    pub fn url(&self) -> Option<&str> {
-        self.args.get("url").map(|s| s.as_str())
-    }
-
-    /// Get patterns from args, if present (e.g., for data_directory function).
-    pub fn patterns(&self) -> Option<&str> {
-        self.args.get("patterns").map(|s| s.as_str())
-    }
-
     pub fn function(&self) -> &str {
         &self.function
     }
@@ -163,8 +153,8 @@ mod tests {
 
         assert_eq!(source.id(), &ObjectId::from(1));
         assert_eq!(source.pack_id(), &ObjectId::from(2));
-        assert_eq!(source.url(), Some("s3://bucket/data/"));
-        assert_eq!(source.patterns(), Some("**/*"));
+        assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
+        assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*"));
         assert_eq!(source.function(), "data_directory");
     }
 
@@ -182,8 +172,8 @@ mod tests {
         let source = Source::from_op(&op, &registry).unwrap();
         assert_eq!(source.id(), &ObjectId::from(1));
         assert_eq!(source.pack_id(), &ObjectId::from(2));
-        assert_eq!(source.url(), Some("s3://bucket/data/"));
-        assert_eq!(source.patterns(), Some("**/*.parquet"));
+        assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
+        assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*.parquet"));
         assert_eq!(source.function(), "data_directory");
     }
 
