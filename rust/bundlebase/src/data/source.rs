@@ -2,6 +2,8 @@
 
 mod remote_dir;
 mod source_function;
+mod source_utils;
+mod web_scrape;
 
 use crate::bundle::{AnyOperation, DefineSourceOp};
 use crate::data::ObjectId;
@@ -14,6 +16,7 @@ use std::sync::Arc;
 
 pub use remote_dir::RemoteDirFunction;
 pub use source_function::{MaterializedData, SourceFunction, SourceFunctionRegistry};
+pub use web_scrape::WebScrapeFunction;
 
 /// Represents a data source definition for a pack.
 ///
@@ -23,10 +26,10 @@ pub use source_function::{MaterializedData, SourceFunction, SourceFunctionRegist
 pub struct Source {
     id: ObjectId,
     pack_id: ObjectId,
-    /// Source function name (e.g., "data_directory")
+    /// Source function name (e.g., "remote_dir")
     function: String,
     /// Function-specific configuration arguments
-    /// For "data_directory": "url" (required), "patterns" (optional)
+    /// For "remote_dir": "url" (required), "patterns" (optional)
     args: HashMap<String, String>,
 }
 
@@ -131,7 +134,7 @@ mod tests {
         let source = Source::new(
             ObjectId::from(1),
             ObjectId::from(2),
-            "data_directory".to_string(),
+            "remote_dir".to_string(),
             make_args("s3://bucket/data/", Some("**/*")),
         );
 
@@ -139,7 +142,7 @@ mod tests {
         assert_eq!(source.pack_id(), &ObjectId::from(2));
         assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
         assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*"));
-        assert_eq!(source.function(), "data_directory");
+        assert_eq!(source.function(), "remote_dir");
     }
 
     #[test]
@@ -149,7 +152,7 @@ mod tests {
         let op = DefineSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
-            function: "data_directory".to_string(),
+            function: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
@@ -158,7 +161,7 @@ mod tests {
         assert_eq!(source.pack_id(), &ObjectId::from(2));
         assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
         assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*.parquet"));
-        assert_eq!(source.function(), "data_directory");
+        assert_eq!(source.function(), "remote_dir");
     }
 
     #[test]
@@ -171,7 +174,7 @@ mod tests {
         let op = DefineSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
-            function: "data_directory".to_string(),
+            function: "remote_dir".to_string(),
             args: args.clone(),
         };
 

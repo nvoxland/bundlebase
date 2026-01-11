@@ -2,14 +2,60 @@
 //!
 //! Source functions define how data is discovered and materialized into files.
 //! Different implementations can provide different strategies (e.g., directory listing,
-//! database queries, API pagination, etc.).
+//! database queries, API pagination, web scraping, etc.).
+//!
+//! ## Architecture
+//!
+//! The `SourceFunction` trait separates concerns:
+//! - `discover()` - Find new data locations (URLs, row ranges, etc.)
+//! - `materialize()` - Download/copy data to the bundle's data directory
+//! - `refresh()` - Orchestrates discovery and materialization (default impl provided)
+//!
+//! Most implementations only need to implement `discover()`. The default `materialize()`
+//! and `refresh()` implementations handle the common case.
 
 use super::remote_dir::RemoteDirFunction;
+use super::source_utils;
+use super::web_scrape::WebScrapeFunction;
 use crate::io::IODir;
-use crate::{BundlebaseError, BundleConfig};
+use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use url::Url;
+
+/// Describes a source function argument for documentation and validation.
+#[derive(Debug, Clone)]
+pub struct ArgSpec {
+    /// Argument name (key in the args HashMap)
+    pub name: &'static str,
+    /// Human-readable description
+    pub description: &'static str,
+    /// Whether this argument is required
+    pub required: bool,
+    /// Default value if not provided (None means no default)
+    pub default: Option<&'static str>,
+}
+
+/// A discovered location ready for materialization.
+///
+/// Represents a unit of data found by the source function's discovery phase.
+#[derive(Debug, Clone)]
+pub struct DiscoveredLocation {
+    /// URL to fetch the data from
+    pub url: Url,
+    /// Identifier to track this location (stored in AttachBlockOp.source_location)
+    /// Often the same as url.to_string(), but can differ (e.g., for normalized URLs)
+    pub source_location: String,
+}
+
+impl DiscoveredLocation {
+    /// Create a new discovered location where source_location equals the URL string.
+    pub fn from_url(url: Url) -> Self {
+        let source_location = url.to_string();
+        Self { url, source_location }
+    }
+}
 
 /// Result of materializing a single data unit from a source.
 #[derive(Debug, Clone)]
@@ -25,23 +71,121 @@ pub struct MaterializedData {
 /// Source functions define how data is discovered and materialized.
 /// Each source function controls:
 /// - What "location" means (file URL, row range, API cursor, etc.)
-/// - How to materialize data into files
-/// - What data to return for attachment
+/// - How to discover new locations
+/// - How to materialize data into files (optional override)
 ///
-/// Each function defines its own required and optional arguments. For example,
-/// "remote_dir" requires:
-/// - "url": Directory URL to list
-/// - "patterns": Comma-separated glob patterns (optional, defaults to "**/*")
+/// ## Implementing a Source Function
+///
+/// Most implementations only need to provide:
+/// - `name()` - Unique identifier
+/// - `arg_specs()` - Argument declarations
+/// - `discover()` - Find new data locations
+///
+/// The default implementations handle validation, materialization, and the refresh loop.
+///
+/// ## Example
+///
+/// ```ignore
+/// impl SourceFunction for MySourceFunction {
+///     fn name(&self) -> &str { "my_source" }
+///
+///     fn arg_specs(&self) -> Vec<ArgSpec> {
+///         vec![
+///             ArgSpec { name: "url", description: "Source URL", required: true, default: None },
+///         ]
+///     }
+///
+///     async fn discover(&self, args: &HashMap<String, String>, attached: &HashSet<String>, config: &BundleConfig)
+///         -> Result<Vec<DiscoveredLocation>, BundlebaseError>
+///     {
+///         // Find and return new locations...
+///     }
+/// }
+/// ```
 #[async_trait]
 pub trait SourceFunction: Send + Sync {
-    /// Name of this source function
+    /// Name of this source function (e.g., "remote_dir", "web_scrape")
     fn name(&self) -> &str;
 
-    /// Validate arguments for this function.
-    /// Should check for required arguments and validate their values.
-    fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError>;
+    /// Declare arguments this function accepts.
+    ///
+    /// Used for documentation, validation, and potential UI generation.
+    /// Default: empty (no declared arguments).
+    fn arg_specs(&self) -> Vec<ArgSpec> {
+        vec![]
+    }
 
-    /// Refresh the source: find new data and materialize it.
+    /// Validate arguments for this function.
+    ///
+    /// Default implementation checks required arguments from `arg_specs()`
+    /// and validates the `copy` argument if present.
+    ///
+    /// Override to add custom validation (call default first via `default_validate_args`).
+    fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
+        self.default_validate_args(args)
+    }
+
+    /// Default argument validation logic.
+    ///
+    /// Checks required arguments and validates `copy` argument.
+    /// Call this from custom `validate_args` implementations.
+    fn default_validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
+        for spec in self.arg_specs() {
+            if spec.required && !args.contains_key(spec.name) {
+                return Err(format!(
+                    "Function '{}' requires a '{}' argument",
+                    self.name(),
+                    spec.name
+                )
+                .into());
+            }
+        }
+        source_utils::validate_copy_arg(self.name(), args)
+    }
+
+    /// Discover new data locations.
+    ///
+    /// This is the core method that each source function must implement.
+    /// It should:
+    /// 1. Query/list/scrape the source to find all available locations
+    /// 2. Filter out locations already in `attached_locations`
+    /// 3. Return the new locations to be materialized
+    ///
+    /// # Arguments
+    /// * `args` - Source configuration arguments
+    /// * `attached_locations` - Locations already attached from this source
+    /// * `config` - Bundle configuration (credentials, etc.)
+    async fn discover(
+        &self,
+        args: &HashMap<String, String>,
+        attached_locations: &HashSet<String>,
+        config: &Arc<BundleConfig>,
+    ) -> Result<Vec<DiscoveredLocation>, BundlebaseError>;
+
+    /// Materialize a single discovered location.
+    ///
+    /// Downloads/copies the data to `data_dir` and returns the location
+    /// where it was saved.
+    ///
+    /// Default implementation uses `source_utils::materialize_url` which handles
+    /// HTTP(S) via reqwest and other schemes via IOFile.
+    ///
+    /// Override for special protocols (SFTP, FTP) or custom handling.
+    async fn materialize(
+        &self,
+        location: &DiscoveredLocation,
+        args: &HashMap<String, String>,
+        data_dir: &IODir,
+        config: &Arc<BundleConfig>,
+    ) -> Result<String, BundlebaseError> {
+        let should_copy = source_utils::should_copy(args);
+        source_utils::materialize_url(&location.url, should_copy, data_dir, config).await
+    }
+
+    /// Refresh the source: discover new data and materialize it.
+    ///
+    /// Default implementation orchestrates the discover/materialize loop.
+    /// Most implementations should not need to override this.
     ///
     /// # Arguments
     /// * `args` - Source configuration
@@ -57,7 +201,20 @@ pub trait SourceFunction: Send + Sync {
         attached_locations: HashSet<String>,
         data_dir: &IODir,
         config: Arc<BundleConfig>,
-    ) -> Result<Vec<MaterializedData>, BundlebaseError>;
+    ) -> Result<Vec<MaterializedData>, BundlebaseError> {
+        let discovered = self.discover(args, &attached_locations, &config).await?;
+
+        let mut results = Vec::with_capacity(discovered.len());
+        for location in discovered {
+            let attach_location = self.materialize(&location, args, data_dir, &config).await?;
+            results.push(MaterializedData {
+                attach_location,
+                source_location: location.source_location,
+            });
+        }
+
+        Ok(results)
+    }
 }
 
 /// Registry for source functions.
@@ -76,8 +233,8 @@ impl SourceFunctionRegistry {
         };
 
         // Register built-in functions
-        // RemoteDirFunction handles all URL schemes via IORegistry
         registry.register(Arc::new(RemoteDirFunction));
+        registry.register(Arc::new(WebScrapeFunction));
 
         registry
     }
@@ -112,12 +269,40 @@ mod tests {
     fn test_registry_new() {
         let registry = SourceFunctionRegistry::new();
         assert!(registry.get("remote_dir").is_some());
+        assert!(registry.get("web_scrape").is_some());
     }
 
     #[test]
-    fn test_registry_get() {
+    fn test_registry_get_remote_dir() {
         let registry = SourceFunctionRegistry::new();
         let func = registry.get("remote_dir").unwrap();
         assert_eq!(func.name(), "remote_dir");
+    }
+
+    #[test]
+    fn test_registry_get_web_scrape() {
+        let registry = SourceFunctionRegistry::new();
+        let func = registry.get("web_scrape").unwrap();
+        assert_eq!(func.name(), "web_scrape");
+    }
+
+    #[test]
+    fn test_discovered_location_from_url() {
+        let url = Url::parse("https://example.com/file.parquet").unwrap();
+        let loc = DiscoveredLocation::from_url(url.clone());
+        assert_eq!(loc.url, url);
+        assert_eq!(loc.source_location, "https://example.com/file.parquet");
+    }
+
+    #[test]
+    fn test_arg_spec() {
+        let spec = ArgSpec {
+            name: "url",
+            description: "The URL",
+            required: true,
+            default: None,
+        };
+        assert_eq!(spec.name, "url");
+        assert!(spec.required);
     }
 }
