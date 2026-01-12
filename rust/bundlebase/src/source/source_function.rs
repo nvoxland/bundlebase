@@ -14,6 +14,7 @@
 //! Most implementations only need to implement `discover()`. The default `materialize()`
 //! and `refresh()` implementations handle the common case.
 
+use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
 use super::source_utils;
 use super::web_scrape::WebScrapeFunction;
@@ -342,6 +343,7 @@ impl SourceFunctionRegistry {
         };
 
         // Register built-in functions
+        registry.register(Arc::new(PostgresFunction));
         registry.register(Arc::new(RemoteDirFunction));
         registry.register(Arc::new(WebScrapeFunction));
 

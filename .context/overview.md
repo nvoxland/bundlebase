@@ -75,7 +75,7 @@ poetry install
 ./scripts/maturin-dev.sh
 
 # Run tests
-cargo test                # Rust tests
+cargo test --profile test # Rust tests
 poetry run pytest         # Python tests
 ```
 

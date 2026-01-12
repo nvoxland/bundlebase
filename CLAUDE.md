@@ -83,7 +83,7 @@ See [.context/development.md](.context/development.md) for full development work
 **CRITICAL: Always use the correct build script for Python package builds**
 
 - ✅ **Python package**: Use `./scripts/maturin-dev.sh` (NOT `maturin develop`)
-- ✅ **Rust only**: Use `cargo build --package bundlebase`
+- ✅ **Rust only**: Use `cargo build --profile test`
 - ❌ **Never**: Use `maturin develop` directly (causes full rebuilds)
 - ❌ **Never**: Use `cargo build --all` for routine development (conflicts with maturin)
 
@@ -95,8 +95,8 @@ See [.context/development.md](.context/development.md) for full development work
 ./scripts/maturin-dev.sh
 
 # Rust development
-cargo build --package bundlebase
-cargo test --package bundlebase
+cargo build --profile test
+cargo test --profile test
 
 # Run Python tests (automatically uses same target-dir as maturin-dev.sh)
 poetry run pytest python/tests/

@@ -137,6 +137,17 @@ impl IOFile {
             }
         }
     }
+
+    /// Write data while computing its SHA256 hash.
+    /// Returns the hex-encoded hash after writing.
+    pub async fn write_with_hash(&self, data: Bytes) -> Result<String, BundlebaseError> {
+        let mut hasher = Sha256::new();
+        hasher.update(&data);
+        let hash = format!("{:x}", hasher.finalize());
+
+        self.write(data).await?;
+        Ok(hash)
+    }
 }
 
 #[async_trait]

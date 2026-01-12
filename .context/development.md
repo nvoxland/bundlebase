@@ -36,8 +36,8 @@ Compile Rust extension and install locally:
 **For Rust-only development:**
 ```bash
 # Fast, doesn't trigger Python rebuilds
-cargo build --package bundlebase
-cargo test --package bundlebase
+cargo build --profile test
+cargo test --profile test
 ```
 
 See [scripts/README.md](../scripts/README.md) for technical details.
@@ -53,6 +53,7 @@ See [scripts/README.md](../scripts/README.md) for technical details.
 ### Step 1: Implement Rust Code
 
 - Write the Rust implementation
+- ALWAYS build rust code with `--profile test`
 - Add comprehensive Rust tests
 - Ensure all Rust tests pass
 - Run Rust tests: `cargo test`
@@ -76,7 +77,7 @@ See [scripts/README.md](../scripts/README.md) for technical details.
 
 ```bash
 # Test Rust code
-cargo test --package bundlebase
+cargo test --profile test
 
 # Build Python package and run tests
 ./scripts/maturin-dev.sh
