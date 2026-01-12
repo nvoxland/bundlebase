@@ -15,7 +15,7 @@ use crate::data::{DataBlock, ObjectId, RefreshAction, VersionedBlockId};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
-use crate::io::{IODir, IOFile, IOLister, IOWriter};
+use crate::io::{IODir, IOLister, IOReader, IOWriter};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
@@ -174,6 +174,17 @@ impl BundleBuilder {
         existing.passed_config = config;
         existing.recompute_config()?;
         existing.data_dir = IODir::from_str(path, existing.config.clone())?;
+
+        // Check if a bundle already exists at this location
+        let meta_dir = existing.data_dir.io_subdir(META_DIR)?;
+        let init_file = meta_dir.io_file(INIT_FILENAME)?;
+        if init_file.exists().await? {
+            return Err(format!(
+                "A bundle already exists at '{}'. Use open() to access an existing bundle.",
+                path
+            )
+            .into());
+        }
 
         let mut builder = BundleBuilder {
             status: BundleStatus::new(),
@@ -1796,5 +1807,28 @@ mod tests {
             .unwrap();
 
         assert_eq!(bundle.bundle.operations.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_create_fails_if_bundle_exists() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().to_str().unwrap();
+
+        // Create and commit a bundle
+        let mut bundle = BundleBuilder::create(path, None).await.unwrap();
+        bundle.commit("Initial").await.unwrap();
+
+        // Attempting to create at the same path should fail
+        let result = BundleBuilder::create(path, None).await;
+        assert!(result.is_err());
+        let err_msg = match result {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("Expected error"),
+        };
+        assert!(
+            err_msg.contains("already exists"),
+            "Error should mention bundle already exists: {}",
+            err_msg
+        );
     }
 }

@@ -876,28 +876,23 @@ async def test_status_chained_operations():
 @pytest.mark.asyncio
 async def test_status_after_commit():
     """Test status() is cleared after commit"""
-    import tempfile
+    c = await bundlebase.create(random_bundle())
+    c = await c.set_name("Test")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        temp_path = f"{tmpdir}/status_test"
+    # Should have operations before commit
+    status_before = c.status()
+    assert isinstance(status_before, bundlebase.PyBundleStatus)
+    assert not status_before.is_empty()
+    assert len(status_before.changes) > 0
 
-        c = await bundlebase.create(temp_path)
-        c = await c.set_name("Test")
+    # Commit the operations
+    await c.commit("Initial setup")
 
-        # Should have operations before commit
-        status_before = c.status()
-        assert isinstance(status_before, bundlebase.PyBundleStatus)
-        assert not status_before.is_empty()
-        assert len(status_before.changes) > 0
-
-        # Commit the operations
-        await c.commit("Initial setup")
-
-        # After commit, status should be cleared
-        status_after = c.status()
-        assert isinstance(status_after, bundlebase.PyBundleStatus)
-        assert status_after.is_empty()
-        assert len(status_after.changes) == 0
+    # After commit, status should be cleared
+    status_after = c.status()
+    assert isinstance(status_after, bundlebase.PyBundleStatus)
+    assert status_after.is_empty()
+    assert len(status_after.changes) == 0
 
 
 # ============================================================================
