@@ -11,7 +11,7 @@ use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::operation::{CreateIndexOp, DropIndexOp, JoinTypeOption};
 use crate::bundle::{commit, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle};
-use crate::data::{DataBlock, ObjectId, VersionedBlockId};
+use crate::data::{DataBlock, ObjectId, RefreshAction, VersionedBlockId};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
@@ -669,7 +669,7 @@ impl BundleBuilder {
     /// # }
     /// ```
     pub async fn refresh(&mut self) -> Result<usize, BundlebaseError> {
-        let mut attached_count = 0;
+        let mut action_count = 0;
 
         // Collect sources to avoid borrow issues
         let sources: Vec<_> = self.bundle.sources().values().cloned().collect();
@@ -679,8 +679,8 @@ impl BundleBuilder {
             let pack_id = source.pack_id().clone();
             let source_id = source.id().clone();
 
-            // Get materialized data from the source function
-            let materialized = source
+            // Get refresh actions from the source function
+            let actions = source
                 .refresh(
                     &self.bundle.operations,
                     self.data_dir(),
@@ -689,32 +689,118 @@ impl BundleBuilder {
                 )
                 .await?;
 
-            for data in materialized {
-                let attach_location = data.attach_location;
-                let source_location = data.source_location.clone();
+            for action in actions {
+                match action {
+                    RefreshAction::Add(data) => {
+                        let attach_location = data.attach_location.clone();
+                        let source_location = data.source_location.clone();
 
-                self.do_change(&format!("Refresh: attach {}", data.source_location), |builder| {
-                    let pack_id = pack_id.clone();
-                    let source_id = source_id.clone();
-                    let attach_location = attach_location.clone();
-                    let source_location = source_location.clone();
+                        self.do_change(
+                            &format!("Refresh: attach {}", source_location),
+                            |builder| {
+                                let pack_id = pack_id.clone();
+                                let source_id = source_id.clone();
+                                let attach_location = attach_location.clone();
+                                let source_location = source_location.clone();
 
-                    Box::pin(async move {
-                        let mut op =
-                            AttachBlockOp::setup(&pack_id, &attach_location, builder).await?;
-                        op.source = Some(source_id);
-                        op.source_location = Some(source_location);
-                        builder.apply_operation(op.into()).await?;
-                        Ok(())
-                    })
-                })
-                .await?;
+                                Box::pin(async move {
+                                    // Use setup_for_source to store version from source_location
+                                    let mut op = AttachBlockOp::setup_for_source(
+                                        &pack_id,
+                                        &attach_location,
+                                        &source_location,
+                                        builder,
+                                    )
+                                    .await?;
+                                    op.source = Some(source_id);
+                                    op.source_location = Some(source_location);
+                                    builder.apply_operation(op.into()).await?;
+                                    Ok(())
+                                })
+                            },
+                        )
+                        .await?;
+                    }
+                    RefreshAction::Replace {
+                        old_source_location,
+                        data,
+                    } => {
+                        // Find the old block's location and detach it
+                        let old_location = self.find_block_location_by_source(
+                            &source_id,
+                            &old_source_location,
+                        )?;
+                        self.detach_block(&old_location).await?;
 
-                attached_count += 1;
+                        // Attach the new block
+                        let attach_location = data.attach_location.clone();
+                        let source_location = data.source_location.clone();
+
+                        self.do_change(
+                            &format!("Refresh: replace {}", source_location),
+                            |builder| {
+                                let pack_id = pack_id.clone();
+                                let source_id = source_id.clone();
+                                let attach_location = attach_location.clone();
+                                let source_location = source_location.clone();
+
+                                Box::pin(async move {
+                                    let mut op = AttachBlockOp::setup_for_source(
+                                        &pack_id,
+                                        &attach_location,
+                                        &source_location,
+                                        builder,
+                                    )
+                                    .await?;
+                                    op.source = Some(source_id);
+                                    op.source_location = Some(source_location);
+                                    builder.apply_operation(op.into()).await?;
+                                    Ok(())
+                                })
+                            },
+                        )
+                        .await?;
+                    }
+                    RefreshAction::Remove { source_location } => {
+                        // Find the block's location and detach it
+                        let location =
+                            self.find_block_location_by_source(&source_id, &source_location)?;
+                        self.detach_block(&location).await?;
+                    }
+                }
+                action_count += 1;
             }
         }
 
-        Ok(attached_count)
+        Ok(action_count)
+    }
+
+    /// Find the current location of a block that was attached from a source with the given source_location.
+    fn find_block_location_by_source(
+        &self,
+        source_id: &ObjectId,
+        source_location: &str,
+    ) -> Result<String, BundlebaseError> {
+        self.bundle
+            .operations
+            .iter()
+            .find_map(|op| {
+                if let AnyOperation::AttachBlock(attach) = op {
+                    if attach.source.as_ref() == Some(source_id)
+                        && attach.source_location.as_deref() == Some(source_location)
+                    {
+                        return Some(attach.location.clone());
+                    }
+                }
+                None
+            })
+            .ok_or_else(|| {
+                format!(
+                    "No block found for source_location '{}'",
+                    source_location
+                )
+                .into()
+            })
     }
 
     /// Attach a view from another BundleBuilder

@@ -32,7 +32,9 @@ pub use rowid_batch::{RowIdBatch, SendableRowIdBatchStream};
 pub use rowid_offset_data_source::{LineOrientedFormat, RowIdOffsetDataSource};
 pub use rowid_provider::{LayoutRowIdProvider, RowIdProvider};
 pub use rowid_stream::RowIdStreamAdapter;
-pub use source::{RemoteDirFunction, Source, SourceFunction, SourceFunctionRegistry};
+pub use source::{
+    RefreshAction, RemoteDirFunction, Source, SourceFunction, SourceFunctionRegistry,
+};
 use std::fmt::Debug;
 use std::sync::Arc;
 use url::Url;

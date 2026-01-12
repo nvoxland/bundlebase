@@ -3,11 +3,15 @@
 //! Lists files from a directory URL using the IO registry to support
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
-use super::source_function::{ArgSpec, DiscoveredLocation, SourceFunction};
+use super::source_function::{
+    ArgSpec, AttachedFileInfo, DiscoveredLocation, MaterializedData, RefreshAction, SourceFunction,
+    SyncMode,
+};
 use super::source_utils;
-use crate::io::{io_registry, parse_scp_url, FtpFile, IODir, IOReader, SftpClient};
+use crate::io::{io_registry, parse_scp_url, FtpFile, IODir, IOFile, IOReader, SftpClient};
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
+use log::debug;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
@@ -24,6 +28,10 @@ use url::Url;
 /// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
 ///   "false" to reference files at their original URL
 /// - `key_path` (optional): SSH key path for SFTP/SCP sources
+/// - `mode` (optional): Sync mode for refresh:
+///   - "add" (default): Only attach new files
+///   - "update": Add new files and replace changed files
+///   - "sync": Add new, replace changed, and remove files no longer at source
 pub struct RemoteDirFunction;
 
 #[async_trait]
@@ -58,6 +66,12 @@ impl SourceFunction for RemoteDirFunction {
                 required: false,
                 default: None,
             },
+            ArgSpec {
+                name: "mode",
+                description: "Sync mode: 'add' (default), 'update', or 'sync'",
+                required: false,
+                default: Some("add"),
+            },
         ]
     }
 
@@ -65,6 +79,10 @@ impl SourceFunction for RemoteDirFunction {
         self.default_validate_args(args)?;
         // Validate URL is parseable
         source_utils::require_url(args, self.name())?;
+        // Validate mode if provided
+        if let Some(mode) = args.get("mode") {
+            SyncMode::from_arg(mode)?;
+        }
         Ok(())
     }
 
@@ -112,10 +130,106 @@ impl SourceFunction for RemoteDirFunction {
             .await
     }
 
-    // Uses default refresh() implementation
+    async fn refresh_with_mode(
+        &self,
+        args: &HashMap<String, String>,
+        attached_files: &HashMap<String, AttachedFileInfo>,
+        data_dir: &IODir,
+        config: Arc<BundleConfig>,
+        mode: SyncMode,
+    ) -> Result<Vec<RefreshAction>, BundlebaseError> {
+        let base_url = source_utils::require_url(args, self.name())?;
+        let patterns = source_utils::get_patterns(args)?;
+
+        // List all files from the remote directory
+        let lister = io_registry()
+            .create_lister(&base_url, config.clone())
+            .await?;
+        let all_files = lister.list_files().await?;
+
+        // Filter files by pattern
+        let remote_files: Vec<_> = all_files
+            .into_iter()
+            .filter(|file| {
+                let relative_path = Self::relative_path(&base_url, &file.url);
+                patterns.iter().any(|pattern| pattern.matches(&relative_path))
+            })
+            .collect();
+
+        // Build a set of remote source_locations for quick lookup
+        let remote_locations: HashSet<String> =
+            remote_files.iter().map(|f| f.url.to_string()).collect();
+
+        let mut actions = Vec::new();
+
+        // Process each remote file
+        for file in remote_files {
+            let source_location = file.url.to_string();
+
+            if let Some(attached_info) = attached_files.get(&source_location) {
+                // File was previously attached - check if it changed (for Update/Sync modes)
+                if mode == SyncMode::Update || mode == SyncMode::Sync {
+                    // Read current version from remote
+                    let current_version =
+                        Self::read_remote_version(&file.url, &config).await?;
+
+                    if current_version != attached_info.version {
+                        debug!(
+                            "File {} changed: version {} -> {}",
+                            source_location, attached_info.version, current_version
+                        );
+                        // File changed - materialize and return Replace action
+                        let location = DiscoveredLocation::from_url(file.url);
+                        let attach_location =
+                            self.materialize(&location, args, data_dir, &config).await?;
+                        actions.push(RefreshAction::Replace {
+                            old_source_location: source_location.clone(),
+                            data: MaterializedData {
+                                attach_location,
+                                source_location,
+                            },
+                        });
+                    }
+                    // If version matches, file hasn't changed - no action needed
+                }
+                // For Add mode, skip files that are already attached
+            } else {
+                // New file - materialize and return Add action
+                let location = DiscoveredLocation::from_url(file.url);
+                let attach_location =
+                    self.materialize(&location, args, data_dir, &config).await?;
+                actions.push(RefreshAction::Add(MaterializedData {
+                    attach_location,
+                    source_location,
+                }));
+            }
+        }
+
+        // For Sync mode, find files that were attached but no longer exist remotely
+        if mode == SyncMode::Sync {
+            for source_location in attached_files.keys() {
+                if !remote_locations.contains(source_location) {
+                    debug!("File {} no longer exists at remote", source_location);
+                    actions.push(RefreshAction::Remove {
+                        source_location: source_location.clone(),
+                    });
+                }
+            }
+        }
+
+        Ok(actions)
+    }
 }
 
 impl RemoteDirFunction {
+    /// Read the version string from a remote URL.
+    ///
+    /// Uses IOFile to get version (ETag/S3 version/mtime hash) from the remote file.
+    async fn read_remote_version(url: &Url, config: &Arc<BundleConfig>) -> Result<String, BundlebaseError> {
+        let io_file = IOFile::from_url(url, config.clone())?;
+        io_file.version().await
+    }
+
     /// Get the relative path of a file URL compared to the source URL.
     fn relative_path(source_url: &Url, file_url: &Url) -> String {
         let source_path = source_url.path();
@@ -214,11 +328,12 @@ mod tests {
     fn test_arg_specs() {
         let func = RemoteDirFunction;
         let specs = func.arg_specs();
-        assert_eq!(specs.len(), 4);
+        assert_eq!(specs.len(), 5);
         assert!(specs.iter().any(|s| s.name == "url" && s.required));
         assert!(specs.iter().any(|s| s.name == "patterns" && !s.required));
         assert!(specs.iter().any(|s| s.name == "copy" && !s.required));
         assert!(specs.iter().any(|s| s.name == "key_path" && !s.required));
+        assert!(specs.iter().any(|s| s.name == "mode" && !s.required));
     }
 
     #[test]

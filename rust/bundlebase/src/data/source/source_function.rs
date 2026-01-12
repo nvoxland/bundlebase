@@ -66,6 +66,68 @@ pub struct MaterializedData {
     pub source_location: String,
 }
 
+/// Sync mode for source refresh operations.
+///
+/// Controls how refresh handles existing files when checking for updates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SyncMode {
+    /// Only add new files (default behavior)
+    #[default]
+    Add,
+    /// Add new files and replace changed files
+    Update,
+    /// Add new files, replace changed files, and remove missing files
+    Sync,
+}
+
+impl SyncMode {
+    /// Parse sync mode from string argument.
+    pub fn from_arg(value: &str) -> Result<Self, BundlebaseError> {
+        match value.to_lowercase().as_str() {
+            "add" => Ok(SyncMode::Add),
+            "update" => Ok(SyncMode::Update),
+            "sync" => Ok(SyncMode::Sync),
+            _ => Err(format!(
+                "Invalid mode '{}'. Must be 'add', 'update', or 'sync'",
+                value
+            )
+            .into()),
+        }
+    }
+}
+
+/// Metadata about an attached file from a source.
+///
+/// Used during refresh to compare remote files with already-attached files.
+#[derive(Debug, Clone)]
+pub struct AttachedFileInfo {
+    /// The location where this block is currently stored
+    pub location: String,
+    /// Version string from AttachBlockOp (ETag/S3 version/mtime hash)
+    pub version: String,
+    /// File size in bytes (from AttachBlockOp.bytes)
+    pub bytes: Option<usize>,
+}
+
+/// Action to take for a discovered file during refresh.
+#[derive(Debug, Clone)]
+pub enum RefreshAction {
+    /// Attach a new file
+    Add(MaterializedData),
+    /// Replace an existing file that has changed
+    Replace {
+        /// The source_location of the old block to detach
+        old_source_location: String,
+        /// The new materialized data to attach
+        data: MaterializedData,
+    },
+    /// Detach a file that no longer exists remotely
+    Remove {
+        /// The source_location of the block to detach
+        source_location: String,
+    },
+}
+
 /// Trait for source function implementations.
 ///
 /// Source functions define how data is discovered and materialized.
@@ -214,6 +276,53 @@ pub trait SourceFunction: Send + Sync {
         }
 
         Ok(results)
+    }
+
+    /// Refresh the source with sync mode support.
+    ///
+    /// This method extends refresh() to support update and sync modes:
+    /// - `Add`: Only add new files (same as refresh())
+    /// - `Update`: Add new files and replace files that have changed
+    /// - `Sync`: Add new, replace changed, and remove files no longer at source
+    ///
+    /// Default implementation delegates to refresh() for Add mode and returns
+    /// an error for other modes. Source functions that support update/sync modes
+    /// should override this method.
+    ///
+    /// # Arguments
+    /// * `args` - Source configuration
+    /// * `attached_files` - Map of source_location to AttachedFileInfo for already-attached files
+    /// * `data_dir` - Where to write materialized files
+    /// * `config` - Bundle configuration
+    /// * `mode` - Sync mode to use
+    ///
+    /// # Returns
+    /// List of refresh actions (Add, Replace, Remove)
+    async fn refresh_with_mode(
+        &self,
+        args: &HashMap<String, String>,
+        attached_files: &HashMap<String, AttachedFileInfo>,
+        data_dir: &IODir,
+        config: Arc<BundleConfig>,
+        mode: SyncMode,
+    ) -> Result<Vec<RefreshAction>, BundlebaseError> {
+        match mode {
+            SyncMode::Add => {
+                // For Add mode, delegate to existing refresh() behavior
+                let attached_locations: HashSet<String> = attached_files.keys().cloned().collect();
+                let materialized = self.refresh(args, attached_locations, data_dir, config).await?;
+                Ok(materialized.into_iter().map(RefreshAction::Add).collect())
+            }
+            SyncMode::Update | SyncMode::Sync => {
+                // Default implementation doesn't support update/sync
+                Err(format!(
+                    "Source function '{}' does not support mode '{:?}'. Only 'add' mode is supported.",
+                    self.name(),
+                    mode
+                )
+                .into())
+            }
+        }
     }
 }
 

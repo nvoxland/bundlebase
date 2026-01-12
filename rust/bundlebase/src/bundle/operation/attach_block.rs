@@ -38,6 +38,49 @@ pub struct AttachBlockOp {
 }
 
 impl AttachBlockOp {
+    /// Read version from a URL using the adapter factory.
+    async fn read_version_from(
+        url: &str,
+        builder: &BundleBuilder,
+    ) -> Result<String, BundlebaseError> {
+        let temp_id = ObjectId::generate();
+        let adapter = builder
+            .bundle
+            .adapter_factory
+            .reader(url, &temp_id, builder.bundle(), None, None)
+            .await?;
+        adapter.read_version().await
+    }
+
+    /// Setup an AttachBlockOp for a file attached via source refresh.
+    ///
+    /// Reads version from `source_location` (the remote URL) rather than
+    /// `attach_location` (the local copy). This enables accurate change
+    /// detection on subsequent refreshes when `copy=true`.
+    ///
+    /// # Arguments
+    /// * `pack` - Pack to attach the block to
+    /// * `attach_location` - Where data is stored (local copy if copy=true)
+    /// * `source_location` - Original remote URL for version tracking
+    /// * `builder` - Bundle builder
+    pub async fn setup_for_source(
+        pack: &ObjectId,
+        attach_location: &str,
+        source_location: &str,
+        builder: &BundleBuilder,
+    ) -> Result<Self, BundlebaseError> {
+        // Read version from SOURCE location for change detection
+        let source_version = Self::read_version_from(source_location, builder).await?;
+
+        // Setup normally for schema/stats from attach_location
+        let mut op = Self::setup(pack, attach_location, builder).await?;
+
+        // Override version with source version
+        op.version = source_version;
+
+        Ok(op)
+    }
+
     pub async fn setup(
         pack: &ObjectId,
         location: &str,
