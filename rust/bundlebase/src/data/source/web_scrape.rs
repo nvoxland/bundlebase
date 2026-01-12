@@ -3,8 +3,11 @@
 //! Fetches a webpage, extracts links from `<a href="...">` elements,
 //! and downloads files that match specified glob patterns.
 
-use super::source_function::{ArgSpec, DiscoveredLocation, SourceFunction};
+use super::source_function::{
+    ArgSpec, AttachedFileInfo, DiscoveredLocation, RefreshAction, SourceFunction, SyncMode,
+};
 use super::source_utils;
+use crate::io::IODir;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use scraper::{Html, Selector};
@@ -22,6 +25,10 @@ use url::Url;
 ///   (e.g., "*.parquet,*.csv"). Defaults to "**/*" (all links)
 /// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
 ///   "false" to reference files at their original URL
+/// - `mode` (optional): Sync mode for refresh:
+///   - "add" (default): Only attach new files
+///   - "update": Add new files and replace changed files
+///   - "sync": Add new, replace changed, and remove files no longer at source
 pub struct WebScrapeFunction;
 
 #[async_trait]
@@ -50,6 +57,12 @@ impl SourceFunction for WebScrapeFunction {
                 required: false,
                 default: Some("true"),
             },
+            ArgSpec {
+                name: "mode",
+                description: "Sync mode: 'add' (default), 'update', or 'sync'",
+                required: false,
+                default: Some("add"),
+            },
         ]
     }
 
@@ -66,6 +79,11 @@ impl SourceFunction for WebScrapeFunction {
                 url.scheme()
             )
             .into());
+        }
+
+        // Validate mode if provided
+        if let Some(mode) = args.get("mode") {
+            SyncMode::from_arg(mode)?;
         }
 
         Ok(())
@@ -93,6 +111,47 @@ impl SourceFunction for WebScrapeFunction {
             .collect();
 
         Ok(locations)
+    }
+
+    async fn refresh_with_mode(
+        &self,
+        args: &HashMap<String, String>,
+        attached_files: &HashMap<String, AttachedFileInfo>,
+        data_dir: &IODir,
+        config: Arc<BundleConfig>,
+        mode: SyncMode,
+    ) -> Result<Vec<RefreshAction>, BundlebaseError> {
+        let base_url = source_utils::require_url(args, self.name())?;
+        let patterns = source_utils::get_patterns(args)?;
+
+        // Fetch and extract links (same as discover)
+        let html = self.fetch_page(&base_url).await?;
+        let discovered: Vec<DiscoveredLocation> = self
+            .extract_links(&html, &base_url)
+            .into_iter()
+            .filter(|url| source_utils::matches_patterns(url, &patterns))
+            .map(DiscoveredLocation::from_url)
+            .collect();
+
+        // Use shared sync logic
+        let should_copy = source_utils::should_copy(args);
+        let data_dir = data_dir.clone();
+        let config = config.clone();
+
+        source_utils::process_sync_mode(
+            discovered,
+            attached_files,
+            mode,
+            |url| Box::pin(source_utils::read_http_version(url)),
+            |loc| {
+                let data_dir = data_dir.clone();
+                let config = config.clone();
+                async move {
+                    source_utils::materialize_url(&loc.url, should_copy, &data_dir, &config).await
+                }
+            },
+        )
+        .await
     }
 
     // Uses default materialize() and refresh() implementations
@@ -178,10 +237,11 @@ mod tests {
     fn test_arg_specs() {
         let func = WebScrapeFunction;
         let specs = func.arg_specs();
-        assert_eq!(specs.len(), 3);
+        assert_eq!(specs.len(), 4);
         assert!(specs.iter().any(|s| s.name == "url" && s.required));
         assert!(specs.iter().any(|s| s.name == "patterns" && !s.required));
         assert!(specs.iter().any(|s| s.name == "copy" && !s.required));
+        assert!(specs.iter().any(|s| s.name == "mode" && !s.required));
     }
 
     #[test]
