@@ -4,8 +4,10 @@ mod define_function;
 mod create_index;
 mod define_pack;
 mod define_source;
+mod detach_block;
 mod drop_index;
 mod drop_view;
+mod replace_block;
 mod filter;
 mod index_blocks;
 mod join;
@@ -25,9 +27,11 @@ pub use crate::bundle::operation::define_function::DefineFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
 pub use crate::bundle::operation::define_pack::DefinePackOp;
 pub use crate::bundle::operation::define_source::DefineSourceOp;
+pub use crate::bundle::operation::detach_block::DetachBlockOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
 pub use crate::bundle::operation::drop_view::DropViewOp;
 pub use crate::bundle::operation::filter::FilterOp;
+pub use crate::bundle::operation::replace_block::ReplaceBlockOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
 pub use crate::bundle::operation::join::{JoinOp, JoinTypeOption};
 pub use crate::bundle::operation::rebuild_index::RebuildIndexOp;
@@ -123,6 +127,7 @@ pub enum AnyOperation {
     CreateView(CreateViewOp),
     DefineFunction(DefineFunctionOp),
     DefineSource(DefineSourceOp),
+    DetachBlock(DetachBlockOp),
     Filter(FilterOp),
     IndexBlocks(IndexBlocksOp),
     CreateIndex(CreateIndexOp),
@@ -130,6 +135,7 @@ pub enum AnyOperation {
     DropIndex(DropIndexOp),
     DropView(DropViewOp),
     RebuildIndex(RebuildIndexOp),
+    ReplaceBlock(ReplaceBlockOp),
     Join(JoinOp),
     Select(SelectOp),
     SetConfig(SetConfigOp),
@@ -148,6 +154,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateView(op) => op.describe(),
             AnyOperation::DefineFunction(op) => op.describe(),
             AnyOperation::DefineSource(op) => op.describe(),
+            AnyOperation::DetachBlock(op) => op.describe(),
             AnyOperation::Filter(op) => op.describe(),
             AnyOperation::IndexBlocks(op) => op.describe(),
             AnyOperation::CreateIndex(op) => op.describe(),
@@ -155,6 +162,7 @@ impl Operation for AnyOperation {
             AnyOperation::DropIndex(op) => op.describe(),
             AnyOperation::DropView(op) => op.describe(),
             AnyOperation::RebuildIndex(op) => op.describe(),
+            AnyOperation::ReplaceBlock(op) => op.describe(),
             AnyOperation::Join(op) => op.describe(),
             AnyOperation::Select(op) => op.describe(),
             AnyOperation::SetConfig(op) => op.describe(),
@@ -172,6 +180,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateView(op) => op.check(bundle).await,
             AnyOperation::DefineFunction(op) => op.check(bundle).await,
             AnyOperation::DefineSource(op) => op.check(bundle).await,
+            AnyOperation::DetachBlock(op) => op.check(bundle).await,
             AnyOperation::Filter(op) => op.check(bundle).await,
             AnyOperation::IndexBlocks(op) => op.check(bundle).await,
             AnyOperation::CreateIndex(op) => op.check(bundle).await,
@@ -179,6 +188,7 @@ impl Operation for AnyOperation {
             AnyOperation::DropIndex(op) => op.check(bundle).await,
             AnyOperation::DropView(op) => op.check(bundle).await,
             AnyOperation::RebuildIndex(op) => op.check(bundle).await,
+            AnyOperation::ReplaceBlock(op) => op.check(bundle).await,
             AnyOperation::Join(op) => op.check(bundle).await,
             AnyOperation::Select(op) => op.check(bundle).await,
             AnyOperation::SetConfig(op) => op.check(bundle).await,
@@ -196,6 +206,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateView(op) => op.apply(bundle).await,
             AnyOperation::DefineFunction(op) => op.apply(bundle).await,
             AnyOperation::DefineSource(op) => op.apply(bundle).await,
+            AnyOperation::DetachBlock(op) => op.apply(bundle).await,
             AnyOperation::Filter(op) => op.apply(bundle).await,
             AnyOperation::IndexBlocks(op) => op.apply(bundle).await,
             AnyOperation::CreateIndex(op) => op.apply(bundle).await,
@@ -203,6 +214,7 @@ impl Operation for AnyOperation {
             AnyOperation::DropIndex(op) => op.apply(bundle).await,
             AnyOperation::DropView(op) => op.apply(bundle).await,
             AnyOperation::RebuildIndex(op) => op.apply(bundle).await,
+            AnyOperation::ReplaceBlock(op) => op.apply(bundle).await,
             AnyOperation::Join(op) => op.apply(bundle).await,
             AnyOperation::Select(op) => op.apply(bundle).await,
             AnyOperation::SetConfig(op) => op.apply(bundle).await,
@@ -224,6 +236,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateView(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DefineFunction(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DefineSource(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::DetachBlock(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::Filter(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::IndexBlocks(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::CreateIndex(op) => op.apply_dataframe(df, ctx).await,
@@ -231,6 +244,7 @@ impl Operation for AnyOperation {
             AnyOperation::DropIndex(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DropView(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::RebuildIndex(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::ReplaceBlock(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::Join(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::Select(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::SetConfig(op) => op.apply_dataframe(df, ctx).await,
@@ -248,6 +262,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateView(op) => op.version(),
             AnyOperation::DefineFunction(op) => op.version(),
             AnyOperation::DefineSource(op) => op.version(),
+            AnyOperation::DetachBlock(op) => op.version(),
             AnyOperation::Filter(op) => op.version(),
             AnyOperation::IndexBlocks(op) => op.version(),
             AnyOperation::CreateIndex(op) => op.version(),
@@ -255,6 +270,7 @@ impl Operation for AnyOperation {
             AnyOperation::DropIndex(op) => op.version(),
             AnyOperation::DropView(op) => op.version(),
             AnyOperation::RebuildIndex(op) => op.version(),
+            AnyOperation::ReplaceBlock(op) => op.version(),
             AnyOperation::Join(op) => op.version(),
             AnyOperation::Select(op) => op.version(),
             AnyOperation::SetConfig(op) => op.version(),
@@ -272,6 +288,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateView(op) => op.allowed_on_view(),
             AnyOperation::DefineFunction(op) => op.allowed_on_view(),
             AnyOperation::DefineSource(op) => op.allowed_on_view(),
+            AnyOperation::DetachBlock(op) => op.allowed_on_view(),
             AnyOperation::Filter(op) => op.allowed_on_view(),
             AnyOperation::IndexBlocks(op) => op.allowed_on_view(),
             AnyOperation::CreateIndex(op) => op.allowed_on_view(),
@@ -279,6 +296,7 @@ impl Operation for AnyOperation {
             AnyOperation::DropIndex(op) => op.allowed_on_view(),
             AnyOperation::DropView(op) => op.allowed_on_view(),
             AnyOperation::RebuildIndex(op) => op.allowed_on_view(),
+            AnyOperation::ReplaceBlock(op) => op.allowed_on_view(),
             AnyOperation::Join(op) => op.allowed_on_view(),
             AnyOperation::Select(op) => op.allowed_on_view(),
             AnyOperation::SetConfig(op) => op.allowed_on_view(),
@@ -328,6 +346,12 @@ impl From<DefineFunctionOp> for AnyOperation {
 impl From<DefineSourceOp> for AnyOperation {
     fn from(config: DefineSourceOp) -> Self {
         AnyOperation::DefineSource(config)
+    }
+}
+
+impl From<DetachBlockOp> for AnyOperation {
+    fn from(config: DetachBlockOp) -> Self {
+        AnyOperation::DetachBlock(config)
     }
 }
 
@@ -394,6 +418,12 @@ impl From<DropViewOp> for AnyOperation {
 impl From<RebuildIndexOp> for AnyOperation {
     fn from(config: RebuildIndexOp) -> Self {
         AnyOperation::RebuildIndex(config)
+    }
+}
+
+impl From<ReplaceBlockOp> for AnyOperation {
+    fn from(config: ReplaceBlockOp) -> Self {
+        AnyOperation::ReplaceBlock(config)
     }
 }
 

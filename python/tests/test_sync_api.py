@@ -569,3 +569,43 @@ class TestSyncStatus:
             status_after = c.status()
             assert status_after.is_empty()
             assert len(status_after.changes) == 0
+
+
+class TestSyncDetachBlock:
+    """Test synchronous detach_block operations."""
+
+    def test_sync_detach_block(self):
+        """Test detaching a block synchronously."""
+        location = datafile("customers-0-100.csv")
+        c = bb.create(random_bundle())
+        c.attach(location)
+
+        # Verify the block is attached
+        assert c.num_rows() == 100
+
+        # Detach the block
+        c.detach_block(location)
+
+        # Verify the block is detached (no rows)
+        assert c.num_rows() == 0
+
+
+class TestSyncReplaceBlock:
+    """Test synchronous replace_block operations."""
+
+    def test_sync_replace_block(self):
+        """Test replacing a block's location synchronously."""
+        old_location = datafile("customers-0-100.csv")
+        new_location = datafile("customers-101-150.csv")
+
+        c = bb.create(random_bundle())
+        c.attach(old_location)
+
+        # Verify initial data
+        assert c.num_rows() == 100
+
+        # Replace with new location
+        c.replace_block(old_location, new_location)
+
+        # Verify the data comes from the new location (50 rows)
+        assert c.num_rows() == 50

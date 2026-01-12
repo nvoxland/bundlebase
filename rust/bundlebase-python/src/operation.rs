@@ -32,6 +32,8 @@ impl PyOperation {
             AnyOperation::RebuildIndex(_) => "rebuildIndex".to_string(),
             AnyOperation::Select(_) => "select".to_string(),
             AnyOperation::DefineSource(_) => "defineSource".to_string(),
+            AnyOperation::DetachBlock(_) => "detachBlock".to_string(),
+            AnyOperation::ReplaceBlock(_) => "replaceBlock".to_string(),
         }
     }
 

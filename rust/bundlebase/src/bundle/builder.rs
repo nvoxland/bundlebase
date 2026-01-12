@@ -3,8 +3,9 @@ use crate::bundle::init::InitCommit;
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, DefineSourceOp, SelectOp};
 use crate::bundle::operation::{
-    AttachBlockOp, CreateViewOp, DefineFunctionOp, DefinePackOp, DropViewOp, FilterOp, JoinOp,
-    RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp, SetConfigOp, SetDescriptionOp,
+    AttachBlockOp, CreateViewOp, DefineFunctionOp, DefinePackOp, DetachBlockOp, DropViewOp,
+    FilterOp, JoinOp, RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp,
+    ReplaceBlockOp, SetConfigOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::operation::{CreateIndexOp, DropIndexOp, JoinTypeOption};
@@ -465,6 +466,80 @@ impl BundleBuilder {
                 Ok(())
             })
         })
+        .await?;
+
+        Ok(self)
+    }
+
+    /// Detach a data block from the bundle by its location.
+    ///
+    /// This removes a previously attached block from the bundle. The block
+    /// is identified by its location (URL), and the operation stores the
+    /// block ID for deterministic replay.
+    ///
+    /// # Arguments
+    /// * `location` - The location (URL) of the block to detach
+    ///
+    /// # Example
+    /// ```ignore
+    /// bundle.detach_block("s3://bucket/data.parquet").await?;
+    /// ```
+    pub async fn detach_block(&mut self, location: &str) -> Result<&mut Self, BundlebaseError> {
+        let location = location.to_string();
+
+        self.do_change(&format!("Detach block at {}", location), |builder| {
+            Box::pin(async move {
+                let op = DetachBlockOp::setup(&location, &builder.bundle).await?;
+                builder.apply_operation(op.into()).await?;
+
+                info!("Detached block from {}", location);
+
+                Ok(())
+            })
+        })
+        .await?;
+
+        Ok(self)
+    }
+
+    /// Replace a block's location in the bundle.
+    ///
+    /// This changes where a block's data is read from without changing the
+    /// block's identity. Useful when data files are moved to a new location.
+    ///
+    /// # Arguments
+    /// * `old_location` - The current location (URL) of the block
+    /// * `new_location` - The new location (URL) to read data from
+    ///
+    /// # Example
+    /// ```ignore
+    /// bundle.replace_block(
+    ///     "s3://old-bucket/data.parquet",
+    ///     "s3://new-bucket/data.parquet"
+    /// ).await?;
+    /// ```
+    pub async fn replace_block(
+        &mut self,
+        old_location: &str,
+        new_location: &str,
+    ) -> Result<&mut Self, BundlebaseError> {
+        let old_location = old_location.to_string();
+        let new_location = new_location.to_string();
+
+        self.do_change(
+            &format!("Replace block {} -> {}", old_location, new_location),
+            |builder| {
+                Box::pin(async move {
+                    let op =
+                        ReplaceBlockOp::setup(&old_location, &new_location, builder).await?;
+                    builder.apply_operation(op.into()).await?;
+
+                    info!("Replaced block {} -> {}", old_location, new_location);
+
+                    Ok(())
+                })
+            },
+        )
         .await?;
 
         Ok(self)

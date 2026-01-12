@@ -44,6 +44,10 @@ impl DataPack {
         self.blocks.write().push(block);
     }
 
+    pub fn remove_block(&self, block_id: &ObjectId) {
+        self.blocks.write().retain(|b| b.id() != block_id);
+    }
+
     pub fn blocks(&self) -> Vec<Arc<DataBlock>> {
         self.blocks.read().clone()
     }
