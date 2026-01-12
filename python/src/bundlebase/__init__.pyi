@@ -425,6 +425,52 @@ class PyBundleBuilder:
         """
         ...
 
+    def detach_block(self, location: str) -> "OperationChain":
+        """
+        Detach a data block from the bundle by its location.
+
+        Removes a previously attached block from the bundle. The block is
+        identified by its location (URL).
+
+        Args:
+            location: The location (URL) of the block to detach
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Raises:
+            ValueError: If no block exists at the specified location
+
+        Example:
+            c = await c.detach_block("s3://bucket/data.parquet")
+        """
+        ...
+
+    def replace_block(self, old_location: str, new_location: str) -> "OperationChain":
+        """
+        Replace a block's data location in the bundle.
+
+        Changes where a block's data is read from without changing the block's
+        identity. Useful when data files are moved to a new location.
+
+        Args:
+            old_location: The current location (URL) of the block
+            new_location: The new location (URL) to read data from
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Raises:
+            ValueError: If no block exists at the old location
+
+        Example:
+            c = await c.replace_block(
+                "s3://old-bucket/data.parquet",
+                "s3://new-bucket/data.parquet"
+            )
+        """
+        ...
+
     def remove_column(self, name: str) -> "OperationChain":
         """
         Queue a remove_column operation.
@@ -809,6 +855,14 @@ class OperationChain:
         """Queue an attach operation."""
         ...
 
+    def detach_block(self, location: str) -> "OperationChain":
+        """Queue a detach_block operation."""
+        ...
+
+    def replace_block(self, old_location: str, new_location: str) -> "OperationChain":
+        """Queue a replace_block operation."""
+        ...
+
     def remove_column(self, name: str) -> "OperationChain":
         """Queue a remove_column operation."""
         ...
@@ -877,6 +931,14 @@ class CreateChain:
         """Queue an attach operation."""
         ...
 
+    def detach_block(self, location: str) -> "CreateChain":
+        """Queue a detach_block operation."""
+        ...
+
+    def replace_block(self, old_location: str, new_location: str) -> "CreateChain":
+        """Queue a replace_block operation."""
+        ...
+
     def remove_column(self, name: str) -> "CreateChain":
         """Queue a remove_column operation."""
         ...
@@ -943,6 +1005,14 @@ class ExtendChain:
 
     def attach(self, url: str) -> "ExtendChain":
         """Queue an attach operation."""
+        ...
+
+    def detach_block(self, location: str) -> "ExtendChain":
+        """Queue a detach_block operation."""
+        ...
+
+    def replace_block(self, old_location: str, new_location: str) -> "ExtendChain":
+        """Queue a replace_block operation."""
         ...
 
     def remove_column(self, name: str) -> "ExtendChain":

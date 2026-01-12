@@ -1454,3 +1454,63 @@ async def test_drop_view_twice_fails():
         await c.drop_view("adults")
     err_msg = str(exc_info.value)
     assert "View 'adults' not found" in err_msg
+
+
+@pytest.mark.asyncio
+async def test_detach_block():
+    """Test detaching a block from a bundle."""
+    location = datafile("customers-0-100.csv")
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(location)
+
+    # Verify the block is attached
+    assert await c.num_rows() == 100
+
+    # Detach the block
+    c = await c.detach_block(location)
+
+    # Verify the block is detached (no rows)
+    assert await c.num_rows() == 0
+
+
+@pytest.mark.asyncio
+async def test_detach_block_not_found():
+    """Test error when detaching a non-existent block."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    with pytest.raises(Exception) as exc_info:
+        await c.detach_block("s3://nonexistent/file.parquet")
+    err_msg = str(exc_info.value)
+    assert "No block found at location" in err_msg
+
+
+@pytest.mark.asyncio
+async def test_replace_block():
+    """Test replacing a block's location."""
+    old_location = datafile("customers-0-100.csv")
+    new_location = datafile("customers-101-150.csv")
+
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(old_location)
+
+    # Verify initial data
+    assert await c.num_rows() == 100
+
+    # Replace with new location (same schema, different data)
+    c = await c.replace_block(old_location, new_location)
+
+    # Verify the data comes from the new location (50 rows in new file)
+    assert await c.num_rows() == 50
+
+
+@pytest.mark.asyncio
+async def test_replace_block_not_found():
+    """Test error when replacing a non-existent block."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    with pytest.raises(Exception) as exc_info:
+        await c.replace_block("s3://nonexistent/file.parquet", "s3://new/file.parquet")
+    err_msg = str(exc_info.value)
+    assert "No block found at location" in err_msg

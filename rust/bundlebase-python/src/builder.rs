@@ -328,6 +328,93 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Detach a data block from the bundle by its location.
+    ///
+    /// Removes a previously attached block from the bundle. The block is
+    /// identified by its location (URL).
+    ///
+    /// # Arguments
+    /// * `location` - The location (URL) of the block to detach
+    ///
+    /// # Example
+    /// ```python
+    /// bundle = await bundle.detach_block("s3://bucket/data.parquet")
+    /// ```
+    fn detach_block<'py>(
+        slf: PyRef<'_, Self>,
+        location: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let location = location.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            builder
+                .detach_block(location.as_str())
+                .await
+                .map_err(|e| to_py_error(&format!("Failed to detach block at '{}'", location), e))?;
+            drop(builder);
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
+    /// Replace a block's data location in the bundle.
+    ///
+    /// Changes where a block's data is read from without changing the block's
+    /// identity. Useful when data files are moved to a new location.
+    ///
+    /// # Arguments
+    /// * `old_location` - The current location (URL) of the block
+    /// * `new_location` - The new location (URL) to read data from
+    ///
+    /// # Example
+    /// ```python
+    /// bundle = await bundle.replace_block(
+    ///     "s3://old-bucket/data.parquet",
+    ///     "s3://new-bucket/data.parquet"
+    /// )
+    /// ```
+    fn replace_block<'py>(
+        slf: PyRef<'_, Self>,
+        old_location: &str,
+        new_location: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let old_location = old_location.to_string();
+        let new_location = new_location.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            builder
+                .replace_block(old_location.as_str(), new_location.as_str())
+                .await
+                .map_err(|e| {
+                    to_py_error(
+                        &format!("Failed to replace block '{}' -> '{}'", old_location, new_location),
+                        e,
+                    )
+                })?;
+            drop(builder);
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PyBundleBuilder {
+                        inner: inner.clone(),
+                    },
+                )
+                .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
     fn remove_column<'py>(
         slf: PyRef<'_, Self>,
         name: &str,

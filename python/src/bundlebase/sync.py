@@ -216,6 +216,36 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def detach_block(self, location: str) -> "SyncBundleBuilder":
+        """Detach a data block from the bundle by its location.
+
+        Args:
+            location: The location (URL) of the block to detach
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "detach_block", location)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def replace_block(self, old_location: str, new_location: str) -> "SyncBundleBuilder":
+        """Replace a block's data location in the bundle.
+
+        Changes where a block's data is read from without changing the block's
+        identity. Useful when data files are moved to a new location.
+
+        Args:
+            old_location: The current location (URL) of the block
+            new_location: The new location (URL) to read data from
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "replace_block", old_location, new_location)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
     def remove_column(self, name: str) -> "SyncBundleBuilder":
         """Remove a column from the bundle."""
         coro = _call_original_method(self._async, "remove_column", name)
