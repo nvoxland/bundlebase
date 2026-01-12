@@ -9,7 +9,6 @@ mod rowid_batch;
 mod rowid_offset_data_source;
 mod rowid_provider;
 mod rowid_stream;
-mod source;
 mod versioned_blockid;
 
 use crate::io::IODir;
@@ -32,9 +31,6 @@ pub use rowid_batch::{RowIdBatch, SendableRowIdBatchStream};
 pub use rowid_offset_data_source::{LineOrientedFormat, RowIdOffsetDataSource};
 pub use rowid_provider::{LayoutRowIdProvider, RowIdProvider};
 pub use rowid_stream::RowIdStreamAdapter;
-pub use source::{
-    RefreshAction, RemoteDirFunction, Source, SourceFunction, SourceFunctionRegistry,
-};
 use std::fmt::Debug;
 use std::sync::Arc;
 use url::Url;
