@@ -10,6 +10,7 @@ mod index;
 pub mod io;
 pub mod metrics;
 pub mod progress;
+pub mod source;
 pub mod test_utils;
 mod versioning;
 

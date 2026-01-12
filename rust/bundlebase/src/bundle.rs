@@ -20,7 +20,8 @@ pub use operation::{AnyOperation, BundleChange, DefineSourceOp, Operation};
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
-use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, Source, SourceFunctionRegistry, VersionedBlockId};
+use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBlockId};
+use crate::source::{Source, SourceFunctionRegistry};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
 use crate::io::{DataStorage, IODir, IOFile, IOLister, IOReader, EMPTY_URL};
