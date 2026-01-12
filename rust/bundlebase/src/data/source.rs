@@ -15,7 +15,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub use remote_dir::RemoteDirFunction;
-pub use source_function::{MaterializedData, SourceFunction, SourceFunctionRegistry};
+pub use source_function::{
+    AttachedFileInfo, MaterializedData, RefreshAction, SourceFunction, SourceFunctionRegistry,
+    SyncMode,
+};
 pub use web_scrape::WebScrapeFunction;
 
 /// Represents a data source definition for a pack.
@@ -83,32 +86,64 @@ impl Source {
 
     /// Refresh this source: find new data and materialize it.
     ///
-    /// Returns a list of materialized data ready for attachment.
+    /// Returns a list of refresh actions (Add, Replace, Remove) based on the sync mode.
     pub async fn refresh(
         &self,
         operations: &[AnyOperation],
         data_dir: &IODir,
         config: Arc<BundleConfig>,
         registry: &Arc<RwLock<SourceFunctionRegistry>>,
-    ) -> Result<Vec<MaterializedData>, BundlebaseError> {
+    ) -> Result<Vec<RefreshAction>, BundlebaseError> {
         let func = {
             let reg = registry.read();
             reg.get(&self.function)
                 .ok_or_else(|| format!("Unknown source function '{}'", self.function))?
         };
 
-        let attached = self.attached_locations(operations);
+        // Parse sync mode from args (defaults to "add")
+        let mode = self
+            .args
+            .get("mode")
+            .map(|s| SyncMode::from_arg(s))
+            .transpose()?
+            .unwrap_or_default();
 
-        func.refresh(&self.args, attached, data_dir, config).await
+        // Build attached files map with metadata
+        let attached_files = self.attached_files(operations);
+
+        func.refresh_with_mode(&self.args, &attached_files, data_dir, config, mode)
+            .await
     }
 
-    /// Get locations already attached from this source.
+    /// Get locations already attached from this source (simple set for backward compatibility).
     fn attached_locations(&self, operations: &[AnyOperation]) -> HashSet<String> {
         operations
             .iter()
             .filter_map(|op| match op {
                 AnyOperation::AttachBlock(attach) if attach.source.as_ref() == Some(&self.id) => {
                     attach.source_location.clone()
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Get attached files with metadata for change detection.
+    fn attached_files(&self, operations: &[AnyOperation]) -> HashMap<String, AttachedFileInfo> {
+        operations
+            .iter()
+            .filter_map(|op| match op {
+                AnyOperation::AttachBlock(attach) if attach.source.as_ref() == Some(&self.id) => {
+                    attach.source_location.as_ref().map(|source_loc| {
+                        (
+                            source_loc.clone(),
+                            AttachedFileInfo {
+                                location: attach.location.clone(),
+                                version: attach.version.clone(),
+                                bytes: attach.bytes,
+                            },
+                        )
+                    })
                 }
                 _ => None,
             })
