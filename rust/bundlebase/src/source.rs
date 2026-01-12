@@ -1,5 +1,6 @@
 //! Source module for data source definitions and discovery functions.
 
+mod postgres;
 mod remote_dir;
 mod source_function;
 mod source_utils;
@@ -14,6 +15,7 @@ use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+pub use postgres::PostgresFunction;
 pub use remote_dir::RemoteDirFunction;
 pub use source_function::{
     AttachedFileInfo, MaterializedData, RefreshAction, SourceFunction, SourceFunctionRegistry,

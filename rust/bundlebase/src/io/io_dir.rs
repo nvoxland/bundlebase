@@ -1,12 +1,14 @@
 //! IODir implementation for directory operations via object_store.
 
+use crate::data::ObjectId;
 use crate::io::io_file::IOFile;
-use crate::io::io_traits::{FileInfo, IOLister, IOReader};
+use crate::io::io_traits::{FileInfo, IOLister, IOReader, IOWriter};
 use crate::io::util::{join_path, join_url, parse_url};
 use crate::io::{EMPTY_SCHEME, EMPTY_URL};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::stream::StreamExt;
 use object_store::path::Path as ObjectPath;
 use object_store::ObjectStore;
@@ -111,6 +113,55 @@ impl IODir {
             path: join_path(&self.path, subdir)?,
             config: self.config.clone(),
         })
+    }
+
+    /// Rename a file within this directory.
+    /// Implemented as copy + delete to work across all storage backends.
+    pub async fn rename(&self, from: &str, to: &str) -> Result<(), BundlebaseError> {
+        let from_file = self.io_file(from)?;
+        let to_file = self.io_file(to)?;
+
+        // Read source, write to destination, delete source
+        let data = from_file
+            .read_bytes()
+            .await?
+            .ok_or_else(|| format!("Source file '{}' does not exist", from))?;
+        to_file.write(data).await?;
+        from_file.delete().await?;
+
+        Ok(())
+    }
+
+    /// Write data to a new file named by its content hash.
+    ///
+    /// The file is written to a temporary location first, then renamed to a
+    /// content-addressed name based on the SHA256 hash of the data.
+    /// If a file with that hash already exists, the temp file is deleted
+    /// and the existing filename is returned (deduplication).
+    ///
+    /// Returns the relative filename (hash-based).
+    pub async fn write_content_addressed(
+        &self,
+        data: Bytes,
+        suffix: &str,
+    ) -> Result<String, BundlebaseError> {
+        // Write to temp file while computing hash
+        let temp_name = format!("temp_{}", ObjectId::generate());
+        let temp_file = self.io_file(&temp_name)?;
+        let hash = temp_file.write_with_hash(data).await?;
+
+        // Rename to content-addressed name (16 char hash prefix for readability)
+        let final_name = format!("{}_{}", &hash[..16], suffix);
+        let final_file = self.io_file(&final_name)?;
+
+        // If file with this hash already exists, delete temp and return existing
+        if final_file.exists().await? {
+            temp_file.delete().await?;
+        } else {
+            self.rename(&temp_name, &final_name).await?;
+        }
+
+        Ok(final_name)
     }
 }
 

@@ -286,8 +286,8 @@ Each domain documentation file follows a consistent structure:
 poetry install && ./scripts/maturin-dev.sh
 
 # Run tests
-cargo test              # Rust tests
-poetry run pytest       # Python tests
+cargo test --profile test # Rust tests
+poetry run pytest         # Python tests
 
 # Build for development
 ./scripts/maturin-dev.sh         # Build and install in dev mode

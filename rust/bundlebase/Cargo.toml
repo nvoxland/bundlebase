@@ -50,6 +50,8 @@ russh-keys = "0.46"
 suppaftp = { version = "7.1", features = ["tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 scraper = "0.22"
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
+postgres-types = { version = "0.2", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.23"
