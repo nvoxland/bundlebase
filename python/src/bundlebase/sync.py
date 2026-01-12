@@ -297,6 +297,50 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def define_source(self, function: str, args: Dict[str, str]) -> "SyncBundleBuilder":
+        """Define a data source for the base pack.
+
+        Args:
+            function: Name of the source function (e.g., "remote_dir", "web_scrape")
+            args: Dictionary of arguments for the source function
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "define_source", function, args)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def define_source_for_join(
+        self, join_name: str, function: str, args: Dict[str, str]
+    ) -> "SyncBundleBuilder":
+        """Define a data source for a joined pack.
+
+        Args:
+            join_name: Name of the join to add the source to
+            function: Name of the source function (e.g., "remote_dir", "web_scrape")
+            args: Dictionary of arguments for the source function
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(
+            self._async, "define_source_for_join", join_name, function, args
+        )
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def refresh(self) -> int:
+        """Refresh data from all defined sources.
+
+        Checks all defined sources for new files and attaches them to the bundle.
+
+        Returns:
+            Number of newly attached files
+        """
+        coro = _call_original_method(self._async, "refresh")
+        return _loop_manager.run_sync(coro)
+
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
         """Execute a SQL query on the data.
 

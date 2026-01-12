@@ -430,17 +430,16 @@ class TestSyncCreateView:
 
     def test_sync_create_view_with_commit(self):
         """Test creating a view and committing synchronously."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            c = bb.create(tmpdir)
-            c.attach(datafile("customers-0-100.csv"))
+        c = bb.create(random_bundle())
+        c.attach(datafile("customers-0-100.csv"))
 
-            # Create view from select
-            filtered = c.select("select * from data limit 10")
-            c.create_view("limited", filtered)
-            c.commit("Added limited view")
+        # Create view from select
+        filtered = c.select("select * from data limit 10")
+        c.create_view("limited", filtered)
+        c.commit("Added limited view")
 
-            # If we get here without deadlock, test passes
-            assert True
+        # If we get here without deadlock, test passes
+        assert True
 
     def test_sync_create_view_chaining(self):
         """Test chaining operations with create_view."""
@@ -551,24 +550,21 @@ class TestSyncStatus:
 
     def test_sync_status_after_commit(self):
         """Test status() is cleared after commit."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            temp_path = f"{tmpdir}/status_test"
+        c = bb.create(random_bundle())
+        c.set_name("Test")
 
-            c = bb.create(temp_path)
-            c.set_name("Test")
+        # Should have operations before commit
+        status_before = c.status()
+        assert not status_before.is_empty()
+        assert len(status_before.changes) > 0
 
-            # Should have operations before commit
-            status_before = c.status()
-            assert not status_before.is_empty()
-            assert len(status_before.changes) > 0
+        # Commit the operations
+        c.commit("Initial setup")
 
-            # Commit the operations
-            c.commit("Initial setup")
-
-            # After commit, status should be cleared
-            status_after = c.status()
-            assert status_after.is_empty()
-            assert len(status_after.changes) == 0
+        # After commit, status should be cleared
+        status_after = c.status()
+        assert status_after.is_empty()
+        assert len(status_after.changes) == 0
 
 
 class TestSyncDetachBlock:
@@ -609,3 +605,31 @@ class TestSyncReplaceBlock:
 
         # Verify the data comes from the new location (50 rows)
         assert c.num_rows() == 50
+
+
+class TestSyncSource:
+    """Test synchronous source operations."""
+
+    def test_sync_define_source(self):
+        """Test defining a source synchronously."""
+        c = bb.create(random_bundle())
+        c.define_source("remote_dir", {"url": "file:///some/path/"})
+        assert c is not None
+
+    def test_sync_define_source_chaining(self):
+        """Test defining a source with chaining."""
+        c = bb.create(random_bundle())
+        c.set_name("Test Bundle").define_source(
+            "remote_dir", {"url": "file:///data/", "patterns": "**/*.parquet"}
+        )
+        assert c.name == "Test Bundle"
+
+    def test_sync_refresh(self):
+        """Test refresh synchronously with empty source."""
+        c = bb.create(random_bundle())
+        # Define a source pointing to a non-existent location (no files to find)
+        c.define_source("remote_dir", {"url": "file:///nonexistent/path/"})
+
+        # Refresh should return 0 (no new files)
+        count = c.refresh()
+        assert count == 0

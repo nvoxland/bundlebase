@@ -113,7 +113,7 @@ pub fn filename_from_url(url: &Url) -> String {
 
 /// Download data and save it to the data directory with a unique filename.
 ///
-/// Returns the URL of the saved file.
+/// Returns the relative filename (not a full URL) so that the bundle is portable.
 pub async fn download_to_data_dir(
     data: Bytes,
     filename: &str,
@@ -123,12 +123,12 @@ pub async fn download_to_data_dir(
     let target_name = format!("{}_{}", block_id, filename);
     let target_file = data_dir.io_file(&target_name)?;
     target_file.write(data).await?;
-    Ok(target_file.url().to_string())
+    Ok(target_name)
 }
 
 /// Download a file from an IOFile to the data directory.
 ///
-/// Returns the URL of the saved file.
+/// Returns the relative filename (not a full URL) so that the bundle is portable.
 pub async fn download_io_file_to_data_dir(
     file: &IOFile,
     data_dir: &IODir,
@@ -142,7 +142,7 @@ pub async fn download_io_file_to_data_dir(
 
 /// Download a file from an HTTP(S) URL to the data directory.
 ///
-/// Returns the URL of the saved file.
+/// Returns the relative filename (not a full URL) so that the bundle is portable.
 pub async fn download_http_to_data_dir(
     url: &Url,
     data_dir: &IODir,
