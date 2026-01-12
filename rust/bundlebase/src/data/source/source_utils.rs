@@ -2,12 +2,18 @@
 //!
 //! Provides common functionality used by multiple source function implementations.
 
+use super::source_function::{
+    AttachedFileInfo, DiscoveredLocation, MaterializedData, RefreshAction, SyncMode,
+};
 use crate::data::ObjectId;
 use crate::io::{IODir, IOFile, IOReader, IOWriter};
 use crate::{BundleConfig, BundlebaseError};
 use bytes::Bytes;
+use futures::future::BoxFuture;
 use glob::Pattern;
-use std::collections::HashMap;
+use log::debug;
+use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 use url::Url;
 
@@ -183,6 +189,108 @@ pub async fn materialize_url(
         let file = IOFile::from_url(url, config.clone())?;
         download_io_file_to_data_dir(&file, data_dir).await
     }
+}
+
+/// Read version from an HTTP(S) URL using ETag or Last-Modified header.
+///
+/// Sends a HEAD request and extracts version information from headers.
+/// Uses ETag if available, otherwise Last-Modified, otherwise falls back to status code.
+pub async fn read_http_version(url: &Url) -> Result<String, BundlebaseError> {
+    let response = reqwest::Client::new()
+        .head(url.as_str())
+        .send()
+        .await
+        .map_err(|e| BundlebaseError::from(format!("Failed to HEAD '{}': {}", url, e)))?;
+
+    // Use ETag if available, otherwise Last-Modified, otherwise status
+    if let Some(etag) = response.headers().get("etag") {
+        return Ok(etag.to_str().unwrap_or("unknown").to_string());
+    }
+    if let Some(lm) = response.headers().get("last-modified") {
+        return Ok(lm.to_str().unwrap_or("unknown").to_string());
+    }
+    Ok(format!("status-{}", response.status().as_u16()))
+}
+
+/// Process sync mode logic for discovered locations.
+///
+/// This is the shared implementation used by both remote_dir and web_scrape.
+/// It handles the core sync logic:
+/// - For new files: generate Add action
+/// - For existing files in Update/Sync mode: compare versions, generate Replace if changed
+/// - For Sync mode: generate Remove action for files no longer at source
+///
+/// # Arguments
+/// * `discovered` - All discovered locations from the source
+/// * `attached_files` - Map of source_location -> metadata for already-attached files
+/// * `mode` - Sync mode (Add, Update, or Sync)
+/// * `read_version` - Async function to read version from a URL
+/// * `materialize` - Async function to materialize a discovered location
+pub async fn process_sync_mode<M, MFut>(
+    discovered: Vec<DiscoveredLocation>,
+    attached_files: &HashMap<String, AttachedFileInfo>,
+    mode: SyncMode,
+    read_version: impl Fn(&Url) -> BoxFuture<'_, Result<String, BundlebaseError>>,
+    materialize: M,
+) -> Result<Vec<RefreshAction>, BundlebaseError>
+where
+    M: Fn(DiscoveredLocation) -> MFut,
+    MFut: Future<Output = Result<String, BundlebaseError>>,
+{
+    // Build set of discovered source_locations for Remove detection
+    let discovered_locations: HashSet<String> = discovered
+        .iter()
+        .map(|d| d.source_location.clone())
+        .collect();
+
+    let mut actions = Vec::new();
+
+    for location in discovered {
+        let source_location = location.source_location.clone();
+
+        if let Some(attached_info) = attached_files.get(&source_location) {
+            // Already attached - check for changes in Update/Sync mode
+            if mode == SyncMode::Update || mode == SyncMode::Sync {
+                let current_version = read_version(&location.url).await?;
+                if current_version != attached_info.version {
+                    debug!(
+                        "File {} changed: version {} -> {}",
+                        source_location, attached_info.version, current_version
+                    );
+                    let attach_location = materialize(location).await?;
+                    actions.push(RefreshAction::Replace {
+                        old_source_location: source_location.clone(),
+                        data: MaterializedData {
+                            attach_location,
+                            source_location,
+                        },
+                    });
+                }
+            }
+            // For Add mode, skip files that are already attached
+        } else {
+            // New file - add it
+            let attach_location = materialize(location).await?;
+            actions.push(RefreshAction::Add(MaterializedData {
+                attach_location,
+                source_location,
+            }));
+        }
+    }
+
+    // For Sync mode: find removed files
+    if mode == SyncMode::Sync {
+        for source_location in attached_files.keys() {
+            if !discovered_locations.contains(source_location) {
+                debug!("File {} no longer exists at remote", source_location);
+                actions.push(RefreshAction::Remove {
+                    source_location: source_location.clone(),
+                });
+            }
+        }
+    }
+
+    Ok(actions)
 }
 
 #[cfg(test)]

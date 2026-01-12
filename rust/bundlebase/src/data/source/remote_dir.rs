@@ -147,77 +147,48 @@ impl SourceFunction for RemoteDirFunction {
             .await?;
         let all_files = lister.list_files().await?;
 
-        // Filter files by pattern
-        let remote_files: Vec<_> = all_files
+        // Filter files by pattern and convert to DiscoveredLocation
+        let discovered: Vec<DiscoveredLocation> = all_files
             .into_iter()
             .filter(|file| {
                 let relative_path = Self::relative_path(&base_url, &file.url);
                 patterns.iter().any(|pattern| pattern.matches(&relative_path))
             })
+            .map(|file| DiscoveredLocation::from_url(file.url))
             .collect();
 
-        // Build a set of remote source_locations for quick lookup
-        let remote_locations: HashSet<String> =
-            remote_files.iter().map(|f| f.url.to_string()).collect();
+        // Use shared sync logic
+        let config_for_version = config.clone();
+        let should_copy = source_utils::should_copy(args);
+        let key_path = args.get("key_path").cloned();
+        let data_dir = data_dir.clone();
+        let config_for_materialize = config.clone();
 
-        let mut actions = Vec::new();
-
-        // Process each remote file
-        for file in remote_files {
-            let source_location = file.url.to_string();
-
-            if let Some(attached_info) = attached_files.get(&source_location) {
-                // File was previously attached - check if it changed (for Update/Sync modes)
-                if mode == SyncMode::Update || mode == SyncMode::Sync {
-                    // Read current version from remote
-                    let current_version =
-                        Self::read_remote_version(&file.url, &config).await?;
-
-                    if current_version != attached_info.version {
-                        debug!(
-                            "File {} changed: version {} -> {}",
-                            source_location, attached_info.version, current_version
-                        );
-                        // File changed - materialize and return Replace action
-                        let location = DiscoveredLocation::from_url(file.url);
-                        let attach_location =
-                            self.materialize(&location, args, data_dir, &config).await?;
-                        actions.push(RefreshAction::Replace {
-                            old_source_location: source_location.clone(),
-                            data: MaterializedData {
-                                attach_location,
-                                source_location,
-                            },
-                        });
-                    }
-                    // If version matches, file hasn't changed - no action needed
+        source_utils::process_sync_mode(
+            discovered,
+            attached_files,
+            mode,
+            |url| {
+                let cfg = config_for_version.clone();
+                Box::pin(async move { Self::read_remote_version(url, &cfg).await })
+            },
+            |loc| {
+                let dd = data_dir.clone();
+                let cfg = config_for_materialize.clone();
+                let kp = key_path.clone();
+                async move {
+                    Self::materialize_url_static(
+                        &loc.url,
+                        should_copy,
+                        kp.as_deref(),
+                        &dd,
+                        &cfg,
+                    )
+                    .await
                 }
-                // For Add mode, skip files that are already attached
-            } else {
-                // New file - materialize and return Add action
-                let location = DiscoveredLocation::from_url(file.url);
-                let attach_location =
-                    self.materialize(&location, args, data_dir, &config).await?;
-                actions.push(RefreshAction::Add(MaterializedData {
-                    attach_location,
-                    source_location,
-                }));
-            }
-        }
-
-        // For Sync mode, find files that were attached but no longer exist remotely
-        if mode == SyncMode::Sync {
-            for source_location in attached_files.keys() {
-                if !remote_locations.contains(source_location) {
-                    debug!("File {} no longer exists at remote", source_location);
-                    actions.push(RefreshAction::Remove {
-                        source_location: source_location.clone(),
-                    });
-                }
-            }
-        }
-
-        Ok(actions)
+            },
+        )
+        .await
     }
 }
 
@@ -242,12 +213,11 @@ impl RemoteDirFunction {
         }
     }
 
-    /// Materialize a file to the data directory.
+    /// Materialize a file to the data directory (static version for use in closures).
     ///
     /// Handles special protocols (SFTP, FTP) that require custom download logic,
     /// and delegates to standard utilities for other schemes.
-    async fn materialize_url(
-        &self,
+    async fn materialize_url_static(
         url: &Url,
         should_copy: bool,
         key_path: Option<&str>,
@@ -262,8 +232,8 @@ impl RemoteDirFunction {
 
         // Handle special protocols that need custom download logic
         match scheme {
-            "scp" | "sftp" => self.download_sftp(url, key_path, data_dir).await,
-            "ftp" => self.download_ftp(url, data_dir).await,
+            "scp" | "sftp" => Self::download_sftp_static(url, key_path, data_dir).await,
+            "ftp" => Self::download_ftp_static(url, data_dir).await,
             _ => {
                 // Use standard materialization for other schemes
                 source_utils::materialize_url(url, true, data_dir, config).await
@@ -271,9 +241,23 @@ impl RemoteDirFunction {
         }
     }
 
-    /// Download a file via SFTP/SCP.
-    async fn download_sftp(
+    /// Materialize a file to the data directory.
+    ///
+    /// Handles special protocols (SFTP, FTP) that require custom download logic,
+    /// and delegates to standard utilities for other schemes.
+    async fn materialize_url(
         &self,
+        url: &Url,
+        should_copy: bool,
+        key_path: Option<&str>,
+        data_dir: &IODir,
+        config: &Arc<BundleConfig>,
+    ) -> Result<String, BundlebaseError> {
+        Self::materialize_url_static(url, should_copy, key_path, data_dir, config).await
+    }
+
+    /// Download a file via SFTP/SCP (static version).
+    async fn download_sftp_static(
         url: &Url,
         key_path: Option<&str>,
         data_dir: &IODir,
@@ -302,8 +286,18 @@ impl RemoteDirFunction {
         source_utils::download_to_data_dir(data, &filename, data_dir).await
     }
 
-    /// Download a file via FTP.
-    async fn download_ftp(&self, url: &Url, data_dir: &IODir) -> Result<String, BundlebaseError> {
+    /// Download a file via SFTP/SCP.
+    async fn download_sftp(
+        &self,
+        url: &Url,
+        key_path: Option<&str>,
+        data_dir: &IODir,
+    ) -> Result<String, BundlebaseError> {
+        Self::download_sftp_static(url, key_path, data_dir).await
+    }
+
+    /// Download a file via FTP (static version).
+    async fn download_ftp_static(url: &Url, data_dir: &IODir) -> Result<String, BundlebaseError> {
         let ftp_file = FtpFile::from_url(url)?;
         let data = ftp_file.read_bytes().await?.ok_or_else(|| {
             BundlebaseError::from(format!("FTP file not found: {}", url))
@@ -311,6 +305,11 @@ impl RemoteDirFunction {
 
         let filename = source_utils::filename_from_url(url);
         source_utils::download_to_data_dir(data, &filename, data_dir).await
+    }
+
+    /// Download a file via FTP.
+    async fn download_ftp(&self, url: &Url, data_dir: &IODir) -> Result<String, BundlebaseError> {
+        Self::download_ftp_static(url, data_dir).await
     }
 }
 
