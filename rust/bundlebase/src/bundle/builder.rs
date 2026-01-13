@@ -696,7 +696,6 @@ impl BundleBuilder {
             // Get refresh actions from the source function
             let actions = source
                 .refresh(
-                    &self.bundle.operations,
                     self.data_dir(),
                     self.bundle.config(),
                     &registry,

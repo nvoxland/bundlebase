@@ -2,6 +2,7 @@ use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
 use crate::data::ObjectId;
 use crate::progress::ProgressScope;
+use crate::source::AttachedFileInfo;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -173,10 +174,28 @@ impl Operation for AttachBlockOp {
             bundle.indexes().clone(),
             Arc::new(bundle.data_dir().clone()),
             bundle.config(),
+            self.source.clone(),
+            self.source_location.clone(),
         ));
 
         let pack = bundle.get_pack(&self.pack).expect("Cannot find pack");
         pack.add_block(block);
+
+        // Add to source's attached_files tracking
+        if let Some(source_id) = &self.source {
+            if let Some(source) = bundle.get_source(source_id) {
+                if let Some(source_loc) = &self.source_location {
+                    source.add_attached_file(
+                        source_loc,
+                        AttachedFileInfo {
+                            location: self.location.clone(),
+                            version: self.version.clone(),
+                            bytes: self.bytes,
+                        },
+                    );
+                }
+            }
+        }
 
         Ok(())
     }

@@ -35,6 +35,10 @@ pub struct DataBlock {
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     data_dir: Arc<ObjectStoreDir>,
     config: Arc<BundleConfig>,
+    /// Source ID if this block was attached via a source refresh
+    source: Option<ObjectId>,
+    /// Original source location (e.g., remote URL) if from a source
+    source_location: Option<String>,
 }
 
 impl DataBlock {
@@ -59,6 +63,8 @@ impl DataBlock {
         indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
         data_dir: Arc<ObjectStoreDir>,
         config: Arc<BundleConfig>,
+        source: Option<ObjectId>,
+        source_location: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -68,11 +74,23 @@ impl DataBlock {
             indexes,
             data_dir,
             config,
+            source,
+            source_location,
         }
     }
 
     pub fn id(&self) -> &ObjectId {
         &self.id
+    }
+
+    /// Returns the source ID if this block was attached via a source refresh
+    pub fn source(&self) -> Option<&ObjectId> {
+        self.source.as_ref()
+    }
+
+    /// Returns the original source location (e.g., remote URL) if from a source
+    pub fn source_location(&self) -> Option<&str> {
+        self.source_location.as_deref()
     }
 
     /// Load index from disk and estimate selectivity
