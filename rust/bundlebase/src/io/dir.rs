@@ -51,11 +51,11 @@ pub trait IOReadWriteDir: IOReadDir {
     /// If a file with that hash already exists, the temp file is deleted
     /// and the existing filename is returned (deduplication).
     ///
-    /// Returns the relative filename in format `{hash_prefix}_{suffix}`.
+    /// Returns the relative filename in format `{hash_prefix}.{ext}`.
     async fn write_content_addressed(
         &self,
         mut source: BoxStream<'static, Result<Bytes, std::io::Error>>,
-        suffix: &str,
+        ext: &str,
     ) -> Result<String, BundlebaseError> {
         use futures::StreamExt;
 
@@ -76,7 +76,7 @@ pub trait IOReadWriteDir: IOReadDir {
 
         // Compute final name from hash (16 char hash prefix for readability)
         let hash = format!("{:x}", hasher.finalize());
-        let final_name = format!("{}_{}", &hash[..16], suffix);
+        let final_name = format!("{}.{}", &hash[..16], ext);
 
         // Check for duplicate - rename or delete temp
         if self.file(&final_name)?.exists().await? {
