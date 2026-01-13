@@ -9,6 +9,7 @@ mod indexed_blocks;
 mod init;
 mod operation;
 mod pack_join;
+mod source;
 mod sql;
 
 use crate::io::EMPTY_SCHEME;
@@ -25,11 +26,12 @@ pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::JoinTypeOption;
 pub use operation::{AnyOperation, BundleChange, DefineSourceOp, Operation};
 pub use pack_join::PackJoin;
+pub use source::Source;
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
 use crate::data::{DataReaderFactory, ObjectId, VersionedBlockId};
-use crate::source::{Source, SourceFunctionRegistry};
+use crate::source::SourceFunctionRegistry;
 use crate::functions::FunctionRegistry;
 use crate::index::IndexDefinition;
 use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
@@ -654,6 +656,19 @@ impl Bundle {
     /// Get all sources
     pub(crate) fn sources(&self) -> &HashMap<ObjectId, Arc<Source>> {
         &self.sources
+    }
+
+    /// Find a block by ID across all packs
+    pub(crate) fn find_block(&self, block_id: &ObjectId) -> Option<Arc<DataBlock>> {
+        let packs = self.data_packs.read();
+        for pack in packs.values() {
+            for block in pack.blocks() {
+                if block.id() == block_id {
+                    return Some(block);
+                }
+            }
+        }
+        None
     }
 
     /// Get the source function registry

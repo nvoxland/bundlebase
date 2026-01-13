@@ -1,4 +1,4 @@
-use crate::data::object_id::ObjectId;
+use crate::object_id::ObjectId;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
 use crate::data::{DataReader, LineOrientedFormat};

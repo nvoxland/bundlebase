@@ -72,6 +72,15 @@ impl Operation for DetachBlockOp {
     }
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+        // Look up block's source info before removing
+        if let Some(block) = bundle.find_block(&self.id) {
+            if let (Some(source_id), Some(source_loc)) = (block.source(), block.source_location()) {
+                if let Some(source) = bundle.get_source(source_id) {
+                    source.remove_attached_file(source_loc);
+                }
+            }
+        }
+
         // Remove the block from all packs
         for pack in bundle.data_packs.read().values() {
             pack.remove_block(&self.id);

@@ -1,3 +1,5 @@
+//! ObjectId module for unique object identification.
+
 use parking_lot::RwLock;
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

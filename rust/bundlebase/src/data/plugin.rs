@@ -20,7 +20,7 @@ use std::sync::Arc;
 #[cfg(test)]
 pub use mock::MockReader;
 
-use crate::data::object_id::ObjectId;
+use crate::object_id::ObjectId;
 use crate::{Bundle, BundlebaseError};
 
 #[async_trait]

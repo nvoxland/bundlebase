@@ -1,6 +1,7 @@
 use crate::bundle::operation::{AnyOperation, Operation};
 use crate::bundle::DataBlock;
 use crate::data::ObjectId;
+use crate::source::AttachedFileInfo;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
@@ -89,6 +90,10 @@ impl Operation for ReplaceBlockOp {
             .find_block_in_packs(bundle)
             .ok_or_else(|| DataFusionError::Execution(format!("Block {} not found", self.id)))?;
 
+        // Preserve source info from old block
+        let source = old_block.source().cloned();
+        let source_location = old_block.source_location().map(|s| s.to_string());
+
         // Create a new reader for the new location
         let reader = bundle
             .adapter_factory
@@ -101,7 +106,7 @@ impl Operation for ReplaceBlockOp {
             )
             .await?;
 
-        // Create a new block with the new reader
+        // Create a new block with the new reader (preserving source info)
         let new_block = Arc::new(DataBlock::new(
             self.id.clone(),
             old_block.schema(),
@@ -110,6 +115,8 @@ impl Operation for ReplaceBlockOp {
             bundle.indexes().clone(),
             Arc::new(bundle.data_dir().clone()),
             bundle.config(),
+            source.clone(),
+            source_location.clone(),
         ));
 
         // Replace the old block with the new one in the pack
@@ -121,7 +128,23 @@ impl Operation for ReplaceBlockOp {
             .ok_or_else(|| DataFusionError::Execution(format!("Pack {} not found", pack_id)))?;
 
         pack.remove_block(&self.id);
-        pack.add_block(new_block);
+        pack.add_block(new_block.clone());
+
+        // Update source's attached_files with the new location
+        if let Some(source_id) = &source {
+            if let Some(src) = bundle.get_source(source_id) {
+                if let Some(source_loc) = &source_location {
+                    src.update_attached_file(
+                        source_loc,
+                        AttachedFileInfo {
+                            location: self.new_location.clone(),
+                            version: old_block.version(),
+                            bytes: None, // Could read from adapter if needed
+                        },
+                    );
+                }
+            }
+        }
 
         log::info!(
             "Replaced block {} location to {}",
