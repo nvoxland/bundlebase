@@ -3,7 +3,7 @@
 //! Supports: file://, s3://, gs://, azure://, az://, memory://, empty://
 
 use crate::io::registry::IOFactory;
-use crate::io::traits::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
+use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::io::util::{join_path, join_url};
 use crate::io::{get_memory_store, get_null_store, EMPTY_SCHEME, EMPTY_URL};
 use crate::BundleConfig;

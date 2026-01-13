@@ -5,7 +5,7 @@
 //! - `tar:///data.tar/` (root of archive)
 
 use crate::io::registry::IOFactory;
-use crate::io::traits::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
+use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use async_trait::async_trait;

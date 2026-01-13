@@ -2,7 +2,7 @@
 //!
 //! Provides a central registry of storage backends that can be looked up by URL scheme.
 
-use crate::io::traits::{IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
+use crate::io::{IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use async_trait::async_trait;
