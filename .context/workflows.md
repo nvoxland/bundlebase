@@ -658,7 +658,7 @@ poetry run python docs/examples/example.py
 ```bash
 # Clean and rebuild
 cargo clean
-cargo build
+cargo test --no-run
 
 # Check specific error
 cargo check

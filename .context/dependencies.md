@@ -416,7 +416,7 @@ open https://github.com/apache/datafusion/releases
 # datafusion = "52.0.0"
 
 # Fix breaking changes
-cargo build
+cargo test --no-run
 # ... fix errors ...
 
 # Test thoroughly

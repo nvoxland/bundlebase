@@ -1,5 +1,6 @@
 use crate::data::{LineOrientedFormat, RowId, RowIdOffsetDataSource};
-use crate::io::{IOReader, IOFile};
+use crate::io::plugin::object_store::ObjectStoreFile;
+use crate::io::IOReadFile;
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use datafusion::common::DataFusionError;
@@ -53,7 +54,7 @@ impl<C: FileFormatConfig> FilePlugin<C> {
         schema: Option<SchemaRef>,
     ) -> Result<FileReader<C>, BundlebaseError> {
         Ok(FileReader::new(
-            &IOFile::from_str(source, bundle.data_dir(), bundle.config())?,
+            &ObjectStoreFile::from_str(source, bundle.data_dir(), bundle.config())?,
             self.config.clone(),
             bundle.ctx(),
             schema,
@@ -68,7 +69,7 @@ impl<C: FileFormatConfig> Default for FilePlugin<C> {
 }
 
 pub struct FileReader<C: FileFormatConfig> {
-    file: IOFile,
+    file: ObjectStoreFile,
     config: C,
     ctx: Arc<SessionContext>,
     schema: Option<SchemaRef>,
@@ -76,7 +77,7 @@ pub struct FileReader<C: FileFormatConfig> {
 
 impl<C: FileFormatConfig> FileReader<C> {
     pub fn new(
-        file: &IOFile,
+        file: &ObjectStoreFile,
         config: C,
         ctx: Arc<SessionContext>,
         schema: Option<SchemaRef>,
@@ -92,7 +93,7 @@ impl<C: FileFormatConfig> FileReader<C> {
 
 impl<C: FileFormatConfig> FileReader<C> {
     /// Get the IOFile
-    pub fn file(&self) -> &IOFile {
+    pub fn file(&self) -> &ObjectStoreFile {
         &self.file
     }
 

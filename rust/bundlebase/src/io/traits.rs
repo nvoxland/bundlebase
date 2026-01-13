@@ -58,7 +58,7 @@ impl FileInfo {
 /// Read-only file operations.
 /// Implemented by all storage backends - both read-only sources (FTP) and read-write stores.
 #[async_trait]
-pub trait IOReader: Send + Sync + Debug {
+pub trait IOReadFile: Send + Sync + Debug {
     /// Returns the URL this reader represents.
     fn url(&self) -> &Url;
 
@@ -94,10 +94,10 @@ pub trait IOReader: Send + Sync + Debug {
 }
 
 /// Directory listing operations.
-/// Separated from IOReader because not all file references support directory operations.
+/// Separated from IOReadFile because not all file references support directory operations.
 #[async_trait]
-pub trait IOLister: Send + Sync + Debug {
-    /// Returns the URL this lister represents.
+pub trait IODir: Send + Sync + Debug {
+    /// Returns the URL this directory represents.
     fn url(&self) -> &Url;
 
     /// List all files in this directory.
@@ -105,17 +105,17 @@ pub trait IOLister: Send + Sync + Debug {
 
     /// Get a subdirectory reference.
     /// The subdirectory is not validated to exist.
-    fn subdir(&self, name: &str) -> Result<Box<dyn IOLister>, BundlebaseError>;
+    fn subdir(&self, name: &str) -> Result<Box<dyn IODir>, BundlebaseError>;
 
     /// Get a file reference within this directory.
     /// The file is not validated to exist.
-    fn file(&self, name: &str) -> Result<Box<dyn IOReader>, BundlebaseError>;
+    fn file(&self, name: &str) -> Result<Box<dyn IOReadFile>, BundlebaseError>;
 }
 
 /// Write operations for storage backends that support modification.
 /// Not implemented by read-only backends (FTP, SCP when used as sources).
 #[async_trait]
-pub trait IOWriter: IOReader {
+pub trait IOReadWriteFile: IOReadFile {
     /// Write bytes to file, overwriting if exists.
     async fn write(&self, data: Bytes) -> Result<(), BundlebaseError>;
 
@@ -130,12 +130,6 @@ pub trait IOWriter: IOReader {
     /// Returns Ok even if the file doesn't exist.
     async fn delete(&self) -> Result<(), BundlebaseError>;
 }
-
-/// Combined trait for backends that support both reading and writing.
-pub trait IOReadWrite: IOReader + IOWriter {}
-
-/// Blanket implementation for types that implement both IOReader and IOWriter.
-impl<T: IOReader + IOWriter> IOReadWrite for T {}
 
 #[cfg(test)]
 mod tests {

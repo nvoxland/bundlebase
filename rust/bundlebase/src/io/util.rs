@@ -1,139 +1,13 @@
-use crate::io::{get_memory_store, get_null_store, TarObjectStore, EMPTY_SCHEME};
+//! Generic URL and path utilities for IO operations.
+//!
+//! These utilities are protocol-agnostic and used across different storage backends.
+
 use crate::BundlebaseError;
-use datafusion::datasource::object_store::ObjectStoreUrl;
 use object_store::path::Path;
-use object_store::{path::Path as ObjectPath, ObjectStore};
-use std::collections::HashMap;
-use std::sync::Arc;
 use url::Url;
 
-pub(super) fn compute_store_url(url: &Url) -> ObjectStoreUrl {
-    ObjectStoreUrl::parse(format!("{}://{}", url.scheme(), url.authority())).unwrap()
-}
-
-/// Parse a URL and return an ObjectStore and Path
-///
-/// # Arguments
-/// * `url` - The URL to parse
-/// * `config` - Optional configuration to apply to the ObjectStore
-pub(super) fn parse_url(
-    url: &Url,
-    config: &HashMap<String, String>,
-) -> Result<(Arc<dyn ObjectStore>, Path), BundlebaseError> {
-    // Handle tar:// scheme - format is tar:///path/to/archive.tar or tar:///path/to/archive.tar/internal/path
-    if url.scheme() == "tar" {
-        let full_path = url.path();
-        // Find where the .tar file ends and internal path begins
-        let (tar_path, internal_path) = if let Some(tar_idx) = full_path.find(".tar") {
-            let tar_end = tar_idx + 4; // ".tar" is 4 chars
-            let tar_file = &full_path[..tar_end];
-            let internal = if tar_end < full_path.len() {
-                &full_path[tar_end..]
-            } else {
-                "/"
-            };
-            (tar_file, internal)
-        } else {
-            // No .tar found, treat entire path as tar file
-            (full_path, "/")
-        };
-
-        let store = TarObjectStore::new(std::path::PathBuf::from(tar_path)).map_err(|e| {
-            format!("Failed to create TarObjectStore for {}: {}", tar_path, e)
-        })?;
-        return Ok((Arc::new(store), ObjectPath::from(internal_path)));
-    }
-
-    // Check for .tar file extension first (before other file:// handling)
-    if url.scheme() == "file" {
-        if let Ok(path) = url.to_file_path() {
-            if path.extension().and_then(|s| s.to_str()) == Some("tar") {
-                let store = TarObjectStore::new(path).map_err(|e| {
-                    format!("Failed to create TarObjectStore: {}", e)
-                })?;
-                return Ok((Arc::new(store), ObjectPath::from("/")));
-            }
-        }
-    }
-
-    if url.scheme() == EMPTY_SCHEME {
-        let store: Arc<dyn ObjectStore> = get_null_store();
-
-        if !url.authority().is_empty() {
-            return Err("Empty URL must be empty:///<path>.".into());
-        }
-        Ok((store, ObjectPath::from(url.path())))
-    } else if url.scheme() == "memory" {
-        if !url.authority().is_empty() {
-            return Err("Memory URL must be memory:///<path>".into());
-        }
-        Ok((get_memory_store(), url.path().into()))
-    } else if !config.is_empty() {
-        // Use config to build ObjectStore
-        let store = build_object_store(url, config)?;
-        let path = Path::from(url.path());
-        Ok((Arc::new(store), path))
-    } else {
-        // Fallback to object_store::parse_url when no config
-        let (store, path) = object_store::parse_url(url)?;
-        Ok((Arc::new(store), path))
-    }
-}
-
-/// Build an ObjectStore with configuration
-///
-/// Starts with Builder::from_env() to pick up environment variables,
-/// then applies config values on top (config overrides env vars).
-fn build_object_store(
-    url: &Url,
-    config: &HashMap<String, String>,
-) -> Result<Box<dyn ObjectStore>, BundlebaseError> {
-    use object_store::aws::AmazonS3Builder;
-    use object_store::azure::MicrosoftAzureBuilder;
-    use object_store::gcp::GoogleCloudStorageBuilder;
-
-    match url.scheme() {
-        "s3" => {
-            let mut builder = AmazonS3Builder::from_env().with_url(url.as_str());
-
-            // Apply config values
-            for (key, value) in config {
-                builder = builder.with_config(key.parse()?, value);
-            }
-
-            Ok(Box::new(builder.build()?))
-        }
-        "gs" => {
-            let mut builder = GoogleCloudStorageBuilder::from_env().with_url(url.as_str());
-
-            // Apply config values
-            for (key, value) in config {
-                builder = builder.with_config(key.parse()?, value);
-            }
-
-            Ok(Box::new(builder.build()?))
-        }
-        "azure" | "az" => {
-            let mut builder = MicrosoftAzureBuilder::from_env().with_url(url.as_str());
-
-            // Apply config values
-            for (key, value) in config {
-                builder = builder.with_config(key.parse()?, value);
-            }
-
-            Ok(Box::new(builder.build()?))
-        }
-        scheme => {
-            // For unknown schemes, fall back to object_store::parse_url
-            let (store, _) = object_store::parse_url(url)
-                .map_err(|e| format!("Unsupported URL scheme '{}': {}", scheme, e))?;
-            Ok(Box::new(store))
-        }
-    }
-}
-
 /// Like Url::join but allows an input with multiple sub-paths. The appended path is always treated as a relative path.
-pub(super) fn join_url(base: &Url, append: &str) -> Result<Url, BundlebaseError> {
+pub fn join_url(base: &Url, append: &str) -> Result<Url, BundlebaseError> {
     let base = if !base.path().ends_with('/') {
         &Url::parse(format!("{}/", base.to_string()).as_str())?
     } else {
@@ -150,7 +24,7 @@ pub(super) fn join_url(base: &Url, append: &str) -> Result<Url, BundlebaseError>
     Ok(return_url)
 }
 
-pub(super) fn join_path(base: &Path, append: &str) -> Result<Path, BundlebaseError> {
+pub fn join_path(base: &Path, append: &str) -> Result<Path, BundlebaseError> {
     let mut obj_path = base.clone();
     for segment in append.split('/').filter(|s| !s.is_empty()) {
         if segment == ".." {
@@ -176,16 +50,6 @@ pub(super) fn join_path(base: &Path, append: &str) -> Result<Path, BundlebaseErr
 mod tests {
     use super::*;
     use rstest::rstest;
-
-    #[rstest]
-    #[case("s3://bucket/path/to/dir", "s3://bucket/")]
-    #[case("s3://bucket/path/to/dir", "s3://bucket/")]
-    #[case("memory:///path/to/dir", "memory:///")]
-    #[case("memory:///path/to/dir", "memory:///")]
-    fn test_compute_store_url(#[case] url: &str, #[case] expected: &str) {
-        let url = Url::parse(url).unwrap();
-        assert_eq!(expected, compute_store_url(&url).as_str());
-    }
 
     #[rstest]
     #[case(

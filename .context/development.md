@@ -36,7 +36,7 @@ Compile Rust extension and install locally:
 **For Rust-only development:**
 ```bash
 # Fast, doesn't trigger Python rebuilds
-cargo build --profile test
+cargo  test --no-run --profile test
 cargo test --profile test
 ```
 

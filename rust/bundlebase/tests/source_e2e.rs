@@ -1,6 +1,7 @@
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::io::{IOLister, IOReader, IOWriter, IOFile};
+use bundlebase::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+use bundlebase::io::{IODir, IOReadFile, IOReadWriteFile};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::{Bundle, BundlebaseError, BundleConfig};
 use std::collections::HashMap;
@@ -21,11 +22,11 @@ fn make_source_args(url: &str, patterns: Option<&str>) -> HashMap<String, String
 /// Helper to copy a test file to a target directory
 async fn copy_test_file(
     test_file: &str,
-    target_dir: &bundlebase::io::IODir,
+    target_dir: &ObjectStoreDir,
     target_name: &str,
 ) -> Result<(), BundlebaseError> {
     let source_obj =
-        IOFile::from_url(&Url::parse(test_file)?, BundleConfig::default().into())?;
+        ObjectStoreFile::from_url(&Url::parse(test_file)?, BundleConfig::default().into())?;
     let data = source_obj
         .read_bytes()
         .await?
