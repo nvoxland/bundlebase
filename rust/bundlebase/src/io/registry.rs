@@ -32,7 +32,7 @@ pub trait IOFactory: Send + Sync {
     }
 
     /// Whether the backend supports true streaming writes.
-    /// When false, `write_stream_boxed()` buffers the entire content in memory first.
+    /// When false, `write_stream()` buffers the entire content in memory first.
     /// Default: true. Tar returns false because tar format requires knowing size upfront.
     fn supports_streaming_write(&self) -> bool {
         true
@@ -113,7 +113,7 @@ impl IORegistry {
     }
 
     /// Check if a URL scheme supports true streaming writes.
-    /// When false, `write_stream_boxed()` buffers the entire content in memory first.
+    /// When false, `write_stream()` buffers the entire content in memory first.
     pub fn supports_streaming_write(&self, scheme: &str) -> bool {
         self.factories
             .get(scheme)

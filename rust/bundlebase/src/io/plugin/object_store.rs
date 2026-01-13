@@ -2,7 +2,6 @@
 //!
 //! Supports: file://, s3://, gs://, azure://, az://, memory://, empty://
 
-use crate::data::ObjectId;
 use crate::io::registry::IOFactory;
 use crate::io::traits::{FileInfo, IODir, IOReadFile, IOReadWriteFile};
 use crate::io::util::{join_path, join_url};
@@ -278,17 +277,6 @@ impl ObjectStoreFile {
             }
         }
     }
-
-    /// Write data while computing its SHA256 hash.
-    /// Returns the hex-encoded hash after writing.
-    pub async fn write_with_hash(&self, data: Bytes) -> Result<String, BundlebaseError> {
-        let mut hasher = Sha256::new();
-        hasher.update(&data);
-        let hash = format!("{:x}", hasher.finalize());
-
-        self.write(data).await?;
-        Ok(hash)
-    }
 }
 
 #[async_trait]
@@ -398,14 +386,15 @@ impl IOReadWriteFile for ObjectStoreFile {
         Ok(())
     }
 
-    async fn write_stream_boxed(
+    async fn write_stream(
         &self,
-        mut source: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>>,
+        mut source: BoxStream<'static, Result<Bytes, std::io::Error>>,
     ) -> Result<(), BundlebaseError> {
         if self.url.scheme() == EMPTY_SCHEME {
             return Err(format!("Cannot write to {}:// URL: {}", EMPTY_SCHEME, self.url).into());
         }
 
+        // TODO: actually stream it
         // Collect stream into a single buffer
         let mut buffer = Vec::new();
         while let Some(chunk_result) = source.next().await {
@@ -537,54 +526,6 @@ impl ObjectStoreDir {
         })
     }
 
-    /// Rename a file within this directory.
-    /// Implemented as copy + delete to work across all storage backends.
-    pub async fn rename(&self, from: &str, to: &str) -> Result<(), BundlebaseError> {
-        let from_file = self.io_file(from)?;
-        let to_file = self.io_file(to)?;
-
-        // Read source, write to destination, delete source
-        let data = from_file
-            .read_bytes()
-            .await?
-            .ok_or_else(|| format!("Source file '{}' does not exist", from))?;
-        to_file.write(data).await?;
-        from_file.delete().await?;
-
-        Ok(())
-    }
-
-    /// Write data to a new file named by its content hash.
-    ///
-    /// The file is written to a temporary location first, then renamed to a
-    /// content-addressed name based on the SHA256 hash of the data.
-    /// If a file with that hash already exists, the temp file is deleted
-    /// and the existing filename is returned (deduplication).
-    ///
-    /// Returns the relative filename (hash-based).
-    pub async fn write_content_addressed(
-        &self,
-        data: Bytes,
-        suffix: &str,
-    ) -> Result<String, BundlebaseError> {
-        // Write to temp file while computing hash
-        let temp_name = format!("temp_{}", ObjectId::generate());
-        let temp_file = self.io_file(&temp_name)?;
-        let hash = temp_file.write_with_hash(data).await?;
-
-        // Rename to content-addressed name (16 char hash prefix for readability)
-        let final_name = format!("{}_{}", &hash[..16], suffix);
-        let final_file = self.io_file(&final_name)?;
-
-        // If file with this hash already exists, delete temp and return existing
-        if final_file.exists().await? {
-            temp_file.delete().await?;
-        } else {
-            self.rename(&temp_name, &final_name).await?;
-        }
-
-        Ok(final_name)
-    }
 }
 
 #[async_trait]
@@ -625,6 +566,19 @@ impl IODir for ObjectStoreDir {
 
     fn file(&self, name: &str) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         Ok(Box::new(self.io_file(name)?))
+    }
+
+    fn writable_file(&self, name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
+        Ok(Box::new(self.io_file(name)?))
+    }
+
+    async fn rename(&self, from: &str, to: &str) -> Result<(), BundlebaseError> {
+        let from_path = join_path(&self.path, from)?;
+        let to_path = join_path(&self.path, to)?;
+
+        // Use native rename - atomic on local filesystem, efficient on cloud
+        self.store.rename(&from_path, &to_path).await?;
+        Ok(())
     }
 }
 

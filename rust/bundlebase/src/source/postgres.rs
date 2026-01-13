@@ -15,6 +15,7 @@ use super::source_function::{
     SourceFunction, SyncMode,
 };
 use crate::io::plugin::object_store::ObjectStoreDir;
+use crate::io::IODir;
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::{
     ArrayRef, BooleanBuilder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
@@ -24,6 +25,7 @@ use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::stream;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 use std::collections::{HashMap, HashSet};
@@ -319,8 +321,9 @@ impl PostgresFunction {
 
         // Write with content-addressed naming
         let suffix = format!("{}.parquet", chunk.source_location.replace(':', "_").replace('-', "_"));
+        let data_stream = Box::pin(stream::once(async { Ok(Bytes::from(buffer)) }));
         let filename = data_dir
-            .write_content_addressed(Bytes::from(buffer), &suffix)
+            .write_content_addressed(data_stream, &suffix)
             .await?;
 
         Ok(filename)

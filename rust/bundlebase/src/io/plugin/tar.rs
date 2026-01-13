@@ -716,7 +716,7 @@ impl IOReadWriteFile for TarFile {
         Ok(())
     }
 
-    async fn write_stream_boxed(
+    async fn write_stream(
         &self,
         mut source: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>>,
     ) -> Result<(), BundlebaseError> {
