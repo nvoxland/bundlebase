@@ -323,7 +323,7 @@ impl PostgresFunction {
         let suffix = format!("{}.parquet", chunk.source_location.replace(':', "_").replace('-', "_"));
         let data_stream = Box::pin(stream::once(async { Ok(Bytes::from(buffer)) }));
         let filename = data_dir
-            .write_data(data_stream, &suffix)
+            .write_content_addressed(data_stream, &suffix)
             .await?;
 
         Ok(filename)

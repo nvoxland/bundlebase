@@ -36,10 +36,10 @@ pub trait IOReadDir: Send + Sync + Debug {
 pub trait IOReadWriteDir: IOReadDir {
     /// Get a writable subdirectory reference.
     /// The subdirectory is not validated to exist.
-    fn subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError>;
+    fn writable_subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError>;
 
     /// Get a writable file reference within this directory.
-    fn file(&self, name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError>;
+    fn writable_file(&self, name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError>;
 
     /// Rename a file within this directory.
     async fn rename(&self, from: &str, to: &str) -> Result<(), BundlebaseError>;
@@ -52,7 +52,7 @@ pub trait IOReadWriteDir: IOReadDir {
     /// and the existing filename is returned (deduplication).
     ///
     /// Returns the relative filename in format `{hash_prefix}_{suffix}`.
-    async fn write_data(
+    async fn write_content_addressed(
         &self,
         mut source: BoxStream<'static, Result<Bytes, std::io::Error>>,
         suffix: &str,
@@ -60,7 +60,7 @@ pub trait IOReadWriteDir: IOReadDir {
         use futures::StreamExt;
 
         let temp_name = format!("temp_{:016x}", rand::rng().random::<u64>());
-        let temp_file = self.file(&temp_name)?;
+        let temp_file = self.writable_file(&temp_name)?;
 
         // Consume stream: compute hash while buffering
         let mut hasher = Sha256::new();
