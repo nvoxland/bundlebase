@@ -1,5 +1,5 @@
 use crate::data::{ObjectId, VersionedBlockId};
-use crate::index::indexed_blocks::IndexedBlocks;
+use crate::bundle::IndexedBlocks;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;

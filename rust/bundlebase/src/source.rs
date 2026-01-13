@@ -30,7 +30,7 @@ pub use web_scrape::WebScrapeFunction;
 #[derive(Debug, Clone)]
 pub struct Source {
     id: ObjectId,
-    pack_id: ObjectId,
+    pack: ObjectId,
     /// Source function name (e.g., "remote_dir")
     function: String,
     /// Function-specific configuration arguments
@@ -41,13 +41,13 @@ pub struct Source {
 impl Source {
     pub fn new(
         id: ObjectId,
-        pack_id: ObjectId,
+        pack: ObjectId,
         function: String,
         args: HashMap<String, String>,
     ) -> Self {
         Self {
             id,
-            pack_id,
+            pack,
             function,
             args,
         }
@@ -74,8 +74,8 @@ impl Source {
         &self.id
     }
 
-    pub fn pack_id(&self) -> &ObjectId {
-        &self.pack_id
+    pub fn pack(&self) -> &ObjectId {
+        &self.pack
     }
 
     pub fn function(&self) -> &str {
@@ -176,7 +176,7 @@ mod tests {
         );
 
         assert_eq!(source.id(), &ObjectId::from(1));
-        assert_eq!(source.pack_id(), &ObjectId::from(2));
+        assert_eq!(source.pack(), &ObjectId::from(2));
         assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
         assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*"));
         assert_eq!(source.function(), "remote_dir");
@@ -195,7 +195,7 @@ mod tests {
 
         let source = Source::from_op(&op, &registry).unwrap();
         assert_eq!(source.id(), &ObjectId::from(1));
-        assert_eq!(source.pack_id(), &ObjectId::from(2));
+        assert_eq!(source.pack(), &ObjectId::from(2));
         assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
         assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*.parquet"));
         assert_eq!(source.function(), "remote_dir");

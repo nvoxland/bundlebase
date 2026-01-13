@@ -2,9 +2,13 @@ mod builder;
 mod column_lineage;
 mod command;
 mod commit;
+mod data_block;
+mod data_pack;
 mod facade;
+mod indexed_blocks;
 mod init;
 mod operation;
+mod pack_join;
 mod sql;
 
 use crate::io::EMPTY_SCHEME;
@@ -13,17 +17,21 @@ pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
 pub use command::parser::parse_command;
 pub use command::BundleCommand;
 pub use commit::{manifest_version, BundleCommit};
+pub use data_block::DataBlock;
+pub use data_pack::DataPack;
 pub use facade::BundleFacade;
+pub use indexed_blocks::IndexedBlocks;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::JoinTypeOption;
 pub use operation::{AnyOperation, BundleChange, DefineSourceOp, Operation};
+pub use pack_join::PackJoin;
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
-use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBlockId};
+use crate::data::{DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::source::{Source, SourceFunctionRegistry};
 use crate::functions::FunctionRegistry;
-use crate::index::{IndexDefinition, IndexedBlocks};
+use crate::index::IndexDefinition;
 use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
 use crate::io::{DataStorage, IOReadDir, EMPTY_URL};
 use crate::{BundleConfig, BundlebaseError};
@@ -70,7 +78,7 @@ pub struct Bundle {
     joins: HashMap<String, PackJoin>,
     sources: HashMap<ObjectId, Arc<Source>>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
-    pub(crate) views: HashMap<String, ObjectId>,
+    views: HashMap<String, ObjectId>,
     dataframe: DataFrameHolder,
 
     ctx: Arc<SessionContext>,
@@ -639,7 +647,7 @@ impl Bundle {
     pub(crate) fn get_source_for_pack(&self, pack_id: &ObjectId) -> Option<Arc<Source>> {
         self.sources
             .values()
-            .find(|s| s.pack_id() == pack_id)
+            .find(|s| s.pack() == pack_id)
             .cloned()
     }
 

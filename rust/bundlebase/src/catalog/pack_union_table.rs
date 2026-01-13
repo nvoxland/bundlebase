@@ -1,4 +1,4 @@
-use crate::data::DataPack;
+use crate::bundle::DataPack;
 use crate::io::ObjectId;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;

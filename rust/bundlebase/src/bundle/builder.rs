@@ -11,7 +11,8 @@ use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::operation::{CreateIndexOp, DropIndexOp, JoinTypeOption};
 use crate::bundle::{commit, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle};
-use crate::data::{DataBlock, ObjectId, VersionedBlockId};
+use super::DataBlock;
+use crate::data::{ObjectId, VersionedBlockId};
 use crate::source::RefreshAction;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
@@ -689,7 +690,7 @@ impl BundleBuilder {
 
         for source in sources {
             let registry = self.bundle.source_function_registry();
-            let pack_id = source.pack_id().clone();
+            let pack_id = source.pack().clone();
             let source_id = source.id().clone();
 
             // Get refresh actions from the source function

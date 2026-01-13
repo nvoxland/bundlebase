@@ -1,5 +1,6 @@
 use crate::bundle::operation::Operation;
-use crate::data::{DataBlock, ObjectId, RowId, VersionedBlockId};
+use crate::bundle::DataBlock;
+use crate::data::{ObjectId, RowId, VersionedBlockId};
 use crate::index::{ColumnIndex, IndexedValue};
 use crate::io::IOReadWriteFile;
 use crate::progress::ProgressScope;
@@ -233,7 +234,7 @@ impl Operation for IndexBlocksOp {
 
         if let Some(index_def) = index_def {
             // Create IndexedBlocks instance with VersionedBlockId
-            let indexed_blocks = Arc::new(crate::index::IndexedBlocks::new(
+            let indexed_blocks = Arc::new(crate::bundle::IndexedBlocks::new(
                 self.blocks.clone(),
                 self.path.clone(),
             ));

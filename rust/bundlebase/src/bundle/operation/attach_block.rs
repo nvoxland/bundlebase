@@ -1,5 +1,6 @@
 use crate::bundle::operation::Operation;
-use crate::data::{DataBlock, ObjectId};
+use crate::bundle::DataBlock;
+use crate::data::ObjectId;
 use crate::progress::ProgressScope;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use arrow_schema::SchemaRef;
