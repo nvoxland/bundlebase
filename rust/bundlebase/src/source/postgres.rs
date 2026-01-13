@@ -15,7 +15,7 @@ use super::source_function::{
     SourceFunction, SyncMode,
 };
 use crate::io::plugin::object_store::ObjectStoreDir;
-use crate::io::IODir;
+use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::{
     ArrayRef, BooleanBuilder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,

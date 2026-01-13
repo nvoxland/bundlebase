@@ -3,7 +3,7 @@
 //! Supports: file://, s3://, gs://, azure://, az://, memory://, empty://
 
 use crate::io::registry::IOFactory;
-use crate::io::traits::{FileInfo, IODir, IOReadFile, IOReadWriteFile};
+use crate::io::traits::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::io::util::{join_path, join_url};
 use crate::io::{get_memory_store, get_null_store, EMPTY_SCHEME, EMPTY_URL};
 use crate::BundleConfig;
@@ -529,7 +529,7 @@ impl ObjectStoreDir {
 }
 
 #[async_trait]
-impl IODir for ObjectStoreDir {
+impl IOReadDir for ObjectStoreDir {
     fn url(&self) -> &Url {
         &self.url
     }
@@ -560,12 +560,19 @@ impl IODir for ObjectStoreDir {
         Ok(files)
     }
 
-    fn subdir(&self, name: &str) -> Result<Box<dyn IODir>, BundlebaseError> {
+    fn subdir(&self, name: &str) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
         Ok(Box::new(self.io_subdir(name)?))
     }
 
     fn file(&self, name: &str) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         Ok(Box::new(self.io_file(name)?))
+    }
+}
+
+#[async_trait]
+impl IOReadWriteDir for ObjectStoreDir {
+    fn writable_subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError> {
+        Ok(Box::new(self.io_subdir(name)?))
     }
 
     fn writable_file(&self, name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
@@ -645,8 +652,20 @@ impl IOFactory for ObjectStoreIOFactory {
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IODir>, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
         Ok(Box::new(ObjectStoreDir::from_url(url, config)?))
+    }
+
+    async fn create_writable_lister(
+        &self,
+        url: &Url,
+        config: Arc<BundleConfig>,
+    ) -> Result<Option<Box<dyn IOReadWriteDir>>, BundlebaseError> {
+        // empty:// is read-only
+        if url.scheme() == "empty" {
+            return Ok(None);
+        }
+        Ok(Some(Box::new(ObjectStoreDir::from_url(url, config)?)))
     }
 
     async fn create_writer(

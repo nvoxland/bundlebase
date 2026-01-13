@@ -2,7 +2,7 @@
 //!
 //! Provides a central registry of storage backends that can be looked up by URL scheme.
 
-use crate::io::traits::{IODir, IOReadFile, IOReadWriteFile};
+use crate::io::traits::{IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -52,12 +52,23 @@ pub trait IOFactory: Send + Sync {
         config: Arc<BundleConfig>,
     ) -> Result<Box<dyn IOReadFile>, BundlebaseError>;
 
-    /// Create a lister for a directory URL.
+    /// Create a read-only directory lister for a directory URL.
     async fn create_lister(
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IODir>, BundlebaseError>;
+    ) -> Result<Box<dyn IOReadDir>, BundlebaseError>;
+
+    /// Create a writable directory for a directory URL.
+    /// Returns None if this backend is read-only.
+    async fn create_writable_lister(
+        &self,
+        url: &Url,
+        config: Arc<BundleConfig>,
+    ) -> Result<Option<Box<dyn IOReadWriteDir>>, BundlebaseError> {
+        let _ = (url, config);
+        Ok(None)
+    }
 
     /// Create a writer for a file URL.
     /// Returns None if this backend is read-only.
@@ -142,16 +153,33 @@ impl IORegistry {
         factory.create_reader(url, config).await
     }
 
-    /// Create a lister for any supported URL.
+    /// Create a read-only directory lister for any supported URL.
     pub async fn create_lister(
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IODir>, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
         let factory = self.get_factory(url.scheme()).ok_or_else(|| {
             format!("Unsupported URL scheme: {}", url.scheme())
         })?;
         factory.create_lister(url, config).await
+    }
+
+    /// Create a writable directory for any supported URL.
+    /// Returns an error if the scheme is read-only.
+    pub async fn create_writable_lister(
+        &self,
+        url: &Url,
+        config: Arc<BundleConfig>,
+    ) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError> {
+        let factory = self.get_factory(url.scheme()).ok_or_else(|| {
+            format!("Unsupported URL scheme: {}", url.scheme())
+        })?;
+
+        factory
+            .create_writable_lister(url, config)
+            .await?
+            .ok_or_else(|| format!("Storage scheme '{}' is read-only", url.scheme()).into())
     }
 
     /// Create a writer for any supported URL.

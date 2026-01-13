@@ -5,7 +5,7 @@
 //! - `tar:///data.tar/` (root of archive)
 
 use crate::io::registry::IOFactory;
-use crate::io::traits::{FileInfo, IODir, IOReadFile, IOReadWriteFile};
+use crate::io::traits::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -788,7 +788,7 @@ impl TarDir {
 }
 
 #[async_trait]
-impl IODir for TarDir {
+impl IOReadDir for TarDir {
     fn url(&self) -> &Url {
         &self.url
     }
@@ -832,7 +832,7 @@ impl IODir for TarDir {
         Ok(files)
     }
 
-    fn subdir(&self, name: &str) -> Result<Box<dyn IODir>, BundlebaseError> {
+    fn subdir(&self, name: &str) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
         let new_path = if self.path.as_ref().is_empty() {
             ObjectPath::from(name.trim_start_matches('/'))
         } else {
@@ -867,6 +867,50 @@ impl IODir for TarDir {
         ))?;
 
         Ok(Box::new(TarFile::new(new_url, self.store.clone(), new_path)))
+    }
+}
+
+#[async_trait]
+impl IOReadWriteDir for TarDir {
+    fn writable_subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError> {
+        let new_path = if self.path.as_ref().is_empty() {
+            ObjectPath::from(name.trim_start_matches('/'))
+        } else {
+            self.path.child(name.trim_start_matches('/'))
+        };
+
+        let new_url = Url::parse(&format!(
+            "tar://{}/{}",
+            self.archive_path.display(),
+            new_path.as_ref()
+        ))?;
+
+        Ok(Box::new(TarDir {
+            url: new_url,
+            store: self.store.clone(),
+            path: new_path,
+            archive_path: self.archive_path.clone(),
+        }))
+    }
+
+    fn writable_file(&self, name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
+        let new_path = if self.path.as_ref().is_empty() {
+            ObjectPath::from(name.trim_start_matches('/'))
+        } else {
+            self.path.child(name.trim_start_matches('/'))
+        };
+
+        let new_url = Url::parse(&format!(
+            "tar://{}/{}",
+            self.archive_path.display(),
+            new_path.as_ref()
+        ))?;
+
+        Ok(Box::new(TarFile::new(new_url, self.store.clone(), new_path)))
+    }
+
+    async fn rename(&self, _from: &str, _to: &str) -> Result<(), BundlebaseError> {
+        Err("Tar archives do not support rename".into())
     }
 }
 
@@ -905,8 +949,16 @@ impl IOFactory for TarIOFactory {
         &self,
         url: &Url,
         _config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IODir>, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
         Ok(Box::new(TarDir::from_url(url)?))
+    }
+
+    async fn create_writable_lister(
+        &self,
+        url: &Url,
+        _config: Arc<BundleConfig>,
+    ) -> Result<Option<Box<dyn IOReadWriteDir>>, BundlebaseError> {
+        Ok(Some(Box::new(TarDir::from_url(url)?)))
     }
 
     async fn create_writer(

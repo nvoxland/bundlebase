@@ -95,10 +95,10 @@ pub trait IOReadFile: Send + Sync + Debug {
     async fn version(&self) -> Result<String, BundlebaseError>;
 }
 
-/// Directory listing operations.
-/// Separated from IOReadFile because not all file references support directory operations.
+/// Read-only directory operations.
+/// Implemented by all storage backends - both read-only sources (FTP) and read-write stores.
 #[async_trait]
-pub trait IODir: Send + Sync + Debug {
+pub trait IOReadDir: Send + Sync + Debug {
     /// Returns the URL this directory represents.
     fn url(&self) -> &Url;
 
@@ -107,23 +107,26 @@ pub trait IODir: Send + Sync + Debug {
 
     /// Get a subdirectory reference.
     /// The subdirectory is not validated to exist.
-    fn subdir(&self, name: &str) -> Result<Box<dyn IODir>, BundlebaseError>;
+    fn subdir(&self, name: &str) -> Result<Box<dyn IOReadDir>, BundlebaseError>;
 
     /// Get a file reference within this directory.
     /// The file is not validated to exist.
     fn file(&self, name: &str) -> Result<Box<dyn IOReadFile>, BundlebaseError>;
+}
+
+/// Write operations for directories that support modification.
+/// Not implemented by read-only backends (FTP, SCP when used as sources).
+#[async_trait]
+pub trait IOReadWriteDir: IOReadDir {
+    /// Get a writable subdirectory reference.
+    /// The subdirectory is not validated to exist.
+    fn writable_subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError>;
 
     /// Get a writable file reference within this directory.
-    /// Returns an error for read-only directories.
-    fn writable_file(&self, _name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
-        Err(format!("Directory {} does not support writable files", self.url()).into())
-    }
+    fn writable_file(&self, name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError>;
 
     /// Rename a file within this directory.
-    /// Returns an error for read-only directories.
-    async fn rename(&self, _from: &str, _to: &str) -> Result<(), BundlebaseError> {
-        Err(format!("Directory {} does not support rename", self.url()).into())
-    }
+    async fn rename(&self, from: &str, to: &str) -> Result<(), BundlebaseError>;
 
     /// Write data stream to a new file named by its content hash.
     ///

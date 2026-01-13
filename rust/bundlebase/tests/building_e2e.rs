@@ -1,7 +1,7 @@
 use bundlebase;
 use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME, META_DIR};
 use bundlebase::io::plugin::object_store::ObjectStoreFile;
-use bundlebase::io::{IODir, IOReadFile, IOReadWriteFile};
+use bundlebase::io::{IOReadDir, IOReadFile, IOReadWriteFile};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::Bundle;
 use bundlebase::BundleConfig;

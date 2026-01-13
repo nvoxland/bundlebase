@@ -1,7 +1,7 @@
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
-use bundlebase::io::{IODir, IOReadFile, IOReadWriteFile};
+use bundlebase::io::{IOReadDir, IOReadFile, IOReadWriteFile};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::{Bundle, BundlebaseError, BundleConfig};
 use std::collections::HashMap;

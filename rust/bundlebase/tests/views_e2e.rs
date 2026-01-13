@@ -1,4 +1,4 @@
-use bundlebase::io::IODir;
+use bundlebase::io::IOReadDir;
 use bundlebase::test_utils::{
     assert_vec_regexp, describe_ops, field_names, random_memory_url, test_datafile,
 };

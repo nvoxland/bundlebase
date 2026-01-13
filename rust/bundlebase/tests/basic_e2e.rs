@@ -2,7 +2,7 @@ use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use bundlebase;
 use bundlebase::bundle::{BundleFacade, INIT_FILENAME, META_DIR};
 use bundlebase::io::plugin::object_store::ObjectStoreFile;
-use bundlebase::io::{IODir, IOReadFile};
+use bundlebase::io::{IOReadDir, IOReadFile};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::BundleConfig;
 use bundlebase::FunctionSignature;
