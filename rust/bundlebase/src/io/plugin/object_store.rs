@@ -571,11 +571,11 @@ impl IOReadDir for ObjectStoreDir {
 
 #[async_trait]
 impl IOReadWriteDir for ObjectStoreDir {
-    fn writable_subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError> {
+    fn subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError> {
         Ok(Box::new(self.io_subdir(name)?))
     }
 
-    fn writable_file(&self, name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
+    fn file(&self, name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
         Ok(Box::new(self.io_file(name)?))
     }
 

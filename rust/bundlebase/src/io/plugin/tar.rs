@@ -872,7 +872,7 @@ impl IOReadDir for TarDir {
 
 #[async_trait]
 impl IOReadWriteDir for TarDir {
-    fn writable_subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError> {
+    fn subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError> {
         let new_path = if self.path.as_ref().is_empty() {
             ObjectPath::from(name.trim_start_matches('/'))
         } else {
@@ -893,7 +893,7 @@ impl IOReadWriteDir for TarDir {
         }))
     }
 
-    fn writable_file(&self, name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
+    fn file(&self, name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
         let new_path = if self.path.as_ref().is_empty() {
             ObjectPath::from(name.trim_start_matches('/'))
         } else {
