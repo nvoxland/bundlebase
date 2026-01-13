@@ -5,7 +5,7 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 #[cfg(test)]
-use crate::index::IndexedBlocks;
+use crate::bundle::IndexedBlocks;
 
 /// Determines whether an index should be used for a query
 pub struct IndexSelector;

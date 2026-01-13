@@ -1,5 +1,5 @@
 use crate::catalog::PackUnionTable;
-use crate::data::DataPack;
+use crate::bundle::DataPack;
 use crate::io::ObjectId;
 use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, TableProvider};
@@ -92,7 +92,8 @@ impl SchemaProvider for PackSchemaProvider {
 mod tests {
     use super::*;
     use crate::catalog::BlockSchemaProvider;
-    use crate::data::{DataBlock, MockReader};
+    use crate::bundle::DataBlock;
+    use crate::data::MockReader;
     use crate::BundleConfig;
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::prelude::SessionContext;

@@ -1,5 +1,4 @@
-use crate::bundle::JoinTypeOption;
-use crate::data::{DataBlock, DataPack, PackJoin};
+use super::{DataBlock, DataPack, JoinTypeOption, PackJoin};
 use crate::{catalog, BundlebaseError};
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -34,7 +33,7 @@ pub(crate) async fn column_sources_from_df(
     data_packs: Option<
         &Arc<
             parking_lot::RwLock<
-                std::collections::HashMap<crate::io::ObjectId, Arc<crate::data::DataPack>>,
+                std::collections::HashMap<crate::io::ObjectId, Arc<DataPack>>,
             >,
         >,
     >,

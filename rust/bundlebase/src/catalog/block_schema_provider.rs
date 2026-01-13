@@ -1,4 +1,4 @@
-use crate::data::{DataBlock, DataPack};
+use crate::bundle::{DataBlock, DataPack};
 use crate::io::ObjectId;
 use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, TableProvider};
