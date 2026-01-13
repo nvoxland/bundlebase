@@ -5,7 +5,7 @@
 //! types. Extracting a common abstraction would add complexity without clear benefit.
 
 use crate::io::registry::IOFactory;
-use crate::io::traits::{FileInfo, IODir, IOReadFile, IOReadWriteFile};
+use crate::io::traits::{FileInfo, IOReadDir, IOReadFile, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -352,7 +352,7 @@ impl FtpDir {
 }
 
 #[async_trait]
-impl IODir for FtpDir {
+impl IOReadDir for FtpDir {
     fn url(&self) -> &Url {
         &self.url
     }
@@ -388,7 +388,7 @@ impl IODir for FtpDir {
         Ok(files)
     }
 
-    fn subdir(&self, name: &str) -> Result<Box<dyn IODir>, BundlebaseError> {
+    fn subdir(&self, name: &str) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
         let new_path = if self.path.ends_with('/') {
             format!("{}{}", self.path, name.trim_start_matches('/'))
         } else {
@@ -462,7 +462,7 @@ impl IOFactory for FtpIOFactory {
         &self,
         url: &Url,
         _config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IODir>, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
         Ok(Box::new(FtpDir::from_url(url)?))
     }
 

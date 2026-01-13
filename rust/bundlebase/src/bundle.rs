@@ -25,7 +25,7 @@ use crate::source::{Source, SourceFunctionRegistry};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
 use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
-use crate::io::{DataStorage, IODir, EMPTY_URL};
+use crate::io::{DataStorage, IOReadDir, EMPTY_URL};
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::Array;
 use arrow_schema::SchemaRef;

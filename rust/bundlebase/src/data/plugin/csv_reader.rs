@@ -223,7 +223,7 @@ impl CsvReader {
 mod tests {
     use super::*;
     use crate::data::plugin::ReaderPlugin;
-    use crate::io::IODir;
+    use crate::io::IOReadDir;
     use crate::test_utils::test_datafile;
     use crate::Bundle;
     use arrow::array::{downcast_array, Array, StringArray};

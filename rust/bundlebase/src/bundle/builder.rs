@@ -17,7 +17,7 @@ use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
 use crate::io::plugin::object_store::ObjectStoreDir;
-use crate::io::{IODir, IOReadFile, IOReadWriteFile};
+use crate::io::{IOReadDir, IOReadFile, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;

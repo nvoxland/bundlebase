@@ -3,7 +3,7 @@
 //! ## Module Structure
 //!
 //! **Generic (protocol-agnostic):**
-//! - `traits` - Core traits: `IOReadFile`, `IOReadWriteFile`, `IODir`, `FileInfo`
+//! - `traits` - Core traits: `IOReadFile`, `IOReadWriteFile`, `IOReadDir`, `IOReadWriteDir`, `FileInfo`
 //! - `registry` - `IORegistry` for dispatching by URL scheme
 //! - `util` - URL and path utilities
 //!
@@ -25,7 +25,7 @@ pub mod plugin;
 pub use registry::{io_registry, IOFactory, IORegistry};
 
 // Re-export traits
-pub use traits::{FileInfo, IODir, IOReadFile, IOReadWriteFile};
+pub use traits::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 
 // Re-export ObjectId from data module
 pub use crate::data::ObjectId;

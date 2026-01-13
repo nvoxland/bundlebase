@@ -2,7 +2,7 @@
 use arrow::datatypes::SchemaRef;
 use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
 use bundlebase::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
-use bundlebase::io::{IODir, IOReadFile};
+use bundlebase::io::{IOReadDir, IOReadFile};
 use bundlebase::{BundlebaseError, BundleConfig};
 use url::Url;
 

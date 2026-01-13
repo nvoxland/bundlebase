@@ -2,7 +2,7 @@ use crate::bundle::commit::BundleCommit;
 use crate::bundle::operation::{AnyOperation, BundleChange, Operation};
 use crate::bundle::META_DIR;
 use crate::data::ObjectId;
-use crate::io::{IODir, IOReadWriteFile};
+use crate::io::{IOReadDir, IOReadWriteFile};
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
