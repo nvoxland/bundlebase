@@ -8,6 +8,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
+use rand::Rng;
+use sha2::{Digest, Sha256};
 use std::fmt::Debug;
 use url::Url;
 
@@ -110,6 +112,62 @@ pub trait IODir: Send + Sync + Debug {
     /// Get a file reference within this directory.
     /// The file is not validated to exist.
     fn file(&self, name: &str) -> Result<Box<dyn IOReadFile>, BundlebaseError>;
+
+    /// Get a writable file reference within this directory.
+    /// Returns an error for read-only directories.
+    fn writable_file(&self, _name: &str) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
+        Err(format!("Directory {} does not support writable files", self.url()).into())
+    }
+
+    /// Rename a file within this directory.
+    /// Returns an error for read-only directories.
+    async fn rename(&self, _from: &str, _to: &str) -> Result<(), BundlebaseError> {
+        Err(format!("Directory {} does not support rename", self.url()).into())
+    }
+
+    /// Write data stream to a new file named by its content hash.
+    ///
+    /// The stream is consumed while computing a SHA256 hash. The file is written
+    /// to a temporary location first, then renamed to a content-addressed name.
+    /// If a file with that hash already exists, the temp file is deleted
+    /// and the existing filename is returned (deduplication).
+    ///
+    /// Returns the relative filename in format `{hash_prefix}_{suffix}`.
+    async fn write_content_addressed(
+        &self,
+        mut source: BoxStream<'static, Result<Bytes, std::io::Error>>,
+        suffix: &str,
+    ) -> Result<String, BundlebaseError> {
+        use futures::StreamExt;
+
+        let temp_name = format!("temp_{:016x}", rand::rng().random::<u64>());
+        let temp_file = self.writable_file(&temp_name)?;
+
+        // Consume stream: compute hash while buffering
+        let mut hasher = Sha256::new();
+        let mut buffer = Vec::new();
+        while let Some(chunk_result) = source.next().await {
+            let chunk = chunk_result.map_err(|e| BundlebaseError::from(e.to_string()))?;
+            hasher.update(&chunk);
+            buffer.extend_from_slice(&chunk);
+        }
+
+        // Write buffered data to temp file
+        temp_file.write(Bytes::from(buffer)).await?;
+
+        // Compute final name from hash (16 char hash prefix for readability)
+        let hash = format!("{:x}", hasher.finalize());
+        let final_name = format!("{}_{}", &hash[..16], suffix);
+
+        // Check for duplicate - rename or delete temp
+        if self.file(&final_name)?.exists().await? {
+            temp_file.delete().await?;
+        } else {
+            self.rename(&temp_name, &final_name).await?;
+        }
+
+        Ok(final_name)
+    }
 }
 
 /// Write operations for storage backends that support modification.
@@ -121,7 +179,7 @@ pub trait IOReadWriteFile: IOReadFile {
 
     /// Write stream to file, overwriting if exists.
     /// Uses a boxed stream for dyn compatibility.
-    async fn write_stream_boxed(
+    async fn write_stream(
         &self,
         source: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>>,
     ) -> Result<(), BundlebaseError>;

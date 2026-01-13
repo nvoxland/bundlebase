@@ -298,7 +298,7 @@ impl BundleBuilder {
         // Write as stream
         let data = bytes::Bytes::from(yaml);
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
-        manifest_file.write_stream_boxed(Box::pin(stream)).await?;
+        manifest_file.write_stream(Box::pin(stream)).await?;
 
         // Update base to reflect the committed version
         // Preserve explicit_config from current bundle

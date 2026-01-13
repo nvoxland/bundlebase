@@ -102,7 +102,7 @@ impl CreateViewOp {
         let filename = format!("00001{}.yaml", hash_short);
         let data = bytes::Bytes::from(yaml);
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
-        manifest_dir.io_file(&filename)?.write_stream_boxed(Box::pin(stream)).await?;
+        manifest_dir.io_file(&filename)?.write_stream(Box::pin(stream)).await?;
         debug!(
             "Wrote view commit: {} with {} operations",
             filename,
