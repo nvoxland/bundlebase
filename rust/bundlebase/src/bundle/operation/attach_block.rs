@@ -1,6 +1,7 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
 use crate::data::ObjectId;
+use crate::io::IOReadDir;
 use crate::progress::ProgressScope;
 use crate::source::AttachedFileInfo;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
@@ -134,7 +135,10 @@ impl AttachBlockOp {
         }
 
         _progress.update(5, Some("Building layout"));
-        op.layout = adapter.build_layout(builder.data_dir()).await?;
+        op.layout = match adapter.build_layout(builder.data_dir()).await? {
+            Some(file) => Some(builder.data_dir().relative_path(file.as_ref())?),
+            None => None,
+        };
 
         Ok(op)
     }

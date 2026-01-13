@@ -227,8 +227,7 @@ pub trait SourceFunction: Send + Sync {
 
     /// Materialize a single discovered location.
     ///
-    /// Downloads/copies the data to `data_dir` and returns the location
-    /// where it was saved.
+    /// Downloads/copies the data to `data_dir` and returns a file reference.
     ///
     /// Default implementation uses `source_utils::materialize_url` which handles
     /// HTTP(S) via reqwest and other schemes via IOFile.
@@ -240,7 +239,7 @@ pub trait SourceFunction: Send + Sync {
         args: &HashMap<String, String>,
         data_dir: &ObjectStoreDir,
         config: &Arc<BundleConfig>,
-    ) -> Result<String, BundlebaseError> {
+    ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
         let should_copy = source_utils::should_copy(args);
         source_utils::materialize_url(&location.url, should_copy, data_dir, config).await
     }
@@ -269,9 +268,9 @@ pub trait SourceFunction: Send + Sync {
 
         let mut results = Vec::with_capacity(discovered.len());
         for location in discovered {
-            let attach_location = self.materialize(&location, args, data_dir, &config).await?;
+            let file = self.materialize(&location, args, data_dir, &config).await?;
             results.push(MaterializedData {
-                attach_location,
+                attach_location: file.url().to_string(),
                 source_location: location.source_location,
             });
         }

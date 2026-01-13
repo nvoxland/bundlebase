@@ -5,9 +5,9 @@
 use super::source_function::{
     AttachedFileInfo, DiscoveredLocation, MaterializedData, RefreshAction, SyncMode,
 };
-use crate::data::ObjectId;
 use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
-use crate::io::{IOReadFile, IOReadWriteFile};
+use crate::io::{IOReadFile, IOReadWriteDir};
+use futures::stream;
 use crate::{BundleConfig, BundlebaseError};
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -112,28 +112,30 @@ pub fn filename_from_url(url: &Url) -> String {
         .unwrap_or_else(|| "data".to_string())
 }
 
-/// Download data and save it to the data directory with a unique filename.
+/// Download data and save it to the data directory using content-addressed storage.
 ///
-/// Returns the relative filename (not a full URL) so that the bundle is portable.
+/// Returns a file reference to the written file.
 pub async fn download_to_data_dir(
     data: Bytes,
     filename: &str,
     data_dir: &ObjectStoreDir,
-) -> Result<String, BundlebaseError> {
-    let block_id = ObjectId::generate();
-    let target_name = format!("{}_{}", block_id, filename);
-    let target_file = data_dir.io_file(&target_name)?;
-    target_file.write(data).await?;
-    Ok(target_name)
+) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+    // Extract extension from filename (e.g., "file.parquet" -> "parquet")
+    let ext = filename.rsplit('.').next().unwrap_or("dat");
+
+    // Create a stream from the bytes
+    let data_stream = Box::pin(stream::once(async { Ok::<_, std::io::Error>(data) }));
+
+    data_dir.write_stream(data_stream, ext).await
 }
 
 /// Download a file from an IOFile to the data directory.
 ///
-/// Returns the relative filename (not a full URL) so that the bundle is portable.
+/// Returns a file reference to the written file.
 pub async fn download_io_file_to_data_dir(
     file: &ObjectStoreFile,
     data_dir: &ObjectStoreDir,
-) -> Result<String, BundlebaseError> {
+) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
     let data = file.read_bytes().await?.ok_or_else(|| {
         BundlebaseError::from(format!("File not found: {}", file.url()))
     })?;
@@ -143,11 +145,11 @@ pub async fn download_io_file_to_data_dir(
 
 /// Download a file from an HTTP(S) URL to the data directory.
 ///
-/// Returns the relative filename (not a full URL) so that the bundle is portable.
+/// Returns a file reference to the written file.
 pub async fn download_http_to_data_dir(
     url: &Url,
     data_dir: &ObjectStoreDir,
-) -> Result<String, BundlebaseError> {
+) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
     let response = reqwest::get(url.as_str())
         .await
         .map_err(|e| BundlebaseError::from(format!("Failed to download '{}': {}", url, e)))?;
@@ -173,15 +175,16 @@ pub async fn download_http_to_data_dir(
 /// Materialize a file from any supported URL scheme to the data directory.
 ///
 /// Handles HTTP(S) via reqwest, other schemes via IOFile.
-/// If should_copy is false, returns the original URL.
+/// If should_copy is false, returns a file reference to the original URL.
 pub async fn materialize_url(
     url: &Url,
     should_copy: bool,
     data_dir: &ObjectStoreDir,
     config: &Arc<BundleConfig>,
-) -> Result<String, BundlebaseError> {
+) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
     if !should_copy {
-        return Ok(url.to_string());
+        let file = ObjectStoreFile::from_url(url, config.clone())?;
+        return Ok(Box::new(file));
     }
 
     if url.scheme() == "http" || url.scheme() == "https" {
@@ -226,7 +229,7 @@ pub async fn read_http_version(url: &Url) -> Result<String, BundlebaseError> {
 /// * `attached_files` - Map of source_location -> metadata for already-attached files
 /// * `mode` - Sync mode (Add, Update, or Sync)
 /// * `read_version` - Async function to read version from a URL
-/// * `materialize` - Async function to materialize a discovered location
+/// * `materialize` - Async function to materialize a discovered location (returns IOReadFile)
 pub async fn process_sync_mode<M, MFut>(
     discovered: Vec<DiscoveredLocation>,
     attached_files: &HashMap<String, AttachedFileInfo>,
@@ -236,7 +239,7 @@ pub async fn process_sync_mode<M, MFut>(
 ) -> Result<Vec<RefreshAction>, BundlebaseError>
 where
     M: Fn(DiscoveredLocation) -> MFut,
-    MFut: Future<Output = Result<String, BundlebaseError>>,
+    MFut: Future<Output = Result<Box<dyn IOReadFile>, BundlebaseError>>,
 {
     // Build set of discovered source_locations for Remove detection
     let discovered_locations: HashSet<String> = discovered
@@ -258,11 +261,11 @@ where
                         "File {} changed: version {} -> {}",
                         source_location, attached_info.version, current_version
                     );
-                    let attach_location = materialize(location).await?;
+                    let file = materialize(location).await?;
                     actions.push(RefreshAction::Replace {
                         old_source_location: source_location.clone(),
                         data: MaterializedData {
-                            attach_location,
+                            attach_location: file.url().to_string(),
                             source_location,
                         },
                     });
@@ -271,9 +274,9 @@ where
             // For Add mode, skip files that are already attached
         } else {
             // New file - add it
-            let attach_location = materialize(location).await?;
+            let file = materialize(location).await?;
             actions.push(RefreshAction::Add(MaterializedData {
-                attach_location,
+                attach_location: file.url().to_string(),
                 source_location,
             }));
         }
