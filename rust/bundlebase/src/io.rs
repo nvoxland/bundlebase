@@ -3,7 +3,9 @@
 //! ## Module Structure
 //!
 //! **Generic (protocol-agnostic):**
-//! - `traits` - Core traits: `IOReadFile`, `IOReadWriteFile`, `IOReadDir`, `IOReadWriteDir`, `FileInfo`
+//! - `file_info` - `FileInfo` struct for file metadata
+//! - `file` - File traits: `IOReadFile`, `IOReadWriteFile`
+//! - `dir` - Directory traits: `IOReadDir`, `IOReadWriteDir`
 //! - `registry` - `IORegistry` for dispatching by URL scheme
 //! - `util` - URL and path utilities
 //!
@@ -14,8 +16,10 @@
 //! - `plugin::tar` - tar://
 
 // Generic modules
+pub mod dir;
+pub mod file;
+pub mod file_info;
 pub mod registry;
-pub mod traits;
 pub(crate) mod util;
 
 // Plugin system with protocol-specific implementations
@@ -24,8 +28,10 @@ pub mod plugin;
 // Re-export core types from registry
 pub use registry::{io_registry, IOFactory, IORegistry};
 
-// Re-export traits
-pub use traits::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
+// Re-export traits and types
+pub use dir::{IOReadDir, IOReadWriteDir};
+pub use file::{IOReadFile, IOReadWriteFile};
+pub use file_info::FileInfo;
 
 // Re-export ObjectId from data module
 pub use crate::data::ObjectId;

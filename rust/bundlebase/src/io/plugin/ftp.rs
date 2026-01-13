@@ -5,7 +5,7 @@
 //! types. Extracting a common abstraction would add complexity without clear benefit.
 
 use crate::io::registry::IOFactory;
-use crate::io::traits::{FileInfo, IOReadDir, IOReadFile, IOReadWriteFile};
+use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use async_trait::async_trait;
