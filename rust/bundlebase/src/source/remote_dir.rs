@@ -122,7 +122,7 @@ impl SourceFunction for RemoteDirFunction {
         args: &HashMap<String, String>,
         data_dir: &ObjectStoreDir,
         config: &Arc<BundleConfig>,
-    ) -> Result<String, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         let should_copy = source_utils::should_copy(args);
         let key_path = args.get("key_path").map(|s| s.as_str());
 
@@ -224,9 +224,10 @@ impl RemoteDirFunction {
         key_path: Option<&str>,
         data_dir: &ObjectStoreDir,
         config: &Arc<BundleConfig>,
-    ) -> Result<String, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         if !should_copy {
-            return Ok(url.to_string());
+            let file = ObjectStoreFile::from_url(url, config.clone())?;
+            return Ok(Box::new(file));
         }
 
         let scheme = url.scheme();
@@ -253,7 +254,7 @@ impl RemoteDirFunction {
         key_path: Option<&str>,
         data_dir: &ObjectStoreDir,
         config: &Arc<BundleConfig>,
-    ) -> Result<String, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         Self::materialize_url_static(url, should_copy, key_path, data_dir, config).await
     }
 
@@ -262,7 +263,7 @@ impl RemoteDirFunction {
         url: &Url,
         key_path: Option<&str>,
         data_dir: &ObjectStoreDir,
-    ) -> Result<String, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         let (user, host, port, remote_path) = parse_scp_url(url)?;
         let key_path_str = key_path.ok_or_else(|| {
             BundlebaseError::from(
@@ -293,12 +294,12 @@ impl RemoteDirFunction {
         url: &Url,
         key_path: Option<&str>,
         data_dir: &ObjectStoreDir,
-    ) -> Result<String, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         Self::download_sftp_static(url, key_path, data_dir).await
     }
 
     /// Download a file via FTP (static version).
-    async fn download_ftp_static(url: &Url, data_dir: &ObjectStoreDir) -> Result<String, BundlebaseError> {
+    async fn download_ftp_static(url: &Url, data_dir: &ObjectStoreDir) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         let ftp_file = FtpFile::from_url(url)?;
         let data = ftp_file.read_bytes().await?.ok_or_else(|| {
             BundlebaseError::from(format!("FTP file not found: {}", url))
@@ -309,7 +310,7 @@ impl RemoteDirFunction {
     }
 
     /// Download a file via FTP.
-    async fn download_ftp(&self, url: &Url, data_dir: &ObjectStoreDir) -> Result<String, BundlebaseError> {
+    async fn download_ftp(&self, url: &Url, data_dir: &ObjectStoreDir) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         Self::download_ftp_static(url, data_dir).await
     }
 }

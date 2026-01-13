@@ -298,11 +298,11 @@ impl PostgresFunction {
             .map_err(|e| BundlebaseError::from(format!("Failed to create RecordBatch: {}", e)))
     }
 
-    /// Write a chunk to parquet and return content-addressed filename.
+    /// Write a chunk to parquet and return file reference.
     async fn write_chunk_to_parquet(
         chunk: &DataChunk,
         data_dir: &ObjectStoreDir,
-    ) -> Result<String, BundlebaseError> {
+    ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
         let batch = Self::rows_to_record_batch(&chunk.rows)?;
 
         // Write to in-memory buffer
@@ -322,11 +322,7 @@ impl PostgresFunction {
         // Write with content-addressed naming
         let suffix = format!("{}.parquet", chunk.source_location.replace(':', "_").replace('-', "_"));
         let data_stream = Box::pin(stream::once(async { Ok(Bytes::from(buffer)) }));
-        let filename = data_dir
-            .write_content_addressed(data_stream, &suffix)
-            .await?;
-
-        Ok(filename)
+        data_dir.write_stream(data_stream, &suffix).await
     }
 
     /// Parse batch_size from args with default.
@@ -494,7 +490,7 @@ impl SourceFunction for PostgresFunction {
         args: &HashMap<String, String>,
         data_dir: &ObjectStoreDir,
         _config: &Arc<BundleConfig>,
-    ) -> Result<String, BundlebaseError> {
+    ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
         let url = args.get("url").ok_or("url is required")?;
         let query = args.get("query").ok_or("query is required")?;
         let sort_column = args.get("sort_column").ok_or("sort_column is required")?;
@@ -578,12 +574,11 @@ impl SourceFunction for PostgresFunction {
             for (source_location, _attached_info) in attached_files {
                 match Self::refetch_range(&client, query, sort_column, source_location).await? {
                     Some(chunk) => {
-                        let attach_location =
-                            Self::write_chunk_to_parquet(&chunk, data_dir).await?;
+                        let file = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
                         actions.push(RefreshAction::Replace {
                             old_source_location: source_location.clone(),
                             data: MaterializedData {
-                                attach_location,
+                                attach_location: file.url().to_string(),
                                 source_location: source_location.clone(),
                             },
                         });
@@ -613,9 +608,9 @@ impl SourceFunction for PostgresFunction {
             }
 
             // New chunk - add it
-            let attach_location = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
+            let file = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
             actions.push(RefreshAction::Add(MaterializedData {
-                attach_location,
+                attach_location: file.url().to_string(),
                 source_location,
             }));
         }

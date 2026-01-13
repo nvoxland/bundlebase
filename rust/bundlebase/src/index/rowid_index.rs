@@ -1,7 +1,10 @@
-use crate::data::{ObjectId, RowId};
+use crate::data::RowId;
 use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
-use crate::io::{IOReadFile, IOReadWriteFile};
+use crate::io::IOReadWriteDir;
 use crate::BundlebaseError;
+use bytes::Bytes;
+use crate::object_id::ObjectId;
+use futures::stream;
 use futures::stream::StreamExt;
 
 const MAGIC_BYTES: &[u8; 8] = b"ROWIDIDX";
@@ -24,23 +27,21 @@ impl RowIdIndex {
         data_dir: &ObjectStoreDir,
         block_id: &ObjectId,
         skip_first_line: bool,
-    ) -> Result<ObjectStoreFile, BundlebaseError> {
+    ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
         // Read stream and collect all bytes
-        let mut stream = datafile.read_existing().await?;
+        let mut file_stream = datafile.read_existing().await?;
         let mut buffer = Vec::new();
-        while let Some(chunk_result) = stream.next().await {
+        while let Some(chunk_result) = file_stream.next().await {
             let chunk = chunk_result?;
             buffer.extend_from_slice(&chunk);
         }
         let data = self.build_row_index(&buffer, block_id, skip_first_line);
 
-        let block_id: String = (*block_id).into();
-        let index_filename = format!("{}-{}.rowid.idx", block_id, datafile.version().await?);
+        // Serialize index to bytes and write using content-addressed storage
+        let index_bytes = self.serialize_index(&data);
+        let data_stream = Box::pin(stream::once(async { Ok::<_, std::io::Error>(index_bytes) }));
 
-        let index_file = data_dir.io_file(&index_filename)?;
-        self.save_index(&data, &index_file).await?;
-
-        Ok(index_file)
+        data_dir.write_stream(data_stream, "rowid.idx").await
     }
 
     /// Scan file bytes and build an index of row offsets
@@ -71,12 +72,8 @@ impl RowIdIndex {
         row_ids
     }
 
-    /// Save an index to disk
-    async fn save_index(
-        &self,
-        data: &[RowId],
-        file: &ObjectStoreFile,
-    ) -> Result<(), BundlebaseError> {
+    /// Serialize an index to bytes
+    fn serialize_index(&self, data: &[RowId]) -> Bytes {
         let mut buffer = Vec::new();
 
         // Magic bytes
@@ -93,8 +90,7 @@ impl RowIdIndex {
             buffer.extend_from_slice(&row_id.as_u64().to_le_bytes());
         }
 
-        file.write(buffer.into()).await?;
-        Ok(())
+        Bytes::from(buffer)
     }
 
     /// Load an index from disk with specified magic bytes
@@ -152,6 +148,7 @@ impl RowIdIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::IOReadWriteFile;
     use crate::test_utils::random_memory_dir;
 
     #[test]
@@ -247,7 +244,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_save_and_load_index_single_row() {
+    async fn test_serialize_and_load_index_single_row() {
         let dir = random_memory_dir();
         let file = dir.io_file("single_row.idx").unwrap();
         let block_id = ObjectId::from(50u8);
@@ -255,7 +252,8 @@ mod tests {
         let index = RowIdIndex::new();
 
         let data = vec![RowId::new(&block_id, 100, 50)];
-        index.save_index(&data, &file).await.unwrap();
+        let bytes = index.serialize_index(&data);
+        file.write(bytes).await.unwrap();
 
         let loaded = index.load_index(&file).await.unwrap();
 
@@ -266,7 +264,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_save_and_load_index_multiple_rows() {
+    async fn test_serialize_and_load_index_multiple_rows() {
         let dir = random_memory_dir();
         let file = dir.io_file("multi_row.idx").unwrap();
         let block_id = ObjectId::from(60u8);
@@ -280,7 +278,8 @@ mod tests {
             RowId::new(&block_id, 450, 75),
         ];
 
-        index.save_index(&data, &file).await.unwrap();
+        let bytes = index.serialize_index(&data);
+        file.write(bytes).await.unwrap();
 
         let loaded = index.load_index(&file).await.unwrap();
 
@@ -292,17 +291,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_index_format_binary_layout() {
-        // Verify the exact binary format of saved index
-        let dir = random_memory_dir();
-        let file = dir.io_file("format_check.idx").unwrap();
+        // Verify the exact binary format of serialized index
         let block_id = ObjectId::from(110u8);
 
         let index = RowIdIndex::new();
 
         let data = vec![RowId::new(&block_id, 42, 100)];
-        index.save_index(&data, &file).await.unwrap();
-
-        let bytes = file.read_bytes().await.unwrap().unwrap();
+        let bytes = index.serialize_index(&data);
 
         // Verify structure
         assert_eq!(&bytes[0..8], MAGIC_BYTES.as_slice()); // Magic bytes

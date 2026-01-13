@@ -128,12 +128,12 @@ impl DataReader for JsonReader {
     async fn build_layout(
         &self,
         data_dir: &ObjectStoreDir,
-    ) -> Result<Option<String>, BundlebaseError> {
-        let index = RowIdIndex::new()
+    ) -> Result<Option<Box<dyn crate::io::IOReadFile>>, BundlebaseError> {
+        let index_file = RowIdIndex::new()
             .build(&self.inner.file(), data_dir, &self.block_id(), false)
             .await?;
 
-        Ok(Some(index.filename().to_string()))
+        Ok(Some(index_file))
     }
 }
 

@@ -52,7 +52,7 @@ pub trait DataReader: Sync + Send + Debug {
     async fn build_layout(
         &self,
         _data_dir: &ObjectStoreDir,
-    ) -> Result<Option<String>, BundlebaseError> {
+    ) -> Result<Option<Box<dyn crate::io::IOReadFile>>, BundlebaseError> {
         Ok(None)
     }
 

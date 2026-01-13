@@ -162,12 +162,12 @@ impl DataReader for CsvReader {
     async fn build_layout(
         &self,
         data_dir: &ObjectStoreDir,
-    ) -> Result<Option<String>, BundlebaseError> {
-        let index = RowIdIndex::new()
+    ) -> Result<Option<Box<dyn crate::io::IOReadFile>>, BundlebaseError> {
+        let index_file = RowIdIndex::new()
             .build(&self.inner.file(), data_dir, &self.block_id(), true)
             .await?;
 
-        Ok(Some(index.filename().to_string()))
+        Ok(Some(index_file))
     }
 
     fn rowid_provider(&self) -> Result<Arc<dyn RowIdProvider>, BundlebaseError> {
@@ -482,11 +482,10 @@ mod tests {
 
         // Build the layout file
         let data_dir = binding.data_dir();
-        let layout_filename = temp_reader
+        let layout_file = temp_reader
             .build_layout(data_dir)
             .await?
             .ok_or_else(|| BundlebaseError::from("Layout should be built for CSV"))?;
-        let layout_file = data_dir.file(&layout_filename)?;
 
         // Read the schema
         let schema = temp_reader.read_schema().await?;
@@ -498,7 +497,7 @@ mod tests {
                 &block_id,
                 binding,
                 schema,
-                Some(layout_file.url().as_str().to_string()),
+                Some(layout_file.url().to_string()),
             )
             .await?
             .unwrap();
@@ -575,11 +574,10 @@ mod tests {
 
         // Build the layout file
         let data_dir = binding.data_dir();
-        let layout_filename = temp_reader
+        let layout_file = temp_reader
             .build_layout(data_dir)
             .await?
             .ok_or_else(|| BundlebaseError::from("Layout should be built for CSV"))?;
-        let layout_file = data_dir.file(&layout_filename)?;
 
         // Read the schema
         let schema = temp_reader.read_schema().await?;
@@ -591,7 +589,7 @@ mod tests {
                 &block_id,
                 binding,
                 schema,
-                Some(layout_file.url().as_str().to_string()),
+                Some(layout_file.url().to_string()),
             )
             .await?
             .unwrap();
