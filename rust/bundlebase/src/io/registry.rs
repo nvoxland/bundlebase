@@ -2,12 +2,7 @@
 //!
 //! Provides a central registry of storage backends that can be looked up by URL scheme.
 
-use crate::io::io_dir::IODir;
-use crate::io::io_file::IOFile;
-use crate::io::io_ftp::FtpIOFactory;
-use crate::io::io_sftp::SftpIOFactory;
-use crate::io::io_tar::TarIOFactory;
-use crate::io::io_traits::{IOLister, IOReader, IOWriter};
+use crate::io::traits::{IODir, IOReadFile, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -55,14 +50,14 @@ pub trait IOFactory: Send + Sync {
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOReader>, BundlebaseError>;
+    ) -> Result<Box<dyn IOReadFile>, BundlebaseError>;
 
     /// Create a lister for a directory URL.
     async fn create_lister(
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOLister>, BundlebaseError>;
+    ) -> Result<Box<dyn IODir>, BundlebaseError>;
 
     /// Create a writer for a file URL.
     /// Returns None if this backend is read-only.
@@ -70,50 +65,7 @@ pub trait IOFactory: Send + Sync {
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Option<Box<dyn IOWriter>>, BundlebaseError>;
-}
-
-/// Factory for object_store-backed URLs (file://, s3://, gs://, azure://, memory://, empty://).
-pub struct ObjectStoreIOFactory;
-
-#[async_trait]
-impl IOFactory for ObjectStoreIOFactory {
-    fn schemes(&self) -> &[&str] {
-        &["file", "s3", "gs", "azure", "az", "memory", "empty"]
-    }
-
-    fn supports_write(&self, url: &Url) -> bool {
-        // empty:// is read-only
-        url.scheme() != "empty"
-    }
-
-    async fn create_reader(
-        &self,
-        url: &Url,
-        config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOReader>, BundlebaseError> {
-        Ok(Box::new(IOFile::from_url(url, config)?))
-    }
-
-    async fn create_lister(
-        &self,
-        url: &Url,
-        config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOLister>, BundlebaseError> {
-        Ok(Box::new(IODir::from_url(url, config)?))
-    }
-
-    async fn create_writer(
-        &self,
-        url: &Url,
-        config: Arc<BundleConfig>,
-    ) -> Result<Option<Box<dyn IOWriter>>, BundlebaseError> {
-        // empty:// is read-only
-        if url.scheme() == "empty" {
-            return Ok(None);
-        }
-        Ok(Some(Box::new(IOFile::from_url(url, config)?)))
-    }
+    ) -> Result<Option<Box<dyn IOReadWriteFile>>, BundlebaseError>;
 }
 
 /// Central registry for IO backends, dispatching by URL scheme.
@@ -122,19 +74,13 @@ pub struct IORegistry {
 }
 
 impl IORegistry {
-    /// Create a new registry with built-in factories.
+    /// Create a new empty registry.
+    /// Use `register()` to add factories, or use `io_registry()` for the global
+    /// singleton with built-in factories already registered.
     pub fn new() -> Self {
-        let mut registry = Self {
+        Self {
             factories: HashMap::new(),
-        };
-
-        // Register built-in factories
-        registry.register(Arc::new(ObjectStoreIOFactory));
-        registry.register(Arc::new(FtpIOFactory));
-        registry.register(Arc::new(SftpIOFactory));
-        registry.register(Arc::new(TarIOFactory));
-
-        registry
+        }
     }
 
     /// Register a factory for its supported schemes.
@@ -189,7 +135,7 @@ impl IORegistry {
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOReader>, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         let factory = self.get_factory(url.scheme()).ok_or_else(|| {
             format!("Unsupported URL scheme: {}", url.scheme())
         })?;
@@ -201,7 +147,7 @@ impl IORegistry {
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOLister>, BundlebaseError> {
+    ) -> Result<Box<dyn IODir>, BundlebaseError> {
         let factory = self.get_factory(url.scheme()).ok_or_else(|| {
             format!("Unsupported URL scheme: {}", url.scheme())
         })?;
@@ -214,7 +160,7 @@ impl IORegistry {
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOWriter>, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadWriteFile>, BundlebaseError> {
         let factory = self.get_factory(url.scheme()).ok_or_else(|| {
             format!("Unsupported URL scheme: {}", url.scheme())
         })?;
@@ -236,8 +182,13 @@ impl Default for IORegistry {
 static IO_REGISTRY: OnceLock<IORegistry> = OnceLock::new();
 
 /// Get the global IO registry instance.
+/// This registry has all built-in factories (object_store, ftp, sftp, tar) already registered.
 pub fn io_registry() -> &'static IORegistry {
-    IO_REGISTRY.get_or_init(IORegistry::new)
+    IO_REGISTRY.get_or_init(|| {
+        let mut registry = IORegistry::new();
+        crate::io::plugin::register_builtin_factories(&mut registry);
+        registry
+    })
 }
 
 #[cfg(test)]
@@ -246,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_registry_has_builtin_factories() {
-        let registry = IORegistry::new();
+        let registry = io_registry();
 
         assert!(registry.get_factory("file").is_some());
         assert!(registry.get_factory("s3").is_some());
@@ -258,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_supports_write() {
-        let registry = IORegistry::new();
+        let registry = io_registry();
 
         assert!(registry.supports_write(&Url::parse("file:///test").unwrap()));
         assert!(registry.supports_write(&Url::parse("s3://bucket/key").unwrap()));
@@ -272,7 +223,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_reader() {
-        let registry = IORegistry::new();
+        let registry = io_registry();
         let url = Url::parse("memory:///test/file.txt").unwrap();
         let config = BundleConfig::default().into();
 
@@ -282,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_reader_unknown_scheme() {
-        let registry = IORegistry::new();
+        let registry = io_registry();
         let url = Url::parse("unknown:///test").unwrap();
         let config = BundleConfig::default().into();
 
@@ -293,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_registry_has_ftp_factory() {
-        let registry = IORegistry::new();
+        let registry = io_registry();
         assert!(registry.get_factory("ftp").is_some());
         // FTP is read-only
         assert!(!registry.supports_write(&Url::parse("ftp://example.com/test").unwrap()));
@@ -301,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_registry_has_sftp_factory() {
-        let registry = IORegistry::new();
+        let registry = io_registry();
         assert!(registry.get_factory("sftp").is_some());
         assert!(registry.get_factory("scp").is_some());
         // SFTP/SCP is read-only
@@ -311,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_registry_has_tar_factory() {
-        let registry = IORegistry::new();
+        let registry = io_registry();
         assert!(registry.get_factory("tar").is_some());
         // TAR supports writes
         assert!(registry.supports_write(&Url::parse("tar:///data.tar/file.txt").unwrap()));
@@ -319,7 +270,7 @@ mod tests {
 
     #[test]
     fn test_supports_streaming_read() {
-        let registry = IORegistry::new();
+        let registry = io_registry();
 
         // Object store backends support streaming reads
         assert!(registry.supports_streaming_read("file"));
@@ -340,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_supports_streaming_write() {
-        let registry = IORegistry::new();
+        let registry = io_registry();
 
         // Object store backends support streaming writes
         assert!(registry.supports_streaming_write("file"));
@@ -356,7 +307,7 @@ mod tests {
 
     #[test]
     fn test_supports_versioning() {
-        let registry = IORegistry::new();
+        let registry = io_registry();
 
         // Object store backends support versioning (ETag, etc.)
         assert!(registry.supports_versioning("file"));

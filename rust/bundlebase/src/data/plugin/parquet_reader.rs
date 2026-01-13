@@ -2,7 +2,6 @@ use crate::data::object_id::ObjectId;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
 use crate::data::{DataReader, RowId, RowIdBatch, SendableRowIdBatchStream};
-use crate::io::IOReader;
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;

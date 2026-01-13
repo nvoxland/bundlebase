@@ -4,14 +4,15 @@
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, MaterializedData, RefreshAction, SourceFunction,
-    SyncMode,
+    ArgSpec, AttachedFileInfo, DiscoveredLocation, RefreshAction, SourceFunction, SyncMode,
 };
 use super::source_utils;
-use crate::io::{io_registry, parse_scp_url, FtpFile, IODir, IOFile, IOReader, SftpClient};
+use crate::io::plugin::ftp::FtpFile;
+use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::plugin::sftp::{parse_scp_url, SftpClient};
+use crate::io::{io_registry, IOReadFile};
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
-use log::debug;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
@@ -119,7 +120,7 @@ impl SourceFunction for RemoteDirFunction {
         &self,
         location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        data_dir: &IODir,
+        data_dir: &ObjectStoreDir,
         config: &Arc<BundleConfig>,
     ) -> Result<String, BundlebaseError> {
         let should_copy = source_utils::should_copy(args);
@@ -134,7 +135,7 @@ impl SourceFunction for RemoteDirFunction {
         &self,
         args: &HashMap<String, String>,
         attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &IODir,
+        data_dir: &ObjectStoreDir,
         config: Arc<BundleConfig>,
         mode: SyncMode,
     ) -> Result<Vec<RefreshAction>, BundlebaseError> {
@@ -197,7 +198,7 @@ impl RemoteDirFunction {
     ///
     /// Uses IOFile to get version (ETag/S3 version/mtime hash) from the remote file.
     async fn read_remote_version(url: &Url, config: &Arc<BundleConfig>) -> Result<String, BundlebaseError> {
-        let io_file = IOFile::from_url(url, config.clone())?;
+        let io_file = ObjectStoreFile::from_url(url, config.clone())?;
         io_file.version().await
     }
 
@@ -221,7 +222,7 @@ impl RemoteDirFunction {
         url: &Url,
         should_copy: bool,
         key_path: Option<&str>,
-        data_dir: &IODir,
+        data_dir: &ObjectStoreDir,
         config: &Arc<BundleConfig>,
     ) -> Result<String, BundlebaseError> {
         if !should_copy {
@@ -250,7 +251,7 @@ impl RemoteDirFunction {
         url: &Url,
         should_copy: bool,
         key_path: Option<&str>,
-        data_dir: &IODir,
+        data_dir: &ObjectStoreDir,
         config: &Arc<BundleConfig>,
     ) -> Result<String, BundlebaseError> {
         Self::materialize_url_static(url, should_copy, key_path, data_dir, config).await
@@ -260,7 +261,7 @@ impl RemoteDirFunction {
     async fn download_sftp_static(
         url: &Url,
         key_path: Option<&str>,
-        data_dir: &IODir,
+        data_dir: &ObjectStoreDir,
     ) -> Result<String, BundlebaseError> {
         let (user, host, port, remote_path) = parse_scp_url(url)?;
         let key_path_str = key_path.ok_or_else(|| {
@@ -291,13 +292,13 @@ impl RemoteDirFunction {
         &self,
         url: &Url,
         key_path: Option<&str>,
-        data_dir: &IODir,
+        data_dir: &ObjectStoreDir,
     ) -> Result<String, BundlebaseError> {
         Self::download_sftp_static(url, key_path, data_dir).await
     }
 
     /// Download a file via FTP (static version).
-    async fn download_ftp_static(url: &Url, data_dir: &IODir) -> Result<String, BundlebaseError> {
+    async fn download_ftp_static(url: &Url, data_dir: &ObjectStoreDir) -> Result<String, BundlebaseError> {
         let ftp_file = FtpFile::from_url(url)?;
         let data = ftp_file.read_bytes().await?.ok_or_else(|| {
             BundlebaseError::from(format!("FTP file not found: {}", url))
@@ -308,7 +309,7 @@ impl RemoteDirFunction {
     }
 
     /// Download a file via FTP.
-    async fn download_ftp(&self, url: &Url, data_dir: &IODir) -> Result<String, BundlebaseError> {
+    async fn download_ftp(&self, url: &Url, data_dir: &ObjectStoreDir) -> Result<String, BundlebaseError> {
         Self::download_ftp_static(url, data_dir).await
     }
 }

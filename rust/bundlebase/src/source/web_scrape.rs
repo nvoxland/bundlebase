@@ -7,7 +7,7 @@ use super::source_function::{
     ArgSpec, AttachedFileInfo, DiscoveredLocation, RefreshAction, SourceFunction, SyncMode,
 };
 use super::source_utils;
-use crate::io::IODir;
+use crate::io::plugin::object_store::ObjectStoreDir;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use scraper::{Html, Selector};
@@ -117,7 +117,7 @@ impl SourceFunction for WebScrapeFunction {
         &self,
         args: &HashMap<String, String>,
         attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &IODir,
+        data_dir: &ObjectStoreDir,
         config: Arc<BundleConfig>,
         mode: SyncMode,
     ) -> Result<Vec<RefreshAction>, BundlebaseError> {

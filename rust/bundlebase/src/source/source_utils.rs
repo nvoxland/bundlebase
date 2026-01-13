@@ -6,7 +6,8 @@ use super::source_function::{
     AttachedFileInfo, DiscoveredLocation, MaterializedData, RefreshAction, SyncMode,
 };
 use crate::data::ObjectId;
-use crate::io::{IODir, IOFile, IOReader, IOWriter};
+use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::{IOReadFile, IOReadWriteFile};
 use crate::{BundleConfig, BundlebaseError};
 use bytes::Bytes;
 use futures::future::BoxFuture;
@@ -117,7 +118,7 @@ pub fn filename_from_url(url: &Url) -> String {
 pub async fn download_to_data_dir(
     data: Bytes,
     filename: &str,
-    data_dir: &IODir,
+    data_dir: &ObjectStoreDir,
 ) -> Result<String, BundlebaseError> {
     let block_id = ObjectId::generate();
     let target_name = format!("{}_{}", block_id, filename);
@@ -130,8 +131,8 @@ pub async fn download_to_data_dir(
 ///
 /// Returns the relative filename (not a full URL) so that the bundle is portable.
 pub async fn download_io_file_to_data_dir(
-    file: &IOFile,
-    data_dir: &IODir,
+    file: &ObjectStoreFile,
+    data_dir: &ObjectStoreDir,
 ) -> Result<String, BundlebaseError> {
     let data = file.read_bytes().await?.ok_or_else(|| {
         BundlebaseError::from(format!("File not found: {}", file.url()))
@@ -145,7 +146,7 @@ pub async fn download_io_file_to_data_dir(
 /// Returns the relative filename (not a full URL) so that the bundle is portable.
 pub async fn download_http_to_data_dir(
     url: &Url,
-    data_dir: &IODir,
+    data_dir: &ObjectStoreDir,
 ) -> Result<String, BundlebaseError> {
     let response = reqwest::get(url.as_str())
         .await
@@ -176,7 +177,7 @@ pub async fn download_http_to_data_dir(
 pub async fn materialize_url(
     url: &Url,
     should_copy: bool,
-    data_dir: &IODir,
+    data_dir: &ObjectStoreDir,
     config: &Arc<BundleConfig>,
 ) -> Result<String, BundlebaseError> {
     if !should_copy {
@@ -186,7 +187,7 @@ pub async fn materialize_url(
     if url.scheme() == "http" || url.scheme() == "https" {
         download_http_to_data_dir(url, data_dir).await
     } else {
-        let file = IOFile::from_url(url, config.clone())?;
+        let file = ObjectStoreFile::from_url(url, config.clone())?;
         download_io_file_to_data_dir(&file, data_dir).await
     }
 }

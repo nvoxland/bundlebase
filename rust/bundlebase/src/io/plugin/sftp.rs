@@ -4,8 +4,8 @@
 //! but use different underlying libraries (suppaftp vs russh_sftp) with incompatible
 //! types. Extracting a common abstraction would add complexity without clear benefit.
 
-use crate::io::io_registry::IOFactory;
-use crate::io::io_traits::{FileInfo, IOLister, IOReader};
+use crate::io::registry::IOFactory;
+use crate::io::traits::{FileInfo, IODir, IOReadFile, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -296,7 +296,7 @@ impl SftpFile {
 }
 
 #[async_trait]
-impl IOReader for SftpFile {
+impl IOReadFile for SftpFile {
     fn url(&self) -> &Url {
         &self.url
     }
@@ -429,7 +429,7 @@ impl SftpDir {
 }
 
 #[async_trait]
-impl IOLister for SftpDir {
+impl IODir for SftpDir {
     fn url(&self) -> &Url {
         &self.url
     }
@@ -452,7 +452,7 @@ impl IOLister for SftpDir {
         Ok(files)
     }
 
-    fn subdir(&self, name: &str) -> Result<Box<dyn IOLister>, BundlebaseError> {
+    fn subdir(&self, name: &str) -> Result<Box<dyn IODir>, BundlebaseError> {
         let new_path = if self.path.ends_with('/') {
             format!("{}{}", self.path, name.trim_start_matches('/'))
         } else {
@@ -471,7 +471,7 @@ impl IOLister for SftpDir {
         }))
     }
 
-    fn file(&self, name: &str) -> Result<Box<dyn IOReader>, BundlebaseError> {
+    fn file(&self, name: &str) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         let new_path = if self.path.ends_with('/') {
             format!("{}{}", self.path, name.trim_start_matches('/'))
         } else {
@@ -518,7 +518,7 @@ impl IOFactory for SftpIOFactory {
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOReader>, BundlebaseError> {
+    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         Ok(Box::new(SftpFile::from_url(url, config)?))
     }
 
@@ -526,7 +526,7 @@ impl IOFactory for SftpIOFactory {
         &self,
         url: &Url,
         config: Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOLister>, BundlebaseError> {
+    ) -> Result<Box<dyn IODir>, BundlebaseError> {
         Ok(Box::new(SftpDir::from_url(url, config)?))
     }
 
@@ -534,7 +534,7 @@ impl IOFactory for SftpIOFactory {
         &self,
         _url: &Url,
         _config: Arc<BundleConfig>,
-    ) -> Result<Option<Box<dyn crate::io::io_traits::IOWriter>>, BundlebaseError> {
+    ) -> Result<Option<Box<dyn IOReadWriteFile>>, BundlebaseError> {
         Ok(None) // Read-only
     }
 }

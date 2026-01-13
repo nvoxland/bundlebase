@@ -16,7 +16,8 @@ use crate::source::RefreshAction;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
-use crate::io::{IODir, IOLister, IOReader, IOWriter};
+use crate::io::plugin::object_store::ObjectStoreDir;
+use crate::io::{IODir, IOReadFile, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
@@ -174,7 +175,7 @@ impl BundleBuilder {
         let mut existing = Bundle::empty().await?;
         existing.passed_config = config;
         existing.recompute_config()?;
-        existing.data_dir = IODir::from_str(path, existing.config.clone())?;
+        existing.data_dir = ObjectStoreDir::from_str(path, existing.config.clone())?;
 
         // Check if a bundle already exists at this location
         let meta_dir = existing.data_dir.io_subdir(META_DIR)?;
@@ -215,7 +216,7 @@ impl BundleBuilder {
         // If data_dir is provided and not empty, use it; otherwise keep the current bundle's data_dir
         if let Some(dir) = data_dir {
             if !dir.is_empty() {
-                new_bundle.data_dir = IODir::from_str(dir, bundle.config())?;
+                new_bundle.data_dir = ObjectStoreDir::from_str(dir, bundle.config())?;
                 if new_bundle.data_dir.url() != bundle.url() {
                     new_bundle.last_manifest_version = 0;
                 }
@@ -377,7 +378,7 @@ impl BundleBuilder {
             let mut new = Bundle::empty().await?;
             new.passed_config = self.bundle.passed_config.clone();
             new.recompute_config()?;
-            new.data_dir = IODir::from_url(self.url(), new.config.clone())?;
+            new.data_dir = ObjectStoreDir::from_url(self.url(), new.config.clone())?;
             new
         } else {
             // Preserve explicit_config when reopening
@@ -1482,7 +1483,7 @@ impl BundleBuilder {
         Ok(analyzer.get_source(logical_name))
     }
 
-    pub fn data_dir(&self) -> &IODir {
+    pub fn data_dir(&self) -> &ObjectStoreDir {
         &self.bundle.data_dir
     }
 }

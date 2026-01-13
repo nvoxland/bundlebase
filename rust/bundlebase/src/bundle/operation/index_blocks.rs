@@ -1,7 +1,7 @@
 use crate::bundle::operation::Operation;
 use crate::data::{DataBlock, ObjectId, RowId, VersionedBlockId};
 use crate::index::{ColumnIndex, IndexedValue};
-use crate::io::IOWriter;
+use crate::io::IOReadWriteFile;
 use crate::progress::ProgressScope;
 use crate::{Bundle, BundlebaseError};
 use arrow_schema::DataType;

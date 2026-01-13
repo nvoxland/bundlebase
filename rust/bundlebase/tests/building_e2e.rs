@@ -1,6 +1,7 @@
 use bundlebase;
 use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME, META_DIR};
-use bundlebase::io::{IOLister, IOReader, IOWriter, IOFile};
+use bundlebase::io::plugin::object_store::ObjectStoreFile;
+use bundlebase::io::{IODir, IOReadFile, IOReadWriteFile};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::Bundle;
 use bundlebase::BundleConfig;
@@ -166,7 +167,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
     // Read source data and write to local location
     let source_obj =
-        IOFile::from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
+        ObjectStoreFile::from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
     let data = source_obj
         .read_bytes()
         .await?

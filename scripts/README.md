@@ -68,13 +68,13 @@ poetry run pytest python/tests/
 For Rust development:
 ```bash
 # Build Rust libraries only
-cargo build --profile test
+cargo test --no-run --profile test
 
 # Run Rust tests
 cargo test --profile test
 
 # Build everything (won't trigger maturin rebuild)
-cargo build --all --all-targets --profile test
+cargo  test --no-run --all --all-targets --profile test
 ```
 
 ## Technical Details

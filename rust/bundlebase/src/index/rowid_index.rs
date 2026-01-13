@@ -1,5 +1,6 @@
 use crate::data::{ObjectId, RowId};
-use crate::io::{IOLister, IOReader, IOWriter, IODir, IOFile};
+use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::{IOReadFile, IOReadWriteFile};
 use crate::BundlebaseError;
 use futures::stream::StreamExt;
 
@@ -19,11 +20,11 @@ impl RowIdIndex {
 
     pub(crate) async fn build(
         &self,
-        datafile: &IOFile,
-        data_dir: &IODir,
+        datafile: &ObjectStoreFile,
+        data_dir: &ObjectStoreDir,
         block_id: &ObjectId,
         skip_first_line: bool,
-    ) -> Result<IOFile, BundlebaseError> {
+    ) -> Result<ObjectStoreFile, BundlebaseError> {
         // Read stream and collect all bytes
         let mut stream = datafile.read_existing().await?;
         let mut buffer = Vec::new();
@@ -74,7 +75,7 @@ impl RowIdIndex {
     async fn save_index(
         &self,
         data: &[RowId],
-        file: &IOFile,
+        file: &ObjectStoreFile,
     ) -> Result<(), BundlebaseError> {
         let mut buffer = Vec::new();
 
@@ -108,7 +109,7 @@ impl RowIdIndex {
     ///
     /// # Errors
     /// Returns an error if the file doesn't exist, is corrupted, has wrong magic bytes, or has an invalid version
-    pub async fn load_index(&self, file: &IOFile) -> Result<Vec<RowId>, BundlebaseError> {
+    pub async fn load_index(&self, file: &ObjectStoreFile) -> Result<Vec<RowId>, BundlebaseError> {
         let mut stream = file.read_existing().await?;
         let mut buffer = Vec::new();
         while let Some(chunk_result) = stream.next().await {

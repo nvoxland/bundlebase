@@ -20,7 +20,7 @@ Before requesting review, ensure:
 
 ### Code Quality
 
-- [ ] Code compiles without errors (`cargo build`)
+- [ ] Code compiles without errors (`cargo test --no-run`)
 - [ ] No clippy warnings (`cargo clippy`)
 - [ ] All tests pass (`cargo test` and `poetry run pytest`)
 - [ ] Code formatted (`cargo fmt`)
@@ -507,7 +507,7 @@ If author and reviewer disagree:
 ### Automated Checks (CI)
 
 These run automatically:
-- Rust compilation (`cargo build`)
+- Rust compilation (`cargo test --no-run`)
 - Rust tests (`cargo test`)
 - Clippy lints (`cargo clippy`)
 - Python tests (`poetry run pytest`)

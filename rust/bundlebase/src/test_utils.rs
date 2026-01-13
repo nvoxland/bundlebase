@@ -2,7 +2,8 @@ use crate::bundle::Operation;
 /// Test utilities for data adapter tests
 use crate::data::DataReaderFactory;
 use crate::functions::FunctionRegistry;
-use crate::io::{DataStorage, IOLister, IOWriter, IODir, IOFile};
+use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::{DataStorage, IOReadWriteFile};
 use crate::{BundleBuilder, BundleConfig, BundleFacade};
 use arrow_schema::SchemaRef;
 use parking_lot::RwLock;
@@ -59,7 +60,7 @@ pub fn test_datafile(name: &str) -> &'static str {
                 let bytes = fs::read(os_path).unwrap();
 
                 let url = Url::parse(&format!("memory:///test_data/{}", filename)).unwrap();
-                let file = IOFile::from_url(&url, BundleConfig::default().into()).unwrap();
+                let file = ObjectStoreFile::from_url(&url, BundleConfig::default().into()).unwrap();
 
                 rt.block_on(file.write(bytes.into())).unwrap();
 
@@ -81,11 +82,11 @@ pub fn random_memory_url() -> Url {
     Url::parse(&format!("memory:///{}", rand::random::<u64>())).unwrap()
 }
 
-pub fn random_memory_dir() -> IODir {
-    IODir::from_url(&random_memory_url(), BundleConfig::default().into()).unwrap()
+pub fn random_memory_dir() -> ObjectStoreDir {
+    ObjectStoreDir::from_url(&random_memory_url(), BundleConfig::default().into()).unwrap()
 }
 
-pub fn random_memory_file(path: &str) -> IOFile {
+pub fn random_memory_file(path: &str) -> ObjectStoreFile {
     random_memory_dir().io_file(path).unwrap()
 }
 

@@ -24,7 +24,8 @@ use crate::data::{DataPack, DataReaderFactory, ObjectId, PackJoin, VersionedBloc
 use crate::source::{Source, SourceFunctionRegistry};
 use crate::functions::FunctionRegistry;
 use crate::index::{IndexDefinition, IndexedBlocks};
-use crate::io::{DataStorage, IODir, IOFile, IOLister, IOReader, EMPTY_URL};
+use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::{DataStorage, IODir, EMPTY_URL};
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::Array;
 use arrow_schema::SchemaRef;
@@ -61,7 +62,7 @@ pub struct Bundle {
     version: String,
     last_manifest_version: u32,
 
-    data_dir: IODir,
+    data_dir: ObjectStoreDir,
     commits: Vec<BundleCommit>,
     operations: Vec<AnyOperation>,
 
@@ -212,7 +213,7 @@ impl Bundle {
 
             last_manifest_version: 0,
             version: "empty".to_string(),
-            data_dir: IODir::from_url(&url, BundleConfig::default().into())?,
+            data_dir: ObjectStoreDir::from_url(&url, BundleConfig::default().into())?,
             commits: vec![],
             dataframe,
             config: Arc::new(crate::BundleConfig::new()),
@@ -246,7 +247,7 @@ impl Bundle {
         bundle.recompute_config()?;
 
         Self::open_internal(
-            IODir::from_str(path, BundleConfig::default().into())?
+            ObjectStoreDir::from_str(path, BundleConfig::default().into())?
                 .url()
                 .as_str(),
             &mut visited,
@@ -269,7 +270,7 @@ impl Bundle {
             );
         }
 
-        let data_dir = IODir::from_str(url, bundle.config())?;
+        let data_dir = ObjectStoreDir::from_str(url, bundle.config())?;
         let manifest_dir = data_dir.io_subdir(META_DIR)?;
 
         debug!("Loading initial commit from {}", INIT_FILENAME);
@@ -356,7 +357,7 @@ impl Bundle {
         for manifest_file_info in manifest_files {
             bundle.last_manifest_version = manifest_version(manifest_file_info.filename().unwrap_or(""));
             // Create IOFile from FileInfo to read the manifest
-            let manifest_file = IOFile::from_url(&manifest_file_info.url, bundle.config())?;
+            let manifest_file = ObjectStoreFile::from_url(&manifest_file_info.url, bundle.config())?;
             let mut commit: BundleCommit = manifest_file.read_yaml().await?.ok_or_else(|| {
                 BundlebaseError::from(format!("Failed to read manifest: {}", manifest_file_info.url))
             })?;
@@ -486,7 +487,7 @@ impl Bundle {
         Ok(())
     }
 
-    pub fn data_dir(&self) -> &IODir {
+    pub fn data_dir(&self) -> &ObjectStoreDir {
         &self.data_dir
     }
 
@@ -515,7 +516,7 @@ impl Bundle {
 
         // Recreate data_dir with the new config
         let url = self.data_dir.url().clone();
-        self.data_dir = IODir::from_url(&url, self.config.clone())?;
+        self.data_dir = ObjectStoreDir::from_url(&url, self.config.clone())?;
 
         Ok(())
     }
@@ -836,7 +837,7 @@ impl BundleFacade for Bundle {
             debug!("Adding file to tar: {}", relative_path);
 
             // Read file contents via stream
-            let io_file = IOFile::from_url(&file.url, self.config())?;
+            let io_file = ObjectStoreFile::from_url(&file.url, self.config())?;
             let mut stream = io_file.read_existing().await?;
 
             // Collect stream into buffer (tar API requires &[u8])

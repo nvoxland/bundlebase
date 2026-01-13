@@ -8,7 +8,7 @@ mod web_scrape;
 
 use crate::bundle::{AnyOperation, DefineSourceOp};
 use crate::data::ObjectId;
-use crate::io::IODir;
+use crate::io::plugin::object_store::ObjectStoreDir;
 use crate::BundlebaseError;
 use crate::BundleConfig;
 use parking_lot::RwLock;
@@ -92,7 +92,7 @@ impl Source {
     pub async fn refresh(
         &self,
         operations: &[AnyOperation],
-        data_dir: &IODir,
+        data_dir: &ObjectStoreDir,
         config: Arc<BundleConfig>,
         registry: &Arc<RwLock<SourceFunctionRegistry>>,
     ) -> Result<Vec<RefreshAction>, BundlebaseError> {
