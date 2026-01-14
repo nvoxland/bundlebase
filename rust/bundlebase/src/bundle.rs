@@ -588,6 +588,8 @@ impl Bundle {
 
         let expr = sql::parse_join_expr(&self.ctx, &base_table, pack_join).await?;
 
+        let base_df = base_df.alias(sql::BASE_PACK_NAME)?;
+
         Ok(base_df.join_on(
             self.ctx.table(&join_table).await?.alias(pack_join.name())?,
             pack_join.join_type().to_datafusion(),
