@@ -3,6 +3,7 @@ use crate::bundle::operation::JoinTypeOption;
 use crate::BundlebaseError;
 use pest::Parser;
 use pest_derive::Parser;
+use std::collections::HashMap;
 
 #[derive(Parser)]
 #[grammar = "bundle/command/commands.pest"]
@@ -26,6 +27,8 @@ pub fn parse_custom_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseE
                 Rule::attach_stmt => parse_attach_pest(inner_stmt)?,
                 Rule::join_stmt => parse_join_pest(inner_stmt)?,
                 Rule::reindex_stmt => parse_reindex_pest(inner_stmt)?,
+                Rule::create_source_stmt => parse_create_source_pest(inner_stmt)?,
+                Rule::fetch_stmt => BundleCommand::Fetch,
                 _ => return Err("Unexpected statement type".into()),
             };
             Ok(Some(cmd))
@@ -54,6 +57,8 @@ fn is_likely_custom_syntax(sql: &str) -> bool {
         || upper.starts_with("RIGHT JOIN")
         || upper.starts_with("FULL JOIN")
         || upper.starts_with("INNER JOIN")
+        || upper.starts_with("CREATE SOURCE")
+        || upper.starts_with("FETCH")
 }
 
 fn format_pest_error(error: pest::error::Error<Rule>, sql: &str) -> BundlebaseError {
@@ -194,6 +199,66 @@ fn parse_reindex_pest(
     // For now, just return Reindex (rebuild all indexes)
     // TODO: Support column-specific reindexing if needed
     Ok(BundleCommand::Reindex)
+}
+
+fn parse_create_source_pest(
+    pair: pest::iterators::Pair<Rule>,
+) -> Result<BundleCommand, BundlebaseError> {
+    let mut function = None;
+    let mut args = HashMap::new();
+    let mut pack = None;
+    let mut seen_source_args = false;
+
+    for inner_pair in pair.into_inner() {
+        match inner_pair.as_rule() {
+            Rule::identifier => {
+                if function.is_none() {
+                    // First identifier is the function name
+                    function = Some(inner_pair.as_str().to_string());
+                } else if seen_source_args {
+                    // Identifier after source_args is the pack name (after ON)
+                    pack = Some(inner_pair.as_str().to_string());
+                }
+            }
+            Rule::source_args => {
+                seen_source_args = true;
+                for arg_pair in inner_pair.into_inner() {
+                    if arg_pair.as_rule() == Rule::source_arg_pair {
+                        let mut key = None;
+                        let mut value = None;
+                        for part in arg_pair.into_inner() {
+                            match part.as_rule() {
+                                Rule::identifier => {
+                                    key = Some(part.as_str().to_string());
+                                }
+                                Rule::quoted_string => {
+                                    value = Some(extract_string_content(part.as_str())?);
+                                }
+                                _ => {}
+                            }
+                        }
+                        if let (Some(k), Some(v)) = (key, value) {
+                            args.insert(k, v);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let function = function
+        .ok_or_else(|| -> BundlebaseError { "CREATE SOURCE missing function name".into() })?;
+
+    if args.is_empty() {
+        return Err("CREATE SOURCE requires at least one argument in WITH clause".into());
+    }
+
+    Ok(BundleCommand::CreateSource {
+        function,
+        args,
+        pack,
+    })
 }
 
 // Helper functions
@@ -439,5 +504,104 @@ mod tests {
         let err = result.unwrap_err();
         // Should contain line/column information in the Pest error
         assert!(err.to_string().contains("line") || err.to_string().contains("column"));
+    }
+
+    #[test]
+    fn test_parse_create_source_simple() {
+        let sql = "CREATE SOURCE remote_dir WITH (url = 's3://bucket/data/')";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::CreateSource {
+                function,
+                args,
+                pack,
+            }) => {
+                assert_eq!(function, "remote_dir");
+                assert_eq!(args.get("url"), Some(&"s3://bucket/data/".to_string()));
+                assert_eq!(pack, None);
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_create_source_with_patterns() {
+        let sql = "CREATE SOURCE remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::CreateSource {
+                function,
+                args,
+                pack,
+            }) => {
+                assert_eq!(function, "remote_dir");
+                assert_eq!(args.get("url"), Some(&"s3://bucket/data/".to_string()));
+                assert_eq!(args.get("patterns"), Some(&"**/*.parquet".to_string()));
+                assert_eq!(pack, None);
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_create_source_with_pack() {
+        let sql = "CREATE SOURCE remote_dir WITH (url = 's3://bucket/users/') ON users";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::CreateSource {
+                function,
+                args,
+                pack,
+            }) => {
+                assert_eq!(function, "remote_dir");
+                assert_eq!(args.get("url"), Some(&"s3://bucket/users/".to_string()));
+                assert_eq!(pack, Some("users".to_string()));
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_create_source_case_insensitive() {
+        let sql = "create source remote_dir with (url = 'file:///data/')";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::CreateSource {
+                function,
+                args,
+                pack,
+            }) => {
+                assert_eq!(function, "remote_dir");
+                assert_eq!(args.get("url"), Some(&"file:///data/".to_string()));
+                assert_eq!(pack, None);
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fetch() {
+        let sql = "FETCH";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::Fetch) => {}
+            _ => panic!("Expected Fetch variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fetch_case_insensitive() {
+        let sql = "fetch";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::Fetch) => {}
+            _ => panic!("Expected Fetch variant"),
+        }
     }
 }
