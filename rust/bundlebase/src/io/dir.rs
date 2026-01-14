@@ -142,7 +142,8 @@ pub trait IOReadWriteDir: IOReadDir {
 
         // Check for duplicate - delete temp or move to final location
         if final_dir.file(&file_name)?.exists().await? {
-            temp_file.delete().await?;
+            // Best-effort delete - some backends (like tar) don't support deletion
+            let _ = temp_file.delete().await;
         } else {
             // Move from temp dir to final location
             // Read+write+delete since rename across directories may not work
@@ -152,7 +153,8 @@ pub trait IOReadWriteDir: IOReadDir {
                 .await?
                 .ok_or("Temp file missing after write")?;
             final_file.write(temp_bytes).await?;
-            temp_file.delete().await?;
+            // Best-effort delete - some backends (like tar) don't support deletion
+            let _ = temp_file.delete().await;
         }
 
         final_dir.file(&file_name)

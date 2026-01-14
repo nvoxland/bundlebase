@@ -6,13 +6,13 @@ use crate::progress::ProgressScope;
 use crate::{Bundle, BundlebaseError};
 use arrow_schema::DataType;
 use async_trait::async_trait;
+use bytes::Bytes;
 use datafusion::error::DataFusionError;
 use datafusion::scalar::ScalarValue;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -169,20 +169,38 @@ impl IndexBlocksOp {
 
         let total_cardinality = column_index.cardinality();
 
-        let rel_path = format!("idx_{}_{}.idx", index, Uuid::new_v4());
-        let path = bundle.data_dir.writable_file(&rel_path)?;
-
-        path.write(column_index.serialize()?).await.map_err(|e| {
+        // Serialize the index and write using content-addressed storage
+        let serialized = column_index.serialize().map_err(|e| {
             BundlebaseError::from(format!(
-                "Failed to save index for column '{}': {}",
+                "Failed to serialize index for column '{}': {}",
                 column, e
             ))
         })?;
 
+        // Create a stream from the serialized bytes
+        let stream = futures::stream::once(async move { Ok::<_, std::io::Error>(serialized) });
+        let boxed_stream: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>> =
+            Box::pin(stream);
+
+        // Write using SHA-based naming with .index.idx extension
+        let written_file = bundle
+            .data_dir
+            .write_stream(boxed_stream, "index.idx")
+            .await
+            .map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to save index for column '{}': {}",
+                    column, e
+                ))
+            })?;
+
+        // Get the relative path within the data_dir
+        let rel_path = bundle.data_dir.relative_path(written_file.as_ref())?;
+
         log::debug!(
             "Successfully created index for column '{}' at {}",
             column,
-            path.url()
+            written_file.url()
         );
 
         Ok(Self {
@@ -271,7 +289,7 @@ mod tests {
                 VersionedBlockId::new(ObjectId::from(10), "v1".to_string()),
                 VersionedBlockId::new(ObjectId::from(20), "v2".to_string()),
             ],
-            path: "idx_01_abc.idx".to_string(),
+            path: "ab/cdef0123456789.index.idx".to_string(),
             cardinality: 100,
         };
 
