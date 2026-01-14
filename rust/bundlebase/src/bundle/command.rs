@@ -1,5 +1,6 @@
 use crate::{BundleBuilder, BundleFacade, BundlebaseError, JoinTypeOption};
 use datafusion::common::ScalarValue;
+use std::collections::HashMap;
 
 pub mod parser;
 pub mod parser_pest;
@@ -97,6 +98,18 @@ pub enum BundleCommand {
     /// Undo last change
     /// Maps to: `bundle.undo()`
     Undo,
+
+    /// Create a data source for fetching files
+    /// Maps to: `bundle.create_source(&function, args, pack.as_deref())`
+    CreateSource {
+        function: String,
+        args: HashMap<String, String>,
+        pack: Option<String>,
+    },
+
+    /// Fetch new files from all defined sources
+    /// Maps to: `bundle.fetch()`
+    Fetch,
 }
 
 impl BundleCommand {
@@ -195,6 +208,20 @@ impl BundleCommand {
                 bundle.undo().await?;
                 Ok(())
             }
+            BundleCommand::CreateSource {
+                function,
+                args,
+                pack,
+            } => {
+                bundle
+                    .create_source(&function, args, pack.as_deref())
+                    .await?;
+                Ok(())
+            }
+            BundleCommand::Fetch => {
+                bundle.fetch().await?;
+                Ok(())
+            }
         }
     }
 
@@ -237,6 +264,7 @@ impl BundleCommand {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::bundle::command::BundleCommand;
     use crate::bundle::ScalarValue;
     #[test]
@@ -313,6 +341,67 @@ mod tests {
                 assert_eq!(pack, Some("users".to_string()));
             }
             _ => panic!("Expected Attach variant"),
+        }
+    }
+
+    #[test]
+    fn test_create_source_command() {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/data/".to_string());
+        args.insert("patterns".to_string(), "**/*.parquet".to_string());
+
+        let cmd = BundleCommand::CreateSource {
+            function: "remote_dir".to_string(),
+            args: args.clone(),
+            pack: None,
+        };
+
+        match cmd {
+            BundleCommand::CreateSource {
+                function,
+                args: a,
+                pack,
+            } => {
+                assert_eq!(function, "remote_dir");
+                assert_eq!(a.get("url"), Some(&"s3://bucket/data/".to_string()));
+                assert_eq!(a.get("patterns"), Some(&"**/*.parquet".to_string()));
+                assert_eq!(pack, None);
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_create_source_with_pack_command() {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/users/".to_string());
+
+        let cmd = BundleCommand::CreateSource {
+            function: "remote_dir".to_string(),
+            args,
+            pack: Some("users".to_string()),
+        };
+
+        match cmd {
+            BundleCommand::CreateSource {
+                function,
+                args: _,
+                pack,
+            } => {
+                assert_eq!(function, "remote_dir");
+                assert_eq!(pack, Some("users".to_string()));
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_fetch_command() {
+        let cmd = BundleCommand::Fetch;
+
+        match cmd {
+            BundleCommand::Fetch => {}
+            _ => panic!("Expected Fetch variant"),
         }
     }
 }

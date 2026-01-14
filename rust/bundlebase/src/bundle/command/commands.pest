@@ -9,6 +9,8 @@
 // - ATTACH '<path>' [AS <name>] [WITH (...)]
 // - [join_type] JOIN AS <name> ON <expression>
 // - REINDEX [ON data(<column>)]
+// - CREATE SOURCE <function> WITH (...) [ON <pack>]
+// - FETCH
 // ============================================================================
 
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
@@ -18,7 +20,7 @@ COMMENT = _{ "--" ~ (!"\n" ~ ANY)* ~ "\n" }
 // Entry Point
 // ============================================================================
 
-statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt) ~ EOI }
+statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt | create_source_stmt | fetch_stmt) ~ EOI }
 
 // ============================================================================
 // FILTER Statement
@@ -95,6 +97,36 @@ join_condition = @{
 
 reindex_stmt = {
     ^"reindex" ~ (^"on" ~ ^"data" ~ "(" ~ identifier ~ ")")?
+}
+
+// ============================================================================
+// CREATE SOURCE Statement
+// ============================================================================
+// Syntax: CREATE SOURCE <function> WITH (<args>) [ON <pack>]
+// Examples:
+//   CREATE SOURCE remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')
+//   CREATE SOURCE remote_dir WITH (url = 'file:///data/') ON users
+
+create_source_stmt = {
+    ^"create" ~ ^"source" ~ identifier ~ ^"with" ~ source_args ~ (^"on" ~ identifier)?
+}
+
+source_args = {
+    "(" ~ source_arg_pair ~ ("," ~ source_arg_pair)* ~ ")"
+}
+
+source_arg_pair = {
+    identifier ~ "=" ~ quoted_string
+}
+
+// ============================================================================
+// FETCH Statement
+// ============================================================================
+// Syntax: FETCH
+// Fetches new files from all defined sources
+
+fetch_stmt = {
+    ^"fetch"
 }
 
 // ============================================================================
