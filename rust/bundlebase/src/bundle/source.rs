@@ -1,6 +1,6 @@
 //! Source struct representing a data source definition for a pack.
 
-use crate::bundle::DefineSourceOp;
+use crate::bundle::CreateSourceOp;
 use crate::data::ObjectId;
 use crate::io::IOReadWriteDir;
 use crate::source::{AttachedFileInfo, FetchAction, SourceFunctionRegistry, SyncMode};
@@ -44,7 +44,7 @@ impl Source {
     }
 
     pub fn from_op(
-        op: &DefineSourceOp,
+        op: &CreateSourceOp,
         registry: &SourceFunctionRegistry,
     ) -> Result<Self, BundlebaseError> {
         // Validate function exists
@@ -165,7 +165,7 @@ mod tests {
     fn test_from_op() {
         let registry = SourceFunctionRegistry::new();
 
-        let op = DefineSourceOp {
+        let op = CreateSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
             function: "remote_dir".to_string(),
@@ -187,7 +187,7 @@ mod tests {
         let mut args = make_args("s3://bucket/data/", None);
         args.insert("key".to_string(), "value".to_string());
 
-        let op = DefineSourceOp {
+        let op = CreateSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
             function: "remote_dir".to_string(),
@@ -205,7 +205,7 @@ mod tests {
     fn test_from_op_unknown_function() {
         let registry = SourceFunctionRegistry::new();
 
-        let op = DefineSourceOp {
+        let op = CreateSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
             function: "unknown_function".to_string(),

@@ -37,21 +37,21 @@ async fn copy_test_file(
 }
 
 #[tokio::test]
-async fn test_define_source_basic() -> Result<(), BundlebaseError> {
+async fn test_create_source_basic() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Define a source with default patterns
     bundle
-        .define_source("remote_dir", make_source_args("memory:///some/path/", None), None)
+        .create_source("remote_dir", make_source_args("memory:///some/path/", None), None)
         .await?;
 
     // Commit and verify
     bundle.commit("Defined source").await?;
 
-    // Verify commit file contains defineSource operation
+    // Verify commit file contains createSource operation
     let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
-    assert!(contents.contains("type: defineSource"));
+    assert!(contents.contains("type: createSource"));
     assert!(contents.contains("url: memory:///some/path/"));
 
     // Reopen and verify source persists (bundle opens successfully)
@@ -61,13 +61,13 @@ async fn test_define_source_basic() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_define_source_with_patterns() -> Result<(), BundlebaseError> {
+async fn test_create_source_with_patterns() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Define source with specific patterns
     bundle
-        .define_source(
+        .create_source(
             "remote_dir",
             make_source_args("memory:///data/", Some("**/*.parquet,**/*.csv")),
             None,
@@ -84,13 +84,13 @@ async fn test_define_source_with_patterns() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_define_source_default_patterns() -> Result<(), BundlebaseError> {
+async fn test_create_source_default_patterns() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Define source without patterns (function defaults to **/* internally)
     bundle
-        .define_source("remote_dir", make_source_args("memory:///data/", None), None)
+        .create_source("remote_dir", make_source_args("memory:///data/", None), None)
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -98,7 +98,7 @@ async fn test_define_source_default_patterns() -> Result<(), BundlebaseError> {
     // When patterns are not provided, they are not included in args
     // The remote_dir function defaults to "**/*" internally
     let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
-    assert!(contents.contains("type: defineSource"));
+    assert!(contents.contains("type: createSource"));
     assert!(contents.contains("url: memory:///data/"));
     // Patterns are not in args when not explicitly provided
     assert!(!contents.contains("patterns:"));
@@ -107,7 +107,7 @@ async fn test_define_source_default_patterns() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_define_source_auto_attaches_files() -> Result<(), BundlebaseError> {
+async fn test_create_source_auto_attaches_files() -> Result<(), BundlebaseError> {
     // Create a source directory with test files
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
@@ -125,10 +125,10 @@ async fn test_define_source_auto_attaches_files() -> Result<(), BundlebaseError>
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
         .await?;
 
-    // Verify file was auto-attached (define_source calls fetch automatically)
+    // Verify file was auto-attached (create_source calls fetch automatically)
     assert_eq!(bundle.num_rows().await?, 1000);
 
     // Verify subsequent fetch finds nothing new
@@ -149,7 +149,7 @@ async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
         .await?;
 
     // Verify no data yet by fetching (should attach nothing)
@@ -192,10 +192,10 @@ async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
         .await?;
 
-    // First explicit fetch should find nothing (already attached by define_source)
+    // First explicit fetch should find nothing (already attached by create_source)
     let count1 = bundle.fetch().await?;
     assert_eq!(count1, 0);
 
@@ -227,7 +227,7 @@ async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*")), None)
+        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*")), None)
         .await?;
 
     // First file should be auto-attached
@@ -274,7 +274,7 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
         .await?;
 
     // Only parquet should be attached (1000 rows)
@@ -305,7 +305,7 @@ async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -337,7 +337,7 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -352,21 +352,21 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_define_source_serialization() -> Result<(), BundlebaseError> {
+async fn test_create_source_serialization() -> Result<(), BundlebaseError> {
     let bundle_dir = random_memory_dir();
     let mut bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source("remote_dir", make_source_args("memory:///data/", Some("**/*.parquet")), None)
+        .create_source("remote_dir", make_source_args("memory:///data/", Some("**/*.parquet")), None)
         .await?;
 
     bundle.commit("Defined source").await?;
 
-    // Read the commit file and verify DefineSource is serialized
+    // Read the commit file and verify CreateSource is serialized
     let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
 
-    assert!(contents.contains("type: defineSource"));
+    assert!(contents.contains("type: createSource"));
     assert!(contents.contains("url: memory:///data/"));
     assert!(contents.contains("patterns: '**/*.parquet'"));
 
@@ -392,7 +392,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir1.url().as_str(), None).await?;
 
     bundle
-        .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
+        .create_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")), None)
         .await?;
 
     bundle.commit("Defined source").await?;
@@ -421,7 +421,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_define_source_copy_default() -> Result<(), BundlebaseError> {
+async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -438,7 +438,7 @@ async fn test_define_source_copy_default() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(
+        .create_source(
             "remote_dir",
             make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
             None,
@@ -458,7 +458,7 @@ async fn test_define_source_copy_default() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_define_source_copy_false() -> Result<(), BundlebaseError> {
+async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -477,7 +477,7 @@ async fn test_define_source_copy_false() -> Result<(), BundlebaseError> {
     let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
     args.insert("copy".to_string(), "false".to_string());
 
-    bundle.define_source("remote_dir", args, None).await?;
+    bundle.create_source("remote_dir", args, None).await?;
 
     bundle.commit("Defined source").await?;
 
@@ -492,7 +492,7 @@ async fn test_define_source_copy_false() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_define_source_copy_true_explicit() -> Result<(), BundlebaseError> {
+async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> {
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -511,7 +511,7 @@ async fn test_define_source_copy_true_explicit() -> Result<(), BundlebaseError> 
     let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
     args.insert("copy".to_string(), "true".to_string());
 
-    bundle.define_source("remote_dir", args, None).await?;
+    bundle.create_source("remote_dir", args, None).await?;
 
     bundle.commit("Defined source").await?;
 
@@ -529,7 +529,7 @@ async fn test_define_source_copy_true_explicit() -> Result<(), BundlebaseError> 
 }
 
 #[tokio::test]
-async fn test_define_source_creates_single_change() -> Result<(), BundlebaseError> {
+async fn test_create_source_creates_single_change() -> Result<(), BundlebaseError> {
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -545,34 +545,34 @@ async fn test_define_source_creates_single_change() -> Result<(), BundlebaseErro
     let mut bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
-    // Record change count before define_source (create may add a change)
+    // Record change count before create_source (create may add a change)
     let changes_before = bundle.status().changes().len();
 
     bundle
-        .define_source(
+        .create_source(
             "remote_dir",
             make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
             None,
         )
         .await?;
 
-    // After define_source, should have exactly 1 additional change (not multiple)
-    // This change should contain both the DefineSourceOp and the AttachBlockOp
+    // After create_source, should have exactly 1 additional change (not multiple)
+    // This change should contain both the CreateSourceOp and the AttachBlockOp
     let changes = bundle.status().changes();
     let changes_added = changes.len() - changes_before;
     assert_eq!(
         changes_added, 1,
-        "define_source should create exactly 1 change, got {}. Changes: {:?}",
+        "create_source should create exactly 1 change, got {}. Changes: {:?}",
         changes_added,
         changes.iter().map(|c| &c.description).collect::<Vec<_>>()
     );
 
-    // The define_source change should contain multiple operations (DefineSourceOp + AttachBlockOp)
-    let define_source_change = &changes[changes_before];
-    let ops_count = define_source_change.operations.len();
+    // The create_source change should contain multiple operations (CreateSourceOp + AttachBlockOp)
+    let create_source_change = &changes[changes_before];
+    let ops_count = create_source_change.operations.len();
     assert!(
         ops_count >= 2,
-        "The change should contain at least 2 operations (DefineSourceOp + AttachBlockOp), got {}",
+        "The change should contain at least 2 operations (CreateSourceOp + AttachBlockOp), got {}",
         ops_count
     );
 
@@ -600,7 +600,7 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(
+        .create_source(
             "remote_dir",
             make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
             None,
@@ -670,7 +670,7 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(
+        .create_source(
             "remote_dir",
             make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
             None,
@@ -744,14 +744,14 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
-        .define_source(
+        .create_source(
             "remote_dir",
             make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
             None,
         )
         .await?;
 
-    // File should be auto-attached (define_source calls fetch)
+    // File should be auto-attached (create_source calls fetch)
     assert_eq!(bundle.num_rows().await?, 1000);
 
     // Subsequent fetch should not re-copy the file

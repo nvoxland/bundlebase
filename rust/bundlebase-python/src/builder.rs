@@ -530,7 +530,7 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Define a data source for a pack.
+    /// Create a data source for a pack.
     ///
     /// A source specifies where to look for data files (e.g., S3 bucket prefix)
     /// and patterns to filter which files to include.
@@ -540,11 +540,11 @@ impl PyBundleBuilder {
     /// * `args` - Function-specific arguments. For "remote_dir":
     ///   - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
     ///   - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
-    /// * `pack` - Which pack to define the source for:
+    /// * `pack` - Which pack to create the source for:
     ///   - "base" (default): The base pack
     ///   - A join name: A joined pack by its join name
     #[pyo3(signature = (function, args, pack="base"))]
-    fn define_source<'py>(
+    fn create_source<'py>(
         slf: PyRef<'_, Self>,
         function: &str,
         args: HashMap<String, String>,
@@ -563,11 +563,11 @@ impl PyBundleBuilder {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
             builder
-                .define_source(&function, args, pack.as_deref())
+                .create_source(&function, args, pack.as_deref())
                 .await
                 .map_err(|e| {
                     to_py_error(
-                        &format!("Failed to define source for {} at '{}'", pack_name, url),
+                        &format!("Failed to create source for {} at '{}'", pack_name, url),
                         e,
                     )
                 })?;

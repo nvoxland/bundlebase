@@ -298,16 +298,16 @@ class SyncBundleBuilder(SyncBundle):
         """Join with another data source.
 
         If location is None, the join point is created without any initial data.
-        Data can be attached later using attach(location, pack=name) or define_source(pack=name).
+        Data can be attached later using attach(location, pack=name) or create_source(pack=name).
         """
         coro = _call_original_method(self._async, "join", name, on, location, how)
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def define_source(
+    def create_source(
         self, function: str, args: Dict[str, str], pack: str = "base"
     ) -> "SyncBundleBuilder":
-        """Define a data source for a pack.
+        """Create a data source for a pack.
 
         Args:
             function: Name of the source function (e.g., "remote_dir", "web_scrape")
@@ -319,7 +319,7 @@ class SyncBundleBuilder(SyncBundle):
         Returns:
             Self for fluent chaining
         """
-        coro = _call_original_method(self._async, "define_source", function, args, pack)
+        coro = _call_original_method(self._async, "create_source", function, args, pack)
         self._async = _loop_manager.run_sync(coro)
         return self
 

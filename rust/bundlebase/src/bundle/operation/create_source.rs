@@ -6,7 +6,7 @@ use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Operation that defines a data source for a pack.
+/// Operation that creates a data source for a pack.
 ///
 /// A source specifies where to look for data files and enables the `fetch()`
 /// functionality to discover and auto-attach new files.
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 /// - "patterns": Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct DefineSourceOp {
+pub struct CreateSourceOp {
     /// Unique identifier for this source
     pub id: ObjectId,
 
@@ -35,7 +35,7 @@ pub struct DefineSourceOp {
     pub args: HashMap<String, String>,
 }
 
-impl DefineSourceOp {
+impl CreateSourceOp {
     pub fn setup(
         id: ObjectId,
         pack: ObjectId,
@@ -52,10 +52,10 @@ impl DefineSourceOp {
 }
 
 #[async_trait]
-impl Operation for DefineSourceOp {
+impl Operation for CreateSourceOp {
     fn describe(&self) -> String {
         let url = self.args.get("url").map(|s| s.as_str()).unwrap_or("<no url>");
-        format!("DEFINE SOURCE {} at {} for pack {}", self.id, url, self.pack)
+        format!("CREATE SOURCE {} at {} for pack {}", self.id, url, self.pack)
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = DefineSourceOp {
+        let op = CreateSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
             function: "remote_dir".to_string(),
@@ -120,13 +120,13 @@ mod tests {
 
         assert_eq!(
             op.describe(),
-            "DEFINE SOURCE 01 at s3://bucket/data/ for pack 02"
+            "CREATE SOURCE 01 at s3://bucket/data/ for pack 02"
         );
     }
 
     #[test]
     fn test_describe_no_url() {
-        let op = DefineSourceOp {
+        let op = CreateSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
             function: "custom_function".to_string(),
@@ -135,13 +135,13 @@ mod tests {
 
         assert_eq!(
             op.describe(),
-            "DEFINE SOURCE 01 at <no url> for pack 02"
+            "CREATE SOURCE 01 at <no url> for pack 02"
         );
     }
 
     #[test]
     fn test_setup() {
-        let op = DefineSourceOp::setup(
+        let op = CreateSourceOp::setup(
             ObjectId::from(1),
             ObjectId::from(2),
             "remote_dir".to_string(),
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_setup_with_patterns() {
-        let op = DefineSourceOp::setup(
+        let op = CreateSourceOp::setup(
             ObjectId::from(1),
             ObjectId::from(2),
             "remote_dir".to_string(),
@@ -173,7 +173,7 @@ mod tests {
         let mut args = make_args("s3://bucket/", Some("**/*"));
         args.insert("key".to_string(), "value".to_string());
 
-        let op = DefineSourceOp::setup(
+        let op = CreateSourceOp::setup(
             ObjectId::from(1),
             ObjectId::from(2),
             "custom_function".to_string(),
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let op = DefineSourceOp {
+        let op = CreateSourceOp {
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
             function: "remote_dir".to_string(),

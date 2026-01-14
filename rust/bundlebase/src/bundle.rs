@@ -24,7 +24,7 @@ pub use facade::BundleFacade;
 pub use indexed_blocks::IndexedBlocks;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::JoinTypeOption;
-pub use operation::{AnyOperation, BundleChange, DefineSourceOp, Operation};
+pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
 pub use join::Join;
 pub use source::Source;
 use std::collections::{HashMap, HashSet};
@@ -639,7 +639,7 @@ impl Bundle {
     }
 
     /// Add a source definition to the bundle
-    pub(crate) fn add_source(&mut self, op: DefineSourceOp) {
+    pub(crate) fn add_source(&mut self, op: CreateSourceOp) {
         let registry = self.source_function_registry.read();
         if let Ok(source) = Source::from_op(&op, &registry) {
             self.sources.insert(op.id.clone(), Arc::new(source));
