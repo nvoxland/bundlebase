@@ -113,7 +113,7 @@ impl Operation for ReplaceBlockOp {
             &old_block.version(),
             reader,
             bundle.indexes().clone(),
-            Arc::new(bundle.data_dir().clone()),
+            bundle.data_dir_arc(),
             bundle.config(),
             source.clone(),
             source_location.clone(),

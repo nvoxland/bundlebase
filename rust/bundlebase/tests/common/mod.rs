@@ -1,8 +1,7 @@
 /// Shared test utilities for integration tests
 use arrow::datatypes::SchemaRef;
 use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
-use bundlebase::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
-use bundlebase::io::{IOReadDir, IOReadFile};
+use bundlebase::io::{readable_file_from_url, IOReadDir, IOReadWriteDir};
 use bundlebase::{BundlebaseError, BundleConfig};
 use url::Url;
 
@@ -19,9 +18,9 @@ pub fn has_column(schema: &SchemaRef, name: &str) -> bool {
 
 #[allow(dead_code)]
 pub async fn latest_commit(
-    data_dir: &ObjectStoreDir,
+    data_dir: &dyn IOReadWriteDir,
 ) -> Result<Option<(String, BundleCommit, Url)>, BundlebaseError> {
-    let meta_dir = data_dir.io_subdir("_bundlebase")?;
+    let meta_dir = data_dir.subdir("_bundlebase")?;
 
     let files = meta_dir.list_files().await?;
     let mut files = files
@@ -36,7 +35,7 @@ pub async fn latest_commit(
     match last_file {
         None => Ok(None),
         Some(file) => {
-            let io_file = ObjectStoreFile::from_url(&file.url, BundleConfig::default().into())?;
+            let io_file = readable_file_from_url(&file.url, BundleConfig::default().into())?;
             let yaml = io_file.read_str().await?;
             Ok(yaml.map(|content| {
                 (

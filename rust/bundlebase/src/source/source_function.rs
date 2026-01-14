@@ -18,7 +18,7 @@ use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
 use super::source_utils;
 use super::web_scrape::WebScrapeFunction;
-use crate::io::plugin::object_store::ObjectStoreDir;
+use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
@@ -237,7 +237,7 @@ pub trait SourceFunction: Send + Sync {
         &self,
         location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
     ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
         let should_copy = source_utils::should_copy(args);
@@ -261,7 +261,7 @@ pub trait SourceFunction: Send + Sync {
         &self,
         args: &HashMap<String, String>,
         attached_locations: HashSet<String>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         config: Arc<BundleConfig>,
     ) -> Result<Vec<MaterializedData>, BundlebaseError> {
         let discovered = self.discover(args, &attached_locations, &config).await?;
@@ -302,7 +302,7 @@ pub trait SourceFunction: Send + Sync {
         &self,
         args: &HashMap<String, String>,
         attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         config: Arc<BundleConfig>,
         mode: SyncMode,
     ) -> Result<Vec<RefreshAction>, BundlebaseError> {

@@ -4,6 +4,8 @@ use crate::BundlebaseError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::fmt::Debug;
 use url::Url;
 
@@ -64,4 +66,24 @@ pub trait IOReadWriteFile: IOReadFile {
     /// Delete the file.
     /// Returns Ok even if the file doesn't exist.
     async fn delete(&self) -> Result<(), BundlebaseError>;
+}
+
+/// Read file contents and deserialize from YAML.
+/// Returns `None` if the file doesn't exist.
+pub async fn read_yaml<T: DeserializeOwned>(
+    file: &dyn IOReadFile,
+) -> Result<Option<T>, BundlebaseError> {
+    match file.read_str().await? {
+        Some(str) => Ok(Some(serde_yaml::from_str(&str)?)),
+        None => Ok(None),
+    }
+}
+
+/// Serialize value to YAML and write to file.
+pub async fn write_yaml<T: Serialize + ?Sized>(
+    file: &dyn IOReadWriteFile,
+    value: &T,
+) -> Result<(), BundlebaseError> {
+    let yaml = serde_yaml::to_string(value)?;
+    file.write(Bytes::from(yaml)).await
 }

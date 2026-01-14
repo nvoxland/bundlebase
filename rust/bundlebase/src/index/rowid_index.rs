@@ -1,5 +1,5 @@
 use crate::data::RowId;
-use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadWriteDir;
 use crate::BundlebaseError;
 use bytes::Bytes;
@@ -24,7 +24,7 @@ impl RowIdIndex {
     pub(crate) async fn build(
         &self,
         datafile: &ObjectStoreFile,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         block_id: &ObjectId,
         skip_first_line: bool,
     ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
@@ -149,7 +149,7 @@ impl RowIdIndex {
 mod tests {
     use super::*;
     use crate::io::IOReadWriteFile;
-    use crate::test_utils::random_memory_dir;
+    use crate::test_utils::random_memory_dir_concrete;
 
     #[test]
     fn test_build_row_index_empty() {
@@ -245,7 +245,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_serialize_and_load_index_single_row() {
-        let dir = random_memory_dir();
+        let dir = random_memory_dir_concrete();
         let file = dir.io_file("single_row.idx").unwrap();
         let block_id = ObjectId::from(50u8);
 
@@ -265,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_serialize_and_load_index_multiple_rows() {
-        let dir = random_memory_dir();
+        let dir = random_memory_dir_concrete();
         let file = dir.io_file("multi_row.idx").unwrap();
         let block_id = ObjectId::from(60u8);
 

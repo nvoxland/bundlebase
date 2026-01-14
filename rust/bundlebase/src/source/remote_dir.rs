@@ -8,7 +8,8 @@ use super::source_function::{
 };
 use super::source_utils;
 use crate::io::plugin::ftp::FtpFile;
-use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::plugin::object_store::ObjectStoreFile;
+use crate::io::IOReadWriteDir;
 use crate::io::plugin::sftp::{parse_scp_url, SftpClient};
 use crate::io::{io_registry, IOReadFile};
 use crate::{BundleConfig, BundlebaseError};
@@ -120,7 +121,7 @@ impl SourceFunction for RemoteDirFunction {
         &self,
         location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
     ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         let should_copy = source_utils::should_copy(args);
@@ -135,7 +136,7 @@ impl SourceFunction for RemoteDirFunction {
         &self,
         args: &HashMap<String, String>,
         attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         config: Arc<BundleConfig>,
         mode: SyncMode,
     ) -> Result<Vec<RefreshAction>, BundlebaseError> {
@@ -182,7 +183,7 @@ impl SourceFunction for RemoteDirFunction {
                         &loc.url,
                         should_copy,
                         kp.as_deref(),
-                        &dd,
+                        dd,
                         &cfg,
                     )
                     .await
@@ -222,7 +223,7 @@ impl RemoteDirFunction {
         url: &Url,
         should_copy: bool,
         key_path: Option<&str>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
     ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         if !should_copy {
@@ -252,7 +253,7 @@ impl RemoteDirFunction {
         url: &Url,
         should_copy: bool,
         key_path: Option<&str>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
     ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         Self::materialize_url_static(url, should_copy, key_path, data_dir, config).await
@@ -262,7 +263,7 @@ impl RemoteDirFunction {
     async fn download_sftp_static(
         url: &Url,
         key_path: Option<&str>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
     ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         let (user, host, port, remote_path) = parse_scp_url(url)?;
         let key_path_str = key_path.ok_or_else(|| {
@@ -293,13 +294,13 @@ impl RemoteDirFunction {
         &self,
         url: &Url,
         key_path: Option<&str>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
     ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         Self::download_sftp_static(url, key_path, data_dir).await
     }
 
     /// Download a file via FTP (static version).
-    async fn download_ftp_static(url: &Url, data_dir: &ObjectStoreDir) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+    async fn download_ftp_static(url: &Url, data_dir: &dyn IOReadWriteDir) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         let ftp_file = FtpFile::from_url(url)?;
         let data = ftp_file.read_bytes().await?.ok_or_else(|| {
             BundlebaseError::from(format!("FTP file not found: {}", url))
@@ -310,7 +311,7 @@ impl RemoteDirFunction {
     }
 
     /// Download a file via FTP.
-    async fn download_ftp(&self, url: &Url, data_dir: &ObjectStoreDir) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+    async fn download_ftp(&self, url: &Url, data_dir: &dyn IOReadWriteDir) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         Self::download_ftp_static(url, data_dir).await
     }
 }

@@ -1,10 +1,10 @@
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
-use bundlebase::io::{IOReadDir, IOReadFile, IOReadWriteFile};
+use bundlebase::io::{readable_file_from_url, IOReadWriteDir, IOReadWriteFile};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::{Bundle, BundlebaseError, BundleConfig};
 use std::collections::HashMap;
+use std::sync::Arc;
 use url::Url;
 
 mod common;
@@ -22,16 +22,16 @@ fn make_source_args(url: &str, patterns: Option<&str>) -> HashMap<String, String
 /// Helper to copy a test file to a target directory
 async fn copy_test_file(
     test_file: &str,
-    target_dir: &ObjectStoreDir,
+    target_dir: &dyn IOReadWriteDir,
     target_name: &str,
 ) -> Result<(), BundlebaseError> {
     let source_obj =
-        ObjectStoreFile::from_url(&Url::parse(test_file)?, BundleConfig::default().into())?;
-    let data = source_obj
+        readable_file_from_url(&Url::parse(test_file)?, BundleConfig::default().into())?;
+    let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?
         .expect("Failed to read source file");
-    let target_file = target_dir.io_file(target_name)?;
+    let target_file = target_dir.writable_file(target_name)?;
     target_file.write(data).await?;
     Ok(())
 }
@@ -114,7 +114,7 @@ async fn test_define_source_auto_attaches_files() -> Result<(), BundlebaseError>
     // Copy test data to source directory
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -158,7 +158,7 @@ async fn test_refresh_attaches_new_files() -> Result<(), BundlebaseError> {
     // Now add a file to the source directory
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -181,7 +181,7 @@ async fn test_refresh_idempotent() -> Result<(), BundlebaseError> {
     // Copy test data to source directory
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -216,7 +216,7 @@ async fn test_refresh_incremental() -> Result<(), BundlebaseError> {
     // Copy first file to source
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -235,7 +235,7 @@ async fn test_refresh_incremental() -> Result<(), BundlebaseError> {
     // Add second file
     copy_test_file(
         test_datafile("customers-0-100.csv"),
-        &source_dir,
+        source_dir.as_ref(),
         "customers.csv",
     )
     .await?;
@@ -255,7 +255,7 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
     // Copy parquet file
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -263,7 +263,7 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
     // Copy CSV file
     copy_test_file(
         test_datafile("customers-0-100.csv"),
-        &source_dir,
+        source_dir.as_ref(),
         "customers.csv",
     )
     .await?;
@@ -294,7 +294,7 @@ async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
     // Copy test file
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -326,7 +326,7 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
     // Copy test file
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -381,7 +381,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
     // Copy test file
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -403,7 +403,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
     // Add a new file to source
     copy_test_file(
         test_datafile("customers-0-100.csv"),
-        &source_dir,
+        source_dir.as_ref(),
         "customers.csv",
     )
     .await?;
@@ -427,7 +427,7 @@ async fn test_define_source_copy_default() -> Result<(), BundlebaseError> {
     // Copy test file to source directory
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -463,7 +463,7 @@ async fn test_define_source_copy_false() -> Result<(), BundlebaseError> {
     // Copy test file to source directory
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -497,7 +497,7 @@ async fn test_define_source_copy_true_explicit() -> Result<(), BundlebaseError> 
     // Copy test file to source directory
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -534,7 +534,7 @@ async fn test_refresh_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     // Copy test file to source directory
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata.parquet",
     )
     .await?;
@@ -560,7 +560,7 @@ async fn test_refresh_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     // Add a second parquet file (same data, different name)
     copy_test_file(
         test_datafile("userdata.parquet"),
-        &source_dir,
+        source_dir.as_ref(),
         "userdata2.parquet",
     )
     .await?;

@@ -23,14 +23,15 @@ pub mod registry;
 pub(crate) mod util;
 
 // Plugin system with protocol-specific implementations
-pub mod plugin;
+// Internal to crate - external code should use factory functions and trait objects
+pub(crate) mod plugin;
 
 // Re-export core types from registry
 pub use registry::{io_registry, IOFactory, IORegistry};
 
 // Re-export traits and types
 pub use dir::{IOReadDir, IOReadWriteDir};
-pub use file::{IOReadFile, IOReadWriteFile};
+pub use file::{read_yaml, write_yaml, IOReadFile, IOReadWriteFile};
 pub use file_info::FileInfo;
 
 // Re-export ObjectId from data module
@@ -38,6 +39,7 @@ pub use crate::data::ObjectId;
 
 use object_store::memory::InMemory;
 use std::sync::{Arc, OnceLock};
+use url::Url;
 
 pub static EMPTY_SCHEME: &str = "empty";
 pub static EMPTY_URL: &str = "empty:///";
@@ -53,6 +55,92 @@ pub fn get_memory_store() -> Arc<InMemory> {
 
 pub fn get_null_store() -> Arc<InMemory> {
     NULL_STORE.get_or_init(|| Arc::new(InMemory::new())).clone()
+}
+
+/// Create a writable directory from a URL.
+///
+/// This is the primary way to create directories outside the io module.
+/// Returns an `Arc<dyn IOReadWriteDir>` that can be cloned cheaply.
+pub fn writable_dir_from_url(
+    url: &Url,
+    config: Arc<crate::BundleConfig>,
+) -> Result<Arc<dyn IOReadWriteDir>, crate::BundlebaseError> {
+    Ok(Arc::new(plugin::object_store::ObjectStoreDir::from_url(
+        url, config,
+    )?))
+}
+
+/// Create a writable directory from a URL string.
+///
+/// Parses the URL string and creates a writable directory.
+/// Relative paths are resolved against the current working directory.
+pub fn writable_dir_from_str(
+    url: &str,
+    config: Arc<crate::BundleConfig>,
+) -> Result<Arc<dyn IOReadWriteDir>, crate::BundlebaseError> {
+    Ok(Arc::new(plugin::object_store::ObjectStoreDir::from_str(
+        url, config,
+    )?))
+}
+
+/// Create a readable file from a URL.
+///
+/// This is the primary way to create files for reading outside the io module.
+pub fn readable_file_from_url(
+    url: &Url,
+    config: Arc<crate::BundleConfig>,
+) -> Result<Box<dyn IOReadFile>, crate::BundlebaseError> {
+    Ok(Box::new(plugin::object_store::ObjectStoreFile::from_url(
+        url, config,
+    )?))
+}
+
+/// Create a writable file from a URL.
+///
+/// This is the primary way to create files for writing outside the io module.
+pub fn writable_file_from_url(
+    url: &Url,
+    config: Arc<crate::BundleConfig>,
+) -> Result<Box<dyn IOReadWriteFile>, crate::BundlebaseError> {
+    Ok(Box::new(plugin::object_store::ObjectStoreFile::from_url(
+        url, config,
+    )?))
+}
+
+/// Create a readable file from a path string.
+///
+/// If the path contains ":" it's treated as an absolute URL.
+/// Otherwise, it's a relative path resolved against the base directory.
+pub fn readable_file_from_path(
+    path: &str,
+    base: &dyn IOReadDir,
+    config: Arc<crate::BundleConfig>,
+) -> Result<Box<dyn IOReadFile>, crate::BundlebaseError> {
+    if path.contains(":") {
+        // Absolute URL
+        readable_file_from_url(&Url::parse(path)?, config)
+    } else {
+        // Relative path - get file from base directory
+        base.file(path)
+    }
+}
+
+/// Create a writable file from a path string.
+///
+/// If the path contains ":" it's treated as an absolute URL.
+/// Otherwise, it's a relative path resolved against the base directory.
+pub fn writable_file_from_path(
+    path: &str,
+    base: &dyn IOReadWriteDir,
+    config: Arc<crate::BundleConfig>,
+) -> Result<Box<dyn IOReadWriteFile>, crate::BundlebaseError> {
+    if path.contains(":") {
+        // Absolute URL
+        writable_file_from_url(&Url::parse(path)?, config)
+    } else {
+        // Relative path - get file from base directory
+        base.writable_file(path)
+    }
 }
 
 pub struct DataStorage {}

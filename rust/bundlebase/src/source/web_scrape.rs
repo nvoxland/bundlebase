@@ -7,7 +7,7 @@ use super::source_function::{
     ArgSpec, AttachedFileInfo, DiscoveredLocation, RefreshAction, SourceFunction, SyncMode,
 };
 use super::source_utils;
-use crate::io::plugin::object_store::ObjectStoreDir;
+use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use scraper::{Html, Selector};
@@ -117,7 +117,7 @@ impl SourceFunction for WebScrapeFunction {
         &self,
         args: &HashMap<String, String>,
         attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         config: Arc<BundleConfig>,
         mode: SyncMode,
     ) -> Result<Vec<RefreshAction>, BundlebaseError> {
@@ -147,7 +147,7 @@ impl SourceFunction for WebScrapeFunction {
                 let data_dir = data_dir.clone();
                 let config = config.clone();
                 async move {
-                    source_utils::materialize_url(&loc.url, should_copy, &data_dir, &config).await
+                    source_utils::materialize_url(&loc.url, should_copy, data_dir, &config).await
                 }
             },
         )

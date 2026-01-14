@@ -17,8 +17,7 @@ use crate::source::RefreshAction;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
-use crate::io::plugin::object_store::ObjectStoreDir;
-use crate::io::{IOReadDir, IOReadFile, IOReadWriteFile};
+use crate::io::{write_yaml, writable_dir_from_str, writable_dir_from_url, IOReadWriteDir};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
@@ -176,11 +175,11 @@ impl BundleBuilder {
         let mut existing = Bundle::empty().await?;
         existing.passed_config = config;
         existing.recompute_config()?;
-        existing.data_dir = ObjectStoreDir::from_str(path, existing.config.clone())?;
+        existing.data_dir = writable_dir_from_str(path, existing.config.clone())?;
 
         // Check if a bundle already exists at this location
-        let meta_dir = existing.data_dir.io_subdir(META_DIR)?;
-        let init_file = meta_dir.io_file(INIT_FILENAME)?;
+        let meta_dir = existing.data_dir.writable_subdir(META_DIR)?;
+        let init_file = meta_dir.file(INIT_FILENAME)?;
         if init_file.exists().await? {
             return Err(format!(
                 "A bundle already exists at '{}'. Use open() to access an existing bundle.",
@@ -217,7 +216,7 @@ impl BundleBuilder {
         // If data_dir is provided and not empty, use it; otherwise keep the current bundle's data_dir
         if let Some(dir) = data_dir {
             if !dir.is_empty() {
-                new_bundle.data_dir = ObjectStoreDir::from_str(dir, bundle.config())?;
+                new_bundle.data_dir = writable_dir_from_str(dir, bundle.config())?;
                 if new_bundle.data_dir.url() != bundle.url() {
                     new_bundle.last_manifest_version = 0;
                 }
@@ -252,12 +251,12 @@ impl BundleBuilder {
     /// bundle.commit("Filter high-value transactions").await?;
     /// ```
     pub async fn commit(&mut self, message: &str) -> Result<(), BundlebaseError> {
-        let manifest_dir = self.bundle.data_dir.io_subdir(META_DIR)?;
+        let manifest_dir = self.bundle.data_dir.writable_subdir(META_DIR)?;
 
         if self.bundle.last_manifest_version == 0 {
             let from = self.bundle.from();
-            let init_file = manifest_dir.io_file(INIT_FILENAME)?;
-            init_file.write_yaml(&InitCommit::new(from)).await?;
+            let init_file = manifest_dir.writable_file(INIT_FILENAME)?;
+            write_yaml(init_file.as_ref(), &InitCommit::new(from)).await?;
         };
 
         // Calculate next version number
@@ -294,7 +293,7 @@ impl BundleBuilder {
 
         // Create versioned filename: {5-digit-version}{12-char-hash}.yaml
         let filename = format!("{:05}{}.yaml", next_version, hash_short);
-        let manifest_file = manifest_dir.io_file(filename.as_str())?;
+        let manifest_file = manifest_dir.writable_file(filename.as_str())?;
 
         // Write as stream
         let data = bytes::Bytes::from(yaml);
@@ -379,7 +378,7 @@ impl BundleBuilder {
             let mut new = Bundle::empty().await?;
             new.passed_config = self.bundle.passed_config.clone();
             new.recompute_config()?;
-            new.data_dir = ObjectStoreDir::from_url(self.url(), new.config.clone())?;
+            new.data_dir = writable_dir_from_url(self.url(), new.config.clone())?;
             new
         } else {
             // Preserve explicit_config when reopening
@@ -1483,8 +1482,8 @@ impl BundleBuilder {
         Ok(analyzer.get_source(logical_name))
     }
 
-    pub fn data_dir(&self) -> &ObjectStoreDir {
-        &self.bundle.data_dir
+    pub fn data_dir(&self) -> &dyn IOReadWriteDir {
+        self.bundle.data_dir()
     }
 }
 
