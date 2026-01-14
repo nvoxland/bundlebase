@@ -24,7 +24,6 @@ pub fn parse_custom_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseE
             let cmd = match inner_stmt.as_rule() {
                 Rule::filter_stmt => parse_filter_pest(inner_stmt)?,
                 Rule::attach_stmt => parse_attach_pest(inner_stmt)?,
-                Rule::attach_to_join_stmt => parse_attach_to_join_pest(inner_stmt)?,
                 Rule::join_stmt => parse_join_pest(inner_stmt)?,
                 Rule::reindex_stmt => parse_reindex_pest(inner_stmt)?,
                 _ => return Err("Unexpected statement type".into()),
@@ -98,6 +97,8 @@ fn parse_filter_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand,
 
 fn parse_attach_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand, BundlebaseError> {
     let mut path = None;
+    let mut pack = None;
+    let raw = pair.as_str().to_string();
 
     for inner_pair in pair.into_inner() {
         match inner_pair.as_rule() {
@@ -107,7 +108,10 @@ fn parse_attach_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand,
                 }
             }
             Rule::identifier => {
-                // AS alias - not used yet
+                // The identifier after TO is the pack name
+                if pack.is_none() {
+                    pack = Some(inner_pair.as_str().to_string());
+                }
             }
             Rule::with_options => {
                 // WITH options - not used yet
@@ -116,43 +120,30 @@ fn parse_attach_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand,
         }
     }
 
-    let path = path.ok_or_else(|| -> BundlebaseError { "ATTACH statement missing path".into() })?;
-
-    Ok(BundleCommand::Attach { path })
-}
-
-fn parse_attach_to_join_pest(
-    pair: pest::iterators::Pair<Rule>,
-) -> Result<BundleCommand, BundlebaseError> {
-    let mut path = None;
-    let mut join = None;
-
-    for inner_pair in pair.into_inner() {
-        match inner_pair.as_rule() {
-            Rule::quoted_string => {
-                // First quoted string is the path, second is the join name
-                if path.is_none() {
-                    path = Some(extract_string_content(inner_pair.as_str())?);
-                } else if join.is_none() {
-                    join = Some(extract_string_content(inner_pair.as_str())?);
-                }
+    // If pack wasn't captured from inner pairs, try to extract from raw string
+    // (the grammar consumes "to" as a keyword, not a captured rule)
+    if pack.is_none() {
+        let upper = raw.to_uppercase();
+        if let Some(to_pos) = upper.find(" TO ") {
+            let after_to = raw[to_pos + 4..].trim_start();
+            let pack_name: String = after_to
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !pack_name.is_empty() {
+                pack = Some(pack_name);
             }
-            _ => {}
         }
     }
 
-    let path =
-        path.ok_or_else(|| -> BundlebaseError { "ATTACH TO JOIN statement missing path".into() })?;
-    let join = join.ok_or_else(|| -> BundlebaseError {
-        "ATTACH TO JOIN statement missing join name".into()
-    })?;
+    let path = path.ok_or_else(|| -> BundlebaseError { "ATTACH statement missing path".into() })?;
 
-    Ok(BundleCommand::AttachToJoin { join, path })
+    Ok(BundleCommand::Attach { path, pack })
 }
 
 fn parse_join_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand, BundlebaseError> {
     let mut join_type = JoinTypeOption::Inner;
-    let mut source = None;
+    let mut location = None;
     let mut name = None;
     let mut expression = None;
 
@@ -162,9 +153,9 @@ fn parse_join_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand, B
                 join_type = parse_join_type(inner_pair.as_str())?;
             }
             Rule::quoted_string => {
-                // First quoted string is the source file
-                if source.is_none() {
-                    source = Some(extract_string_content(inner_pair.as_str())?);
+                // First quoted string is the location file
+                if location.is_none() {
+                    location = Some(extract_string_content(inner_pair.as_str())?);
                 }
             }
             Rule::identifier => {
@@ -178,8 +169,8 @@ fn parse_join_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand, B
         }
     }
 
-    let source =
-        source.ok_or_else(|| -> BundlebaseError { "JOIN statement missing source file".into() })?;
+    let location =
+        location.ok_or_else(|| -> BundlebaseError { "JOIN statement missing location file".into() })?;
     let name =
         name.ok_or_else(|| -> BundlebaseError { "JOIN statement missing AS name".into() })?;
     let expression = expression
@@ -191,7 +182,7 @@ fn parse_join_pest(pair: pest::iterators::Pair<Rule>) -> Result<BundleCommand, B
 
     Ok(BundleCommand::Join {
         name,
-        source,
+        location: Some(location),
         expression,
         join_type,
     })
@@ -293,8 +284,9 @@ mod tests {
         let result = parse_custom_pest(sql).unwrap();
 
         match result {
-            Some(BundleCommand::Attach { path }) => {
+            Some(BundleCommand::Attach { path, pack }) => {
                 assert_eq!(path, "data.parquet");
+                assert_eq!(pack, None);
             }
             _ => panic!("Expected Attach variant"),
         }
@@ -306,8 +298,9 @@ mod tests {
         let result = parse_custom_pest(sql).unwrap();
 
         match result {
-            Some(BundleCommand::Attach { path }) => {
+            Some(BundleCommand::Attach { path, pack }) => {
                 assert_eq!(path, "data.csv");
+                assert_eq!(pack, None);
             }
             _ => panic!("Expected Attach variant"),
         }
@@ -319,52 +312,39 @@ mod tests {
         let result = parse_custom_pest(sql).unwrap();
 
         match result {
-            Some(BundleCommand::Attach { path }) => {
+            Some(BundleCommand::Attach { path, pack }) => {
                 assert_eq!(path, "path/with'quote.csv");
+                assert_eq!(pack, None);
             }
             _ => panic!("Expected Attach variant"),
         }
     }
 
     #[test]
-    fn test_parse_attach_to_join() {
-        let sql = "ATTACH 'more_users.parquet' TO JOIN 'users'";
+    fn test_parse_attach_to_pack() {
+        let sql = "ATTACH 'more_users.parquet' TO users";
         let result = parse_custom_pest(sql).unwrap();
 
         match result {
-            Some(BundleCommand::AttachToJoin { join, path }) => {
-                assert_eq!(join, "users");
+            Some(BundleCommand::Attach { path, pack }) => {
                 assert_eq!(path, "more_users.parquet");
+                assert_eq!(pack, Some("users".to_string()));
             }
-            _ => panic!("Expected AttachToJoin variant"),
+            _ => panic!("Expected Attach variant"),
         }
     }
 
     #[test]
-    fn test_parse_attach_to_join_double_quotes() {
-        let sql = "ATTACH \"data.csv\" TO JOIN \"additional\"";
+    fn test_parse_attach_to_pack_case_insensitive() {
+        let sql = "attach 'file.json' to joined_data";
         let result = parse_custom_pest(sql).unwrap();
 
         match result {
-            Some(BundleCommand::AttachToJoin { join, path }) => {
-                assert_eq!(join, "additional");
-                assert_eq!(path, "data.csv");
-            }
-            _ => panic!("Expected AttachToJoin variant"),
-        }
-    }
-
-    #[test]
-    fn test_parse_attach_to_join_case_insensitive() {
-        let sql = "attach 'file.json' to join 'joined_data'";
-        let result = parse_custom_pest(sql).unwrap();
-
-        match result {
-            Some(BundleCommand::AttachToJoin { join, path }) => {
-                assert_eq!(join, "joined_data");
+            Some(BundleCommand::Attach { path, pack }) => {
                 assert_eq!(path, "file.json");
+                assert_eq!(pack, Some("joined_data".to_string()));
             }
-            _ => panic!("Expected AttachToJoin variant"),
+            _ => panic!("Expected Attach variant"),
         }
     }
 
@@ -376,12 +356,12 @@ mod tests {
         match result {
             Some(BundleCommand::Join {
                 name,
-                source,
+                location,
                 expression,
                 join_type,
             }) => {
                 assert_eq!(name, "other");
-                assert_eq!(source, "other.csv");
+                assert_eq!(location, Some("other.csv".to_string()));
                 assert_eq!(expression, "id = other.id");
                 assert_eq!(join_type, JoinTypeOption::Inner);
             }
@@ -397,12 +377,12 @@ mod tests {
         match result {
             Some(BundleCommand::Join {
                 name,
-                source,
+                location,
                 expression,
                 join_type,
             }) => {
                 assert_eq!(name, "users");
-                assert_eq!(source, "users.parquet");
+                assert_eq!(location, Some("users.parquet".to_string()));
                 assert_eq!(expression, "user_id = users.id");
                 assert_eq!(join_type, JoinTypeOption::Left);
             }
@@ -418,12 +398,12 @@ mod tests {
         match result {
             Some(BundleCommand::Join {
                 name,
-                source,
+                location,
                 expression,
                 join_type,
             }) => {
                 assert_eq!(name, "data");
-                assert_eq!(source, "data.json");
+                assert_eq!(location, Some("data.json".to_string()));
                 assert_eq!(expression, "key = data.key");
                 assert_eq!(join_type, JoinTypeOption::Full);
             }

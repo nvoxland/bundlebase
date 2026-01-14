@@ -13,7 +13,7 @@ async fn test_export_and_reopen_tar() {
     // Create bundle in memory
     let mut bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
     bundle
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     bundle.commit("Initial data").await.unwrap();
@@ -48,7 +48,7 @@ async fn test_commit_to_tar() {
     // Create and export
     let mut bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
     bundle
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
@@ -84,7 +84,7 @@ async fn test_multiple_commits_to_tar() {
     // Create initial bundle and export
     let mut bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
     bundle
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
@@ -125,7 +125,7 @@ async fn test_tar_preserves_metadata() {
     bundle.set_name("Test Bundle").await.unwrap();
     bundle.set_description("A test bundle for tar export").await.unwrap();
     bundle
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     bundle.commit("Initial commit").await.unwrap();
@@ -153,7 +153,7 @@ async fn test_create_index_in_tar() {
     // Create bundle and export
     let mut bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
     bundle
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();
@@ -191,7 +191,7 @@ async fn test_tar_query_equivalence() {
     // Create and query memory bundle
     let mut mem_bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
     mem_bundle
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     mem_bundle.filter("id > 100", vec![]).await.unwrap();
@@ -224,7 +224,7 @@ async fn test_export_from_bundle() {
     // Create and commit a bundle
     let mut builder = BundleBuilder::create(memory_url.as_str(), None).await.unwrap();
     builder
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     builder.commit("Initial data").await.unwrap();
@@ -257,7 +257,7 @@ async fn test_export_from_builder_no_changes() {
         .await
         .unwrap();
     builder
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     builder.commit("Initial data").await.unwrap();
@@ -284,7 +284,7 @@ async fn test_export_from_builder_with_uncommitted_changes() {
         .await
         .unwrap();
     builder
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     // Note: NOT committing here
@@ -317,7 +317,7 @@ async fn test_tar_file_listing() {
     // Create bundle with data
     let mut bundle = BundleBuilder::create(random_memory_url().as_str(), None).await.unwrap();
     bundle
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     bundle.commit("v1").await.unwrap();

@@ -12,7 +12,7 @@ async fn test_bundle_data_table() {
 
     // Populate cache by attaching data and getting the dataframe
     bundle
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
     let df = bundle.dataframe().await.unwrap();
@@ -40,7 +40,7 @@ async fn test_data_table_schema() {
 
     // Attach data
     bundle
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
 

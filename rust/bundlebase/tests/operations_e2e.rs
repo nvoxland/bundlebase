@@ -22,7 +22,7 @@ async fn test_create() -> Result<(), BundlebaseError> {
 async fn test_attach() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     let full_path = test_datafile("userdata.parquet");
-    bundle.attach(&full_path).await?;
+    bundle.attach(&full_path, None).await?;
 
     assert_eq!(1000, bundle.bundle().num_rows().await?);
 
@@ -61,7 +61,7 @@ async fn test_attach() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_remove() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet")).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
     bundle.remove_column("title").await?;
 
     assert!(!bundle
@@ -76,7 +76,7 @@ async fn test_remove() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_rename() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet")).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
     bundle.rename_column("first_name", "new_name").await?;
 
     assert_eq!(
@@ -126,7 +126,7 @@ async fn test_rename_case_sensitive() -> Result<(), BundlebaseError> {
     let _ = env_logger::builder().is_test(true).try_init();
 
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("customers-0-100.csv")).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
     bundle.rename_column("Email", "email").await?;
 
     assert_eq!(
@@ -187,7 +187,7 @@ async fn test_function_source() -> Result<(), BundlebaseError> {
             )),
         )
         .await?;
-    bundle.attach("function://names").await?;
+    bundle.attach("function://names", None).await?;
     assert_eq!(3, bundle.num_rows().await?);
 
     Ok(())
@@ -196,7 +196,7 @@ async fn test_function_source() -> Result<(), BundlebaseError> {
 async fn test_multi_operation_pipeline() -> Result<(), BundlebaseError> {
     // Test a realistic workflow: attach -> remove -> rename -> query
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet")).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Remove multiple columns
     bundle.remove_column("title").await?;
@@ -222,7 +222,7 @@ async fn test_multi_operation_pipeline() -> Result<(), BundlebaseError> {
 async fn test_sequential_renames() -> Result<(), BundlebaseError> {
     // Test multiple renames in sequence
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet")).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
     bundle.rename_column("first_name", "fname").await?;
     bundle.rename_column("last_name", "lname").await?;
     bundle.rename_column("email", "email_addr").await?;
@@ -246,7 +246,7 @@ async fn test_attach_missing_file_error() -> Result<(), BundlebaseError> {
     let nonexistent_path =
         std::env::current_dir()?.join("../../test_data/nonexistent_file.parquet");
     let nonexistent_url = Url::from_file_path(nonexistent_path).unwrap();
-    let result = bundle.attach(nonexistent_url.as_str()).await;
+    let result = bundle.attach(nonexistent_url.as_str(), None).await;
     assert!(result.is_err());
 
     Ok(())
@@ -256,7 +256,7 @@ async fn test_attach_invalid_function_error() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Should fail when attaching a function that hasn't been defined
-    let result = bundle.attach("function://undefined_function").await;
+    let result = bundle.attach("function://undefined_function", None).await;
     assert!(result.is_err());
 
     Ok(())

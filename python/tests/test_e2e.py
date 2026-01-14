@@ -174,11 +174,11 @@ async def test_join():
     """Test that join() method binding works correctly"""
     c = await (bundlebase.create(random_bundle())
                .attach(datafile("customers-0-100.csv"))
-               .join("regions", datafile("sales-regions.csv"), '$base."Country" = regions."Country"'))
+               .join("regions", '$base."Country" = regions."Country"', datafile("sales-regions.csv")))
 
     assert await c.num_rows() == 99
 
-    await c.attach_to_join("regions", datafile("sales-regions-2.csv"))
+    await c.attach(datafile("sales-regions-2.csv"), pack="regions")
     assert await c.num_rows() == 100
 
 

@@ -19,8 +19,12 @@ pub mod parser_pest;
 #[derive(Debug, Clone)]
 pub enum BundleCommand {
     /// Attach a data source
-    /// Maps to: `bundle.attach(&path)`
-    Attach { path: String },
+    /// Maps to: `bundle.attach(&path, pack.as_deref())`
+    /// If pack is None or "base", attaches to the base pack. Otherwise, attaches to the join pack.
+    Attach {
+        path: String,
+        pack: Option<String>,
+    },
 
     /// Filter rows by a WHERE condition
     /// Maps to: `bundle.filter(&where_clause, params)`
@@ -49,10 +53,11 @@ pub enum BundleCommand {
     },
 
     /// Join with another data source
-    /// Maps to: `bundle.join(&name, &source, &expression, join_type)`
+    /// Maps to: `bundle.join(&name, location.as_deref(), &expression, join_type)`
+    /// If location is None, creates a join point without initial data.
     Join {
         name: String,
-        source: String,
+        location: Option<String>,
         expression: String,
         join_type: JoinTypeOption,
     },
@@ -92,10 +97,6 @@ pub enum BundleCommand {
     /// Undo last change
     /// Maps to: `bundle.undo()`
     Undo,
-
-    /// Attach data to an existing join's pack
-    /// Maps to: `bundle.attach_to_join(&join, &path)`
-    AttachToJoin { join: String, path: String },
 }
 
 impl BundleCommand {
@@ -120,8 +121,8 @@ impl BundleCommand {
     /// ```
     pub async fn execute(self, bundle: &mut BundleBuilder) -> Result<(), BundlebaseError> {
         match self {
-            BundleCommand::Attach { path } => {
-                bundle.attach(&path).await?;
+            BundleCommand::Attach { path, pack } => {
+                bundle.attach(&path, pack.as_deref()).await?;
                 Ok(())
             }
             BundleCommand::Filter {
@@ -149,11 +150,13 @@ impl BundleCommand {
             }
             BundleCommand::Join {
                 name,
-                source,
+                location,
                 expression,
                 join_type,
             } => {
-                bundle.join(&name, &source, &expression, join_type).await?;
+                bundle
+                    .join(&name, &expression, location.as_deref(), join_type)
+                    .await?;
                 Ok(())
             }
             BundleCommand::Index { column } => {
@@ -190,10 +193,6 @@ impl BundleCommand {
             }
             BundleCommand::Undo => {
                 bundle.undo().await?;
-                Ok(())
-            }
-            BundleCommand::AttachToJoin { join, path } => {
-                bundle.attach_to_join(&join, &path).await?;
                 Ok(())
             }
         }
@@ -286,32 +285,34 @@ mod tests {
         // with_params should have no effect on commands that don't support parameters
         let cmd = BundleCommand::Attach {
             path: "data.parquet".to_string(),
+            pack: None,
         };
 
         let params = vec![ScalarValue::Int64(Some(42))];
         let cmd_with_params = cmd.with_params(params);
 
         match cmd_with_params {
-            BundleCommand::Attach { path } => {
+            BundleCommand::Attach { path, pack } => {
                 assert_eq!(path, "data.parquet");
+                assert_eq!(pack, None);
             }
             _ => panic!("Expected Attach variant"),
         }
     }
 
     #[test]
-    fn test_attach_to_join_command() {
-        let cmd = BundleCommand::AttachToJoin {
-            join: "users".to_string(),
+    fn test_attach_to_pack_command() {
+        let cmd = BundleCommand::Attach {
             path: "more_users.parquet".to_string(),
+            pack: Some("users".to_string()),
         };
 
         match cmd {
-            BundleCommand::AttachToJoin { join, path } => {
-                assert_eq!(join, "users");
+            BundleCommand::Attach { path, pack } => {
                 assert_eq!(path, "more_users.parquet");
+                assert_eq!(pack, Some("users".to_string()));
             }
-            _ => panic!("Expected AttachToJoin variant"),
+            _ => panic!("Expected Attach variant"),
         }
     }
 }

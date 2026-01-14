@@ -209,7 +209,10 @@ mod tests {
     fn test_parse_attach() {
         let cmd = parse("ATTACH 'data.parquet'").unwrap();
         match cmd {
-            Command::Sql(BundleCommand::Attach { path }) => assert_eq!(path, "data.parquet"),
+            Command::Sql(BundleCommand::Attach { path, pack }) => {
+                assert_eq!(path, "data.parquet");
+                assert_eq!(pack, None);
+            }
             _ => panic!("Expected Sql(Attach) command"),
         }
     }

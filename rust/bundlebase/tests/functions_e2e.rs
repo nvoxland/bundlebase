@@ -37,7 +37,7 @@ async fn function_datasource() -> Result<(), BundlebaseError> {
             )),
         )
         .await?;
-    bundle.attach("function://test_func").await?;
+    bundle.attach("function://test_func", None).await?;
 
     // Save bundle
     bundle.commit("Commit changes").await?;
@@ -78,7 +78,7 @@ async fn test_function_with_static_impl_basic() -> Result<(), BundlebaseError> {
     bundle.set_impl("users", impl_arc).await?;
 
     // Attach the function
-    bundle.attach("function://users").await?;
+    bundle.attach("function://users", None).await?;
 
     // Query the data
     let df = bundle.dataframe().await?;
@@ -109,7 +109,7 @@ async fn test_function_with_multiple_pages() -> Result<(), BundlebaseError> {
 
     let impl_arc = Arc::new(StaticImpl::new(vec![page_0, page_1], "v1".to_string()));
     bundle.set_impl("paginated", impl_arc).await?;
-    bundle.attach("function://paginated").await?;
+    bundle.attach("function://paginated", None).await?;
 
     let df = bundle.dataframe().await?;
     let result = df.as_ref().clone().collect().await?;
@@ -142,7 +142,7 @@ async fn test_function_in_pipeline_with_transformations() -> Result<(), Bundleba
 
     let impl_arc = Arc::new(StaticImpl::new(test_data, "v1".to_string()));
     bundle.set_impl("scores", impl_arc).await?;
-    bundle.attach("function://scores").await?;
+    bundle.attach("function://scores", None).await?;
 
     // Apply transformations
     bundle.remove_column("score").await?;
@@ -214,7 +214,7 @@ async fn test_multiple_functions_in_bundle() -> Result<(), BundlebaseError> {
     bundle.set_impl("products", impl2).await?;
 
     // Attach users
-    bundle.attach("function://users").await?;
+    bundle.attach("function://users", None).await?;
     let df = bundle.dataframe().await?;
     let result = df.as_ref().clone().collect().await?;
     assert_eq!(result[0].num_rows(), 2, "Users function should have 2 rows");
@@ -241,7 +241,7 @@ async fn test_function_with_metadata() -> Result<(), BundlebaseError> {
 
     let impl_arc = Arc::new(StaticImpl::new(test_data, "v1".to_string()));
     bundle.set_impl("test_func", impl_arc).await?;
-    bundle.attach("function://test_func").await?;
+    bundle.attach("function://test_func", None).await?;
 
     // Set name and description
     bundle.set_name("FunctionBundleTest").await?;
@@ -272,7 +272,7 @@ async fn test_function_error_no_implementation() -> Result<(), BundlebaseError> 
     bundle.define_function(sig).await?;
 
     // Try to attach without setting implementation - should fail
-    let result = bundle.attach("function://missing_impl").await;
+    let result = bundle.attach("function://missing_impl", None).await;
     assert!(
         result.is_err(),
         "Should fail when implementation is not set"
@@ -286,7 +286,7 @@ async fn test_function_error_unknown_function() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Try to attach a function that was never defined
-    let result = bundle.attach("function://undefined_func").await;
+    let result = bundle.attach("function://undefined_func", None).await;
     assert!(result.is_err(), "Should fail when function is not defined");
 
     Ok(())
@@ -308,7 +308,7 @@ async fn test_multiple_function_definitions() -> Result<(), BundlebaseError> {
     bundle1.set_impl("func1", impl1).await?;
 
     // Attach and query func1
-    bundle1.attach("function://func1").await?;
+    bundle1.attach("function://func1", None).await?;
     let df1 = bundle1.dataframe().await?;
     let result1 = df1.as_ref().clone().collect().await?;
     assert_eq!(result1[0].num_rows(), 3, "func1 should have 3 rows");
@@ -327,7 +327,7 @@ async fn test_multiple_function_definitions() -> Result<(), BundlebaseError> {
     bundle2.set_impl("func2", impl2).await?;
 
     // Attach and query func2
-    bundle2.attach("function://func2").await?;
+    bundle2.attach("function://func2", None).await?;
     let df2 = bundle2.dataframe().await?;
     let result2 = df2.as_ref().clone().collect().await?;
     assert_eq!(result2[0].num_rows(), 2, "func2 should have 2 rows");

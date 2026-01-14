@@ -138,9 +138,9 @@ All operations work synchronously without `await`:
   c.join("sales", "sales.parquet", "customer_id = sale_customer", how="left")
   ```
 
-- **`attach_to_join(name: str, url: str)`** - Attach data source for joining
+- **`attach(name: str, location: str)`** - Attach data source for joining
   ```python
-  c.attach_to_join("sales", "sales.parquet")
+  c.attach("sales", "sales.parquet")
   ```
 
 - **`select(sql: str, params: List = [])`** - Execute SQL

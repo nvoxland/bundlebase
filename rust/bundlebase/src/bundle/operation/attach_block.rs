@@ -351,7 +351,7 @@ schema:
     #[tokio::test]
     async fn test_attach_dataframe_schema() -> Result<(), BundlebaseError> {
         let mut bundle = crate::BundleBuilder::create("memory:///test_bundle", None).await?;
-        bundle.attach(test_datafile("userdata.parquet")).await?;
+        bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
         // Get the DataFrame from the bundle
         let df = bundle.dataframe().await?;

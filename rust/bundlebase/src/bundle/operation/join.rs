@@ -1,5 +1,5 @@
 use crate::bundle::operation::Operation;
-use crate::bundle::PackJoin;
+use crate::bundle::Join;
 use crate::data::ObjectId;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use async_trait::async_trait;
@@ -97,7 +97,7 @@ impl Operation for JoinOp {
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         bundle.joins.insert(
             self.name.clone(),
-            PackJoin::new(&self.pack, &self.name, &self.join_type, &self.expression),
+            Join::new(&self.pack, &self.name, &self.join_type, &self.expression),
         );
 
         Ok(())

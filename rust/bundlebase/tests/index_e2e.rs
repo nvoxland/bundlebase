@@ -13,7 +13,7 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
-    bundle.attach(test_datafile("customers-0-100.csv")).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
     bundle.commit("No index").await?;
 
     let rs = bundle
@@ -112,7 +112,7 @@ async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseE
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
-    bundle.attach(test_datafile("customers-0-100.csv")).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email column
     bundle.index("Email").await?;
@@ -149,7 +149,7 @@ async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
-    bundle.attach(test_datafile("customers-0-100.csv")).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email column
     bundle.index("Email").await?;
@@ -183,7 +183,7 @@ async fn test_select_without_index_falls_back() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data but DON'T create index
-    bundle.attach(test_datafile("customers-0-100.csv")).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     bundle.commit("Attached data without index").await?;
 
@@ -214,7 +214,7 @@ async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
-    bundle.attach(test_datafile("customers-0-100.csv")).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email but query on City (not indexed)
     bundle.index("Email").await?;
@@ -245,7 +245,7 @@ async fn test_index_selectivity() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
-    bundle.attach(test_datafile("customers-0-100.csv")).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Customer Id (should be unique)
     bundle.index("Customer Id").await?;

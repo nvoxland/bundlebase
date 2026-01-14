@@ -72,7 +72,6 @@ _original_methods = {
     # Row operations
     "filter": _PyBundleBuilder.filter,
     "join": _PyBundleBuilder.join,
-    "attach_to_join": _PyBundleBuilder.attach_to_join,
 
     # Query operations
     "select": _PyBundleBuilder.select,
