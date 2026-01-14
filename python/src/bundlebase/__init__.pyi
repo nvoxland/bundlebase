@@ -404,7 +404,7 @@ class PyBundleBuilder:
         """
         ...
 
-    def attach(self, location: str) -> "OperationChain":
+    def attach(self, location: str, pack: str = "base") -> "OperationChain":
         """
         Attach data from a file location.
 
@@ -413,6 +413,7 @@ class PyBundleBuilder:
 
         Args:
             location: Data file location (e.g., "data.csv", "data.parquet", "function://my_data")
+            pack: Pack to attach to - "base" for the base pack, or a join name for joined data
 
         Returns:
             OperationChain for fluent chaining
@@ -422,6 +423,7 @@ class PyBundleBuilder:
 
         Example:
             c = await c.attach("data.parquet")
+            c = await c.attach("extra_users.csv", pack="users")  # attach to a join
         """
         ...
 
@@ -573,20 +575,22 @@ class PyBundleBuilder:
         ...
 
 
-    def join(self, location: str, expression: str, join_type: Optional[str] = None) -> "OperationChain":
+    def join(self, name: str, expression: str, location: Optional[str] = None, join_type: Optional[str] = None) -> "OperationChain":
         """
         Queue a join operation.
 
         Args:
-            location: Data file location to join with
+            name: Name for the joined data (used to reference in expressions)
             expression: Join condition expression
+            location: Optional data file location to join with (can attach data later)
             join_type: Type of join ("Inner", "Left", "Right", "Full")
 
         Returns:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.join("other_data.csv", 'base.id = joined.id')
+            c = await c.join("users", 'base.id = users.user_id', "users.csv")
+            c = await c.join("regions", 'base.country = regions.country')  # attach data later
         """
         ...
 
@@ -851,7 +855,7 @@ class OperationChain:
     chain executes sequentially when awaited.
     """
 
-    def attach(self, location: str) -> "OperationChain":
+    def attach(self, location: str, pack: str = "base") -> "OperationChain":
         """Queue an attach operation."""
         ...
 
@@ -875,7 +879,7 @@ class OperationChain:
         """Queue a filter operation."""
         ...
 
-    def join(self, location: str, expression: str, join_type: Optional[str] = None) -> "OperationChain":
+    def join(self, name: str, expression: str, location: Optional[str] = None, join_type: Optional[str] = None) -> "OperationChain":
         """Queue a join operation."""
         ...
 
@@ -927,7 +931,7 @@ class CreateChain:
                   .remove_column("unwanted"))
     """
 
-    def attach(self, url: str) -> "CreateChain":
+    def attach(self, location: str, pack: str = "base") -> "CreateChain":
         """Queue an attach operation."""
         ...
 
@@ -951,7 +955,7 @@ class CreateChain:
         """Queue a filter operation."""
         ...
 
-    def join(self, location: str, expression: str, join_type: Optional[str] = None) -> "CreateChain":
+    def join(self, name: str, expression: str, location: Optional[str] = None, join_type: Optional[str] = None) -> "CreateChain":
         """Queue a join operation."""
         ...
 
@@ -1003,7 +1007,7 @@ class ExtendChain:
         extended = await c.extend(new_path).attach("data.parquet").remove_column("unwanted")
     """
 
-    def attach(self, url: str) -> "ExtendChain":
+    def attach(self, location: str, pack: str = "base") -> "ExtendChain":
         """Queue an attach operation."""
         ...
 
@@ -1027,7 +1031,7 @@ class ExtendChain:
         """Queue a filter operation."""
         ...
 
-    def join(self, location: str, expression: str, join_type: Optional[str] = None) -> "ExtendChain":
+    def join(self, name: str, expression: str, location: Optional[str] = None, join_type: Optional[str] = None) -> "ExtendChain":
         """Queue a join operation."""
         ...
 

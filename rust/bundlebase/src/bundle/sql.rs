@@ -1,4 +1,4 @@
-use super::{DataBlock, DataPack, JoinTypeOption, PackJoin};
+use super::{DataBlock, DataPack, JoinTypeOption, Join};
 use crate::{catalog, BundlebaseError};
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -235,7 +235,7 @@ fn find_orig(plan: &LogicalPlan, target: &str, sources: &mut Vec<(String, String
 pub(crate) async fn parse_join_expr(
     ctx: &SessionContext,
     table: &str,
-    join: &PackJoin,
+    join: &Join,
 ) -> Result<Vec<Expr>, DataFusionError> {
     let join_type = match join.join_type() {
         JoinTypeOption::Inner => "INNER JOIN",
@@ -250,7 +250,7 @@ pub(crate) async fn parse_join_expr(
         "SELECT * FROM {} {} packs.{} {} ON {}",
         table,
         join_type,
-        DataPack::table_name(join.pack_id()),
+        DataPack::table_name(join.pack()),
         join.name(),
         &join_expr
     );
@@ -404,7 +404,7 @@ mod tests {
         let preds = parse_join_expr(
             &ctx,
             "t",
-            &PackJoin::new(&join_id, "test_join", &JoinTypeOption::Inner, "a=x"),
+            &Join::new(&join_id, "test_join", &JoinTypeOption::Inner, "a=x"),
         )
         .await
         .unwrap()
@@ -418,7 +418,7 @@ mod tests {
         let preds = parse_join_expr(
             &ctx,
             "t",
-            &PackJoin::new(
+            &Join::new(
                 &join_id,
                 "test_join",
                 &JoinTypeOption::Inner,
@@ -593,7 +593,7 @@ mod tests {
     #[tokio::test]
     async fn test_column_source_from_dataframe() -> Result<(), BundlebaseError> {
         let mut bundle = BundleBuilder::create("memory:///test_bundle", None).await?;
-        bundle.attach(test_datafile("userdata.parquet")).await?;
+        bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
         let df = bundle.dataframe().await?;
 

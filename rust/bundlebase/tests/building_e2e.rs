@@ -18,7 +18,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     let mut c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
     assert_eq!(None, c1.bundle.from());
     assert_eq!(temp1.url(), c1.url());
-    c1.attach(test_datafile("customers-0-100.csv")).await?;
+    c1.attach(test_datafile("customers-0-100.csv"), None).await?;
     c1.commit("Initial commit").await?;
 
     let init_commit = temp1.subdir(META_DIR)?.file(INIT_FILENAME)?;
@@ -68,7 +68,7 @@ async fn test_simple_extend_chain() -> Result<(), BundlebaseError> {
 
     // Create base bundle
     let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
-    c1.attach(test_datafile("customers-0-100.csv")).await?;
+    c1.attach(test_datafile("customers-0-100.csv"), None).await?;
     c1.commit("Base commit").await?;
 
     // Extend and commit
@@ -102,7 +102,7 @@ async fn test_lazy_history_traversal() -> Result<(), BundlebaseError> {
 
     // Create 3-level bundle chain
     let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
-    c1.attach(test_datafile("customers-0-100.csv")).await?;
+    c1.attach(test_datafile("customers-0-100.csv"), None).await?;
     c1.commit("Base commit").await?;
 
     let base1 = Bundle::open(&temp1.to_string(), None).await?;
@@ -135,7 +135,7 @@ async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
     let temp = random_memory_url();
 
     let mut bundle = bundlebase::BundleBuilder::create(&temp.to_string(), None).await?;
-    bundle.attach(test_datafile("customers-0-100.csv")).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
     bundle.remove_column("country").await?;
 
     assert_eq!(bundle.bundle.operations().len(), 3);
@@ -174,7 +174,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     local_file.write(data).await?;
 
     // Attach using relative path (no scheme separator)
-    bundle_a.attach("local_data.csv").await?;
+    bundle_a.attach("local_data.csv", None).await?;
     bundle_a.commit("Bundle A with relative path").await?;
 
     // Extend to Bundle B in different location
@@ -225,7 +225,7 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
 
     // Create base bundle
     let mut c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
-    c1.attach(test_datafile("customers-0-100.csv")).await?;
+    c1.attach(test_datafile("customers-0-100.csv"), None).await?;
     c1.commit("Initial commit").await?;
 
     // Get the ID from the base bundle's InitCommit

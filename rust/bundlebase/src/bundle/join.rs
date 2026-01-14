@@ -3,23 +3,23 @@ use crate::data::ObjectId;
 
 /// Describes a join between base pack and another pack
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PackJoin {
-    pack_id: ObjectId,
+pub struct Join {
+    pack: ObjectId,
     name: String,
     join_type: JoinTypeOption,
     expression: String,
 }
 
-impl PackJoin {
+impl Join {
     /// Create a new PackJoin
     pub fn new(
-        pack_id: &ObjectId,
+        pack: &ObjectId,
         name: &str,
         join_type: &JoinTypeOption,
         expression: &str,
     ) -> Self {
         Self {
-            pack_id: pack_id.clone(),
+            pack: pack.clone(),
             name: name.to_string(),
             join_type: join_type.clone(),
             expression: expression.to_string(),
@@ -31,8 +31,8 @@ impl PackJoin {
     }
 
     /// Get the pack ID
-    pub fn pack_id(&self) -> &ObjectId {
-        &self.pack_id
+    pub fn pack(&self) -> &ObjectId {
+        &self.pack
     }
 
     /// Get the join type

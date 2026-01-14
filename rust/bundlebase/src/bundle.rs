@@ -8,7 +8,7 @@ mod facade;
 mod indexed_blocks;
 mod init;
 mod operation;
-mod pack_join;
+mod join;
 mod source;
 mod sql;
 
@@ -25,7 +25,7 @@ pub use indexed_blocks::IndexedBlocks;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::JoinTypeOption;
 pub use operation::{AnyOperation, BundleChange, DefineSourceOp, Operation};
-pub use pack_join::PackJoin;
+pub use join::Join;
 pub use source::Source;
 use std::collections::{HashMap, HashSet};
 
@@ -76,7 +76,7 @@ pub struct Bundle {
     operations: Vec<AnyOperation>,
 
     data_packs: Arc<RwLock<HashMap<ObjectId, Arc<DataPack>>>>,
-    joins: HashMap<String, PackJoin>,
+    joins: HashMap<String, Join>,
     sources: HashMap<ObjectId, Arc<Source>>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     views: HashMap<String, ObjectId>,
@@ -578,13 +578,13 @@ impl Bundle {
     async fn dataframe_join(
         &self,
         base_df: DataFrame,
-        pack_join: &PackJoin,
+        pack_join: &Join,
     ) -> Result<DataFrame, BundlebaseError> {
         let base_table = format!(
             "packs.{}",
             DataPack::table_name(&ObjectId::BASE_PACK)
         );
-        let join_table = format!("packs.{}", DataPack::table_name(pack_join.pack_id()));
+        let join_table = format!("packs.{}", DataPack::table_name(pack_join.pack()));
 
         let expr = sql::parse_join_expr(&self.ctx, &base_table, pack_join).await?;
 
@@ -758,7 +758,7 @@ impl BundleFacade for Bundle {
             let mut df = self.ctx.table(&table_name).await?;
 
             for (_, pack_join) in &self.joins {
-                debug!("Executing join with pack {}", pack_join.pack_id());
+                debug!("Executing join with pack {}", pack_join.pack());
                 df = self.dataframe_join(df, pack_join).await?;
             }
 

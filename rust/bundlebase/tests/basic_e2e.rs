@@ -17,7 +17,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
-        .attach(test_datafile("userdata.parquet"))
+        .attach(test_datafile("userdata.parquet"), None)
         .await?
         .remove_column("title")
         .await?
@@ -230,7 +230,7 @@ async fn test_save_multiple_operations() -> Result<(), BundlebaseError> {
     let temp_dir = random_memory_dir();
 
     let mut bundle = bundlebase::BundleBuilder::create(temp_dir.url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet")).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
     bundle.remove_column("title").await?;
     bundle.remove_column("comments").await?;
     bundle.rename_column("first_name", "fname").await?;
@@ -461,7 +461,7 @@ async fn test_attach_csv() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
-    bundle.attach(test_datafile("customers-0-100.csv")).await?;
+    bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     bundle.commit("CSV commit").await?;
 
@@ -624,7 +624,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
-        .attach(test_datafile("objects.json"))
+        .attach(test_datafile("objects.json"), None)
         .await?
         .rename_column("score", "points")
         .await?;

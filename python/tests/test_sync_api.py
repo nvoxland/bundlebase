@@ -368,15 +368,15 @@ class TestSyncJoin:
         c.attach(datafile("customers-0-100.csv"))
         c.join(
             "regions",
-            datafile("sales-regions.csv"),
             '$base."Country" = regions."Country"',
+            datafile("sales-regions.csv"),
         )
 
         results = c.to_dict()
         assert "Country" in results
 
         # Then attach additional data to the existing join
-        c.attach_to_join("regions", datafile("sales-regions.csv"))
+        c.attach(datafile("sales-regions.csv"), pack="regions")
 
         results = c.to_dict()
         assert "Country" in results

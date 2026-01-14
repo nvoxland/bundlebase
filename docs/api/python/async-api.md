@@ -56,7 +56,6 @@ Mutable bundle class returned by `create()` and transformation methods.
         - filter
         - select
         - join
-        - attach_to_join
         - set_name
         - set_description
         - define_function

@@ -210,9 +210,18 @@ class SyncBundleBuilder(SyncBundle):
     # ======================== Mutable Operations ========================
     # All mutation methods return self to enable fluent chaining
 
-    def attach(self, url: str) -> "SyncBundleBuilder":
-        """Attach a data source to the bundle."""
-        coro = _call_original_method(self._async, "attach", url)
+    def attach(self, location: str, pack: str = "base") -> "SyncBundleBuilder":
+        """Attach a data source to the bundle.
+
+        Args:
+            location: The URL/path of the data to attach
+            pack: The pack to attach to. Use "base" for the base pack,
+                  or a join name to attach to that join's pack.
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "attach", location, pack)
         self._async = _loop_manager.run_sync(coro)
         return self
 
@@ -284,16 +293,14 @@ class SyncBundleBuilder(SyncBundle):
         return self
 
     def join(
-        self, name: str, url: str, on: str, how: str = "inner"
+        self, name: str, on: str, location: Optional[str] = None, how: str = "inner"
     ) -> "SyncBundleBuilder":
-        """Join with another data source."""
-        coro = _call_original_method(self._async, "join", name, url, on, how)
-        self._async = _loop_manager.run_sync(coro)
-        return self
+        """Join with another data source.
 
-    def attach_to_join(self, name: str, url: str) -> "SyncBundleBuilder":
-        """Attach a data source for joining."""
-        coro = _call_original_method(self._async, "attach_to_join", name, url)
+        If location is None, the join point is created without any initial data.
+        Data can be attached later using attach(location, pack=name) or define_source_for_join().
+        """
+        coro = _call_original_method(self._async, "join", name, on, location, how)
         self._async = _loop_manager.run_sync(coro)
         return self
 

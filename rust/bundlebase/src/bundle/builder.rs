@@ -132,7 +132,7 @@ impl std::fmt::Display for BundleStatus {
 ///
 /// # Example
 /// let bundle = BundleBuilder::create("memory://work", None).await?;
-/// bundle.attach("data.parquet").await?
+/// bundle.attach("data.parquet", None).await?
 ///     .filter("amount > 100").await?
 ///     .commit("Filter high-value transactions").await?;
 /// ```
@@ -166,7 +166,7 @@ impl BundleBuilder {
     ///
     /// # Example
     /// let bundle = BundleBuilder::create("memory://work", None).await?;
-    /// bundle.attach("data.parquet").await?;
+    /// bundle.attach("data.parquet", None).await?;
     /// ```
     pub async fn create(
         path: &str,
@@ -246,7 +246,7 @@ impl BundleBuilder {
     /// * `message` - Human-readable description of the changes (e.g., "Filter to Q4 data")
     ///
     /// # Example
-    /// bundle.attach("data.parquet").await?;
+    /// bundle.attach("data.parquet", None).await?;
     /// bundle.filter("amount > 100").await?;
     /// bundle.commit("Filter high-value transactions").await?;
     /// ```
@@ -318,7 +318,7 @@ impl BundleBuilder {
     /// the last committed version. Any changes made since the last commit are discarded.
     ///
     /// # Example
-    /// bundle.attach("data.parquet").await?;
+    /// bundle.attach("data.parquet", None).await?;
     /// bundle.filter("amount > 100").await?;
     /// bundle.reset().await?;  // Discards attach and filter operations
     /// ```
@@ -344,7 +344,7 @@ impl BundleBuilder {
     /// Use this for incremental undo functionality.
     ///
     /// # Example
-    /// bundle.attach("data.parquet").await?;
+    /// bundle.attach("data.parquet", None).await?;
     /// bundle.filter("amount > 100").await?;
     /// bundle.undo().await?; // Discards only the filter change
     /// // Bundle now has only the attach change pending
@@ -462,25 +462,40 @@ impl BundleBuilder {
         }
     }
 
-    /// Attach a data block to the bundle
-    pub async fn attach(&mut self, path: &str) -> Result<&mut Self, BundlebaseError> {
-        let path = path.to_string();
+    /// Attach a data block to the bundle.
+    ///
+    /// # Arguments
+    /// * `path` - The location/URL of the data to attach
+    /// * `pack` - The pack to attach to. Use `None` or `"base"` for the base pack,
+    ///            or a join name to attach to that join's pack.
+    pub async fn attach(
+        &mut self,
+        path: &str,
+        pack: Option<&str>,
+    ) -> Result<&mut Self, BundlebaseError> {
+        let pack_id = match pack {
+            None | Some("base") => ObjectId::BASE_PACK,
+            Some(join_name) => self
+                .bundle
+                .joins
+                .get(join_name)
+                .ok_or(format!("Unknown join '{}'", join_name))?
+                .pack()
+                .clone(),
+        };
 
-        self.do_change(&format!("Attach {}", path), |builder| {
+        let path = path.to_string();
+        let pack_name = pack.unwrap_or("base").to_string();
+
+        self.do_change(&format!("Attach {} to {}", path, pack_name), |builder| {
             Box::pin(async move {
                 builder
                     .apply_operation(
-                        AttachBlockOp::setup(
-                            &ObjectId::BASE_PACK,
-                            &path,
-                            builder,
-                        )
-                        .await?
-                        .into(),
+                        AttachBlockOp::setup(&pack_id, &path, builder).await?.into(),
                     )
                     .await?;
 
-                info!("Attached {} to bundle", path);
+                info!("Attached {} to {}", path, pack_name);
 
                 Ok(())
             })
@@ -646,7 +661,7 @@ impl BundleBuilder {
                         .joins
                         .get(&join_name)
                         .ok_or(format!("Unknown join '{}'", join_name))?;
-                    let pack_id = pack_join.pack_id().clone();
+                    let pack_id = pack_join.pack().clone();
 
                     let source_id = ObjectId::generate();
                     let op = DefineSourceOp::setup(source_id, pack_id, function, args);
@@ -842,7 +857,7 @@ impl BundleBuilder {
     /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
     /// # async fn example() -> Result<(), BundlebaseError> {
     /// let mut c = BundleBuilder::create("memory:///container", None).await?;
-    /// c.attach("data.csv").await?;
+    /// c.attach("data.csv", None).await?;
     /// c.commit("Initial").await?;
     ///
     /// let adults = c.select("select * where age > 21", vec![]).await?;
@@ -911,7 +926,7 @@ impl BundleBuilder {
     /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
     /// # async fn example() -> Result<(), BundlebaseError> {
     /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
-    /// # c.attach("data.csv").await?;
+    /// # c.attach("data.csv", None).await?;
     /// let adults = c.select("select * from bundle where age > 21", vec![]).await?;
     /// c.create_view("adults", &adults).await?;
     /// c.rename_view("adults", "adults_view").await?;
@@ -954,7 +969,7 @@ impl BundleBuilder {
     /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
     /// # async fn example() -> Result<(), BundlebaseError> {
     /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
-    /// # c.attach("data.csv").await?;
+    /// # c.attach("data.csv", None).await?;
     /// let adults = c.select("select * from bundle where age > 21", vec![]).await?;
     /// c.create_view("adults", &adults).await?;
     /// c.drop_view("adults").await?;
@@ -979,41 +994,6 @@ impl BundleBuilder {
                 })
             },
         )
-        .await?;
-
-        Ok(self)
-    }
-
-    /// Attach a data block to the joined pack
-    pub async fn attach_to_join(
-        &mut self,
-        join: &str,
-        path: &str,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let pack_join_id = self
-            .bundle
-            .joins
-            .get(join)
-            .ok_or(format!("Unknown join '{}'", join))?
-            .pack_id()
-            .clone();
-
-        let join = join.to_string();
-        let path = path.to_string();
-
-        self.do_change(&format!("Attach {} to join '{}'", path, join), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(
-                        AttachBlockOp::setup(&pack_join_id, &path, builder)
-                            .await?
-                            .into(),
-                    )
-                    .await?;
-
-                Ok(())
-            })
-        })
         .await?;
 
         Ok(self)
@@ -1091,15 +1071,18 @@ impl BundleBuilder {
     }
 
     /// Join with another data source (mutates self)
+    ///
+    /// If `location` is None, the join point is created without any initial data.
+    /// Data can be attached later using `attach()` or `define_source_for_join()`.
     pub async fn join(
         &mut self,
         name: &str,
-        location: &str,
         expression: &str,
+        location: Option<&str>,
         join_type: JoinTypeOption,
     ) -> Result<&mut Self, BundlebaseError> {
         let name = name.to_string();
-        let location = location.to_string();
+        let location = location.map(|s| s.to_string());
         let expression = expression.to_string();
 
         self.do_change(&format!("Join '{}' on {}", name, expression), |builder| {
@@ -1110,14 +1093,16 @@ impl BundleBuilder {
                     .apply_operation(DefinePackOp::setup(&join_pack_id).await?.into())
                     .await?;
 
-                // Step 2: Attach the location data to the join pack
-                builder
-                    .apply_operation(
-                        AttachBlockOp::setup(&join_pack_id, &location, builder)
-                            .await?
-                            .into(),
-                    )
-                    .await?;
+                // Step 2: Attach the location data to the join pack (if provided)
+                if let Some(loc) = &location {
+                    builder
+                        .apply_operation(
+                            AttachBlockOp::setup(&join_pack_id, loc, builder)
+                                .await?
+                                .into(),
+                        )
+                        .await?;
+                }
 
                 // Step 3: Create JoinOp that references the pack
                 builder
@@ -1128,7 +1113,10 @@ impl BundleBuilder {
                     )
                     .await?;
 
-                info!("Joined: {} as \"{}\"", location, name);
+                match &location {
+                    Some(loc) => info!("Joined: {} as \"{}\"", loc, name),
+                    None => info!("Created join point \"{}\" (no initial data)", name),
+                }
 
                 Ok(())
             })
@@ -1623,7 +1611,7 @@ mod tests {
             .await
             .unwrap();
         bundle
-            .attach(test_datafile("userdata.parquet"))
+            .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
 
@@ -1647,7 +1635,7 @@ mod tests {
             .await
             .unwrap();
         bundle
-            .attach(test_datafile("userdata.parquet"))
+            .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
 
@@ -1702,7 +1690,7 @@ mod tests {
             .await
             .unwrap();
         bundle
-            .attach(test_datafile("userdata.parquet"))
+            .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
 
@@ -1731,7 +1719,7 @@ mod tests {
         );
 
         let bundle = bundle
-            .attach(test_datafile("userdata.parquet"))
+            .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
         assert_eq!(bundle.bundle.operations().len(), 2);
@@ -1749,7 +1737,7 @@ mod tests {
         let init_version = bundle.version();
 
         bundle
-            .attach(test_datafile("userdata.parquet"))
+            .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
 
@@ -1762,7 +1750,7 @@ mod tests {
             .await
             .unwrap();
         bundle
-            .attach(test_datafile("userdata.parquet"))
+            .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
 
@@ -1810,7 +1798,7 @@ mod tests {
             .await
             .unwrap();
         bundle
-            .attach(test_datafile("userdata.parquet"))
+            .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
         bundle.remove_column("title").await.unwrap();
