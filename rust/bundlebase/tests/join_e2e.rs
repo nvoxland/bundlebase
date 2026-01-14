@@ -34,7 +34,7 @@ async fn test_join_basic() -> Result<(), BundlebaseError> {
     let bundle = bundle
         .join(
             "regions",
-            r#"$base."Country" = regions."Country""#,
+            r#"base."Country" = regions."Country""#,
             Some(test_datafile("sales-regions.csv")),
             JoinTypeOption::Inner,
         )
@@ -76,7 +76,7 @@ async fn test_join_appending() -> Result<(), BundlebaseError> {
     let bundle = bundle
         .join(
             "regions",
-            r#"$base."Country" = regions."Country""#,
+            r#"base."Country" = regions."Country""#,
             Some(test_datafile("sales-regions.csv")),
             JoinTypeOption::Inner,
         )
@@ -102,7 +102,7 @@ async fn test_join_with_left_join_type() -> Result<(), BundlebaseError> {
     let bundle = bundle
         .join(
             "regions",
-            r#"$base."Country" = regions."Country""#,
+            r#"base."Country" = regions."Country""#,
             Some(test_datafile("sales-regions.csv")),
             JoinTypeOption::Left,
         )
@@ -127,7 +127,7 @@ async fn test_join_without_url_then_attach() -> Result<(), BundlebaseError> {
     let bundle = bundle
         .join(
             "regions", // No URL
-            r#"$base."Country" = regions."Country""#,
+            r#"base."Country" = regions."Country""#,
             None,
             JoinTypeOption::Inner,
         )

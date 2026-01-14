@@ -9,6 +9,9 @@ use datafusion::sql::TableReference;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, OnceLock};
 
+/// The name used to reference the base pack in join expressions
+pub const BASE_PACK_NAME: &str = "base";
+
 static TEMP_COUNTER: OnceLock<AtomicU64> = OnceLock::new();
 
 /// Finds the original source (table and column name) for a logical column.
@@ -244,11 +247,12 @@ pub(crate) async fn parse_join_expr(
         JoinTypeOption::Full => "FULL OUTER JOIN",
     };
 
-    let join_expr = join.expression().replace("$base", table);
+    let join_expr = join.expression();
 
     let sql = format!(
-        "SELECT * FROM {} {} packs.{} {} ON {}",
+        "SELECT * FROM {} AS {} {} packs.{} AS {} ON {}",
         table,
+        BASE_PACK_NAME,
         join_type,
         DataPack::table_name(join.pack()),
         join.name(),
@@ -412,7 +416,7 @@ mod tests {
         .map(|pred| format!("{:?}", pred))
         .collect::<Vec<_>>()
         .join("\n");
-        assert_eq!("BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"t\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) })",
+        assert_eq!("BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"base\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) })",
                    preds.as_str());
 
         let preds = parse_join_expr(
@@ -431,7 +435,7 @@ mod tests {
         .map(|pred| format!("{:?}", pred))
         .collect::<Vec<_>>()
         .join("\n");
-        assert_eq!("BinaryExpr(BinaryExpr { left: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"t\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) }), op: And, right: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }), op: Gt, right: Literal(Int64(3), None) }) })",
+        assert_eq!("BinaryExpr(BinaryExpr { left: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"base\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) }), op: And, right: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }), op: Gt, right: Literal(Int64(3), None) }) })",
                    preds.as_str());
     }
 
