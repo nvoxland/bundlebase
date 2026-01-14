@@ -651,12 +651,13 @@ impl Bundle {
         self.sources.get(source_id).cloned()
     }
 
-    /// Get the source defined for a specific pack
-    pub(crate) fn get_source_for_pack(&self, pack_id: &ObjectId) -> Option<Arc<Source>> {
+    /// Get all sources for a specific pack
+    pub(crate) fn get_sources_for_pack(&self, pack_id: &ObjectId) -> Vec<Arc<Source>> {
         self.sources
             .values()
-            .find(|s| s.pack() == pack_id)
+            .filter(|s| s.pack() == pack_id)
             .cloned()
+            .collect()
     }
 
     /// Get all sources

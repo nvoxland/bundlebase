@@ -10,7 +10,7 @@ use crate::bundle::operation::{
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::operation::{CreateIndexOp, DropIndexOp, JoinTypeOption};
 use crate::bundle::{commit, INIT_FILENAME, META_DIR};
-use crate::bundle::{sql, Bundle};
+use crate::bundle::{sql, Bundle, Source};
 use super::DataBlock;
 use crate::data::{ObjectId, VersionedBlockId};
 use crate::source::FetchAction;
@@ -604,7 +604,7 @@ impl BundleBuilder {
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
     /// bundle.create_source("remote_dir", args, None).await?;
-    /// bundle.fetch().await?;
+    /// bundle.fetch(None).await?;  // Fetch from base pack sources
     /// bundle.commit("Initial data from source").await?;
     /// # Ok(())
     /// # }
@@ -636,13 +636,17 @@ impl BundleBuilder {
                     };
 
                     let source_id = ObjectId::generate();
-                    let op = CreateSourceOp::setup(source_id, pack_id, function, args);
+                    let op = CreateSourceOp::setup(source_id.clone(), pack_id, function, args);
 
                     builder.apply_operation(op.into()).await?;
 
-                    // Automatically fetch to attach any existing files
+                    // Automatically fetch from the newly created source
                     // This runs inside the same change context
-                    builder.fetch().await?;
+                    let source = builder
+                        .bundle
+                        .get_source(&source_id)
+                        .ok_or_else(|| format!("Source '{}' not found after creation", source_id))?;
+                    builder.fetch_source(&source).await?;
 
                     Ok(())
                 })
@@ -653,10 +657,15 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Fetch from all defined sources - discover and attach new files.
+    /// Fetch from sources for a pack - discover and attach new files.
     ///
-    /// Lists files from each source URL, compares with already-attached files,
+    /// Lists files from the source URLs, compares with already-attached files,
     /// and auto-attaches any new files.
+    ///
+    /// # Arguments
+    /// * `pack` - Which pack to fetch sources for:
+    ///   - `None` or `Some("base")`: The base pack (default)
+    ///   - `Some(join_name)`: A joined pack by its join name
     ///
     /// # Returns
     /// The number of new files that were attached.
@@ -671,116 +680,169 @@ impl BundleBuilder {
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
     /// bundle.create_source("remote_dir", args, None).await?;
-    /// let count = bundle.fetch().await?;
+    /// let count = bundle.fetch(None).await?;  // Fetch from base pack sources
     /// println!("Attached {} new files", count);
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn fetch(&mut self) -> Result<usize, BundlebaseError> {
+    pub async fn fetch(&mut self, pack: Option<&str>) -> Result<usize, BundlebaseError> {
+        let pack_id = match pack {
+            None | Some("base") => ObjectId::BASE_PACK,
+            Some(join_name) => self
+                .bundle
+                .joins
+                .get(join_name)
+                .ok_or(format!("Unknown join '{}'", join_name))?
+                .pack()
+                .clone(),
+        };
+
+        let sources = self.bundle.get_sources_for_pack(&pack_id);
+        if sources.is_empty() {
+            return Err(format!("No sources defined for pack '{}'", pack.unwrap_or("base")).into());
+        }
+
+        let mut action_count = 0;
+        for source in sources {
+            action_count += self.fetch_source(&source).await?;
+        }
+
+        Ok(action_count)
+    }
+
+    /// Fetch from all defined sources - discover and attach new files.
+    ///
+    /// Lists files from each source URL, compares with already-attached files,
+    /// and auto-attaches any new files.
+    ///
+    /// # Returns
+    /// The number of new files that were attached across all sources.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use bundlebase::{BundleBuilder, BundlebaseError};
+    /// # use std::collections::HashMap;
+    /// # async fn example() -> Result<(), BundlebaseError> {
+    /// let mut bundle = BundleBuilder::create("memory:///work", None).await?;
+    /// // Create multiple sources...
+    /// let count = bundle.fetch_all().await?;
+    /// println!("Attached {} new files", count);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn fetch_all(&mut self) -> Result<usize, BundlebaseError> {
         let mut action_count = 0;
 
         // Collect sources to avoid borrow issues
         let sources: Vec<_> = self.bundle.sources().values().cloned().collect();
 
         for source in sources {
-            let registry = self.bundle.source_function_registry();
-            let pack_id = source.pack().clone();
-            let source_id = source.id().clone();
+            action_count += self.fetch_source(&source).await?;
+        }
 
-            // Get fetch actions from the source function
-            let actions = source
-                .fetch(
-                    self.data_dir(),
-                    self.bundle.config(),
-                    &registry,
-                )
-                .await?;
+        Ok(action_count)
+    }
 
-            for action in actions {
-                match action {
-                    FetchAction::Add(data) => {
-                        let attach_location = data.attach_location.clone();
-                        let source_location = data.source_location.clone();
-                        let source_url = data.source_url.clone();
+    /// Internal helper to fetch from a single source.
+    async fn fetch_source(&mut self, source: &Arc<Source>) -> Result<usize, BundlebaseError> {
+        let mut action_count = 0;
+        let registry = self.bundle.source_function_registry();
+        let pack_id = source.pack().clone();
+        let source_id = source.id().clone();
 
-                        self.do_change(
-                            &format!("Fetch: attach {}", source_location),
-                            |builder| {
-                                let pack_id = pack_id.clone();
-                                let source_id = source_id.clone();
-                                let attach_location = attach_location.clone();
-                                let source_location = source_location.clone();
-                                let source_url = source_url.clone();
+        // Get fetch actions from the source function
+        let actions = source
+            .fetch(
+                self.data_dir(),
+                self.bundle.config(),
+                &registry,
+            )
+            .await?;
 
-                                Box::pin(async move {
-                                    // Use setup_for_source to read version from source_url
-                                    let mut op = AttachBlockOp::setup_for_source(
-                                        &pack_id,
-                                        &attach_location,
-                                        &source_url,
-                                        builder,
-                                    )
-                                    .await?;
-                                    op.source = Some(source_id);
-                                    op.source_location = Some(source_location);
-                                    builder.apply_operation(op.into()).await?;
-                                    Ok(())
-                                })
-                            },
-                        )
-                        .await?;
-                    }
-                    FetchAction::Replace {
-                        old_source_location,
-                        data,
-                    } => {
-                        // Find the old block's location and detach it
-                        let old_location = self.find_block_location_by_source(
-                            &source_id,
-                            &old_source_location,
-                        )?;
-                        self.detach_block(&old_location).await?;
+        for action in actions {
+            match action {
+                FetchAction::Add(data) => {
+                    let attach_location = data.attach_location.clone();
+                    let source_location = data.source_location.clone();
+                    let source_url = data.source_url.clone();
 
-                        // Attach the new block
-                        let attach_location = data.attach_location.clone();
-                        let source_location = data.source_location.clone();
-                        let source_url = data.source_url.clone();
+                    self.do_change(
+                        &format!("Fetch: attach {}", source_location),
+                        |builder| {
+                            let pack_id = pack_id.clone();
+                            let source_id = source_id.clone();
+                            let attach_location = attach_location.clone();
+                            let source_location = source_location.clone();
+                            let source_url = source_url.clone();
 
-                        self.do_change(
-                            &format!("Fetch: replace {}", source_location),
-                            |builder| {
-                                let pack_id = pack_id.clone();
-                                let source_id = source_id.clone();
-                                let attach_location = attach_location.clone();
-                                let source_location = source_location.clone();
-                                let source_url = source_url.clone();
-
-                                Box::pin(async move {
-                                    let mut op = AttachBlockOp::setup_for_source(
-                                        &pack_id,
-                                        &attach_location,
-                                        &source_url,
-                                        builder,
-                                    )
-                                    .await?;
-                                    op.source = Some(source_id);
-                                    op.source_location = Some(source_location);
-                                    builder.apply_operation(op.into()).await?;
-                                    Ok(())
-                                })
-                            },
-                        )
-                        .await?;
-                    }
-                    FetchAction::Remove { source_location } => {
-                        // Find the block's location and detach it
-                        let location =
-                            self.find_block_location_by_source(&source_id, &source_location)?;
-                        self.detach_block(&location).await?;
-                    }
+                            Box::pin(async move {
+                                // Use setup_for_source to read version from source_url
+                                let mut op = AttachBlockOp::setup_for_source(
+                                    &pack_id,
+                                    &attach_location,
+                                    &source_url,
+                                    builder,
+                                )
+                                .await?;
+                                op.source = Some(source_id);
+                                op.source_location = Some(source_location);
+                                builder.apply_operation(op.into()).await?;
+                                Ok(())
+                            })
+                        },
+                    )
+                    .await?;
                 }
-                action_count += 1;
+                FetchAction::Replace {
+                    old_source_location,
+                    data,
+                } => {
+                    // Find the old block's location and detach it
+                    let old_location = self.find_block_location_by_source(
+                        &source_id,
+                        &old_source_location,
+                    )?;
+                    self.detach_block(&old_location).await?;
+
+                    // Attach the new block
+                    let attach_location = data.attach_location.clone();
+                    let source_location = data.source_location.clone();
+                    let source_url = data.source_url.clone();
+
+                    self.do_change(
+                        &format!("Fetch: replace {}", source_location),
+                        |builder| {
+                            let pack_id = pack_id.clone();
+                            let source_id = source_id.clone();
+                            let attach_location = attach_location.clone();
+                            let source_location = source_location.clone();
+                            let source_url = source_url.clone();
+
+                            Box::pin(async move {
+                                let mut op = AttachBlockOp::setup_for_source(
+                                    &pack_id,
+                                    &attach_location,
+                                    &source_url,
+                                    builder,
+                                )
+                                .await?;
+                                op.source = Some(source_id);
+                                op.source_location = Some(source_location);
+                                builder.apply_operation(op.into()).await?;
+                                Ok(())
+                            })
+                        },
+                    )
+                    .await?;
+                }
+                FetchAction::Remove { source_location } => {
+                    // Find the block's location and detach it
+                    let location =
+                        self.find_block_location_by_source(&source_id, &source_location)?;
+                    self.detach_block(&location).await?;
+                }
             }
+            action_count += 1;
         }
 
         Ok(action_count)

@@ -28,7 +28,7 @@ pub fn parse_custom_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseE
                 Rule::join_stmt => parse_join_pest(inner_stmt)?,
                 Rule::reindex_stmt => parse_reindex_pest(inner_stmt)?,
                 Rule::create_source_stmt => parse_create_source_pest(inner_stmt)?,
-                Rule::fetch_stmt => BundleCommand::Fetch,
+                Rule::fetch_stmt => parse_fetch_pest(inner_stmt)?,
                 _ => return Err("Unexpected statement type".into()),
             };
             Ok(Some(cmd))
@@ -259,6 +259,35 @@ fn parse_create_source_pest(
         args,
         pack,
     })
+}
+
+fn parse_fetch_pest(
+    pair: pest::iterators::Pair<Rule>,
+) -> Result<BundleCommand, BundlebaseError> {
+    // Check if it's FETCH ALL, FETCH <pack>, or just FETCH (base pack)
+    let raw = pair.as_str().to_uppercase();
+
+    for inner_pair in pair.into_inner() {
+        if inner_pair.as_rule() == Rule::identifier {
+            let ident = inner_pair.as_str();
+            // Check if it's "all" (case insensitive)
+            if ident.eq_ignore_ascii_case("all") {
+                return Ok(BundleCommand::FetchAll);
+            }
+            // Otherwise it's a pack name
+            return Ok(BundleCommand::Fetch {
+                pack: Some(ident.to_string()),
+            });
+        }
+    }
+
+    // If we get here with just "FETCH ALL" where "all" was parsed as keyword
+    if raw.contains("ALL") {
+        return Ok(BundleCommand::FetchAll);
+    }
+
+    // Just "FETCH" - fetch from base pack
+    Ok(BundleCommand::Fetch { pack: None })
 }
 
 // Helper functions
@@ -584,24 +613,63 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_fetch() {
-        let sql = "FETCH";
+    fn test_parse_fetch_pack() {
+        let sql = "FETCH users";
         let result = parse_custom_pest(sql).unwrap();
 
         match result {
-            Some(BundleCommand::Fetch) => {}
+            Some(BundleCommand::Fetch { pack }) => {
+                assert_eq!(pack, Some("users".to_string()));
+            }
             _ => panic!("Expected Fetch variant"),
         }
     }
 
     #[test]
-    fn test_parse_fetch_case_insensitive() {
-        let sql = "fetch";
+    fn test_parse_fetch_base() {
+        let sql = "FETCH";
         let result = parse_custom_pest(sql).unwrap();
 
         match result {
-            Some(BundleCommand::Fetch) => {}
+            Some(BundleCommand::Fetch { pack }) => {
+                assert_eq!(pack, None);
+            }
             _ => panic!("Expected Fetch variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fetch_all() {
+        let sql = "FETCH ALL";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::FetchAll) => {}
+            _ => panic!("Expected FetchAll variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fetch_case_insensitive() {
+        let sql = "fetch users";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::Fetch { pack }) => {
+                assert_eq!(pack, Some("users".to_string()));
+            }
+            _ => panic!("Expected Fetch variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fetch_all_case_insensitive() {
+        let sql = "fetch all";
+        let result = parse_custom_pest(sql).unwrap();
+
+        match result {
+            Some(BundleCommand::FetchAll) => {}
+            _ => panic!("Expected FetchAll variant"),
         }
     }
 }

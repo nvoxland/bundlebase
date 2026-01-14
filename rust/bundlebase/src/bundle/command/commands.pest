@@ -122,11 +122,14 @@ source_arg_pair = {
 // ============================================================================
 // FETCH Statement
 // ============================================================================
-// Syntax: FETCH
-// Fetches new files from all defined sources
+// Syntax: FETCH [<pack>] | FETCH ALL
+// Examples:
+//   FETCH              -- fetch from base pack sources
+//   FETCH users        -- fetch from 'users' pack sources
+//   FETCH ALL          -- fetch from all sources
 
 fetch_stmt = {
-    ^"fetch"
+    ^"fetch" ~ (^"all" | identifier)?
 }
 
 // ============================================================================

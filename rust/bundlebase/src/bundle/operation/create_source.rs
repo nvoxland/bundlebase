@@ -64,11 +64,6 @@ impl Operation for CreateSourceOp {
             return Err(format!("Pack {} not found", self.pack).into());
         }
 
-        // Verify no source already defined for this pack
-        if bundle.get_source_for_pack(&self.pack).is_some() {
-            return Err(format!("Pack {} already has a source defined", self.pack).into());
-        }
-
         // Verify function exists and validate arguments
         let registry = bundle.source_function_registry();
         let registry_guard = registry.read();
