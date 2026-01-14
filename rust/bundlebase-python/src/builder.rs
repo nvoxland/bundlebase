@@ -530,7 +530,7 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Define a data source for the base pack.
+    /// Define a data source for a pack.
     ///
     /// A source specifies where to look for data files (e.g., S3 bucket prefix)
     /// and patterns to filter which files to include.
@@ -540,63 +540,34 @@ impl PyBundleBuilder {
     /// * `args` - Function-specific arguments. For "remote_dir":
     ///   - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
     ///   - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
-    #[pyo3(signature = (function, args))]
+    /// * `pack` - Which pack to define the source for:
+    ///   - "base" (default): The base pack
+    ///   - A join name: A joined pack by its join name
+    #[pyo3(signature = (function, args, pack="base"))]
     fn define_source<'py>(
         slf: PyRef<'_, Self>,
         function: &str,
         args: HashMap<String, String>,
+        pack: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let function = function.to_string();
+        let pack = if pack == "base" {
+            None
+        } else {
+            Some(pack.to_string())
+        };
         let url = args.get("url").cloned().unwrap_or_else(|| "<no url>".to_string());
+        let pack_name = pack.clone().unwrap_or_else(|| "base".to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
             builder
-                .define_source(&function, args)
-                .await
-                .map_err(|e| to_py_error(&format!("Failed to define source at '{}'", url), e))?;
-            drop(builder);
-            Python::attach(|py| {
-                Py::new(
-                    py,
-                    PyBundleBuilder {
-                        inner: inner.clone(),
-                    },
-                )
-                .map_err(|e| to_py_error("Failed to create bundle", e))
-            })
-        })
-    }
-
-    /// Define a data source for a joined pack.
-    ///
-    /// # Arguments
-    /// * `join_name` - Name of the join to define a source for
-    /// * `function` - Source function name (e.g., "remote_dir")
-    /// * `args` - Function-specific arguments. For "remote_dir":
-    ///   - "url" (required): Directory URL to list
-    ///   - "patterns" (optional): Comma-separated glob patterns
-    #[pyo3(signature = (join_name, function, args))]
-    fn define_source_for_join<'py>(
-        slf: PyRef<'_, Self>,
-        join_name: &str,
-        function: &str,
-        args: HashMap<String, String>,
-        py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let inner = slf.inner.clone();
-        let join_name = join_name.to_string();
-        let function = function.to_string();
-        let url = args.get("url").cloned().unwrap_or_else(|| "<no url>".to_string());
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let mut builder = inner.lock().await;
-            builder
-                .define_source_for_join(&join_name, &function, args)
+                .define_source(&function, args, pack.as_deref())
                 .await
                 .map_err(|e| {
                     to_py_error(
-                        &format!("Failed to define source for join '{}' at '{}'", join_name, url),
+                        &format!("Failed to define source for {} at '{}'", pack_name, url),
                         e,
                     )
                 })?;
