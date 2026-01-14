@@ -574,11 +574,17 @@ impl SourceFunction for PostgresFunction {
                 match Self::refetch_range(&client, query, sort_column, source_location).await? {
                     Some(chunk) => {
                         let file = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
+                        // Use relative path if file is in data_dir, otherwise full URL
+                        let attach_location = data_dir
+                            .relative_path(file.as_ref())
+                            .unwrap_or_else(|_| file.url().to_string());
+                        // For Postgres, source_url is the attach_location since there's no remote file
                         actions.push(RefreshAction::Replace {
                             old_source_location: source_location.clone(),
                             data: MaterializedData {
-                                attach_location: file.url().to_string(),
+                                attach_location: attach_location.clone(),
                                 source_location: source_location.clone(),
+                                source_url: attach_location,
                             },
                         });
                     }
@@ -608,9 +614,15 @@ impl SourceFunction for PostgresFunction {
 
             // New chunk - add it
             let file = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
+            // Use relative path if file is in data_dir, otherwise full URL
+            let attach_location = data_dir
+                .relative_path(file.as_ref())
+                .unwrap_or_else(|_| file.url().to_string());
+            // For Postgres, source_url is the attach_location since there's no remote file
             actions.push(RefreshAction::Add(MaterializedData {
-                attach_location: file.url().to_string(),
+                attach_location: attach_location.clone(),
                 source_location,
+                source_url: attach_location,
             }));
         }
 

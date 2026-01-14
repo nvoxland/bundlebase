@@ -71,10 +71,15 @@ impl Operation for DefineSourceOp {
 
         // Verify function exists and validate arguments
         let registry = bundle.source_function_registry();
-        let func = registry
-            .read()
-            .get(&self.function)
-            .ok_or_else(|| format!("Unknown source function '{}'", self.function))?;
+        let registry_guard = registry.read();
+        let func = registry_guard.get(&self.function).ok_or_else(|| {
+            let available = registry_guard.function_names();
+            format!(
+                "Unknown source function '{}'. Available functions: {}",
+                self.function,
+                available.join(", ")
+            )
+        })?;
 
         func.validate_args(&self.args)?;
 

@@ -63,8 +63,10 @@ impl DiscoveredLocation {
 pub struct MaterializedData {
     /// Location of the materialized file (URL in data_dir or original if not copied)
     pub attach_location: String,
-    /// Original source location identifier (file URL, row range, etc.)
+    /// Original source location identifier (relative path or row range for storage)
     pub source_location: String,
+    /// Full URL to the source file for version reading (may differ from source_location)
+    pub source_url: String,
 }
 
 /// Sync mode for source refresh operations.
@@ -190,19 +192,62 @@ pub trait SourceFunction: Send + Sync {
 
     /// Default argument validation logic.
     ///
-    /// Checks required arguments and validates `copy` argument.
+    /// Checks required arguments, validates unknown arguments, and validates `copy` argument.
     /// Call this from custom `validate_args` implementations.
     fn default_validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        for spec in self.arg_specs() {
+        let specs = self.arg_specs();
+        let valid_names: HashSet<&str> = specs.iter().map(|s| s.name).collect();
+
+        // Check for required arguments
+        for spec in &specs {
             if spec.required && !args.contains_key(spec.name) {
+                let valid_args: Vec<String> = specs
+                    .iter()
+                    .map(|s| {
+                        if s.required {
+                            format!("{} (required)", s.name)
+                        } else if let Some(default) = s.default {
+                            format!("{} (optional, default: {})", s.name, default)
+                        } else {
+                            format!("{} (optional)", s.name)
+                        }
+                    })
+                    .collect();
                 return Err(format!(
-                    "Function '{}' requires a '{}' argument",
+                    "Function '{}' requires a '{}' argument. Valid arguments: {}",
                     self.name(),
-                    spec.name
+                    spec.name,
+                    valid_args.join(", ")
                 )
                 .into());
             }
         }
+
+        // Check for unknown arguments
+        for key in args.keys() {
+            if !valid_names.contains(key.as_str()) {
+                let valid_args: Vec<String> = specs
+                    .iter()
+                    .map(|s| {
+                        if s.required {
+                            format!("{} (required)", s.name)
+                        } else if let Some(default) = s.default {
+                            format!("{} (optional, default: {})", s.name, default)
+                        } else {
+                            format!("{} (optional)", s.name)
+                        }
+                    })
+                    .collect();
+                return Err(format!(
+                    "Function '{}' does not accept argument '{}'. Valid arguments: {}",
+                    self.name(),
+                    key,
+                    valid_args.join(", ")
+                )
+                .into());
+            }
+        }
+
         source_utils::validate_copy_arg(self.name(), args)
     }
 
@@ -268,10 +313,16 @@ pub trait SourceFunction: Send + Sync {
 
         let mut results = Vec::with_capacity(discovered.len());
         for location in discovered {
+            let source_url = location.url.to_string();
             let file = self.materialize(&location, args, data_dir, &config).await?;
+            // Use relative path if file is in data_dir, otherwise full URL
+            let attach_location = data_dir
+                .relative_path(file.as_ref())
+                .unwrap_or_else(|_| file.url().to_string());
             results.push(MaterializedData {
-                attach_location: file.url().to_string(),
+                attach_location,
                 source_location: location.source_location,
+                source_url,
             });
         }
 
@@ -414,5 +465,49 @@ mod tests {
         };
         assert_eq!(spec.name, "url");
         assert!(spec.required);
+    }
+
+    #[test]
+    fn test_validate_args_unknown_arg() {
+        let registry = SourceFunctionRegistry::new();
+        let func = registry.get("remote_dir").unwrap();
+
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "file:///test/".to_string());
+        args.insert("invalid_arg".to_string(), "value".to_string());
+
+        let result = func.validate_args(&args);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("does not accept argument 'invalid_arg'"));
+        assert!(err.contains("Valid arguments:"));
+        assert!(err.contains("url (required)"));
+    }
+
+    #[test]
+    fn test_validate_args_missing_required() {
+        let registry = SourceFunctionRegistry::new();
+        let func = registry.get("remote_dir").unwrap();
+
+        let args = HashMap::new(); // Missing required 'url'
+
+        let result = func.validate_args(&args);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("requires a 'url' argument"));
+        assert!(err.contains("Valid arguments:"));
+    }
+
+    #[test]
+    fn test_validate_args_valid() {
+        let registry = SourceFunctionRegistry::new();
+        let func = registry.get("remote_dir").unwrap();
+
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "file:///test/".to_string());
+        args.insert("patterns".to_string(), "*.parquet".to_string());
+
+        let result = func.validate_args(&args);
+        assert!(result.is_ok());
     }
 }
