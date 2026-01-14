@@ -14,7 +14,6 @@ use super::source_function::{
     ArgSpec, AttachedFileInfo, DiscoveredLocation, MaterializedData, RefreshAction,
     SourceFunction, SyncMode,
 };
-use crate::io::plugin::object_store::ObjectStoreDir;
 use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::{
@@ -301,7 +300,7 @@ impl PostgresFunction {
     /// Write a chunk to parquet and return file reference.
     async fn write_chunk_to_parquet(
         chunk: &DataChunk,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
     ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
         let batch = Self::rows_to_record_batch(&chunk.rows)?;
 
@@ -488,7 +487,7 @@ impl SourceFunction for PostgresFunction {
         &self,
         location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         _config: &Arc<BundleConfig>,
     ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
         let url = args.get("url").ok_or("url is required")?;
@@ -557,7 +556,7 @@ impl SourceFunction for PostgresFunction {
         &self,
         args: &HashMap<String, String>,
         attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         _config: Arc<BundleConfig>,
         mode: SyncMode,
     ) -> Result<Vec<RefreshAction>, BundlebaseError> {

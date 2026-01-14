@@ -5,7 +5,7 @@ mod rowid_provider;
 mod rowid_stream;
 mod versioned_blockid;
 
-use crate::io::plugin::object_store::ObjectStoreDir;
+use crate::io::IOReadWriteDir;
 use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
@@ -51,7 +51,7 @@ pub trait DataReader: Sync + Send + Debug {
 
     async fn build_layout(
         &self,
-        _data_dir: &ObjectStoreDir,
+        _data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn crate::io::IOReadFile>>, BundlebaseError> {
         Ok(None)
     }

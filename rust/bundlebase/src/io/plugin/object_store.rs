@@ -188,16 +188,17 @@ impl ObjectStoreFile {
     /// The string can be either a URL or a path relative to the passed base_dir.
     pub fn from_str(
         path: &str,
-        base: &ObjectStoreDir,
+        base: &dyn IOReadDir,
         config: Arc<BundleConfig>,
     ) -> Result<ObjectStoreFile, BundlebaseError> {
         if path.contains(":") {
             // Absolute URL - use provided config
             Self::from_url(&Url::parse(path)?, config)
         } else {
-            // Relative path - get file from base directory
-            // io_file() returns IOFile directly
-            Ok(base.io_file(path)?)
+            // Relative path - join with base URL and create from that
+            let base_url = base.url();
+            let file_url = join_url(base_url, path)?;
+            Self::from_url(&file_url, config)
         }
     }
 

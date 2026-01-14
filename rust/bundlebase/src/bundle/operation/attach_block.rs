@@ -1,7 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
 use crate::data::ObjectId;
-use crate::io::IOReadDir;
 use crate::progress::ProgressScope;
 use crate::source::AttachedFileInfo;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
@@ -176,7 +175,7 @@ impl Operation for AttachBlockOp {
             &self.version,
             reader,
             bundle.indexes().clone(),
-            Arc::new(bundle.data_dir().clone()),
+            bundle.data_dir_arc(),
             bundle.config(),
             self.source.clone(),
             self.source_location.clone(),

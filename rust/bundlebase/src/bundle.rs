@@ -34,8 +34,7 @@ use crate::data::{DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::source::SourceFunctionRegistry;
 use crate::functions::FunctionRegistry;
 use crate::index::IndexDefinition;
-use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
-use crate::io::{DataStorage, IOReadDir, EMPTY_URL};
+use crate::io::{read_yaml, readable_file_from_url, writable_dir_from_str, writable_dir_from_url, DataStorage, IOReadWriteDir, EMPTY_URL};
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::Array;
 use arrow_schema::SchemaRef;
@@ -72,7 +71,7 @@ pub struct Bundle {
     version: String,
     last_manifest_version: u32,
 
-    data_dir: ObjectStoreDir,
+    data_dir: Arc<dyn IOReadWriteDir>,
     commits: Vec<BundleCommit>,
     operations: Vec<AnyOperation>,
 
@@ -121,7 +120,7 @@ impl Clone for Bundle {
             id: self.id.clone(),
             name: self.name.clone(),
             description: self.description.clone(),
-            data_dir: self.data_dir.clone(),
+            data_dir: Arc::clone(&self.data_dir),
             commits: self.commits.clone(),
             operations: self.operations.clone(),
             version: self.version.clone(),
@@ -223,7 +222,7 @@ impl Bundle {
 
             last_manifest_version: 0,
             version: "empty".to_string(),
-            data_dir: ObjectStoreDir::from_url(&url, BundleConfig::default().into())?,
+            data_dir: writable_dir_from_url(&url, BundleConfig::default().into())?,
             commits: vec![],
             dataframe,
             config: Arc::new(crate::BundleConfig::new()),
@@ -257,13 +256,13 @@ impl Bundle {
         bundle.recompute_config()?;
 
         Self::open_internal(
-            ObjectStoreDir::from_str(path, BundleConfig::default().into())?
+            writable_dir_from_str(path, BundleConfig::default().into())?
                 .url()
                 .as_str(),
             &mut visited,
             &mut bundle,
         )
-            .await?;
+        .await?;
 
         Ok(bundle)
     }
@@ -280,12 +279,12 @@ impl Bundle {
             );
         }
 
-        let data_dir = ObjectStoreDir::from_str(url, bundle.config())?;
-        let manifest_dir = data_dir.io_subdir(META_DIR)?;
+        let data_dir = writable_dir_from_str(url, bundle.config())?;
+        let manifest_dir = data_dir.writable_subdir(META_DIR)?;
 
         debug!("Loading initial commit from {}", INIT_FILENAME);
 
-        let init_commit: Option<InitCommit> = manifest_dir.io_file(INIT_FILENAME)?.read_yaml().await?;
+        let init_commit: Option<InitCommit> = read_yaml(manifest_dir.file(INIT_FILENAME)?.as_ref()).await?;
         let init_commit = init_commit
             .expect(format!("No {}/{} found in {}", META_DIR, INIT_FILENAME, url).as_str());
 
@@ -324,7 +323,7 @@ impl Bundle {
         if let Some(id) = init_commit.id {
             bundle.id = id;
         }
-        bundle.data_dir = data_dir.clone();
+        bundle.data_dir = Arc::clone(&data_dir);
 
         // Mark this bundle as a view if it has a view field in the init commit
         bundle.is_view = init_commit.view.is_some();
@@ -367,8 +366,8 @@ impl Bundle {
         for manifest_file_info in manifest_files {
             bundle.last_manifest_version = manifest_version(manifest_file_info.filename().unwrap_or(""));
             // Create IOFile from FileInfo to read the manifest
-            let manifest_file = ObjectStoreFile::from_url(&manifest_file_info.url, bundle.config())?;
-            let mut commit: BundleCommit = manifest_file.read_yaml().await?.ok_or_else(|| {
+            let manifest_file = readable_file_from_url(&manifest_file_info.url, bundle.config())?;
+            let mut commit: BundleCommit = read_yaml(manifest_file.as_ref()).await?.ok_or_else(|| {
                 BundlebaseError::from(format!("Failed to read manifest: {}", manifest_file_info.url))
             })?;
             commit.url = Some(manifest_file_info.url.clone());
@@ -497,8 +496,13 @@ impl Bundle {
         Ok(())
     }
 
-    pub fn data_dir(&self) -> &ObjectStoreDir {
-        &self.data_dir
+    pub fn data_dir(&self) -> &dyn IOReadWriteDir {
+        self.data_dir.as_ref()
+    }
+
+    /// Returns the data directory as an Arc for passing to components that need ownership.
+    pub fn data_dir_arc(&self) -> Arc<dyn IOReadWriteDir> {
+        Arc::clone(&self.data_dir)
     }
 
     pub fn config(&self) -> Arc<BundleConfig> {
@@ -526,7 +530,7 @@ impl Bundle {
 
         // Recreate data_dir with the new config
         let url = self.data_dir.url().clone();
-        self.data_dir = ObjectStoreDir::from_url(&url, self.config.clone())?;
+        self.data_dir = writable_dir_from_url(&url, self.config.clone())?;
 
         Ok(())
     }
@@ -860,8 +864,10 @@ impl BundleFacade for Bundle {
             debug!("Adding file to tar: {}", relative_path);
 
             // Read file contents via stream
-            let io_file = ObjectStoreFile::from_url(&file.url, self.config())?;
-            let mut stream = io_file.read_existing().await?;
+            let io_file = readable_file_from_url(&file.url, self.config())?;
+            let mut stream = io_file.read_stream().await?.ok_or_else(|| {
+                BundlebaseError::from(format!("File not found: {}", file.url))
+            })?;
 
             // Collect stream into buffer (tar API requires &[u8])
             let mut buffer = Vec::new();

@@ -5,7 +5,7 @@
 use super::source_function::{
     AttachedFileInfo, DiscoveredLocation, MaterializedData, RefreshAction, SyncMode,
 };
-use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir};
 use futures::stream;
 use crate::{BundleConfig, BundlebaseError};
@@ -118,7 +118,7 @@ pub fn filename_from_url(url: &Url) -> String {
 pub async fn download_to_data_dir(
     data: Bytes,
     filename: &str,
-    data_dir: &ObjectStoreDir,
+    data_dir: &dyn IOReadWriteDir,
 ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
     // Extract extension from filename (e.g., "file.parquet" -> "parquet")
     let ext = filename.rsplit('.').next().unwrap_or("dat");
@@ -134,7 +134,7 @@ pub async fn download_to_data_dir(
 /// Returns a file reference to the written file.
 pub async fn download_io_file_to_data_dir(
     file: &ObjectStoreFile,
-    data_dir: &ObjectStoreDir,
+    data_dir: &dyn IOReadWriteDir,
 ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
     let data = file.read_bytes().await?.ok_or_else(|| {
         BundlebaseError::from(format!("File not found: {}", file.url()))
@@ -148,7 +148,7 @@ pub async fn download_io_file_to_data_dir(
 /// Returns a file reference to the written file.
 pub async fn download_http_to_data_dir(
     url: &Url,
-    data_dir: &ObjectStoreDir,
+    data_dir: &dyn IOReadWriteDir,
 ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
     let response = reqwest::get(url.as_str())
         .await
@@ -179,7 +179,7 @@ pub async fn download_http_to_data_dir(
 pub async fn materialize_url(
     url: &Url,
     should_copy: bool,
-    data_dir: &ObjectStoreDir,
+    data_dir: &dyn IOReadWriteDir,
     config: &Arc<BundleConfig>,
 ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
     if !should_copy {

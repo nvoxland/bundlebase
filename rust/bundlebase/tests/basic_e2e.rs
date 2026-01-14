@@ -1,8 +1,7 @@
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use bundlebase;
 use bundlebase::bundle::{BundleFacade, INIT_FILENAME, META_DIR};
-use bundlebase::io::plugin::object_store::ObjectStoreFile;
-use bundlebase::io::{IOReadDir, IOReadFile};
+use bundlebase::io::{readable_file_from_path, readable_file_from_url, IOReadDir, IOReadFile};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::BundleConfig;
 use bundlebase::FunctionSignature;
@@ -24,7 +23,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
         .await?
         .rename_column("first_name", "name")
         .await?;
-    let version = ObjectStoreFile::from_url(
+    let version = readable_file_from_url(
         &Url::parse(test_datafile("userdata.parquet"))?,
         BundleConfig::default().into(),
     )?
@@ -241,7 +240,7 @@ async fn test_save_multiple_operations() -> Result<(), BundlebaseError> {
     bundle.commit("Commit changes").await?;
 
     // Find and read the versioned manifest file
-    let (contents, commit, _) = common::latest_commit(&temp_dir).await?.unwrap();
+    let (contents, commit, _) = common::latest_commit(temp_dir.as_ref()).await?.unwrap();
 
     let expected = format!(
         r#"
@@ -605,7 +604,7 @@ changes:
 
     // Verify layout file exists
     let layout = op_field!(commit.operations()[1], AnyOperation::AttachBlock, layout).unwrap();
-    let layout_file = ObjectStoreFile::from_str(
+    let layout_file = readable_file_from_path(
         &layout,
         loaded_bundle.data_dir(),
         BundleConfig::default().into(),

@@ -2,7 +2,7 @@
 
 use crate::bundle::DefineSourceOp;
 use crate::data::ObjectId;
-use crate::io::plugin::object_store::ObjectStoreDir;
+use crate::io::IOReadWriteDir;
 use crate::source::{AttachedFileInfo, RefreshAction, SourceFunctionRegistry, SyncMode};
 use crate::BundlebaseError;
 use crate::BundleConfig;
@@ -81,7 +81,7 @@ impl Source {
     /// Returns a list of refresh actions (Add, Replace, Remove) based on the sync mode.
     pub async fn refresh(
         &self,
-        data_dir: &ObjectStoreDir,
+        data_dir: &dyn IOReadWriteDir,
         config: Arc<BundleConfig>,
         registry: &Arc<RwLock<SourceFunctionRegistry>>,
     ) -> Result<Vec<RefreshAction>, BundlebaseError> {

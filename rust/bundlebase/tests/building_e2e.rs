@@ -1,7 +1,6 @@
 use bundlebase;
 use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME, META_DIR};
-use bundlebase::io::plugin::object_store::ObjectStoreFile;
-use bundlebase::io::{IOReadDir, IOReadFile, IOReadWriteFile};
+use bundlebase::io::{read_yaml, readable_file_from_url, IOReadDir, IOReadFile, IOReadWriteFile};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::Bundle;
 use bundlebase::BundleConfig;
@@ -16,25 +15,25 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     let temp2 = random_memory_dir();
 
     // Create and commit first bundle
-    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
+    let mut c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
     assert_eq!(None, c1.bundle.from());
     assert_eq!(temp1.url(), c1.url());
     c1.attach(test_datafile("customers-0-100.csv")).await?;
     c1.commit("Initial commit").await?;
 
-    let init_commit = temp1.io_subdir(META_DIR)?.io_file(INIT_FILENAME)?;
-    let init_commit: Option<InitCommit> = init_commit.read_yaml().await?;
+    let init_commit = temp1.subdir(META_DIR)?.file(INIT_FILENAME)?;
+    let init_commit: Option<InitCommit> = read_yaml(init_commit.as_ref()).await?;
     let init_commit = init_commit.expect("Failed to read init commit");
     assert_eq!(None, init_commit.from);
     assert_eq!(None, c1.bundle.from());
 
     // Open first bundle and extend to new directory
-    let opened1 = Bundle::open(&temp1.to_string(), None).await?;
+    let opened1 = Bundle::open(&temp1.url().to_string(), None).await?;
     assert_eq!(opened1.operations().len(), 2);
     assert_eq!(None, opened1.from());
     assert_eq!(temp1.url(), opened1.url());
 
-    let mut c2 = opened1.extend(Some(&temp2.to_string()))?;
+    let mut c2 = opened1.extend(Some(&temp2.url().to_string()))?;
     assert_eq!(Some(temp1.url()), c2.bundle.from());
     assert_eq!(temp2.url(), c2.url());
 
@@ -43,13 +42,13 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     c2.commit("Remove country column").await?;
     assert_eq!(Some(temp1.url()), c2.bundle.from());
 
-    let init_commit = temp2.io_subdir(META_DIR)?.io_file(INIT_FILENAME)?;
-    let init_commit: Option<InitCommit> = init_commit.read_yaml().await?;
+    let init_commit = temp2.subdir(META_DIR)?.file(INIT_FILENAME)?;
+    let init_commit: Option<InitCommit> = read_yaml(init_commit.as_ref()).await?;
     let init_commit = init_commit.expect("Failed to read init commit");
     assert_eq!(Some(temp1.url().clone()), init_commit.from);
 
     // Open the extended bundle
-    let reopened = Bundle::open(&temp2.to_string(), None).await?;
+    let reopened = Bundle::open(&temp2.url().to_string(), None).await?;
     assert_eq!(Some(temp1.url()), c2.bundle.from());
     assert_eq!(reopened.url(), c2.url());
 
@@ -159,16 +158,16 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     let temp2 = random_memory_dir();
 
     // Create Bundle A with attachment using RELATIVE path
-    let mut bundle_a = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
+    let mut bundle_a = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
 
     // Copy test data to bundle's directory with a local name
     let source_file = test_datafile("customers-0-100.csv");
-    let local_file = temp1.io_file("local_data.csv")?;
+    let local_file = temp1.writable_file("local_data.csv")?;
 
     // Read source data and write to local location
     let source_obj =
-        ObjectStoreFile::from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
-    let data = source_obj
+        readable_file_from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
+    let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?
         .expect("Failed to read source file");
@@ -179,13 +178,13 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     bundle_a.commit("Bundle A with relative path").await?;
 
     // Extend to Bundle B in different location
-    let bundle_a_reopened = Bundle::open(&temp1.to_string(), None).await?;
-    let mut bundle_b = bundle_a_reopened.extend(Some(&temp2.to_string()))?;
+    let bundle_a_reopened = Bundle::open(&temp1.url().to_string(), None).await?;
+    let mut bundle_b = bundle_a_reopened.extend(Some(&temp2.url().to_string()))?;
     bundle_b.remove_column("country").await?;
     bundle_b.commit("Bundle B extends A").await?;
 
     // Reopen Bundle B - this should work without file-not-found errors
-    let bundle_b_reopened = Bundle::open(&temp2.to_string(), None).await?;
+    let bundle_b_reopened = Bundle::open(&temp2.url().to_string(), None).await?;
 
     // Verify data is accessible
     let df = bundle_b_reopened.dataframe().await?;
@@ -225,33 +224,29 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     let temp3 = random_memory_dir();
 
     // Create base bundle
-    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
+    let mut c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
     c1.attach(test_datafile("customers-0-100.csv")).await?;
     c1.commit("Initial commit").await?;
 
     // Get the ID from the base bundle's InitCommit
-    let init_commit1: InitCommit = temp1
-        .io_subdir(META_DIR)?
-        .io_file(INIT_FILENAME)?
-        .read_yaml()
+    let init_file1 = temp1.subdir(META_DIR)?.file(INIT_FILENAME)?;
+    let init_commit1: InitCommit = read_yaml(init_file1.as_ref())
         .await?
         .expect("Should have init commit");
     let base_id = init_commit1.id.expect("Base bundle should have id");
     assert!(init_commit1.from.is_none(), "Base bundle should not have 'from'");
 
     // Extend to second bundle
-    let base1 = Bundle::open(&temp1.to_string(), None).await?;
+    let base1 = Bundle::open(&temp1.url().to_string(), None).await?;
     assert_eq!(base_id, base1.id(), "Opened bundle should have same ID as InitCommit");
 
-    let mut c2 = base1.extend(Some(&temp2.to_string()))?;
+    let mut c2 = base1.extend(Some(&temp2.url().to_string()))?;
     c2.remove_column("country").await?;
     c2.commit("Second commit").await?;
 
     // Verify extended bundle's InitCommit has only 'from', not 'id'
-    let init_commit2: InitCommit = temp2
-        .io_subdir(META_DIR)?
-        .io_file(INIT_FILENAME)?
-        .read_yaml()
+    let init_file2 = temp2.subdir(META_DIR)?.file(INIT_FILENAME)?;
+    let init_commit2: InitCommit = read_yaml(init_file2.as_ref())
         .await?
         .expect("Should have init commit");
     assert!(init_commit2.id.is_none(), "Extended bundle should NOT have 'id' in InitCommit");
@@ -262,7 +257,7 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     );
 
     // Verify the opened extended bundle has the SAME id as the base bundle
-    let base2 = Bundle::open(&temp2.to_string(), None).await?;
+    let base2 = Bundle::open(&temp2.url().to_string(), None).await?;
     assert_eq!(
         base_id,
         base2.id(),
@@ -270,14 +265,12 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     );
 
     // Extend again to third bundle and verify ID is still the same
-    let mut c3 = base2.extend(Some(&temp3.to_string()))?;
+    let mut c3 = base2.extend(Some(&temp3.url().to_string()))?;
     c3.remove_column("phone").await?;
     c3.commit("Third commit").await?;
 
-    let init_commit3: InitCommit = temp3
-        .io_subdir(META_DIR)?
-        .io_file(INIT_FILENAME)?
-        .read_yaml()
+    let init_file3 = temp3.subdir(META_DIR)?.file(INIT_FILENAME)?;
+    let init_commit3: InitCommit = read_yaml(init_file3.as_ref())
         .await?
         .expect("Should have init commit");
     assert!(init_commit3.id.is_none(), "Extended bundle should NOT have 'id' in InitCommit");
@@ -287,7 +280,7 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
         "Extended bundle should have 'from' pointing to parent"
     );
 
-    let base3 = Bundle::open(&temp3.to_string(), None).await?;
+    let base3 = Bundle::open(&temp3.url().to_string(), None).await?;
     assert_eq!(
         base_id,
         base3.id(),

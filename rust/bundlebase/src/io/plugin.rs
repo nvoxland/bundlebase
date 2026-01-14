@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 // Re-export commonly used types for convenience
 pub use ftp::{FtpDir, FtpFile, FtpFileInfo, FtpIOFactory};
-pub use object_store::{ObjectStoreDir, ObjectStoreFile, ObjectStoreIOFactory};
+pub use object_store::{ObjectStoreFile, ObjectStoreIOFactory};
 pub use sftp::{SftpClient, SftpDir, SftpFile, SftpFileInfo, SftpIOFactory};
 pub use tar::{TarDir, TarFile, TarIOFactory, TarObjectStore};
 
