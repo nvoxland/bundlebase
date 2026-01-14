@@ -298,42 +298,28 @@ class SyncBundleBuilder(SyncBundle):
         """Join with another data source.
 
         If location is None, the join point is created without any initial data.
-        Data can be attached later using attach(location, pack=name) or define_source_for_join().
+        Data can be attached later using attach(location, pack=name) or define_source(pack=name).
         """
         coro = _call_original_method(self._async, "join", name, on, location, how)
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def define_source(self, function: str, args: Dict[str, str]) -> "SyncBundleBuilder":
-        """Define a data source for the base pack.
-
-        Args:
-            function: Name of the source function (e.g., "remote_dir", "web_scrape")
-            args: Dictionary of arguments for the source function
-
-        Returns:
-            Self for fluent chaining
-        """
-        coro = _call_original_method(self._async, "define_source", function, args)
-        self._async = _loop_manager.run_sync(coro)
-        return self
-
-    def define_source_for_join(
-        self, join_name: str, function: str, args: Dict[str, str]
+    def define_source(
+        self, function: str, args: Dict[str, str], pack: str = "base"
     ) -> "SyncBundleBuilder":
-        """Define a data source for a joined pack.
+        """Define a data source for a pack.
 
         Args:
-            join_name: Name of the join to add the source to
             function: Name of the source function (e.g., "remote_dir", "web_scrape")
             args: Dictionary of arguments for the source function
+            pack: Which pack to define the source for:
+                - "base" (default): The base pack
+                - A join name: A joined pack by its join name
 
         Returns:
             Self for fluent chaining
         """
-        coro = _call_original_method(
-            self._async, "define_source_for_join", join_name, function, args
-        )
+        coro = _call_original_method(self._async, "define_source", function, args, pack)
         self._async = _loop_manager.run_sync(coro)
         return self
 

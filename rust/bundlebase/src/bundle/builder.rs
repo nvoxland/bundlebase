@@ -579,7 +579,7 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Define a data source for the base pack.
+    /// Define a data source for a pack.
     ///
     /// A source specifies where to look for data files (e.g., S3 bucket prefix)
     /// and patterns to filter which files to include. This enables the `fetch()`
@@ -590,6 +590,9 @@ impl BundleBuilder {
     /// * `args` - Function-specific arguments. For "remote_dir":
     ///   - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
     ///   - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
+    /// * `pack` - Which pack to define the source for:
+    ///   - `None` or `Some("base")`: The base pack (default)
+    ///   - `Some(join_name)`: A joined pack by its join name
     ///
     /// # Example
     /// ```no_run
@@ -600,7 +603,7 @@ impl BundleBuilder {
     /// let mut args = HashMap::new();
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
-    /// bundle.define_source("remote_dir", args).await?;
+    /// bundle.define_source("remote_dir", args, None).await?;
     /// bundle.fetch().await?;
     /// bundle.commit("Initial data from source").await?;
     /// # Ok(())
@@ -610,58 +613,27 @@ impl BundleBuilder {
         &mut self,
         function: &str,
         args: HashMap<String, String>,
+        pack: Option<&str>,
     ) -> Result<&mut Self, BundlebaseError> {
+        let pack = pack.map(|s| s.to_string());
         let function = function.to_string();
         let url = args.get("url").cloned().unwrap_or_else(|| "<no url>".to_string());
-
-        self.do_change(&format!("Define source at {}", url), |builder| {
-            Box::pin(async move {
-                let source_id = ObjectId::generate();
-                let op =
-                    DefineSourceOp::setup(source_id, ObjectId::BASE_PACK, function, args);
-
-                builder.apply_operation(op.into()).await?;
-
-                // Automatically fetch to attach any existing files
-                // This runs inside the same change context
-                builder.fetch().await?;
-
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
-    }
-
-    /// Define a data source for a joined pack.
-    ///
-    /// # Arguments
-    /// * `join_name` - Name of the join to define a source for
-    /// * `function` - Source function name (e.g., "remote_dir")
-    /// * `args` - Function-specific arguments. For "remote_dir":
-    ///   - "url" (required): Directory URL to list
-    ///   - "patterns" (optional): Comma-separated glob patterns
-    pub async fn define_source_for_join(
-        &mut self,
-        join_name: &str,
-        function: &str,
-        args: HashMap<String, String>,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let join_name = join_name.to_string();
-        let function = function.to_string();
-        let url = args.get("url").cloned().unwrap_or_else(|| "<no url>".to_string());
+        let pack_name = pack.clone().unwrap_or_else(|| "base".to_string());
 
         self.do_change(
-            &format!("Define source for join '{}' at {}", join_name, url),
+            &format!("Define source for {} at {}", pack_name, url),
             |builder| {
                 Box::pin(async move {
-                    let pack_join = builder
-                        .bundle
-                        .joins
-                        .get(&join_name)
-                        .ok_or(format!("Unknown join '{}'", join_name))?;
-                    let pack_id = pack_join.pack().clone();
+                    let pack_id = match pack.as_deref() {
+                        None | Some("base") => ObjectId::BASE_PACK,
+                        Some(join_name) => builder
+                            .bundle
+                            .joins
+                            .get(join_name)
+                            .ok_or(format!("Unknown join '{}'", join_name))?
+                            .pack()
+                            .clone(),
+                    };
 
                     let source_id = ObjectId::generate();
                     let op = DefineSourceOp::setup(source_id, pack_id, function, args);
@@ -698,7 +670,7 @@ impl BundleBuilder {
     /// let mut args = HashMap::new();
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
-    /// bundle.define_source("remote_dir", args).await?;
+    /// bundle.define_source("remote_dir", args, None).await?;
     /// let count = bundle.fetch().await?;
     /// println!("Attached {} new files", count);
     /// # Ok(())
@@ -1073,7 +1045,7 @@ impl BundleBuilder {
     /// Join with another data source (mutates self)
     ///
     /// If `location` is None, the join point is created without any initial data.
-    /// Data can be attached later using `attach()` or `define_source_for_join()`.
+    /// Data can be attached later using `attach()` or `define_source()` with the `pack` parameter.
     pub async fn join(
         &mut self,
         name: &str,

@@ -610,9 +610,9 @@ class PyBundleBuilder:
         """
         ...
 
-    def define_source(self, function: str, args: Dict[str, str]) -> "OperationChain":
+    def define_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
         """
-        Define a data source for the base pack.
+        Define a data source for a pack.
 
         Queues an operation to define a source from which files can be
         automatically attached via fetch().
@@ -640,12 +640,15 @@ class PyBundleBuilder:
                     Note: Files are always copied into the bundle (remote files cannot be directly referenced)
 
             args: Function-specific configuration arguments as described above.
+            pack: Which pack to define the source for:
+                - "base" (default): The base pack
+                - A join name: A joined pack by its join name
 
         Returns:
             OperationChain for fluent chaining
 
         Examples:
-            # Local/cloud directory
+            # Local/cloud directory (base pack)
             c = await c.define_source("remote_dir", {"url": "s3://bucket/data/", "patterns": "**/*.parquet"})
 
             # FTP directory (anonymous)
@@ -656,28 +659,9 @@ class PyBundleBuilder:
 
             # Remote directory via SSH (scp:// or sftp:// both work)
             c = await c.define_source("scp_directory", {"url": "sftp://user@host/data/", "key_path": "~/.ssh/id_rsa"})
-        """
-        ...
 
-    def define_source_for_join(self, join_name: str, function: str, args: Dict[str, str]) -> "OperationChain":
-        """
-        Define a data source for a joined pack.
-
-        Queues an operation to define a source for a specific join's pack.
-
-        Args:
-            join_name: Name of the join to associate the source with
-            function: Source function name. See define_source() for available functions:
-                - "remote_dir": List files from local/cloud directories
-                - "ftp_directory": List files from remote FTP directories
-                - "scp_directory": List files from remote directories via SSH/SFTP
-            args: Function-specific configuration arguments. See define_source() for details.
-
-        Returns:
-            OperationChain for fluent chaining
-
-        Example:
-            c = await c.define_source_for_join("customers", "remote_dir", {"url": "s3://bucket/customers/"})
+            # Define source for a joined pack
+            c = await c.define_source("remote_dir", {"url": "s3://bucket/customers/"}, pack="customers")
         """
         ...
 
@@ -909,12 +893,8 @@ class OperationChain:
         """Queue a define_function operation."""
         ...
 
-    def define_source(self, function: str, args: Dict[str, str]) -> "OperationChain":
+    def define_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
         """Queue a define_source operation."""
-        ...
-
-    def define_source_for_join(self, join_name: str, function: str, args: Dict[str, str]) -> "OperationChain":
-        """Queue a define_source_for_join operation."""
         ...
 
 
@@ -985,12 +965,8 @@ class CreateChain:
         """Queue a define_function operation."""
         ...
 
-    def define_source(self, function: str, args: Dict[str, str]) -> "CreateChain":
+    def define_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "CreateChain":
         """Queue a define_source operation."""
-        ...
-
-    def define_source_for_join(self, join_name: str, function: str, args: Dict[str, str]) -> "CreateChain":
-        """Queue a define_source_for_join operation."""
         ...
 
 
@@ -1061,12 +1037,8 @@ class ExtendChain:
         """Queue a define_function operation."""
         ...
 
-    def define_source(self, function: str, args: Dict[str, str]) -> "ExtendChain":
+    def define_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "ExtendChain":
         """Queue a define_source operation."""
-        ...
-
-    def define_source_for_join(self, join_name: str, function: str, args: Dict[str, str]) -> "ExtendChain":
-        """Queue a define_source_for_join operation."""
         ...
 
 
