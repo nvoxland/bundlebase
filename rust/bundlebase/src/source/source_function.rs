@@ -9,10 +9,10 @@
 //! The `SourceFunction` trait separates concerns:
 //! - `discover()` - Find new data locations (URLs, row ranges, etc.)
 //! - `materialize()` - Download/copy data to the bundle's data directory
-//! - `refresh()` - Orchestrates discovery and materialization (default impl provided)
+//! - `fetch()` - Orchestrates discovery and materialization (default impl provided)
 //!
 //! Most implementations only need to implement `discover()`. The default `materialize()`
-//! and `refresh()` implementations handle the common case.
+//! and `fetch()` implementations handle the common case.
 
 use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
@@ -69,9 +69,9 @@ pub struct MaterializedData {
     pub source_url: String,
 }
 
-/// Sync mode for source refresh operations.
+/// Sync mode for source fetch operations.
 ///
-/// Controls how refresh handles existing files when checking for updates.
+/// Controls how fetch handles existing files when checking for updates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SyncMode {
     /// Only add new files (default behavior)
@@ -101,7 +101,7 @@ impl SyncMode {
 
 /// Metadata about an attached file from a source.
 ///
-/// Used during refresh to compare remote files with already-attached files.
+/// Used during fetch to compare remote files with already-attached files.
 #[derive(Debug, Clone)]
 pub struct AttachedFileInfo {
     /// The location where this block is currently stored
@@ -112,9 +112,9 @@ pub struct AttachedFileInfo {
     pub bytes: Option<usize>,
 }
 
-/// Action to take for a discovered file during refresh.
+/// Action to take for a discovered file during fetch.
 #[derive(Debug, Clone)]
-pub enum RefreshAction {
+pub enum FetchAction {
     /// Attach a new file
     Add(MaterializedData),
     /// Replace an existing file that has changed
@@ -146,7 +146,7 @@ pub enum RefreshAction {
 /// - `arg_specs()` - Argument declarations
 /// - `discover()` - Find new data locations
 ///
-/// The default implementations handle validation, materialization, and the refresh loop.
+/// The default implementations handle validation, materialization, and the fetch loop.
 ///
 /// ## Example
 ///
@@ -289,7 +289,7 @@ pub trait SourceFunction: Send + Sync {
         source_utils::materialize_url(&location.url, should_copy, data_dir, config).await
     }
 
-    /// Refresh the source: discover new data and materialize it.
+    /// Fetch the source: discover new data and materialize it.
     ///
     /// Default implementation orchestrates the discover/materialize loop.
     /// Most implementations should not need to override this.
@@ -302,7 +302,7 @@ pub trait SourceFunction: Send + Sync {
     ///
     /// # Returns
     /// List of materialized data ready for attachment
-    async fn refresh(
+    async fn fetch(
         &self,
         args: &HashMap<String, String>,
         attached_locations: HashSet<String>,
@@ -329,14 +329,14 @@ pub trait SourceFunction: Send + Sync {
         Ok(results)
     }
 
-    /// Refresh the source with sync mode support.
+    /// Fetch the source with sync mode support.
     ///
-    /// This method extends refresh() to support update and sync modes:
-    /// - `Add`: Only add new files (same as refresh())
+    /// This method extends fetch() to support update and sync modes:
+    /// - `Add`: Only add new files (same as fetch())
     /// - `Update`: Add new files and replace files that have changed
     /// - `Sync`: Add new, replace changed, and remove files no longer at source
     ///
-    /// Default implementation delegates to refresh() for Add mode and returns
+    /// Default implementation delegates to fetch() for Add mode and returns
     /// an error for other modes. Source functions that support update/sync modes
     /// should override this method.
     ///
@@ -348,21 +348,21 @@ pub trait SourceFunction: Send + Sync {
     /// * `mode` - Sync mode to use
     ///
     /// # Returns
-    /// List of refresh actions (Add, Replace, Remove)
-    async fn refresh_with_mode(
+    /// List of fetch actions (Add, Replace, Remove)
+    async fn fetch_with_mode(
         &self,
         args: &HashMap<String, String>,
         attached_files: &HashMap<String, AttachedFileInfo>,
         data_dir: &dyn IOReadWriteDir,
         config: Arc<BundleConfig>,
         mode: SyncMode,
-    ) -> Result<Vec<RefreshAction>, BundlebaseError> {
+    ) -> Result<Vec<FetchAction>, BundlebaseError> {
         match mode {
             SyncMode::Add => {
-                // For Add mode, delegate to existing refresh() behavior
+                // For Add mode, delegate to existing fetch() behavior
                 let attached_locations: HashSet<String> = attached_files.keys().cloned().collect();
-                let materialized = self.refresh(args, attached_locations, data_dir, config).await?;
-                Ok(materialized.into_iter().map(RefreshAction::Add).collect())
+                let materialized = self.fetch(args, attached_locations, data_dir, config).await?;
+                Ok(materialized.into_iter().map(FetchAction::Add).collect())
             }
             SyncMode::Update | SyncMode::Sync => {
                 // Default implementation doesn't support update/sync

@@ -3,7 +3,7 @@
 //! Provides common functionality used by multiple source function implementations.
 
 use super::source_function::{
-    AttachedFileInfo, DiscoveredLocation, MaterializedData, RefreshAction, SyncMode,
+    AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction, SyncMode,
 };
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir};
@@ -238,7 +238,7 @@ pub async fn process_sync_mode<M, MFut>(
     mode: SyncMode,
     read_version: impl Fn(&Url) -> BoxFuture<'_, Result<String, BundlebaseError>>,
     materialize: M,
-) -> Result<Vec<RefreshAction>, BundlebaseError>
+) -> Result<Vec<FetchAction>, BundlebaseError>
 where
     M: Fn(DiscoveredLocation) -> MFut,
     MFut: Future<Output = Result<Box<dyn IOReadFile>, BundlebaseError>>,
@@ -269,7 +269,7 @@ where
                     let attach_location = data_dir
                         .relative_path(file.as_ref())
                         .unwrap_or_else(|_| file.url().to_string());
-                    actions.push(RefreshAction::Replace {
+                    actions.push(FetchAction::Replace {
                         old_source_location: source_location.clone(),
                         data: MaterializedData {
                             attach_location,
@@ -287,7 +287,7 @@ where
             let attach_location = data_dir
                 .relative_path(file.as_ref())
                 .unwrap_or_else(|_| file.url().to_string());
-            actions.push(RefreshAction::Add(MaterializedData {
+            actions.push(FetchAction::Add(MaterializedData {
                 attach_location,
                 source_location,
                 source_url,
@@ -300,7 +300,7 @@ where
         for source_location in attached_files.keys() {
             if !discovered_locations.contains(source_location) {
                 debug!("File {} no longer exists at remote", source_location);
-                actions.push(RefreshAction::Remove {
+                actions.push(FetchAction::Remove {
                     source_location: source_location.clone(),
                 });
             }

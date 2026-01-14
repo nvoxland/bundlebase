@@ -35,7 +35,7 @@ pub struct DataBlock {
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     data_dir: Arc<dyn IOReadWriteDir>,
     config: Arc<BundleConfig>,
-    /// Source ID if this block was attached via a source refresh
+    /// Source ID if this block was attached via a source fetch
     source: Option<ObjectId>,
     /// Original source location (e.g., remote URL) if from a source
     source_location: Option<String>,
@@ -83,7 +83,7 @@ impl DataBlock {
         &self.id
     }
 
-    /// Returns the source ID if this block was attached via a source refresh
+    /// Returns the source ID if this block was attached via a source fetch
     pub fn source(&self) -> Option<&ObjectId> {
         self.source.as_ref()
     }

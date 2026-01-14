@@ -624,12 +624,12 @@ class TestSyncSource:
         )
         assert c.name == "Test Bundle"
 
-    def test_sync_refresh(self):
-        """Test refresh synchronously with empty source."""
+    def test_sync_fetch(self):
+        """Test fetch synchronously with empty source."""
         c = bb.create(random_bundle())
         # Define a source pointing to a non-existent location (no files to find)
         c.define_source("remote_dir", {"url": "file:///nonexistent/path/"})
 
-        # Refresh should return 0 (no new files)
-        count = c.refresh()
+        # fetch should return 0 (no new files)
+        count = c.fetch()
         assert count == 0

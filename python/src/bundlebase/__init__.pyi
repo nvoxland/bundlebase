@@ -611,7 +611,7 @@ class PyBundleBuilder:
         Define a data source for the base pack.
 
         Queues an operation to define a source from which files can be
-        automatically attached via refresh().
+        automatically attached via fetch().
 
         Args:
             function: Source function name. Available functions:
@@ -677,9 +677,9 @@ class PyBundleBuilder:
         """
         ...
 
-    async def refresh(self) -> int:
+    async def fetch(self) -> int:
         """
-        Refresh data from all defined sources.
+        Fetch data from all defined sources.
 
         Compares files in each source with already-attached files and
         auto-attaches any new files found.
@@ -688,7 +688,7 @@ class PyBundleBuilder:
             Number of files attached
 
         Example:
-            count = await c.refresh()
+            count = await c.fetch()
             print(f"Attached {count} new files")
         """
         ...

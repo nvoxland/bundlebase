@@ -4,7 +4,7 @@
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, RefreshAction, SourceFunction, SyncMode,
+    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction, SyncMode,
 };
 use super::source_utils;
 use crate::io::plugin::ftp::FtpFile;
@@ -30,7 +30,7 @@ use url::Url;
 /// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
 ///   "false" to reference files at their original URL
 /// - `key_path` (optional): SSH key path for SFTP/SCP sources
-/// - `mode` (optional): Sync mode for refresh:
+/// - `mode` (optional): Sync mode for fetch:
 ///   - "add" (default): Only attach new files
 ///   - "update": Add new files and replace changed files
 ///   - "sync": Add new, replace changed, and remove files no longer at source
@@ -142,14 +142,14 @@ impl SourceFunction for RemoteDirFunction {
             .await
     }
 
-    async fn refresh_with_mode(
+    async fn fetch_with_mode(
         &self,
         args: &HashMap<String, String>,
         attached_files: &HashMap<String, AttachedFileInfo>,
         data_dir: &dyn IOReadWriteDir,
         config: Arc<BundleConfig>,
         mode: SyncMode,
-    ) -> Result<Vec<RefreshAction>, BundlebaseError> {
+    ) -> Result<Vec<FetchAction>, BundlebaseError> {
         let base_url = source_utils::require_url(args, self.name())?;
         let patterns = source_utils::get_patterns(args)?;
 

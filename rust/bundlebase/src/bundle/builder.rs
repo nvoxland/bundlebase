@@ -13,7 +13,7 @@ use crate::bundle::{commit, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle};
 use super::DataBlock;
 use crate::data::{ObjectId, VersionedBlockId};
-use crate::source::RefreshAction;
+use crate::source::FetchAction;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
@@ -567,7 +567,7 @@ impl BundleBuilder {
     /// Define a data source for the base pack.
     ///
     /// A source specifies where to look for data files (e.g., S3 bucket prefix)
-    /// and patterns to filter which files to include. This enables the `refresh()`
+    /// and patterns to filter which files to include. This enables the `fetch()`
     /// functionality to discover and auto-attach new files.
     ///
     /// # Arguments
@@ -586,7 +586,7 @@ impl BundleBuilder {
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
     /// bundle.define_source("remote_dir", args).await?;
-    /// bundle.refresh().await?;
+    /// bundle.fetch().await?;
     /// bundle.commit("Initial data from source").await?;
     /// # Ok(())
     /// # }
@@ -607,9 +607,9 @@ impl BundleBuilder {
 
                 builder.apply_operation(op.into()).await?;
 
-                // Automatically refresh to attach any existing files
+                // Automatically fetch to attach any existing files
                 // This runs inside the same change context
-                builder.refresh().await?;
+                builder.fetch().await?;
 
                 Ok(())
             })
@@ -653,9 +653,9 @@ impl BundleBuilder {
 
                     builder.apply_operation(op.into()).await?;
 
-                    // Automatically refresh to attach any existing files
+                    // Automatically fetch to attach any existing files
                     // This runs inside the same change context
-                    builder.refresh().await?;
+                    builder.fetch().await?;
 
                     Ok(())
                 })
@@ -666,7 +666,7 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Refresh from all defined sources - discover and attach new files.
+    /// Fetch from all defined sources - discover and attach new files.
     ///
     /// Lists files from each source URL, compares with already-attached files,
     /// and auto-attaches any new files.
@@ -684,12 +684,12 @@ impl BundleBuilder {
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
     /// bundle.define_source("remote_dir", args).await?;
-    /// let count = bundle.refresh().await?;
+    /// let count = bundle.fetch().await?;
     /// println!("Attached {} new files", count);
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn refresh(&mut self) -> Result<usize, BundlebaseError> {
+    pub async fn fetch(&mut self) -> Result<usize, BundlebaseError> {
         let mut action_count = 0;
 
         // Collect sources to avoid borrow issues
@@ -700,9 +700,9 @@ impl BundleBuilder {
             let pack_id = source.pack().clone();
             let source_id = source.id().clone();
 
-            // Get refresh actions from the source function
+            // Get fetch actions from the source function
             let actions = source
-                .refresh(
+                .fetch(
                     self.data_dir(),
                     self.bundle.config(),
                     &registry,
@@ -711,13 +711,13 @@ impl BundleBuilder {
 
             for action in actions {
                 match action {
-                    RefreshAction::Add(data) => {
+                    FetchAction::Add(data) => {
                         let attach_location = data.attach_location.clone();
                         let source_location = data.source_location.clone();
                         let source_url = data.source_url.clone();
 
                         self.do_change(
-                            &format!("Refresh: attach {}", source_location),
+                            &format!("Fetch: attach {}", source_location),
                             |builder| {
                                 let pack_id = pack_id.clone();
                                 let source_id = source_id.clone();
@@ -743,7 +743,7 @@ impl BundleBuilder {
                         )
                         .await?;
                     }
-                    RefreshAction::Replace {
+                    FetchAction::Replace {
                         old_source_location,
                         data,
                     } => {
@@ -760,7 +760,7 @@ impl BundleBuilder {
                         let source_url = data.source_url.clone();
 
                         self.do_change(
-                            &format!("Refresh: replace {}", source_location),
+                            &format!("Fetch: replace {}", source_location),
                             |builder| {
                                 let pack_id = pack_id.clone();
                                 let source_id = source_id.clone();
@@ -785,7 +785,7 @@ impl BundleBuilder {
                         )
                         .await?;
                     }
-                    RefreshAction::Remove { source_location } => {
+                    FetchAction::Remove { source_location } => {
                         // Find the block's location and detach it
                         let location =
                             self.find_block_location_by_source(&source_id, &source_location)?;

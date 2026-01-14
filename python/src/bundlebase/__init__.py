@@ -63,7 +63,7 @@ _original_methods = {
     "replace_block": _PyBundleBuilder.replace_block,
     "define_source": _PyBundleBuilder.define_source,
     "define_source_for_join": _PyBundleBuilder.define_source_for_join,
-    "refresh": _PyBundleBuilder.refresh,
+    "fetch": _PyBundleBuilder.fetch,
 
     # Column operations
     "remove_column": _PyBundleBuilder.remove_column,
@@ -138,7 +138,7 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 
 # Wrap mutation methods to return OperationChain
 # (but NOT read-only methods like schema, num_rows, explain)
-# Note: refresh is NOT here because it returns a value (count), not PyBundleBuilder
+# Note: fetch is NOT here because it returns a value (count), not PyBundleBuilder
 mutation_methods = [
     "attach", "detach_block", "replace_block", "define_source", "define_source_for_join",
     "remove_column", "rename_column", "filter", "select", "join",

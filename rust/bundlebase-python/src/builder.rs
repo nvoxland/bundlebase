@@ -630,17 +630,17 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Refresh from all defined sources - discover and attach new files.
+    /// Fetch from all defined sources - discover and attach new files.
     ///
     /// Returns the number of new files that were attached.
-    fn refresh<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn fetch<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
             let count = builder
-                .refresh()
+                .fetch()
                 .await
-                .map_err(|e| to_py_error("Failed to refresh from sources", e))?;
+                .map_err(|e| to_py_error("Failed to fetch from sources", e))?;
             Ok(count)
         })
     }

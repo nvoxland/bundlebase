@@ -4,7 +4,7 @@
 //! and downloads files that match specified glob patterns.
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, RefreshAction, SourceFunction, SyncMode,
+    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction, SyncMode,
 };
 use super::source_utils;
 use crate::io::IOReadWriteDir;
@@ -25,7 +25,7 @@ use url::Url;
 ///   (e.g., "*.parquet,*.csv"). Defaults to "**/*" (all links)
 /// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
 ///   "false" to reference files at their original URL
-/// - `mode` (optional): Sync mode for refresh:
+/// - `mode` (optional): Sync mode for fetch:
 ///   - "add" (default): Only attach new files
 ///   - "update": Add new files and replace changed files
 ///   - "sync": Add new, replace changed, and remove files no longer at source
@@ -113,14 +113,14 @@ impl SourceFunction for WebScrapeFunction {
         Ok(locations)
     }
 
-    async fn refresh_with_mode(
+    async fn fetch_with_mode(
         &self,
         args: &HashMap<String, String>,
         attached_files: &HashMap<String, AttachedFileInfo>,
         data_dir: &dyn IOReadWriteDir,
         config: Arc<BundleConfig>,
         mode: SyncMode,
-    ) -> Result<Vec<RefreshAction>, BundlebaseError> {
+    ) -> Result<Vec<FetchAction>, BundlebaseError> {
         let base_url = source_utils::require_url(args, self.name())?;
         let patterns = source_utils::get_patterns(args)?;
 
@@ -153,7 +153,7 @@ impl SourceFunction for WebScrapeFunction {
         .await
     }
 
-    // Uses default materialize() and refresh() implementations
+    // Uses default materialize() and fetch() implementations
 }
 
 impl WebScrapeFunction {

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Operation that defines a data source for a pack.
 ///
-/// A source specifies where to look for data files and enables the `refresh()`
+/// A source specifies where to look for data files and enables the `fetch()`
 /// functionality to discover and auto-attach new files.
 ///
 /// The source function is responsible for file discovery. Each function may require

@@ -11,7 +11,7 @@
 //! - `mode` (optional): Sync mode: 'add' (default), 'update', or 'sync'
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, MaterializedData, RefreshAction,
+    ArgSpec, AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction,
     SourceFunction, SyncMode,
 };
 use crate::io::IOReadWriteDir;
@@ -552,14 +552,14 @@ impl SourceFunction for PostgresFunction {
         Self::write_chunk_to_parquet(&chunk, data_dir).await
     }
 
-    async fn refresh_with_mode(
+    async fn fetch_with_mode(
         &self,
         args: &HashMap<String, String>,
         attached_files: &HashMap<String, AttachedFileInfo>,
         data_dir: &dyn IOReadWriteDir,
         _config: Arc<BundleConfig>,
         mode: SyncMode,
-    ) -> Result<Vec<RefreshAction>, BundlebaseError> {
+    ) -> Result<Vec<FetchAction>, BundlebaseError> {
         let url = args.get("url").ok_or("url is required")?;
         let query = args.get("query").ok_or("query is required")?;
         let sort_column = args.get("sort_column").ok_or("sort_column is required")?;
@@ -579,7 +579,7 @@ impl SourceFunction for PostgresFunction {
                             .relative_path(file.as_ref())
                             .unwrap_or_else(|_| file.url().to_string());
                         // For Postgres, source_url is the attach_location since there's no remote file
-                        actions.push(RefreshAction::Replace {
+                        actions.push(FetchAction::Replace {
                             old_source_location: source_location.clone(),
                             data: MaterializedData {
                                 attach_location: attach_location.clone(),
@@ -591,7 +591,7 @@ impl SourceFunction for PostgresFunction {
                     None => {
                         // Range is now empty - in Sync mode, remove it
                         if mode == SyncMode::Sync {
-                            actions.push(RefreshAction::Remove {
+                            actions.push(FetchAction::Remove {
                                 source_location: source_location.clone(),
                             });
                         }
@@ -619,7 +619,7 @@ impl SourceFunction for PostgresFunction {
                 .relative_path(file.as_ref())
                 .unwrap_or_else(|_| file.url().to_string());
             // For Postgres, source_url is the attach_location since there's no remote file
-            actions.push(RefreshAction::Add(MaterializedData {
+            actions.push(FetchAction::Add(MaterializedData {
                 attach_location: attach_location.clone(),
                 source_location,
                 source_url: attach_location,
