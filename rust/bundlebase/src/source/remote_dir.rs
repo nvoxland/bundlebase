@@ -104,14 +104,24 @@ impl SourceFunction for RemoteDirFunction {
         let all_files = lister.list_files().await?;
 
         // Filter files by pattern and already-attached status
+        // Use relative path as source_location (relative to base_url)
         let locations: Vec<DiscoveredLocation> = all_files
             .into_iter()
-            .filter(|file| {
+            .filter_map(|file| {
                 let relative_path = Self::relative_path(&base_url, &file.url);
-                patterns.iter().any(|pattern| pattern.matches(&relative_path))
+                // Check pattern match
+                if !patterns.iter().any(|pattern| pattern.matches(&relative_path)) {
+                    return None;
+                }
+                // Check if already attached (by relative path)
+                if attached_locations.contains(&relative_path) {
+                    return None;
+                }
+                Some(DiscoveredLocation {
+                    url: file.url,
+                    source_location: relative_path,
+                })
             })
-            .filter(|file| !attached_locations.contains(file.url.as_str()))
-            .map(|file| DiscoveredLocation::from_url(file.url))
             .collect();
 
         Ok(locations)
@@ -150,32 +160,38 @@ impl SourceFunction for RemoteDirFunction {
         let all_files = lister.list_files().await?;
 
         // Filter files by pattern and convert to DiscoveredLocation
+        // Use relative path as source_location (relative to base_url)
         let discovered: Vec<DiscoveredLocation> = all_files
             .into_iter()
-            .filter(|file| {
+            .filter_map(|file| {
                 let relative_path = Self::relative_path(&base_url, &file.url);
-                patterns.iter().any(|pattern| pattern.matches(&relative_path))
+                // Check pattern match
+                if !patterns.iter().any(|pattern| pattern.matches(&relative_path)) {
+                    return None;
+                }
+                Some(DiscoveredLocation {
+                    url: file.url,
+                    source_location: relative_path,
+                })
             })
-            .map(|file| DiscoveredLocation::from_url(file.url))
             .collect();
 
         // Use shared sync logic
         let config_for_version = config.clone();
         let should_copy = source_utils::should_copy(args);
         let key_path = args.get("key_path").cloned();
-        let data_dir = data_dir.clone();
         let config_for_materialize = config.clone();
 
         source_utils::process_sync_mode(
             discovered,
             attached_files,
+            data_dir,
             mode,
             |url| {
                 let cfg = config_for_version.clone();
                 Box::pin(async move { Self::read_remote_version(url, &cfg).await })
             },
             |loc| {
-                let dd = data_dir.clone();
                 let cfg = config_for_materialize.clone();
                 let kp = key_path.clone();
                 async move {
@@ -183,7 +199,7 @@ impl SourceFunction for RemoteDirFunction {
                         &loc.url,
                         should_copy,
                         kp.as_deref(),
-                        dd,
+                        data_dir,
                         &cfg,
                     )
                     .await

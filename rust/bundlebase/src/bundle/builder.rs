@@ -424,33 +424,39 @@ impl BundleBuilder {
     where
         F: for<'a> FnOnce(&'a mut Self) -> BoxFuture<'a, Result<(), BundlebaseError>>,
     {
-        // Check for nested changes
-        match &self.in_progress_change {
+        // Check for nested changes - track whether we created this change
+        let is_nested = match &self.in_progress_change {
             Some(in_progress) => {
                 debug!(
                     "Change {} already in progress, not going to separately track {}",
                     in_progress.description, description
                 );
+                true
             }
             None => {
                 let change = BundleChange::new(description);
                 self.in_progress_change = Some(change);
+                false
             }
         };
 
         // Execute the closure
         let result = f(self).await;
 
-        // Move change to status on success, discard on error
+        // Only finalize the change if we created it (not nested)
         match result {
             Ok(_) => {
-                if let Some(change) = self.in_progress_change.take() {
-                    self.status.changes.push(change);
+                if !is_nested {
+                    if let Some(change) = self.in_progress_change.take() {
+                        self.status.changes.push(change);
+                    }
                 }
                 Ok(())
             }
             Err(e) => {
-                self.in_progress_change = None;
+                if !is_nested {
+                    self.in_progress_change = None;
+                }
                 Err(e)
             }
         }
@@ -601,13 +607,14 @@ impl BundleBuilder {
 
                 builder.apply_operation(op.into()).await?;
 
+                // Automatically refresh to attach any existing files
+                // This runs inside the same change context
+                builder.refresh().await?;
+
                 Ok(())
             })
         })
         .await?;
-
-        // Automatically refresh to attach any existing files
-        self.refresh().await?;
 
         Ok(self)
     }
@@ -646,14 +653,15 @@ impl BundleBuilder {
 
                     builder.apply_operation(op.into()).await?;
 
+                    // Automatically refresh to attach any existing files
+                    // This runs inside the same change context
+                    builder.refresh().await?;
+
                     Ok(())
                 })
             },
         )
         .await?;
-
-        // Automatically refresh to attach any existing files
-        self.refresh().await?;
 
         Ok(self)
     }
@@ -706,6 +714,7 @@ impl BundleBuilder {
                     RefreshAction::Add(data) => {
                         let attach_location = data.attach_location.clone();
                         let source_location = data.source_location.clone();
+                        let source_url = data.source_url.clone();
 
                         self.do_change(
                             &format!("Refresh: attach {}", source_location),
@@ -714,13 +723,14 @@ impl BundleBuilder {
                                 let source_id = source_id.clone();
                                 let attach_location = attach_location.clone();
                                 let source_location = source_location.clone();
+                                let source_url = source_url.clone();
 
                                 Box::pin(async move {
-                                    // Use setup_for_source to store version from source_location
+                                    // Use setup_for_source to read version from source_url
                                     let mut op = AttachBlockOp::setup_for_source(
                                         &pack_id,
                                         &attach_location,
-                                        &source_location,
+                                        &source_url,
                                         builder,
                                     )
                                     .await?;
@@ -747,6 +757,7 @@ impl BundleBuilder {
                         // Attach the new block
                         let attach_location = data.attach_location.clone();
                         let source_location = data.source_location.clone();
+                        let source_url = data.source_url.clone();
 
                         self.do_change(
                             &format!("Refresh: replace {}", source_location),
@@ -755,12 +766,13 @@ impl BundleBuilder {
                                 let source_id = source_id.clone();
                                 let attach_location = attach_location.clone();
                                 let source_location = source_location.clone();
+                                let source_url = source_url.clone();
 
                                 Box::pin(async move {
                                     let mut op = AttachBlockOp::setup_for_source(
                                         &pack_id,
                                         &attach_location,
-                                        &source_location,
+                                        &source_url,
                                         builder,
                                     )
                                     .await?;

@@ -527,6 +527,201 @@ async fn test_define_source_copy_true_explicit() -> Result<(), BundlebaseError> 
 }
 
 #[tokio::test]
+async fn test_define_source_creates_single_change() -> Result<(), BundlebaseError> {
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Copy test file to source directory
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "userdata.parquet",
+    )
+    .await?;
+
+    // Create bundle and define source
+    let mut bundle =
+        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    // Record change count before define_source (create may add a change)
+    let changes_before = bundle.status().changes().len();
+
+    bundle
+        .define_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+        )
+        .await?;
+
+    // After define_source, should have exactly 1 additional change (not multiple)
+    // This change should contain both the DefineSourceOp and the AttachBlockOp
+    let changes = bundle.status().changes();
+    let changes_added = changes.len() - changes_before;
+    assert_eq!(
+        changes_added, 1,
+        "define_source should create exactly 1 change, got {}. Changes: {:?}",
+        changes_added,
+        changes.iter().map(|c| &c.description).collect::<Vec<_>>()
+    );
+
+    // The define_source change should contain multiple operations (DefineSourceOp + AttachBlockOp)
+    let define_source_change = &changes[changes_before];
+    let ops_count = define_source_change.operations.len();
+    assert!(
+        ops_count >= 2,
+        "The change should contain at least 2 operations (DefineSourceOp + AttachBlockOp), got {}",
+        ops_count
+    );
+
+    // Verify the data is actually attached
+    assert_eq!(bundle.num_rows().await?, 1000);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError> {
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Copy test file to source directory
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "userdata.parquet",
+    )
+    .await?;
+
+    // Create bundle and define source
+    let mut bundle =
+        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    bundle
+        .define_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+        )
+        .await?;
+
+    bundle.commit("Defined source").await?;
+
+    // Read the commit file and verify the sourceLocation is a relative path
+    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+
+    // Find the attachBlock operation and verify its sourceLocation field
+    // The YAML format is: sourceLocation: <path>
+    let lines: Vec<&str> = contents.lines().collect();
+    let mut found_attach_block = false;
+    let mut source_location_is_relative = false;
+
+    for line in lines.iter() {
+        if line.contains("type: attachBlock") {
+            found_attach_block = true;
+        }
+        // Look for sourceLocation field after attachBlock
+        if found_attach_block && line.trim_start().starts_with("sourceLocation:") {
+            let location_value = line.split(':').skip(1).collect::<Vec<_>>().join(":");
+            let location = location_value.trim().trim_matches('\'').trim_matches('"');
+
+            // A relative path should NOT contain "://" (URL scheme indicator)
+            // and should be just the filename like "userdata.parquet"
+            source_location_is_relative = !location.contains("://");
+
+            // The relative path should be just the filename
+            assert_eq!(
+                location, "userdata.parquet",
+                "sourceLocation should be relative path 'userdata.parquet', got: {}",
+                location
+            );
+
+            break;
+        }
+    }
+
+    assert!(found_attach_block, "Should have attachBlock operation in commit");
+    assert!(
+        source_location_is_relative,
+        "sourceLocation should be relative path, not URL. Contents:\n{}",
+        contents
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Copy test file to source directory
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "userdata.parquet",
+    )
+    .await?;
+
+    // Create bundle and define source with copy=true (default)
+    let mut bundle =
+        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    bundle
+        .define_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+        )
+        .await?;
+
+    bundle.commit("Defined source").await?;
+
+    // Read the commit file and verify the attach location is a relative path
+    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+
+    // The attachBlock location should be a relative path like "ab/cdef12345.parquet"
+    // NOT a full URL like "memory:///xxx/ab/cdef12345.parquet"
+
+    // Find the attachBlock operation and verify its location field
+    // The YAML format is: location: <path>
+    let lines: Vec<&str> = contents.lines().collect();
+    let mut found_attach_block = false;
+    let mut location_is_relative = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        if line.contains("type: attachBlock") {
+            found_attach_block = true;
+        }
+        // Look for location field after attachBlock
+        if found_attach_block && line.trim_start().starts_with("location:") {
+            let location_value = line.split(':').skip(1).collect::<Vec<_>>().join(":");
+            let location = location_value.trim().trim_matches('\'').trim_matches('"');
+
+            // A relative path should NOT contain "://" (URL scheme indicator)
+            // and should be a simple path like "ab/cdef12345678.parquet"
+            location_is_relative = !location.contains("://");
+
+            // Also verify it looks like a SHA-based path (2 char dir / hash.ext)
+            let parts: Vec<&str> = location.split('/').collect();
+            assert!(
+                parts.len() >= 2 && parts[0].len() == 2,
+                "Location should be SHA-based path like 'ab/cdef12345.parquet', got: {}",
+                location
+            );
+
+            break;
+        }
+    }
+
+    assert!(found_attach_block, "Should have attachBlock operation in commit");
+    assert!(
+        location_is_relative,
+        "attachBlock location should be relative path, not URL. Contents:\n{}",
+        contents
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_refresh_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();

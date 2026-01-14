@@ -227,12 +227,14 @@ pub async fn read_http_version(url: &Url) -> Result<String, BundlebaseError> {
 /// # Arguments
 /// * `discovered` - All discovered locations from the source
 /// * `attached_files` - Map of source_location -> metadata for already-attached files
+/// * `data_dir` - Data directory for computing relative paths
 /// * `mode` - Sync mode (Add, Update, or Sync)
 /// * `read_version` - Async function to read version from a URL
 /// * `materialize` - Async function to materialize a discovered location (returns IOReadFile)
 pub async fn process_sync_mode<M, MFut>(
     discovered: Vec<DiscoveredLocation>,
     attached_files: &HashMap<String, AttachedFileInfo>,
+    data_dir: &dyn IOReadWriteDir,
     mode: SyncMode,
     read_version: impl Fn(&Url) -> BoxFuture<'_, Result<String, BundlebaseError>>,
     materialize: M,
@@ -251,6 +253,7 @@ where
 
     for location in discovered {
         let source_location = location.source_location.clone();
+        let source_url = location.url.to_string();
 
         if let Some(attached_info) = attached_files.get(&source_location) {
             // Already attached - check for changes in Update/Sync mode
@@ -262,11 +265,16 @@ where
                         source_location, attached_info.version, current_version
                     );
                     let file = materialize(location).await?;
+                    // Use relative path if file is in data_dir, otherwise full URL
+                    let attach_location = data_dir
+                        .relative_path(file.as_ref())
+                        .unwrap_or_else(|_| file.url().to_string());
                     actions.push(RefreshAction::Replace {
                         old_source_location: source_location.clone(),
                         data: MaterializedData {
-                            attach_location: file.url().to_string(),
+                            attach_location,
                             source_location,
+                            source_url,
                         },
                     });
                 }
@@ -275,9 +283,14 @@ where
         } else {
             // New file - add it
             let file = materialize(location).await?;
+            // Use relative path if file is in data_dir, otherwise full URL
+            let attach_location = data_dir
+                .relative_path(file.as_ref())
+                .unwrap_or_else(|_| file.url().to_string());
             actions.push(RefreshAction::Add(MaterializedData {
-                attach_location: file.url().to_string(),
+                attach_location,
                 source_location,
+                source_url,
             }));
         }
     }

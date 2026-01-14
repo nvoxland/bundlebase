@@ -135,16 +135,15 @@ impl SourceFunction for WebScrapeFunction {
 
         // Use shared sync logic
         let should_copy = source_utils::should_copy(args);
-        let data_dir = data_dir.clone();
         let config = config.clone();
 
         source_utils::process_sync_mode(
             discovered,
             attached_files,
+            data_dir,
             mode,
             |url| Box::pin(source_utils::read_http_version(url)),
             |loc| {
-                let data_dir = data_dir.clone();
                 let config = config.clone();
                 async move {
                     source_utils::materialize_url(&loc.url, should_copy, data_dir, &config).await
