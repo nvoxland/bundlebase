@@ -30,10 +30,10 @@ pub struct AttachBlockOp {
         deserialize_with = "super::serde_util::deserialize_schema_option"
     )]
     pub schema: Option<SchemaRef>,
-    /// If this block was attached via a source refresh, the source ID
+    /// If this block was attached via a source fetch, the source ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<ObjectId>,
-    /// If this block was attached via a source refresh, the original source URL
+    /// If this block was attached via a source fetch, the original source URL
     /// Used to track which files have been attached when checking for new files
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_location: Option<String>,
@@ -54,11 +54,11 @@ impl AttachBlockOp {
         adapter.read_version().await
     }
 
-    /// Setup an AttachBlockOp for a file attached via source refresh.
+    /// Setup an AttachBlockOp for a file attached via source fetch.
     ///
     /// Reads version from `source_location` (the remote URL) rather than
     /// `attach_location` (the local copy). This enables accurate change
-    /// detection on subsequent refreshes when `copy=true`.
+    /// detection on subsequent fetches when `copy=true`.
     ///
     /// # Arguments
     /// * `pack` - Pack to attach the block to

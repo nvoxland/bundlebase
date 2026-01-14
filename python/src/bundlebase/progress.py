@@ -92,7 +92,7 @@ class TqdmProgressTracker:
                 if message:
                     bar.set_postfix_str(message)
 
-                bar.refresh()
+                bar.fetch()
 
         elif event == 'finish':
             bar = self._bars.pop(id, None)

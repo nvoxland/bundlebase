@@ -127,18 +127,18 @@ async fn test_define_source_auto_attaches_files() -> Result<(), BundlebaseError>
         .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
         .await?;
 
-    // Verify file was auto-attached (define_source calls refresh automatically)
+    // Verify file was auto-attached (define_source calls fetch automatically)
     assert_eq!(bundle.num_rows().await?, 1000);
 
-    // Verify subsequent refresh finds nothing new
-    let count = bundle.refresh().await?;
+    // Verify subsequent fetch finds nothing new
+    let count = bundle.fetch().await?;
     assert_eq!(count, 0);
 
     Ok(())
 }
 
 #[tokio::test]
-async fn test_refresh_attaches_new_files() -> Result<(), BundlebaseError> {
+async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
     // Create a source directory
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
@@ -151,8 +151,8 @@ async fn test_refresh_attaches_new_files() -> Result<(), BundlebaseError> {
         .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
         .await?;
 
-    // Verify no data yet by refreshing (should attach nothing)
-    let count = bundle.refresh().await?;
+    // Verify no data yet by fetching (should attach nothing)
+    let count = bundle.fetch().await?;
     assert_eq!(count, 0);
 
     // Now add a file to the source directory
@@ -163,8 +163,8 @@ async fn test_refresh_attaches_new_files() -> Result<(), BundlebaseError> {
     )
     .await?;
 
-    // Refresh should find and attach the new file
-    let count = bundle.refresh().await?;
+    // Fetch should find and attach the new file
+    let count = bundle.fetch().await?;
     assert_eq!(count, 1);
 
     // Verify data is now available
@@ -174,7 +174,7 @@ async fn test_refresh_attaches_new_files() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_refresh_idempotent() -> Result<(), BundlebaseError> {
+async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -194,12 +194,12 @@ async fn test_refresh_idempotent() -> Result<(), BundlebaseError> {
         .define_source("remote_dir", make_source_args(source_dir.url().as_str(), Some("**/*.parquet")))
         .await?;
 
-    // First explicit refresh should find nothing (already attached by define_source)
-    let count1 = bundle.refresh().await?;
+    // First explicit fetch should find nothing (already attached by define_source)
+    let count1 = bundle.fetch().await?;
     assert_eq!(count1, 0);
 
-    // Second refresh should also find nothing
-    let count2 = bundle.refresh().await?;
+    // Second fetch should also find nothing
+    let count2 = bundle.fetch().await?;
     assert_eq!(count2, 0);
 
     // Data should still be there
@@ -209,7 +209,7 @@ async fn test_refresh_idempotent() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_refresh_incremental() -> Result<(), BundlebaseError> {
+async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -240,8 +240,8 @@ async fn test_refresh_incremental() -> Result<(), BundlebaseError> {
     )
     .await?;
 
-    // Refresh should only attach the new file
-    let count = bundle.refresh().await?;
+    // Fetch should only attach the new file
+    let count = bundle.fetch().await?;
     assert_eq!(count, 1);
 
     Ok(())
@@ -279,8 +279,8 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
     // Only parquet should be attached (1000 rows)
     assert_eq!(bundle.num_rows().await?, 1000);
 
-    // Refresh should not find CSV (doesn't match pattern)
-    let count = bundle.refresh().await?;
+    // Fetch should not find CSV (doesn't match pattern)
+    let count = bundle.fetch().await?;
     assert_eq!(count, 0);
 
     Ok(())
@@ -408,10 +408,10 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
     )
     .await?;
 
-    // Extended bundle should be able to refresh from the source
+    // Extended bundle should be able to fetch from the source
     // But only CSV matches since we defined pattern as **/*
     // Actually, the pattern is **/*.parquet, so CSV won't match
-    let count = extended.refresh().await?;
+    let count = extended.fetch().await?;
     assert_eq!(count, 0); // CSV doesn't match parquet pattern
 
     extended.commit("Extended").await?;
@@ -722,7 +722,7 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_refresh_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
+async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -745,11 +745,11 @@ async fn test_refresh_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
         )
         .await?;
 
-    // File should be auto-attached (define_source calls refresh)
+    // File should be auto-attached (define_source calls fetch)
     assert_eq!(bundle.num_rows().await?, 1000);
 
-    // Subsequent refresh should not re-copy the file
-    let count = bundle.refresh().await?;
+    // Subsequent fetch should not re-copy the file
+    let count = bundle.fetch().await?;
     assert_eq!(count, 0, "Should not re-attach already copied file");
 
     // Add a second parquet file (same data, different name)
@@ -760,15 +760,15 @@ async fn test_refresh_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     )
     .await?;
 
-    // Refresh should only find the new file
-    let count = bundle.refresh().await?;
+    // Fetch should only find the new file
+    let count = bundle.fetch().await?;
     assert_eq!(count, 1, "Should attach only the new file");
 
     // Now we should have 2000 rows (1000 from each file)
     assert_eq!(bundle.num_rows().await?, 2000);
 
-    // Another refresh should find nothing
-    let count = bundle.refresh().await?;
+    // Another fetch should find nothing
+    let count = bundle.fetch().await?;
     assert_eq!(count, 0, "Should not re-attach already copied files");
 
     Ok(())

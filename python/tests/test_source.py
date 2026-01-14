@@ -1,6 +1,6 @@
-"""Tests for Python bindings of source definition and refresh functionality.
+"""Tests for Python bindings of source definition and fetch functionality.
 
-Note: The core source/refresh logic is tested in Rust E2E tests.
+Note: The core source/fetch logic is tested in Rust E2E tests.
 These tests verify that the Python bindings work correctly.
 """
 
@@ -44,8 +44,8 @@ async def test_define_source_chaining():
 
 
 @pytest.mark.asyncio
-async def test_define_source_auto_refresh():
-    """Test that define_source automatically refreshes and attaches files."""
+async def test_define_source_auto_fetch():
+    """Test that define_source automatically fetches and attaches files."""
     with tempfile.TemporaryDirectory() as source_dir:
         # Copy test file to source directory
         src_path = os.path.join(
@@ -64,8 +64,8 @@ async def test_define_source_auto_refresh():
 
 
 @pytest.mark.asyncio
-async def test_refresh_returns_count():
-    """Test that refresh returns the count of newly attached files."""
+async def test_fetch_returns_count():
+    """Test that fetch returns the count of newly attached files."""
     with tempfile.TemporaryDirectory() as source_dir:
         c = await bundlebase.create(random_bundle())
         source_url = f"file://{source_dir}/"
@@ -79,6 +79,6 @@ async def test_refresh_returns_count():
         if os.path.exists(src_path):
             shutil.copy(src_path, os.path.join(source_dir, "userdata.parquet"))
 
-            # Refresh should return 1
-            count = await c.refresh()
+            # fetch should return 1
+            count = await c.fetch()
             assert count == 1

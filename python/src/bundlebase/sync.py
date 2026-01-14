@@ -330,15 +330,15 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def refresh(self) -> int:
-        """Refresh data from all defined sources.
+    def fetch(self) -> int:
+        """Fetch data from all defined sources.
 
         Checks all defined sources for new files and attaches them to the bundle.
 
         Returns:
             Number of newly attached files
         """
-        coro = _call_original_method(self._async, "refresh")
+        coro = _call_original_method(self._async, "fetch")
         return _loop_manager.run_sync(coro)
 
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":

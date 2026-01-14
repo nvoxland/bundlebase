@@ -3,7 +3,7 @@
 use crate::bundle::DefineSourceOp;
 use crate::data::ObjectId;
 use crate::io::IOReadWriteDir;
-use crate::source::{AttachedFileInfo, RefreshAction, SourceFunctionRegistry, SyncMode};
+use crate::source::{AttachedFileInfo, FetchAction, SourceFunctionRegistry, SyncMode};
 use crate::BundlebaseError;
 use crate::BundleConfig;
 use parking_lot::RwLock;
@@ -76,15 +76,15 @@ impl Source {
         &self.args
     }
 
-    /// Refresh this source: find new data and materialize it.
+    /// Fetch this source: find new data and materialize it.
     ///
-    /// Returns a list of refresh actions (Add, Replace, Remove) based on the sync mode.
-    pub async fn refresh(
+    /// Returns a list of fetch actions (Add, Replace, Remove) based on the sync mode.
+    pub async fn fetch(
         &self,
         data_dir: &dyn IOReadWriteDir,
         config: Arc<BundleConfig>,
         registry: &Arc<RwLock<SourceFunctionRegistry>>,
-    ) -> Result<Vec<RefreshAction>, BundlebaseError> {
+    ) -> Result<Vec<FetchAction>, BundlebaseError> {
         let func = {
             let reg = registry.read();
             reg.get(&self.function)
@@ -102,7 +102,7 @@ impl Source {
         // Get attached files directly from self
         let attached_files = self.attached_files();
 
-        func.refresh_with_mode(&self.args, &attached_files, data_dir, config, mode)
+        func.fetch_with_mode(&self.args, &attached_files, data_dir, config, mode)
             .await
     }
 
