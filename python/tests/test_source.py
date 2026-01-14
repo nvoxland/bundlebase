@@ -18,34 +18,34 @@ from conftest import random_bundle
 
 
 @pytest.mark.asyncio
-async def test_define_source_binding():
-    """Test that define_source Python binding works."""
+async def test_create_source_binding():
+    """Test that create_source Python binding works."""
     c = await bundlebase.create(random_bundle())
-    c = await c.define_source("remote_dir", {"url": "file:///some/path/"})
+    c = await c.create_source("remote_dir", {"url": "file:///some/path/"})
     assert c is not None
 
 
 @pytest.mark.asyncio
-async def test_define_source_with_patterns_binding():
-    """Test that define_source with patterns Python binding works."""
+async def test_create_source_with_patterns_binding():
+    """Test that create_source with patterns Python binding works."""
     c = await bundlebase.create(random_bundle())
-    c = await c.define_source("remote_dir", {"url": "file:///data/", "patterns": "**/*.parquet,**/*.csv"})
+    c = await c.create_source("remote_dir", {"url": "file:///data/", "patterns": "**/*.parquet,**/*.csv"})
     assert c is not None
 
 
 @pytest.mark.asyncio
-async def test_define_source_chaining():
-    """Test that define_source works with operation chaining."""
+async def test_create_source_chaining():
+    """Test that create_source works with operation chaining."""
     c = await (bundlebase.create(random_bundle())
                .set_name("Test Bundle")
-               .define_source("remote_dir", {"url": "file:///data/", "patterns": "**/*.parquet"}))
+               .create_source("remote_dir", {"url": "file:///data/", "patterns": "**/*.parquet"}))
     assert c is not None
     assert c.name == "Test Bundle"
 
 
 @pytest.mark.asyncio
-async def test_define_source_auto_fetch():
-    """Test that define_source automatically fetches and attaches files."""
+async def test_create_source_auto_fetch():
+    """Test that create_source automatically fetches and attaches files."""
     with tempfile.TemporaryDirectory() as source_dir:
         # Copy test file to source directory
         src_path = os.path.join(
@@ -57,7 +57,7 @@ async def test_define_source_auto_fetch():
 
             c = await bundlebase.create(random_bundle())
             source_url = f"file://{source_dir}/"
-            c = await c.define_source("remote_dir", {"url": source_url, "patterns": "**/*.parquet"})
+            c = await c.create_source("remote_dir", {"url": source_url, "patterns": "**/*.parquet"})
 
             # Data should be auto-attached
             assert await c.num_rows() == 1000
@@ -69,9 +69,9 @@ async def test_fetch_returns_count():
     with tempfile.TemporaryDirectory() as source_dir:
         c = await bundlebase.create(random_bundle())
         source_url = f"file://{source_dir}/"
-        c = await c.define_source("remote_dir", {"url": source_url, "patterns": "**/*"})
+        c = await c.create_source("remote_dir", {"url": source_url, "patterns": "**/*"})
 
-        # Add a file after define_source
+        # Add a file after create_source
         src_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "test_data", "userdata.parquet"

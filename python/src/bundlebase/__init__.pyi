@@ -610,9 +610,9 @@ class PyBundleBuilder:
         """
         ...
 
-    def define_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
+    def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
         """
-        Define a data source for a pack.
+        Create a data source for a pack.
 
         Queues an operation to define a source from which files can be
         automatically attached via fetch().
@@ -649,19 +649,19 @@ class PyBundleBuilder:
 
         Examples:
             # Local/cloud directory (base pack)
-            c = await c.define_source("remote_dir", {"url": "s3://bucket/data/", "patterns": "**/*.parquet"})
+            c = await c.create_source("remote_dir", {"url": "s3://bucket/data/", "patterns": "**/*.parquet"})
 
             # FTP directory (anonymous)
-            c = await c.define_source("ftp_directory", {"url": "ftp://ftp.example.com/pub/data/"})
+            c = await c.create_source("ftp_directory", {"url": "ftp://ftp.example.com/pub/data/"})
 
             # FTP directory (authenticated)
-            c = await c.define_source("ftp_directory", {"url": "ftp://user:pass@ftp.example.com/data/"})
+            c = await c.create_source("ftp_directory", {"url": "ftp://user:pass@ftp.example.com/data/"})
 
             # Remote directory via SSH (scp:// or sftp:// both work)
-            c = await c.define_source("scp_directory", {"url": "sftp://user@host/data/", "key_path": "~/.ssh/id_rsa"})
+            c = await c.create_source("scp_directory", {"url": "sftp://user@host/data/", "key_path": "~/.ssh/id_rsa"})
 
             # Define source for a joined pack
-            c = await c.define_source("remote_dir", {"url": "s3://bucket/customers/"}, pack="customers")
+            c = await c.create_source("remote_dir", {"url": "s3://bucket/customers/"}, pack="customers")
         """
         ...
 
@@ -893,8 +893,8 @@ class OperationChain:
         """Queue a define_function operation."""
         ...
 
-    def define_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
-        """Queue a define_source operation."""
+    def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
+        """Queue a create_source operation."""
         ...
 
 
@@ -965,8 +965,8 @@ class CreateChain:
         """Queue a define_function operation."""
         ...
 
-    def define_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "CreateChain":
-        """Queue a define_source operation."""
+    def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "CreateChain":
+        """Queue a create_source operation."""
         ...
 
 
@@ -1037,8 +1037,8 @@ class ExtendChain:
         """Queue a define_function operation."""
         ...
 
-    def define_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "ExtendChain":
-        """Queue a define_source operation."""
+    def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "ExtendChain":
+        """Queue a create_source operation."""
         ...
 
 

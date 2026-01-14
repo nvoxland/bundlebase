@@ -610,16 +610,16 @@ class TestSyncReplaceBlock:
 class TestSyncSource:
     """Test synchronous source operations."""
 
-    def test_sync_define_source(self):
+    def test_sync_create_source(self):
         """Test defining a source synchronously."""
         c = bb.create(random_bundle())
-        c.define_source("remote_dir", {"url": "file:///some/path/"})
+        c.create_source("remote_dir", {"url": "file:///some/path/"})
         assert c is not None
 
-    def test_sync_define_source_chaining(self):
+    def test_sync_create_source_chaining(self):
         """Test defining a source with chaining."""
         c = bb.create(random_bundle())
-        c.set_name("Test Bundle").define_source(
+        c.set_name("Test Bundle").create_source(
             "remote_dir", {"url": "file:///data/", "patterns": "**/*.parquet"}
         )
         assert c.name == "Test Bundle"
@@ -628,7 +628,7 @@ class TestSyncSource:
         """Test fetch synchronously with empty source."""
         c = bb.create(random_bundle())
         # Define a source pointing to a non-existent location (no files to find)
-        c.define_source("remote_dir", {"url": "file:///nonexistent/path/"})
+        c.create_source("remote_dir", {"url": "file:///nonexistent/path/"})
 
         # fetch should return 0 (no new files)
         count = c.fetch()
