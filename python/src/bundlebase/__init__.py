@@ -63,6 +63,7 @@ _original_methods = {
     "replace_block": _PyBundleBuilder.replace_block,
     "create_source": _PyBundleBuilder.create_source,
     "fetch": _PyBundleBuilder.fetch,
+    "fetch_all": _PyBundleBuilder.fetch_all,
 
     # Column operations
     "remove_column": _PyBundleBuilder.remove_column,

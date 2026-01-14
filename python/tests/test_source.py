@@ -79,6 +79,6 @@ async def test_fetch_returns_count():
         if os.path.exists(src_path):
             shutil.copy(src_path, os.path.join(source_dir, "userdata.parquet"))
 
-            # fetch should return 1
+            # fetch should return 1 (default pack is "base")
             count = await c.fetch()
             assert count == 1

@@ -107,9 +107,13 @@ pub enum BundleCommand {
         pack: Option<String>,
     },
 
+    /// Fetch new files from sources for a pack
+    /// Maps to: `bundle.fetch(pack.as_deref())`
+    Fetch { pack: Option<String> },
+
     /// Fetch new files from all defined sources
-    /// Maps to: `bundle.fetch()`
-    Fetch,
+    /// Maps to: `bundle.fetch_all()`
+    FetchAll,
 }
 
 impl BundleCommand {
@@ -218,8 +222,12 @@ impl BundleCommand {
                     .await?;
                 Ok(())
             }
-            BundleCommand::Fetch => {
-                bundle.fetch().await?;
+            BundleCommand::Fetch { pack } => {
+                bundle.fetch(pack.as_deref()).await?;
+                Ok(())
+            }
+            BundleCommand::FetchAll => {
+                bundle.fetch_all().await?;
                 Ok(())
             }
         }
@@ -397,11 +405,25 @@ mod tests {
 
     #[test]
     fn test_fetch_command() {
-        let cmd = BundleCommand::Fetch;
+        let cmd = BundleCommand::Fetch {
+            pack: Some("users".to_string()),
+        };
 
         match cmd {
-            BundleCommand::Fetch => {}
+            BundleCommand::Fetch { pack } => {
+                assert_eq!(pack, Some("users".to_string()));
+            }
             _ => panic!("Expected Fetch variant"),
+        }
+    }
+
+    #[test]
+    fn test_fetch_all_command() {
+        let cmd = BundleCommand::FetchAll;
+
+        match cmd {
+            BundleCommand::FetchAll => {}
+            _ => panic!("Expected FetchAll variant"),
         }
     }
 }

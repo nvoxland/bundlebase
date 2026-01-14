@@ -665,7 +665,28 @@ class PyBundleBuilder:
         """
         ...
 
-    async def fetch(self) -> int:
+    async def fetch(self, pack: str = "base") -> int:
+        """
+        Fetch data from sources for a pack.
+
+        Compares files in the pack's sources with already-attached files and
+        auto-attaches any new files found.
+
+        Args:
+            pack: Which pack to fetch sources for:
+                - "base" (default): The base pack
+                - A join name: A joined pack by its join name
+
+        Returns:
+            Number of files attached
+
+        Example:
+            count = await c.fetch()  # Fetch from base pack sources
+            print(f"Attached {count} new files")
+        """
+        ...
+
+    async def fetch_all(self) -> int:
         """
         Fetch data from all defined sources.
 
@@ -673,10 +694,10 @@ class PyBundleBuilder:
         auto-attaches any new files found.
 
         Returns:
-            Number of files attached
+            Number of files attached across all sources
 
         Example:
-            count = await c.fetch()
+            count = await c.fetch_all()
             print(f"Attached {count} new files")
         """
         ...

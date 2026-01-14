@@ -584,15 +584,44 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Fetch from all defined sources - discover and attach new files.
+    /// Fetch from sources for a pack - discover and attach new files.
+    ///
+    /// # Arguments
+    /// * `pack` - Which pack to fetch sources for ("base" for base pack, or a join name)
     ///
     /// Returns the number of new files that were attached.
-    fn fetch<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    #[pyo3(signature = (pack="base"))]
+    fn fetch<'py>(
+        slf: PyRef<'_, Self>,
+        pack: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let pack = if pack == "base" {
+            None
+        } else {
+            Some(pack.to_string())
+        };
+        let pack_name = pack.clone().unwrap_or_else(|| "base".to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut builder = inner.lock().await;
+            let count = builder
+                .fetch(pack.as_deref())
+                .await
+                .map_err(|e| to_py_error(&format!("Failed to fetch from pack '{}'", pack_name), e))?;
+            Ok(count)
+        })
+    }
+
+    /// Fetch from all defined sources - discover and attach new files.
+    ///
+    /// Returns the number of new files that were attached across all sources.
+    fn fetch_all<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
             let count = builder
-                .fetch()
+                .fetch_all()
                 .await
                 .map_err(|e| to_py_error("Failed to fetch from sources", e))?;
             Ok(count)

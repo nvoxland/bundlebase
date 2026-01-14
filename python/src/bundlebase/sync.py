@@ -323,15 +323,31 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def fetch(self) -> int:
+    def fetch(self, pack: str = "base") -> int:
+        """Fetch data from sources for a pack.
+
+        Checks the pack's sources for new files and attaches them to the bundle.
+
+        Args:
+            pack: Which pack to fetch sources for:
+                - "base" (default): The base pack
+                - A join name: A joined pack by its join name
+
+        Returns:
+            Number of newly attached files
+        """
+        coro = _call_original_method(self._async, "fetch", pack)
+        return _loop_manager.run_sync(coro)
+
+    def fetch_all(self) -> int:
         """Fetch data from all defined sources.
 
         Checks all defined sources for new files and attaches them to the bundle.
 
         Returns:
-            Number of newly attached files
+            Number of newly attached files across all sources
         """
-        coro = _call_original_method(self._async, "fetch")
+        coro = _call_original_method(self._async, "fetch_all")
         return _loop_manager.run_sync(coro)
 
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
