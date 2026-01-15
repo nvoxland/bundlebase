@@ -84,7 +84,7 @@ async fn test_filter_with_other_operations() -> Result<(), BundlebaseError> {
         .filter("salary > $1", vec![ScalarValue::Float64(Some(50000.0))])
         .await?;
 
-    let reduced = filtered.remove_column("email").await?;
+    let reduced = filtered.drop_column("email").await?;
 
     // Query should work
     let df = reduced.dataframe().await?;

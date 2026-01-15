@@ -36,7 +36,7 @@ def create(path: str = ..., config: Optional[ConfigType] = None) -> "CreateChain
     Example:
         c = await (create(path)
                   .attach("data.parquet")
-                  .remove_column("unwanted"))
+                  .drop_column("unwanted"))
     """
     ...
 
@@ -239,7 +239,7 @@ class PyBundle:
 
         Example:
             c = await bundlebase.open(path)
-            extended = await c.extend(new_path).attach("data.parquet").remove_column("col")
+            extended = await c.extend(new_path).attach("data.parquet").drop_column("col")
         """
         ...
 
@@ -296,7 +296,7 @@ class PyBundleBuilder:
     Example:
         c = await (await bundlebase.create(path)
                   .attach("data.parquet")
-                  .remove_column("unwanted")
+                  .drop_column("unwanted")
                   .rename_column("old_name", "new_name"))
     """
 
@@ -473,9 +473,9 @@ class PyBundleBuilder:
         """
         ...
 
-    def remove_column(self, name: str) -> "OperationChain":
+    def drop_column(self, name: str) -> "OperationChain":
         """
-        Queue a remove_column operation.
+        Queue a drop_column operation.
 
         Args:
             name: Name of the column to remove
@@ -487,7 +487,7 @@ class PyBundleBuilder:
             ValueError: If the column doesn't exist
 
         Example:
-            c = await c.remove_column("unwanted_col")
+            c = await c.drop_column("unwanted_col")
         """
         ...
 
@@ -868,7 +868,7 @@ class OperationChain:
     Allows chaining multiple mutation operations with a single await:
 
         c = await (c.attach("data.parquet")
-                  .remove_column("unwanted")
+                  .drop_column("unwanted")
                   .rename_column("old_name", "new_name"))
 
     All chained methods return self for continued chaining, and the entire
@@ -887,8 +887,8 @@ class OperationChain:
         """Queue a replace_block operation."""
         ...
 
-    def remove_column(self, name: str) -> "OperationChain":
-        """Queue a remove_column operation."""
+    def drop_column(self, name: str) -> "OperationChain":
+        """Queue a drop_column operation."""
         ...
 
     def rename_column(self, old_name: str, new_name: str) -> "OperationChain":
@@ -948,7 +948,7 @@ class CreateChain:
     Example:
         c = await (create(path)
                   .attach("data.parquet")
-                  .remove_column("unwanted"))
+                  .drop_column("unwanted"))
     """
 
     def attach(self, location: str, pack: str = "base") -> "CreateChain":
@@ -963,8 +963,8 @@ class CreateChain:
         """Queue a replace_block operation."""
         ...
 
-    def remove_column(self, name: str) -> "CreateChain":
-        """Queue a remove_column operation."""
+    def drop_column(self, name: str) -> "CreateChain":
+        """Queue a drop_column operation."""
         ...
 
     def rename_column(self, old_name: str, new_name: str) -> "CreateChain":
@@ -1024,7 +1024,7 @@ class ExtendChain:
 
     Example:
         c = await bundlebase.open(path)
-        extended = await c.extend(new_path).attach("data.parquet").remove_column("unwanted")
+        extended = await c.extend(new_path).attach("data.parquet").drop_column("unwanted")
     """
 
     def attach(self, location: str, pack: str = "base") -> "ExtendChain":
@@ -1039,8 +1039,8 @@ class ExtendChain:
         """Queue a replace_block operation."""
         ...
 
-    def remove_column(self, name: str) -> "ExtendChain":
-        """Queue a remove_column operation."""
+    def drop_column(self, name: str) -> "ExtendChain":
+        """Queue a drop_column operation."""
         ...
 
     def rename_column(self, old_name: str, new_name: str) -> "ExtendChain":

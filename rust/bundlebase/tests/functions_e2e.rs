@@ -145,7 +145,7 @@ async fn test_function_in_pipeline_with_transformations() -> Result<(), Bundleba
     bundle.attach("function://scores", None).await?;
 
     // Apply transformations
-    bundle.remove_column("score").await?;
+    bundle.drop_column("score").await?;
     bundle.rename_column("name", "full_name").await?;
 
     // Verify schema by checking columns

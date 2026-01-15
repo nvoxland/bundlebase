@@ -66,7 +66,7 @@ _original_methods = {
     "fetch_all": _PyBundleBuilder.fetch_all,
 
     # Column operations
-    "remove_column": _PyBundleBuilder.remove_column,
+    "drop_column": _PyBundleBuilder.drop_column,
     "rename_column": _PyBundleBuilder.rename_column,
 
     # Row operations
@@ -141,7 +141,7 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 # Note: fetch is NOT here because it returns a value (count), not PyBundleBuilder
 mutation_methods = [
     "attach", "detach_block", "replace_block", "create_source",
-    "remove_column", "rename_column", "filter", "select", "join",
+    "drop_column", "rename_column", "filter", "select", "join",
     "create_view", "drop_join", "set_name", "set_description", "set_config", "create_function",
     "create_index", "rebuild_index", "reindex"
 ]
@@ -172,7 +172,7 @@ def create(path: str = "", config: Optional[ConfigType] = None) -> CreateChain:
     Example:
         c = await (create(path)
                   .attach("data.parquet")
-                  .remove_column("unwanted")
+                  .drop_column("unwanted")
                   .rename_column("old", "new"))
 
         # With config:

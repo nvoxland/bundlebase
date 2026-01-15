@@ -71,7 +71,7 @@ async def test_json_support():
 async def test_chaining():
     c = await (bundlebase.create(random_bundle())
                .attach(datafile("userdata.parquet"))
-               .remove_column("country")
+               .drop_column("country")
                .rename_column("title", "new_title"))
 
     assert "new_title" in [f.name for f in (await c.schema()).fields]
@@ -473,7 +473,7 @@ async def test_extend_bundle_with_operations():
             # Open and extend with chained operations
             c_opened = await bundlebase.open(temp1)
             c_extended = await (c_opened.extend(temp2)
-                                .remove_column("email")
+                                .drop_column("email")
                                 .filter("salary > $1", [50000.0]))
 
             # Verify the extended bundle has the transformations
@@ -585,7 +585,7 @@ async def test_extend_bundle_inherits_id():
 
                 # Extend to second bundle
                 c2 = await c1_opened.extend(temp2)
-                c2 = await c2.remove_column("country")
+                c2 = await c2.drop_column("country")
                 await c2.commit("Second commit")
 
                 # Verify extended bundle's 00000000000000000.yaml has only 'from', not 'id'
@@ -603,7 +603,7 @@ async def test_extend_bundle_inherits_id():
 
                 # Extend again to third bundle and verify ID is still the same
                 c3 = await c2_opened.extend(temp3)
-                c3 = await c3.remove_column("phone")
+                c3 = await c3.drop_column("phone")
                 await c3.commit("Third commit")
 
                 # Verify third bundle's 00000000000000000.yaml

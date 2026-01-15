@@ -19,7 +19,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     bundle
         .attach(test_datafile("userdata.parquet"), None)
         .await?
-        .remove_column("title")
+        .drop_column("title")
         .await?
         .rename_column("first_name", "name")
         .await?;
@@ -146,9 +146,9 @@ changes:
         metadata: {{}}
       metadata: {{}}
 - id: {}
-  description: Remove column title
+  description: Drop column title
   operations:
-  - type: removeColumns
+  - type: dropColumn
     names:
     - title
 - id: {}
@@ -221,8 +221,8 @@ async fn test_save_multiple_operations() -> Result<(), BundlebaseError> {
 
     let mut bundle = bundlebase::BundleBuilder::create(temp_dir.url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
-    bundle.remove_column("title").await?;
-    bundle.remove_column("comments").await?;
+    bundle.drop_column("title").await?;
+    bundle.drop_column("comments").await?;
     bundle.rename_column("first_name", "fname").await?;
     bundle.rename_column("last_name", "lname").await?;
 
@@ -333,15 +333,15 @@ changes:
         metadata: {{}}
       metadata: {{}}
 - id: {}
-  description: Remove column title
+  description: Drop column title
   operations:
-  - type: removeColumns
+  - type: dropColumn
     names:
     - title
 - id: {}
-  description: Remove column comments
+  description: Drop column comments
   operations:
-  - type: removeColumns
+  - type: dropColumn
     names:
     - comments
 - id: {}

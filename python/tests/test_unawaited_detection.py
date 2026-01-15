@@ -42,12 +42,12 @@ class TestUnawaitedOperationChain:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            chain = c.filter("id > 100").remove_column("country")
+            chain = c.filter("id > 100").drop_column("country")
             del chain
 
             assert len(w) == 1
             assert "filter" in str(w[0].message)
-            assert "remove_column" in str(w[0].message)
+            assert "drop_column" in str(w[0].message)
             assert "2 operation(s)" in str(w[0].message)
 
     @pytest.mark.asyncio
@@ -105,14 +105,14 @@ class TestUnawaitedCreateChain:
                 bundlebase.create(random_bundle())
                 .attach(datafile("userdata.parquet"))
                 .filter("salary > $1", [50000.0])
-                .remove_column("country")
+                .drop_column("country")
             )
             del chain
 
             assert len(w) == 1
             assert "attach" in str(w[0].message)
             assert "filter" in str(w[0].message)
-            assert "remove_column" in str(w[0].message)
+            assert "drop_column" in str(w[0].message)
             assert "3 operation(s)" in str(w[0].message)
 
     @pytest.mark.asyncio
@@ -164,14 +164,14 @@ class TestWarningContent:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            chain = c.remove_column("country").rename_column("id", "user_id")
+            chain = c.drop_column("country").rename_column("id", "user_id")
             del chain
 
             assert len(w) == 1
             msg = str(w[0].message)
             assert "OperationChain" in msg
             assert "2 operation(s)" in msg
-            assert "remove_column" in msg
+            assert "drop_column" in msg
             assert "rename_column" in msg
             assert "Did you forget to add 'await'" in msg
 

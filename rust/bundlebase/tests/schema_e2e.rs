@@ -33,7 +33,7 @@ async fn test_schema_tracking_through_operations() -> Result<(), BundlebaseError
         .any(|f| f.name() == "title"));
 
     // After remove
-    bundle.remove_column("title").await?;
+    bundle.drop_column("title").await?;
     assert_eq!(12, bundle.schema().await?.fields().len());
     assert!(!bundle
         .schema()
@@ -70,7 +70,7 @@ async fn test_schema_tracking_through_operations() -> Result<(), BundlebaseError
 async fn test_schema_consistency_with_dataframe() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
-    bundle.remove_column("title").await?;
+    bundle.drop_column("title").await?;
     bundle.rename_column("first_name", "given_name").await?;
 
     // Schema from bundle should match DataFrame schema
@@ -155,8 +155,8 @@ async fn test_remove_all_columns() -> Result<(), BundlebaseError> {
     bundle.attach("function://simple", None).await?;
 
     // Remove both columns
-    bundle.remove_column("col1").await?;
-    bundle.remove_column("col2").await?;
+    bundle.drop_column("col1").await?;
+    bundle.drop_column("col2").await?;
 
     // Schema should be empty
     assert_eq!(0, bundle.schema().await?.fields().len());
