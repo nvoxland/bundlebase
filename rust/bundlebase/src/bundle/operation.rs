@@ -6,6 +6,7 @@ mod define_pack;
 mod create_source;
 mod detach_block;
 mod drop_index;
+mod drop_join;
 mod drop_view;
 mod replace_block;
 mod filter;
@@ -29,6 +30,7 @@ pub use crate::bundle::operation::define_pack::DefinePackOp;
 pub use crate::bundle::operation::create_source::CreateSourceOp;
 pub use crate::bundle::operation::detach_block::DetachBlockOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
+pub use crate::bundle::operation::drop_join::DropJoinOp;
 pub use crate::bundle::operation::drop_view::DropViewOp;
 pub use crate::bundle::operation::filter::FilterOp;
 pub use crate::bundle::operation::replace_block::ReplaceBlockOp;
@@ -133,6 +135,7 @@ pub enum AnyOperation {
     CreateIndex(CreateIndexOp),
     DefinePack(DefinePackOp),
     DropIndex(DropIndexOp),
+    DropJoin(DropJoinOp),
     DropView(DropViewOp),
     RebuildIndex(RebuildIndexOp),
     ReplaceBlock(ReplaceBlockOp),
@@ -160,6 +163,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateIndex(op) => op.describe(),
             AnyOperation::DefinePack(op) => op.describe(),
             AnyOperation::DropIndex(op) => op.describe(),
+            AnyOperation::DropJoin(op) => op.describe(),
             AnyOperation::DropView(op) => op.describe(),
             AnyOperation::RebuildIndex(op) => op.describe(),
             AnyOperation::ReplaceBlock(op) => op.describe(),
@@ -186,6 +190,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateIndex(op) => op.check(bundle).await,
             AnyOperation::DefinePack(op) => op.check(bundle).await,
             AnyOperation::DropIndex(op) => op.check(bundle).await,
+            AnyOperation::DropJoin(op) => op.check(bundle).await,
             AnyOperation::DropView(op) => op.check(bundle).await,
             AnyOperation::RebuildIndex(op) => op.check(bundle).await,
             AnyOperation::ReplaceBlock(op) => op.check(bundle).await,
@@ -212,6 +217,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateIndex(op) => op.apply(bundle).await,
             AnyOperation::DefinePack(op) => op.apply(bundle).await,
             AnyOperation::DropIndex(op) => op.apply(bundle).await,
+            AnyOperation::DropJoin(op) => op.apply(bundle).await,
             AnyOperation::DropView(op) => op.apply(bundle).await,
             AnyOperation::RebuildIndex(op) => op.apply(bundle).await,
             AnyOperation::ReplaceBlock(op) => op.apply(bundle).await,
@@ -242,6 +248,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateIndex(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DefinePack(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DropIndex(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::DropJoin(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DropView(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::RebuildIndex(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::ReplaceBlock(op) => op.apply_dataframe(df, ctx).await,
@@ -268,6 +275,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateIndex(op) => op.version(),
             AnyOperation::DefinePack(op) => op.version(),
             AnyOperation::DropIndex(op) => op.version(),
+            AnyOperation::DropJoin(op) => op.version(),
             AnyOperation::DropView(op) => op.version(),
             AnyOperation::RebuildIndex(op) => op.version(),
             AnyOperation::ReplaceBlock(op) => op.version(),
@@ -294,6 +302,7 @@ impl Operation for AnyOperation {
             AnyOperation::CreateIndex(op) => op.allowed_on_view(),
             AnyOperation::DefinePack(op) => op.allowed_on_view(),
             AnyOperation::DropIndex(op) => op.allowed_on_view(),
+            AnyOperation::DropJoin(op) => op.allowed_on_view(),
             AnyOperation::DropView(op) => op.allowed_on_view(),
             AnyOperation::RebuildIndex(op) => op.allowed_on_view(),
             AnyOperation::ReplaceBlock(op) => op.allowed_on_view(),
@@ -406,6 +415,12 @@ impl From<DefinePackOp> for AnyOperation {
 impl From<DropIndexOp> for AnyOperation {
     fn from(config: DropIndexOp) -> Self {
         AnyOperation::DropIndex(config)
+    }
+}
+
+impl From<DropJoinOp> for AnyOperation {
+    fn from(config: DropJoinOp) -> Self {
+        AnyOperation::DropJoin(config)
     }
 }
 

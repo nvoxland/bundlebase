@@ -3,8 +3,8 @@ use crate::bundle::init::InitCommit;
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, CreateSourceOp, SelectOp};
 use crate::bundle::operation::{
-    AttachBlockOp, CreateViewOp, CreateFunctionOp, DefinePackOp, DetachBlockOp, DropViewOp,
-    FilterOp, JoinOp, RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp,
+    AttachBlockOp, CreateViewOp, CreateFunctionOp, DefinePackOp, DetachBlockOp, DropJoinOp,
+    DropViewOp, FilterOp, JoinOp, RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp,
     ReplaceBlockOp, SetConfigOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
@@ -1028,6 +1028,38 @@ impl BundleBuilder {
                 })
             },
         )
+        .await?;
+
+        Ok(self)
+    }
+
+    /// Drop an existing join
+    ///
+    /// # Arguments
+    /// * `join_name` - The name of the join to drop
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
+    /// # async fn example() -> Result<(), BundlebaseError> {
+    /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
+    /// # c.attach("data.csv", None).await?;
+    /// c.join("customers", "base.customer_id = customers.id", Some("customers.parquet"), None).await?;
+    /// c.drop_join("customers").await?;
+    /// c.commit("Dropped join").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn drop_join(&mut self, join_name: &str) -> Result<&mut Self, BundlebaseError> {
+        let join_name = join_name.to_string();
+
+        self.do_change(&format!("Drop join '{}'", join_name), |builder| {
+            Box::pin(async move {
+                let op = DropJoinOp::setup(&join_name, &builder.bundle).await?;
+                builder.apply_operation(op.into()).await?;
+                Ok(())
+            })
+        })
         .await?;
 
         Ok(self)

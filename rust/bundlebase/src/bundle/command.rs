@@ -75,6 +75,10 @@ pub enum BundleCommand {
     /// Maps to: `bundle.drop_view(&name)`
     DropView { name: String },
 
+    /// Drop a join
+    /// Maps to: `bundle.drop_join(&name)`
+    DropJoin { name: String },
+
     /// Rebuild all indexes
     /// Maps to: `bundle.reindex()`
     Reindex,
@@ -186,6 +190,10 @@ impl BundleCommand {
             }
             BundleCommand::DropView { name } => {
                 bundle.drop_view(&name).await?;
+                Ok(())
+            }
+            BundleCommand::DropJoin { name } => {
+                bundle.drop_join(&name).await?;
                 Ok(())
             }
             BundleCommand::Reindex => {
