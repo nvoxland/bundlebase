@@ -93,7 +93,7 @@ async def test_custom_functions():
             )
         return None
 
-    c = await c.define_function(
+    c = await c.create_function(
         name="test_function",
         output={
             "id": "Int64",
@@ -269,7 +269,7 @@ async def test_python_function_with_multiple_pages():
             )
         return None
 
-    c = await c.define_function(
+    c = await c.create_function(
         name="paginated_func",
         output={"page_num": "Int32"},
         func=paginated_data,
@@ -298,7 +298,7 @@ async def test_python_function_error_handling():
         return None
 
     # Define function with mismatched schema should still work (schema validation happens at attach time)
-    c = await c.define_function(
+    c = await c.create_function(
         name="error_func",
         output={"id": "Int64"},
         func=error_data,

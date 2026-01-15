@@ -229,7 +229,7 @@ impl PyBundleBuilder {
     }
 
     #[pyo3(signature = (name, output, func, version))]
-    fn define_function<'py>(
+    fn create_function<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         output: Py<PyDict>,
@@ -269,12 +269,12 @@ impl PyBundleBuilder {
 
             let mut builder = inner.lock().await;
             builder
-                .define_function(FunctionSignature::new(
+                .create_function(FunctionSignature::new(
                     name.as_str(),
                     SchemaRef::new(Schema::new(schema)),
                 ))
                 .await
-                .map_err(|e| to_py_error(&format!("Failed to define function '{}'", name), e))?;
+                .map_err(|e| to_py_error(&format!("Failed to create function '{}'", name), e))?;
 
             builder
                 .set_impl(

@@ -173,7 +173,7 @@ async fn test_rename_case_sensitive() -> Result<(), BundlebaseError> {
 async fn test_function_source() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle
-        .define_function(FunctionSignature::new(
+        .create_function(FunctionSignature::new(
             "names",
             SchemaRef::new(Schema::new(vec![Field::new("name", DataType::Utf8, false)])),
         ))

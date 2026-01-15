@@ -373,7 +373,7 @@ class PyBundleBuilder:
         """
         ...
 
-    def define_function(
+    def create_function(
         self,
         name: str,
         output: Dict[str, str],
@@ -400,7 +400,7 @@ class PyBundleBuilder:
                     return pa.record_batch([[1, 2, 3], ["a", "b", "c"]], schema=schema)
                 return None
 
-            c = await (c.define_function("my_data", {"id": "Int64", "value": "Utf8"}, my_data))
+            c = await (c.create_function("my_data", {"id": "Int64", "value": "Utf8"}, my_data))
         """
         ...
 
@@ -904,14 +904,14 @@ class OperationChain:
         """Queue a set_config operation."""
         ...
 
-    def define_function(
+    def create_function(
         self,
         name: str,
         output: Dict[str, str],
         func: Callable[[int, Any], Any],
         version: str = ...,
     ) -> "OperationChain":
-        """Queue a define_function operation."""
+        """Queue a create_function operation."""
         ...
 
     def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
@@ -976,14 +976,14 @@ class CreateChain:
         """Queue a set_config operation."""
         ...
 
-    def define_function(
+    def create_function(
         self,
         name: str,
         output: Dict[str, str],
         func: Callable[[int, Any], Any],
         version: str = ...,
     ) -> "CreateChain":
-        """Queue a define_function operation."""
+        """Queue a create_function operation."""
         ...
 
     def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "CreateChain":
@@ -1048,14 +1048,14 @@ class ExtendChain:
         """Queue a set_config operation."""
         ...
 
-    def define_function(
+    def create_function(
         self,
         name: str,
         output: Dict[str, str],
         func: Callable[[int, Any], Any],
         version: str = ...,
     ) -> "ExtendChain":
-        """Queue a define_function operation."""
+        """Queue a create_function operation."""
         ...
 
     def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "ExtendChain":

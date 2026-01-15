@@ -416,7 +416,7 @@ async fn test_open_with_function() -> Result<(), BundlebaseError> {
         Field::new("value", DataType::Utf8, true),
     ]));
     bundle
-        .define_function(FunctionSignature::new("test_func", schema))
+        .create_function(FunctionSignature::new("test_func", schema))
         .await?;
 
     bundle.commit("Commit changes").await?;

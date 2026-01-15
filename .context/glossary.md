@@ -47,7 +47,7 @@ df = await c.to_pandas()  # Can read, cannot modify
 - All modification methods mutate in-place and return `&mut self`
 - Can be committed via `commit(message)` to create a versioned snapshot
 
-**Methods**: `attach()`, `remove_column()`, `rename_column()`, `filter()`, `select()`, `join()`, `define_function()`, `commit()`
+**Methods**: `attach()`, `remove_column()`, `rename_column()`, `filter()`, `select()`, `join()`, `create_function()`, `commit()`
 
 **Python Type**: `BundleBuilder` (mutable wrapper)
 
@@ -91,7 +91,7 @@ await c.commit("Filtered adults")
 - **Select**: Select specific columns or execute SQL
 - **Join**: Join with other data sources
 - **Query**: Execute custom SQL queries
-- **DefineFunction**: Register custom data generation functions
+- **CreateFunction**: Register custom data generation functions
 - **SetName**: Set container name
 - **SetDescription**: Set container description
 - **IndexData**: Track row indexing metadata

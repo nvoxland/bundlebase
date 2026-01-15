@@ -421,7 +421,7 @@ def my_data_source(page: int, schema: pa.Schema) -> pa.RecordBatch | None:
     return None
 
 c = dc.create()
-c.define_function(
+c.create_function(
     name="my_func",
     output={"id": "Int32", "value": "Int32"},
     func=my_data_source,

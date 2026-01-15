@@ -1,6 +1,6 @@
 mod attach_block;
 mod create_view;
-mod define_function;
+mod create_function;
 mod create_index;
 mod define_pack;
 mod create_source;
@@ -23,7 +23,7 @@ mod set_name;
 
 pub use crate::bundle::operation::attach_block::AttachBlockOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
-pub use crate::bundle::operation::define_function::DefineFunctionOp;
+pub use crate::bundle::operation::create_function::CreateFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
 pub use crate::bundle::operation::define_pack::DefinePackOp;
 pub use crate::bundle::operation::create_source::CreateSourceOp;
@@ -125,7 +125,7 @@ pub enum AnyOperation {
     RenameView(RenameViewOp),
     AttachBlock(AttachBlockOp),
     CreateView(CreateViewOp),
-    DefineFunction(DefineFunctionOp),
+    CreateFunction(CreateFunctionOp),
     CreateSource(CreateSourceOp),
     DetachBlock(DetachBlockOp),
     Filter(FilterOp),
@@ -152,7 +152,7 @@ impl Operation for AnyOperation {
             AnyOperation::RenameView(op) => op.describe(),
             AnyOperation::AttachBlock(op) => op.describe(),
             AnyOperation::CreateView(op) => op.describe(),
-            AnyOperation::DefineFunction(op) => op.describe(),
+            AnyOperation::CreateFunction(op) => op.describe(),
             AnyOperation::CreateSource(op) => op.describe(),
             AnyOperation::DetachBlock(op) => op.describe(),
             AnyOperation::Filter(op) => op.describe(),
@@ -178,7 +178,7 @@ impl Operation for AnyOperation {
             AnyOperation::RenameView(op) => op.check(bundle).await,
             AnyOperation::AttachBlock(op) => op.check(bundle).await,
             AnyOperation::CreateView(op) => op.check(bundle).await,
-            AnyOperation::DefineFunction(op) => op.check(bundle).await,
+            AnyOperation::CreateFunction(op) => op.check(bundle).await,
             AnyOperation::CreateSource(op) => op.check(bundle).await,
             AnyOperation::DetachBlock(op) => op.check(bundle).await,
             AnyOperation::Filter(op) => op.check(bundle).await,
@@ -204,7 +204,7 @@ impl Operation for AnyOperation {
             AnyOperation::RenameView(op) => op.apply(bundle).await,
             AnyOperation::AttachBlock(op) => op.apply(bundle).await,
             AnyOperation::CreateView(op) => op.apply(bundle).await,
-            AnyOperation::DefineFunction(op) => op.apply(bundle).await,
+            AnyOperation::CreateFunction(op) => op.apply(bundle).await,
             AnyOperation::CreateSource(op) => op.apply(bundle).await,
             AnyOperation::DetachBlock(op) => op.apply(bundle).await,
             AnyOperation::Filter(op) => op.apply(bundle).await,
@@ -234,7 +234,7 @@ impl Operation for AnyOperation {
             AnyOperation::RenameView(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::AttachBlock(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::CreateView(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::DefineFunction(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::CreateFunction(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::CreateSource(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::DetachBlock(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::Filter(op) => op.apply_dataframe(df, ctx).await,
@@ -260,7 +260,7 @@ impl Operation for AnyOperation {
             AnyOperation::RenameView(op) => op.version(),
             AnyOperation::AttachBlock(op) => op.version(),
             AnyOperation::CreateView(op) => op.version(),
-            AnyOperation::DefineFunction(op) => op.version(),
+            AnyOperation::CreateFunction(op) => op.version(),
             AnyOperation::CreateSource(op) => op.version(),
             AnyOperation::DetachBlock(op) => op.version(),
             AnyOperation::Filter(op) => op.version(),
@@ -286,7 +286,7 @@ impl Operation for AnyOperation {
             AnyOperation::RenameView(op) => op.allowed_on_view(),
             AnyOperation::AttachBlock(op) => op.allowed_on_view(),
             AnyOperation::CreateView(op) => op.allowed_on_view(),
-            AnyOperation::DefineFunction(op) => op.allowed_on_view(),
+            AnyOperation::CreateFunction(op) => op.allowed_on_view(),
             AnyOperation::CreateSource(op) => op.allowed_on_view(),
             AnyOperation::DetachBlock(op) => op.allowed_on_view(),
             AnyOperation::Filter(op) => op.allowed_on_view(),
@@ -337,9 +337,9 @@ impl From<CreateViewOp> for AnyOperation {
     }
 }
 
-impl From<DefineFunctionOp> for AnyOperation {
-    fn from(config: DefineFunctionOp) -> Self {
-        AnyOperation::DefineFunction(config)
+impl From<CreateFunctionOp> for AnyOperation {
+    fn from(config: CreateFunctionOp) -> Self {
+        AnyOperation::CreateFunction(config)
     }
 }
 
