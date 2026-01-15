@@ -20,7 +20,7 @@ Mutable container for modifications:
 - Wraps an Bundlebase with a working directory
 - Tracks new operations applied since the base container
 - All modification methods mutate in-place and return `&mut self`
-- Methods: `attach()`, `remove_column()`, `rename_column()`, `filter()`, `select()`, `join()`, `define_function()`, `set_name()`, `set_description()`
+- Methods: `attach()`, `remove_column()`, `rename_column()`, `filter()`, `select()`, `join()`, `create_function()`, `set_name()`, `set_description()`
 - Can be committed via `commit(message)` to create a new versioned snapshot
 - Can be re-opened via `open_extending(url)` to load the latest state
 
@@ -43,7 +43,7 @@ Operations are recorded and applied in sequence when querying:
 - **Select**: Select specific columns
 - **Join**: Join with other data sources
 - **Query**: Execute custom SQL
-- **DefineFunction**: Register custom data generation functions
+- **CreateFunction**: Register custom data generation functions
 - **SetName**: Set container name
 - **SetDescription**: Set container description
 - **IndexData**: Track row indexing metadata
@@ -70,9 +70,9 @@ Custom data generation framework (`src/functions/`) with complete lifecycle:
 
 **Function Lifecycle:**
 
-1. **Define signature**: `container.define_function(FunctionSig::new("my_func", schema))`
+1. **Define signature**: `container.create_function(FunctionSig::new("my_func", schema))`
    - Registers function name and output schema in shared FunctionRegistry
-   - Creates DefineFunction operation (stored but doesn't affect DataFrame until attached)
+   - Creates CreateFunction operation (stored but doesn't affect DataFrame until attached)
 
 2. **Set implementation**: `container.set_impl("my_func", Arc::new(impl))`
    - Stores the actual implementation in FunctionRegistry

@@ -7,27 +7,27 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DefineFunctionOp {
+pub struct CreateFunctionOp {
     pub signature: FunctionSignature,
 }
 
-impl PartialEq for DefineFunctionOp {
+impl PartialEq for CreateFunctionOp {
     fn eq(&self, other: &Self) -> bool {
         // Compare only the function names since FunctionSignature contains SchemaRef
         self.signature.name() == other.signature.name()
     }
 }
 
-impl DefineFunctionOp {
+impl CreateFunctionOp {
     pub fn setup(signature: FunctionSignature) -> Self {
         Self { signature }
     }
 }
 
 #[async_trait]
-impl Operation for DefineFunctionOp {
+impl Operation for CreateFunctionOp {
     fn describe(&self) -> String {
-        format!("DEFINE FUNCTION: {}", self.signature.name())
+        format!("CREATE FUNCTION: {}", self.signature.name())
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -59,8 +59,8 @@ mod tests {
     #[test]
     fn test_describe() {
         let schema = create_test_schema();
-        let op = DefineFunctionOp::setup(FunctionSignature::new("test_func", schema));
-        assert_eq!(op.describe(), "DEFINE FUNCTION: test_func");
+        let op = CreateFunctionOp::setup(FunctionSignature::new("test_func", schema));
+        assert_eq!(op.describe(), "CREATE FUNCTION: test_func");
     }
 
     #[test]
@@ -69,21 +69,21 @@ mod tests {
 
         for name in cases {
             let schema = create_test_schema();
-            let op = DefineFunctionOp::setup(FunctionSignature::new(name, schema));
-            assert_eq!(op.describe(), format!("DEFINE FUNCTION: {}", name));
+            let op = CreateFunctionOp::setup(FunctionSignature::new(name, schema));
+            assert_eq!(op.describe(), format!("CREATE FUNCTION: {}", name));
         }
     }
 
     #[test]
     fn test_serialization() {
         let schema = create_test_schema();
-        let op = DefineFunctionOp::setup(FunctionSignature::new("test_func", schema));
+        let op = CreateFunctionOp::setup(FunctionSignature::new("test_func", schema));
 
         // Verify serialization is possible
         let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
 
         // Verify we can deserialize back
-        let _deserialized: DefineFunctionOp =
+        let _deserialized: CreateFunctionOp =
             serde_yaml::from_str(&serialized).expect("Failed to deserialize");
     }
 
@@ -94,11 +94,11 @@ mod tests {
             DataType::Int32,
             false,
         )]));
-        let op = DefineFunctionOp::setup(FunctionSignature::new("count_rows", schema));
+        let op = CreateFunctionOp::setup(FunctionSignature::new("count_rows", schema));
 
         // Verify serialization and deserialization round-trip
         let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
-        let deserialized: DefineFunctionOp =
+        let deserialized: CreateFunctionOp =
             serde_yaml::from_str(&serialized).expect("Failed to deserialize");
 
         assert_eq!(deserialized.signature.name(), "count_rows");
@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn test_setup_name() {
         let schema = create_test_schema();
-        let op = DefineFunctionOp::setup(FunctionSignature::new("my_func", schema));
+        let op = CreateFunctionOp::setup(FunctionSignature::new("my_func", schema));
         assert_eq!(op.signature.name(), "my_func");
     }
 
@@ -120,7 +120,7 @@ mod tests {
             Field::new("name", DataType::Utf8, true),
             Field::new("age", DataType::Int32, false),
         ]));
-        let op = DefineFunctionOp::setup(FunctionSignature::new("user_data", schema.clone()));
+        let op = CreateFunctionOp::setup(FunctionSignature::new("user_data", schema.clone()));
 
         assert_eq!(op.signature.output().fields().len(), 3);
         assert_eq!(op.signature.output().field(0).name(), "id");
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn test_version() {
         let schema = create_test_schema();
-        let op = DefineFunctionOp::setup(FunctionSignature::new("my_func", schema));
+        let op = CreateFunctionOp::setup(FunctionSignature::new("my_func", schema));
         let version = op.version();
 
         assert_eq!(version, "17d0564af14f");

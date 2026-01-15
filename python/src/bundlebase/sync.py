@@ -395,11 +395,11 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def define_function(
+    def create_function(
         self, name: str, output: Dict[str, str], func: Any, version: str = "1"
     ) -> "SyncBundleBuilder":
         """Define a custom Python function as a data source."""
-        coro = _call_original_method(self._async, "define_function", name, output, func, version)
+        coro = _call_original_method(self._async, "create_function", name, output, func, version)
         self._async = _loop_manager.run_sync(coro)
         return self
 

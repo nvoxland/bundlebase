@@ -132,7 +132,7 @@ async fn test_remove_all_columns() -> Result<(), BundlebaseError> {
 
     // Create a simple function with just 2 columns
     bundle
-        .define_function(FunctionSignature::new(
+        .create_function(FunctionSignature::new(
             "simple",
             SchemaRef::new(Schema::new(vec![
                 Field::new("col1", DataType::Int32, false),

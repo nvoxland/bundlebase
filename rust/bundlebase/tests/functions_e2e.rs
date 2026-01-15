@@ -17,7 +17,7 @@ async fn function_datasource() -> Result<(), BundlebaseError> {
 
     // Define a function
     bundle
-        .define_function(FunctionSignature::new(
+        .create_function(FunctionSignature::new(
             "test_func",
             SchemaRef::new(Schema::new(vec![
                 Field::new("id", DataType::Int64, false),
@@ -65,7 +65,7 @@ async fn test_function_with_static_impl_basic() -> Result<(), BundlebaseError> {
 
     // Define the function
     let sig = FunctionSignature::new("users", schema.clone());
-    bundle.define_function(sig).await?;
+    bundle.create_function(sig).await?;
 
     // Create test data
     let test_data = vec![record_batch!(
@@ -101,7 +101,7 @@ async fn test_function_with_multiple_pages() -> Result<(), BundlebaseError> {
     )]));
 
     let sig = FunctionSignature::new("paginated", schema.clone());
-    bundle.define_function(sig).await?;
+    bundle.create_function(sig).await?;
 
     // Create data for 2 pages
     let page_0 = record_batch!(("page_num", Int32, [0_i32, 0_i32]))?;
@@ -132,7 +132,7 @@ async fn test_function_in_pipeline_with_transformations() -> Result<(), Bundleba
     ]));
 
     let sig = FunctionSignature::new("scores", schema.clone());
-    bundle.define_function(sig).await?;
+    bundle.create_function(sig).await?;
 
     let test_data = vec![record_batch!(
         ("id", Int64, [1_i64, 2_i64, 3_i64]),
@@ -188,7 +188,7 @@ async fn test_multiple_functions_in_bundle() -> Result<(), BundlebaseError> {
         Field::new("username", DataType::Utf8, true),
     ]));
     let sig1 = FunctionSignature::new("users", schema1.clone());
-    bundle.define_function(sig1).await?;
+    bundle.create_function(sig1).await?;
 
     // Define second function
     let schema2 = SchemaRef::new(Schema::new(vec![
@@ -196,7 +196,7 @@ async fn test_multiple_functions_in_bundle() -> Result<(), BundlebaseError> {
         Field::new("product_name", DataType::Utf8, true),
     ]));
     let sig2 = FunctionSignature::new("products", schema2.clone());
-    bundle.define_function(sig2).await?;
+    bundle.create_function(sig2).await?;
 
     // Set implementations
     let user_data = vec![record_batch!(
@@ -232,7 +232,7 @@ async fn test_function_with_metadata() -> Result<(), BundlebaseError> {
     ]));
 
     let sig = FunctionSignature::new("test_func", schema.clone());
-    bundle.define_function(sig).await?;
+    bundle.create_function(sig).await?;
 
     let test_data = vec![record_batch!(
         ("id", Int64, [1_i64]),
@@ -269,7 +269,7 @@ async fn test_function_error_no_implementation() -> Result<(), BundlebaseError> 
     let schema = SchemaRef::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
 
     let sig = FunctionSignature::new("missing_impl", schema);
-    bundle.define_function(sig).await?;
+    bundle.create_function(sig).await?;
 
     // Try to attach without setting implementation - should fail
     let result = bundle.attach("function://missing_impl", None).await;
@@ -300,7 +300,7 @@ async fn test_multiple_function_definitions() -> Result<(), BundlebaseError> {
     // Define func1
     let schema1 = SchemaRef::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
     let sig1 = FunctionSignature::new("func1", schema1);
-    bundle1.define_function(sig1).await?;
+    bundle1.create_function(sig1).await?;
 
     // Set implementation for func1
     let data1 = vec![record_batch!(("x", Int32, [1_i32, 2_i32, 3_i32]))?];
@@ -319,7 +319,7 @@ async fn test_multiple_function_definitions() -> Result<(), BundlebaseError> {
     // Define func2
     let schema2 = SchemaRef::new(Schema::new(vec![Field::new("y", DataType::Utf8, true)]));
     let sig2 = FunctionSignature::new("func2", schema2);
-    bundle2.define_function(sig2).await?;
+    bundle2.create_function(sig2).await?;
 
     // Set implementation for func2
     let data2 = vec![record_batch!(("y", Utf8, ["a", "b"]))?];

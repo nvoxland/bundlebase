@@ -20,7 +20,7 @@ impl PyOperation {
             AnyOperation::RenameView(_) => "renameView".to_string(),
             AnyOperation::Filter(_) => "filter".to_string(),
             AnyOperation::Join(_) => "join".to_string(),
-            AnyOperation::DefineFunction(_) => "defineFunction".to_string(),
+            AnyOperation::CreateFunction(_) => "createFunction".to_string(),
             AnyOperation::SetConfig(_) => "setConfig".to_string(),
             AnyOperation::SetName(_) => "setName".to_string(),
             AnyOperation::SetDescription(_) => "setDescription".to_string(),

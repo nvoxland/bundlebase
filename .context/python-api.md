@@ -24,7 +24,7 @@ def my_data(page: int, schema: pa.Schema) -> pa.RecordBatch | None:
         )
     return None
 
-await c.define_function(
+await c.create_function(
     name="my_data",
     output={"id": "Int64", "name": "Utf8"},  # output not schema
     func=my_data  # func not function
@@ -92,7 +92,7 @@ c = await Bundlebase.open("/my/container/dir")
 - `select(sql, params)` - Execute custom SQL
 - `set_name(name)` - Set container name
 - `set_description(description)` - Set container description
-- `define_function(name, output, func)` - Define custom function
+- `create_function(name, output, func)` - Define custom function
 
 ## Schema Introspection
 

@@ -58,7 +58,7 @@ Mutable bundle class returned by `create()` and transformation methods.
         - join
         - set_name
         - set_description
-        - define_function
+        - create_function
         - create_index
         - rebuild_index
         - reindex

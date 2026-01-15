@@ -3,7 +3,7 @@ use crate::bundle::init::InitCommit;
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, CreateSourceOp, SelectOp};
 use crate::bundle::operation::{
-    AttachBlockOp, CreateViewOp, DefineFunctionOp, DefinePackOp, DetachBlockOp, DropViewOp,
+    AttachBlockOp, CreateViewOp, CreateFunctionOp, DefinePackOp, DetachBlockOp, DropViewOp,
     FilterOp, JoinOp, RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp,
     ReplaceBlockOp, SetConfigOp, SetDescriptionOp,
 };
@@ -1160,17 +1160,17 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Define a custom function (mutates self)
-    pub async fn define_function(
+    /// Create a custom function (mutates self)
+    pub async fn create_function(
         &mut self,
         signature: FunctionSignature,
     ) -> Result<&mut Self, BundlebaseError> {
         let name = signature.name().to_string();
 
-        self.do_change(&format!("Define function {}", name), |builder| {
+        self.do_change(&format!("Create function {}", name), |builder| {
             Box::pin(async move {
                 builder
-                    .apply_operation(DefineFunctionOp::setup(signature).into())
+                    .apply_operation(CreateFunctionOp::setup(signature).into())
                     .await?;
                 Ok(())
             })
