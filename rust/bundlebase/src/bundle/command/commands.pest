@@ -20,7 +20,7 @@ COMMENT = _{ "--" ~ (!"\n" ~ ANY)* ~ "\n" }
 // Entry Point
 // ============================================================================
 
-statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt | create_source_stmt | fetch_stmt) ~ EOI }
+statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt | create_source_stmt | fetch_stmt | drop_join_stmt) ~ EOI }
 
 // ============================================================================
 // FILTER Statement
@@ -130,6 +130,17 @@ source_arg_pair = {
 
 fetch_stmt = {
     ^"fetch" ~ (^"all" | identifier)?
+}
+
+// ============================================================================
+// DROP JOIN Statement
+// ============================================================================
+// Syntax: DROP JOIN <name>
+// Examples:
+//   DROP JOIN customers
+
+drop_join_stmt = {
+    ^"drop" ~ ^"join" ~ identifier
 }
 
 // ============================================================================

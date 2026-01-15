@@ -304,6 +304,19 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def drop_join(self, join_name: str) -> "SyncBundleBuilder":
+        """Drop an existing join.
+
+        Args:
+            join_name: Name of the join to drop
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "drop_join", join_name)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
     def create_source(
         self, function: str, args: Dict[str, str], pack: str = "base"
     ) -> "SyncBundleBuilder":

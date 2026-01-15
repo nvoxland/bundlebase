@@ -594,6 +594,21 @@ class PyBundleBuilder:
         """
         ...
 
+    def drop_join(self, join_name: str) -> "OperationChain":
+        """
+        Drop an existing join.
+
+        Args:
+            join_name: Name of the join to drop
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.drop_join("customers")
+        """
+        ...
+
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
         """
         Queue a select operation.
@@ -888,6 +903,10 @@ class OperationChain:
         """Queue a join operation."""
         ...
 
+    def drop_join(self, join_name: str) -> "OperationChain":
+        """Queue a drop_join operation."""
+        ...
+
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
         """Queue a select operation."""
         ...
@@ -960,6 +979,10 @@ class CreateChain:
         """Queue a join operation."""
         ...
 
+    def drop_join(self, join_name: str) -> "CreateChain":
+        """Queue a drop_join operation."""
+        ...
+
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "CreateChain":
         """Queue a select operation."""
         ...
@@ -1030,6 +1053,10 @@ class ExtendChain:
 
     def join(self, name: str, expression: str, location: Optional[str] = None, join_type: Optional[str] = None) -> "ExtendChain":
         """Queue a join operation."""
+        ...
+
+    def drop_join(self, join_name: str) -> "ExtendChain":
+        """Queue a drop_join operation."""
         ...
 
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "ExtendChain":

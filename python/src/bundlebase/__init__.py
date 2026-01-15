@@ -78,6 +78,7 @@ _original_methods = {
 
     # View operations
     "create_view": _PyBundleBuilder.create_view,
+    "drop_join": _PyBundleBuilder.drop_join,
 
     # Metadata operations
     "set_name": _PyBundleBuilder.set_name,
@@ -141,7 +142,7 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 mutation_methods = [
     "attach", "detach_block", "replace_block", "create_source",
     "remove_column", "rename_column", "filter", "select", "join",
-    "create_view", "set_name", "set_description", "set_config", "create_function",
+    "create_view", "drop_join", "set_name", "set_description", "set_config", "create_function",
     "create_index", "rebuild_index", "reindex"
 ]
 for method_name in mutation_methods:
