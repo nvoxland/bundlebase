@@ -29,7 +29,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
 
     // Open first bundle and extend to new directory
     let opened1 = Bundle::open(&temp1.url().to_string(), None).await?;
-    assert_eq!(opened1.operations().len(), 2);
+    assert_eq!(opened1.operations().len(), 1);
     assert_eq!(None, opened1.from());
     assert_eq!(temp1.url(), opened1.url());
 
@@ -138,8 +138,8 @@ async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
     bundle.remove_column("country").await?;
 
-    assert_eq!(bundle.bundle.operations().len(), 3);
-    assert_eq!(bundle.bundle.operations().len(), 3);
+    assert_eq!(bundle.bundle.operations().len(), 2);
+    assert_eq!(bundle.bundle.operations().len(), 2);
 
     bundle.commit("Test commit").await?;
 
@@ -147,7 +147,7 @@ async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
     let reopened = Bundle::open(&temp.to_string(), None).await?;
 
     // Operations should now be in state
-    assert_eq!(reopened.operations().len(), 3);
+    assert_eq!(reopened.operations().len(), 2);
 
     Ok(())
 }

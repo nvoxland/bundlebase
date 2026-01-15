@@ -3,13 +3,13 @@ use crate::bundle::init::InitCommit;
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, CreateSourceOp, SelectOp};
 use crate::bundle::operation::{
-    AttachBlockOp, CreateViewOp, CreateFunctionOp, DefinePackOp, DetachBlockOp, DropJoinOp,
-    DropViewOp, FilterOp, JoinOp, RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp,
+    AttachBlockOp, CreateFunctionOp, CreateViewOp, DefinePackOp, DetachBlockOp, DropJoinOp,
+    DropViewOp, FilterOp, RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp,
     ReplaceBlockOp, SetConfigOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
-use crate::bundle::operation::{CreateIndexOp, DropIndexOp, JoinTypeOption};
-use crate::bundle::{commit, INIT_FILENAME, META_DIR};
+use crate::bundle::operation::{CreateIndexOp, DropIndexOp};
+use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle, Source};
 use super::DataBlock;
 use crate::data::{ObjectId, VersionedBlockId};
@@ -17,7 +17,7 @@ use crate::source::FetchAction;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::IndexDefinition;
-use crate::io::{write_yaml, writable_dir_from_str, writable_dir_from_url, IOReadWriteDir};
+use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
@@ -33,6 +33,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use url::Url;
+use crate::bundle::pack::JoinTypeOption;
 
 /// Format a system time as ISO8601 UTC string (e.g., "2024-01-01T12:34:56Z")
 fn to_iso(time: std::time::SystemTime) -> String {
@@ -195,17 +196,7 @@ impl BundleBuilder {
         };
 
         // Automatically create the base pack with a well-known ID
-        builder
-            .do_change("Initialize bundle", |b| {
-                Box::pin(async move {
-                    b.apply_operation(
-                        DefinePackOp::setup(&ObjectId::BASE_PACK).await?.into(),
-                    )
-                    .await?;
-                    Ok(())
-                })
-            })
-            .await?;
+        builder.bundle.add_pack(ObjectId::BASE_PACK.clone(), Arc::new(Pack::new_base()));
 
         Ok(builder)
     }
@@ -477,10 +468,9 @@ impl BundleBuilder {
             None | Some("base") => ObjectId::BASE_PACK,
             Some(join_name) => self
                 .bundle
-                .joins
-                .get(join_name)
+                .pack_by_name(join_name)
                 .ok_or(format!("Unknown join '{}'", join_name))?
-                .pack()
+                .id()
                 .clone(),
         };
 
@@ -628,10 +618,9 @@ impl BundleBuilder {
                         None | Some("base") => ObjectId::BASE_PACK,
                         Some(join_name) => builder
                             .bundle
-                            .joins
-                            .get(join_name)
+                            .pack_by_name(join_name)
                             .ok_or(format!("Unknown join '{}'", join_name))?
-                            .pack()
+                            .id()
                             .clone(),
                     };
 
@@ -690,10 +679,9 @@ impl BundleBuilder {
             None | Some("base") => ObjectId::BASE_PACK,
             Some(join_name) => self
                 .bundle
-                .joins
-                .get(join_name)
+                .pack_by_name(join_name)
                 .ok_or(format!("Unknown join '{}'", join_name))?
-                .pack()
+                .id()
                 .clone(),
         };
 
@@ -1040,11 +1028,11 @@ impl BundleBuilder {
     ///
     /// # Example
     /// ```no_run
-    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
+    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade, JoinTypeOption};
     /// # async fn example() -> Result<(), BundlebaseError> {
     /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
     /// # c.attach("data.csv", None).await?;
-    /// c.join("customers", "base.customer_id = customers.id", Some("customers.parquet"), None).await?;
+    /// c.join("customers", "base.customer_id = customers.id", Some("customers.parquet"), JoinTypeOption::Left).await?;
     /// c.drop_join("customers").await?;
     /// c.commit("Dropped join").await?;
     /// # Ok(())
@@ -1153,10 +1141,14 @@ impl BundleBuilder {
 
         self.do_change(&format!("Join '{}' on {}", name, expression), |builder| {
             Box::pin(async move {
-                // Step 1: Create a new pack for the joined data
+                // Step 1: Create a new pack with join metadata
                 let join_pack_id = ObjectId::generate();
                 builder
-                    .apply_operation(DefinePackOp::setup(&join_pack_id).await?.into())
+                    .apply_operation(
+                        DefinePackOp::setup(&join_pack_id, &name, &expression, join_type)
+                            .await?
+                            .into(),
+                    )
                     .await?;
 
                 // Step 2: Attach the location data to the join pack (if provided)
@@ -1169,15 +1161,6 @@ impl BundleBuilder {
                         )
                         .await?;
                 }
-
-                // Step 3: Create JoinOp that references the pack
-                builder
-                    .apply_operation(
-                        JoinOp::setup(&name, join_pack_id, &expression, join_type, builder)
-                            .await?
-                            .into(),
-                    )
-                    .await?;
 
                 match &location {
                     Some(loc) => info!("Joined: {} as \"{}\"", loc, name),
@@ -1396,11 +1379,11 @@ impl BundleBuilder {
                     let index_id = index_def.id();
                     debug!("Checking index on {}", &logical_col);
 
-                    // Pass data_packs to expand pack tables into block tables
+                    // Pass packs to expand pack tables into block tables
                     let sources = match sql::column_sources_from_df(
                         logical_col.as_str(),
                         &df,
-                        Some(&builder.bundle.data_packs),
+                        Some(builder.bundle.packs()),
                     )
                     .await
                     {
@@ -1430,7 +1413,7 @@ impl BundleBuilder {
                         // Find the block and get its version
                         let block_version = builder
                             .find_block_version(&block_id)
-                            .ok_or_else(|| format!("Block {} not found in data_packs", block_id))?;
+                            .ok_or_else(|| format!("Block {} not found in packs", block_id))?;
                         debug!(
                             "Physical source: block {} version {}",
                             &block_id, &block_version
@@ -1485,7 +1468,7 @@ impl BundleBuilder {
 
     /// Find the version of a block by its ID
     fn find_block_version(&self, block_id: &ObjectId) -> Option<String> {
-        for (_, pack) in &self.bundle.data_packs.read().clone() {
+        for (_, pack) in &self.bundle.packs().read().clone() {
             for block in pack.blocks() {
                 if block.id() == block_id {
                     return Some(block.version());
@@ -1535,7 +1518,7 @@ impl BundleBuilder {
         analyzer.register_table("__base_0".to_string(), "base".to_string());
 
         // Register joined packs
-        for (join_name, _join) in &self.bundle.joins {
+        for join_name in self.bundle.join_names() {
             analyzer.register_table(join_name.clone(), join_name.clone());
         }
 
@@ -1781,17 +1764,17 @@ mod tests {
             .unwrap();
         assert_eq!(
             bundle.bundle.operations().len(),
-            1,
+            0,
         );
 
         let bundle = bundle
             .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
-        assert_eq!(bundle.bundle.operations().len(), 2);
+        assert_eq!(bundle.bundle.operations().len(), 1);
 
         bundle.remove_column("title").await.unwrap();
-        assert_eq!(bundle.bundle.operations().len(), 3,);
+        assert_eq!(bundle.bundle.operations().len(), 2);
     }
 
     #[tokio::test]
@@ -1828,16 +1811,16 @@ mod tests {
         let v2 = bundle_clone.version();
 
         // Original should be unchanged
-        assert_eq!(bundle.bundle.operations().len(), 2);
-        assert_eq!(bundle_clone.bundle.operations().len(), 3);
+        assert_eq!(bundle.bundle.operations().len(), 1);
+        assert_eq!(bundle_clone.bundle.operations().len(), 2);
         assert_ne!(
             v1, v2,
             "Different operations should have different versions"
         );
 
-        // Test that data_packs are independent
-        let orig_packs_count = bundle.bundle.data_packs.read().len();
-        let clone_packs_count = bundle_clone.bundle.data_packs.read().len();
+        // Test that packs are independent
+        let orig_packs_count = bundle.bundle.packs().read().len();
+        let clone_packs_count = bundle_clone.bundle.packs().read().len();
         assert_eq!(orig_packs_count, clone_packs_count);
 
         // Test that indexes are independent
@@ -1873,7 +1856,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(bundle.bundle.operations.len(), 4);
+        assert_eq!(bundle.bundle.operations.len(), 3);
     }
 
     #[tokio::test]

@@ -1,5 +1,5 @@
 use crate::bundle::command::BundleCommand;
-use crate::bundle::operation::JoinTypeOption;
+use crate::bundle::pack::JoinTypeOption;
 use crate::BundlebaseError;
 use pest::Parser;
 use pest_derive::Parser;

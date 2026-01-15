@@ -23,7 +23,6 @@ async fn test_create_view_basic() -> Result<(), BundlebaseError> {
 
     assert_vec_regexp(
         vec![
-            "CREATE PACK \\w+",
             "ATTACH: memory:///test_data/customers-0-100.csv",
             "CREATE VIEW: 'chile'",
             "select \\* from bundle where Country = 'Chile'",
@@ -232,7 +231,7 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
     let view = c.view("high_index").await?;
 
     // Debug assertions
-    println!("View data_packs count: {}", view.data_packs_count());
+    println!("View data_packs count: {}", view.packs_count());
     println!(
         "View operations: {:?}",
         view.operations()
@@ -242,7 +241,7 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
     );
 
     assert!(
-        view.data_packs_count() > 0,
+        view.packs_count() > 0,
         "View should have data_packs from parent"
     );
 
@@ -487,14 +486,14 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
     // Test 1: Open view by name
     let view_by_name = c.view("adults").await?;
     assert!(
-        view_by_name.operations().len() >= 4,
+        view_by_name.operations().len() >= 3,
         "View should have operations"
     );
 
     // Test 2: Open view by ID
     let view_by_id = c.view(&view_id.to_string()).await?;
     assert!(
-        view_by_id.operations().len() >= 4,
+        view_by_id.operations().len() >= 3,
         "View should have operations"
     );
 

@@ -1,5 +1,6 @@
 use bundlebase;
-use bundlebase::bundle::{BundleFacade, JoinTypeOption};
+use bundlebase::bundle::BundleFacade;
+use bundlebase::bundle::JoinTypeOption;
 use bundlebase::test_utils::{field_names, random_memory_url, test_datafile};
 use bundlebase::BundlebaseError;
 

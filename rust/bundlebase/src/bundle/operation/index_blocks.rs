@@ -23,9 +23,9 @@ pub struct IndexBlocksOp {
     pub cardinality: u64,
 }
 
-/// Finds a block by ID in the bundle's data packs.
+/// Finds a block by ID in the bundle's packs.
 fn find_block(bundle: &Bundle, block_id: &ObjectId) -> Result<Arc<DataBlock>, BundlebaseError> {
-    for (_, pack) in &bundle.data_packs.read().clone() {
+    for (_, pack) in &bundle.packs().read().clone() {
         for block in &pack.blocks() {
             if block.id() == block_id {
                 return Ok(block.clone());
@@ -58,7 +58,7 @@ impl IndexBlocksOp {
     /// # Errors
     /// Returns error if:
     /// - `blocks` is empty (cannot create index with no data)
-    /// - Any block is not found in data_packs
+    /// - Any block is not found in packs
     /// - Column doesn't exist in a block
     /// - Data types differ between blocks for the same column
     /// - Streaming or index building fails
@@ -84,7 +84,7 @@ impl IndexBlocksOp {
 
         // For each block, stream data and build index mappings
         for (idx, (block_id, _version)) in blocks.iter().enumerate() {
-            // Get the block from data_packs
+            // Get the block from packs
             let block = find_block(bundle, block_id).map_err(|e| {
                 BundlebaseError::from(format!(
                     "Failed to find block {} for indexing: {}",

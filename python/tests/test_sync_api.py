@@ -17,10 +17,10 @@ class TestSyncCreate:
         """Test creating an empty bundle synchronously."""
         c = bb.create(random_bundle())
         assert c is not None
-        # Empty bundle has "Initialize bundle" change from base pack auto-creation
+        # Base pack is auto-created without an operation, so status should be empty
         status = c.status()
-        assert len(status.changes) == 1
-        assert "Initialize bundle" in status.changes[0].description
+        assert len(status.changes) == 0
+        assert status.is_empty()
 
     def test_sync_create_with_path(self):
         """Test creating bundle with specific path."""
@@ -495,25 +495,24 @@ class TestSyncStatus:
         """Test status() on empty bundle."""
         c = bb.create(random_bundle())
 
-        # Bundle has "Initialize bundle" change from base pack auto-creation
+        # Base pack is auto-created without an operation, so status should be empty
         status = c.status()
         assert hasattr(status, 'is_empty')
-        assert not status.is_empty()
-        assert len(status.changes) == 1
-        assert "Initialize bundle" in status.changes[0].description
+        assert status.is_empty()
+        assert len(status.changes) == 0
 
     def test_sync_status_single_operation(self):
         """Test status() after single operation."""
         c = bb.create(random_bundle())
         c.set_name("Test Bundle")
 
-        # Should have 2 changes: Initialize bundle + set_name
+        # Should have 1 change: set_name
         status = c.status()
-        assert len(status.changes) == 2
-        assert status.total_operations == 2
+        assert len(status.changes) == 1
+        assert status.total_operations == 1
 
-        # Check the set_name change (second change)
-        change = status.changes[1]
+        # Check the set_name change
+        change = status.changes[0]
         assert isinstance(change.id, str)
         assert len(change.id) > 0
         assert change.description == "Set name to Test Bundle"
@@ -525,11 +524,11 @@ class TestSyncStatus:
         c.set_name("Test Bundle")
         c.set_description("A test description")
 
-        # Should have 3 changes: Initialize bundle + set_name + set_description
+        # Should have 2 changes: set_name + set_description
         status = c.status()
-        assert len(status.changes) == 3
-        assert status.changes[1].description == "Set name to Test Bundle"
-        assert status.changes[2].description == "Set description to A test description"
+        assert len(status.changes) == 2
+        assert status.changes[0].description == "Set name to Test Bundle"
+        assert status.changes[1].description == "Set description to A test description"
 
     def test_sync_status_chained_operations(self):
         """Test status() with chained operations."""

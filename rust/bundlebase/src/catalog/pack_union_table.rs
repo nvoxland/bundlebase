@@ -1,4 +1,4 @@
-use crate::bundle::DataPack;
+use crate::bundle::Pack;
 use crate::io::ObjectId;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -16,7 +16,7 @@ use std::sync::Arc;
 /// execution model. Multiple blocks in a pack are combined using UNION BY NAME.
 pub struct PackUnionTable {
     pack_id: ObjectId,
-    pack: Arc<DataPack>,
+    pack: Arc<Pack>,
     schema: SchemaRef,
 }
 
@@ -31,7 +31,7 @@ impl std::fmt::Debug for PackUnionTable {
 }
 
 impl PackUnionTable {
-    pub fn new(pack_id: ObjectId, pack: Arc<DataPack>) -> Result<Self> {
+    pub fn new(pack_id: ObjectId, pack: Arc<Pack>) -> Result<Self> {
         // Get schema from first block
         let blocks = pack.blocks();
 

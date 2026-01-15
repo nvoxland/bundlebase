@@ -2,7 +2,7 @@ use crate::function_impl::PythonFunctionImpl;
 use crate::utils::convert_py_params;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use ::bundlebase::bundle::BundleBuilder;
-use ::bundlebase::bundle::{BundleChange, BundleFacade, BundleStatus, JoinTypeOption};
+use ::bundlebase::bundle::{BundleChange, BundleFacade, BundleStatus};
 use ::bundlebase::functions::FunctionSignature;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFunction};
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
+use bundlebase::bundle::JoinTypeOption;
 use super::commit::PyCommit;
 
 #[pyclass]

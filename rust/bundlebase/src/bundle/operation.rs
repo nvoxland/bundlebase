@@ -11,7 +11,6 @@ mod drop_view;
 mod replace_block;
 mod filter;
 mod index_blocks;
-mod join;
 mod rebuild_index;
 mod remove_columns;
 mod rename_column;
@@ -35,7 +34,6 @@ pub use crate::bundle::operation::drop_view::DropViewOp;
 pub use crate::bundle::operation::filter::FilterOp;
 pub use crate::bundle::operation::replace_block::ReplaceBlockOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
-pub use crate::bundle::operation::join::{JoinOp, JoinTypeOption};
 pub use crate::bundle::operation::rebuild_index::RebuildIndexOp;
 pub use crate::bundle::operation::remove_columns::RemoveColumnsOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
@@ -139,7 +137,6 @@ pub enum AnyOperation {
     DropView(DropViewOp),
     RebuildIndex(RebuildIndexOp),
     ReplaceBlock(ReplaceBlockOp),
-    Join(JoinOp),
     Select(SelectOp),
     SetConfig(SetConfigOp),
     SetName(SetNameOp),
@@ -167,7 +164,6 @@ impl Operation for AnyOperation {
             AnyOperation::DropView(op) => op.describe(),
             AnyOperation::RebuildIndex(op) => op.describe(),
             AnyOperation::ReplaceBlock(op) => op.describe(),
-            AnyOperation::Join(op) => op.describe(),
             AnyOperation::Select(op) => op.describe(),
             AnyOperation::SetConfig(op) => op.describe(),
             AnyOperation::SetName(op) => op.describe(),
@@ -194,7 +190,6 @@ impl Operation for AnyOperation {
             AnyOperation::DropView(op) => op.check(bundle).await,
             AnyOperation::RebuildIndex(op) => op.check(bundle).await,
             AnyOperation::ReplaceBlock(op) => op.check(bundle).await,
-            AnyOperation::Join(op) => op.check(bundle).await,
             AnyOperation::Select(op) => op.check(bundle).await,
             AnyOperation::SetConfig(op) => op.check(bundle).await,
             AnyOperation::SetName(op) => op.check(bundle).await,
@@ -221,7 +216,6 @@ impl Operation for AnyOperation {
             AnyOperation::DropView(op) => op.apply(bundle).await,
             AnyOperation::RebuildIndex(op) => op.apply(bundle).await,
             AnyOperation::ReplaceBlock(op) => op.apply(bundle).await,
-            AnyOperation::Join(op) => op.apply(bundle).await,
             AnyOperation::Select(op) => op.apply(bundle).await,
             AnyOperation::SetConfig(op) => op.apply(bundle).await,
             AnyOperation::SetName(op) => op.apply(bundle).await,
@@ -252,7 +246,6 @@ impl Operation for AnyOperation {
             AnyOperation::DropView(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::RebuildIndex(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::ReplaceBlock(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::Join(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::Select(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::SetConfig(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::SetName(op) => op.apply_dataframe(df, ctx).await,
@@ -279,7 +272,6 @@ impl Operation for AnyOperation {
             AnyOperation::DropView(op) => op.version(),
             AnyOperation::RebuildIndex(op) => op.version(),
             AnyOperation::ReplaceBlock(op) => op.version(),
-            AnyOperation::Join(op) => op.version(),
             AnyOperation::Select(op) => op.version(),
             AnyOperation::SetConfig(op) => op.version(),
             AnyOperation::SetName(op) => op.version(),
@@ -306,7 +298,6 @@ impl Operation for AnyOperation {
             AnyOperation::DropView(op) => op.allowed_on_view(),
             AnyOperation::RebuildIndex(op) => op.allowed_on_view(),
             AnyOperation::ReplaceBlock(op) => op.allowed_on_view(),
-            AnyOperation::Join(op) => op.allowed_on_view(),
             AnyOperation::Select(op) => op.allowed_on_view(),
             AnyOperation::SetConfig(op) => op.allowed_on_view(),
             AnyOperation::SetName(op) => op.allowed_on_view(),
@@ -373,12 +364,6 @@ impl From<FilterOp> for AnyOperation {
 impl From<IndexBlocksOp> for AnyOperation {
     fn from(config: IndexBlocksOp) -> Self {
         AnyOperation::IndexBlocks(config)
-    }
-}
-
-impl From<JoinOp> for AnyOperation {
-    fn from(config: JoinOp) -> Self {
-        AnyOperation::Join(config)
     }
 }
 
