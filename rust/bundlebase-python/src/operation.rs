@@ -25,7 +25,7 @@ impl PyOperation {
             AnyOperation::SetDescription(_) => "setDescription".to_string(),
             AnyOperation::IndexBlocks(_) => "indexBlocks".to_string(),
             AnyOperation::CreateIndex(_) => "createIndex".to_string(),
-            AnyOperation::DefinePack(_) => "definePack".to_string(),
+            AnyOperation::CreateJoin(_) => "createJoin".to_string(),
             AnyOperation::DropIndex(_) => "dropIndex".to_string(),
             AnyOperation::DropJoin(_) => "dropJoin".to_string(),
             AnyOperation::DropView(_) => "dropView".to_string(),

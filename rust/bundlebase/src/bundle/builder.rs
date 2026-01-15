@@ -3,7 +3,7 @@ use crate::bundle::init::InitCommit;
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, CreateSourceOp, SelectOp};
 use crate::bundle::operation::{
-    AttachBlockOp, CreateFunctionOp, CreateViewOp, DefinePackOp, DetachBlockOp, DropJoinOp,
+    AttachBlockOp, CreateFunctionOp, CreateJoinOp, CreateViewOp, DetachBlockOp, DropJoinOp,
     DropViewOp, FilterOp, RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp,
     ReplaceBlockOp, SetConfigOp, SetDescriptionOp,
 };
@@ -1145,7 +1145,7 @@ impl BundleBuilder {
                 let join_pack_id = ObjectId::generate();
                 builder
                     .apply_operation(
-                        DefinePackOp::setup(&join_pack_id, &name, &expression, join_type)
+                        CreateJoinOp::setup(&join_pack_id, &name, &expression, join_type)
                             .await?
                             .into(),
                     )
