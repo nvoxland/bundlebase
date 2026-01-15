@@ -1,6 +1,6 @@
 use crate::state::State;
 use arrow::datatypes::SchemaRef;
-use arrow::ipc::writer::{DictionaryTracker, IpcDataGenerator, IpcWriteOptions};
+use arrow::ipc::writer::{CompressionContext, DictionaryTracker, IpcDataGenerator, IpcWriteOptions};
 use arrow::record_batch::RecordBatch;
 use arrow_flight::flight_service_server::FlightService;
 use arrow_flight::{
@@ -247,10 +247,11 @@ fn create_batch_message(batch: &RecordBatch) -> Result<FlightData, Status> {
     let options = IpcWriteOptions::default();
     let gen = IpcDataGenerator::default();
     let mut dict_tracker = DictionaryTracker::new(false);
+    let mut compression_context = CompressionContext::default();
 
-    // encoded_batch returns (Vec<EncodedData>, EncodedData)
+    // encode returns (Vec<EncodedData>, EncodedData)
     let (_dict_batches, encoded_batch) = gen
-        .encoded_batch(batch, &mut dict_tracker, &options)
+        .encode(batch, &mut dict_tracker, &options, &mut compression_context)
         .map_err(|e| Status::internal(format!("Failed to encode batch: {}", e)))?;
 
     Ok(FlightData {

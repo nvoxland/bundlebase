@@ -87,44 +87,6 @@ impl RowIdOffsetDataSource {
         }
     }
 
-    /// Create a new RowIdOffsetDataSource for CSV files
-    ///
-    /// # Arguments
-    /// * `file` - The CSV file
-    /// * `schema` - Schema of the data
-    /// * `row_ids` - List of RowIds to read
-    /// * `projection` - Optional column projection
-    pub fn new_csv(
-        file: &ObjectStoreFile,
-        schema: SchemaRef,
-        row_ids: Vec<RowId>,
-        projection: Option<Vec<usize>>,
-    ) -> Self {
-        Self::new(file, schema, row_ids, projection, LineOrientedFormat::Csv)
-    }
-
-    /// Create a new RowIdOffsetDataSource for JSON Lines files
-    ///
-    /// # Arguments
-    /// * `file` - The JSON Lines file
-    /// * `schema` - Schema of the data
-    /// * `row_ids` - List of RowIds to read
-    /// * `projection` - Optional column projection
-    pub fn new_json_lines(
-        file: &ObjectStoreFile,
-        schema: SchemaRef,
-        row_ids: Vec<RowId>,
-        projection: Option<Vec<usize>>,
-    ) -> Self {
-        Self::new(
-            file,
-            schema,
-            row_ids,
-            projection,
-            LineOrientedFormat::JsonLines,
-        )
-    }
-
     /// Extract all complete lines from a byte range
     /// Works for both CSV and JSON Lines since both are line-oriented
     /// Returns only complete lines (those ending with newline)
@@ -461,7 +423,7 @@ mod tests {
         )
         .unwrap();
         let schema = Arc::new(arrow::datatypes::Schema::empty());
-        let source = RowIdOffsetDataSource::new_csv(&file, schema, row_ids, None);
+        let source = RowIdOffsetDataSource::new(&file, schema, row_ids, None, LineOrientedFormat::Csv);
 
         // Verify row_ids are sorted by offset
         assert_eq!(source.row_ids[0].offset(), 100);
@@ -483,7 +445,7 @@ mod tests {
         )
         .unwrap();
         let schema = Arc::new(arrow::datatypes::Schema::empty());
-        let source = RowIdOffsetDataSource::new_csv(&file, schema, row_ids, None);
+        let source = RowIdOffsetDataSource::new(&file, schema, row_ids, None, LineOrientedFormat::Csv);
 
         let stats = source.partition_statistics(None).unwrap();
         assert_eq!(stats.num_rows.get_value(), Some(&2));

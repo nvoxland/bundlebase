@@ -305,17 +305,7 @@ impl RemoteDirFunction {
         source_utils::download_to_data_dir(data, &filename, data_dir).await
     }
 
-    /// Download a file via SFTP/SCP.
-    async fn download_sftp(
-        &self,
-        url: &Url,
-        key_path: Option<&str>,
-        data_dir: &dyn IOReadWriteDir,
-    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
-        Self::download_sftp_static(url, key_path, data_dir).await
-    }
-
-    /// Download a file via FTP (static version).
+    /// Download a file via FTP.
     async fn download_ftp_static(url: &Url, data_dir: &dyn IOReadWriteDir) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
         let ftp_file = FtpFile::from_url(url)?;
         let data = ftp_file.read_bytes().await?.ok_or_else(|| {
@@ -324,11 +314,6 @@ impl RemoteDirFunction {
 
         let filename = source_utils::filename_from_url(url);
         source_utils::download_to_data_dir(data, &filename, data_dir).await
-    }
-
-    /// Download a file via FTP.
-    async fn download_ftp(&self, url: &Url, data_dir: &dyn IOReadWriteDir) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
-        Self::download_ftp_static(url, data_dir).await
     }
 }
 

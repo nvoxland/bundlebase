@@ -19,17 +19,6 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use url::Url;
 
-/// Information about a remote file from FTP listing.
-#[derive(Debug, Clone)]
-pub struct FtpFileInfo {
-    /// Full path on the remote system
-    pub path: String,
-    /// File size in bytes (if available)
-    pub size: Option<u64>,
-    /// Whether this entry is a directory
-    pub is_dir: bool,
-}
-
 /// Parse an FTP URL into its components.
 ///
 /// # URL Format
@@ -307,7 +296,7 @@ impl FtpDir {
         &self,
         stream: &mut AsyncFtpStream,
         path: &str,
-        files: &mut Vec<FtpFileInfo>,
+        files: &mut Vec<FileInfo>,
     ) -> Result<(), BundlebaseError> {
         let entries: Vec<String> = stream.nlst(Some(path)).await.map_err(|e| {
             BundlebaseError::from(format!("Failed to list FTP directory '{}': {}", path, e))
@@ -328,11 +317,8 @@ impl FtpDir {
             // Try to get the size to determine if it's a file
             match stream.size(&full_path).await {
                 Ok(size) => {
-                    files.push(FtpFileInfo {
-                        path: full_path,
-                        size: Some(size as u64),
-                        is_dir: false,
-                    });
+                    let url = build_ftp_url(&self.user, &self.password, &self.host, self.port, &full_path)?;
+                    files.push(FileInfo::new(url).with_size(size as u64));
                 }
                 Err(_) => {
                     // Might be a directory, try to list it
@@ -359,32 +345,12 @@ impl IOReadDir for FtpDir {
 
     async fn list_files(&self) -> Result<Vec<FileInfo>, BundlebaseError> {
         let mut stream = self.connect().await?;
-        let mut ftp_files = Vec::new();
-        self.list_files_recursive_internal(&mut stream, &self.path, &mut ftp_files)
+        let mut files = Vec::new();
+        self.list_files_recursive_internal(&mut stream, &self.path, &mut files)
             .await?;
         if let Err(e) = stream.quit().await {
             debug!("Error closing FTP connection: {}", e);
         }
-
-        // Convert to FileInfo
-        let files = ftp_files
-            .into_iter()
-            .filter_map(|f| {
-                // Construct FTP URL for file
-                let file_url = format!(
-                    "ftp://{}:{}@{}:{}{}",
-                    self.user, self.password, self.host, self.port, f.path
-                );
-                Url::parse(&file_url).ok().map(|url| {
-                    let mut info = FileInfo::new(url);
-                    if let Some(size) = f.size {
-                        info = info.with_size(size);
-                    }
-                    info
-                })
-            })
-            .collect();
-
         Ok(files)
     }
 

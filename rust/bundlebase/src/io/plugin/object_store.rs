@@ -14,8 +14,6 @@ use datafusion::datasource::object_store::ObjectStoreUrl;
 use futures::stream::{BoxStream, StreamExt, TryStreamExt};
 use object_store::path::Path as ObjectPath;
 use object_store::{ObjectMeta, ObjectStore};
-use serde::de::DeserializeOwned;
-use serde::ser::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::env::current_dir;
@@ -215,11 +213,6 @@ impl ObjectStoreFile {
         })
     }
 
-    /// Get the filename portion of the path.
-    pub fn filename(&self) -> &str {
-        self.path.filename().unwrap_or("")
-    }
-
     /// Get the underlying ObjectStore.
     pub fn store(&self) -> Arc<dyn ObjectStore> {
         self.store.clone()
@@ -243,26 +236,6 @@ impl ObjectStoreFile {
             Some(stream) => Ok(stream),
             None => Err(format!("File not found: {}", self.url).into()),
         }
-    }
-
-    /// Read file contents and deserialize from YAML.
-    pub async fn read_yaml<T>(&self) -> Result<Option<T>, BundlebaseError>
-    where
-        T: DeserializeOwned,
-    {
-        match self.read_str().await? {
-            Some(str) => Ok(Some(serde_yaml::from_str(&str)?)),
-            None => Ok(None),
-        }
-    }
-
-    /// Serialize value to YAML and write to file.
-    pub async fn write_yaml<T>(&self, value: &T) -> Result<(), BundlebaseError>
-    where
-        T: ?Sized + Serialize,
-    {
-        let yaml = serde_yaml::to_string(value)?;
-        self.write(Bytes::from(yaml)).await
     }
 
     /// Get full ObjectMeta from object store.
@@ -488,24 +461,6 @@ impl ObjectStoreDir {
         })
     }
 
-    /// Creates a memory-backed directory for storing index and metadata files.
-    pub fn new_memory() -> Result<ObjectStoreDir, BundlebaseError> {
-        let url = Url::parse("memory:///_indexes")?;
-        let config = HashMap::new();
-        let (store, path) = parse_url(&url, &config)?;
-        ObjectStoreDir::new(&url, store, &path, BundleConfig::default().into())
-    }
-
-    /// Get the underlying ObjectStore.
-    pub fn store(&self) -> Arc<dyn ObjectStore> {
-        self.store.clone()
-    }
-
-    /// Get the configuration.
-    pub fn config(&self) -> Arc<BundleConfig> {
-        self.config.clone()
-    }
-
     /// Get an IOFile for a path within this directory.
     pub fn io_file(&self, path: &str) -> Result<ObjectStoreFile, BundlebaseError> {
         let file_url = join_url(&self.url, path)?;
@@ -691,19 +646,6 @@ mod tests {
     use super::*;
     use crate::test_utils::random_memory_file;
     use rstest::rstest;
-
-    // IOFile tests
-
-    #[test]
-    fn test_filename() {
-        let file = ObjectStoreFile::from_url(
-            &Url::parse("memory:///test/test.json").unwrap(),
-            BundleConfig::default().into(),
-        )
-        .unwrap();
-        assert_eq!(file.filename(), "test.json");
-        assert_eq!(file.url().to_string(), "memory:///test/test.json");
-    }
 
     #[tokio::test]
     async fn test_read_write() {

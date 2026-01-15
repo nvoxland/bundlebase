@@ -427,7 +427,7 @@ mod tests {
         assert_eq!(indexable.len(), 1);
         assert_eq!(indexable[0].column, "price");
 
-        if let IndexPredicate::Range { min, max } = &indexable[0].predicate {
+        if let IndexPredicate::Range { min: _, max } = &indexable[0].predicate {
             assert_eq!(*max, IndexedValue::Float64(OrderedFloat(100.0)));
         } else {
             panic!("Expected IndexPredicate::Range");

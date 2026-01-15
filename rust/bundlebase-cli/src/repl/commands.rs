@@ -4,7 +4,6 @@ use bundlebase::{
     bundle::{parse_command, BundleFacade},
     BundlebaseError,
 };
-use std::fmt::Display;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -29,7 +28,6 @@ pub enum Command {
 pub enum ExecuteResult {
     Message(String),
     Table(String),
-    List(Vec<Box<dyn Display>>),
     None,
 }
 

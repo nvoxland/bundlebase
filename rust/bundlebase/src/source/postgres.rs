@@ -42,10 +42,6 @@ pub struct PostgresFunction;
 struct DataChunk {
     /// Source location identifier (sort_column:min-max)
     source_location: String,
-    /// Minimum value of sort column in this chunk
-    min_value: String,
-    /// Maximum value of sort column in this chunk
-    max_value: String,
     /// The actual rows in this chunk
     rows: Vec<Row>,
 }
@@ -129,8 +125,6 @@ impl PostgresFunction {
 
             chunks.push(DataChunk {
                 source_location,
-                min_value,
-                max_value,
                 rows,
             });
 
@@ -377,8 +371,6 @@ impl PostgresFunction {
 
         Ok(Some(DataChunk {
             source_location: source_location.to_string(),
-            min_value: min_value.to_string(),
-            max_value: max_value.to_string(),
             rows,
         }))
     }
@@ -544,8 +536,6 @@ impl SourceFunction for PostgresFunction {
 
         let chunk = DataChunk {
             source_location: location.source_location.clone(),
-            min_value: min_value.to_string(),
-            max_value: max_value.to_string(),
             rows,
         };
 

@@ -1,5 +1,4 @@
 use bundlebase::bundle::BundleFacade;
-use bundlebase::io::IOReadDir;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
 use bundlebase::BundleBuilder;
 

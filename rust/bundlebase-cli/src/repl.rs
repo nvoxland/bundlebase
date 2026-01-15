@@ -77,9 +77,6 @@ pub async fn run(state: Arc<State>) -> Result<(), BundlebaseError> {
                     Ok(result) => match result {
                         ExecuteResult::Message(msg) => println!("{}", msg),
                         ExecuteResult::Table(table) => println!("{}", table),
-                        ExecuteResult::List(items) => {
-                            items.iter().for_each(|item| println!("- {}", item))
-                        }
                         ExecuteResult::None => {}
                     },
                     Err(e) => {

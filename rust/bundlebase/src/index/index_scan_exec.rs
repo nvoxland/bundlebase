@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::data::{DataReader, RowId, SendableRecordBatchStream};
 use crate::index::column_index::{ColumnIndex, IndexedValue};
 use crate::BundlebaseError;

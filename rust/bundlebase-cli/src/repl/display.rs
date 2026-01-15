@@ -1,5 +1,5 @@
 use arrow_schema::SchemaRef;
-use bundlebase::{bundle::BundleCommit, AnyOperation, BundlebaseError, Operation};
+use bundlebase::{bundle::BundleCommit, BundlebaseError};
 use comfy_table::{presets::UTF8_FULL, Cell, Color, ContentArrangement, Table};
 use datafusion::prelude::DataFrame;
 use futures::StreamExt;
@@ -91,22 +91,6 @@ pub fn display_schema(schema: SchemaRef) -> String {
 
     if schema.fields().is_empty() {
         "No columns in schema".to_string()
-    } else {
-        table.to_string()
-    }
-}
-
-pub fn display_status(new_ops: Vec<AnyOperation>) -> String {
-    let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
-    table.set_content_arrangement(ContentArrangement::Dynamic);
-
-    for op in new_ops {
-        table.add_row(vec![Cell::new(&op.describe())]);
-    }
-
-    if table.is_empty() {
-        "No commit history".to_string()
     } else {
         table.to_string()
     }

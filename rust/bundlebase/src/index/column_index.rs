@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::data::RowId;
 use crate::BundlebaseError;
 use arrow::datatypes::DataType;

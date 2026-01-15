@@ -20,7 +20,6 @@ use std::sync::Arc;
 /// Candidate index for a query with its estimated selectivity
 struct IndexCandidate<'a> {
     filter: &'a IndexableFilter,
-    index_def: Arc<IndexDefinition>,
     index_path: String,
     selectivity: f64,
 }
@@ -234,7 +233,6 @@ impl DataBlock {
                             );
                             candidates.push(IndexCandidate {
                                 filter,
-                                index_def,
                                 index_path: index_path.to_string(),
                                 selectivity,
                             });

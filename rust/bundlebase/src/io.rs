@@ -154,7 +154,7 @@ impl DataStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+    use crate::io::plugin::object_store::ObjectStoreFile;
     use crate::BundleConfig;
     use url::Url;
 

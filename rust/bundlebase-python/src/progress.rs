@@ -106,7 +106,7 @@ impl ProgressTracker for PyProgressTracker {
 /// bundlebase._register_progress_callback(my_callback)
 /// ```
 #[pyfunction]
-fn _register_progress_callback(callback: PyObject) {
+fn _register_progress_callback(callback: Py<PyAny>) {
     let tracker = PyProgressTracker::new(callback);
     ::bundlebase::set_tracker(Box::new(tracker));
 }
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn test_py_progress_tracker_basic() {
         // Create a mock Python callback that does nothing
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
         Python::attach(|py| {
             // Create a simple Python function
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_register_callback() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
         Python::attach(|py| {
             let callback = py

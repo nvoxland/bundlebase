@@ -139,10 +139,6 @@ mod tests {
                 count: Arc::new(parking_lot::Mutex::new(0)),
             }
         }
-
-        fn get_count(&self) -> usize {
-            *self.count.lock()
-        }
     }
 
     impl ProgressTracker for CountingTracker {

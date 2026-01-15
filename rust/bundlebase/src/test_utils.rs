@@ -2,7 +2,7 @@ use crate::bundle::Operation;
 /// Test utilities for data adapter tests
 use crate::data::DataReaderFactory;
 use crate::functions::FunctionRegistry;
-use crate::io::plugin::object_store::{ObjectStoreDir, ObjectStoreFile};
+use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{writable_dir_from_url, DataStorage, IOReadWriteDir, IOReadWriteFile};
 use crate::{BundleBuilder, BundleConfig, BundleFacade};
 use arrow_schema::SchemaRef;
@@ -90,20 +90,15 @@ pub fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
 
 /// Internal function for unit tests that need the concrete ObjectStoreDir type.
 /// This is pub(crate) so it's only available within the crate.
-pub(crate) fn random_memory_dir_concrete() -> ObjectStoreDir {
-    ObjectStoreDir::from_url(&random_memory_url(), BundleConfig::default().into()).unwrap()
+#[cfg(test)]
+pub(crate) fn random_memory_dir_concrete() -> crate::io::plugin::object_store::ObjectStoreDir {
+    crate::io::plugin::object_store::ObjectStoreDir::from_url(&random_memory_url(), BundleConfig::default().into()).unwrap()
 }
 
 /// Create a random memory file for testing.
 /// Returns a Box<dyn IOReadWriteFile> that can be used in tests.
 pub fn random_memory_file(path: &str) -> Box<dyn IOReadWriteFile> {
     random_memory_dir().writable_file(path).unwrap()
-}
-
-/// Internal function for unit tests that need the concrete ObjectStoreFile type.
-/// This is pub(crate) so it's only available within the crate.
-pub(crate) fn random_memory_file_concrete(path: &str) -> ObjectStoreFile {
-    random_memory_dir_concrete().io_file(path).unwrap()
 }
 
 /// Macro to extract a field from an AnyOperation enum
