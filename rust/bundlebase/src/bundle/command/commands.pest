@@ -20,7 +20,7 @@ COMMENT = _{ "--" ~ (!"\n" ~ ANY)* ~ "\n" }
 // Entry Point
 // ============================================================================
 
-statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt | create_source_stmt | fetch_stmt | drop_join_stmt) ~ EOI }
+statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt | create_source_stmt | fetch_stmt | drop_join_stmt | rename_join_stmt) ~ EOI }
 
 // ============================================================================
 // FILTER Statement
@@ -141,6 +141,17 @@ fetch_stmt = {
 
 drop_join_stmt = {
     ^"drop" ~ ^"join" ~ identifier
+}
+
+// ============================================================================
+// RENAME JOIN Statement
+// ============================================================================
+// Syntax: RENAME JOIN <old_name> TO <new_name>
+// Examples:
+//   RENAME JOIN customers TO clients
+
+rename_join_stmt = {
+    ^"rename" ~ ^"join" ~ identifier ~ ^"to" ~ identifier
 }
 
 // ============================================================================

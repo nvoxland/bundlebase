@@ -4,8 +4,8 @@ use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, CreateSourceOp, SelectOp};
 use crate::bundle::operation::{
     AttachBlockOp, CreateFunctionOp, CreateJoinOp, CreateViewOp, DetachBlockOp, DropJoinOp,
-    DropViewOp, FilterOp, RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameViewOp,
-    ReplaceBlockOp, SetConfigOp, SetDescriptionOp,
+    DropViewOp, FilterOp, RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameJoinOp,
+    RenameViewOp, ReplaceBlockOp, SetConfigOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::operation::{CreateIndexOp, DropIndexOp};
@@ -1048,6 +1048,48 @@ impl BundleBuilder {
                 Ok(())
             })
         })
+        .await?;
+
+        Ok(self)
+    }
+
+    /// Rename an existing join
+    ///
+    /// # Arguments
+    /// * `old_name` - The current name of the join
+    /// * `new_name` - The new name for the join
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade, JoinTypeOption};
+    /// # async fn example() -> Result<(), BundlebaseError> {
+    /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
+    /// # c.attach("data.csv", None).await?;
+    /// c.join("customers", "base.customer_id = customers.id", Some("customers.parquet"), JoinTypeOption::Left).await?;
+    /// c.rename_join("customers", "clients").await?;
+    /// c.commit("Renamed join").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn rename_join(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<&mut Self, BundlebaseError> {
+        let old_name = old_name.to_string();
+        let new_name = new_name.to_string();
+
+        self.do_change(
+            &format!("Rename join '{}' to '{}'", old_name, new_name),
+            |builder| {
+                Box::pin(async move {
+                    let op =
+                        RenameJoinOp::setup(&old_name, &new_name, &builder.bundle).await?;
+                    builder.apply_operation(op.into()).await?;
+                    Ok(())
+                })
+            },
+        )
         .await?;
 
         Ok(self)

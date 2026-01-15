@@ -90,6 +90,11 @@ impl Pack {
         self.name.as_str()
     }
 
+    /// Set the pack name (for rename operations).
+    pub fn set_name(&mut self, name: &str) {
+        self.name = name.to_string();
+    }
+
     /// Get the join type.
     pub fn join_type(&self) -> Option<&JoinTypeOption> {
         self.join_type.as_ref()
