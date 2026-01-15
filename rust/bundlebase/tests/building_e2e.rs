@@ -1,6 +1,6 @@
 use bundlebase;
 use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME, META_DIR};
-use bundlebase::io::{read_yaml, readable_file_from_url, IOReadDir, IOReadFile, IOReadWriteFile};
+use bundlebase::io::{read_yaml, readable_file_from_url};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::Bundle;
 use bundlebase::BundleConfig;

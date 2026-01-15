@@ -163,7 +163,6 @@ pub trait IOReadWriteDir: IOReadDir {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::test_utils::random_memory_dir;
 
     #[test]

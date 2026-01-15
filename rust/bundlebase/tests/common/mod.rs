@@ -1,11 +1,11 @@
 /// Shared test utilities for integration tests
 use arrow::datatypes::SchemaRef;
 use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
-use bundlebase::io::{readable_file_from_url, IOReadDir, IOReadWriteDir};
+use bundlebase::io::{readable_file_from_url, IOReadWriteDir};
 use bundlebase::{BundlebaseError, BundleConfig};
 use url::Url;
 
-
+#[allow(dead_code)]
 pub fn enable_logging() {
     let _ = env_logger::builder().is_test(true).try_init();
 }

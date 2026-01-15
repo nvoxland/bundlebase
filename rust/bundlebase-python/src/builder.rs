@@ -1231,7 +1231,7 @@ impl PyBundleBuilder {
     }
 
     fn views(&self) -> HashMap<String, String> {
-        Python::with_gil(|_py| {
+        Python::attach(|_py| {
             self.inner
                 .blocking_lock()
                 .views()
@@ -1242,7 +1242,7 @@ impl PyBundleBuilder {
     }
 
     fn operations(&self) -> Vec<super::operation::PyOperation> {
-        Python::with_gil(|_py| {
+        Python::attach(|_py| {
             self.inner
                 .blocking_lock()
                 .bundle()

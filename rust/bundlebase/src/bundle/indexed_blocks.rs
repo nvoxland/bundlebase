@@ -20,16 +20,6 @@ impl IndexedBlocks {
         }
     }
 
-    /// Creates a new IndexedBlocks instance from a list of (block_id, version) tuples
-    #[cfg(test)]
-    pub(crate) fn from_tuples(blocks: Vec<(ObjectId, String)>, path: String) -> Self {
-        let versioned_blocks = blocks
-            .into_iter()
-            .map(|(block, version)| VersionedBlockId::new(block, version))
-            .collect();
-        Self::new(versioned_blocks, path)
-    }
-
     /// Checks if this index contains the specified block at the specified version
     pub fn contains(&self, block_id: &ObjectId, version: &str) -> bool {
         self.blocks

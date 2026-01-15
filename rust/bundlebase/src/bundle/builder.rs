@@ -189,7 +189,7 @@ impl BundleBuilder {
             .into());
         }
 
-        let mut builder = BundleBuilder {
+        let builder = BundleBuilder {
             status: BundleStatus::new(),
             bundle: existing,
             in_progress_change: None,

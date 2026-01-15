@@ -21,17 +21,6 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use url::Url;
 
-/// Information about a remote file from SFTP listing.
-#[derive(Debug, Clone)]
-pub struct SftpFileInfo {
-    /// Full path on the remote system
-    pub path: String,
-    /// File size in bytes
-    pub size: u64,
-    /// Whether this entry is a directory
-    pub is_dir: bool,
-}
-
 /// SSH client handler for russh.
 struct SshHandler;
 
@@ -163,16 +152,22 @@ impl SftpClient {
     pub async fn list_files_recursive(
         &self,
         path: &str,
-    ) -> Result<Vec<SftpFileInfo>, BundlebaseError> {
+        user: &str,
+        host: &str,
+        port: u16,
+    ) -> Result<Vec<FileInfo>, BundlebaseError> {
         let mut all_files = Vec::new();
-        self.list_dir_recursive_inner(path, &mut all_files).await?;
+        self.list_dir_recursive_inner(path, user, host, port, &mut all_files).await?;
         Ok(all_files)
     }
 
     async fn list_dir_recursive_inner(
         &self,
         path: &str,
-        files: &mut Vec<SftpFileInfo>,
+        user: &str,
+        host: &str,
+        port: u16,
+        files: &mut Vec<FileInfo>,
     ) -> Result<(), BundlebaseError> {
         let entries = self.sftp.read_dir(path).await.map_err(|e| {
             BundlebaseError::from(format!("Failed to list directory '{}': {}", path, e))
@@ -196,13 +191,10 @@ impl SftpClient {
             let size = entry.metadata().size.unwrap_or(0);
 
             if is_dir {
-                Box::pin(self.list_dir_recursive_inner(&full_path, files)).await?;
+                Box::pin(self.list_dir_recursive_inner(&full_path, user, host, port, files)).await?;
             } else {
-                files.push(SftpFileInfo {
-                    path: full_path,
-                    size,
-                    is_dir: false,
-                });
+                let url = build_sftp_url(user, host, port, &full_path)?;
+                files.push(FileInfo::new(url).with_size(size));
             }
         }
 
@@ -436,19 +428,8 @@ impl IOReadDir for SftpDir {
 
     async fn list_files(&self) -> Result<Vec<FileInfo>, BundlebaseError> {
         let client = self.connect().await?;
-        let sftp_files = client.list_files_recursive(&self.path).await?;
+        let files = client.list_files_recursive(&self.path, &self.user, &self.host, self.port).await?;
         client.close().await?;
-
-        // Convert to FileInfo
-        let files = sftp_files
-            .into_iter()
-            .filter_map(|f| {
-                build_sftp_url(&self.user, &self.host, self.port, &f.path)
-                    .ok()
-                    .map(|url| FileInfo::new(url).with_size(f.size))
-            })
-            .collect();
-
         Ok(files)
     }
 

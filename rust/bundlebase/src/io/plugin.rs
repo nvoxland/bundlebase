@@ -15,9 +15,13 @@ use crate::io::registry::IORegistry;
 use std::sync::Arc;
 
 // Re-export commonly used types for convenience
-pub use ftp::{FtpDir, FtpFile, FtpFileInfo, FtpIOFactory};
+#[allow(unused_imports)]
+pub use ftp::{FtpDir, FtpFile, FtpIOFactory};
+#[allow(unused_imports)]
 pub use object_store::{ObjectStoreFile, ObjectStoreIOFactory};
-pub use sftp::{SftpClient, SftpDir, SftpFile, SftpFileInfo, SftpIOFactory};
+#[allow(unused_imports)]
+pub use sftp::{SftpClient, SftpDir, SftpFile, SftpIOFactory};
+#[allow(unused_imports)]
 pub use tar::{TarDir, TarFile, TarIOFactory, TarObjectStore};
 
 /// Register all built-in IO factories with the registry.

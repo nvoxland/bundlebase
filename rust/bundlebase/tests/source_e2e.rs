@@ -1,10 +1,9 @@
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::io::{readable_file_from_url, IOReadWriteDir, IOReadWriteFile};
+use bundlebase::io::{readable_file_from_url, IOReadWriteDir};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::{Bundle, BundlebaseError, BundleConfig};
 use std::collections::HashMap;
-use std::sync::Arc;
 use url::Url;
 
 mod common;
@@ -691,7 +690,7 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
     let mut found_attach_block = false;
     let mut location_is_relative = false;
 
-    for (i, line) in lines.iter().enumerate() {
+    for line in lines.iter() {
         if line.contains("type: attachBlock") {
             found_attach_block = true;
         }

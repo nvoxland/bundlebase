@@ -110,8 +110,6 @@ impl OperationCategory {
 /// Use `start_span()` to create a new span, add attributes with `set_attribute()`,
 /// record events with `add_event()`, and the span will automatically finish when dropped.
 pub struct Span {
-    category: OperationCategory,
-    operation: String,
     inner: BoxedSpan,
 }
 
@@ -125,11 +123,7 @@ impl Span {
             span.set_attribute(KeyValue::new("category", category.as_str()));
             span.set_attribute(KeyValue::new("operation", operation.clone()));
 
-            Self {
-                category,
-                operation,
-                inner: span,
-            }
+            Self { inner: span }
         }
     }
 

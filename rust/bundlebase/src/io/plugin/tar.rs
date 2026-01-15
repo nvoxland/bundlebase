@@ -20,7 +20,7 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -135,10 +135,8 @@ impl TarObjectStore {
                 })
                 .unwrap_or_else(|| chrono::DateTime::UNIX_EPOCH);
 
-            // Calculate offset - this is an approximation since we're iterating
-            // We'll recalculate precise offsets when we actually need to read
             let tar_entry = TarEntry {
-                offset: 0, // Will be set to proper value when reading
+                offset: entry.raw_file_position(),
                 size,
                 modified,
             };
@@ -162,54 +160,40 @@ impl TarObjectStore {
         Ok(())
     }
 
-    /// Reads a file from the tar archive by scanning to find it.
-    /// This is less efficient than using byte offsets, but tar format
-    /// requires sequential reading for accurate positioning.
+    /// Reads a file from the tar archive using the indexed offset for O(1) seeking.
     fn read_entry(&self, path: &ObjectPath) -> ObjectStoreResult<Bytes> {
-        let file = File::open(&*self.tar_path).map_err(|e| {
-            object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: Box::new(e),
-            }
+        self.ensure_indexed()?;
+
+        // Look up the entry in the index
+        let index = self.index.read();
+        let entry = index.entries.get(path).ok_or_else(|| object_store::Error::NotFound {
+            path: path.to_string(),
+            source: "File not found in tar index".into(),
         })?;
 
-        let mut archive = Archive::new(file);
+        let offset = entry.offset;
+        let size = entry.size;
+        drop(index); // Release lock before file I/O
 
-        for entry_result in archive.entries().map_err(|e| object_store::Error::Generic {
+        // Open file and seek directly to the data
+        let mut file = File::open(&*self.tar_path).map_err(|e| object_store::Error::Generic {
             store: "TarObjectStore",
             source: Box::new(e),
-        })? {
-            let mut entry = entry_result.map_err(|e| object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: Box::new(e),
-            })?;
+        })?;
 
-            let entry_path = entry.path().map_err(|e| object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: Box::new(e),
-            })?;
-            let entry_path_str = entry_path.to_str().ok_or_else(|| object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: "Invalid UTF-8 in tar entry path".into(),
-            })?;
+        file.seek(std::io::SeekFrom::Start(offset)).map_err(|e| object_store::Error::Generic {
+            store: "TarObjectStore",
+            source: Box::new(e),
+        })?;
 
-            if entry_path_str == path.as_ref() {
-                // Found the entry, read its contents
-                let mut buffer = Vec::new();
-                entry.read_to_end(&mut buffer).map_err(|e| {
-                    object_store::Error::Generic {
-                        store: "TarObjectStore",
-                        source: Box::new(e),
-                    }
-                })?;
-                return Ok(Bytes::from(buffer));
-            }
-        }
+        // Read exactly `size` bytes
+        let mut buffer = vec![0u8; size as usize];
+        file.read_exact(&mut buffer).map_err(|e| object_store::Error::Generic {
+            store: "TarObjectStore",
+            source: Box::new(e),
+        })?;
 
-        Err(object_store::Error::NotFound {
-            path: path.to_string(),
-            source: "File not found in tar archive".into(),
-        })
+        Ok(Bytes::from(buffer))
     }
 
     /// Appends a new file to the tar archive.
@@ -626,11 +610,6 @@ impl TarFile {
     pub fn new(url: Url, store: Arc<TarObjectStore>, path: ObjectPath) -> Self {
         Self { url, store, path }
     }
-
-    /// Get the filename portion of the path.
-    pub fn filename(&self) -> &str {
-        self.path.filename().unwrap_or("")
-    }
 }
 
 #[async_trait]
@@ -774,16 +753,6 @@ impl TarDir {
             path,
             archive_path,
         })
-    }
-
-    /// Create a TarDir with an existing store.
-    pub fn new(url: Url, store: Arc<TarObjectStore>, path: ObjectPath, archive_path: PathBuf) -> Self {
-        Self {
-            url,
-            store,
-            path,
-            archive_path,
-        }
     }
 }
 

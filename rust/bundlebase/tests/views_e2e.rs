@@ -1,4 +1,4 @@
-use bundlebase::io::{read_yaml, IOReadDir};
+use bundlebase::io::read_yaml;
 use bundlebase::test_utils::{
     assert_vec_regexp, describe_ops, field_names, random_memory_url, test_datafile,
 };
