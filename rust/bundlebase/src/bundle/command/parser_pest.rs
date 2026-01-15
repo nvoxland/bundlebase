@@ -30,6 +30,7 @@ pub fn parse_custom_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseE
                 Rule::create_source_stmt => parse_create_source_pest(inner_stmt)?,
                 Rule::fetch_stmt => parse_fetch_pest(inner_stmt)?,
                 Rule::drop_join_stmt => parse_drop_join_pest(inner_stmt)?,
+                Rule::rename_join_stmt => parse_rename_join_pest(inner_stmt)?,
                 _ => return Err("Unexpected statement type".into()),
             };
             Ok(Some(cmd))
@@ -61,6 +62,7 @@ fn is_likely_custom_syntax(sql: &str) -> bool {
         || upper.starts_with("CREATE SOURCE")
         || upper.starts_with("FETCH")
         || upper.starts_with("DROP JOIN")
+        || upper.starts_with("RENAME JOIN")
 }
 
 fn format_pest_error(error: pest::error::Error<Rule>, sql: &str) -> BundlebaseError {
@@ -307,6 +309,30 @@ fn parse_drop_join_pest(
         .ok_or_else(|| -> BundlebaseError { "DROP JOIN statement missing join name".into() })?;
 
     Ok(BundleCommand::DropJoin { name })
+}
+
+fn parse_rename_join_pest(
+    pair: pest::iterators::Pair<Rule>,
+) -> Result<BundleCommand, BundlebaseError> {
+    let mut old_name = None;
+    let mut new_name = None;
+
+    for inner_pair in pair.into_inner() {
+        if inner_pair.as_rule() == Rule::identifier {
+            if old_name.is_none() {
+                old_name = Some(inner_pair.as_str().to_string());
+            } else {
+                new_name = Some(inner_pair.as_str().to_string());
+            }
+        }
+    }
+
+    let old_name = old_name
+        .ok_or_else(|| -> BundlebaseError { "RENAME JOIN statement missing old join name".into() })?;
+    let new_name = new_name
+        .ok_or_else(|| -> BundlebaseError { "RENAME JOIN statement missing new join name".into() })?;
+
+    Ok(BundleCommand::RenameJoin { old_name, new_name })
 }
 
 // Helper functions

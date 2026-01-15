@@ -80,6 +80,10 @@ pub enum BundleCommand {
     /// Maps to: `bundle.drop_join(&name)`
     DropJoin { name: String },
 
+    /// Rename a join
+    /// Maps to: `bundle.rename_join(&old_name, &new_name)`
+    RenameJoin { old_name: String, new_name: String },
+
     /// Rebuild all indexes
     /// Maps to: `bundle.reindex()`
     Reindex,
@@ -195,6 +199,10 @@ impl BundleCommand {
             }
             BundleCommand::DropJoin { name } => {
                 bundle.drop_join(&name).await?;
+                Ok(())
+            }
+            BundleCommand::RenameJoin { old_name, new_name } => {
+                bundle.rename_join(&old_name, &new_name).await?;
                 Ok(())
             }
             BundleCommand::Reindex => {
