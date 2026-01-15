@@ -37,7 +37,7 @@ pub enum BundleCommand {
 
     /// Remove a column
     /// Maps to: `bundle.remove_column(&name)`
-    RemoveColumn { name: String },
+    DropColumn { name: String },
 
     /// Rename a column
     /// Maps to: `bundle.rename_column(&old_name, &new_name)`
@@ -158,8 +158,8 @@ impl BundleCommand {
                 bundle.filter(&where_clause, params).await?;
                 Ok(())
             }
-            BundleCommand::RemoveColumn { name } => {
-                bundle.remove_column(&name).await?;
+            BundleCommand::DropColumn { name } => {
+                bundle.drop_column(&name).await?;
                 Ok(())
             }
             BundleCommand::RenameColumn { old_name, new_name } => {

@@ -203,7 +203,7 @@ class SyncBundleBuilder(SyncBundle):
 
     Example:
         >>> c = dc.create()
-        >>> c.attach("data.parquet").filter("active = true").remove_column("email")
+        >>> c.attach("data.parquet").filter("active = true").drop_column("email")
         >>> df = c.to_pandas()
     """
 
@@ -255,9 +255,9 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def remove_column(self, name: str) -> "SyncBundleBuilder":
+    def drop_column(self, name: str) -> "SyncBundleBuilder":
         """Remove a column from the bundle."""
-        coro = _call_original_method(self._async, "remove_column", name)
+        coro = _call_original_method(self._async, "drop_column", name)
         self._async = _loop_manager.run_sync(coro)
         return self
 

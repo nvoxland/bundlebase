@@ -3,14 +3,14 @@
 Allows multiple operations to be queued and executed with a single await:
 
     c = await (c.attach("data.parquet")
-              .remove_column("col")
+              .drop_column("col")
               .rename_column("old", "new"))
 
 Also supports chaining from create() and open():
 
     c = await (create(path)
               .attach("data.parquet")
-              .remove_column("unwanted"))
+              .drop_column("unwanted"))
 """
 
 from typing import Any, List, Tuple, Callable, Dict, Optional
@@ -32,7 +32,7 @@ class OperationChain:
 
     Example:
         c = await (c.attach("data.parquet")
-                  .remove_column("unwanted")
+                  .drop_column("unwanted")
                   .rename_column("old_name", "new_name"))
     """
 
@@ -163,7 +163,7 @@ class CreateChain:
     Example:
         c = await (create(path)
                   .attach("data.parquet")
-                  .remove_column("unwanted"))
+                  .drop_column("unwanted"))
     """
 
     def __init__(self, create_func: Callable, *create_args):
@@ -295,7 +295,7 @@ class ExtendChain:
     Example:
         c = await (existing_c.extend("/new/path")
                           .attach("new_data.parquet")
-                          .remove_column("unwanted"))
+                          .drop_column("unwanted"))
     """
 
     def __init__(self, original_extend_method: Callable, existing_bundle: Any, data_dir: str):

@@ -15,7 +15,7 @@ impl PyOperation {
         match &self.inner {
             AnyOperation::AttachBlock(_) => "attachBlock".to_string(),
             AnyOperation::CreateView(_) => "CreateView".to_string(),
-            AnyOperation::RemoveColumns(_) => "removeColumns".to_string(),
+            AnyOperation::DropColumn(_) => "dropColumn".to_string(),
             AnyOperation::RenameColumn(_) => "renameColumn".to_string(),
             AnyOperation::RenameJoin(_) => "renameJoin".to_string(),
             AnyOperation::RenameView(_) => "renameView".to_string(),

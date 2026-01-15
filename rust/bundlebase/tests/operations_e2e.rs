@@ -62,7 +62,7 @@ async fn test_attach() -> Result<(), BundlebaseError> {
 async fn test_remove() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
-    bundle.remove_column("title").await?;
+    bundle.drop_column("title").await?;
 
     assert!(!bundle
         .bundle
@@ -199,8 +199,8 @@ async fn test_multi_operation_pipeline() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Remove multiple columns
-    bundle.remove_column("title").await?;
-    bundle.remove_column("comments").await?;
+    bundle.drop_column("title").await?;
+    bundle.drop_column("comments").await?;
 
     // Rename a column
     bundle.rename_column("first_name", "given_name").await?;

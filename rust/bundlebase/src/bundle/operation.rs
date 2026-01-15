@@ -11,8 +11,8 @@ mod drop_view;
 mod replace_block;
 mod filter;
 mod index_blocks;
+mod drop_column;
 mod rebuild_index;
-mod remove_columns;
 mod rename_column;
 mod rename_join;
 mod rename_view;
@@ -35,8 +35,8 @@ pub use crate::bundle::operation::drop_view::DropViewOp;
 pub use crate::bundle::operation::filter::FilterOp;
 pub use crate::bundle::operation::replace_block::ReplaceBlockOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
+pub use crate::bundle::operation::drop_column::DropColumnOp;
 pub use crate::bundle::operation::rebuild_index::RebuildIndexOp;
-pub use crate::bundle::operation::remove_columns::RemoveColumnsOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
 pub use crate::bundle::operation::rename_join::RenameJoinOp;
 pub use crate::bundle::operation::rename_view::RenameViewOp;
@@ -122,7 +122,7 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AnyOperation {
-    RemoveColumns(RemoveColumnsOp),
+    DropColumn(DropColumnOp),
     RenameColumn(RenameColumnOp),
     RenameJoin(RenameJoinOp),
     RenameView(RenameViewOp),
@@ -150,7 +150,7 @@ pub enum AnyOperation {
 impl Operation for AnyOperation {
     fn describe(&self) -> String {
         match self {
-            AnyOperation::RemoveColumns(op) => op.describe(),
+            AnyOperation::DropColumn(op) => op.describe(),
             AnyOperation::RenameColumn(op) => op.describe(),
             AnyOperation::RenameJoin(op) => op.describe(),
             AnyOperation::RenameView(op) => op.describe(),
@@ -177,7 +177,7 @@ impl Operation for AnyOperation {
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         match self {
-            AnyOperation::RemoveColumns(op) => op.check(bundle).await,
+            AnyOperation::DropColumn(op) => op.check(bundle).await,
             AnyOperation::RenameColumn(op) => op.check(bundle).await,
             AnyOperation::RenameJoin(op) => op.check(bundle).await,
             AnyOperation::RenameView(op) => op.check(bundle).await,
@@ -204,7 +204,7 @@ impl Operation for AnyOperation {
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         match self {
-            AnyOperation::RemoveColumns(op) => op.apply(bundle).await,
+            AnyOperation::DropColumn(op) => op.apply(bundle).await,
             AnyOperation::RenameColumn(op) => op.apply(bundle).await,
             AnyOperation::RenameJoin(op) => op.apply(bundle).await,
             AnyOperation::RenameView(op) => op.apply(bundle).await,
@@ -235,7 +235,7 @@ impl Operation for AnyOperation {
         ctx: Arc<SessionContext>,
     ) -> Result<DataFrame, BundlebaseError> {
         match self {
-            AnyOperation::RemoveColumns(op) => op.apply_dataframe(df, ctx).await,
+            AnyOperation::DropColumn(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::RenameColumn(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::RenameJoin(op) => op.apply_dataframe(df, ctx).await,
             AnyOperation::RenameView(op) => op.apply_dataframe(df, ctx).await,
@@ -262,7 +262,7 @@ impl Operation for AnyOperation {
 
     fn version(&self) -> String {
         match self {
-            AnyOperation::RemoveColumns(op) => op.version(),
+            AnyOperation::DropColumn(op) => op.version(),
             AnyOperation::RenameColumn(op) => op.version(),
             AnyOperation::RenameJoin(op) => op.version(),
             AnyOperation::RenameView(op) => op.version(),
@@ -289,7 +289,7 @@ impl Operation for AnyOperation {
 
     fn allowed_on_view(&self) -> bool {
         match self {
-            AnyOperation::RemoveColumns(op) => op.allowed_on_view(),
+            AnyOperation::DropColumn(op) => op.allowed_on_view(),
             AnyOperation::RenameColumn(op) => op.allowed_on_view(),
             AnyOperation::RenameJoin(op) => op.allowed_on_view(),
             AnyOperation::RenameView(op) => op.allowed_on_view(),
@@ -316,9 +316,9 @@ impl Operation for AnyOperation {
 }
 
 // Into conversions for each config type
-impl From<RemoveColumnsOp> for AnyOperation {
-    fn from(config: RemoveColumnsOp) -> Self {
-        AnyOperation::RemoveColumns(config)
+impl From<DropColumnOp> for AnyOperation {
+    fn from(config: DropColumnOp) -> Self {
+        AnyOperation::DropColumn(config)
     }
 }
 

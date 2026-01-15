@@ -422,7 +422,7 @@ impl PyBundleBuilder {
         })
     }
 
-    fn remove_column<'py>(
+    fn drop_column<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         py: Python<'py>,
@@ -432,9 +432,9 @@ impl PyBundleBuilder {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
             builder
-                .remove_column(name.as_str())
+                .drop_column(name.as_str())
                 .await
-                .map_err(|e| to_py_error(&format!("Failed to remove column '{}'", name), e))?;
+                .map_err(|e| to_py_error(&format!("Failed to drop column '{}'", name), e))?;
             drop(builder);
             Python::attach(|py| {
                 Py::new(

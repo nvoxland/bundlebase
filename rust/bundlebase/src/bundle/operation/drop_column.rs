@@ -9,11 +9,11 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct RemoveColumnsOp {
+pub struct DropColumnOp {
     pub names: Vec<String>,
 }
 
-impl RemoveColumnsOp {
+impl DropColumnOp {
     pub fn setup(names: Vec<&str>) -> Self {
         Self {
             names: names.iter().map(|s| s.to_string()).collect(),
@@ -22,9 +22,9 @@ impl RemoveColumnsOp {
 }
 
 #[async_trait]
-impl Operation for RemoveColumnsOp {
+impl Operation for DropColumnOp {
     fn describe(&self) -> String {
-        format!("REMOVE COLUMNS: {:?}", self.names)
+        format!("DROP COLUMN: {:?}", self.names)
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -51,19 +51,19 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = RemoveColumnsOp::setup(vec!["col1", "col2"]);
-        assert_eq!(op.describe(), r#"REMOVE COLUMNS: ["col1", "col2"]"#);
+        let op = DropColumnOp::setup(vec!["col1", "col2"]);
+        assert_eq!(op.describe(), r#"DROP COLUMN: ["col1", "col2"]"#);
     }
 
     #[test]
     fn test_describe_single_column() {
-        let op = RemoveColumnsOp::setup(vec!["title"]);
-        assert_eq!(op.describe(), r#"REMOVE COLUMNS: ["title"]"#);
+        let op = DropColumnOp::setup(vec!["title"]);
+        assert_eq!(op.describe(), r#"DROP COLUMN: ["title"]"#);
     }
 
     #[test]
     fn test_serialization() {
-        let op = RemoveColumnsOp::setup(vec!["col1", "col2"]);
+        let op = DropColumnOp::setup(vec!["col1", "col2"]);
 
         let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
         let expected = r#"names:
@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_serialization_single() {
-        let op = RemoveColumnsOp::setup(vec!["title"]);
+        let op = DropColumnOp::setup(vec!["title"]);
 
         let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
         let expected = r#"names:
@@ -86,7 +86,7 @@ mod tests {
 
     #[test]
     fn test_version() {
-        let op = RemoveColumnsOp::setup(vec!["title"]);
+        let op = DropColumnOp::setup(vec!["title"]);
         let version = op.version();
 
         // Exact value for this specific config (first 12 chars of SHA256)

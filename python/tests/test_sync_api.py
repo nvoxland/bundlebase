@@ -66,11 +66,11 @@ class TestSyncCreate:
 class TestSyncOperations:
     """Test synchronous mutation operations."""
 
-    def test_sync_remove_column(self):
+    def test_sync_drop_column(self):
         """Test removing a column synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.remove_column("country")
+        c.drop_column("country")
 
         field_names = [f.name for f in c.schema.fields]
         assert "country" not in field_names
@@ -116,9 +116,9 @@ class TestSyncChaining:
     """Test fluent method chaining in synchronous mode."""
 
     def test_chain_attach_and_remove(self):
-        """Test chaining attach and remove_column without await."""
+        """Test chaining attach and drop_column without await."""
         c = bb.create(random_bundle())
-        c.attach(datafile("userdata.parquet")).remove_column("country")
+        c.attach(datafile("userdata.parquet")).drop_column("country")
 
         field_names = [f.name for f in c.schema.fields]
         assert "country" not in field_names
@@ -126,7 +126,7 @@ class TestSyncChaining:
     def test_chain_multiple_operations(self):
         """Test chaining multiple operations."""
         c = bb.create(random_bundle())
-        c.attach(datafile("userdata.parquet")).remove_column("country").rename_column(
+        c.attach(datafile("userdata.parquet")).drop_column("country").rename_column(
             "first_name", "fname"
         ).filter("salary > $1", [50000.0])
 

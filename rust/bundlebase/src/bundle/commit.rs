@@ -40,7 +40,7 @@ pub fn manifest_version(filename: &str) -> u32 {
 mod tests {
     use super::*;
     use crate::bundle::operation::{
-        BundleChange, RemoveColumnsOp, RenameColumnOp, SetDescriptionOp, SetNameOp,
+        BundleChange, DropColumnOp, RenameColumnOp, SetDescriptionOp, SetNameOp,
     };
     use uuid::Uuid;
 
@@ -71,7 +71,7 @@ changes: []
 
     #[test]
     fn test_serialize_single_operation() {
-        let op = RemoveColumnsOp::setup(vec!["col1"]);
+        let op = DropColumnOp::setup(vec!["col1"]);
         let change = BundleChange {
             id: test_uuid(),
             description: "Remove columns".to_string(),
@@ -94,7 +94,7 @@ changes:
 - id: 12345678-1234-1234-1234-123456789012
   description: Remove columns
   operations:
-  - type: removeColumns
+  - type: dropColumn
     names:
     - col1
 ";
@@ -104,7 +104,7 @@ changes:
     #[test]
     fn test_serialize_multiple_operations() {
         let op1 = SetNameOp::setup("Test");
-        let op2 = RemoveColumnsOp::setup(vec!["col1"]);
+        let op2 = DropColumnOp::setup(vec!["col1"]);
         let op3 = RenameColumnOp::setup("old", "new");
 
         let change = BundleChange {
@@ -131,7 +131,7 @@ changes:
   operations:
   - type: setName
     name: Test
-  - type: removeColumns
+  - type: dropColumn
     names:
     - col1
   - type: renameColumn
@@ -214,7 +214,7 @@ changes:
   operations:
   - type: setName
     name: Test
-  - type: removeColumns
+  - type: dropColumn
     names:
     - col1
   - type: renameColumn
@@ -537,7 +537,7 @@ changes:
     #[test]
     fn test_roundtrip_complex_operations() {
         // Test that serialization and deserialization are symmetric
-        use crate::bundle::operation::{AttachBlockOp, RemoveColumnsOp};
+        use crate::bundle::operation::{AttachBlockOp, DropColumnOp};
         use crate::data::ObjectId;
         use arrow_schema::{DataType, Field, Schema};
         use std::sync::Arc;
@@ -560,7 +560,7 @@ changes:
             source_location: None,
         };
 
-        let remove_config = RemoveColumnsOp {
+        let remove_config = DropColumnOp {
             names: vec!["col1".to_string()],
         };
 
@@ -568,7 +568,7 @@ changes:
             id: test_uuid(),
             operations: vec![
                 AnyOperation::AttachBlock(attach_config),
-                AnyOperation::RemoveColumns(remove_config),
+                AnyOperation::DropColumn(remove_config),
             ],
             description: "Complex operations".to_string(),
         };
@@ -587,7 +587,7 @@ changes:
 
         // Verify type field appears for each operation
         assert!(yaml.contains("type: attachBlock"));
-        assert!(yaml.contains("type: removeColumns"));
+        assert!(yaml.contains("type: dropColumn"));
 
         // Deserialize back
         let deserialized: BundleCommit = serde_yaml::from_str(&yaml).unwrap();
@@ -599,7 +599,7 @@ changes:
         ));
         assert!(matches!(
             deserialized.operations()[1],
-            AnyOperation::RemoveColumns(_)
+            AnyOperation::DropColumn(_)
         ));
     }
 
@@ -684,7 +684,7 @@ changes:
         dict_is_ordered: false
         metadata: {}
       metadata: {}
-  - type: removeColumns
+  - type: dropColumn
     names:
     - title
   - type: renameColumn
@@ -713,7 +713,7 @@ changes:
 
         // Verify RemoveColumns operation
         match &commit.operations()[1] {
-            AnyOperation::RemoveColumns(config) => {
+            AnyOperation::DropColumn(config) => {
                 assert_eq!(config.names, vec!["title".to_string()]);
             }
             _ => panic!("Expected RemoveColumns operation"),

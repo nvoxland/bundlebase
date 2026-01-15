@@ -3,8 +3,8 @@ use crate::bundle::init::InitCommit;
 use crate::bundle::operation::SetNameOp;
 use crate::bundle::operation::{AnyOperation, CreateSourceOp, SelectOp};
 use crate::bundle::operation::{
-    AttachBlockOp, CreateFunctionOp, CreateJoinOp, CreateViewOp, DetachBlockOp, DropJoinOp,
-    DropViewOp, FilterOp, RebuildIndexOp, RemoveColumnsOp, RenameColumnOp, RenameJoinOp,
+    AttachBlockOp, CreateFunctionOp, CreateJoinOp, CreateViewOp, DetachBlockOp, DropColumnOp,
+    DropJoinOp, DropViewOp, FilterOp, RebuildIndexOp, RenameColumnOp, RenameJoinOp,
     RenameViewOp, ReplaceBlockOp, SetConfigOp, SetDescriptionOp,
 };
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
@@ -1095,17 +1095,17 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Remove a column (mutates self)
-    pub async fn remove_column(&mut self, name: &str) -> Result<&mut Self, BundlebaseError> {
+    /// Drop a column (mutates self)
+    pub async fn drop_column(&mut self, name: &str) -> Result<&mut Self, BundlebaseError> {
         let name = name.to_string();
 
-        self.do_change(&format!("Remove column {}", name), |builder| {
+        self.do_change(&format!("Drop column {}", name), |builder| {
             Box::pin(async move {
                 builder
-                    .apply_operation(RemoveColumnsOp::setup(vec![name.as_str()]).into())
+                    .apply_operation(DropColumnOp::setup(vec![name.as_str()]).into())
                     .await?;
 
-                info!("Removed column \"{}\"", name);
+                info!("Dropped column \"{}\"", name);
 
                 Ok(())
             })
@@ -1721,7 +1721,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_schema_after_remove_column() {
+    async fn test_schema_after_drop_column() {
         let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
@@ -1733,7 +1733,7 @@ mod tests {
         let schema_before = &bundle.bundle.schema().await.unwrap();
         assert_eq!(schema_before.fields().len(), 13);
 
-        bundle.remove_column("title").await.unwrap();
+        bundle.drop_column("title").await.unwrap();
         let schema_after = &bundle.bundle.schema().await.unwrap();
         assert_eq!(schema_after.fields().len(), 12);
 
@@ -1815,7 +1815,7 @@ mod tests {
             .unwrap();
         assert_eq!(bundle.bundle.operations().len(), 1);
 
-        bundle.remove_column("title").await.unwrap();
+        bundle.drop_column("title").await.unwrap();
         assert_eq!(bundle.bundle.operations().len(), 2);
     }
 
@@ -1849,7 +1849,7 @@ mod tests {
 
         // Clone and add operation to clone
         let mut bundle_clone = bundle.clone();
-        bundle_clone.remove_column("title").await.unwrap();
+        bundle_clone.drop_column("title").await.unwrap();
         let v2 = bundle_clone.version();
 
         // Original should be unchanged
@@ -1892,7 +1892,7 @@ mod tests {
             .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
-        bundle.remove_column("title").await.unwrap();
+        bundle.drop_column("title").await.unwrap();
         let bundle = bundle
             .rename_column("first_name", "given_name")
             .await
