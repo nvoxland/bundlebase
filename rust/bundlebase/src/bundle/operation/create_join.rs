@@ -10,14 +10,14 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct DefinePackOp {
+pub struct CreateJoinOp {
     pub id: ObjectId,
     pub name: String,
     pub join_type: JoinTypeOption,
     pub expression: String,
 }
 
-impl DefinePackOp {
+impl CreateJoinOp {
     pub async fn setup(
         id: &ObjectId,
         name: &str,
@@ -34,9 +34,9 @@ impl DefinePackOp {
 }
 
 #[async_trait]
-impl Operation for DefinePackOp {
+impl Operation for CreateJoinOp {
     fn describe(&self) -> String {
-        format!("CREATE PACK {} AS JOIN {}", self.id, &self.name)
+        format!("CREATE JOIN '{}' ON {}", &self.name, &self.expression)
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -67,19 +67,19 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = DefinePackOp {
+        let op = CreateJoinOp {
             id: ObjectId::generate(),
             name: "customers".to_string(),
             join_type: JoinTypeOption::Left,
             expression: "base.id = customers.id".to_string(),
         };
-        assert!(op.describe().contains("AS JOIN customers"));
+        assert!(op.describe().contains("CREATE JOIN 'customers'"));
     }
 
     #[test]
     fn test_serialization() {
         let pack_id: ObjectId = "a5".try_into().unwrap();
-        let op = DefinePackOp {
+        let op = CreateJoinOp {
             id: pack_id.clone(),
             name: "customers".to_string(),
             join_type: JoinTypeOption::Left,
