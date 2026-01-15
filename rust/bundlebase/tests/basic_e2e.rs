@@ -52,11 +52,6 @@ message: First commit
 timestamp: {}
 changes:
 - id: {}
-  description: Initialize bundle
-  operations:
-  - type: definePack
-    id: {}
-- id: {}
   description: {}
   operations:
   - type: attachBlock
@@ -166,25 +161,20 @@ changes:
         commit.author,
         commit.timestamp,
         commit.changes[0].id,
-        match &commit.operations()[0] {
-            AnyOperation::DefinePack(op) => test_utils::for_yaml(String::from(op.id.clone())),
-            _ => panic!("Expected first operation to be DefinePack"),
-        },
-        commit.changes[1].id,
-        commit.changes[1].description,
+        commit.changes[0].description,
         test_utils::for_yaml(version),
         test_utils::for_yaml(String::from(op_field!(
-            &commit.operations()[1],
+            &commit.operations()[0],
             AnyOperation::AttachBlock,
             id
         ))),
         test_utils::for_yaml(String::from(op_field!(
-            &commit.operations()[1],
+            &commit.operations()[0],
             AnyOperation::AttachBlock,
             pack
         ))),
+        commit.changes[1].id,
         commit.changes[2].id,
-        commit.changes[3].id,
     );
     assert_eq!(contents, expected);
 
@@ -248,11 +238,6 @@ author: {}
 message: Commit changes
 timestamp: {}
 changes:
-- id: {}
-  description: Initialize bundle
-  operations:
-  - type: definePack
-    id: {}
 - id: {}
   description: {}
   operations:
@@ -375,30 +360,26 @@ changes:
         commit.author,
         commit.timestamp,
         commit.changes[0].id,
-        test_utils::for_yaml(
-            op_field!(&commit.operations()[0], AnyOperation::DefinePack, id).into()
-        ),
-        commit.changes[1].id,
-        commit.changes[1].description,
+        commit.changes[0].description,
         test_utils::for_yaml(op_field!(
-            &commit.operations()[1],
+            &commit.operations()[0],
             AnyOperation::AttachBlock,
             version
         )),
         test_utils::for_yaml(String::from(op_field!(
-            &commit.operations()[1],
+            &commit.operations()[0],
             AnyOperation::AttachBlock,
             id
         ))),
         test_utils::for_yaml(String::from(op_field!(
-            &commit.operations()[1],
+            &commit.operations()[0],
             AnyOperation::AttachBlock,
             pack
         ))),
+        commit.changes[1].id,
         commit.changes[2].id,
         commit.changes[3].id,
         commit.changes[4].id,
-        commit.changes[5].id,
     );
     assert_eq!(contents.trim(), expected.trim());
 
@@ -475,11 +456,6 @@ author: {}
 message: CSV commit
 timestamp: {}
 changes:
-- id: {}
-  description: Initialize bundle
-  operations:
-  - type: definePack
-    id: {}
 - id: {}
   description: {}
   operations:
@@ -569,24 +545,20 @@ changes:
             commit.author,
             commit.timestamp,
             commit.changes[0].id,
-            test_utils::for_yaml(
-                op_field!(commit.operations()[0], AnyOperation::DefinePack, id).into()
-            ),
-            commit.changes[1].id,
-            commit.changes[1].description,
+            commit.changes[0].description,
             test_utils::for_yaml(op_field!(
-                commit.operations()[1],
+                commit.operations()[0],
                 AnyOperation::AttachBlock,
                 version
             )),
             test_utils::for_yaml(
-                op_field!(commit.operations()[1], AnyOperation::AttachBlock, id).into()
+                op_field!(commit.operations()[0], AnyOperation::AttachBlock, id).into()
             ),
             test_utils::for_yaml(
-                op_field!(commit.operations()[1], AnyOperation::AttachBlock, pack).into()
+                op_field!(commit.operations()[0], AnyOperation::AttachBlock, pack).into()
             ),
             test_utils::for_yaml(
-                op_field!(commit.operations()[1], AnyOperation::AttachBlock, layout).unwrap()
+                op_field!(commit.operations()[0], AnyOperation::AttachBlock, layout).unwrap()
             )
         )
         .trim(),
@@ -603,7 +575,7 @@ changes:
     assert!(batches[0].schema().column_with_name("Website").is_some());
 
     // Verify layout file exists
-    let layout = op_field!(commit.operations()[1], AnyOperation::AttachBlock, layout).unwrap();
+    let layout = op_field!(commit.operations()[0], AnyOperation::AttachBlock, layout).unwrap();
     let layout_file = readable_file_from_path(
         &layout,
         loaded_bundle.data_dir(),
@@ -645,7 +617,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     assert!(contents.contains("numRows: 4"));
 
     // Verify the attach operation metadata
-    match &commit.operations()[1] {
+    match &commit.operations()[0] {
         AnyOperation::AttachBlock(op) => {
             assert_eq!(op.location, "memory:///test_data/objects.json");
             assert_eq!(op.num_rows, Some(4));

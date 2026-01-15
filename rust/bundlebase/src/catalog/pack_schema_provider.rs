@@ -1,5 +1,5 @@
 use crate::catalog::PackUnionTable;
-use crate::bundle::DataPack;
+use crate::bundle::Pack;
 use crate::io::ObjectId;
 use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, TableProvider};
@@ -9,27 +9,27 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// SchemaProvider that exposes DataPack tables.
+/// SchemaProvider that exposes Pack tables.
 ///
 /// Each pack is exposed as a table with name `__pack_{id}`, representing
 /// the UNION of all blocks in that pack. The actual UNION is computed lazily
 /// by the PackUnionTable implementation.
 pub struct PackSchemaProvider {
-    data_packs: Arc<RwLock<HashMap<ObjectId, Arc<DataPack>>>>,
+    packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
 }
 
 impl std::fmt::Debug for PackSchemaProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PackSchemaProvider")
-            .field("data_packs", &"<Arc<RwLock<HashMap>>>")
+            .field("packs", &"<Arc<RwLock<HashMap>>>")
             .field("ctx", &"<SessionContext>")
             .finish()
     }
 }
 
 impl PackSchemaProvider {
-    pub fn new(data_packs: Arc<RwLock<HashMap<ObjectId, Arc<DataPack>>>>) -> Self {
-        Self { data_packs }
+    pub fn new(packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>) -> Self {
+        Self { packs }
     }
 
     /// Extract pack ID from table name (e.g., "__pack_abc123" -> "abc123")
@@ -46,10 +46,10 @@ impl SchemaProvider for PackSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        let packs = self.data_packs.read();
+        let packs = self.packs.read();
         packs
             .keys()
-            .map(|pack_id| DataPack::table_name(pack_id))
+            .map(|pack_id| Pack::table_name(pack_id))
             .collect()
     }
 
@@ -58,7 +58,7 @@ impl SchemaProvider for PackSchemaProvider {
 
         match pack_id {
             Some(id) => {
-                let packs = self.data_packs.read();
+                let packs = self.packs.read();
                 if let Some(pack) = packs.get(&id) {
                     if pack.is_empty() {
                         return Ok(None);
@@ -76,7 +76,7 @@ impl SchemaProvider for PackSchemaProvider {
 
     fn table_exist(&self, name: &str) -> bool {
         if let Some(pack_id) = Self::parse_id(name) {
-            let packs = self.data_packs.read();
+            let packs = self.packs.read();
             if let Some(pack) = packs.get(&pack_id) {
                 !pack.is_empty()
             } else {
@@ -94,7 +94,7 @@ mod tests {
     use crate::catalog::BlockSchemaProvider;
     use crate::bundle::DataBlock;
     use crate::data::MockReader;
-    use crate::BundleConfig;
+    use crate::{BundleConfig, JoinTypeOption};
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::prelude::SessionContext;
     use parking_lot::RwLock;
@@ -108,7 +108,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_provider() {
-        let packs = Arc::new(RwLock::new(HashMap::<ObjectId, Arc<DataPack>>::new()));
+        let packs = Arc::new(RwLock::new(HashMap::<ObjectId, Arc<Pack>>::new()));
         let provider = PackSchemaProvider::new(packs);
         assert!(provider.table_names().is_empty());
         assert!(!provider.table_exist("__block_nonexistent"));
@@ -182,11 +182,11 @@ mod tests {
             None,
         ));
 
-        let pack1 = Arc::new(DataPack::new(pack1_id.clone()));
+        let pack1 = Arc::new(Pack::new(pack1_id.clone(), "pack1", "", JoinTypeOption::Full));
         pack1.add_block(block11);
         pack1.add_block(block12);
 
-        let pack2 = Arc::new(DataPack::new(pack2_id.clone()));
+        let pack2 = Arc::new(Pack::new(pack2_id.clone(), "pack2", "", JoinTypeOption::Full));
         pack2.add_block(block21);
 
         let mut map = HashMap::new();
@@ -201,19 +201,19 @@ mod tests {
         let provider = PackSchemaProvider::new(packs);
 
         let names = provider.table_names();
-        assert!(names.contains(&DataPack::table_name(&pack1_id)));
-        assert!(names.contains(&DataPack::table_name(&pack2_id)));
+        assert!(names.contains(&Pack::table_name(&pack1_id)));
+        assert!(names.contains(&Pack::table_name(&pack2_id)));
 
-        assert!(provider.table_exist(&DataPack::table_name(&pack1_id)));
-        assert!(provider.table_exist(&DataPack::table_name(&pack2_id)));
+        assert!(provider.table_exist(&Pack::table_name(&pack1_id)));
+        assert!(provider.table_exist(&Pack::table_name(&pack2_id)));
 
         assert!(provider
-            .table(&DataPack::table_name(&pack1_id))
+            .table(&Pack::table_name(&pack1_id))
             .await
             .unwrap()
             .is_some());
         assert!(provider
-            .table(&DataPack::table_name(&pack2_id))
+            .table(&Pack::table_name(&pack2_id))
             .await
             .unwrap()
             .is_some());
@@ -221,7 +221,7 @@ mod tests {
         assert_eq!(
             schema1,
             provider
-                .table(&DataPack::table_name(&pack1_id))
+                .table(&Pack::table_name(&pack1_id))
                 .await
                 .unwrap()
                 .unwrap()
@@ -230,7 +230,7 @@ mod tests {
         assert_eq!(
             schema2,
             provider
-                .table(&DataPack::table_name(&pack2_id))
+                .table(&Pack::table_name(&pack2_id))
                 .await
                 .unwrap()
                 .unwrap()
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(
             schema1,
             provider
-                .table(&DataPack::table_name(&pack1_id))
+                .table(&Pack::table_name(&pack1_id))
                 .await
                 .unwrap()
                 .unwrap()

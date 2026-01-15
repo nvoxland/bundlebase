@@ -1,4 +1,4 @@
-use crate::bundle::{DataBlock, DataPack};
+use crate::bundle::{DataBlock, Pack};
 use crate::io::ObjectId;
 use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, TableProvider};
@@ -14,12 +14,12 @@ use std::sync::Arc;
 /// This provider dynamically discovers blocks by scanning through all data packs.
 #[derive(Debug)]
 pub struct BlockSchemaProvider {
-    data_packs: Arc<RwLock<HashMap<ObjectId, Arc<DataPack>>>>,
+    packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
 }
 
 impl BlockSchemaProvider {
-    pub fn new(data_packs: Arc<RwLock<HashMap<ObjectId, Arc<DataPack>>>>) -> Self {
-        Self { data_packs }
+    pub fn new(packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>) -> Self {
+        Self { packs }
     }
 
     /// Extract block ID from table name (e.g., "__block_abc123" -> "abc123")
@@ -30,7 +30,7 @@ impl BlockSchemaProvider {
 
     /// Find a block by ID across all packs
     fn find_block(&self, block_id: &ObjectId) -> Option<Arc<DataBlock>> {
-        let packs = self.data_packs.read();
+        let packs = self.packs.read();
         for pack in packs.values() {
             let blocks = pack.blocks();
             for block in blocks {
@@ -50,7 +50,7 @@ impl SchemaProvider for BlockSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        let packs = self.data_packs.read();
+        let packs = self.packs.read();
         let mut names = Vec::new();
 
         for pack in packs.values() {
@@ -91,7 +91,7 @@ impl SchemaProvider for BlockSchemaProvider {
 mod tests {
     use super::*;
     use crate::data::MockReader;
-    use crate::BundleConfig;
+    use crate::{BundleConfig, JoinTypeOption};
     use arrow_schema::{DataType, Field, Schema};
     use parking_lot::RwLock;
     use std::collections::HashMap;
@@ -104,7 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_provider() {
-        let packs = Arc::new(RwLock::new(HashMap::<ObjectId, Arc<DataPack>>::new()));
+        let packs = Arc::new(RwLock::new(HashMap::<ObjectId, Arc<Pack>>::new()));
         let provider = BlockSchemaProvider::new(packs);
         assert!(provider.table_names().is_empty());
         assert!(!provider.table_exist("__block_nonexistent"));
@@ -176,11 +176,11 @@ mod tests {
             None,
         ));
 
-        let pack1 = Arc::new(DataPack::new(pack1_id.clone()));
+        let pack1 = Arc::new(Pack::new(pack1_id.clone(), "pack1", "", JoinTypeOption::Full));
         pack1.add_block(block11);
         pack1.add_block(block12);
 
-        let pack2 = Arc::new(DataPack::new(pack2_id.clone()));
+        let pack2 = Arc::new(Pack::new(pack2_id.clone(), "pack2", "", JoinTypeOption::Full));
         pack2.add_block(block21);
 
         let mut map = HashMap::new();

@@ -17,11 +17,11 @@ from conftest import datafile, random_bundle
 async def test_empty_bundle():
     c = await bundlebase.create(random_bundle())
     assert c is not None
-    # Note: Empty bundles have a base pack defined but no data,
-    # so we verify by checking status has the "Initialize bundle" change
+    # Note: Empty bundles have base pack auto-created without an operation,
+    # so status should show no uncommitted changes
     status = c.status()
-    assert len(status.changes) == 1
-    assert "Initialize bundle" in status.changes[0].description
+    assert len(status.changes) == 0
+    assert status.is_empty()
 
 
 @pytest.mark.asyncio
@@ -784,13 +784,12 @@ async def test_status_empty_bundle():
     """Test status() on a newly created bundle"""
     c = await bundlebase.create(random_bundle())
 
-    # Bundle has "Initialize bundle" change from base pack auto-creation
+    # Base pack is auto-created without an operation, so status should be empty
     status = c.status()
     assert isinstance(status, bundlebase.PyBundleStatus)
-    assert not status.is_empty()
-    assert len(status.changes) == 1
-    assert status.total_operations == 1
-    assert "Initialize bundle" in status.changes[0].description
+    assert status.is_empty()
+    assert len(status.changes) == 0
+    assert status.total_operations == 0
 
 
 @pytest.mark.asyncio
@@ -799,15 +798,15 @@ async def test_status_single_operation():
     c = await bundlebase.create(random_bundle())
     c = await c.set_name("Test Bundle")
 
-    # Should have two changes (Initialize bundle + set_name)
+    # Should have one change (set_name)
     status = c.status()
     assert isinstance(status, bundlebase.PyBundleStatus)
-    assert len(status.changes) == 2
-    assert status.total_operations == 2
+    assert len(status.changes) == 1
+    assert status.total_operations == 1
     assert not status.is_empty()
 
-    # Check the set_name change attributes (second change)
-    change = status.changes[1]
+    # Check the set_name change attributes
+    change = status.changes[0]
     assert isinstance(change, bundlebase.PyChange)
     assert isinstance(change.id, str)
     assert len(change.id) > 0
@@ -824,19 +823,19 @@ async def test_status_multiple_operations():
     c = await c.set_name("Test Bundle")
     c = await c.set_description("A test description")
 
-    # Should have three changes (Initialize bundle + set_name + set_description)
+    # Should have two changes (set_name + set_description)
     status = c.status()
     assert isinstance(status, bundlebase.PyBundleStatus)
-    assert len(status.changes) == 3
-    assert status.total_operations == 3
+    assert len(status.changes) == 2
+    assert status.total_operations == 2
 
-    # Check first user operation (second change after Initialize bundle)
-    assert status.changes[1].description == "Set name to Test Bundle"
+    # Check first operation
+    assert status.changes[0].description == "Set name to Test Bundle"
+    assert status.changes[0].operation_count == 1
+
+    # Check second operation
+    assert status.changes[1].description == "Set description to A test description"
     assert status.changes[1].operation_count == 1
-
-    # Check second user operation (third change)
-    assert status.changes[2].description == "Set description to A test description"
-    assert status.changes[2].operation_count == 1
 
 
 @pytest.mark.asyncio
@@ -847,9 +846,9 @@ async def test_status_with_data_operations():
 
     status = c.status()
     assert isinstance(status, bundlebase.PyBundleStatus)
-    # Should have 2 changes: Initialize bundle + attach
-    assert len(status.changes) == 2
-    assert "Attach" in status.changes[1].description or "attach" in status.changes[1].description.lower()
+    # Should have 1 change: attach
+    assert len(status.changes) == 1
+    assert "Attach" in status.changes[0].description or "attach" in status.changes[0].description.lower()
 
 
 @pytest.mark.asyncio
@@ -918,7 +917,7 @@ async def test_create_view_basic():
 
     # Verify view has operations
     operations = view.operations()
-    assert len(operations) >= 4  # CREATE PACK, ATTACH, CREATE VIEW, SELECT
+    assert len(operations) >= 3  # ATTACH, CREATE VIEW, SELECT
 
 
 @pytest.mark.asyncio
@@ -1107,8 +1106,8 @@ async def test_view_chaining():
     assert v2 is not None
 
     # Both should have operations
-    assert len(v1.operations()) >= 4
-    assert len(v2.operations()) >= 4
+    assert len(v1.operations()) >= 3
+    assert len(v2.operations()) >= 3
 
 
 @pytest.mark.asyncio

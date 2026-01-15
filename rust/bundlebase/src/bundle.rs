@@ -3,12 +3,11 @@ mod column_lineage;
 mod command;
 mod commit;
 mod data_block;
-mod data_pack;
+mod pack;
 mod facade;
 mod indexed_blocks;
 mod init;
 mod operation;
-mod join;
 mod source;
 mod sql;
 
@@ -19,13 +18,12 @@ pub use command::parser::parse_command;
 pub use command::BundleCommand;
 pub use commit::{manifest_version, BundleCommit};
 pub use data_block::DataBlock;
-pub use data_pack::DataPack;
+pub use pack::Pack;
+pub use pack::JoinTypeOption;
 pub use facade::BundleFacade;
 pub use indexed_blocks::IndexedBlocks;
 pub use init::{InitCommit, INIT_FILENAME};
-pub use operation::JoinTypeOption;
 pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
-pub use join::Join;
 pub use source::Source;
 use std::collections::{HashMap, HashSet};
 
@@ -75,8 +73,7 @@ pub struct Bundle {
     commits: Vec<BundleCommit>,
     operations: Vec<AnyOperation>,
 
-    data_packs: Arc<RwLock<HashMap<ObjectId, Arc<DataPack>>>>,
-    joins: HashMap<String, Join>,
+    packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
     sources: HashMap<ObjectId, Arc<Source>>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     views: HashMap<String, ObjectId>,
@@ -125,8 +122,7 @@ impl Clone for Bundle {
             operations: self.operations.clone(),
             version: self.version.clone(),
             last_manifest_version: self.last_manifest_version,
-            data_packs: Arc::clone(&self.data_packs),
-            joins: self.joins.clone(),
+            packs: Arc::clone(&self.packs),
             sources: self.sources.clone(),
             indexes,
             views: self.views.clone(),
@@ -160,8 +156,7 @@ impl Bundle {
         options.sql_parser.enable_ident_normalization = false;
         let ctx = Arc::new(SessionContext::new_with_config(config));
 
-        // Create data_packs bundle and dataframe cache
-        let data_packs = Arc::new(RwLock::new(HashMap::new()));
+        let packs = Arc::new(RwLock::new(HashMap::new()));
 
         let empty_dataframe = DataFrame::new(
             ctx.state(),
@@ -179,11 +174,11 @@ impl Bundle {
             .expect("Default catalog not found");
         catalog.register_schema(
             "blocks",
-            Arc::new(BlockSchemaProvider::new(data_packs.clone())),
+            Arc::new(BlockSchemaProvider::new(packs.clone())),
         )?;
         catalog.register_schema(
             "packs",
-            Arc::new(PackSchemaProvider::new(data_packs.clone())),
+            Arc::new(PackSchemaProvider::new(packs.clone())),
         )?;
         catalog.register_schema(
             "public",
@@ -203,8 +198,7 @@ impl Bundle {
         Ok(Self {
             ctx,
             id: Uuid::new_v4().to_string(),
-            data_packs,
-            joins: HashMap::new(),
+            packs,
             sources: HashMap::new(),
             indexes: Arc::new(RwLock::new(Vec::new())),
             views: HashMap::new(),
@@ -250,6 +244,8 @@ impl Bundle {
     pub async fn open(path: &str, config: Option<BundleConfig>) -> Result<Self, BundlebaseError> {
         let mut visited = HashSet::new();
         let mut bundle = Bundle::empty().await?;
+
+        bundle.add_pack(ObjectId::BASE_PACK.clone(), Arc::new(Pack::new_base()));
 
         // Set explicit config if provided and recompute merged config
         bundle.passed_config = config;
@@ -463,10 +459,9 @@ impl Bundle {
         }
     }
 
-    /// Get the base pack ID (for testing/debugging)
-    /// Get the number of data packs (for testing/debugging)
-    pub fn data_packs_count(&self) -> usize {
-        self.data_packs.read().len()
+    /// Get the number of packs (for testing/debugging)
+    pub fn packs_count(&self) -> usize {
+        self.packs.read().len()
     }
 
     /// Check if this bundle is a view
@@ -574,25 +569,30 @@ impl Bundle {
         Ok(result.trim().to_string())
     }
 
-    /// Joins the pack
+    /// Joins the pack with join metadata to the base dataframe
     async fn dataframe_join(
         &self,
         base_df: DataFrame,
-        pack_join: &Join,
+        pack: &Pack,
     ) -> Result<DataFrame, BundlebaseError> {
         let base_table = format!(
             "packs.{}",
-            DataPack::table_name(&ObjectId::BASE_PACK)
+            Pack::table_name(&ObjectId::BASE_PACK)
         );
-        let join_table = format!("packs.{}", DataPack::table_name(pack_join.pack()));
+        let join_table = format!("packs.{}", Pack::table_name(pack.id()));
 
-        let expr = sql::parse_join_expr(&self.ctx, &base_table, pack_join).await?;
+        let expr = sql::parse_join_expr(&self.ctx, &base_table, pack).await?;
 
         let base_df = base_df.alias(sql::BASE_PACK_NAME)?;
 
+        let name = pack.name();
+
+        // Safe to unwrap since we only call this for packs with join metadata
+        let join_type = pack.join_type().expect("Pack must have join_type for join");
+
         Ok(base_df.join_on(
-            self.ctx.table(&join_table).await?.alias(pack_join.name())?,
-            pack_join.join_type().to_datafusion(),
+            self.ctx.table(&join_table).await?.alias(name)?,
+            join_type.to_datafusion(),
             expr,
         )?)
     }
@@ -607,12 +607,35 @@ impl Bundle {
         self.version = hex::encode(hasher.finalize())[0..12].to_string();
     }
 
-    pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<DataPack>) {
-        self.data_packs.write().insert(pack_id, pack);
+    pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<Pack>) {
+        self.packs.write().insert(pack_id, pack);
     }
 
-    pub(crate) fn get_pack(&self, pack_id: &ObjectId) -> Option<Arc<DataPack>> {
-        self.data_packs.read().get(pack_id).cloned()
+    pub(crate) fn get_pack(&self, pack_id: &ObjectId) -> Option<Arc<Pack>> {
+        self.packs.read().get(pack_id).cloned()
+    }
+
+    /// Get read access to the packs map
+    pub(crate) fn packs(&self) -> &Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>> {
+        &self.packs
+    }
+
+    /// Find a join pack by its name
+    pub(crate) fn pack_by_name(&self, name: &str) -> Option<Arc<Pack>> {
+        self.packs
+            .read()
+            .values()
+            .find(|p| p.name() == name)
+            .cloned()
+    }
+
+    /// Get all join pack names
+    pub(crate) fn join_names(&self) -> Vec<String> {
+        self.packs
+            .read()
+            .values()
+            .filter_map(|p| Some(p.name().to_string()))
+            .collect()
     }
 
     /// Get read access to the indexes list
@@ -667,7 +690,7 @@ impl Bundle {
 
     /// Find a block by ID across all packs
     pub(crate) fn find_block(&self, block_id: &ObjectId) -> Option<Arc<DataBlock>> {
-        let packs = self.data_packs.read();
+        let packs = self.packs.read();
         for pack in packs.values() {
             for block in pack.blocks() {
                 if block.id() == block_id {
@@ -751,18 +774,28 @@ impl BundleFacade for Bundle {
 
         // Check if base pack exists and has data
         let base_pack_has_data = self
-            .data_packs
+            .packs
             .read()
             .get(&ObjectId::BASE_PACK)
             .is_some_and(|p| !p.is_empty());
 
         let df = if base_pack_has_data {
-            let table_name = format!("packs.{}", DataPack::table_name(&ObjectId::BASE_PACK));
+            let table_name = format!("packs.{}", Pack::table_name(&ObjectId::BASE_PACK));
             let mut df = self.ctx.table(&table_name).await?;
 
-            for (_, pack_join) in &self.joins {
-                debug!("Executing join with pack {}", pack_join.pack());
-                df = self.dataframe_join(df, pack_join).await?;
+            // Collect join packs first (release lock before async calls)
+            let join_packs: Vec<Arc<Pack>> = self
+                .packs
+                .read()
+                .values()
+                .filter(|p| p.is_join())
+                .cloned()
+                .collect();
+
+            // Join all packs that have join metadata
+            for pack in join_packs {
+                debug!("Executing join with pack {}", pack.id());
+                df = self.dataframe_join(df, &pack).await?;
             }
 
             // Apply operations to the base DataFrame

@@ -16,8 +16,8 @@ pub struct DropJoinOp {
 
 impl DropJoinOp {
     pub async fn setup(join_name: &str, bundle: &Bundle) -> Result<Self, BundlebaseError> {
-        let join = bundle.joins.get(join_name).ok_or_else(|| {
-            let available_joins: Vec<String> = bundle.joins.keys().cloned().collect();
+        let pack = bundle.pack_by_name(join_name).ok_or_else(|| {
+            let available_joins = bundle.join_names();
             let available_list = if available_joins.is_empty() {
                 "none".to_string()
             } else {
@@ -29,7 +29,7 @@ impl DropJoinOp {
             ))
         })?;
         Ok(Self {
-            id: join.pack().clone(),
+            id: pack.id().clone(),
         })
     }
 }
@@ -41,11 +41,13 @@ impl Operation for DropJoinOp {
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        let join_exists = bundle.joins.values().any(|j| j.pack() == &self.id);
-        if !join_exists {
-            return Err(format!("Join with pack ID '{}' not found", self.id).into());
+        // Check if a pack with this ID exists and is a join pack
+        let pack = bundle.get_pack(&self.id);
+        match pack {
+            Some(p) if p.is_join() => Ok(()),
+            Some(_) => Err(format!("Pack '{}' is not a join pack", self.id).into()),
+            None => Err(format!("Join pack with ID '{}' not found", self.id).into()),
         }
-        Ok(())
     }
 
     fn allowed_on_view(&self) -> bool {
@@ -53,8 +55,7 @@ impl Operation for DropJoinOp {
     }
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
-        bundle.joins.retain(|_, j| j.pack() != &self.id);
-        bundle.data_packs.write().remove(&self.id);
+        bundle.packs().write().remove(&self.id);
         log::info!("Dropped join with pack {}", self.id);
         Ok(())
     }

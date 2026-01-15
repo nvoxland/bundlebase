@@ -46,7 +46,7 @@ impl DetachBlockOp {
 
     /// Find the block in any pack within the bundle.
     fn find_block_in_packs(&self, bundle: &Bundle) -> bool {
-        for pack in bundle.data_packs.read().values() {
+        for pack in bundle.packs().read().values() {
             for block in pack.blocks() {
                 if block.id() == &self.id {
                     return true;
@@ -82,7 +82,7 @@ impl Operation for DetachBlockOp {
         }
 
         // Remove the block from all packs
-        for pack in bundle.data_packs.read().values() {
+        for pack in bundle.packs().read().values() {
             pack.remove_block(&self.id);
         }
 

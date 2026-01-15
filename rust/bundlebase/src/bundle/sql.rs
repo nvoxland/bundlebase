@@ -1,4 +1,4 @@
-use super::{DataBlock, DataPack, JoinTypeOption, Join};
+use super::{DataBlock, Pack};
 use crate::{catalog, BundlebaseError};
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -8,6 +8,7 @@ use datafusion::prelude::SessionContext;
 use datafusion::sql::TableReference;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, OnceLock};
+use crate::bundle::pack::JoinTypeOption;
 
 /// The name used to reference the base pack in join expressions
 pub const BASE_PACK_NAME: &str = "base";
@@ -24,7 +25,7 @@ static TEMP_COUNTER: OnceLock<AtomicU64> = OnceLock::new();
 /// # Arguments
 /// * `column_name` - The logical column name to trace
 /// * `df` - The DataFrame to analyze
-/// * `data_packs` - Optional map of packs for expanding pack tables to blocks
+/// * `packs` - Optional map of packs for expanding pack tables to blocks
 ///
 /// # Returns
 /// * `Ok(Some(sources))` - List of (table_name, physical_column_name) pairs
@@ -33,10 +34,10 @@ static TEMP_COUNTER: OnceLock<AtomicU64> = OnceLock::new();
 pub(crate) async fn column_sources_from_df(
     column_name: &str,
     df: &DataFrame,
-    data_packs: Option<
+    packs: Option<
         &Arc<
             parking_lot::RwLock<
-                std::collections::HashMap<crate::io::ObjectId, Arc<DataPack>>,
+                std::collections::HashMap<crate::io::ObjectId, Arc<Pack>>,
             >,
         >,
     >,
@@ -46,11 +47,11 @@ pub(crate) async fn column_sources_from_df(
     let mut sources = Vec::new();
     find_orig(plan, column_name, &mut sources);
 
-    // Expand pack references to their constituent blocks if data_packs is provided
-    let expanded_sources = if let Some(packs_map) = data_packs {
+    // Expand pack references to their constituent blocks if packs is provided
+    let expanded_sources = if let Some(packs_map) = packs {
         let mut result = Vec::new();
         for (table_name, col_name) in sources {
-            if let Some(pack_id) = DataPack::parse_id(&table_name) {
+            if let Some(pack_id) = Pack::parse_id(&table_name) {
                 // This is a pack table - expand it to the individual blocks that have this column
                 let packs = packs_map.read();
                 if let Some(pack) = packs.get(&pack_id) {
@@ -238,25 +239,28 @@ fn find_orig(plan: &LogicalPlan, target: &str, sources: &mut Vec<(String, String
 pub(crate) async fn parse_join_expr(
     ctx: &SessionContext,
     table: &str,
-    join: &Join,
+    pack: &Pack,
 ) -> Result<Vec<Expr>, DataFusionError> {
-    let join_type = match join.join_type() {
+    // Pack must have join metadata
+    let pack_join_type = pack.join_type().expect("Pack must have join_type for join");
+    let pack_name = pack.name();
+    let pack_expression = pack.expression().expect("Pack must have expression for join");
+
+    let join_type = match pack_join_type {
         JoinTypeOption::Inner => "INNER JOIN",
         JoinTypeOption::Left => "LEFT JOIN",
         JoinTypeOption::Right => "RIGHT JOIN",
         JoinTypeOption::Full => "FULL OUTER JOIN",
     };
 
-    let join_expr = join.expression();
-
     let sql = format!(
         "SELECT * FROM {} AS {} {} packs.{} AS {} ON {}",
         table,
         BASE_PACK_NAME,
         join_type,
-        DataPack::table_name(join.pack()),
-        join.name(),
-        &join_expr
+        Pack::table_name(pack.id()),
+        pack_name,
+        pack_expression
     );
 
     let df = ctx.sql(&sql).await?;
@@ -397,7 +401,7 @@ mod tests {
 
         packs_schema
             .register_table(
-                DataPack::table_name(&join_id).to_string(),
+                Pack::table_name(&join_id).to_string(),
                 Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
                     Field::new("x", DataType::Int32, false),
                     Field::new("y", DataType::Utf8, false),
@@ -405,10 +409,11 @@ mod tests {
             )
             .unwrap();
 
+        let pack = Pack::new(join_id.clone(), "test_join", "a=x", JoinTypeOption::Inner);
         let preds = parse_join_expr(
             &ctx,
             "t",
-            &Join::new(&join_id, "test_join", &JoinTypeOption::Inner, "a=x"),
+            &pack,
         )
         .await
         .unwrap()
@@ -419,15 +424,11 @@ mod tests {
         assert_eq!("BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"base\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) })",
                    preds.as_str());
 
+        let pack2 = Pack::new(join_id.clone(), "test_join", "a=x and x > 3", JoinTypeOption::Inner);
         let preds = parse_join_expr(
             &ctx,
             "t",
-            &Join::new(
-                &join_id,
-                "test_join",
-                &JoinTypeOption::Inner,
-                "a=x and x > 3",
-            ),
+            &pack2,
         )
         .await
         .unwrap()
@@ -602,7 +603,7 @@ mod tests {
         let df = bundle.dataframe().await?;
 
         // Test with pack expansion - should return only blocks that have the column
-        let sources = column_sources_from_df("first_name", &df, Some(&bundle.bundle().data_packs))
+        let sources = column_sources_from_df("first_name", &df, Some(&bundle.bundle().packs))
             .await?
             .ok_or("Could not find columns")?;
 

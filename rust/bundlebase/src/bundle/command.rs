@@ -1,6 +1,7 @@
-use crate::{BundleBuilder, BundleFacade, BundlebaseError, JoinTypeOption};
+use crate::{BundleBuilder, BundleFacade, BundlebaseError};
 use datafusion::common::ScalarValue;
 use std::collections::HashMap;
+use crate::bundle::pack::JoinTypeOption;
 
 pub mod parser;
 pub mod parser_pest;

@@ -15,7 +15,6 @@ async fn test_adding_blocks() -> Result<(), BundlebaseError> {
 
     assert_vec_regexp(
         vec![
-            "CREATE PACK \\w+",
             "ATTACH: memory:///test_data/customers-0-100.csv",
         ],
         bundle
@@ -35,7 +34,6 @@ async fn test_adding_blocks() -> Result<(), BundlebaseError> {
 
     assert_vec_regexp(
         vec![
-            "CREATE PACK \\w+",
             "ATTACH: memory:///test_data/customers-0-100.csv",
             "ATTACH: memory:///test_data/customers-101-150.csv",
         ],

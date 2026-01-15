@@ -59,7 +59,7 @@ impl ReplaceBlockOp {
 
     /// Find the block in any pack within the bundle.
     fn find_block_in_packs(&self, bundle: &Bundle) -> Option<(ObjectId, Arc<DataBlock>)> {
-        for (pack_id, pack) in &*bundle.data_packs.read() {
+        for (pack_id, pack) in &*bundle.packs().read() {
             for block in pack.blocks() {
                 if block.id() == &self.id {
                     return Some((pack_id.clone(), block.clone()));
@@ -121,7 +121,7 @@ impl Operation for ReplaceBlockOp {
 
         // Replace the old block with the new one in the pack
         let pack = bundle
-            .data_packs
+            .packs()
             .read()
             .get(&pack_id)
             .cloned()
