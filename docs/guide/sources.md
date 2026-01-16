@@ -194,45 +194,69 @@ Lists files from a remote directory via SFTP. Requires an SSH private key for au
 
 ### fetch()
 
-Discovers and attaches new files from a specific pack's sources.
+Discovers and attaches new files from a specific pack's sources. Returns a list of `FetchResults`, one for each source.
 
 === "Async API"
 
     ```python
     # Fetch from base pack (default)
-    count = await c.fetch()
+    results = await c.fetch()
+    for result in results:
+        print(f"{result.source_function}: {len(result.added)} added")
 
     # Fetch from a joined pack
-    count = await c.fetch("customers")
+    results = await c.fetch("customers")
     ```
 
 === "Sync API"
 
     ```python
     # Fetch from base pack (default)
-    count = c.fetch()
+    results = c.fetch()
+    for result in results:
+        print(f"{result.source_function}: {len(result.added)} added")
 
     # Fetch from a joined pack
-    count = c.fetch("customers")
+    results = c.fetch("customers")
     ```
 
 ### fetch_all()
 
-Discovers and attaches new files from all defined sources across all packs.
+Discovers and attaches new files from all defined sources across all packs. Returns a list of `FetchResults`, one for each source (including sources with no changes).
 
 === "Async API"
 
     ```python
-    count = await c.fetch_all()
-    print(f"Attached {count} files total")
+    results = await c.fetch_all()
+    for result in results:
+        print(f"{result.pack}/{result.source_function}: {result.total_count()} changes")
     ```
 
 === "Sync API"
 
     ```python
-    count = c.fetch_all()
-    print(f"Attached {count} files total")
+    results = c.fetch_all()
+    for result in results:
+        print(f"{result.pack}/{result.source_function}: {result.total_count()} changes")
     ```
+
+### FetchResults
+
+Each `FetchResults` object contains:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `source_function` | `str` | Source function name (e.g., "remote_dir") |
+| `source_url` | `str` | Source URL |
+| `pack` | `str` | Pack name ("base" or join name) |
+| `added` | `list[FetchedBlock]` | Blocks that were newly added |
+| `replaced` | `list[FetchedBlock]` | Blocks that were replaced (updated) |
+| `removed` | `list[str]` | Source locations of blocks that were removed |
+
+Methods:
+
+- `total_count()` - Total number of changes (added + replaced + removed)
+- `is_empty()` - Returns `True` if no changes were made
 
 ## Sources with Joins
 
@@ -256,7 +280,8 @@ You can define sources for joined packs by specifying the `pack` parameter.
     }, pack="customers")
 
     # Fetch will attach files to the customers join
-    count = await c.fetch("customers")
+    results = await c.fetch("customers")
+    print(f"Added {len(results[0].added)} customer files")
 
     await c.commit("Added customers from S3")
     ```
@@ -279,7 +304,8 @@ You can define sources for joined packs by specifying the `pack` parameter.
     }, pack="customers")
 
     # Fetch will attach files to the customers join
-    count = c.fetch("customers")
+    results = c.fetch("customers")
+    print(f"Added {len(results[0].added)} customer files")
 
     c.commit("Added customers from S3")
     ```
@@ -313,17 +339,19 @@ A typical workflow for incrementally loading data:
         }))
 
     # Initial load
-    count = await c.fetch()
-    print(f"Initial load: {count} files")
+    results = await c.fetch()
+    total_added = sum(len(r.added) for r in results)
+    print(f"Initial load: {total_added} files")
     await c.commit("Initial data load")
 
     # ... time passes, new files appear in S3 ...
 
     # Incremental load (only attaches new files)
     c = await bb.open("sales/data")
-    count = await c.fetch()
-    if count > 0:
-        print(f"Loaded {count} new files")
+    results = await c.fetch()
+    total_added = sum(len(r.added) for r in results)
+    if total_added > 0:
+        print(f"Loaded {total_added} new files")
         await c.commit("Incremental data load")
     ```
 
@@ -340,16 +368,18 @@ A typical workflow for incrementally loading data:
         }))
 
     # Initial load
-    count = c.fetch()
-    print(f"Initial load: {count} files")
+    results = c.fetch()
+    total_added = sum(len(r.added) for r in results)
+    print(f"Initial load: {total_added} files")
     c.commit("Initial data load")
 
     # ... time passes, new files appear in S3 ...
 
     # Incremental load (only attaches new files)
     c = bb.open("sales/data")
-    count = c.fetch()
-    if count > 0:
-        print(f"Loaded {count} new files")
+    results = c.fetch()
+    total_added = sum(len(r.added) for r in results)
+    if total_added > 0:
+        print(f"Loaded {total_added} new files")
         c.commit("Incremental data load")
     ```

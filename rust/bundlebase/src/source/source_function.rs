@@ -131,6 +131,100 @@ pub enum FetchAction {
     },
 }
 
+/// Information about a block that was fetched (added or replaced).
+#[derive(Debug, Clone)]
+pub struct FetchedBlock {
+    /// Location where the block is attached (path in data_dir or URL)
+    pub attach_location: String,
+    /// Original source location identifier
+    pub source_location: String,
+}
+
+/// Results from fetching a single source.
+///
+/// Contains information about the source and all blocks that were
+/// added, replaced, or removed during the fetch operation.
+#[derive(Debug, Clone)]
+pub struct FetchResults {
+    /// Source function name (e.g., "remote_dir", "web_scrape")
+    pub source_function: String,
+    /// Source URL or identifier from args
+    pub source_url: String,
+    /// Pack name ("base" or join name)
+    pub pack: String,
+    /// Blocks that were newly added
+    pub added: Vec<FetchedBlock>,
+    /// Blocks that were replaced (updated)
+    pub replaced: Vec<FetchedBlock>,
+    /// Source locations of blocks that were removed
+    pub removed: Vec<String>,
+}
+
+impl FetchResults {
+    /// Create a new FetchResults for a source with no changes.
+    pub fn empty(source_function: String, source_url: String, pack: String) -> Self {
+        Self {
+            source_function,
+            source_url,
+            pack,
+            added: Vec::new(),
+            replaced: Vec::new(),
+            removed: Vec::new(),
+        }
+    }
+
+    /// Create FetchResults from a list of FetchActions.
+    pub fn from_actions(
+        source_function: String,
+        source_url: String,
+        pack: String,
+        actions: Vec<FetchAction>,
+    ) -> Self {
+        let mut added = Vec::new();
+        let mut replaced = Vec::new();
+        let mut removed = Vec::new();
+
+        for action in actions {
+            match action {
+                FetchAction::Add(data) => {
+                    added.push(FetchedBlock {
+                        attach_location: data.attach_location,
+                        source_location: data.source_location,
+                    });
+                }
+                FetchAction::Replace { data, .. } => {
+                    replaced.push(FetchedBlock {
+                        attach_location: data.attach_location,
+                        source_location: data.source_location,
+                    });
+                }
+                FetchAction::Remove { source_location } => {
+                    removed.push(source_location);
+                }
+            }
+        }
+
+        Self {
+            source_function,
+            source_url,
+            pack,
+            added,
+            replaced,
+            removed,
+        }
+    }
+
+    /// Total number of actions (added + replaced + removed).
+    pub fn total_count(&self) -> usize {
+        self.added.len() + self.replaced.len() + self.removed.len()
+    }
+
+    /// Check if there were any changes.
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.replaced.is_empty() && self.removed.is_empty()
+    }
+}
+
 /// Trait for source function implementations.
 ///
 /// Source functions define how data is discovered and materialized.

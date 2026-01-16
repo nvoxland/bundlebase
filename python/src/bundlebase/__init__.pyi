@@ -282,6 +282,66 @@ class PyBundleStatus:
         ...
 
 
+class FetchedBlock:
+    """Information about a block that was fetched (added or replaced)."""
+
+    @property
+    def attach_location(self) -> str:
+        """Location where the block is attached (path in data_dir or URL)."""
+        ...
+
+    @property
+    def source_location(self) -> str:
+        """Original source location identifier."""
+        ...
+
+
+class FetchResults:
+    """Results from fetching a single source.
+
+    Contains information about the source and all blocks that were
+    added, replaced, or removed during the fetch operation.
+    """
+
+    @property
+    def source_function(self) -> str:
+        """Source function name (e.g., "remote_dir", "web_scrape")."""
+        ...
+
+    @property
+    def source_url(self) -> str:
+        """Source URL or identifier."""
+        ...
+
+    @property
+    def pack(self) -> str:
+        """Pack name ("base" or join name)."""
+        ...
+
+    @property
+    def added(self) -> List[FetchedBlock]:
+        """Blocks that were newly added."""
+        ...
+
+    @property
+    def replaced(self) -> List[FetchedBlock]:
+        """Blocks that were replaced (updated)."""
+        ...
+
+    @property
+    def removed(self) -> List[str]:
+        """Source locations of blocks that were removed."""
+        ...
+
+    def total_count(self) -> int:
+        """Total number of actions (added + replaced + removed)."""
+        ...
+
+    def is_empty(self) -> bool:
+        """Check if there were any changes."""
+        ...
+
+
 class PyBundleBuilder:
     """
     Mutable Bundle class for data processing operations.
@@ -816,7 +876,7 @@ class PyBundleBuilder:
         """
         ...
 
-    async def fetch(self, pack: str = "base") -> int:
+    async def fetch(self, pack: str = "base") -> List[FetchResults]:
         """
         Fetch data from sources for a pack.
 
@@ -829,15 +889,17 @@ class PyBundleBuilder:
                 - A join name: A joined pack by its join name
 
         Returns:
-            Number of files attached
+            List of FetchResults, one for each source in the pack.
+            Each result contains details about blocks added, replaced, and removed.
 
         Example:
-            count = await c.fetch()  # Fetch from base pack sources
-            print(f"Attached {count} new files")
+            results = await c.fetch()  # Fetch from base pack sources
+            for result in results:
+                print(f"{result.source_function}: {len(result.added)} added")
         """
         ...
 
-    async def fetch_all(self) -> int:
+    async def fetch_all(self) -> List[FetchResults]:
         """
         Fetch data from all defined sources.
 
@@ -845,11 +907,13 @@ class PyBundleBuilder:
         auto-attaches any new files found.
 
         Returns:
-            Number of files attached across all sources
+            List of FetchResults, one for each source across all packs.
+            Includes results for sources with no changes (empty results).
 
         Example:
-            count = await c.fetch_all()
-            print(f"Attached {count} new files")
+            results = await c.fetch_all()
+            for result in results:
+                print(f"{result.source_function}: {result.total_count()} changes")
         """
         ...
 

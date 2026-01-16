@@ -629,6 +629,14 @@ impl Bundle {
             .cloned()
     }
 
+    /// Get a pack's name by its ID
+    pub(crate) fn pack_name(&self, pack_id: &ObjectId) -> Option<String> {
+        self.packs
+            .read()
+            .get(pack_id)
+            .map(|p| p.name().to_string())
+    }
+
     /// Get all join pack names
     pub(crate) fn join_names(&self) -> Vec<String> {
         self.packs
