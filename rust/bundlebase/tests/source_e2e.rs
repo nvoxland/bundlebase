@@ -8,6 +8,11 @@ use url::Url;
 
 mod common;
 
+/// Helper to sum total changes from FetchResults
+fn total_changes(results: &[bundlebase::source::FetchResults]) -> usize {
+    results.iter().map(|r| r.total_count()).sum()
+}
+
 /// Helper to create args for remote_dir source function
 fn make_source_args(url: &str, patterns: Option<&str>) -> HashMap<String, String> {
     let mut args = HashMap::new();
@@ -131,8 +136,8 @@ async fn test_create_source_auto_attaches_files() -> Result<(), BundlebaseError>
     assert_eq!(bundle.num_rows().await?, 1000);
 
     // Verify subsequent fetch finds nothing new
-    let count = bundle.fetch_all().await?;
-    assert_eq!(count, 0);
+    let results = bundle.fetch_all().await?;
+    assert_eq!(total_changes(&results), 0);
 
     Ok(())
 }
@@ -152,8 +157,8 @@ async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
         .await?;
 
     // Verify no data yet by fetching (should attach nothing)
-    let count = bundle.fetch_all().await?;
-    assert_eq!(count, 0);
+    let results = bundle.fetch_all().await?;
+    assert_eq!(total_changes(&results), 0);
 
     // Now add a file to the source directory
     copy_test_file(
@@ -164,8 +169,8 @@ async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
     .await?;
 
     // Fetch should find and attach the new file
-    let count = bundle.fetch_all().await?;
-    assert_eq!(count, 1);
+    let results = bundle.fetch_all().await?;
+    assert_eq!(total_changes(&results), 1);
 
     // Verify data is now available
     assert_eq!(bundle.num_rows().await?, 1000);
@@ -195,12 +200,12 @@ async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
         .await?;
 
     // First explicit fetch should find nothing (already attached by create_source)
-    let count1 = bundle.fetch_all().await?;
-    assert_eq!(count1, 0);
+    let results1 = bundle.fetch_all().await?;
+    assert_eq!(total_changes(&results1), 0);
 
     // Second fetch should also find nothing
-    let count2 = bundle.fetch_all().await?;
-    assert_eq!(count2, 0);
+    let results2 = bundle.fetch_all().await?;
+    assert_eq!(total_changes(&results2), 0);
 
     // Data should still be there
     assert_eq!(bundle.num_rows().await?, 1000);
@@ -241,8 +246,8 @@ async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
     .await?;
 
     // Fetch should only attach the new file
-    let count = bundle.fetch_all().await?;
-    assert_eq!(count, 1);
+    let results = bundle.fetch_all().await?;
+    assert_eq!(total_changes(&results), 1);
 
     Ok(())
 }
@@ -280,8 +285,8 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
     assert_eq!(bundle.num_rows().await?, 1000);
 
     // Fetch should not find CSV (doesn't match pattern)
-    let count = bundle.fetch_all().await?;
-    assert_eq!(count, 0);
+    let results = bundle.fetch_all().await?;
+    assert_eq!(total_changes(&results), 0);
 
     Ok(())
 }
@@ -411,8 +416,8 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
     // Extended bundle should be able to fetch from the source
     // But only CSV matches since we defined pattern as **/*
     // Actually, the pattern is **/*.parquet, so CSV won't match
-    let count = extended.fetch_all().await?;
-    assert_eq!(count, 0); // CSV doesn't match parquet pattern
+    let results = extended.fetch_all().await?;
+    assert_eq!(total_changes(&results), 0); // CSV doesn't match parquet pattern
 
     extended.commit("Extended").await?;
 
@@ -754,8 +759,8 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     assert_eq!(bundle.num_rows().await?, 1000);
 
     // Subsequent fetch should not re-copy the file
-    let count = bundle.fetch_all().await?;
-    assert_eq!(count, 0, "Should not re-attach already copied file");
+    let results = bundle.fetch_all().await?;
+    assert_eq!(total_changes(&results), 0, "Should not re-attach already copied file");
 
     // Add a second parquet file (same data, different name)
     copy_test_file(
@@ -766,15 +771,15 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     .await?;
 
     // Fetch should only find the new file
-    let count = bundle.fetch_all().await?;
-    assert_eq!(count, 1, "Should attach only the new file");
+    let results = bundle.fetch_all().await?;
+    assert_eq!(total_changes(&results), 1, "Should attach only the new file");
 
     // Now we should have 2000 rows (1000 from each file)
     assert_eq!(bundle.num_rows().await?, 2000);
 
     // Another fetch should find nothing
-    let count = bundle.fetch_all().await?;
-    assert_eq!(count, 0, "Should not re-attach already copied files");
+    let results = bundle.fetch_all().await?;
+    assert_eq!(total_changes(&results), 0, "Should not re-attach already copied files");
 
     Ok(())
 }

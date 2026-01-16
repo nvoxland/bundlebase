@@ -4,6 +4,7 @@ use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use ::bundlebase::bundle::BundleBuilder;
 use ::bundlebase::bundle::{BundleChange, BundleFacade, BundleStatus};
 use ::bundlebase::functions::FunctionSignature;
+use ::bundlebase::source::{FetchedBlock, FetchResults};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFunction};
 use std::collections::HashMap;
@@ -100,6 +101,99 @@ impl std::fmt::Display for PyBundleStatus {
             }
             Ok(())
         }
+    }
+}
+
+/// Information about a block that was fetched (added or replaced).
+#[pyclass]
+#[derive(Clone)]
+pub struct PyFetchedBlock {
+    /// Location where the block is attached (path in data_dir or URL)
+    #[pyo3(get)]
+    pub attach_location: String,
+    /// Original source location identifier
+    #[pyo3(get)]
+    pub source_location: String,
+}
+
+impl PyFetchedBlock {
+    pub fn from_rust(block: &FetchedBlock) -> Self {
+        PyFetchedBlock {
+            attach_location: block.attach_location.clone(),
+            source_location: block.source_location.clone(),
+        }
+    }
+}
+
+#[pymethods]
+impl PyFetchedBlock {
+    fn __repr__(&self) -> String {
+        format!(
+            "FetchedBlock(attach_location='{}', source_location='{}')",
+            self.attach_location, self.source_location
+        )
+    }
+}
+
+/// Results from fetching a single source.
+#[pyclass]
+#[derive(Clone)]
+pub struct PyFetchResults {
+    /// Source function name (e.g., "remote_dir", "web_scrape")
+    #[pyo3(get)]
+    pub source_function: String,
+    /// Source URL or identifier
+    #[pyo3(get)]
+    pub source_url: String,
+    /// Pack name ("base" or join name)
+    #[pyo3(get)]
+    pub pack: String,
+    /// Blocks that were newly added
+    #[pyo3(get)]
+    pub added: Vec<PyFetchedBlock>,
+    /// Blocks that were replaced (updated)
+    #[pyo3(get)]
+    pub replaced: Vec<PyFetchedBlock>,
+    /// Source locations of blocks that were removed
+    #[pyo3(get)]
+    pub removed: Vec<String>,
+}
+
+impl PyFetchResults {
+    pub fn from_rust(results: &FetchResults) -> Self {
+        PyFetchResults {
+            source_function: results.source_function.clone(),
+            source_url: results.source_url.clone(),
+            pack: results.pack.clone(),
+            added: results.added.iter().map(PyFetchedBlock::from_rust).collect(),
+            replaced: results.replaced.iter().map(PyFetchedBlock::from_rust).collect(),
+            removed: results.removed.clone(),
+        }
+    }
+}
+
+#[pymethods]
+impl PyFetchResults {
+    /// Total number of actions (added + replaced + removed).
+    fn total_count(&self) -> usize {
+        self.added.len() + self.replaced.len() + self.removed.len()
+    }
+
+    /// Check if there were any changes.
+    fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.replaced.is_empty() && self.removed.is_empty()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "FetchResults(source_function='{}', source_url='{}', pack='{}', added={}, replaced={}, removed={})",
+            self.source_function,
+            self.source_url,
+            self.pack,
+            self.added.len(),
+            self.replaced.len(),
+            self.removed.len()
+        )
     }
 }
 
@@ -606,7 +700,7 @@ impl PyBundleBuilder {
     /// # Arguments
     /// * `pack` - Which pack to fetch sources for ("base" for base pack, or a join name)
     ///
-    /// Returns the number of new files that were attached.
+    /// Returns a list of FetchResults, one for each source in the pack.
     #[pyo3(signature = (pack="base"))]
     fn fetch<'py>(
         slf: PyRef<'_, Self>,
@@ -622,26 +716,28 @@ impl PyBundleBuilder {
         let pack_name = pack.clone().unwrap_or_else(|| "base".to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
-            let count = builder
+            let results = builder
                 .fetch(pack.as_deref())
                 .await
                 .map_err(|e| to_py_error(&format!("Failed to fetch from pack '{}'", pack_name), e))?;
-            Ok(count)
+            let py_results: Vec<PyFetchResults> = results.iter().map(PyFetchResults::from_rust).collect();
+            Ok(py_results)
         })
     }
 
     /// Fetch from all defined sources - discover and attach new files.
     ///
-    /// Returns the number of new files that were attached across all sources.
+    /// Returns a list of FetchResults, one for each source across all packs.
     fn fetch_all<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
-            let count = builder
+            let results = builder
                 .fetch_all()
                 .await
                 .map_err(|e| to_py_error("Failed to fetch from sources", e))?;
-            Ok(count)
+            let py_results: Vec<PyFetchResults> = results.iter().map(PyFetchResults::from_rust).collect();
+            Ok(py_results)
         })
     }
 

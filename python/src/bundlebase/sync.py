@@ -17,10 +17,13 @@ For Jupyter notebooks, install with:
     poetry install -E jupyter
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from bundlebase._loop_manager import EventLoopManager
 from bundlebase.chain import _ORIGINAL_METHODS
+
+if TYPE_CHECKING:
+    from bundlebase import FetchResults
 
 # Global event loop manager (singleton)
 _loop_manager = EventLoopManager()
@@ -336,7 +339,7 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def fetch(self, pack: str = "base") -> int:
+    def fetch(self, pack: str = "base") -> List["FetchResults"]:
         """Fetch data from sources for a pack.
 
         Checks the pack's sources for new files and attaches them to the bundle.
@@ -347,18 +350,20 @@ class SyncBundleBuilder(SyncBundle):
                 - A join name: A joined pack by its join name
 
         Returns:
-            Number of newly attached files
+            List of FetchResults, one for each source in the pack.
+            Each result contains details about blocks added, replaced, and removed.
         """
         coro = _call_original_method(self._async, "fetch", pack)
         return _loop_manager.run_sync(coro)
 
-    def fetch_all(self) -> int:
+    def fetch_all(self) -> List["FetchResults"]:
         """Fetch data from all defined sources.
 
         Checks all defined sources for new files and attaches them to the bundle.
 
         Returns:
-            Number of newly attached files across all sources
+            List of FetchResults, one for each source across all packs.
+            Includes results for sources with no changes (empty results).
         """
         coro = _call_original_method(self._async, "fetch_all")
         return _loop_manager.run_sync(coro)

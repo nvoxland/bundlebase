@@ -629,6 +629,7 @@ class TestSyncSource:
         # Define a source pointing to a non-existent location (no files to find)
         c.create_source("remote_dir", {"url": "file:///nonexistent/path/"})
 
-        # fetch should return 0 (no new files)
-        count = c.fetch()
-        assert count == 0
+        # fetch should return FetchResults with no changes
+        results = c.fetch()
+        assert len(results) == 1
+        assert results[0].total_count() == 0

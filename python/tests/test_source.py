@@ -64,8 +64,8 @@ async def test_create_source_auto_fetch():
 
 
 @pytest.mark.asyncio
-async def test_fetch_returns_count():
-    """Test that fetch returns the count of newly attached files."""
+async def test_fetch_returns_results():
+    """Test that fetch returns FetchResults with details about attached files."""
     with tempfile.TemporaryDirectory() as source_dir:
         c = await bundlebase.create(random_bundle())
         source_url = f"file://{source_dir}/"
@@ -79,6 +79,15 @@ async def test_fetch_returns_count():
         if os.path.exists(src_path):
             shutil.copy(src_path, os.path.join(source_dir, "userdata.parquet"))
 
-            # fetch should return 1 (default pack is "base")
-            count = await c.fetch()
-            assert count == 1
+            # fetch should return a list of FetchResults
+            results = await c.fetch()
+            assert len(results) == 1  # One source
+            result = results[0]
+            assert result.source_function == "remote_dir"
+            assert len(result.added) == 1  # One file added
+            assert result.added[0].source_location == "userdata.parquet"
+            assert result.pack == "base"
+            assert len(result.replaced) == 0
+            assert len(result.removed) == 0
+            assert result.total_count() == 1
+            assert not result.is_empty()
