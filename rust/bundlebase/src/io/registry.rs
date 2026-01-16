@@ -14,7 +14,7 @@ use url::Url;
 /// Each backend implements this trait to handle its supported URL schemes.
 #[async_trait]
 pub trait IOFactory: Send + Sync {
-    /// URL schemes this factory handles (e.g., ["ftp"], ["scp", "sftp"], ["tar"]).
+    /// URL schemes this factory handles (e.g., ["ftp"], ["sftp"], ["tar"]).
     fn schemes(&self) -> &[&str];
 
     /// Whether this backend supports write operations for the given URL.
@@ -282,10 +282,8 @@ mod tests {
     fn test_registry_has_sftp_factory() {
         let registry = io_registry();
         assert!(registry.get_factory("sftp").is_some());
-        assert!(registry.get_factory("scp").is_some());
-        // SFTP/SCP is read-only
+        // SFTP is read-only
         assert!(!registry.supports_write(&Url::parse("sftp://user@example.com/test").unwrap()));
-        assert!(!registry.supports_write(&Url::parse("scp://user@example.com/test").unwrap()));
     }
 
     #[test]
@@ -308,7 +306,6 @@ mod tests {
         // FTP and SFTP do not support true streaming reads
         assert!(!registry.supports_streaming_read("ftp"));
         assert!(!registry.supports_streaming_read("sftp"));
-        assert!(!registry.supports_streaming_read("scp"));
 
         // Tar supports streaming reads (via object_store)
         assert!(registry.supports_streaming_read("tar"));
@@ -345,7 +342,6 @@ mod tests {
         // FTP and SFTP use synthetic versions (based on size)
         assert!(!registry.supports_versioning("ftp"));
         assert!(!registry.supports_versioning("sftp"));
-        assert!(!registry.supports_versioning("scp"));
 
         // Tar supports versioning (via object_store)
         assert!(registry.supports_versioning("tar"));

@@ -84,7 +84,7 @@ pub trait IOReadDir: Send + Sync + Debug {
 }
 
 /// Write operations for directories that support modification.
-/// Not implemented by read-only backends (FTP, SCP when used as sources).
+/// Not implemented by read-only backends (FTP, SFTP when used as sources).
 #[async_trait]
 pub trait IOReadWriteDir: IOReadDir {
     /// Get a writable subdirectory reference.

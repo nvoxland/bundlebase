@@ -12,7 +12,7 @@
 //! **Protocol-specific (in `plugin/`):**
 //! - `plugin::object_store` - file://, s3://, gs://, azure://, memory://, empty://
 //! - `plugin::ftp` - ftp://
-//! - `plugin::sftp` - sftp://, scp://
+//! - `plugin::sftp` - sftp://
 //! - `plugin::tar` - tar://
 
 // Generic modules

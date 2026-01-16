@@ -38,24 +38,22 @@ impl client::Handler for SshHandler {
     }
 }
 
-/// Parse an SCP/SFTP URL into its components.
+/// Parse an SFTP URL into its components.
 ///
 /// # URL Format
-/// `scp://[user@]host[:port]/path` or `sftp://[user@]host[:port]/path`
-///
-/// Both `scp://` and `sftp://` schemes are accepted and treated identically.
+/// `sftp://[user@]host[:port]/path`
 ///
 /// # Returns
 /// Tuple of (user, host, port, path)
-pub fn parse_scp_url(url: &Url) -> Result<(String, String, u16, String), BundlebaseError> {
+pub fn parse_sftp_url(url: &Url) -> Result<(String, String, u16, String), BundlebaseError> {
     let scheme = url.scheme();
-    if scheme != "scp" && scheme != "sftp" {
-        return Err(format!("Expected 'scp' or 'sftp' URL scheme, got '{}'", scheme).into());
+    if scheme != "sftp" {
+        return Err(format!("Expected 'sftp' URL scheme, got '{}'", scheme).into());
     }
 
     let host = url
         .host_str()
-        .ok_or_else(|| BundlebaseError::from("SCP/SFTP URL must include a host"))?;
+        .ok_or_else(|| BundlebaseError::from("SFTP URL must include a host"))?;
 
     let port = url.port().unwrap_or(22);
 
@@ -67,7 +65,7 @@ pub fn parse_scp_url(url: &Url) -> Result<(String, String, u16, String), Bundleb
 
     let path = url.path().to_string();
     if path.is_empty() || path == "/" {
-        return Err("SCP/SFTP URL must include a path".into());
+        return Err("SFTP URL must include a path".into());
     }
 
     Ok((user, host.to_string(), port, path))
@@ -255,7 +253,7 @@ impl Debug for SftpFile {
 impl SftpFile {
     /// Create an SftpFile from a URL and configuration.
     pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<Self, BundlebaseError> {
-        let (user, host, port, path) = parse_scp_url(url)?;
+        let (user, host, port, path) = parse_sftp_url(url)?;
 
         // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
@@ -388,7 +386,7 @@ impl Debug for SftpDir {
 impl SftpDir {
     /// Create an SftpDir from a URL and configuration.
     pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<Self, BundlebaseError> {
-        let (user, host, port, path) = parse_scp_url(url)?;
+        let (user, host, port, path) = parse_sftp_url(url)?;
 
         // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
@@ -478,7 +476,7 @@ pub struct SftpIOFactory;
 #[async_trait]
 impl IOFactory for SftpIOFactory {
     fn schemes(&self) -> &[&str] {
-        &["scp", "sftp"]
+        &["sftp"]
     }
 
     fn supports_write(&self, _url: &Url) -> bool {
@@ -525,9 +523,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_scp_url_full() {
-        let url = Url::parse("scp://testuser@example.com:2222/home/data").unwrap();
-        let (user, host, port, path) = parse_scp_url(&url).unwrap();
+    fn test_parse_sftp_url_full() {
+        let url = Url::parse("sftp://testuser@example.com:2222/home/data").unwrap();
+        let (user, host, port, path) = parse_sftp_url(&url).unwrap();
         assert_eq!(user, "testuser");
         assert_eq!(host, "example.com");
         assert_eq!(port, 2222);
@@ -537,7 +535,7 @@ mod tests {
     #[test]
     fn test_parse_sftp_url() {
         let url = Url::parse("sftp://testuser@example.com/data/files").unwrap();
-        let (user, host, port, path) = parse_scp_url(&url).unwrap();
+        let (user, host, port, path) = parse_sftp_url(&url).unwrap();
         assert_eq!(user, "testuser");
         assert_eq!(host, "example.com");
         assert_eq!(port, 22);
@@ -545,29 +543,29 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_scp_url_wrong_scheme() {
+    fn test_parse_sftp_url_wrong_scheme() {
         let url = Url::parse("http://example.com/data").unwrap();
-        let result = parse_scp_url(&url);
+        let result = parse_sftp_url(&url);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("Expected 'scp' or 'sftp'"));
+            .contains("Expected 'sftp'"));
     }
 
     #[test]
-    fn test_parse_scp_url_missing_path() {
+    fn test_parse_sftp_url_missing_path() {
         let url = Url::parse("sftp://user@example.com").unwrap();
-        let result = parse_scp_url(&url);
+        let result = parse_sftp_url(&url);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("must include a path"));
     }
 
     #[test]
-    fn test_parse_scp_url_defaults_user() {
+    fn test_parse_sftp_url_defaults_user() {
         // When no username is provided, it defaults to $USER or "root"
         let url = Url::parse("sftp://example.com/data").unwrap();
-        let result = parse_scp_url(&url);
+        let result = parse_sftp_url(&url);
         assert!(result.is_ok());
         let (user, host, _, _) = result.unwrap();
         assert_eq!(host, "example.com");
@@ -596,20 +594,13 @@ mod tests {
     fn test_sftp_factory_schemes() {
         let factory = SftpIOFactory;
         let schemes = factory.schemes();
-        assert_eq!(schemes, &["scp", "sftp"]);
+        assert_eq!(schemes, &["sftp"]);
     }
 
     #[test]
     fn test_sftp_factory_supports_write_returns_false() {
         let factory = SftpIOFactory;
         let url = Url::parse("sftp://user@example.com/data").unwrap();
-        assert!(!factory.supports_write(&url));
-    }
-
-    #[test]
-    fn test_sftp_factory_supports_write_scp_returns_false() {
-        let factory = SftpIOFactory;
-        let url = Url::parse("scp://user@example.com/data").unwrap();
         assert!(!factory.supports_write(&url));
     }
 

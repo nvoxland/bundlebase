@@ -50,7 +50,7 @@ pub trait IOReadFile: Send + Sync + Debug {
 }
 
 /// Write operations for storage backends that support modification.
-/// Not implemented by read-only backends (FTP, SCP when used as sources).
+/// Not implemented by read-only backends (FTP, SFTP when used as sources).
 #[async_trait]
 pub trait IOReadWriteFile: IOReadFile {
     /// Write bytes to file, overwriting if exists.
