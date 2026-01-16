@@ -784,10 +784,8 @@ class PyBundleBuilder:
                     Supports anonymous FTP (just omit user/pass), custom ports, and authenticated access.
                     Note: Files are always copied into the bundle (remote files cannot be directly referenced)
 
-                "scp_directory" - List files from a remote directory via SSH/SFTP:
-                    - "url" (required): SCP or SFTP URL. Both schemes are supported:
-                        - "scp://user@host:22/path/to/data"
-                        - "sftp://user@host:22/path/to/data"
+                "sftp_directory" - List files from a remote directory via SFTP:
+                    - "url" (required): SFTP URL (e.g., "sftp://user@host:22/path/to/data")
                     - "key_path" (required): Path to SSH private key file (e.g., "~/.ssh/id_rsa")
                     - "patterns" (optional): Comma-separated glob patterns (defaults to "**/*")
                     Note: Files are always copied into the bundle (remote files cannot be directly referenced)
@@ -810,8 +808,8 @@ class PyBundleBuilder:
             # FTP directory (authenticated)
             c = await c.create_source("ftp_directory", {"url": "ftp://user:pass@ftp.example.com/data/"})
 
-            # Remote directory via SSH (scp:// or sftp:// both work)
-            c = await c.create_source("scp_directory", {"url": "sftp://user@host/data/", "key_path": "~/.ssh/id_rsa"})
+            # Remote directory via SFTP
+            c = await c.create_source("sftp_directory", {"url": "sftp://user@host/data/", "key_path": "~/.ssh/id_rsa"})
 
             # Define source for a joined pack
             c = await c.create_source("remote_dir", {"url": "s3://bucket/customers/"}, pack="customers")

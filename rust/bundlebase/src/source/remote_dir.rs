@@ -10,7 +10,7 @@ use super::source_utils;
 use crate::io::plugin::ftp::FtpFile;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadWriteDir;
-use crate::io::plugin::sftp::{parse_scp_url, SftpClient};
+use crate::io::plugin::sftp::{parse_sftp_url, SftpClient};
 use crate::io::{io_registry, IOReadFile};
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
@@ -29,7 +29,7 @@ use url::Url;
 ///   Defaults to "**/*" (all files)
 /// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
 ///   "false" to reference files at their original URL
-/// - `key_path` (optional): SSH key path for SFTP/SCP sources
+/// - `key_path` (optional): SSH key path for SFTP sources
 /// - `mode` (optional): Sync mode for fetch:
 ///   - "add" (default): Only attach new files
 ///   - "update": Add new files and replace changed files
@@ -64,7 +64,7 @@ impl SourceFunction for RemoteDirFunction {
             },
             ArgSpec {
                 name: "key_path",
-                description: "SSH key path for SFTP/SCP sources",
+                description: "SSH key path for SFTP sources",
                 required: false,
                 default: None,
             },
@@ -251,7 +251,7 @@ impl RemoteDirFunction {
 
         // Handle special protocols that need custom download logic
         match scheme {
-            "scp" | "sftp" => Self::download_sftp_static(url, key_path, data_dir).await,
+            "sftp" => Self::download_sftp_static(url, key_path, data_dir).await,
             "ftp" => Self::download_ftp_static(url, data_dir).await,
             _ => {
                 // Use standard materialization for other schemes
@@ -275,16 +275,16 @@ impl RemoteDirFunction {
         Self::materialize_url_static(url, should_copy, key_path, data_dir, config).await
     }
 
-    /// Download a file via SFTP/SCP (static version).
+    /// Download a file via SFTP (static version).
     async fn download_sftp_static(
         url: &Url,
         key_path: Option<&str>,
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
-        let (user, host, port, remote_path) = parse_scp_url(url)?;
+        let (user, host, port, remote_path) = parse_sftp_url(url)?;
         let key_path_str = key_path.ok_or_else(|| {
             BundlebaseError::from(
-                "SCP/SFTP source requires 'key_path' argument for downloading files",
+                "SFTP source requires 'key_path' argument for downloading files",
             )
         })?;
         let key_path_expanded = shellexpand::tilde(key_path_str).to_string();

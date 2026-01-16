@@ -3,7 +3,7 @@
 //! This module contains implementations for specific storage backends:
 //! - `object_store`: file://, s3://, gs://, azure://, memory://, empty://
 //! - `ftp`: ftp://
-//! - `sftp`: sftp://, scp://
+//! - `sftp`: sftp://
 //! - `tar`: tar://
 
 pub mod ftp;
