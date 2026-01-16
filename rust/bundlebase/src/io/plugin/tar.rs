@@ -266,7 +266,7 @@ impl TarObjectStore {
             header.set_mtime(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("BUG: current time should be after Unix epoch")
                     .as_secs(),
             );
             header.set_cksum();
@@ -286,7 +286,7 @@ impl TarObjectStore {
         header.set_mtime(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .expect("BUG: current time should be after Unix epoch")
                 .as_secs(),
         );
         header.set_cksum();
@@ -430,7 +430,7 @@ impl ObjectStore for TarObjectStore {
 
         // Clone the data we need
         let index = self.index.read();
-        let prefix_owned = prefix.map(|p| p.clone());
+        let prefix_owned = prefix.cloned();
 
         let entries: Vec<ObjectMeta> = index
             .entries
@@ -668,7 +668,7 @@ impl IOReadFile for TarFile {
         match self.store.head(&self.path).await {
             Ok(meta) => Ok(Some(
                 FileInfo::new(self.url.clone())
-                    .with_size(meta.size as u64)
+                    .with_size(meta.size)
                     .with_modified(meta.last_modified),
             )),
             Err(e) => {
@@ -793,7 +793,7 @@ impl IOReadDir for TarDir {
             if let Ok(url) = Url::parse(&file_url) {
                 files.push(
                     FileInfo::new(url)
-                        .with_size(meta.size as u64)
+                        .with_size(meta.size)
                         .with_modified(meta.last_modified),
                 );
             }

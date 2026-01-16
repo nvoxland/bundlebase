@@ -17,10 +17,14 @@ pub fn parse_custom_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseE
     match parse_result {
         Ok(mut pairs) => {
             // Get the top-level statement rule
-            let statement = pairs.next().unwrap();
+            let statement = pairs.next().ok_or_else(|| {
+                BundlebaseError::from("Parser produced empty result")
+            })?;
 
             // Get the inner statement type (filter_stmt, attach_stmt, etc.)
-            let inner_stmt = statement.into_inner().next().unwrap();
+            let inner_stmt = statement.into_inner().next().ok_or_else(|| {
+                BundlebaseError::from("Parser produced empty inner statement")
+            })?;
 
             let cmd = match inner_stmt.as_rule() {
                 Rule::filter_stmt => parse_filter_pest(inner_stmt)?,

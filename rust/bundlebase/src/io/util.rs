@@ -8,13 +8,11 @@ use url::Url;
 
 /// Like Url::join but allows an input with multiple sub-paths. The appended path is always treated as a relative path.
 pub fn join_url(base: &Url, append: &str) -> Result<Url, BundlebaseError> {
-    let base = if !base.path().ends_with('/') {
-        &Url::parse(format!("{}/", base.to_string()).as_str())?
+    let mut return_url = if !base.path().ends_with('/') {
+        Url::parse(format!("{}/", base).as_str())?
     } else {
-        &base
+        base.clone()
     };
-
-    let mut return_url = base.clone();
     for segment in append.split("/").filter(|s| !s.is_empty()) {
         return_url = return_url.join(format!("{}/", segment).as_str())?;
     }

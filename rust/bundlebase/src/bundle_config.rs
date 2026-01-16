@@ -142,7 +142,7 @@ impl BundleConfig {
             Some(prefix) => {
                 self.url_overrides
                     .entry(prefix.to_string())
-                    .or_insert_with(HashMap::new)
+                    .or_default()
                     .insert(key.to_string(), value.to_string());
             }
             None => {
@@ -173,7 +173,7 @@ impl BundleConfig {
             merged
                 .url_overrides
                 .entry(url_prefix.clone())
-                .or_insert_with(HashMap::new)
+                .or_default()
                 .extend(override_map.clone());
         }
 

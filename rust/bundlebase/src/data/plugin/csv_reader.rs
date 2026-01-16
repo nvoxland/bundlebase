@@ -42,16 +42,9 @@ impl FileFormatConfig for CsvFormatConfig {
 }
 
 /// CSV plugin - uses generic FilePlugin and creates CsvReader
+#[derive(Default)]
 pub struct CsvPlugin {
     inner: FilePlugin<CsvFormatConfig>,
-}
-
-impl Default for CsvPlugin {
-    fn default() -> Self {
-        Self {
-            inner: FilePlugin::default(),
-        }
-    }
 }
 
 #[async_trait]
@@ -153,9 +146,11 @@ impl DataReader for CsvReader {
         let (num_rows, file_bytes) = self.compute_statistics().await?;
 
         // Create statistics with actual row count and byte size
-        let mut stats = Statistics::default();
-        stats.num_rows = Precision::Exact(num_rows);
-        stats.total_byte_size = Precision::Exact(file_bytes);
+        let stats = Statistics {
+            num_rows: Precision::Exact(num_rows),
+            total_byte_size: Precision::Exact(file_bytes),
+            ..Default::default()
+        };
 
         Ok(Some(stats))
     }
@@ -165,7 +160,7 @@ impl DataReader for CsvReader {
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn crate::io::IOReadFile>>, BundlebaseError> {
         let index_file = RowIdIndex::new()
-            .build(&self.inner.file(), data_dir, &self.block_id(), true)
+            .build(self.inner.file(), data_dir, &self.block_id(), true)
             .await?;
 
         Ok(Some(index_file))

@@ -16,7 +16,7 @@ pub struct IndexDefinition {
 impl IndexDefinition {
     pub(crate) fn new(id: &ObjectId, column: &String) -> IndexDefinition {
         Self {
-            id: id.clone(),
+            id: *id,
             column: column.clone(),
             blocks: RwLock::new(Vec::new()),
         }

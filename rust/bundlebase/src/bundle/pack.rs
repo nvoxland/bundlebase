@@ -25,10 +25,10 @@ pub struct Pack {
 impl Clone for Pack {
     fn clone(&self) -> Self {
         Self {
-            id: self.id.clone(),
+            id: self.id,
             blocks: RwLock::new(self.blocks.read().clone()),
             name: self.name.clone(),
-            join_type: self.join_type.clone(),
+            join_type: self.join_type,
             expression: self.expression.clone(),
         }
     }
@@ -183,7 +183,7 @@ mod tests {
     fn test_new_join() {
         let id = ObjectId::generate();
         let pack = Pack::new(
-            id.clone(),
+            id,
             "customers",
             "base.id = customers.id",
             JoinTypeOption::Left,

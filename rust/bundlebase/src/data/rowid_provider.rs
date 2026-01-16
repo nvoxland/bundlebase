@@ -42,7 +42,7 @@ impl RowIdProvider for LayoutRowIdProvider {
         let url = self.layout.url();
 
         // Check global LRU cache first
-        if let Some(cached) = GLOBAL_ROWID_CACHE.get(&url) {
+        if let Some(cached) = GLOBAL_ROWID_CACHE.get(url) {
             log::trace!("RowId cache hit for {}", url);
             return Ok(cached[begin..end].to_vec());
         }

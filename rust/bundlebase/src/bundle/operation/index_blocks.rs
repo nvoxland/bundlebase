@@ -25,7 +25,7 @@ pub struct IndexBlocksOp {
 
 /// Finds a block by ID in the bundle's packs.
 fn find_block(bundle: &Bundle, block_id: &ObjectId) -> Result<Arc<DataBlock>, BundlebaseError> {
-    for (_, pack) in &bundle.packs().read().clone() {
+    for pack in bundle.packs().read().values() {
         for block in &pack.blocks() {
             if block.id() == block_id {
                 return Ok(block.clone());
@@ -145,7 +145,7 @@ impl IndexBlocksOp {
 
                     all_value_to_rowids
                         .entry(indexed_value)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(*row_id);
                 }
             }
@@ -204,7 +204,7 @@ impl IndexBlocksOp {
         );
 
         Ok(Self {
-            index: index.clone(),
+            index: *index,
             blocks: blocks
                 .into_iter()
                 .map(|(block, version)| VersionedBlockId { block, version })

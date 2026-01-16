@@ -496,10 +496,27 @@ impl PyBundleBuilder {
         let expression = expression.to_string();
         let join_type = join_type.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let join_type_option = join_type
-                .as_ref()
-                .map(|jt| JoinTypeOption::from_str(jt))
-                .unwrap_or(JoinTypeOption::Inner);
+            let join_type_option = match &join_type {
+                None => JoinTypeOption::Inner,
+                Some(jt) => {
+                    let jt_lower = jt.to_lowercase();
+                    match jt_lower.as_str() {
+                        "inner" => JoinTypeOption::Inner,
+                        "left" => JoinTypeOption::Left,
+                        "right" => JoinTypeOption::Right,
+                        "full" => JoinTypeOption::Full,
+                        _ => {
+                            return Err(to_py_error(
+                                "Invalid join_type",
+                                format!(
+                                    "'{}' is not a valid join type. Valid options: Inner, Left, Right, Full",
+                                    jt
+                                ),
+                            ));
+                        }
+                    }
+                }
+            };
 
             let mut builder = inner.lock().await;
             builder
@@ -628,7 +645,15 @@ impl PyBundleBuilder {
         })
     }
 
-    #[doc = "Returns a reference to the underlying PyArrow record batches for manual conversion to pandas, polars, numpy, etc."]
+    /// Returns the underlying PyArrow record batches for manual conversion.
+    ///
+    /// WARNING: This method materializes the entire dataset into memory.
+    /// For large datasets, use `as_pyarrow_stream()` instead which streams
+    /// data in batches without loading everything into memory.
+    ///
+    /// Recommended alternatives:
+    /// - `to_pandas()` / `to_polars()` - These stream internally and use constant memory
+    /// - `as_pyarrow_stream()` - For custom incremental processing
     fn as_pyarrow<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -1252,6 +1277,7 @@ impl PyBundleBuilder {
                 .collect()
         })
     }
+
 }
 
 impl PyBundleBuilder {

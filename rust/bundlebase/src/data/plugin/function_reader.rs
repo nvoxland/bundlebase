@@ -63,7 +63,7 @@ impl ReaderPlugin for FunctionPlugin {
             url,
             output: function.output().clone(),
             implementation,
-            block_id: block_id.clone(),
+            block_id: *block_id,
         })))
     }
 }
@@ -114,8 +114,10 @@ impl DataReader for FunctionDataReader {
                     }
                 }
 
-                let mut stats = Statistics::default();
-                stats.num_rows = Precision::Exact(total_rows);
+                let stats = Statistics {
+                    num_rows: Precision::Exact(total_rows),
+                    ..Default::default()
+                };
                 Ok(Some(stats))
             }
             Err(_) => Ok(None),

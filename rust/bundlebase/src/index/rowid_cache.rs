@@ -25,7 +25,11 @@ pub struct RowIdCache {
 impl RowIdCache {
     /// Creates a new RowIdCache with the specified capacity
     pub fn new(capacity: usize) -> Self {
-        let capacity = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(100).unwrap());
+        let capacity = if let Some(nz) = NonZeroUsize::new(capacity) {
+            nz
+        } else {
+            NonZeroUsize::new(100).expect("100 is non-zero")
+        };
         Self {
             cache: Mutex::new(LruCache::new(capacity)),
         }

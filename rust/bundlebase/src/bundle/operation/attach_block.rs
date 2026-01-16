@@ -116,7 +116,7 @@ impl AttachBlockOp {
             version,
             schema,
             id: block_id,
-            pack: pack.clone(),
+            pack: *pack,
             layout: None,
             source: None,
             source_location: None,
@@ -170,14 +170,14 @@ impl Operation for AttachBlockOp {
             .await?;
 
         let block = Arc::new(DataBlock::new(
-            self.id.clone(),
-            self.schema.clone().unwrap(),
+            self.id,
+            self.schema.clone().expect("BUG: schema must be set during setup"),
             &self.version,
             reader,
             bundle.indexes().clone(),
             bundle.data_dir_arc(),
             bundle.config(),
-            self.source.clone(),
+            self.source,
             self.source_location.clone(),
         ));
 
@@ -237,8 +237,8 @@ mod tests {
         let datafile = test_datafile("userdata.parquet");
         let op =
             AttachBlockOp::setup(&ObjectId::generate(), datafile, &empty_bundle().await).await?;
-        let block_id = String::from(op.id.clone());
-        let pack = String::from(op.pack.clone());
+        let block_id = String::from(op.id);
+        let pack = String::from(op.pack);
         let version = ObjectStoreFile::from_url(
             &Url::parse(datafile).unwrap(),
             BundleConfig::default().into(),

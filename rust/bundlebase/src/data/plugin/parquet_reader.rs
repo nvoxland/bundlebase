@@ -39,16 +39,9 @@ impl FileFormatConfig for ParquetFormatConfig {
     }
 }
 
+#[derive(Default)]
 pub struct ParquetPlugin {
     inner: FilePlugin<ParquetFormatConfig>,
-}
-
-impl Default for ParquetPlugin {
-    fn default() -> Self {
-        Self {
-            inner: FilePlugin::default(),
-        }
-    }
 }
 
 #[async_trait]
@@ -61,14 +54,14 @@ impl ReaderPlugin for ParquetPlugin {
         schema: Option<SchemaRef>,
         _layout: Option<String>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
-        if !self.inner.handles(&source) {
+        if !self.inner.handles(source) {
             return Ok(None);
         }
 
         let reader = self.inner.reader(source, bundle, schema).await?;
         Ok(Some(Arc::new(ParquetDataReader::new(
             reader,
-            block_id.clone(),
+            *block_id,
         ))))
     }
 }
@@ -140,9 +133,11 @@ impl DataReader for ParquetDataReader {
         let row_count = metadata.file_metadata().num_rows() as usize;
 
         // Create statistics with row count and file size
-        let mut stats = Statistics::default();
-        stats.num_rows = Precision::Exact(row_count);
-        stats.total_byte_size = Precision::Exact(file_size);
+        let stats = Statistics {
+            num_rows: Precision::Exact(row_count),
+            total_byte_size: Precision::Exact(file_size),
+            ..Default::default()
+        };
 
         Ok(Some(stats))
     }

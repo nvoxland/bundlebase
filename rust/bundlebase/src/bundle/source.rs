@@ -53,8 +53,8 @@ impl Source {
             .ok_or_else(|| format!("Unknown source function '{}'", op.function))?;
 
         Ok(Self::new(
-            op.id.clone(),
-            op.pack.clone(),
+            op.id,
+            op.pack,
             op.function.clone(),
             op.args.clone(),
         ))

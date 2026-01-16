@@ -11,6 +11,7 @@ pub struct ColumnSource {
 }
 
 /// Analyzes a DataFusion LogicalPlan to extract column lineage
+#[derive(Default)]
 pub struct ColumnLineageAnalyzer {
     /// Maps logical column names to their sources
     lineage: HashMap<String, ColumnSource>,

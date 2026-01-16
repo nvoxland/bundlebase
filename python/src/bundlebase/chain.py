@@ -18,10 +18,61 @@ from typing import Any, List, Tuple, Callable, Dict, Optional
 # Store original methods to avoid recursion
 _ORIGINAL_METHODS: Dict[str, Callable] = {}
 
+# Methods that should execute the chain first, then call the method on the result
+_CONVERSION_METHODS = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyarrow_stream"}
+
 
 def register_original_method(name: str, method: Callable) -> None:
     """Register the original (non-wrapped) method."""
     _ORIGINAL_METHODS[name] = method
+
+
+def _validate_method_name(name: str, class_name: str) -> None:
+    """Validate that a method name is a known operation.
+
+    Args:
+        name: Method name to validate
+        class_name: Name of the calling class for error messages
+
+    Raises:
+        AttributeError: If the method name is not registered
+    """
+    if _ORIGINAL_METHODS.get(name) is None:
+        available_methods = sorted([
+            m for m in _ORIGINAL_METHODS.keys() if not m.startswith("_")
+        ])
+        raise AttributeError(
+            f"'{class_name}' has no method '{name}'. "
+            f"Available methods: {', '.join(available_methods)}"
+        )
+
+
+async def _execute_operations(
+    bundle: Any,
+    operations: List[Tuple[str, tuple, dict]]
+) -> Any:
+    """Execute a list of operations on a bundle.
+
+    Args:
+        bundle: The bundle to operate on
+        operations: List of (method_name, args, kwargs) tuples
+
+    Returns:
+        The final bundle after all operations
+    """
+    for method_name, args, kwargs in operations:
+        # Use the original method to avoid recursion
+        original_method = _ORIGINAL_METHODS.get(method_name)
+        if original_method:
+            result = original_method(bundle, *args, **kwargs)
+        else:
+            # Fallback to getattr (for non-wrapped methods)
+            method = getattr(bundle, method_name)
+            result = method(*args, **kwargs)
+
+        bundle = await result
+
+    return bundle
 
 
 class OperationChain:
@@ -63,8 +114,7 @@ class OperationChain:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
         # Conversion and streaming methods should execute the chain, not queue operations
-        conversion_methods = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyarrow_stream"}
-        if name in conversion_methods:
+        if name in _CONVERSION_METHODS:
             async def conversion_wrapper(*args, **kwargs):
                 # Execute the chain first
                 bundle = await self._execute()
@@ -76,29 +126,7 @@ class OperationChain:
 
         # Validate that the method is a known operation before queuing
         # This gives early feedback instead of failing at await time
-        original_method = _ORIGINAL_METHODS.get(name)
-        if original_method is None:
-            # Provide helpful error message with available methods
-            available_methods = sorted([
-                m for m in _ORIGINAL_METHODS.keys() if not m.startswith("_")
-            ])
-            raise AttributeError(
-                f"'{type(self).__name__}' has no method '{name}'. "
-                f"Available methods: {', '.join(available_methods)}"
-            )
-
-        # Validate that the method is a known operation before queuing
-        # This gives early feedback instead of failing at await time
-        original_method = _ORIGINAL_METHODS.get(name)
-        if original_method is None:
-            # Provide helpful error message with available methods
-            available_methods = sorted([
-                m for m in _ORIGINAL_METHODS.keys() if not m.startswith("_")
-            ])
-            raise AttributeError(
-                f"'{type(self).__name__}' has no method '{name}'. "
-                f"Available methods: {', '.join(available_methods)}"
-            )
+        _validate_method_name(name, type(self).__name__)
 
         # Other methods are queued as operations
         def method_wrapper(*args, **kwargs):
@@ -118,21 +146,7 @@ class OperationChain:
     async def _execute(self) -> Any:
         """Execute all queued operations and return the final bundle."""
         self._executed = True
-        bundle = self._bundle
-
-        for method_name, args, kwargs in self._operations:
-            # Use the original method to avoid recursion
-            original_method = _ORIGINAL_METHODS.get(method_name)
-            if original_method:
-                result = original_method(bundle, *args, **kwargs)
-            else:
-                # Fallback to getattr (for non-wrapped methods)
-                method = getattr(bundle, method_name)
-                result = method(*args, **kwargs)
-
-            bundle = await result
-
-        return bundle
+        return await _execute_operations(self._bundle, self._operations)
 
     def __del__(self):
         """Detect if operations were never executed.
@@ -194,8 +208,7 @@ class CreateChain:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
         # Conversion and streaming methods should execute the chain, not queue operations
-        conversion_methods = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyarrow_stream"}
-        if name in conversion_methods:
+        if name in _CONVERSION_METHODS:
             async def conversion_wrapper(*args, **kwargs):
                 # Execute the chain first
                 bundle = await self._execute()
@@ -207,16 +220,7 @@ class CreateChain:
 
         # Validate that the method is a known operation before queuing
         # This gives early feedback instead of failing at await time
-        original_method = _ORIGINAL_METHODS.get(name)
-        if original_method is None:
-            # Provide helpful error message with available methods
-            available_methods = sorted([
-                m for m in _ORIGINAL_METHODS.keys() if not m.startswith("_")
-            ])
-            raise AttributeError(
-                f"'{type(self).__name__}' has no method '{name}'. "
-                f"Available methods: {', '.join(available_methods)}"
-            )
+        _validate_method_name(name, type(self).__name__)
 
         # Other methods are queued as operations
         def method_wrapper(*args, **kwargs):
@@ -236,28 +240,10 @@ class CreateChain:
     async def _execute(self) -> Any:
         """Execute the creation first, then all queued operations."""
         self._executed = True
-        # First, create the bundle
-        original_create = _ORIGINAL_METHODS.get("create") or _ORIGINAL_METHODS.get("open")
-        if original_create is None:
-            raise RuntimeError("No create/open function registered")
-
         # Call the create function with its arguments
         bundle = await self._create_func(*self._create_args)
-
         # Then execute all queued operations
-        for method_name, args, kwargs in self._operations:
-            # Use the original method to avoid recursion
-            original_method = _ORIGINAL_METHODS.get(method_name)
-            if original_method:
-                result = original_method(bundle, *args, **kwargs)
-            else:
-                # Fallback to getattr (for non-wrapped methods)
-                method = getattr(bundle, method_name)
-                result = method(*args, **kwargs)
-
-            bundle = await result
-
-        return bundle
+        return await _execute_operations(bundle, self._operations)
 
     def __del__(self):
         """Detect if create/open was never executed.
@@ -325,8 +311,7 @@ class ExtendChain:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
         # Conversion and streaming methods should execute the chain, not queue operations
-        conversion_methods = {"to_pandas", "to_polars", "to_numpy", "to_dict", "as_pyarrow_stream"}
-        if name in conversion_methods:
+        if name in _CONVERSION_METHODS:
             async def conversion_wrapper(*args, **kwargs):
                 # Execute the chain first
                 bundle = await self._execute()
@@ -335,6 +320,10 @@ class ExtendChain:
                 return await method(*args, **kwargs)
 
             return conversion_wrapper
+
+        # Validate that the method is a known operation before queuing
+        # This gives early feedback instead of failing at await time
+        _validate_method_name(name, type(self).__name__)
 
         # Other methods are queued as operations
         def method_wrapper(*args, **kwargs):
@@ -354,21 +343,7 @@ class ExtendChain:
     async def _execute(self) -> Any:
         """Execute all queued operations and return the final bundle."""
         self._executed = True
-        bundle = self._bundle
-
-        for method_name, args, kwargs in self._operations:
-            # Use the original method to avoid recursion
-            original_method = _ORIGINAL_METHODS.get(method_name)
-            if original_method:
-                result = original_method(bundle, *args, **kwargs)
-            else:
-                # Fallback to getattr (for non-wrapped methods)
-                method = getattr(bundle, method_name)
-                result = method(*args, **kwargs)
-
-            bundle = await result
-
-        return bundle
+        return await _execute_operations(self._bundle, self._operations)
 
     def __del__(self):
         """Detect if extend chain was never executed.

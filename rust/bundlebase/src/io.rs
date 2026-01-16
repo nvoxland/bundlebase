@@ -143,6 +143,7 @@ pub fn writable_file_from_path(
     }
 }
 
+#[derive(Default)]
 pub struct DataStorage {}
 
 impl DataStorage {
@@ -291,7 +292,7 @@ mod tests {
 
     #[test]
     fn dir_from_url() {
-        for (url, expected) in vec![
+        for (url, expected) in [
             ("memory:///test", "memory:///test"),
             ("memory:///test/", "memory:///test/"),
             ("memory:///test/here", "memory:///test/here"),
@@ -313,7 +314,7 @@ mod tests {
 
     #[test]
     fn file_from_url() {
-        for (url, expected) in vec![
+        for (url, expected) in [
             ("memory:///test", "memory:///test"),
             ("memory:///test/", "memory:///test/"),
             ("memory:///test/here.txt", "memory:///test/here.txt"),

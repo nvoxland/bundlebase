@@ -13,6 +13,7 @@ pub mod object_id;
 pub mod progress;
 pub mod row_id;
 pub mod source;
+#[allow(clippy::unwrap_used)]
 pub mod test_utils;
 mod versioning;
 

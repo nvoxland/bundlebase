@@ -109,9 +109,9 @@ impl RowIdOffsetDataSource {
             // Extract the line from current position to next newline
             if let Some(relative_end) = text[current_pos..].find('\n') {
                 let end = current_pos + relative_end;
-                let line = text[current_pos..end].trim().to_string();
-                if !line.is_empty() {
-                    lines.push(line);
+                let trimmed = text[current_pos..end].trim();
+                if !trimmed.is_empty() {
+                    lines.push(trimmed.to_string());
                 }
                 current_pos = end + 1;
             } else {
@@ -145,11 +145,11 @@ impl RowIdOffsetDataSource {
                 current_end = current_end.max(row_end);
                 current_offsets.push(row_start);
             } else {
-                // Start a new batch
-                batches.push((current_start, current_end, current_offsets.clone()));
+                // Start a new batch - use mem::take to avoid cloning
+                batches.push((current_start, current_end, std::mem::take(&mut current_offsets)));
                 current_start = row_start;
                 current_end = row_end;
-                current_offsets = vec![row_start];
+                current_offsets.push(row_start);
             }
         }
 
@@ -267,15 +267,22 @@ impl DataSource for RowIdOffsetDataSource {
 
                 let batch = match format {
                     LineOrientedFormat::Csv => {
-                        // Prepend schema header to CSV data
-                        let header = schema
-                            .fields()
-                            .iter()
-                            .map(|f| f.name().as_str())
-                            .collect::<Vec<_>>()
-                            .join(",");
+                        // Estimate capacity: header + newlines + all lines
+                        let lines_len: usize = lines.iter().map(|l| l.len() + 1).sum();
+                        let header_len: usize = schema.fields().iter().map(|f| f.name().len() + 1).sum();
+                        let mut csv_data = String::with_capacity(header_len + lines_len);
 
-                        let mut csv_data = header + "\n";
+                        // Build header inline without intermediate Vec allocation
+                        let mut first = true;
+                        for field in schema.fields() {
+                            if !first {
+                                csv_data.push(',');
+                            }
+                            csv_data.push_str(field.name());
+                            first = false;
+                        }
+                        csv_data.push('\n');
+
                         for line in lines {
                             csv_data.push_str(&line);
                             csv_data.push('\n');
@@ -296,8 +303,10 @@ impl DataSource for RowIdOffsetDataSource {
                             .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?
                     }
                     LineOrientedFormat::JsonLines => {
-                        // Combine JSON lines into newline-delimited format
-                        let mut json_data = String::new();
+                        // Pre-allocate capacity for all lines plus newlines
+                        let total_len: usize = lines.iter().map(|l| l.len() + 1).sum();
+                        let mut json_data = String::with_capacity(total_len);
+
                         for line in lines {
                             json_data.push_str(&line);
                             json_data.push('\n');

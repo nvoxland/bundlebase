@@ -28,9 +28,7 @@ impl DropJoinOp {
                 join_name, available_list
             ))
         })?;
-        Ok(Self {
-            id: pack.id().clone(),
-        })
+        Ok(Self { id: *pack.id() })
     }
 }
 
@@ -76,21 +74,17 @@ mod tests {
     #[test]
     fn test_describe() {
         let pack_id = ObjectId::generate();
-        let op = DropJoinOp {
-            id: pack_id.clone(),
-        };
+        let op = DropJoinOp { id: pack_id };
         assert_eq!(op.describe(), format!("DROP JOIN {}", pack_id));
     }
 
     #[test]
     fn test_serialization() {
         let pack_id: ObjectId = "a5".try_into().unwrap();
-        let op = DropJoinOp {
-            id: pack_id.clone(),
-        };
+        let op = DropJoinOp { id: pack_id };
 
         let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
-        let expected = format!("id: {}\n", pack_id.to_string());
+        let expected = format!("id: {}\n", pack_id);
         assert_eq!(serialized, expected);
     }
 

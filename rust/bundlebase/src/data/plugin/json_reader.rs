@@ -41,16 +41,9 @@ impl FileFormatConfig for JsonFormatConfig {
 }
 
 /// JSON plugin - uses generic FilePlugin and creates JsonReader
+#[derive(Default)]
 pub struct JsonPlugin {
     inner: FilePlugin<JsonFormatConfig>,
-}
-
-impl Default for JsonPlugin {
-    fn default() -> Self {
-        Self {
-            inner: FilePlugin::default(),
-        }
-    }
 }
 
 #[async_trait]
@@ -68,7 +61,7 @@ impl ReaderPlugin for JsonPlugin {
         }
 
         let reader = self.inner.reader(source, bundle, schema).await?;
-        Ok(Some(Arc::new(JsonReader::new(reader, block_id.clone()))))
+        Ok(Some(Arc::new(JsonReader::new(reader, *block_id))))
     }
 }
 
@@ -118,9 +111,11 @@ impl DataReader for JsonReader {
         let (num_rows, file_bytes) = self.compute_statistics().await?;
 
         // Create statistics with actual row count and byte size
-        let mut stats = Statistics::default();
-        stats.num_rows = Precision::Exact(num_rows);
-        stats.total_byte_size = Precision::Exact(file_bytes);
+        let stats = Statistics {
+            num_rows: Precision::Exact(num_rows),
+            total_byte_size: Precision::Exact(file_bytes),
+            ..Default::default()
+        };
 
         Ok(Some(stats))
     }
@@ -130,7 +125,7 @@ impl DataReader for JsonReader {
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn crate::io::IOReadFile>>, BundlebaseError> {
         let index_file = RowIdIndex::new()
-            .build(&self.inner.file(), data_dir, &self.block_id(), false)
+            .build(self.inner.file(), data_dir, &self.block_id(), false)
             .await?;
 
         Ok(Some(index_file))

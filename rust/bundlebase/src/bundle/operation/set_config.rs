@@ -58,7 +58,7 @@ impl Operation for SetConfigOp {
         // Recompute merged config and recreate data_dir with new config
         bundle
             .recompute_config()
-            .map_err(|e| DataFusionError::External(e))?;
+            .map_err(DataFusionError::External)?;
 
         Ok(())
     }

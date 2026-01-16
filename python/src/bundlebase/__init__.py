@@ -78,7 +78,14 @@ _original_methods = {
 
     # View operations
     "create_view": _PyBundleBuilder.create_view,
+    "rename_view": _PyBundleBuilder.rename_view,
+    "drop_view": _PyBundleBuilder.drop_view,
     "drop_join": _PyBundleBuilder.drop_join,
+    "rename_join": _PyBundleBuilder.rename_join,
+
+    # Bundle state operations
+    "reset": _PyBundleBuilder.reset,
+    "undo": _PyBundleBuilder.undo,
 
     # Metadata operations
     "set_name": _PyBundleBuilder.set_name,
@@ -90,6 +97,7 @@ _original_methods = {
 
     # Index operations
     "create_index": _PyBundleBuilder.index,  # Rust: "index", Python API: "create_index"
+    "drop_index": _PyBundleBuilder.drop_index,
     "rebuild_index": _PyBundleBuilder.rebuild_index,
     "reindex": _PyBundleBuilder.reindex,
 
@@ -142,8 +150,10 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 mutation_methods = [
     "attach", "detach_block", "replace_block", "create_source",
     "drop_column", "rename_column", "filter", "select", "join",
-    "create_view", "drop_join", "set_name", "set_description", "set_config", "create_function",
-    "create_index", "rebuild_index", "reindex"
+    "create_view", "rename_view", "drop_view", "drop_join", "rename_join",
+    "set_name", "set_description", "set_config", "create_function",
+    "create_index", "drop_index", "rebuild_index", "reindex",
+    "reset", "undo"
 ]
 for method_name in mutation_methods:
     wrapped = _wrap_mutation_method(method_name)

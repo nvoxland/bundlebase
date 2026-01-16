@@ -347,7 +347,7 @@ fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
 
                     let fields: Result<Vec<Field>, String> = match fields_value {
                         Value::Sequence(seq) => {
-                            seq.iter().map(|v| deserialize_field_internal(v)).collect()
+                            seq.iter().map(deserialize_field_internal).collect()
                         }
                         _ => Err("fields must be a sequence".to_string()),
                     };
@@ -487,7 +487,7 @@ fn deserialize_schema_internal(value: &serde_yaml::Value) -> Result<Arc<Schema>,
         .ok_or_else(|| "missing 'fields' field".to_string())?;
 
     let fields: Result<Vec<Field>, String> = match fields_value {
-        Value::Sequence(seq) => seq.iter().map(|v| deserialize_field_internal(v)).collect(),
+        Value::Sequence(seq) => seq.iter().map(deserialize_field_internal).collect(),
         _ => Err("fields must be a sequence".to_string()),
     };
 

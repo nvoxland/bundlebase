@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 /// Keys are sorted alphabetically to ensure consistency.
 pub fn hash_config<T: Serialize>(config: &T) -> String {
     // Serialize to a serde_json value to sort keys
-    let value = serde_json::to_value(config).unwrap();
+    let value = serde_json::to_value(config).expect("BUG: config must be serializable");
 
     // Convert to a string with sorted keys
     let sorted_yaml = sort_json_keys(&value);

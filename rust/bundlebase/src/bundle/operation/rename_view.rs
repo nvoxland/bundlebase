@@ -22,7 +22,7 @@ impl RenameViewOp {
         bundle: &Bundle,
     ) -> Result<Self, BundlebaseError> {
         // Look up the view ID from the old name
-        let view_id = bundle
+        let view_id = *bundle
             .views
             .get(old_name)
             .ok_or_else(|| {
@@ -40,8 +40,7 @@ impl RenameViewOp {
                     "View '{}' not found. Available views: {}",
                     old_name, available_list
                 ))
-            })?
-            .clone();
+            })?;
 
         Ok(Self {
             id: view_id,
@@ -80,7 +79,7 @@ impl Operation for RenameViewOp {
         }
 
         // Insert new name->id mapping
-        bundle.views.insert(self.new_name.clone(), self.id.clone());
+        bundle.views.insert(self.new_name.clone(), self.id);
 
         Ok(())
     }
@@ -133,12 +132,12 @@ mod tests {
     fn test_serialization() {
         let view_id: ObjectId = "a5".try_into().unwrap();
         let op = RenameViewOp {
-            id: view_id.clone(),
+            id: view_id,
             new_name: "new_view".to_string(),
         };
 
         let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
-        let expected = format!("id: {}\nnewName: new_view\n", view_id.to_string());
+        let expected = format!("id: {}\nnewName: new_view\n", view_id);
         assert_eq!(serialized, expected);
     }
 

@@ -17,7 +17,7 @@ pub struct DropViewOp {
 impl DropViewOp {
     pub async fn setup(view_name: &str, bundle: &Bundle) -> Result<Self, BundlebaseError> {
         // Look up the view ID from the name
-        let view_id = bundle
+        let view_id = *bundle
             .views
             .get(view_name)
             .ok_or_else(|| {
@@ -35,8 +35,7 @@ impl DropViewOp {
                     "View '{}' not found. Available views: {}",
                     view_name, available_list
                 ))
-            })?
-            .clone();
+            })?;
 
         Ok(Self { id: view_id })
     }
@@ -88,21 +87,17 @@ mod tests {
     #[test]
     fn test_describe() {
         let view_id = ObjectId::generate();
-        let op = DropViewOp {
-            id: view_id.clone(),
-        };
+        let op = DropViewOp { id: view_id };
         assert_eq!(op.describe(), format!("DROP VIEW {}", view_id));
     }
 
     #[test]
     fn test_serialization() {
         let view_id: ObjectId = "a5".try_into().unwrap();
-        let op = DropViewOp {
-            id: view_id.clone(),
-        };
+        let op = DropViewOp { id: view_id };
 
         let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
-        let expected = format!("id: {}\n", view_id.to_string());
+        let expected = format!("id: {}\n", view_id);
         assert_eq!(serialized, expected);
     }
 
