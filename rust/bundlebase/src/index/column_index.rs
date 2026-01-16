@@ -203,7 +203,7 @@ impl Ord for IndexedValue {
                 } else if b.0.is_nan() {
                     Ordering::Less
                 } else {
-                    a.partial_cmp(b).unwrap()
+                    a.partial_cmp(b).expect("BUG: neither float should be NaN at this point")
                 }
             }
             (IndexedValue::Utf8(a), IndexedValue::Utf8(b)) => a.cmp(b),
@@ -417,8 +417,8 @@ impl ColumnIndex {
                 continue;
             }
 
-            let min_value = block.entries.first().unwrap().value.clone();
-            let max_value = block.entries.last().unwrap().value.clone();
+            let min_value = block.entries.first().expect("BUG: entries must be non-empty").value.clone();
+            let max_value = block.entries.last().expect("BUG: entries must be non-empty").value.clone();
 
             directory_entries.push(BlockEntry {
                 min_value,
@@ -590,7 +590,7 @@ impl ColumnIndex {
         match block_idx {
             Some(idx) => self.blocks[idx]
                 .find_exact(target)
-                .map(|v| v.clone())
+                .cloned()
                 .unwrap_or_default(),
             None => Vec::new(),
         }

@@ -52,7 +52,7 @@ impl RenameJoinOp {
         }
 
         Ok(Self {
-            id: pack.id().clone(),
+            id: *pack.id(),
             new_name: new_name.to_string(),
         })
     }
@@ -86,7 +86,7 @@ impl Operation for RenameJoinOp {
             .expect("Pack must exist - check() already verified");
         let mut new_pack = (*old_pack).clone();
         new_pack.set_name(&self.new_name);
-        bundle.add_pack(self.id.clone(), Arc::new(new_pack));
+        bundle.add_pack(self.id, Arc::new(new_pack));
 
         Ok(())
     }
@@ -139,12 +139,12 @@ mod tests {
     fn test_serialization() {
         let pack_id: ObjectId = "a5".try_into().unwrap();
         let op = RenameJoinOp {
-            id: pack_id.clone(),
+            id: pack_id,
             new_name: "new_join".to_string(),
         };
 
         let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
-        let expected = format!("id: {}\nnewName: new_join\n", pack_id.to_string());
+        let expected = format!("id: {}\nnewName: new_join\n", pack_id);
         assert_eq!(serialized, expected);
     }
 

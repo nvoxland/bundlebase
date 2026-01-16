@@ -35,14 +35,12 @@ impl PackUnionTable {
         // Get schema from first block
         let blocks = pack.blocks();
 
-        if blocks.is_empty() {
-            return Err(datafusion::error::DataFusionError::Plan(format!(
+        let schema = blocks.first().ok_or_else(|| {
+            datafusion::error::DataFusionError::Plan(format!(
                 "Pack {} has no blocks",
                 pack_id
-            )));
-        }
-
-        let schema = blocks.first().unwrap().schema();
+            ))
+        })?.schema();
 
         Ok(Self {
             pack_id,
@@ -106,8 +104,8 @@ impl TableProvider for PackUnionTable {
         }
 
         // If only one block, return its plan directly
-        if inputs.len() == 1 {
-            return Ok(inputs.into_iter().next().unwrap());
+        if let [plan] = inputs.as_slice() {
+            return Ok(plan.clone());
         }
 
         // Create a UnionExec to combine all block plans

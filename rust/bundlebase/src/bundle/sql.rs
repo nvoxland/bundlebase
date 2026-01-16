@@ -251,7 +251,7 @@ pub(crate) async fn parse_join_expr(
     let plan = df.logical_plan();
 
     let mut preds = Vec::new();
-    collect_join_exprs(&plan, &mut preds);
+    collect_join_exprs(plan, &mut preds);
     Ok(preds)
 }
 
@@ -393,7 +393,7 @@ mod tests {
             )
             .unwrap();
 
-        let pack = Pack::new(join_id.clone(), "test_join", "a=x", JoinTypeOption::Inner);
+        let pack = Pack::new(join_id, "test_join", "a=x", JoinTypeOption::Inner);
         let preds = parse_join_expr(
             &ctx,
             "t",
@@ -408,7 +408,7 @@ mod tests {
         assert_eq!("BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"base\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) })",
                    preds.as_str());
 
-        let pack2 = Pack::new(join_id.clone(), "test_join", "a=x and x > 3", JoinTypeOption::Inner);
+        let pack2 = Pack::new(join_id, "test_join", "a=x and x > 3", JoinTypeOption::Inner);
         let preds = parse_join_expr(
             &ctx,
             "t",

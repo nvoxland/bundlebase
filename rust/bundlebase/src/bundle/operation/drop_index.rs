@@ -14,9 +14,7 @@ pub struct DropIndexOp {
 
 impl DropIndexOp {
     pub async fn setup(id: &ObjectId) -> Result<Self, BundlebaseError> {
-        Ok(Self {
-            id: id.clone(),
-        })
+        Ok(Self { id: *id })
     }
 }
 
@@ -56,9 +54,7 @@ mod tests {
     #[test]
     fn test_drop_index_describe() {
         let index_id = ObjectId::generate();
-        let op = DropIndexOp {
-            id: index_id.clone(),
-        };
+        let op = DropIndexOp { id: index_id };
 
         assert_eq!(op.describe(), format!("DROP INDEX {}", index_id));
     }

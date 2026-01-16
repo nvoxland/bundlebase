@@ -292,7 +292,7 @@ impl TableProvider for DataBlock {
 
         if !indexable_filters.is_empty() {
             // Create VersionedBlockId for this block
-            let versioned_block = VersionedBlockId::new(self.id.clone(), self.version.clone());
+            let versioned_block = VersionedBlockId::new(self.id, self.version.clone());
 
             // Evaluate all indexable filters and select the best index
             if let Some(best) = self
@@ -302,8 +302,8 @@ impl TableProvider for DataBlock {
                 // Start span and timer for index lookup
                 let mut span = start_span(OperationCategory::Index, "lookup");
                 span.set_attribute("column", &best.filter.column);
-                span.set_attribute("selectivity", &format!("{:.3}", best.selectivity));
-                span.set_attribute("block_id", &self.id.to_string());
+                span.set_attribute("selectivity", format!("{:.3}", best.selectivity));
+                span.set_attribute("block_id", self.id.to_string());
 
                 let timer = OperationTimer::start(OperationCategory::Index, "lookup")
                     .with_label("column", &best.filter.column);
@@ -340,7 +340,7 @@ impl TableProvider for DataBlock {
                         );
 
                         // Record successful index hit
-                        span.set_attribute("matched_rows", &row_ids.len().to_string());
+                        span.set_attribute("matched_rows", row_ids.len().to_string());
                         span.set_outcome(OperationOutcome::Success);
                         timer.finish(OperationOutcome::Success);
 

@@ -25,7 +25,7 @@ impl CreateJoinOp {
         join_type: JoinTypeOption,
     ) -> Result<Self, BundlebaseError> {
         Ok(Self {
-            id: id.clone(),
+            id: *id,
             name: name.to_string(),
             join_type,
             expression: expression.to_string(),
@@ -49,13 +49,13 @@ impl Operation for CreateJoinOp {
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         let pack = Arc::new(Pack::new(
-            self.id.clone(),
+            self.id,
             &self.name,
             &self.expression,
             self.join_type,
         ));
 
-        bundle.add_pack(self.id.clone(), pack);
+        bundle.add_pack(self.id, pack);
 
         Ok(())
     }
@@ -80,7 +80,7 @@ mod tests {
     fn test_serialization() {
         let pack_id: ObjectId = "a5".try_into().unwrap();
         let op = CreateJoinOp {
-            id: pack_id.clone(),
+            id: pack_id,
             name: "customers".to_string(),
             join_type: JoinTypeOption::Left,
             expression: "base.id = customers.id".to_string(),

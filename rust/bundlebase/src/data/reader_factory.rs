@@ -42,11 +42,11 @@ impl DataReaderFactory {
         layout: Option<String>,
     ) -> Result<Arc<dyn DataReader>, BundlebaseError> {
         for plugin in &self.plugins {
-            let reader = plugin
+            if let Some(reader) = plugin
                 .reader(source, block_id, bundle, schema.clone(), layout.clone())
-                .await?;
-            if reader.is_some() {
-                return Ok(reader.unwrap());
+                .await?
+            {
+                return Ok(reader);
             }
         }
         Err(DataFusionError::NotImplemented(format!("No reader found for {}", source)).into())

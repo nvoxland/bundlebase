@@ -29,7 +29,7 @@ use super::tar::TarObjectStore;
 // ============================================================================
 
 pub(crate) fn compute_store_url(url: &Url) -> ObjectStoreUrl {
-    ObjectStoreUrl::parse(format!("{}://{}", url.scheme(), url.authority())).unwrap()
+    ObjectStoreUrl::parse(format!("{}://{}", url.scheme(), url.authority())).expect("BUG: URL scheme://authority should be valid")
 }
 
 /// Parse a URL and return an ObjectStore and Path
@@ -309,7 +309,7 @@ impl IOReadFile for ObjectStoreFile {
         match self.store.head(&self.path).await {
             Ok(meta) => Ok(Some(
                 FileInfo::new(self.url.clone())
-                    .with_size(meta.size as u64)
+                    .with_size(meta.size)
                     .with_modified(meta.last_modified),
             )),
             Err(e) => {
@@ -509,7 +509,7 @@ impl IOReadDir for ObjectStoreDir {
             let file_url = join_url(&self.url, relative_path)?;
             files.push(
                 FileInfo::new(file_url)
-                    .with_size(meta.size as u64)
+                    .with_size(meta.size)
                     .with_modified(meta.last_modified),
             );
         }
@@ -556,7 +556,7 @@ fn str_to_url(path: &str) -> Result<Url, BundlebaseError> {
         Ok(Url::parse(path)?)
     } else {
         // Check if this is a tar file - if so, use tar:// scheme
-        let file = file_url(path);
+        let file = file_url(path)?;
         if file.path().ends_with(".tar") {
             Ok(Url::parse(&format!("tar://{}", file.path()))?)
         } else {
@@ -567,15 +567,19 @@ fn str_to_url(path: &str) -> Result<Url, BundlebaseError> {
 
 /// Returns a URL for a file path.
 /// If the path is relative, returns an absolute file URL relative to the current working directory.
-fn file_url(path: &str) -> Url {
+fn file_url(path: &str) -> Result<Url, BundlebaseError> {
     let path_buf = PathBuf::from(path);
     let absolute_path = if path_buf.is_absolute() {
         path_buf
     } else {
-        current_dir().unwrap().join(path_buf)
+        current_dir().map_err(|e| {
+            BundlebaseError::from(format!("Failed to get current directory: {}", e))
+        })?.join(path_buf)
     };
 
-    Url::from_file_path(absolute_path.as_path()).unwrap()
+    Url::from_file_path(absolute_path.as_path()).map_err(|_| {
+        BundlebaseError::from(format!("Invalid file path: {}", path))
+    })
 }
 
 // ============================================================================
@@ -703,7 +707,7 @@ mod tests {
         assert_eq!(dir.url.to_string(), "memory:///test2");
 
         let dir = ObjectStoreDir::from_str("relative/path", BundleConfig::default().into()).unwrap();
-        assert_eq!(dir.url.to_string(), file_url("relative/path").to_string());
+        assert_eq!(dir.url.to_string(), file_url("relative/path").unwrap().to_string());
     }
 
     #[rstest]

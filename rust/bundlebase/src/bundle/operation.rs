@@ -12,6 +12,7 @@ mod replace_block;
 mod filter;
 mod index_blocks;
 mod drop_column;
+mod parameter_value;
 mod rebuild_index;
 mod rename_column;
 mod rename_join;
@@ -117,335 +118,105 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
     }
 }
 
-/// Enum wrapping all concrete operation types
-/// This allows storing heterogeneous operations in a single Vec while maintaining type safety
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum AnyOperation {
-    DropColumn(DropColumnOp),
-    RenameColumn(RenameColumnOp),
-    RenameJoin(RenameJoinOp),
-    RenameView(RenameViewOp),
+/// Macro to generate the AnyOperation enum, Operation trait impl, and From impls.
+///
+/// This eliminates boilerplate when adding new operations. To add a new operation:
+/// 1. Create the operation module and struct
+/// 2. Add it to the module declarations at the top of this file
+/// 3. Add a single line to the macro invocation below
+macro_rules! define_any_operation {
+    (
+        $(
+            $variant:ident($op_type:ty)
+        ),* $(,)?
+    ) => {
+        /// Enum wrapping all concrete operation types.
+        /// This allows storing heterogeneous operations in a single Vec while maintaining type safety.
+        #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+        #[serde(tag = "type", rename_all = "camelCase")]
+        pub enum AnyOperation {
+            $( $variant($op_type), )*
+        }
+
+        #[async_trait]
+        impl Operation for AnyOperation {
+            fn describe(&self) -> String {
+                match self {
+                    $( AnyOperation::$variant(op) => op.describe(), )*
+                }
+            }
+
+            async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
+                match self {
+                    $( AnyOperation::$variant(op) => op.check(bundle).await, )*
+                }
+            }
+
+            async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+                match self {
+                    $( AnyOperation::$variant(op) => op.apply(bundle).await, )*
+                }
+            }
+
+            async fn apply_dataframe(
+                &self,
+                df: DataFrame,
+                ctx: Arc<SessionContext>,
+            ) -> Result<DataFrame, BundlebaseError> {
+                match self {
+                    $( AnyOperation::$variant(op) => op.apply_dataframe(df, ctx).await, )*
+                }
+            }
+
+            fn version(&self) -> String {
+                match self {
+                    $( AnyOperation::$variant(op) => op.version(), )*
+                }
+            }
+
+            fn allowed_on_view(&self) -> bool {
+                match self {
+                    $( AnyOperation::$variant(op) => op.allowed_on_view(), )*
+                }
+            }
+        }
+
+        // Generate From impls for each operation type
+        $(
+            impl From<$op_type> for AnyOperation {
+                fn from(op: $op_type) -> Self {
+                    AnyOperation::$variant(op)
+                }
+            }
+        )*
+    };
+}
+
+// Define all operations in one place.
+// To add a new operation, simply add a line here.
+define_any_operation! {
     AttachBlock(AttachBlockOp),
-    CreateView(CreateViewOp),
     CreateFunction(CreateFunctionOp),
-    CreateSource(CreateSourceOp),
-    DetachBlock(DetachBlockOp),
-    Filter(FilterOp),
-    IndexBlocks(IndexBlocksOp),
     CreateIndex(CreateIndexOp),
     CreateJoin(CreateJoinOp),
+    CreateSource(CreateSourceOp),
+    CreateView(CreateViewOp),
+    DetachBlock(DetachBlockOp),
+    DropColumn(DropColumnOp),
     DropIndex(DropIndexOp),
     DropJoin(DropJoinOp),
     DropView(DropViewOp),
+    Filter(FilterOp),
+    IndexBlocks(IndexBlocksOp),
     RebuildIndex(RebuildIndexOp),
+    RenameColumn(RenameColumnOp),
+    RenameJoin(RenameJoinOp),
+    RenameView(RenameViewOp),
     ReplaceBlock(ReplaceBlockOp),
     Select(SelectOp),
     SetConfig(SetConfigOp),
-    SetName(SetNameOp),
     SetDescription(SetDescriptionOp),
-}
-
-#[async_trait]
-impl Operation for AnyOperation {
-    fn describe(&self) -> String {
-        match self {
-            AnyOperation::DropColumn(op) => op.describe(),
-            AnyOperation::RenameColumn(op) => op.describe(),
-            AnyOperation::RenameJoin(op) => op.describe(),
-            AnyOperation::RenameView(op) => op.describe(),
-            AnyOperation::AttachBlock(op) => op.describe(),
-            AnyOperation::CreateView(op) => op.describe(),
-            AnyOperation::CreateFunction(op) => op.describe(),
-            AnyOperation::CreateSource(op) => op.describe(),
-            AnyOperation::DetachBlock(op) => op.describe(),
-            AnyOperation::Filter(op) => op.describe(),
-            AnyOperation::IndexBlocks(op) => op.describe(),
-            AnyOperation::CreateIndex(op) => op.describe(),
-            AnyOperation::CreateJoin(op) => op.describe(),
-            AnyOperation::DropIndex(op) => op.describe(),
-            AnyOperation::DropJoin(op) => op.describe(),
-            AnyOperation::DropView(op) => op.describe(),
-            AnyOperation::RebuildIndex(op) => op.describe(),
-            AnyOperation::ReplaceBlock(op) => op.describe(),
-            AnyOperation::Select(op) => op.describe(),
-            AnyOperation::SetConfig(op) => op.describe(),
-            AnyOperation::SetName(op) => op.describe(),
-            AnyOperation::SetDescription(op) => op.describe(),
-        }
-    }
-
-    async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        match self {
-            AnyOperation::DropColumn(op) => op.check(bundle).await,
-            AnyOperation::RenameColumn(op) => op.check(bundle).await,
-            AnyOperation::RenameJoin(op) => op.check(bundle).await,
-            AnyOperation::RenameView(op) => op.check(bundle).await,
-            AnyOperation::AttachBlock(op) => op.check(bundle).await,
-            AnyOperation::CreateView(op) => op.check(bundle).await,
-            AnyOperation::CreateFunction(op) => op.check(bundle).await,
-            AnyOperation::CreateSource(op) => op.check(bundle).await,
-            AnyOperation::DetachBlock(op) => op.check(bundle).await,
-            AnyOperation::Filter(op) => op.check(bundle).await,
-            AnyOperation::IndexBlocks(op) => op.check(bundle).await,
-            AnyOperation::CreateIndex(op) => op.check(bundle).await,
-            AnyOperation::CreateJoin(op) => op.check(bundle).await,
-            AnyOperation::DropIndex(op) => op.check(bundle).await,
-            AnyOperation::DropJoin(op) => op.check(bundle).await,
-            AnyOperation::DropView(op) => op.check(bundle).await,
-            AnyOperation::RebuildIndex(op) => op.check(bundle).await,
-            AnyOperation::ReplaceBlock(op) => op.check(bundle).await,
-            AnyOperation::Select(op) => op.check(bundle).await,
-            AnyOperation::SetConfig(op) => op.check(bundle).await,
-            AnyOperation::SetName(op) => op.check(bundle).await,
-            AnyOperation::SetDescription(op) => op.check(bundle).await,
-        }
-    }
-
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
-        match self {
-            AnyOperation::DropColumn(op) => op.apply(bundle).await,
-            AnyOperation::RenameColumn(op) => op.apply(bundle).await,
-            AnyOperation::RenameJoin(op) => op.apply(bundle).await,
-            AnyOperation::RenameView(op) => op.apply(bundle).await,
-            AnyOperation::AttachBlock(op) => op.apply(bundle).await,
-            AnyOperation::CreateView(op) => op.apply(bundle).await,
-            AnyOperation::CreateFunction(op) => op.apply(bundle).await,
-            AnyOperation::CreateSource(op) => op.apply(bundle).await,
-            AnyOperation::DetachBlock(op) => op.apply(bundle).await,
-            AnyOperation::Filter(op) => op.apply(bundle).await,
-            AnyOperation::IndexBlocks(op) => op.apply(bundle).await,
-            AnyOperation::CreateIndex(op) => op.apply(bundle).await,
-            AnyOperation::CreateJoin(op) => op.apply(bundle).await,
-            AnyOperation::DropIndex(op) => op.apply(bundle).await,
-            AnyOperation::DropJoin(op) => op.apply(bundle).await,
-            AnyOperation::DropView(op) => op.apply(bundle).await,
-            AnyOperation::RebuildIndex(op) => op.apply(bundle).await,
-            AnyOperation::ReplaceBlock(op) => op.apply(bundle).await,
-            AnyOperation::Select(op) => op.apply(bundle).await,
-            AnyOperation::SetConfig(op) => op.apply(bundle).await,
-            AnyOperation::SetName(op) => op.apply(bundle).await,
-            AnyOperation::SetDescription(op) => op.apply(bundle).await,
-        }
-    }
-
-    async fn apply_dataframe(
-        &self,
-        df: DataFrame,
-        ctx: Arc<SessionContext>,
-    ) -> Result<DataFrame, BundlebaseError> {
-        match self {
-            AnyOperation::DropColumn(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::RenameColumn(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::RenameJoin(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::RenameView(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::AttachBlock(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::CreateView(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::CreateFunction(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::CreateSource(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::DetachBlock(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::Filter(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::IndexBlocks(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::CreateIndex(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::CreateJoin(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::DropIndex(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::DropJoin(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::DropView(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::RebuildIndex(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::ReplaceBlock(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::Select(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::SetConfig(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::SetName(op) => op.apply_dataframe(df, ctx).await,
-            AnyOperation::SetDescription(op) => op.apply_dataframe(df, ctx).await,
-        }
-    }
-
-    fn version(&self) -> String {
-        match self {
-            AnyOperation::DropColumn(op) => op.version(),
-            AnyOperation::RenameColumn(op) => op.version(),
-            AnyOperation::RenameJoin(op) => op.version(),
-            AnyOperation::RenameView(op) => op.version(),
-            AnyOperation::AttachBlock(op) => op.version(),
-            AnyOperation::CreateView(op) => op.version(),
-            AnyOperation::CreateFunction(op) => op.version(),
-            AnyOperation::CreateSource(op) => op.version(),
-            AnyOperation::DetachBlock(op) => op.version(),
-            AnyOperation::Filter(op) => op.version(),
-            AnyOperation::IndexBlocks(op) => op.version(),
-            AnyOperation::CreateIndex(op) => op.version(),
-            AnyOperation::CreateJoin(op) => op.version(),
-            AnyOperation::DropIndex(op) => op.version(),
-            AnyOperation::DropJoin(op) => op.version(),
-            AnyOperation::DropView(op) => op.version(),
-            AnyOperation::RebuildIndex(op) => op.version(),
-            AnyOperation::ReplaceBlock(op) => op.version(),
-            AnyOperation::Select(op) => op.version(),
-            AnyOperation::SetConfig(op) => op.version(),
-            AnyOperation::SetName(op) => op.version(),
-            AnyOperation::SetDescription(op) => op.version(),
-        }
-    }
-
-    fn allowed_on_view(&self) -> bool {
-        match self {
-            AnyOperation::DropColumn(op) => op.allowed_on_view(),
-            AnyOperation::RenameColumn(op) => op.allowed_on_view(),
-            AnyOperation::RenameJoin(op) => op.allowed_on_view(),
-            AnyOperation::RenameView(op) => op.allowed_on_view(),
-            AnyOperation::AttachBlock(op) => op.allowed_on_view(),
-            AnyOperation::CreateView(op) => op.allowed_on_view(),
-            AnyOperation::CreateFunction(op) => op.allowed_on_view(),
-            AnyOperation::CreateSource(op) => op.allowed_on_view(),
-            AnyOperation::DetachBlock(op) => op.allowed_on_view(),
-            AnyOperation::Filter(op) => op.allowed_on_view(),
-            AnyOperation::IndexBlocks(op) => op.allowed_on_view(),
-            AnyOperation::CreateIndex(op) => op.allowed_on_view(),
-            AnyOperation::CreateJoin(op) => op.allowed_on_view(),
-            AnyOperation::DropIndex(op) => op.allowed_on_view(),
-            AnyOperation::DropJoin(op) => op.allowed_on_view(),
-            AnyOperation::DropView(op) => op.allowed_on_view(),
-            AnyOperation::RebuildIndex(op) => op.allowed_on_view(),
-            AnyOperation::ReplaceBlock(op) => op.allowed_on_view(),
-            AnyOperation::Select(op) => op.allowed_on_view(),
-            AnyOperation::SetConfig(op) => op.allowed_on_view(),
-            AnyOperation::SetName(op) => op.allowed_on_view(),
-            AnyOperation::SetDescription(op) => op.allowed_on_view(),
-        }
-    }
-}
-
-// Into conversions for each config type
-impl From<DropColumnOp> for AnyOperation {
-    fn from(config: DropColumnOp) -> Self {
-        AnyOperation::DropColumn(config)
-    }
-}
-
-impl From<RenameColumnOp> for AnyOperation {
-    fn from(config: RenameColumnOp) -> Self {
-        AnyOperation::RenameColumn(config)
-    }
-}
-
-impl From<RenameViewOp> for AnyOperation {
-    fn from(config: RenameViewOp) -> Self {
-        AnyOperation::RenameView(config)
-    }
-}
-
-impl From<RenameJoinOp> for AnyOperation {
-    fn from(config: RenameJoinOp) -> Self {
-        AnyOperation::RenameJoin(config)
-    }
-}
-
-impl From<AttachBlockOp> for AnyOperation {
-    fn from(config: AttachBlockOp) -> Self {
-        AnyOperation::AttachBlock(config)
-    }
-}
-
-impl From<CreateViewOp> for AnyOperation {
-    fn from(config: CreateViewOp) -> Self {
-        AnyOperation::CreateView(config)
-    }
-}
-
-impl From<CreateFunctionOp> for AnyOperation {
-    fn from(config: CreateFunctionOp) -> Self {
-        AnyOperation::CreateFunction(config)
-    }
-}
-
-impl From<CreateSourceOp> for AnyOperation {
-    fn from(config: CreateSourceOp) -> Self {
-        AnyOperation::CreateSource(config)
-    }
-}
-
-impl From<DetachBlockOp> for AnyOperation {
-    fn from(config: DetachBlockOp) -> Self {
-        AnyOperation::DetachBlock(config)
-    }
-}
-
-impl From<FilterOp> for AnyOperation {
-    fn from(config: FilterOp) -> Self {
-        AnyOperation::Filter(config)
-    }
-}
-
-impl From<IndexBlocksOp> for AnyOperation {
-    fn from(config: IndexBlocksOp) -> Self {
-        AnyOperation::IndexBlocks(config)
-    }
-}
-
-impl From<SelectOp> for AnyOperation {
-    fn from(config: SelectOp) -> Self {
-        AnyOperation::Select(config)
-    }
-}
-
-impl From<SetNameOp> for AnyOperation {
-    fn from(config: SetNameOp) -> Self {
-        AnyOperation::SetName(config)
-    }
-}
-
-impl From<SetDescriptionOp> for AnyOperation {
-    fn from(config: SetDescriptionOp) -> Self {
-        AnyOperation::SetDescription(config)
-    }
-}
-
-impl From<CreateIndexOp> for AnyOperation {
-    fn from(config: CreateIndexOp) -> Self {
-        AnyOperation::CreateIndex(config)
-    }
-}
-
-impl From<CreateJoinOp> for AnyOperation {
-    fn from(config: CreateJoinOp) -> Self {
-        AnyOperation::CreateJoin(config)
-    }
-}
-
-impl From<DropIndexOp> for AnyOperation {
-    fn from(config: DropIndexOp) -> Self {
-        AnyOperation::DropIndex(config)
-    }
-}
-
-impl From<DropJoinOp> for AnyOperation {
-    fn from(config: DropJoinOp) -> Self {
-        AnyOperation::DropJoin(config)
-    }
-}
-
-impl From<DropViewOp> for AnyOperation {
-    fn from(config: DropViewOp) -> Self {
-        AnyOperation::DropView(config)
-    }
-}
-
-impl From<RebuildIndexOp> for AnyOperation {
-    fn from(config: RebuildIndexOp) -> Self {
-        AnyOperation::RebuildIndex(config)
-    }
-}
-
-impl From<ReplaceBlockOp> for AnyOperation {
-    fn from(config: ReplaceBlockOp) -> Self {
-        AnyOperation::ReplaceBlock(config)
-    }
-}
-
-impl From<SetConfigOp> for AnyOperation {
-    fn from(config: SetConfigOp) -> Self {
-        AnyOperation::SetConfig(config)
-    }
+    SetName(SetNameOp),
 }
 
 impl Display for AnyOperation {

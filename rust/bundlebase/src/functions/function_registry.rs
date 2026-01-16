@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FunctionRegistry {
     functions: HashMap<String, FunctionSignature>,
     impls: HashMap<String, Arc<dyn FunctionImpl>>,
@@ -41,8 +41,8 @@ impl FunctionRegistry {
         debug!(
             "Available functions: {}",
             self.functions
-                .iter()
-                .map(|(k, _)| k.as_str())
+                .keys()
+                .map(|k| k.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         );
@@ -53,8 +53,8 @@ impl FunctionRegistry {
         debug!(
             "Available implementations: {}",
             self.impls
-                .iter()
-                .map(|(k, _)| k.as_str())
+                .keys()
+                .map(|k| k.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         );

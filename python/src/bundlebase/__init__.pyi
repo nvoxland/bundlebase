@@ -609,6 +609,144 @@ class PyBundleBuilder:
         """
         ...
 
+    def drop_view(self, view_name: str) -> "OperationChain":
+        """
+        Drop an existing view.
+
+        Args:
+            view_name: Name of the view to drop
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.drop_view("active_users")
+        """
+        ...
+
+    def drop_index(self, column: str) -> "OperationChain":
+        """
+        Drop an index from a column.
+
+        Args:
+            column: Name of the column whose index to drop
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.drop_index("user_id")
+        """
+        ...
+
+    def rename_view(self, old_name: str, new_name: str) -> "OperationChain":
+        """
+        Rename an existing view.
+
+        Args:
+            old_name: Current view name
+            new_name: New view name
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.rename_view("old_view", "new_view")
+        """
+        ...
+
+    def rename_join(self, old_name: str, new_name: str) -> "OperationChain":
+        """
+        Rename an existing join.
+
+        Args:
+            old_name: Current join name
+            new_name: New join name
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.rename_join("old_join", "new_join")
+        """
+        ...
+
+    def reset(self) -> "OperationChain":
+        """
+        Reset all uncommitted changes.
+
+        Reverts the bundle to its last committed state, discarding all
+        uncommitted operations.
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.reset()
+        """
+        ...
+
+    def undo(self) -> "OperationChain":
+        """
+        Undo the last uncommitted change.
+
+        Removes the most recent uncommitted operation from the bundle.
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.undo()
+        """
+        ...
+
+    def create_view(self, name: str, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
+        """
+        Create a named view from a SQL query.
+
+        Args:
+            name: Name for the view
+            sql: SQL query defining the view
+            params: Optional list of parameters for parameterized queries
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.create_view("active_users", "SELECT * FROM bundle WHERE active = true")
+        """
+        ...
+
+    def create_index(self, column: str) -> "OperationChain":
+        """
+        Create an index on a column.
+
+        Args:
+            column: Name of the column to index
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.create_index("user_id")
+        """
+        ...
+
+    def rebuild_index(self, column: str) -> "OperationChain":
+        """
+        Rebuild an index on a column.
+
+        Args:
+            column: Name of the column whose index to rebuild
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.rebuild_index("user_id")
+        """
+        ...
+
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
         """
         Queue a select operation.
@@ -907,6 +1045,14 @@ class OperationChain:
         """Queue a drop_join operation."""
         ...
 
+    def drop_view(self, view_name: str) -> "OperationChain":
+        """Queue a drop_view operation."""
+        ...
+
+    def drop_index(self, column: str) -> "OperationChain":
+        """Queue a drop_index operation."""
+        ...
+
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
         """Queue a select operation."""
         ...
@@ -935,6 +1081,34 @@ class OperationChain:
 
     def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
         """Queue a create_source operation."""
+        ...
+
+    def rename_view(self, old_name: str, new_name: str) -> "OperationChain":
+        """Queue a rename_view operation."""
+        ...
+
+    def rename_join(self, old_name: str, new_name: str) -> "OperationChain":
+        """Queue a rename_join operation."""
+        ...
+
+    def reset(self) -> "OperationChain":
+        """Queue a reset operation."""
+        ...
+
+    def undo(self) -> "OperationChain":
+        """Queue an undo operation."""
+        ...
+
+    def create_view(self, name: str, sql: str, params: Optional[List[Any]] = None) -> "OperationChain":
+        """Queue a create_view operation."""
+        ...
+
+    def create_index(self, column: str) -> "OperationChain":
+        """Queue a create_index operation."""
+        ...
+
+    def rebuild_index(self, column: str) -> "OperationChain":
+        """Queue a rebuild_index operation."""
         ...
 
 
@@ -983,6 +1157,14 @@ class CreateChain:
         """Queue a drop_join operation."""
         ...
 
+    def drop_view(self, view_name: str) -> "CreateChain":
+        """Queue a drop_view operation."""
+        ...
+
+    def drop_index(self, column: str) -> "CreateChain":
+        """Queue a drop_index operation."""
+        ...
+
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "CreateChain":
         """Queue a select operation."""
         ...
@@ -1011,6 +1193,34 @@ class CreateChain:
 
     def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "CreateChain":
         """Queue a create_source operation."""
+        ...
+
+    def rename_view(self, old_name: str, new_name: str) -> "CreateChain":
+        """Queue a rename_view operation."""
+        ...
+
+    def rename_join(self, old_name: str, new_name: str) -> "CreateChain":
+        """Queue a rename_join operation."""
+        ...
+
+    def reset(self) -> "CreateChain":
+        """Queue a reset operation."""
+        ...
+
+    def undo(self) -> "CreateChain":
+        """Queue an undo operation."""
+        ...
+
+    def create_view(self, name: str, sql: str, params: Optional[List[Any]] = None) -> "CreateChain":
+        """Queue a create_view operation."""
+        ...
+
+    def create_index(self, column: str) -> "CreateChain":
+        """Queue a create_index operation."""
+        ...
+
+    def rebuild_index(self, column: str) -> "CreateChain":
+        """Queue a rebuild_index operation."""
         ...
 
 
@@ -1059,6 +1269,14 @@ class ExtendChain:
         """Queue a drop_join operation."""
         ...
 
+    def drop_view(self, view_name: str) -> "ExtendChain":
+        """Queue a drop_view operation."""
+        ...
+
+    def drop_index(self, column: str) -> "ExtendChain":
+        """Queue a drop_index operation."""
+        ...
+
     def select(self, sql: str, params: Optional[List[Any]] = None) -> "ExtendChain":
         """Queue a select operation."""
         ...
@@ -1087,6 +1305,34 @@ class ExtendChain:
 
     def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "ExtendChain":
         """Queue a create_source operation."""
+        ...
+
+    def rename_view(self, old_name: str, new_name: str) -> "ExtendChain":
+        """Queue a rename_view operation."""
+        ...
+
+    def rename_join(self, old_name: str, new_name: str) -> "ExtendChain":
+        """Queue a rename_join operation."""
+        ...
+
+    def reset(self) -> "ExtendChain":
+        """Queue a reset operation."""
+        ...
+
+    def undo(self) -> "ExtendChain":
+        """Queue an undo operation."""
+        ...
+
+    def create_view(self, name: str, sql: str, params: Optional[List[Any]] = None) -> "ExtendChain":
+        """Queue a create_view operation."""
+        ...
+
+    def create_index(self, column: str) -> "ExtendChain":
+        """Queue a create_index operation."""
+        ...
+
+    def rebuild_index(self, column: str) -> "ExtendChain":
+        """Queue a rebuild_index operation."""
         ...
 
 

@@ -1,3 +1,4 @@
+use crate::bundle::operation::parameter_value::ParameterValue;
 use crate::bundle::operation::Operation;
 use crate::bundle::sql::with_temp_table;
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
@@ -9,47 +10,6 @@ use datafusion::prelude::SessionContext;
 use datafusion::scalar::ScalarValue;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-/// Serializable representation of a parameter value
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ParameterValue {
-    Null,
-    Boolean(bool),
-    Int64(i64),
-    Float64(f64),
-    String(String),
-}
-
-impl ParameterValue {
-    /// Convert to DataFusion ScalarValue
-    pub fn to_scalar_value(&self) -> ScalarValue {
-        match self {
-            ParameterValue::Null => ScalarValue::Null,
-            ParameterValue::Boolean(b) => ScalarValue::Boolean(Some(*b)),
-            ParameterValue::Int64(i) => ScalarValue::Int64(Some(*i)),
-            ParameterValue::Float64(f) => ScalarValue::Float64(Some(*f)),
-            ParameterValue::String(s) => ScalarValue::Utf8(Some(s.clone())),
-        }
-    }
-}
-
-impl From<ScalarValue> for ParameterValue {
-    fn from(sv: ScalarValue) -> Self {
-        match sv {
-            ScalarValue::Null => ParameterValue::Null,
-            ScalarValue::Boolean(Some(b)) => ParameterValue::Boolean(b),
-            ScalarValue::Boolean(None) => ParameterValue::Null,
-            ScalarValue::Int64(Some(i)) => ParameterValue::Int64(i),
-            ScalarValue::Int64(None) => ParameterValue::Null,
-            ScalarValue::Float64(Some(f)) => ParameterValue::Float64(f),
-            ScalarValue::Float64(None) => ParameterValue::Null,
-            ScalarValue::Utf8(Some(s)) => ParameterValue::String(s),
-            ScalarValue::Utf8(None) => ParameterValue::Null,
-            // For other types, convert to string representation then store as String
-            other => ParameterValue::String(other.to_string()),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

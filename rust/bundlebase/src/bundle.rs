@@ -245,7 +245,7 @@ impl Bundle {
         let mut visited = HashSet::new();
         let mut bundle = Bundle::empty().await?;
 
-        bundle.add_pack(ObjectId::BASE_PACK.clone(), Arc::new(Pack::new_base()));
+        bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
 
         // Set explicit config if provided and recompute merged config
         bundle.passed_config = config;
@@ -438,7 +438,7 @@ impl Bundle {
 
         // Treat as name
         if let Some(id) = self.views.get(identifier) {
-            Ok((id.clone(), identifier.to_string()))
+            Ok((*id, identifier.to_string()))
         } else {
             // Provide helpful error message listing available views
             if self.views.is_empty() {
@@ -651,10 +651,8 @@ impl Bundle {
     ) -> Option<Arc<IndexedBlocks>> {
         for index in self.indexes.read().iter() {
             if index.column() == column {
-                let indexed_blocks = index.indexed_blocks(block);
-
-                if indexed_blocks.is_some() {
-                    return Some(indexed_blocks.unwrap());
+                if let Some(indexed_blocks) = index.indexed_blocks(block) {
+                    return Some(indexed_blocks);
                 }
             }
         }
@@ -665,7 +663,7 @@ impl Bundle {
     pub(crate) fn add_source(&mut self, op: CreateSourceOp) {
         let registry = self.source_function_registry.read();
         if let Ok(source) = Source::from_op(&op, &registry) {
-            self.sources.insert(op.id.clone(), Arc::new(source));
+            self.sources.insert(op.id, Arc::new(source));
         }
     }
 
@@ -725,7 +723,7 @@ impl BundleFacade for Bundle {
 
     /// Retrieve the URL of the base bundle this was loaded from, if any.
     fn url(&self) -> &Url {
-        &self.data_dir.url()
+        self.data_dir.url()
     }
 
     fn from(&self) -> Option<&Url> {
@@ -733,7 +731,7 @@ impl BundleFacade for Bundle {
             .iter()
             .filter(|x| x.data_dir != Some(self.data_dir.url().clone()))
             .last()
-            .map(|c| c.data_dir.as_ref().unwrap())
+            .and_then(|c| c.data_dir.as_ref())
     }
 
     fn version(&self) -> String {
@@ -860,7 +858,7 @@ impl BundleFacade for Bundle {
         // Reverse the name->id HashMap to id->name
         self.views
             .iter()
-            .map(|(name, id)| (id.clone(), name.clone()))
+            .map(|(name, id)| (*id, name.clone()))
             .collect()
     }
 
@@ -919,7 +917,7 @@ impl BundleFacade for Bundle {
             header.set_mtime(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .expect("BUG: current time should be after Unix epoch")
                     .as_secs(),
             );
             header.set_cksum();
@@ -950,7 +948,7 @@ pub struct DataFrameHolder {
 impl DataFrameHolder {
     fn new(df: Option<DataFrame>) -> Self {
         Self {
-            dataframe: Arc::new(RwLock::new(df.map(|df| Arc::new(df)))),
+            dataframe: Arc::new(RwLock::new(df.map(Arc::new))),
         }
     }
 

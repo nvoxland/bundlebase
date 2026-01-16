@@ -42,7 +42,7 @@ impl ReplaceBlockOp {
             .find_map(|op| {
                 if let AnyOperation::AttachBlock(attach_op) = op {
                     if attach_op.location == old_location {
-                        return Some(attach_op.id.clone());
+                        return Some(attach_op.id);
                     }
                 }
                 None
@@ -62,7 +62,7 @@ impl ReplaceBlockOp {
         for (pack_id, pack) in &*bundle.packs().read() {
             for block in pack.blocks() {
                 if block.id() == &self.id {
-                    return Some((pack_id.clone(), block.clone()));
+                    return Some((*pack_id, block.clone()));
                 }
             }
         }
@@ -108,14 +108,14 @@ impl Operation for ReplaceBlockOp {
 
         // Create a new block with the new reader (preserving source info)
         let new_block = Arc::new(DataBlock::new(
-            self.id.clone(),
+            self.id,
             old_block.schema(),
             &old_block.version(),
             reader,
             bundle.indexes().clone(),
             bundle.data_dir_arc(),
             bundle.config(),
-            source.clone(),
+            source,
             source_location.clone(),
         ));
 
@@ -177,7 +177,7 @@ mod tests {
     fn test_describe() {
         let block_id = ObjectId::generate();
         let op = ReplaceBlockOp {
-            id: block_id.clone(),
+            id: block_id,
             new_location: "s3://bucket/new_data.parquet".to_string(),
         };
         assert_eq!(
@@ -190,7 +190,7 @@ mod tests {
     fn test_serialization() {
         let block_id: ObjectId = "a5".try_into().unwrap();
         let op = ReplaceBlockOp {
-            id: block_id.clone(),
+            id: block_id,
             new_location: "file:///new/path.csv".to_string(),
         };
 

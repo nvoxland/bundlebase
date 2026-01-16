@@ -85,11 +85,11 @@ impl FilterAnalyzer {
 
     /// Extract equality predicate: column = literal
     fn extract_equality(
-        left: &Box<Expr>,
-        right: &Box<Expr>,
+        left: &Expr,
+        right: &Expr,
     ) -> Result<IndexableFilter, BundlebaseError> {
         // Try left = literal
-        if let (Expr::Column(col), Expr::Literal(scalar, _)) = (left.as_ref(), right.as_ref()) {
+        if let (Expr::Column(col), Expr::Literal(scalar, _)) = (left, right) {
             let indexed_value = IndexedValue::from_scalar(scalar)?;
             return Ok(IndexableFilter {
                 column: col.name.clone(),
@@ -98,7 +98,7 @@ impl FilterAnalyzer {
         }
 
         // Try literal = right (reversed)
-        if let (Expr::Literal(scalar, _), Expr::Column(col)) = (left.as_ref(), right.as_ref()) {
+        if let (Expr::Literal(scalar, _), Expr::Column(col)) = (left, right) {
             let indexed_value = IndexedValue::from_scalar(scalar)?;
             return Ok(IndexableFilter {
                 column: col.name.clone(),
@@ -111,11 +111,11 @@ impl FilterAnalyzer {
 
     /// Extract IN list predicate: column IN (literal1, literal2, ...)
     fn extract_in_list(
-        expr: &Box<Expr>,
+        expr: &Expr,
         list: &[Expr],
     ) -> Result<IndexableFilter, BundlebaseError> {
         // Check if expr is a column reference
-        if let Expr::Column(col) = expr.as_ref() {
+        if let Expr::Column(col) = expr {
             // Extract all literals from the list
             let mut values = Vec::new();
             for item in list {
@@ -143,12 +143,12 @@ impl FilterAnalyzer {
     /// Extract single range predicate: column > min, column >= min, column < max, column <= max
     /// Returns a Range with appropriate bounds
     fn extract_range_single(
-        left: &Box<Expr>,
+        left: &Expr,
         op: Operator,
-        right: &Box<Expr>,
+        right: &Expr,
     ) -> Result<IndexableFilter, BundlebaseError> {
         // Try column OP literal
-        if let (Expr::Column(col), Expr::Literal(scalar, _)) = (left.as_ref(), right.as_ref()) {
+        if let (Expr::Column(col), Expr::Literal(scalar, _)) = (left, right) {
             let indexed_value = IndexedValue::from_scalar(scalar)?;
             let predicate = match op {
                 Operator::Gt | Operator::GtEq => {
@@ -210,8 +210,8 @@ impl FilterAnalyzer {
 
     /// Extract range predicate from AND expression: column >= min AND column <= max
     fn extract_range_and(
-        left: &Box<Expr>,
-        right: &Box<Expr>,
+        left: &Expr,
+        right: &Expr,
     ) -> Result<IndexableFilter, BundlebaseError> {
         // Try to extract range predicates from both sides
         let left_filter = Self::analyze_expr(left);

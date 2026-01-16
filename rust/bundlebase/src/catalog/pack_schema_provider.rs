@@ -49,7 +49,7 @@ impl SchemaProvider for PackSchemaProvider {
         let packs = self.packs.read();
         packs
             .keys()
-            .map(|pack_id| Pack::table_name(pack_id))
+            .map(Pack::table_name)
             .collect()
     }
 
@@ -64,7 +64,7 @@ impl SchemaProvider for PackSchemaProvider {
                         return Ok(None);
                     }
 
-                    let union_table = PackUnionTable::new(id.clone(), pack.clone())?;
+                    let union_table = PackUnionTable::new(id, pack.clone())?;
                     Ok(Some(Arc::new(union_table)))
                 } else {
                     Ok(None)
@@ -147,7 +147,7 @@ mod tests {
         );
 
         let block11 = Arc::new(DataBlock::new(
-            block11_id.clone(),
+            block11_id,
             schema1.clone(),
             "32",
             Arc::new(MockReader::with_schema(schema1.clone())),
@@ -159,7 +159,7 @@ mod tests {
         ));
 
         let block12 = Arc::new(DataBlock::new(
-            block12_id.clone(),
+            block12_id,
             schema1.clone(),
             "32",
             Arc::new(MockReader::with_schema(schema1.clone())),
@@ -171,7 +171,7 @@ mod tests {
         ));
 
         let block21 = Arc::new(DataBlock::new(
-            block21_id.clone(),
+            block21_id,
             schema2.clone(),
             "32",
             Arc::new(MockReader::with_schema(schema2.clone())),
@@ -182,11 +182,11 @@ mod tests {
             None,
         ));
 
-        let pack1 = Arc::new(Pack::new(pack1_id.clone(), "pack1", "", JoinTypeOption::Full));
+        let pack1 = Arc::new(Pack::new(pack1_id, "pack1", "", JoinTypeOption::Full));
         pack1.add_block(block11);
         pack1.add_block(block12);
 
-        let pack2 = Arc::new(Pack::new(pack2_id.clone(), "pack2", "", JoinTypeOption::Full));
+        let pack2 = Arc::new(Pack::new(pack2_id, "pack2", "", JoinTypeOption::Full));
         pack2.add_block(block21);
 
         let mut map = HashMap::new();

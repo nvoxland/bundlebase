@@ -45,7 +45,7 @@ fn to_iso(time: std::time::SystemTime) -> String {
 ///
 /// Represents the current state of a BundleBuilder with information about
 /// all the operations that have been queued but not yet committed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BundleStatus {
     /// The changes that represent the changes since creation/extension
     changes: Vec<BundleChange>,
@@ -92,9 +92,9 @@ impl std::fmt::Display for BundleStatus {
         if self.is_empty() {
             write!(f, "No uncommitted changes")
         } else {
-            write!(
+            writeln!(
                 f,
-                "Bundle Status: {} change(s), {} total operation(s)\n",
+                "Bundle Status: {} change(s), {} total operation(s)",
                 self.changes().len(),
                 self.operations_count()
             )?;
@@ -112,7 +112,7 @@ impl std::fmt::Display for BundleStatus {
                     }
                 )?;
                 if idx < self.changes.len() - 1 {
-                    write!(f, "\n")?;
+                    writeln!(f)?;
                 }
             }
             Ok(())
@@ -196,7 +196,7 @@ impl BundleBuilder {
         };
 
         // Automatically create the base pack with a well-known ID
-        builder.bundle.add_pack(ObjectId::BASE_PACK.clone(), Arc::new(Pack::new_base()));
+        builder.bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
 
         Ok(builder)
     }
@@ -466,12 +466,11 @@ impl BundleBuilder {
     ) -> Result<&mut Self, BundlebaseError> {
         let pack_id = match pack {
             None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => self
+            Some(join_name) => *self
                 .bundle
                 .pack_by_name(join_name)
                 .ok_or(format!("Unknown join '{}'", join_name))?
-                .id()
-                .clone(),
+                .id(),
         };
 
         let path = path.to_string();
@@ -616,16 +615,15 @@ impl BundleBuilder {
                 Box::pin(async move {
                     let pack_id = match pack.as_deref() {
                         None | Some("base") => ObjectId::BASE_PACK,
-                        Some(join_name) => builder
+                        Some(join_name) => *builder
                             .bundle
                             .pack_by_name(join_name)
                             .ok_or(format!("Unknown join '{}'", join_name))?
-                            .id()
-                            .clone(),
+                            .id(),
                     };
 
                     let source_id = ObjectId::generate();
-                    let op = CreateSourceOp::setup(source_id.clone(), pack_id, function, args);
+                    let op = CreateSourceOp::setup(source_id, pack_id, function, args);
 
                     builder.apply_operation(op.into()).await?;
 
@@ -677,12 +675,11 @@ impl BundleBuilder {
     pub async fn fetch(&mut self, pack: Option<&str>) -> Result<usize, BundlebaseError> {
         let pack_id = match pack {
             None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => self
+            Some(join_name) => *self
                 .bundle
                 .pack_by_name(join_name)
                 .ok_or(format!("Unknown join '{}'", join_name))?
-                .id()
-                .clone(),
+                .id(),
         };
 
         let sources = self.bundle.get_sources_for_pack(&pack_id);
@@ -735,8 +732,8 @@ impl BundleBuilder {
     async fn fetch_source(&mut self, source: &Arc<Source>) -> Result<usize, BundlebaseError> {
         let mut action_count = 0;
         let registry = self.bundle.source_function_registry();
-        let pack_id = source.pack().clone();
-        let source_id = source.id().clone();
+        let pack_id = *source.pack();
+        let source_id = *source.id();
 
         // Get fetch actions from the source function
         let actions = source
@@ -757,8 +754,6 @@ impl BundleBuilder {
                     self.do_change(
                         &format!("Fetch: attach {}", source_location),
                         |builder| {
-                            let pack_id = pack_id.clone();
-                            let source_id = source_id.clone();
                             let attach_location = attach_location.clone();
                             let source_location = source_location.clone();
                             let source_url = source_url.clone();
@@ -800,8 +795,6 @@ impl BundleBuilder {
                     self.do_change(
                         &format!("Fetch: replace {}", source_location),
                         |builder| {
-                            let pack_id = pack_id.clone();
-                            let source_id = source_id.clone();
                             let attach_location = attach_location.clone();
                             let source_location = source_location.clone();
                             let source_url = source_url.clone();
@@ -1359,7 +1352,7 @@ impl BundleBuilder {
                     let index = indexes.iter().find(|idx| idx.column() == column.as_str());
 
                     match index {
-                        Some(idx) => idx.id().clone(),
+                        Some(idx) => *idx.id(),
                         None => {
                             return Err(format!("No index found for column '{}'", column).into());
                         }
@@ -1463,7 +1456,7 @@ impl BundleBuilder {
 
                         // Check if index already exists at this version
                         let versioned_block =
-                            VersionedBlockId::new(block_id.clone(), block_version.clone());
+                            VersionedBlockId::new(block_id, block_version.clone());
                         let needs_index = builder
                             .bundle()
                             .get_index(&source_col, &versioned_block)
@@ -1472,8 +1465,8 @@ impl BundleBuilder {
 
                         if needs_index {
                             blocks_to_index
-                                .entry((index_id.clone(), source_col.clone()))
-                                .or_insert_with(Vec::new)
+                                .entry((*index_id, source_col.clone()))
+                                .or_default()
                                 .push((block_id, block_version));
                         }
                     }
@@ -1510,7 +1503,7 @@ impl BundleBuilder {
 
     /// Find the version of a block by its ID
     fn find_block_version(&self, block_id: &ObjectId) -> Option<String> {
-        for (_, pack) in &self.bundle.packs().read().clone() {
+        for pack in self.bundle.packs().read().values() {
             for block in pack.blocks() {
                 if block.id() == block_id {
                     return Some(block.version());
