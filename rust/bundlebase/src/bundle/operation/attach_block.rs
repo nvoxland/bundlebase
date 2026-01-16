@@ -14,10 +14,14 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachBlockOp {
-    pub location: String,
-    pub version: String,
     pub id: ObjectId,
     pub pack: ObjectId,
+    pub location: String,
+    pub version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<ObjectId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_location: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30,13 +34,6 @@ pub struct AttachBlockOp {
         deserialize_with = "super::serde_util::deserialize_schema_option"
     )]
     pub schema: Option<SchemaRef>,
-    /// If this block was attached via a source fetch, the source ID
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<ObjectId>,
-    /// If this block was attached via a source fetch, the original source URL
-    /// Used to track which files have been attached when checking for new files
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_location: Option<String>,
 }
 
 impl AttachBlockOp {
