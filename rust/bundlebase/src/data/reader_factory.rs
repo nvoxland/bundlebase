@@ -33,6 +33,16 @@ impl DataReaderFactory {
         &self.storage
     }
 
+    /// Create a reader for the given source.
+    ///
+    /// # Arguments
+    /// * `source` - URL or path to the data source
+    /// * `block_id` - ID of the block being read
+    /// * `bundle` - Bundle context
+    /// * `schema` - Optional schema (if already known)
+    /// * `layout` - Optional layout file path
+    /// * `expected_version` - If provided, validates version on first data access.
+    ///   This is used to detect when source files have changed since the bundle was created.
     pub async fn reader(
         &self,
         source: &str,
@@ -40,10 +50,18 @@ impl DataReaderFactory {
         bundle: &Bundle,
         schema: Option<SchemaRef>,
         layout: Option<String>,
+        expected_version: Option<String>,
     ) -> Result<Arc<dyn DataReader>, BundlebaseError> {
         for plugin in &self.plugins {
             if let Some(reader) = plugin
-                .reader(source, block_id, bundle, schema.clone(), layout.clone())
+                .reader(
+                    source,
+                    block_id,
+                    bundle,
+                    schema.clone(),
+                    layout.clone(),
+                    expected_version.clone(),
+                )
                 .await?
             {
                 return Ok(reader);

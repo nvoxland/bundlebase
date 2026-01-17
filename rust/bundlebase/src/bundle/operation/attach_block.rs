@@ -62,7 +62,7 @@ impl AttachBlockOp {
         let adapter = builder
             .bundle
             .adapter_factory
-            .reader(url, &temp_id, builder.bundle(), None, None)
+            .reader(url, &temp_id, builder.bundle(), None, None, None)
             .await?;
         adapter.read_version().await
     }
@@ -154,7 +154,7 @@ impl AttachBlockOp {
         let adapter = builder
             .bundle
             .adapter_factory
-            .reader(location, &block_id, builder.bundle(), None, None)
+            .reader(location, &block_id, builder.bundle(), None, None, None)
             .await?;
 
         _progress.update(2, Some("Reading version"));
@@ -212,6 +212,16 @@ impl Operation for AttachBlockOp {
     }
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+        // Only validate version for files that are NOT copied from a source.
+        // When a file is copied (source_info.is_some()), the stored version is the
+        // SOURCE version, not the local copy's version. The local copy is internal
+        // to the bundle and won't change unexpectedly.
+        let expected_version = if self.source_info.is_none() {
+            Some(self.version.clone())
+        } else {
+            None
+        };
+
         let reader = bundle
             .adapter_factory
             .reader(
@@ -220,6 +230,7 @@ impl Operation for AttachBlockOp {
                 bundle,
                 self.schema.clone(),
                 self.layout.clone(),
+                expected_version,
             )
             .await?;
 

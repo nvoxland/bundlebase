@@ -10,6 +10,7 @@ pub mod ftp;
 pub mod object_store;
 pub mod sftp;
 pub mod tar;
+pub mod versioned_object_store;
 
 use crate::io::registry::IORegistry;
 use std::sync::Arc;
@@ -23,6 +24,8 @@ pub use object_store::{ObjectStoreFile, ObjectStoreIOFactory};
 pub use sftp::{SftpClient, SftpDir, SftpFile, SftpIOFactory};
 #[allow(unused_imports)]
 pub use tar::{TarDir, TarFile, TarIOFactory, TarObjectStore};
+#[allow(unused_imports)]
+pub use versioned_object_store::VersionedObjectStoreFile;
 
 /// Register all built-in IO factories with the registry.
 ///

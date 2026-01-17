@@ -34,6 +34,7 @@ impl ReaderPlugin for FunctionPlugin {
         _bundle: &Bundle,
         _schema: Option<SchemaRef>,
         _layout: Option<String>,
+        _expected_version: Option<String>, // Functions use their own versioning, not file-based
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
         if !source.starts_with("function://") {
             return Ok(None);
@@ -173,7 +174,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let result = plugin
-            .reader("file:///test.csv", &1.into(), &binding, None, None)
+            .reader("file:///test.csv", &1.into(), &binding, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -191,6 +192,7 @@ mod tests {
                 "function://",
                 &1.into(),
                 &Bundle::empty().await?,
+                None,
                 None,
                 None,
             )
@@ -214,6 +216,7 @@ mod tests {
                 "function://invalid",
                 &1.into(),
                 &Bundle::empty().await?,
+                None,
                 None,
                 None,
             )
@@ -257,7 +260,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let reader = plugin
-            .reader("function://mock", &1.into(), &binding, None, None)
+            .reader("function://mock", &1.into(), &binding, None, None, None)
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 

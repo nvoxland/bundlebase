@@ -55,7 +55,7 @@ impl ReplaceBlockOp {
         let adapter = builder
             .bundle
             .adapter_factory
-            .reader(new_location, &temp_id, builder.bundle(), None, None)
+            .reader(new_location, &temp_id, builder.bundle(), None, None, None)
             .await?;
         let new_version = adapter.read_version().await?;
 
@@ -159,6 +159,7 @@ impl Operation for ReplaceBlockOp {
                 bundle,
                 Some(old_block.schema()),
                 None, // Layout will be rebuilt if needed
+                Some(self.new_version.clone()), // Validate version during query execution
             )
             .await?;
 

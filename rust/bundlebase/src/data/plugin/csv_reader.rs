@@ -56,12 +56,16 @@ impl ReaderPlugin for CsvPlugin {
         bundle: &Bundle,
         schema: Option<SchemaRef>,
         layout: Option<String>,
+        expected_version: Option<String>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
         if !self.inner.handles(source) {
             return Ok(None);
         }
 
-        let reader = self.inner.reader(source, bundle, schema).await?;
+        let reader = self
+            .inner
+            .reader(source, bundle, schema, expected_version)
+            .await?;
         let layout = match layout {
             None => None,
             Some(x) => Some(ObjectStoreFile::from_str(
@@ -160,7 +164,12 @@ impl DataReader for CsvReader {
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn crate::io::IOReadFile>>, BundlebaseError> {
         let index_file = RowIdIndex::new()
-            .build(self.inner.file(), data_dir, &self.block_id(), true)
+            .build(
+                self.inner.file().as_object_store_file(),
+                data_dir,
+                &self.block_id(),
+                true,
+            )
             .await?;
 
         Ok(Some(index_file))
@@ -230,7 +239,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let result = plugin
-            .reader("file:///test.parquet", &1.into(), &binding, None, None)
+            .reader("file:///test.parquet", &1.into(), &binding, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -244,7 +253,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let invalid_reader = plugin
-            .reader("file:///invalid.csv", &1.into(), &binding, None, None)
+            .reader("file:///invalid.csv", &1.into(), &binding, None, None, None)
             .await?;
 
         assert!(invalid_reader.is_some());
@@ -270,6 +279,7 @@ mod tests {
                 test_datafile("customers-0-100.csv"),
                 &1.into(),
                 &binding,
+                None,
                 None,
                 None,
             )
@@ -312,6 +322,7 @@ mod tests {
                 &1.into(),
                 &binding,
                 Some(schema),
+                None,
                 None,
             )
             .await?
@@ -372,6 +383,7 @@ mod tests {
                 &binding,
                 None,
                 None,
+                None,
             )
             .await?
             .unwrap();
@@ -415,6 +427,7 @@ mod tests {
                 test_datafile("customers-0-100.csv"),
                 &1.into(),
                 &binding,
+                None,
                 None,
                 None,
             )
@@ -471,7 +484,7 @@ mod tests {
         // First, create a reader to build the layout
         let csv_url = test_datafile("customers-0-100.csv");
         let temp_reader = plugin
-            .reader(csv_url, &block_id, binding, None, None)
+            .reader(csv_url, &block_id, binding, None, None, None)
             .await?
             .unwrap();
 
@@ -493,6 +506,7 @@ mod tests {
                 binding,
                 schema,
                 Some(layout_file.url().to_string()),
+                None,
             )
             .await?
             .unwrap();
@@ -563,7 +577,7 @@ mod tests {
         // First, create a reader to build the layout
         let csv_url = test_datafile("customers-0-100.csv");
         let temp_reader = plugin
-            .reader(csv_url, &block_id, binding, None, None)
+            .reader(csv_url, &block_id, binding, None, None, None)
             .await?
             .unwrap();
 
@@ -585,6 +599,7 @@ mod tests {
                 binding,
                 schema,
                 Some(layout_file.url().to_string()),
+                None,
             )
             .await?
             .unwrap();

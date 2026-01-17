@@ -1,15 +1,19 @@
 use crate::data::{LineOrientedFormat, RowId, RowIdOffsetDataSource};
 use crate::io::plugin::object_store::ObjectStoreFile;
+use crate::io::plugin::versioned_object_store::VersionedObjectStoreFile;
 use crate::io::IOReadFile;
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::SchemaRef;
 use datafusion::common::DataFusionError;
 use datafusion::datasource::file_format::FileFormat;
 use datafusion::datasource::listing::PartitionedFile;
+use datafusion::datasource::object_store::ObjectStoreUrl;
 use datafusion::datasource::physical_plan::{FileScanConfigBuilder, FileSource};
 use datafusion::datasource::source::DataSource;
 use datafusion::logical_expr::Expr;
 use datafusion::prelude::SessionContext;
+use object_store::path::Path as ObjectPath;
+use object_store::{ObjectMeta, ObjectStore};
 use std::sync::Arc;
 use url::Url;
 
@@ -32,6 +36,78 @@ pub trait FileFormatConfig: Send + Sync + Default + Clone {
     }
 }
 
+/// Either a plain ObjectStoreFile or one with version validation.
+///
+/// When `expected_version` is provided during reader creation, version is validated
+/// on first data access. This prevents silently reading stale data when the source
+/// file has changed since the bundle was created.
+#[derive(Debug, Clone)]
+pub enum MaybeVersionedFile {
+    Plain(ObjectStoreFile),
+    Versioned(VersionedObjectStoreFile),
+}
+
+impl MaybeVersionedFile {
+    /// Get the URL of the file
+    pub fn url(&self) -> &Url {
+        match self {
+            MaybeVersionedFile::Plain(f) => f.url(),
+            MaybeVersionedFile::Versioned(f) => f.url(),
+        }
+    }
+
+    /// Get the underlying ObjectStore
+    pub fn store(&self) -> Arc<dyn ObjectStore> {
+        match self {
+            MaybeVersionedFile::Plain(f) => f.store(),
+            MaybeVersionedFile::Versioned(f) => f.store(),
+        }
+    }
+
+    /// Get the ObjectStore URL for DataFusion registration
+    pub fn store_url(&self) -> ObjectStoreUrl {
+        match self {
+            MaybeVersionedFile::Plain(f) => f.store_url(),
+            MaybeVersionedFile::Versioned(f) => f.store_url(),
+        }
+    }
+
+    /// Get the path within the object store
+    pub fn store_path(&self) -> &ObjectPath {
+        match self {
+            MaybeVersionedFile::Plain(f) => f.store_path(),
+            MaybeVersionedFile::Versioned(f) => f.store_path(),
+        }
+    }
+
+    /// Get the version of the file
+    pub async fn version(&self) -> Result<String, BundlebaseError> {
+        match self {
+            MaybeVersionedFile::Plain(f) => f.version().await,
+            MaybeVersionedFile::Versioned(f) => f.version().await,
+        }
+    }
+
+    /// Get full ObjectMeta, validating version if needed
+    pub async fn object_meta(&self) -> Result<Option<ObjectMeta>, BundlebaseError> {
+        match self {
+            MaybeVersionedFile::Plain(f) => f.object_meta().await,
+            MaybeVersionedFile::Versioned(f) => f.object_meta().await,
+        }
+    }
+
+    /// Get the underlying ObjectStoreFile reference.
+    ///
+    /// For versioned files, this returns the inner ObjectStoreFile.
+    /// Note: When using a versioned file, ensure validation has been done first.
+    pub fn as_object_store_file(&self) -> &ObjectStoreFile {
+        match self {
+            MaybeVersionedFile::Plain(f) => f,
+            MaybeVersionedFile::Versioned(f) => f.inner(),
+        }
+    }
+}
+
 /// Generic plugin for file-based data formats
 /// This is a utility that plugin implementations can use
 pub struct FilePlugin<C: FileFormatConfig> {
@@ -48,14 +124,30 @@ impl<C: FileFormatConfig> FilePlugin<C> {
         source.ends_with(self.config.extension())
     }
 
+    /// Create a reader for the given source.
+    ///
+    /// # Arguments
+    /// * `source` - URL or path to the file
+    /// * `bundle` - Bundle context
+    /// * `schema` - Optional schema (if already known)
+    /// * `expected_version` - If provided, validates version on first data access
     pub async fn reader(
         &self,
         source: &str,
         bundle: &Bundle,
         schema: Option<SchemaRef>,
+        expected_version: Option<String>,
     ) -> Result<FileReader<C>, BundlebaseError> {
+        let object_file =
+            ObjectStoreFile::from_str(source, bundle.data_dir(), bundle.config())?;
+
+        let file = match expected_version {
+            Some(v) => MaybeVersionedFile::Versioned(VersionedObjectStoreFile::new(object_file, v)),
+            None => MaybeVersionedFile::Plain(object_file),
+        };
+
         Ok(FileReader::new(
-            &ObjectStoreFile::from_str(source, bundle.data_dir(), bundle.config())?,
+            file,
             self.config.clone(),
             bundle.ctx(),
             schema,
@@ -70,7 +162,7 @@ impl<C: FileFormatConfig> Default for FilePlugin<C> {
 }
 
 pub struct FileReader<C: FileFormatConfig> {
-    file: ObjectStoreFile,
+    file: MaybeVersionedFile,
     config: C,
     ctx: Arc<SessionContext>,
     schema: Option<SchemaRef>,
@@ -78,13 +170,13 @@ pub struct FileReader<C: FileFormatConfig> {
 
 impl<C: FileFormatConfig> FileReader<C> {
     pub fn new(
-        file: &ObjectStoreFile,
+        file: MaybeVersionedFile,
         config: C,
         ctx: Arc<SessionContext>,
         schema: Option<SchemaRef>,
     ) -> Self {
         Self {
-            file: file.clone(),
+            file,
             ctx,
             schema,
             config,
@@ -93,8 +185,8 @@ impl<C: FileFormatConfig> FileReader<C> {
 }
 
 impl<C: FileFormatConfig> FileReader<C> {
-    /// Get the IOFile
-    pub fn file(&self) -> &ObjectStoreFile {
+    /// Get the file (MaybeVersionedFile)
+    pub fn file(&self) -> &MaybeVersionedFile {
         &self.file
     }
 
@@ -104,7 +196,7 @@ impl<C: FileFormatConfig> FileReader<C> {
     }
 
     /// Get the object store
-    pub fn object_store(&self) -> Arc<dyn object_store::ObjectStore> {
+    pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         self.file.store()
     }
 
@@ -140,8 +232,12 @@ impl<C: FileFormatConfig> FileReader<C> {
         // Return RowIdOffsetDataSource for selective row reading if format supports it
         if let Some(ids) = row_ids {
             if let Some(format) = self.config.line_oriented_format() {
+                // For RowIdOffsetDataSource, we need an ObjectStoreFile
+                // Use as_object_store_file() which gives us access to the underlying file
+                // Note: For versioned files, version validation happens on first object_meta() call
+                // which occurs below if we fall through to the full scan path
                 return Ok(Arc::new(RowIdOffsetDataSource::new(
-                    &self.file,
+                    self.file.as_object_store_file(),
                     self.schema.clone().expect("No schema set"),
                     ids.to_vec(),
                     projection.cloned(),
@@ -152,7 +248,9 @@ impl<C: FileFormatConfig> FileReader<C> {
             // This can happen with Parquet files
         }
 
-        let metadata = self.file.object_meta().await?.ok_or_else(|| {
+        let metadata = self.file.object_meta().await.map_err(|e| {
+            DataFusionError::Internal(format!("Failed to get object metadata: {}", e))
+        })?.ok_or_else(|| {
             DataFusionError::Internal(format!(
                 "File metadata not available for: {}",
                 self.file.url()
@@ -179,16 +277,6 @@ impl<C: FileFormatConfig> FileReader<C> {
         Ok(Arc::new(builder.build()))
     }
 }
-
-// impl<C: FileFormatConfig> Clone for FileReader<C> {
-//     fn clone(&self) -> Self {
-//         Self {
-//             file: self.file.clone(),
-//             schema: self.schema.clone(),
-//             config: self.config.clone(),
-//         }
-//     }
-// }
 
 impl<C: FileFormatConfig> std::fmt::Debug for FileReader<C> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
