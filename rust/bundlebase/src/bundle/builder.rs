@@ -879,11 +879,27 @@ impl BundleBuilder {
     }
 
     /// Find the current location of a block that was attached from a source with the given source_location.
+    ///
+    /// This searches through both AttachBlockOp and ReplaceBlockOp operations to find the
+    /// current location of a block. If the block was replaced, returns the new location.
     fn find_block_location_by_source(
         &self,
         source_id: &ObjectId,
         source_location: &str,
     ) -> Result<String, BundlebaseError> {
+        // First, check ReplaceBlockOp operations (in reverse order to get most recent)
+        // to see if the block was replaced and has updated source_info
+        for op in self.bundle.operations.iter().rev() {
+            if let AnyOperation::ReplaceBlock(replace) = op {
+                if let Some(ref info) = replace.source_info {
+                    if &info.id == source_id && info.location == source_location {
+                        return Ok(replace.new_location.clone());
+                    }
+                }
+            }
+        }
+
+        // If not found in ReplaceBlockOp, check AttachBlockOp
         self.bundle
             .operations
             .iter()
