@@ -552,13 +552,12 @@ changes:
             version: "v1".to_string(),
             hash: "abcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab".to_string(),
             id: ObjectId::from(42u8),
-            source: None,
             pack: ObjectId::from(53u8),
             layout: None,
             num_rows: Some(100),
             bytes: Some(1000),
             schema: Some(schema),
-            source_location: None,
+            source_info: None,
         };
 
         let remove_config = DropColumnOp {

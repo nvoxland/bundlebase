@@ -1,4 +1,4 @@
-use crate::bundle::operation::{AnyOperation, Operation};
+use crate::bundle::operation::{AnyOperation, Operation, SourceInfo};
 use crate::bundle::DataBlock;
 use crate::data::ObjectId;
 use crate::source::AttachedFileInfo;
@@ -90,10 +90,6 @@ impl Operation for ReplaceBlockOp {
             .find_block_in_packs(bundle)
             .ok_or_else(|| DataFusionError::Execution(format!("Block {} not found", self.id)))?;
 
-        // Preserve source info from old block
-        let source = old_block.source().cloned();
-        let source_location = old_block.source_location().map(|s| s.to_string());
-
         // Create a new reader for the new location
         let reader = bundle
             .adapter_factory
@@ -106,17 +102,26 @@ impl Operation for ReplaceBlockOp {
             )
             .await?;
 
-        // Create a new block with the new reader (preserving source info)
+        // Get the new version from the reader
+        let new_version = old_block.version();
+
+        // Update source info with the new version
+        let source_info = old_block.source_info().map(|info| SourceInfo {
+            id: info.id,
+            location: info.location.clone(),
+            version: new_version.clone(),
+        });
+
+        // Create a new block with the new reader and updated source info
         let new_block = Arc::new(DataBlock::new(
             self.id,
             old_block.schema(),
-            &old_block.version(),
+            &new_version,
             reader,
             bundle.indexes().clone(),
             bundle.data_dir_arc(),
             bundle.config(),
-            source,
-            source_location.clone(),
+            source_info.clone(),
         ));
 
         // Replace the old block with the new one in the pack
@@ -130,19 +135,17 @@ impl Operation for ReplaceBlockOp {
         pack.remove_block(&self.id);
         pack.add_block(new_block.clone());
 
-        // Update source's attached_files with the new location
-        if let Some(source_id) = &source {
-            if let Some(src) = bundle.get_source(source_id) {
-                if let Some(source_loc) = &source_location {
-                    src.update_attached_file(
-                        source_loc,
-                        AttachedFileInfo {
-                            location: self.new_location.clone(),
-                            version: old_block.version(),
-                            bytes: None, // Could read from adapter if needed
-                        },
-                    );
-                }
+        // Update source's attached_files with the new location and version
+        if let Some(ref info) = source_info {
+            if let Some(src) = bundle.get_source(&info.id) {
+                src.update_attached_file(
+                    &info.location,
+                    AttachedFileInfo {
+                        location: self.new_location.clone(),
+                        version: info.version.clone(),
+                        bytes: None, // Could read from adapter if needed
+                    },
+                );
             }
         }
 
