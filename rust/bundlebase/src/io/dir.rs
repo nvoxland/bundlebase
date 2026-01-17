@@ -11,6 +11,16 @@ use url::Url;
 
 use super::{FileInfo, IOReadFile, IOReadWriteFile};
 
+/// Result of writing a stream to a content-addressed file.
+/// Contains both the file reference and the computed SHA256 hash.
+#[derive(Debug)]
+pub struct WriteResult {
+    /// Reference to the written file
+    pub file: Box<dyn IOReadFile>,
+    /// SHA256 hash of the content (full 64-character hex string)
+    pub hash: String,
+}
+
 /// Read-only directory operations.
 /// Implemented by all storage backends - both read-only sources (FTP) and read-write stores.
 #[async_trait]
@@ -107,12 +117,12 @@ pub trait IOReadWriteDir: IOReadDir {
     /// Files are organized by hash prefix: the first 2 hex characters become
     /// a subdirectory, and the remaining hash characters become the filename.
     ///
-    /// Returns a read-only file reference to the written file.
+    /// Returns a `WriteResult` containing the file reference and the computed hash.
     async fn write_stream(
         &self,
         mut source: BoxStream<'static, Result<Bytes, std::io::Error>>,
         ext: &str,
-    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+    ) -> Result<WriteResult, BundlebaseError> {
         use futures::StreamExt;
 
         // Create temp subdir and write temp file there
@@ -157,7 +167,8 @@ pub trait IOReadWriteDir: IOReadDir {
             let _ = temp_file.delete().await;
         }
 
-        final_dir.file(&file_name)
+        let file = final_dir.file(&file_name)?;
+        Ok(WriteResult { file, hash })
     }
 }
 

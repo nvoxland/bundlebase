@@ -550,6 +550,7 @@ changes:
         let attach_config = AttachBlockOp {
             location: "memory:///test".to_string(),
             version: "v1".to_string(),
+            hash: "abcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab".to_string(),
             id: ObjectId::from(42u8),
             source: None,
             pack: ObjectId::from(53u8),
@@ -616,6 +617,7 @@ changes:
     pack: '3b'
     location: memory:///test_data/userdata.parquet
     version: test-version
+    hash: 0000000000000000000000000000000000000000000000000000000000000000
     id: '2a'
     numRows: 100
     bytes: 1000
@@ -656,6 +658,7 @@ changes:
   - type: attachBlock
     location: memory:///test_data/userdata.parquet
     version: '2'
+    hash: 0000000000000000000000000000000000000000000000000000000000000000
     id: cc
     pack: dd
     numRows: 1000

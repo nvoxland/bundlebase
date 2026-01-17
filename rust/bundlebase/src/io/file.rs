@@ -4,8 +4,10 @@ use crate::BundlebaseError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
+use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::fmt::Debug;
 use url::Url;
 
@@ -47,6 +49,29 @@ pub trait IOReadFile: Send + Sync + Debug {
     /// Returns a version identifier for the file.
     /// This could be an ETag, last modified time hash, or version ID.
     async fn version(&self) -> Result<String, BundlebaseError>;
+
+    /// Compute the SHA256 hash of the file content by streaming.
+    ///
+    /// Reads the file in chunks and computes the hash incrementally,
+    /// avoiding loading the entire file into memory.
+    /// Returns the full 64-character hex string.
+    async fn compute_hash(&self) -> Result<String, BundlebaseError> {
+        let mut hasher = Sha256::new();
+
+        if let Some(mut stream) = self.read_stream().await? {
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result?;
+                hasher.update(&chunk);
+            }
+        } else {
+            return Err(BundlebaseError::from(format!(
+                "File not found: {}",
+                self.url()
+            )));
+        }
+
+        Ok(format!("{:x}", hasher.finalize()))
+    }
 }
 
 /// Write operations for storage backends that support modification.

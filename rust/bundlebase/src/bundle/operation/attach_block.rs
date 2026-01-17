@@ -1,6 +1,7 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
 use crate::data::ObjectId;
+use crate::io::readable_file_from_path;
 use crate::progress::ProgressScope;
 use crate::source::AttachedFileInfo;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
@@ -18,6 +19,8 @@ pub struct AttachBlockOp {
     pub pack: ObjectId,
     pub location: String,
     pub version: String,
+    /// SHA256 hash of the content (full 64-character hex string)
+    pub hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<ObjectId>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,18 +64,20 @@ impl AttachBlockOp {
     /// * `pack` - Pack to attach the block to
     /// * `attach_location` - Where data is stored (local copy if copy=true)
     /// * `source_location` - Original remote URL for version tracking
+    /// * `hash` - SHA256 hash of the content (computed during copy/materialize)
     /// * `builder` - Bundle builder
     pub async fn setup_for_source(
         pack: &ObjectId,
         attach_location: &str,
         source_location: &str,
+        hash: &str,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         // Read version from SOURCE location for change detection
         let source_version = Self::read_version_from(source_location, builder).await?;
 
         // Setup normally for schema/stats from attach_location
-        let mut op = Self::setup(pack, attach_location, builder).await?;
+        let mut op = Self::setup_with_hash(pack, attach_location, hash, builder).await?;
 
         // Override version with source version
         op.version = source_version;
@@ -80,9 +85,33 @@ impl AttachBlockOp {
         Ok(op)
     }
 
+    /// Setup an AttachBlockOp for a file, computing the hash by streaming.
     pub async fn setup(
         pack: &ObjectId,
         location: &str,
+        builder: &BundleBuilder,
+    ) -> Result<Self, BundlebaseError> {
+        // Create progress scope (indeterminate - we don't know how many steps)
+        let _progress = ProgressScope::new(
+            &format!("Attaching '{}'", location),
+            None, // indeterminate progress
+        );
+
+        _progress.update(1, Some("Computing hash"));
+        // Get file reference and compute hash by streaming
+        let file = readable_file_from_path(location, builder.data_dir(), builder.bundle.config())?;
+        let hash = file.compute_hash().await?;
+
+        Self::setup_with_hash(pack, location, &hash, builder).await
+    }
+
+    /// Setup an AttachBlockOp with a pre-computed hash.
+    ///
+    /// Used when the hash is already known (e.g., from source materialization).
+    pub async fn setup_with_hash(
+        pack: &ObjectId,
+        location: &str,
+        hash: &str,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         // Create progress scope (indeterminate - we don't know how many steps)
@@ -111,6 +140,7 @@ impl AttachBlockOp {
             num_rows: None,
             bytes: None,
             version,
+            hash: hash.to_string(),
             schema,
             id: block_id,
             pack: *pack,
@@ -216,6 +246,7 @@ mod tests {
         let op = AttachBlockOp {
             location: "file:///test/data.csv".to_string(),
             version: "test-version".to_string(),
+            hash: "0".repeat(64),
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
             num_rows: None,
@@ -245,10 +276,11 @@ mod tests {
 
         assert_eq!(
             format!(
-                r#"location: memory:///test_data/userdata.parquet
-version: {}
-id: {}
+                r#"id: {}
 pack: {}
+location: memory:///test_data/userdata.parquet
+version: {}
+hash: 59d4fdcdd71e5b6ab79d0bc8fae8ee6f144d3639250facb4b519b36b92c8a5cc
 numRows: 1000
 bytes: 113629
 schema:
@@ -336,9 +368,9 @@ schema:
     metadata: {{}}
   metadata: {{}}
 "#,
-                for_yaml(version),
                 for_yaml(block_id),
                 for_yaml(pack),
+                for_yaml(version),
             ),
             serde_yaml::to_string(&op)?
         );
@@ -387,6 +419,7 @@ schema:
         let op = AttachBlockOp {
             location: "file:///test/data.csv".to_string(),
             version: "test-version".to_string(),
+            hash: "0".repeat(64),
             id: ObjectId::from(1),
             pack: ObjectId::from(2),
             num_rows: None,
