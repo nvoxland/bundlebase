@@ -137,6 +137,44 @@ impl PyBundle {
         Ok(super::builder::PyBundleBuilder::new(builder))
     }
 
+    #[pyo3(signature = (sql, params=None))]
+    fn select<'py>(
+        &self,
+        sql: &str,
+        params: Option<Vec<Py<PyAny>>>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let sql = sql.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let params_vec = if let Some(params_list) = params {
+                super::utils::convert_py_params(params_list)?
+            } else {
+                vec![]
+            };
+
+            let builder = inner
+                .select(&sql, params_vec)
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to execute query: {}",
+                        e
+                    ))
+                })?;
+
+            Python::attach(|py| {
+                Py::new(py, super::builder::PyBundleBuilder::new(builder))
+                    .map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                            "Failed to create bundle: {}",
+                            e
+                        ))
+                    })
+            })
+        })
+    }
+
     fn ctx<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
