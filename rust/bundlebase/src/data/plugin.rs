@@ -25,6 +25,15 @@ use crate::{Bundle, BundlebaseError};
 
 #[async_trait]
 pub trait ReaderPlugin: Send + Sync {
+    /// Create a reader for the given source.
+    ///
+    /// # Arguments
+    /// * `source` - URL or path to the data source
+    /// * `block_id` - ID of the block being read
+    /// * `bundle` - Bundle context
+    /// * `schema` - Optional schema (if already known)
+    /// * `layout` - Optional layout file path
+    /// * `expected_version` - If provided, validates version on first data access
     async fn reader(
         &self,
         source: &str,
@@ -32,5 +41,6 @@ pub trait ReaderPlugin: Send + Sync {
         bundle: &Bundle,
         schema: Option<SchemaRef>,
         layout: Option<String>,
+        expected_version: Option<String>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError>;
 }

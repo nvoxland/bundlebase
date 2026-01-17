@@ -55,12 +55,16 @@ impl ReaderPlugin for JsonPlugin {
         bundle: &Bundle,
         schema: Option<SchemaRef>,
         _layout: Option<String>,
+        expected_version: Option<String>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
         if !self.inner.handles(source) {
             return Ok(None);
         }
 
-        let reader = self.inner.reader(source, bundle, schema).await?;
+        let reader = self
+            .inner
+            .reader(source, bundle, schema, expected_version)
+            .await?;
         Ok(Some(Arc::new(JsonReader::new(reader, *block_id))))
     }
 }
@@ -125,7 +129,12 @@ impl DataReader for JsonReader {
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn crate::io::IOReadFile>>, BundlebaseError> {
         let index_file = RowIdIndex::new()
-            .build(self.inner.file(), data_dir, &self.block_id(), false)
+            .build(
+                self.inner.file().as_object_store_file(),
+                data_dir,
+                &self.block_id(),
+                false,
+            )
             .await?;
 
         Ok(Some(index_file))
@@ -189,7 +198,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let result = plugin
-            .reader("file:///test.csv", &1.into(), &binding, None, None)
+            .reader("file:///test.csv", &1.into(), &binding, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -203,7 +212,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let invalid_reader = plugin
-            .reader("file:///invalid.json", &1.into(), &binding, None, None)
+            .reader("file:///invalid.json", &1.into(), &binding, None, None, None)
             .await?;
 
         assert!(
@@ -234,6 +243,7 @@ mod tests {
                 &binding,
                 None,
                 None,
+                None,
             )
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
@@ -261,6 +271,7 @@ mod tests {
                 &1.into(),
                 &binding,
                 Some(schema),
+                None,
                 None,
             )
             .await?
@@ -319,6 +330,7 @@ mod tests {
                 test_datafile("objects.json"),
                 &1.into(),
                 &binding,
+                None,
                 None,
                 None,
             )

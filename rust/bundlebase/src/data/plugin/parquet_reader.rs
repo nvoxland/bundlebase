@@ -53,16 +53,17 @@ impl ReaderPlugin for ParquetPlugin {
         bundle: &Bundle,
         schema: Option<SchemaRef>,
         _layout: Option<String>,
+        expected_version: Option<String>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
         if !self.inner.handles(source) {
             return Ok(None);
         }
 
-        let reader = self.inner.reader(source, bundle, schema).await?;
-        Ok(Some(Arc::new(ParquetDataReader::new(
-            reader,
-            *block_id,
-        ))))
+        let reader = self
+            .inner
+            .reader(source, bundle, schema, expected_version)
+            .await?;
+        Ok(Some(Arc::new(ParquetDataReader::new(reader, *block_id))))
     }
 }
 
@@ -235,7 +236,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let result = plugin
-            .reader("file:///test.csv", &1.into(), &binding, None, None)
+            .reader("file:///test.csv", &1.into(), &binding, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -249,7 +250,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let invalid_reader = plugin
-            .reader("file:///invalid.parquet", &1.into(), &binding, None, None)
+            .reader("file:///invalid.parquet", &1.into(), &binding, None, None, None)
             .await?;
 
         assert!(invalid_reader.is_some());
@@ -275,6 +276,7 @@ mod tests {
                 test_datafile("userdata.parquet"),
                 &1.into(),
                 &binding,
+                None,
                 None,
                 None,
             )
@@ -318,6 +320,7 @@ mod tests {
                 &1.into(),
                 &binding,
                 Some(schema),
+                None,
                 None,
             )
             .await?
@@ -371,6 +374,7 @@ mod tests {
                 &binding,
                 None,
                 None,
+                None,
             )
             .await?
             .unwrap();
@@ -415,6 +419,7 @@ mod tests {
                 test_datafile("userdata.parquet"),
                 &1.into(),
                 &binding,
+                None,
                 None,
                 None,
             )
