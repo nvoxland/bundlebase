@@ -32,8 +32,8 @@ impl FileFormatConfig for CsvFormatConfig {
         Arc::new(CsvFormat::default())
     }
 
-    fn file_source(&self) -> Arc<dyn FileSource> {
-        Arc::new(CsvSource::new(true, b',', b'"'))
+    fn file_source(&self, schema: SchemaRef) -> Arc<dyn FileSource> {
+        Arc::new(CsvSource::new(schema))
     }
 
     fn line_oriented_format(&self) -> Option<LineOrientedFormat> {

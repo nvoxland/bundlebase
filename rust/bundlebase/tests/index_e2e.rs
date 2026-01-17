@@ -32,11 +32,10 @@ Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
     TableScan: packs.__pack_\w\w projection=\[Index, City, Email], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)]
 
 \*\*\* physical_plan \*\*\*
-CoalesceBatchesExec: target_batch_size=8192
-  FilterExec: Email@2 = elizabethbarr@ewing.com, projection=\[Index@0, City@1]
-    RepartitionExec: partitioning=RoundRobinBatch\(\d+\), input_partitions=1
-      DataSourceExec: file_groups=\{1 group: \[\[test_data/customers-0-100.csv]]}, projection=\[Index, City, Email], file_type=csv, has_header=true
-    "#,
+FilterExec: Email@\d+ = elizabethbarr@ewing.com, projection=\[Index@\d+, City@\d+\]
+  RepartitionExec: partitioning=RoundRobinBatch\(\d+\), input_partitions=1
+    DataSourceExec: file_groups=\{1 group: \[\[test_data/customers-0-100.csv\]\]\}, projection=\[Index, City, Email\], file_type=csv, has_header=true
+"#,
         explain
     );
 
@@ -92,13 +91,13 @@ CoalesceBatchesExec: target_batch_size=8192
 \*\*\* logical_plan \*\*\*
 Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
   Filter: packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)
-    TableScan: packs.__pack_\w\w projection=\[Index, City, Email], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)]
+    TableScan: packs.__pack_\w\w projection=\[Index, City, Email\], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)\]
 
 \*\*\* physical_plan \*\*\*
-CoalesceBatchesExec: target_batch_size=8192
-  FilterExec: Email@2 = elizabethbarr@ewing.com, projection=\[Index@0, City@1]
-    CooperativeExec
-      DataSourceExec: RowIdOffsetDataSource\[file=memory:///test_data/customers-0-100.csv, rows=1, format=Csv]    "#,
+FilterExec: Email@2 = elizabethbarr@ewing.com, projection=\[Index@0, City@1\]
+  CooperativeExec
+    DataSourceExec: RowIdOffsetDataSource\[file=memory:///test_data/customers-0-100.csv, rows=1, format=Csv\]
+"#,
         explain
     );
     Ok(())

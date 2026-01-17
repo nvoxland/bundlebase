@@ -22,7 +22,8 @@ pub trait FileFormatConfig: Send + Sync + Default + Clone {
     fn file_format(&self) -> Arc<dyn FileFormat>;
 
     /// Get the FileSource for this format (e.g., CsvSource, JsonSource, ParquetSource)
-    fn file_source(&self) -> Arc<dyn FileSource>;
+    /// The schema is required by the FileSource constructors in DataFusion 52+
+    fn file_source(&self, schema: SchemaRef) -> Arc<dyn FileSource>;
 
     /// Get the line-oriented format if this format supports it (CSV or JSON Lines)
     /// Returns None for formats that don't use line-based offset reading (like Parquet)
@@ -160,15 +161,15 @@ impl<C: FileFormatConfig> FileReader<C> {
 
         let partitioned_file = PartitionedFile::from(metadata);
 
+        let schema = self.schema.clone().expect("No schema set");
         let mut builder = FileScanConfigBuilder::new(
             self.file.store_url(),
-            self.schema.clone().expect("No schema set"),
-            self.config.file_source(),
+            self.config.file_source(schema),
         )
         .with_file(partitioned_file);
 
         if let Some(proj) = projection {
-            builder = builder.with_projection_indices(Some(proj.to_vec()));
+            builder = builder.with_projection_indices(Some(proj.to_vec()))?;
         }
 
         if let Some(lim) = limit {

@@ -1,6 +1,7 @@
 use crate::DataGenerator;
 use arrow::array::RecordBatch;
 use datafusion::physical_plan::memory::LazyBatchGenerator;
+use parking_lot::RwLock;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
@@ -32,5 +33,9 @@ impl LazyBatchGenerator for FunctionBatchGenerator {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn reset_state(&self) -> Arc<RwLock<dyn LazyBatchGenerator>> {
+        Arc::new(RwLock::new(FunctionBatchGenerator::new(self.generator.clone())))
     }
 }

@@ -8,7 +8,7 @@ use datafusion::datasource::source::DataSource;
 use datafusion::execution::TaskContext;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_expr::EquivalenceProperties;
-use datafusion::physical_plan::projection::ProjectionExpr;
+use datafusion::physical_expr::projection::ProjectionExprs;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayFormatType, Partitioning, SendableRecordBatchStream};
 use futures::stream;
@@ -139,7 +139,7 @@ impl DataSource for MockDataSource {
 
     fn try_swapping_with_projection(
         &self,
-        _projection: &[ProjectionExpr],
+        _projection: &ProjectionExprs,
     ) -> datafusion::common::Result<Option<Arc<dyn DataSource>>> {
         Ok(None)
     }
