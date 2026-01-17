@@ -12,9 +12,9 @@
 
 use super::source_function::{
     ArgSpec, AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction,
-    SourceFunction, SyncMode,
+    MaterializeResult, SourceFunction, SyncMode,
 };
-use crate::io::IOReadWriteDir;
+use crate::io::{IOReadWriteDir, WriteResult};
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::{
     ArrayRef, BooleanBuilder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
@@ -291,11 +291,11 @@ impl PostgresFunction {
             .map_err(|e| BundlebaseError::from(format!("Failed to create RecordBatch: {}", e)))
     }
 
-    /// Write a chunk to parquet and return file reference.
+    /// Write a chunk to parquet and return WriteResult with file and hash.
     async fn write_chunk_to_parquet(
         chunk: &DataChunk,
         data_dir: &dyn IOReadWriteDir,
-    ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
+    ) -> Result<WriteResult, BundlebaseError> {
         let batch = Self::rows_to_record_batch(&chunk.rows)?;
 
         // Write to in-memory buffer
@@ -481,7 +481,7 @@ impl SourceFunction for PostgresFunction {
         args: &HashMap<String, String>,
         data_dir: &dyn IOReadWriteDir,
         _config: &Arc<BundleConfig>,
-    ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
+    ) -> Result<MaterializeResult, BundlebaseError> {
         let url = args.get("url").ok_or("url is required")?;
         let query = args.get("query").ok_or("query is required")?;
         let sort_column = args.get("sort_column").ok_or("sort_column is required")?;
@@ -539,7 +539,11 @@ impl SourceFunction for PostgresFunction {
             rows,
         };
 
-        Self::write_chunk_to_parquet(&chunk, data_dir).await
+        let result = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
+        Ok(MaterializeResult {
+            file: result.file,
+            hash: result.hash,
+        })
     }
 
     async fn fetch_with_mode(
@@ -563,11 +567,11 @@ impl SourceFunction for PostgresFunction {
             for (source_location, _attached_info) in attached_files {
                 match Self::refetch_range(&client, query, sort_column, source_location).await? {
                     Some(chunk) => {
-                        let file = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
+                        let result = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
                         // Use relative path if file is in data_dir, otherwise full URL
                         let attach_location = data_dir
-                            .relative_path(file.as_ref())
-                            .unwrap_or_else(|_| file.url().to_string());
+                            .relative_path(result.file.as_ref())
+                            .unwrap_or_else(|_| result.file.url().to_string());
                         // For Postgres, source_url is the attach_location since there's no remote file
                         actions.push(FetchAction::Replace {
                             old_source_location: source_location.clone(),
@@ -575,6 +579,7 @@ impl SourceFunction for PostgresFunction {
                                 attach_location: attach_location.clone(),
                                 source_location: source_location.clone(),
                                 source_url: attach_location,
+                                hash: result.hash,
                             },
                         });
                     }
@@ -603,16 +608,17 @@ impl SourceFunction for PostgresFunction {
             }
 
             // New chunk - add it
-            let file = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
+            let result = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
             // Use relative path if file is in data_dir, otherwise full URL
             let attach_location = data_dir
-                .relative_path(file.as_ref())
-                .unwrap_or_else(|_| file.url().to_string());
+                .relative_path(result.file.as_ref())
+                .unwrap_or_else(|_| result.file.url().to_string());
             // For Postgres, source_url is the attach_location since there's no remote file
             actions.push(FetchAction::Add(MaterializedData {
                 attach_location: attach_location.clone(),
                 source_location,
                 source_url: attach_location,
+                hash: result.hash,
             }));
         }
 

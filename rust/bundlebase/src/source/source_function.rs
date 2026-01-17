@@ -18,6 +18,9 @@ use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
 use super::source_utils;
 use super::web_scrape::WebScrapeFunction;
+
+// Re-export MaterializeResult for use by source function implementations
+pub use super::source_utils::MaterializeResult;
 use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
@@ -67,6 +70,8 @@ pub struct MaterializedData {
     pub source_location: String,
     /// Full URL to the source file for version reading (may differ from source_location)
     pub source_url: String,
+    /// SHA256 hash of the content (full 64-character hex string)
+    pub hash: String,
 }
 
 /// Sync mode for source fetch operations.
@@ -366,7 +371,8 @@ pub trait SourceFunction: Send + Sync {
 
     /// Materialize a single discovered location.
     ///
-    /// Downloads/copies the data to `data_dir` and returns a file reference.
+    /// Downloads/copies the data to `data_dir` and returns a MaterializeResult
+    /// containing the file reference and its SHA256 hash.
     ///
     /// Default implementation uses `source_utils::materialize_url` which handles
     /// HTTP(S) via reqwest and other schemes via IOFile.
@@ -378,7 +384,7 @@ pub trait SourceFunction: Send + Sync {
         args: &HashMap<String, String>,
         data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
-    ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
+    ) -> Result<MaterializeResult, BundlebaseError> {
         let should_copy = source_utils::should_copy(args);
         source_utils::materialize_url(&location.url, should_copy, data_dir, config).await
     }
@@ -408,15 +414,16 @@ pub trait SourceFunction: Send + Sync {
         let mut results = Vec::with_capacity(discovered.len());
         for location in discovered {
             let source_url = location.url.to_string();
-            let file = self.materialize(&location, args, data_dir, &config).await?;
+            let result = self.materialize(&location, args, data_dir, &config).await?;
             // Use relative path if file is in data_dir, otherwise full URL
             let attach_location = data_dir
-                .relative_path(file.as_ref())
-                .unwrap_or_else(|_| file.url().to_string());
+                .relative_path(result.file.as_ref())
+                .unwrap_or_else(|_| result.file.url().to_string());
             results.push(MaterializedData {
                 attach_location,
                 source_location: location.source_location,
                 source_url,
+                hash: result.hash,
             });
         }
 

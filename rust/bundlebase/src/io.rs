@@ -30,7 +30,7 @@ pub(crate) mod plugin;
 pub use registry::{io_registry, IOFactory, IORegistry};
 
 // Re-export traits and types
-pub use dir::{IOReadDir, IOReadWriteDir};
+pub use dir::{IOReadDir, IOReadWriteDir, WriteResult};
 pub use file::{read_yaml, write_yaml, IOReadFile, IOReadWriteFile};
 pub use file_info::FileInfo;
 

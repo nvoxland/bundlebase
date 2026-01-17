@@ -780,6 +780,7 @@ impl BundleBuilder {
                     let attach_location = data.attach_location.clone();
                     let source_location = data.source_location.clone();
                     let source_url_for_op = data.source_url.clone();
+                    let hash = data.hash.clone();
 
                     self.do_change(
                         &format!("Fetch: attach {}", source_location),
@@ -787,6 +788,7 @@ impl BundleBuilder {
                             let attach_location = attach_location.clone();
                             let source_location = source_location.clone();
                             let source_url_for_op = source_url_for_op.clone();
+                            let hash = hash.clone();
 
                             Box::pin(async move {
                                 // Use setup_for_source to read version from source_url
@@ -794,6 +796,7 @@ impl BundleBuilder {
                                     &pack_id,
                                     &attach_location,
                                     &source_url_for_op,
+                                    &hash,
                                     builder,
                                 )
                                 .await?;
@@ -821,6 +824,7 @@ impl BundleBuilder {
                     let attach_location = data.attach_location.clone();
                     let source_location = data.source_location.clone();
                     let source_url_for_op = data.source_url.clone();
+                    let hash = data.hash.clone();
 
                     self.do_change(
                         &format!("Fetch: replace {}", source_location),
@@ -828,12 +832,14 @@ impl BundleBuilder {
                             let attach_location = attach_location.clone();
                             let source_location = source_location.clone();
                             let source_url_for_op = source_url_for_op.clone();
+                            let hash = hash.clone();
 
                             Box::pin(async move {
                                 let mut op = AttachBlockOp::setup_for_source(
                                     &pack_id,
                                     &attach_location,
                                     &source_url_for_op,
+                                    &hash,
                                     builder,
                                 )
                                 .await?;

@@ -183,7 +183,7 @@ impl IndexBlocksOp {
             Box::pin(stream);
 
         // Write using SHA-based naming with .index.idx extension
-        let written_file = bundle
+        let write_result = bundle
             .data_dir
             .write_stream(boxed_stream, "index.idx")
             .await
@@ -193,6 +193,7 @@ impl IndexBlocksOp {
                     column, e
                 ))
             })?;
+        let written_file = write_result.file;
 
         // Get the relative path within the data_dir
         let rel_path = bundle.data_dir.relative_path(written_file.as_ref())?;

@@ -6,7 +6,7 @@ use super::source_function::{
     AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction, SyncMode,
 };
 use crate::io::plugin::object_store::ObjectStoreFile;
-use crate::io::{IOReadFile, IOReadWriteDir};
+use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};
 use futures::stream;
 use crate::{BundleConfig, BundlebaseError};
 use bytes::Bytes;
@@ -114,12 +114,12 @@ pub fn filename_from_url(url: &Url) -> String {
 
 /// Download data and save it to the data directory using content-addressed storage.
 ///
-/// Returns a file reference to the written file.
+/// Returns a WriteResult containing the file reference and the computed SHA256 hash.
 pub async fn download_to_data_dir(
     data: Bytes,
     filename: &str,
     data_dir: &dyn IOReadWriteDir,
-) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+) -> Result<WriteResult, BundlebaseError> {
     // Extract extension from filename (e.g., "file.parquet" -> "parquet")
     let ext = filename.rsplit('.').next().unwrap_or("dat");
 
@@ -131,11 +131,11 @@ pub async fn download_to_data_dir(
 
 /// Download a file from an IOFile to the data directory.
 ///
-/// Returns a file reference to the written file.
+/// Returns a WriteResult containing the file reference and the computed SHA256 hash.
 pub async fn download_io_file_to_data_dir(
     file: &ObjectStoreFile,
     data_dir: &dyn IOReadWriteDir,
-) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+) -> Result<WriteResult, BundlebaseError> {
     let data = file.read_bytes().await?.ok_or_else(|| {
         BundlebaseError::from(format!("File not found: {}", file.url()))
     })?;
@@ -145,11 +145,11 @@ pub async fn download_io_file_to_data_dir(
 
 /// Download a file from an HTTP(S) URL to the data directory.
 ///
-/// Returns a file reference to the written file.
+/// Returns a WriteResult containing the file reference and the computed SHA256 hash.
 pub async fn download_http_to_data_dir(
     url: &Url,
     data_dir: &dyn IOReadWriteDir,
-) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+) -> Result<WriteResult, BundlebaseError> {
     let response = reqwest::get(url.as_str())
         .await
         .map_err(|e| BundlebaseError::from(format!("Failed to download '{}': {}", url, e)))?;
@@ -172,26 +172,48 @@ pub async fn download_http_to_data_dir(
     download_to_data_dir(data, &filename, data_dir).await
 }
 
+/// Result of materializing a file, containing the file reference and its hash.
+#[derive(Debug)]
+pub struct MaterializeResult {
+    /// Reference to the file (either copied to data_dir or original location)
+    pub file: Box<dyn IOReadFile>,
+    /// SHA256 hash of the content (full 64-character hex string)
+    pub hash: String,
+}
+
 /// Materialize a file from any supported URL scheme to the data directory.
 ///
 /// Handles HTTP(S) via reqwest, other schemes via IOFile.
-/// If should_copy is false, returns a file reference to the original URL.
+/// If should_copy is false, returns a file reference to the original URL
+/// and computes the hash by streaming the file content.
+///
+/// Returns both the file reference and its SHA256 hash.
 pub async fn materialize_url(
     url: &Url,
     should_copy: bool,
     data_dir: &dyn IOReadWriteDir,
     config: &Arc<BundleConfig>,
-) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+) -> Result<MaterializeResult, BundlebaseError> {
     if !should_copy {
-        let file = ObjectStoreFile::from_url(url, config.clone())?;
-        return Ok(Box::new(file));
+        // For non-copied files, compute the hash by streaming
+        let file: Box<dyn IOReadFile> = Box::new(ObjectStoreFile::from_url(url, config.clone())?);
+        let hash = file.compute_hash().await?;
+        return Ok(MaterializeResult { file, hash });
     }
 
     if url.scheme() == "http" || url.scheme() == "https" {
-        download_http_to_data_dir(url, data_dir).await
+        let result = download_http_to_data_dir(url, data_dir).await?;
+        Ok(MaterializeResult {
+            file: result.file,
+            hash: result.hash,
+        })
     } else {
         let file = ObjectStoreFile::from_url(url, config.clone())?;
-        download_io_file_to_data_dir(&file, data_dir).await
+        let result = download_io_file_to_data_dir(&file, data_dir).await?;
+        Ok(MaterializeResult {
+            file: result.file,
+            hash: result.hash,
+        })
     }
 }
 
@@ -230,7 +252,7 @@ pub async fn read_http_version(url: &Url) -> Result<String, BundlebaseError> {
 /// * `data_dir` - Data directory for computing relative paths
 /// * `mode` - Sync mode (Add, Update, or Sync)
 /// * `read_version` - Async function to read version from a URL
-/// * `materialize` - Async function to materialize a discovered location (returns IOReadFile)
+/// * `materialize` - Async function to materialize a discovered location (returns MaterializeResult with file and hash)
 pub async fn process_sync_mode<M, MFut>(
     discovered: Vec<DiscoveredLocation>,
     attached_files: &HashMap<String, AttachedFileInfo>,
@@ -241,7 +263,7 @@ pub async fn process_sync_mode<M, MFut>(
 ) -> Result<Vec<FetchAction>, BundlebaseError>
 where
     M: Fn(DiscoveredLocation) -> MFut,
-    MFut: Future<Output = Result<Box<dyn IOReadFile>, BundlebaseError>>,
+    MFut: Future<Output = Result<MaterializeResult, BundlebaseError>>,
 {
     // Build set of discovered source_locations for Remove detection
     let discovered_locations: HashSet<String> = discovered
@@ -264,17 +286,18 @@ where
                         "File {} changed: version {} -> {}",
                         source_location, attached_info.version, current_version
                     );
-                    let file = materialize(location).await?;
+                    let result = materialize(location).await?;
                     // Use relative path if file is in data_dir, otherwise full URL
                     let attach_location = data_dir
-                        .relative_path(file.as_ref())
-                        .unwrap_or_else(|_| file.url().to_string());
+                        .relative_path(result.file.as_ref())
+                        .unwrap_or_else(|_| result.file.url().to_string());
                     actions.push(FetchAction::Replace {
                         old_source_location: source_location.clone(),
                         data: MaterializedData {
                             attach_location,
                             source_location,
                             source_url,
+                            hash: result.hash,
                         },
                     });
                 }
@@ -282,15 +305,16 @@ where
             // For Add mode, skip files that are already attached
         } else {
             // New file - add it
-            let file = materialize(location).await?;
+            let result = materialize(location).await?;
             // Use relative path if file is in data_dir, otherwise full URL
             let attach_location = data_dir
-                .relative_path(file.as_ref())
-                .unwrap_or_else(|_| file.url().to_string());
+                .relative_path(result.file.as_ref())
+                .unwrap_or_else(|_| result.file.url().to_string());
             actions.push(FetchAction::Add(MaterializedData {
                 attach_location,
                 source_location,
                 source_url,
+                hash: result.hash,
             }));
         }
     }

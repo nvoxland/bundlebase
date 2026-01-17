@@ -6,7 +6,7 @@
 use super::source_function::{
     ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction, SyncMode,
 };
-use super::source_utils;
+use super::source_utils::{self, MaterializeResult};
 use crate::io::plugin::ftp::FtpFile;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadWriteDir;
@@ -133,7 +133,7 @@ impl SourceFunction for RemoteDirFunction {
         args: &HashMap<String, String>,
         data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+    ) -> Result<MaterializeResult, BundlebaseError> {
         let should_copy = source_utils::should_copy(args);
         let key_path = args.get("key_path").map(|s| s.as_str());
 
@@ -235,16 +235,19 @@ impl RemoteDirFunction {
     ///
     /// Handles special protocols (SFTP, FTP) that require custom download logic,
     /// and delegates to standard utilities for other schemes.
+    /// Returns MaterializeResult containing the file and its SHA256 hash.
     async fn materialize_url_static(
         url: &Url,
         should_copy: bool,
         key_path: Option<&str>,
         data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+    ) -> Result<MaterializeResult, BundlebaseError> {
         if !should_copy {
-            let file = ObjectStoreFile::from_url(url, config.clone())?;
-            return Ok(Box::new(file));
+            // For non-copied files, compute the hash by streaming
+            let file: Box<dyn IOReadFile> = Box::new(ObjectStoreFile::from_url(url, config.clone())?);
+            let hash = file.compute_hash().await?;
+            return Ok(MaterializeResult { file, hash });
         }
 
         let scheme = url.scheme();
@@ -264,6 +267,7 @@ impl RemoteDirFunction {
     ///
     /// Handles special protocols (SFTP, FTP) that require custom download logic,
     /// and delegates to standard utilities for other schemes.
+    /// Returns MaterializeResult containing the file and its SHA256 hash.
     async fn materialize_url(
         &self,
         url: &Url,
@@ -271,16 +275,17 @@ impl RemoteDirFunction {
         key_path: Option<&str>,
         data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
-    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+    ) -> Result<MaterializeResult, BundlebaseError> {
         Self::materialize_url_static(url, should_copy, key_path, data_dir, config).await
     }
 
     /// Download a file via SFTP (static version).
+    /// Returns MaterializeResult containing the file and its SHA256 hash.
     async fn download_sftp_static(
         url: &Url,
         key_path: Option<&str>,
         data_dir: &dyn IOReadWriteDir,
-    ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+    ) -> Result<MaterializeResult, BundlebaseError> {
         let (user, host, port, remote_path) = parse_sftp_url(url)?;
         let key_path_str = key_path.ok_or_else(|| {
             BundlebaseError::from(
@@ -302,18 +307,27 @@ impl RemoteDirFunction {
             .map(|s| s.to_string())
             .unwrap_or_else(|| "data".to_string());
 
-        source_utils::download_to_data_dir(data, &filename, data_dir).await
+        let result = source_utils::download_to_data_dir(data, &filename, data_dir).await?;
+        Ok(MaterializeResult {
+            file: result.file,
+            hash: result.hash,
+        })
     }
 
     /// Download a file via FTP.
-    async fn download_ftp_static(url: &Url, data_dir: &dyn IOReadWriteDir) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
+    /// Returns MaterializeResult containing the file and its SHA256 hash.
+    async fn download_ftp_static(url: &Url, data_dir: &dyn IOReadWriteDir) -> Result<MaterializeResult, BundlebaseError> {
         let ftp_file = FtpFile::from_url(url)?;
         let data = ftp_file.read_bytes().await?.ok_or_else(|| {
             BundlebaseError::from(format!("FTP file not found: {}", url))
         })?;
 
         let filename = source_utils::filename_from_url(url);
-        source_utils::download_to_data_dir(data, &filename, data_dir).await
+        let result = source_utils::download_to_data_dir(data, &filename, data_dir).await?;
+        Ok(MaterializeResult {
+            file: result.file,
+            hash: result.hash,
+        })
     }
 }
 
