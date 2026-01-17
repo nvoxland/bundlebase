@@ -1,7 +1,7 @@
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::SetNameOp;
-use crate::bundle::operation::{AnyOperation, CreateSourceOp, SelectOp};
+use crate::bundle::operation::{AnyOperation, CreateSourceOp, SelectOp, SourceInfo};
 use crate::bundle::operation::{
     AttachBlockOp, CreateFunctionOp, CreateJoinOp, CreateViewOp, DetachBlockOp, DropColumnOp,
     DropJoinOp, DropViewOp, FilterOp, RebuildIndexOp, RenameColumnOp, RenameJoinOp,
@@ -800,8 +800,12 @@ impl BundleBuilder {
                                     builder,
                                 )
                                 .await?;
-                                op.source = Some(source_id);
-                                op.source_location = Some(source_location);
+                                // Create SourceInfo with the source version from the operation
+                                op.source_info = Some(SourceInfo {
+                                    id: source_id,
+                                    location: source_location,
+                                    version: op.version.clone(),
+                                });
                                 builder.apply_operation(op.into()).await?;
                                 Ok(())
                             })
@@ -843,8 +847,12 @@ impl BundleBuilder {
                                     builder,
                                 )
                                 .await?;
-                                op.source = Some(source_id);
-                                op.source_location = Some(source_location);
+                                // Create SourceInfo with the source version from the operation
+                                op.source_info = Some(SourceInfo {
+                                    id: source_id,
+                                    location: source_location,
+                                    version: op.version.clone(),
+                                });
                                 builder.apply_operation(op.into()).await?;
                                 Ok(())
                             })
@@ -881,10 +889,10 @@ impl BundleBuilder {
             .iter()
             .find_map(|op| {
                 if let AnyOperation::AttachBlock(attach) = op {
-                    if attach.source.as_ref() == Some(source_id)
-                        && attach.source_location.as_deref() == Some(source_location)
-                    {
-                        return Some(attach.location.clone());
+                    if let Some(ref info) = attach.source_info {
+                        if &info.id == source_id && info.location == source_location {
+                            return Some(attach.location.clone());
+                        }
                     }
                 }
                 None

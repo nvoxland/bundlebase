@@ -23,7 +23,7 @@ mod set_config;
 mod set_description;
 mod set_name;
 
-pub use crate::bundle::operation::attach_block::AttachBlockOp;
+pub use crate::bundle::operation::attach_block::{AttachBlockOp, SourceInfo};
 pub use crate::bundle::operation::create_view::CreateViewOp;
 pub use crate::bundle::operation::create_function::CreateFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;

@@ -12,6 +12,21 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+/// Information about the source that a block was fetched from.
+///
+/// This struct consolidates source-related fields for blocks attached via source fetch.
+/// When present, all fields are required and track the origin of the data.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceInfo {
+    /// The source function ID that fetched this block
+    pub id: ObjectId,
+    /// The original source location (e.g., remote URL) where data was fetched from
+    pub location: String,
+    /// The version of the source at fetch time (e.g., ETag, last-modified)
+    pub version: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachBlockOp {
@@ -21,10 +36,8 @@ pub struct AttachBlockOp {
     pub version: String,
     /// SHA256 hash of the content (full 64-character hex string)
     pub hash: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<ObjectId>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_location: Option<String>,
+    #[serde(rename = "source", skip_serializing_if = "Option::is_none")]
+    pub source_info: Option<SourceInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,8 +158,7 @@ impl AttachBlockOp {
             id: block_id,
             pack: *pack,
             layout: None,
-            source: None,
-            source_location: None,
+            source_info: None,
         };
 
         _progress.update(4, Some("Reading statistics"));
@@ -204,26 +216,23 @@ impl Operation for AttachBlockOp {
             bundle.indexes().clone(),
             bundle.data_dir_arc(),
             bundle.config(),
-            self.source,
-            self.source_location.clone(),
+            self.source_info.clone(),
         ));
 
         let pack = bundle.get_pack(&self.pack).expect("Cannot find pack");
         pack.add_block(block);
 
         // Add to source's attached_files tracking
-        if let Some(source_id) = &self.source {
-            if let Some(source) = bundle.get_source(source_id) {
-                if let Some(source_loc) = &self.source_location {
-                    source.add_attached_file(
-                        source_loc,
-                        AttachedFileInfo {
-                            location: self.location.clone(),
-                            version: self.version.clone(),
-                            bytes: self.bytes,
-                        },
-                    );
-                }
+        if let Some(ref source_info) = self.source_info {
+            if let Some(source) = bundle.get_source(&source_info.id) {
+                source.add_attached_file(
+                    &source_info.location,
+                    AttachedFileInfo {
+                        location: self.location.clone(),
+                        version: source_info.version.clone(),
+                        bytes: self.bytes,
+                    },
+                );
             }
         }
 
@@ -253,8 +262,7 @@ mod tests {
             bytes: None,
             schema: None,
             layout: None,
-            source: None,
-            source_location: None,
+            source_info: None,
         };
 
         assert_eq!(op.describe(), "ATTACH: file:///test/data.csv");
@@ -426,8 +434,7 @@ schema:
             bytes: None,
             schema: None,
             layout: None,
-            source: None,
-            source_location: None,
+            source_info: None,
         };
 
         let version = op.version();

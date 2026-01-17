@@ -55,10 +55,11 @@ changes:
   description: {}
   operations:
   - type: attachBlock
-    location: memory:///test_data/userdata.parquet
-    version: {}
     id: {}
     pack: {}
+    location: memory:///test_data/userdata.parquet
+    version: {}
+    hash: 59d4fdcdd71e5b6ab79d0bc8fae8ee6f144d3639250facb4b519b36b92c8a5cc
     numRows: 1000
     bytes: 113629
     schema:
@@ -162,7 +163,6 @@ changes:
         commit.timestamp,
         commit.changes[0].id,
         commit.changes[0].description,
-        test_utils::for_yaml(version),
         test_utils::for_yaml(String::from(op_field!(
             &commit.operations()[0],
             AnyOperation::AttachBlock,
@@ -173,6 +173,7 @@ changes:
             AnyOperation::AttachBlock,
             pack
         ))),
+        test_utils::for_yaml(version),
         commit.changes[1].id,
         commit.changes[2].id,
     );
@@ -242,10 +243,11 @@ changes:
   description: {}
   operations:
   - type: attachBlock
-    location: memory:///test_data/userdata.parquet
-    version: {}
     id: {}
     pack: {}
+    location: memory:///test_data/userdata.parquet
+    version: {}
+    hash: 59d4fdcdd71e5b6ab79d0bc8fae8ee6f144d3639250facb4b519b36b92c8a5cc
     numRows: 1000
     bytes: 113629
     schema:
@@ -361,11 +363,6 @@ changes:
         commit.timestamp,
         commit.changes[0].id,
         commit.changes[0].description,
-        test_utils::for_yaml(op_field!(
-            &commit.operations()[0],
-            AnyOperation::AttachBlock,
-            version
-        )),
         test_utils::for_yaml(String::from(op_field!(
             &commit.operations()[0],
             AnyOperation::AttachBlock,
@@ -376,6 +373,11 @@ changes:
             AnyOperation::AttachBlock,
             pack
         ))),
+        test_utils::for_yaml(op_field!(
+            &commit.operations()[0],
+            AnyOperation::AttachBlock,
+            version
+        )),
         commit.changes[1].id,
         commit.changes[2].id,
         commit.changes[3].id,
@@ -460,10 +462,11 @@ changes:
   description: {}
   operations:
   - type: attachBlock
-    location: memory:///test_data/customers-0-100.csv
-    version: {}
     id: {}
     pack: {}
+    location: memory:///test_data/customers-0-100.csv
+    version: {}
+    hash: f2147696392a019d768a11ff68bab8e8dec77b5af2c93e8e5d5e399bd7bba8b9
     layout: {}
     numRows: 100
     bytes: 17160
@@ -546,17 +549,17 @@ changes:
             commit.timestamp,
             commit.changes[0].id,
             commit.changes[0].description,
-            test_utils::for_yaml(op_field!(
-                commit.operations()[0],
-                AnyOperation::AttachBlock,
-                version
-            )),
             test_utils::for_yaml(
                 op_field!(commit.operations()[0], AnyOperation::AttachBlock, id).into()
             ),
             test_utils::for_yaml(
                 op_field!(commit.operations()[0], AnyOperation::AttachBlock, pack).into()
             ),
+            test_utils::for_yaml(op_field!(
+                commit.operations()[0],
+                AnyOperation::AttachBlock,
+                version
+            )),
             test_utils::for_yaml(
                 op_field!(commit.operations()[0], AnyOperation::AttachBlock, layout).unwrap()
             )

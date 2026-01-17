@@ -149,7 +149,6 @@ mod tests {
             data_dir.clone(),
             BundleConfig::default().into(),
             None,
-            None,
         ));
 
         let block12 = Arc::new(DataBlock::new(
@@ -161,7 +160,6 @@ mod tests {
             data_dir.clone(),
             BundleConfig::default().into(),
             None,
-            None,
         ));
 
         let block21 = Arc::new(DataBlock::new(
@@ -172,7 +170,6 @@ mod tests {
             indexes.clone(),
             data_dir.clone(),
             BundleConfig::default().into(),
-            None,
             None,
         ));
 
