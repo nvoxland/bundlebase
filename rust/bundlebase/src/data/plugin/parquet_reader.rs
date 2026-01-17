@@ -34,8 +34,8 @@ impl FileFormatConfig for ParquetFormatConfig {
         Arc::new(ParquetFormat::default())
     }
 
-    fn file_source(&self) -> Arc<dyn FileSource> {
-        Arc::new(ParquetSource::default())
+    fn file_source(&self, schema: SchemaRef) -> Arc<dyn FileSource> {
+        Arc::new(ParquetSource::new(schema))
     }
 }
 

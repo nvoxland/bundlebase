@@ -31,8 +31,8 @@ impl FileFormatConfig for JsonFormatConfig {
         Arc::new(JsonFormat::default())
     }
 
-    fn file_source(&self) -> Arc<dyn FileSource> {
-        Arc::new(JsonSource::default())
+    fn file_source(&self, schema: SchemaRef) -> Arc<dyn FileSource> {
+        Arc::new(JsonSource::new(schema))
     }
 
     fn line_oriented_format(&self) -> Option<LineOrientedFormat> {

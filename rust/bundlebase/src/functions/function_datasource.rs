@@ -6,7 +6,7 @@ use datafusion::datasource::source::{DataSource, DataSourceExec};
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, LexOrdering, Partitioning};
 use datafusion::physical_plan::memory::LazyMemoryExec;
-use datafusion::physical_plan::projection::ProjectionExpr;
+use datafusion::physical_expr::projection::ProjectionExprs;
 use datafusion::physical_plan::{DisplayFormatType, ExecutionPlan};
 use std::any::Any;
 use std::fmt::{Display, Formatter};
@@ -40,7 +40,7 @@ impl FunctionDataSource {
             generator,
             schema,
             projected_schema,
-            projection: None,
+            projection,
             sort_information: vec![],
             fetch: None,
         })
@@ -81,12 +81,20 @@ impl DataSource for FunctionDataSource {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
+        // Create LazyMemoryExec with the full schema (generators produce full batches)
         let memory_exec = LazyMemoryExec::try_new(
             self.schema.clone(),
             vec![Arc::new(parking_lot::RwLock::new(
                 FunctionBatchGenerator::new(self.generator.clone()),
             ))],
         )?;
+
+        // Apply projection if specified to match projected_schema
+        let memory_exec = if let Some(ref projection) = self.projection {
+            memory_exec.with_projection(Some(projection.clone()))
+        } else {
+            memory_exec
+        };
 
         memory_exec.execute(partition, context)
     }
@@ -128,7 +136,7 @@ impl DataSource for FunctionDataSource {
 
     fn try_swapping_with_projection(
         &self,
-        _projection: &[ProjectionExpr],
+        _projection: &ProjectionExprs,
     ) -> datafusion::common::Result<Option<Arc<dyn DataSource>>> {
         // For now, we don't optimize projections at the source level
         Ok(None)
