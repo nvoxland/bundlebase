@@ -197,6 +197,29 @@ class SyncBundle:
         async_extended = _loop_manager.run_sync(coro)
         return SyncBundleBuilder(async_extended)
 
+    def select(self, sql: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
+        """Execute a SQL query on the data.
+
+        Creates a new forked bundle with the query applied, leaving the original unchanged.
+
+        Args:
+            sql: SQL query string
+            params: Optional list of parameters for parameterized queries.
+                    If None, defaults to empty list.
+
+        Returns:
+            New SyncBundleBuilder with query applied
+        """
+        # Call the method directly on PyBundle (not via _ORIGINAL_METHODS which has PyBundleBuilder.select)
+        async def _select_async():
+            result = self._async.select(sql, params)
+            if hasattr(result, '__await__'):
+                return await result
+            return result
+
+        async_result = _loop_manager.run_sync(_select_async())
+        return SyncBundleBuilder(async_result)
+
 
 class SyncBundleBuilder(SyncBundle):
     """Synchronous wrapper for PyBundleBuilder (mutable).
