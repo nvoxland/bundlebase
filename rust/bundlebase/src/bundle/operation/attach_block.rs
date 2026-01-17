@@ -111,9 +111,24 @@ impl AttachBlockOp {
         );
 
         _progress.update(1, Some("Computing hash"));
-        // Get file reference and compute hash by streaming
-        let file = readable_file_from_path(location, builder.data_dir(), builder.bundle.config())?;
-        let hash = file.compute_hash().await?;
+
+        // Check if this is a function:// URL - these don't support file-based hash
+        //todo: do this right
+        let hash = if location.starts_with("function://") {
+            // For functions, use version as hash proxy
+            let version = Self::read_version_from(location, builder).await?;
+
+            // Hash the version string as a proxy for content hash
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(version.as_bytes());
+            hex::encode(hasher.finalize())
+        } else {
+            // Normal file-based hash computation for other schemes
+            let file =
+                readable_file_from_path(location, builder.data_dir(), builder.bundle.config())?;
+            file.compute_hash().await?
+        };
 
         Self::setup_with_hash(pack, location, &hash, builder).await
     }

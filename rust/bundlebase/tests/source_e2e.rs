@@ -455,8 +455,8 @@ async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
     let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
 
     // The location should be in the bundle data_dir, not the original source
-    // And source_location should be the original URL
-    assert!(contents.contains("sourceLocation:"), "AttachBlock should have sourceLocation: {}", contents);
+    // And source should contain the original location
+    assert!(contents.contains("source:"), "AttachBlock should have source: {}", contents);
 
     Ok(())
 }
@@ -523,8 +523,8 @@ async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> 
     let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
 
     // The location should be in the bundle data_dir (copied)
-    // And source_location should be the original URL
-    assert!(contents.contains("sourceLocation:"), "AttachBlock should have sourceLocation: {}", contents);
+    // And source should contain the original location
+    assert!(contents.contains("source:"), "AttachBlock should have source: {}", contents);
 
     // Data should be queryable
     assert_eq!(bundle.num_rows().await?, 1000);
@@ -617,17 +617,27 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
     let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
 
     // Find the attachBlock operation and verify its sourceLocation field
-    // The YAML format is: sourceLocation: <path>
+    // The YAML format is now nested:
+    // source:
+    //   id: '...'
+    //   location: userdata.parquet
+    //   version: '...'
     let lines: Vec<&str> = contents.lines().collect();
     let mut found_attach_block = false;
+    let mut in_source_block = false;
     let mut source_location_is_relative = false;
 
     for line in lines.iter() {
         if line.contains("type: attachBlock") {
             found_attach_block = true;
         }
-        // Look for sourceLocation field after attachBlock
-        if found_attach_block && line.trim_start().starts_with("sourceLocation:") {
+        // Look for source: field after attachBlock
+        if found_attach_block && line.trim() == "source:" {
+            in_source_block = true;
+            continue;
+        }
+        // Look for location: within source block (indented)
+        if in_source_block && line.trim_start().starts_with("location:") {
             let location_value = line.split(':').skip(1).collect::<Vec<_>>().join(":");
             let location = location_value.trim().trim_matches('\'').trim_matches('"');
 
@@ -638,18 +648,22 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
             // The relative path should be just the filename
             assert_eq!(
                 location, "userdata.parquet",
-                "sourceLocation should be relative path 'userdata.parquet', got: {}",
+                "source.location should be relative path 'userdata.parquet', got: {}",
                 location
             );
 
             break;
+        }
+        // Exit source block when we hit a line that's not indented enough
+        if in_source_block && !line.starts_with("      ") && !line.trim().is_empty() {
+            in_source_block = false;
         }
     }
 
     assert!(found_attach_block, "Should have attachBlock operation in commit");
     assert!(
         source_location_is_relative,
-        "sourceLocation should be relative path, not URL. Contents:\n{}",
+        "source.location should be relative path, not URL. Contents:\n{}",
         contents
     );
 

@@ -45,10 +45,10 @@ impl ReplaceBlockOp {
     ) -> Result<Self, BundlebaseError> {
         // Find block ID by searching AttachBlockOp operations for matching location
         // Also check ReplaceBlockOp in case the block was already replaced
-        let (block_id, old_source_info) = Self::find_block_by_location(old_location, &builder.bundle.operations)
-            .ok_or_else(|| {
-                BundlebaseError::from(format!("No block found at location '{}'", old_location))
-            })?;
+        let (block_id, old_source_info) =
+            Self::find_block_by_location(old_location, &builder.bundle.operations).ok_or_else(
+                || BundlebaseError::from(format!("No block found at location '{}'", old_location)),
+            )?;
 
         // Create adapter to read version from the new location
         let temp_id = ObjectId::generate();
@@ -60,8 +60,18 @@ impl ReplaceBlockOp {
         let new_version = adapter.read_version().await?;
 
         // Compute hash from the new location
-        let file = readable_file_from_path(new_location, builder.data_dir(), builder.bundle.config())?;
-        let new_hash = file.compute_hash().await?;
+        // function:// URLs don't support file-based hash, use version-based hash instead
+        // todo: do this right
+        let new_hash = if new_location.starts_with("function://") {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(new_version.as_bytes());
+            hex::encode(hasher.finalize())
+        } else {
+            let file =
+                readable_file_from_path(new_location, builder.data_dir(), builder.bundle.config())?;
+            file.compute_hash().await?
+        };
 
         // Update source info with the new version (if source info exists)
         let source_info = old_source_info.map(|info| SourceInfo {
