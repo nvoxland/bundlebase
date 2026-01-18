@@ -17,7 +17,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
 use builder::{PyBundleBuilder, PyBundleStatus, PyChange, PyFetchedBlock, PyFetchResults};
-use bundle::PyBundle;
+use bundle::{PyBundle, PyFileVerificationResult, PyVerificationResults};
 use bundle_config::{config_from_python, PyBundleConfig};
 use commit::PyCommit;
 use operation::PyOperation;
@@ -96,6 +96,8 @@ fn bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyOperation>()?;
     m.add_class::<PyRecordBatchStream>()?;
     m.add_class::<PySessionContext>()?;
+    m.add_class::<PyFileVerificationResult>()?;
+    m.add_class::<PyVerificationResults>()?;
 
     // Initialize Rust→Python logging bridge
     // This forwards all Rust log::* calls to Python's logging module

@@ -1508,3 +1508,112 @@ async def test_replace_block_not_found():
         await c.replace_block("s3://nonexistent/file.parquet", "s3://new/file.parquet")
     err_msg = str(exc_info.value)
     assert "No block found at location" in err_msg
+
+
+@pytest.mark.asyncio
+async def test_verify_data_on_builder():
+    """Test verify_data on BundleBuilder."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    # Verify data on uncommitted bundle
+    results = await c.verify_data()
+
+    assert results is not None
+    assert results.all_passed
+    assert results.passed_count >= 1
+    assert results.failed_count == 0
+
+    # Check that we can call check() without error
+    results.check()
+
+
+@pytest.mark.asyncio
+async def test_verify_data_on_committed_bundle():
+    """Test verify_data on committed Bundle."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        bundle_path = os.path.join(tmp_dir, "bundle")
+        c = await bundlebase.create(bundle_path)
+        c = await c.attach(datafile("userdata.parquet"))
+        await c.commit("Initial data")
+
+        # Reopen and verify
+        loaded = await bundlebase.open(bundle_path)
+        results = await loaded.verify_data()
+
+        assert results is not None
+        assert results.all_passed
+        assert results.passed_count >= 1
+        assert results.failed_count == 0
+
+        # Check that we can call check() without error
+        results.check()
+
+
+@pytest.mark.asyncio
+async def test_verify_data_file_results():
+    """Test that verify_data returns file verification details."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    results = await c.verify_data()
+
+    # Should have at least one file result
+    assert len(results.files) >= 1
+
+    # Check file result properties
+    file_result = results.files[0]
+    assert file_result.file_type == "data"
+    assert file_result.passed
+    assert file_result.expected_hash is not None
+    assert file_result.actual_hash is not None
+    assert file_result.expected_hash == file_result.actual_hash
+    assert file_result.error is None
+
+
+@pytest.mark.asyncio
+async def test_verify_data_with_function():
+    """Test verify_data skips function:// URLs."""
+    import pyarrow as pa
+
+    c = await bundlebase.create(random_bundle())
+
+    def simple_data(page: int, schema: pa.Schema) -> pa.RecordBatch | None:
+        if page == 0:
+            return pa.record_batch(
+                schema=schema,
+                data={"id": [1, 2, 3]}
+            )
+        return None
+
+    c = await c.create_function(
+        name="test_func",
+        output={"id": "Int64"},
+        func=simple_data,
+        version="1",
+    )
+
+    c = await c.attach("function://test_func")
+
+    # Verify data - should pass and skip function URL
+    results = await c.verify_data()
+
+    assert results.all_passed
+    # Function URLs should be skipped (passed with no hash)
+    func_result = [f for f in results.files if "function://" in f.location]
+    assert len(func_result) == 1
+    assert func_result[0].passed
+    assert func_result[0].expected_hash is None
+
+
+@pytest.mark.asyncio
+async def test_verify_data_update_versions():
+    """Test that verify_data with update_versions=True works on BundleBuilder."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    # Verify with update_versions=True (default is False)
+    results = await c.verify_data(update_versions=True)
+
+    assert results is not None
+    assert results.all_passed

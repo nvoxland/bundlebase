@@ -1634,6 +1634,229 @@ impl BundleBuilder {
     pub fn data_dir(&self) -> &dyn IOReadWriteDir {
         self.bundle.data_dir()
     }
+
+    /// Verify the integrity of all files in the bundle by checking SHA256 hashes.
+    ///
+    /// This method checks:
+    /// - All data blocks: Verifies SHA256 hash matches the stored hash from operations
+    /// - Index files: Verifies the files exist (no hash verification for indexes)
+    ///
+    /// # Arguments
+    /// * `update_versions` - If true and hash matches but version changed, add UpdateVersionOp
+    ///   to update stored version metadata
+    ///
+    /// # Returns
+    /// `VerificationResults` with details for each file verified.
+    pub async fn verify_data(
+        &mut self,
+        update_versions: bool,
+    ) -> Result<super::VerificationResults, BundlebaseError> {
+        use super::{FileVerificationResult, VerificationResults};
+        use crate::bundle::operation::UpdateVersionOp;
+        use crate::io::readable_file_from_path;
+
+        let mut results = Vec::new();
+        let block_hashes = self.bundle.build_block_hash_map();
+        let block_locations = self.bundle.build_block_location_map();
+
+        // Collect block info first to avoid borrowing issues
+        let blocks_to_verify: Vec<(ObjectId, String, Option<String>, String)> = {
+            let packs = self.bundle.packs().read().clone();
+            let mut result = Vec::new();
+            for pack in packs.values() {
+                for block in pack.blocks() {
+                    let block_id = *block.id();
+                    let location = block_locations
+                        .get(&block_id)
+                        .cloned()
+                        .unwrap_or_else(|| block.reader().url().to_string());
+                    let expected_hash = block_hashes.get(&block_id).cloned();
+                    let current_version = block.version();
+                    result.push((block_id, location, expected_hash, current_version));
+                }
+            }
+            result
+        };
+
+        // Verify each block
+        for (block_id, location, expected_hash, current_version) in blocks_to_verify {
+            // Skip function:// URLs (generated data has no file to verify)
+            if location.starts_with("function://") {
+                results.push(FileVerificationResult {
+                    location,
+                    file_type: "data".to_string(),
+                    expected_hash: None,
+                    actual_hash: None,
+                    passed: true,
+                    error: None,
+                    version_updated: false,
+                });
+                continue;
+            }
+
+            // Compute the actual hash
+            let file = match readable_file_from_path(
+                &location,
+                self.bundle.data_dir(),
+                self.bundle.config(),
+            ) {
+                Ok(f) => f,
+                Err(e) => {
+                    results.push(FileVerificationResult {
+                        location,
+                        file_type: "data".to_string(),
+                        expected_hash,
+                        actual_hash: None,
+                        passed: false,
+                        error: Some(format!("Failed to open file: {}", e)),
+                        version_updated: false,
+                    });
+                    continue;
+                }
+            };
+
+            let actual_hash = match file.compute_hash().await {
+                Ok(h) => h,
+                Err(e) => {
+                    results.push(FileVerificationResult {
+                        location,
+                        file_type: "data".to_string(),
+                        expected_hash,
+                        actual_hash: None,
+                        passed: false,
+                        error: Some(format!("Failed to compute hash: {}", e)),
+                        version_updated: false,
+                    });
+                    continue;
+                }
+            };
+
+            let hash_matches = expected_hash
+                .as_ref()
+                .map(|expected| expected == &actual_hash)
+                .unwrap_or(true);
+
+            if hash_matches {
+                // Hash matches - check if version needs updating
+                let mut version_updated = false;
+
+                if update_versions {
+                    // Read the current version from the file
+                    let temp_id = ObjectId::generate();
+                    if let Ok(adapter) = self
+                        .bundle
+                        .adapter_factory
+                        .reader(&location, &temp_id, self.bundle(), None, None, None)
+                        .await
+                    {
+                        if let Ok(file_version) = adapter.read_version().await {
+                            if file_version != current_version {
+                                // Version changed but hash matches - update version
+                                let op = UpdateVersionOp::setup(block_id, file_version);
+                                if self
+                                    .do_change(
+                                        &format!("Update version for block {}", block_id),
+                                        |builder| {
+                                            let op = op.clone();
+                                            Box::pin(async move {
+                                                builder.apply_operation(op.into()).await?;
+                                                Ok(())
+                                            })
+                                        },
+                                    )
+                                    .await
+                                    .is_ok()
+                                {
+                                    version_updated = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                results.push(FileVerificationResult {
+                    location,
+                    file_type: "data".to_string(),
+                    expected_hash,
+                    actual_hash: Some(actual_hash),
+                    passed: true,
+                    error: None,
+                    version_updated,
+                });
+            } else {
+                // Hash mismatch - verification failed
+                results.push(FileVerificationResult {
+                    location,
+                    file_type: "data".to_string(),
+                    expected_hash,
+                    actual_hash: Some(actual_hash),
+                    passed: false,
+                    error: None,
+                    version_updated: false,
+                });
+            }
+        }
+
+        // Verify index files exist
+        let indexes = self.bundle.indexes().read().clone();
+        for index_def in indexes.iter() {
+            for indexed_blocks in index_def.all_indexed_blocks() {
+                let path = indexed_blocks.path();
+                let result = self.verify_index_exists(path).await;
+                results.push(result);
+            }
+        }
+
+        Ok(VerificationResults::from_files(results))
+    }
+
+    /// Verify an index file exists.
+    async fn verify_index_exists(&self, path: &str) -> super::FileVerificationResult {
+        use super::FileVerificationResult;
+        use crate::io::plugin::object_store::ObjectStoreFile;
+        use crate::io::IOReadFile;
+
+        match ObjectStoreFile::from_str(path, self.bundle.data_dir(), self.bundle.config()) {
+            Ok(file) => match file.exists().await {
+                Ok(true) => FileVerificationResult {
+                    location: path.to_string(),
+                    file_type: "index".to_string(),
+                    expected_hash: None,
+                    actual_hash: None,
+                    passed: true,
+                    error: None,
+                    version_updated: false,
+                },
+                Ok(false) => FileVerificationResult {
+                    location: path.to_string(),
+                    file_type: "index".to_string(),
+                    expected_hash: None,
+                    actual_hash: None,
+                    passed: false,
+                    error: Some("Index file not found".to_string()),
+                    version_updated: false,
+                },
+                Err(e) => FileVerificationResult {
+                    location: path.to_string(),
+                    file_type: "index".to_string(),
+                    expected_hash: None,
+                    actual_hash: None,
+                    passed: false,
+                    error: Some(format!("Failed to check index file: {}", e)),
+                    version_updated: false,
+                },
+            },
+            Err(e) => FileVerificationResult {
+                location: path.to_string(),
+                file_type: "index".to_string(),
+                expected_hash: None,
+                actual_hash: None,
+                passed: false,
+                error: Some(format!("Failed to create file handle: {}", e)),
+                version_updated: false,
+            },
+        }
+    }
 }
 
 #[async_trait]

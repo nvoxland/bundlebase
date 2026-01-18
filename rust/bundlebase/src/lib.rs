@@ -19,7 +19,7 @@ mod versioning;
 
 pub use crate::bundle::{
     AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade, BundleStatus,
-    Operation,
+    FileVerificationResult, Operation, VerificationResults,
 };
 pub use crate::bundle_config::BundleConfig;
 pub use crate::data::DataGenerator;
