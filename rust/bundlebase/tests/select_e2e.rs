@@ -55,6 +55,42 @@ async fn test_select_is_not_required() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
+async fn test_select_star_without_keyword() -> Result<(), BundlebaseError> {
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+
+    // "* FROM bundle LIMIT 10" should work like "SELECT * FROM bundle LIMIT 10"
+    let queried = bundle.select("* FROM bundle LIMIT 10", vec![]).await?;
+
+    let df = queried.dataframe().await?;
+    let result = df.as_ref().clone().collect().await?;
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].num_rows(), 10);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_select_lowercase_keyword_not_duplicated() -> Result<(), BundlebaseError> {
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+
+    // Lowercase "select" should not be double-prepended
+    let queried = bundle
+        .select("select * from bundle limit 10", vec![])
+        .await?;
+
+    let df = queried.dataframe().await?;
+    let result = df.as_ref().clone().collect().await?;
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].num_rows(), 10);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_select_multiple_parameters() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;

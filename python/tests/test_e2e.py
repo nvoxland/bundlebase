@@ -242,6 +242,41 @@ async def test_select():
 
 
 @pytest.mark.asyncio
+async def test_select_without_select_keyword():
+    """Test that select() auto-prepends SELECT if missing."""
+    c = await (bundlebase.create().attach(datafile("userdata.parquet")))
+
+    # Test with "* FROM bundle" - should work like "SELECT * FROM bundle"
+    q = await c.select("* FROM bundle LIMIT 10")
+    results = await q.to_dict()
+    assert len(results["id"]) == 10
+
+
+@pytest.mark.asyncio
+async def test_select_without_select_keyword_columns():
+    """Test that select() with column list auto-prepends SELECT."""
+    c = await (bundlebase.create().attach(datafile("userdata.parquet")))
+
+    # Test with specific columns - should work like "SELECT id, first_name FROM bundle"
+    q = await c.select("id, first_name FROM bundle LIMIT 5")
+    results = await q.to_dict()
+    assert len(results["id"]) == 5
+    assert "id" in results
+    assert "first_name" in results
+
+
+@pytest.mark.asyncio
+async def test_select_lowercase_select():
+    """Test that select() works with lowercase 'select' keyword."""
+    c = await (bundlebase.create().attach(datafile("userdata.parquet")))
+
+    # Test with lowercase "select" - should not double-prepend
+    q = await c.select("select * from bundle limit 10")
+    results = await q.to_dict()
+    assert len(results["id"]) == 10
+
+
+@pytest.mark.asyncio
 async def test_filter():
     c = await bundlebase.create(random_bundle())
     c = await (c.attach(datafile("userdata.parquet"))

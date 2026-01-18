@@ -143,9 +143,10 @@ All operations work synchronously without `await`:
   c.attach("sales", "sales.parquet")
   ```
 
-- **`select(sql: str, params: List = [])`** - Execute SQL
+- **`select(sql: str, params: List = [])`** - Execute SQL (SELECT keyword is auto-prepended if missing)
   ```python
   c.select("SELECT * FROM bundle WHERE id = $1 LIMIT 10", [42])
+  c.select("* FROM bundle LIMIT 10")  # SELECT is auto-prepended
   ```
 
 - **`set_name(name: str)`** - Set container name
