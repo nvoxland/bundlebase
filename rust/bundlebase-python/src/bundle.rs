@@ -1,9 +1,129 @@
 use super::commit::PyCommit;
 use arrow::pyarrow::ToPyArrow;
 use ::bundlebase::bundle::BundleFacade;
-use ::bundlebase::Bundle;
+use ::bundlebase::{Bundle, FileVerificationResult, VerificationResults};
 use pyo3::prelude::*;
 use std::collections::HashMap;
+
+/// Result of verifying a single file
+#[pyclass]
+#[derive(Clone)]
+pub struct PyFileVerificationResult {
+    #[pyo3(get)]
+    pub location: String,
+    #[pyo3(get)]
+    pub file_type: String,
+    #[pyo3(get)]
+    pub expected_hash: Option<String>,
+    #[pyo3(get)]
+    pub actual_hash: Option<String>,
+    #[pyo3(get)]
+    pub passed: bool,
+    #[pyo3(get)]
+    pub error: Option<String>,
+    #[pyo3(get)]
+    pub version_updated: bool,
+}
+
+impl From<&FileVerificationResult> for PyFileVerificationResult {
+    fn from(result: &FileVerificationResult) -> Self {
+        Self {
+            location: result.location.clone(),
+            file_type: result.file_type.clone(),
+            expected_hash: result.expected_hash.clone(),
+            actual_hash: result.actual_hash.clone(),
+            passed: result.passed,
+            error: result.error.clone(),
+            version_updated: result.version_updated,
+        }
+    }
+}
+
+#[pymethods]
+impl PyFileVerificationResult {
+    fn __repr__(&self) -> String {
+        let status = if self.passed { "passed" } else { "FAILED" };
+        format!(
+            "FileVerificationResult(location='{}', type='{}', status={})",
+            self.location, self.file_type, status
+        )
+    }
+}
+
+/// Complete verification results for a bundle
+#[pyclass]
+#[derive(Clone)]
+pub struct PyVerificationResults {
+    #[pyo3(get)]
+    pub files: Vec<PyFileVerificationResult>,
+    #[pyo3(get)]
+    pub passed_count: usize,
+    #[pyo3(get)]
+    pub failed_count: usize,
+    #[pyo3(get)]
+    pub skipped_count: usize,
+    #[pyo3(get)]
+    pub versions_updated_count: usize,
+    #[pyo3(get)]
+    pub all_passed: bool,
+}
+
+impl From<&VerificationResults> for PyVerificationResults {
+    fn from(results: &VerificationResults) -> Self {
+        Self {
+            files: results.files.iter().map(PyFileVerificationResult::from).collect(),
+            passed_count: results.passed_count,
+            failed_count: results.failed_count,
+            skipped_count: results.skipped_count,
+            versions_updated_count: results.versions_updated_count,
+            all_passed: results.all_passed,
+        }
+    }
+}
+
+#[pymethods]
+impl PyVerificationResults {
+    /// Check verification results and raise exception if any files failed.
+    fn check(&self) -> PyResult<()> {
+        if self.all_passed {
+            Ok(())
+        } else {
+            let failures: Vec<&PyFileVerificationResult> =
+                self.files.iter().filter(|f| !f.passed).collect();
+
+            let messages: Vec<String> = failures
+                .iter()
+                .map(|f| {
+                    if let Some(ref err) = f.error {
+                        format!("{}: {}", f.location, err)
+                    } else if f.expected_hash != f.actual_hash {
+                        format!(
+                            "{}: hash mismatch (expected {}, got {})",
+                            f.location,
+                            f.expected_hash.as_deref().unwrap_or("none"),
+                            f.actual_hash.as_deref().unwrap_or("none")
+                        )
+                    } else {
+                        format!("{}: verification failed", f.location)
+                    }
+                })
+                .collect();
+
+            Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Data verification failed for {} file(s):\n{}",
+                failures.len(),
+                messages.join("\n")
+            )))
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "VerificationResults(passed={}, failed={}, skipped={}, versions_updated={})",
+            self.passed_count, self.failed_count, self.skipped_count, self.versions_updated_count
+        )
+    }
+}
 
 #[pyclass]
 #[derive(Clone)]
@@ -246,6 +366,33 @@ impl PyBundle {
                         tar_path, e
                     ))
                 })
+        })
+    }
+
+    /// Verify the integrity of all files in the bundle by checking SHA256 hashes.
+    ///
+    /// Returns VerificationResults with details for each file verified.
+    fn verify_data<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let results = inner
+                .verify_data()
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to verify data: {}",
+                        e
+                    ))
+                })?;
+            Python::attach(|py| {
+                Py::new(py, PyVerificationResults::from(&results))
+                    .map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                            "Failed to create verification results: {}",
+                            e
+                        ))
+                    })
+            })
         })
     }
 }

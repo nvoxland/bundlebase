@@ -1374,6 +1374,43 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Verify the integrity of all files in the bundle by checking SHA256 hashes.
+    ///
+    /// # Arguments
+    /// * `update_versions` - If true and hash matches but version changed, add UpdateVersionOp
+    ///   to update stored version metadata. Defaults to false.
+    ///
+    /// Returns VerificationResults with details for each file verified.
+    #[pyo3(signature = (update_versions=false))]
+    fn verify_data<'py>(
+        &self,
+        update_versions: bool,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let mut guard = inner.lock().await;
+            let results = guard
+                .verify_data(update_versions)
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to verify data: {}",
+                        e
+                    ))
+                })?;
+            Python::attach(|py| {
+                Py::new(py, super::bundle::PyVerificationResults::from(&results))
+                    .map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                            "Failed to create verification results: {}",
+                            e
+                        ))
+                    })
+            })
+        })
+    }
+
 }
 
 impl PyBundleBuilder {

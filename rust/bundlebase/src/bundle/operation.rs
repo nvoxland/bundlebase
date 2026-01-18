@@ -22,6 +22,7 @@ mod serde_util;
 mod set_config;
 mod set_description;
 mod set_name;
+mod update_version;
 
 pub use crate::bundle::operation::attach_block::{AttachBlockOp, SourceInfo};
 pub use crate::bundle::operation::create_view::CreateViewOp;
@@ -45,6 +46,7 @@ pub use crate::bundle::operation::select::SelectOp;
 pub use crate::bundle::operation::set_config::SetConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
+pub use crate::bundle::operation::update_version::UpdateVersionOp;
 use crate::{versioning, Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
@@ -217,6 +219,7 @@ define_any_operation! {
     SetConfig(SetConfigOp),
     SetDescription(SetDescriptionOp),
     SetName(SetNameOp),
+    UpdateVersion(UpdateVersionOp),
 }
 
 impl Display for AnyOperation {
