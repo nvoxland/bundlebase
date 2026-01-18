@@ -1,7 +1,10 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
 use crate::data::{ObjectId, RowId, VersionedBlockId};
-use crate::index::{ColumnIndex, IndexedValue, IndexType, TextColumnIndex, TokenizerConfig};
+use crate::index::{
+    ColumnIndex, ExternalSortConfig, ExternalSortWriter, IndexedValue, IndexType, TempDirManager,
+    TextColumnIndex, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
+};
 use crate::progress::ProgressScope;
 use crate::{Bundle, BundlebaseError};
 use arrow::record_batch::RecordBatch;
@@ -12,7 +15,6 @@ use datafusion::error::DataFusionError;
 use datafusion::scalar::ScalarValue;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -212,6 +214,13 @@ impl IndexBlocksOp {
     }
 
     /// Build a column index (B-tree style for equality/range queries)
+    ///
+    /// Uses streaming external sort to build indexes larger than available RAM.
+    /// The process:
+    /// 1. Stream through all blocks, adding (value, rowid) pairs to external sorter
+    /// 2. External sorter flushes sorted runs to disk when memory limit exceeded
+    /// 3. K-way merge produces sorted stream of entries
+    /// 4. Build index incrementally from sorted stream
     async fn build_column_index(
         index: &ObjectId,
         column: &str,
@@ -251,34 +260,41 @@ impl IndexBlocksOp {
             Some(blocks.len() as u64),
         );
 
-        // Accumulate value -> rowid mappings
-        let mut all_value_to_rowids: HashMap<IndexedValue, Vec<RowId>> = HashMap::new();
+        // Create temp directory for external sort
+        let temp_manager = TempDirManager::new(&bundle.data_dir, "column_index")?;
 
-        // Iterate through all blocks and process batches
+        let sort_config = ExternalSortConfig::new(
+            DEFAULT_MEMORY_LIMIT_BYTES,
+            temp_manager.path().clone(),
+        );
+        let mut sorter = ExternalSortWriter::new(sort_config)?;
+
+        // Stream entries to sorter (replaces HashMap accumulation)
         iterate_blocks(&block_infos, bundle, &progress, |batch, row_ids| {
             let array = batch.column(0);
 
             for (row, row_id) in row_ids.iter().enumerate() {
                 let scalar = ScalarValue::try_from_array(array, row)?;
                 let indexed_value = IndexedValue::from_scalar(&scalar)?;
-
-                all_value_to_rowids
-                    .entry(indexed_value)
-                    .or_default()
-                    .push(*row_id);
+                sorter.add(indexed_value, *row_id)?;
             }
             Ok(())
         })
         .await?;
 
-        // Build the combined index
-        let column_index =
-            ColumnIndex::build(column, &data_type, all_value_to_rowids).map_err(|e| {
-                BundlebaseError::from(format!(
-                    "Failed to build index for column '{}': {}",
-                    column, e
-                ))
-            })?;
+        // Build index from sorted stream
+        let sorted_iter = sorter.finish()?;
+        let column_index = ColumnIndex::build_streaming(
+            column,
+            &data_type,
+            sorted_iter.map(|r| r.map(|e| (e.value, e.row_id))),
+        )
+        .map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to build index for column '{}': {}",
+                column, e
+            ))
+        })?;
 
         let total_cardinality = column_index.cardinality();
 
@@ -336,6 +352,9 @@ impl IndexBlocksOp {
     }
 
     /// Build a text index (BM25 full-text search)
+    ///
+    /// Uses streaming to collect documents, then builds via Tantivy's streaming builder.
+    /// Tantivy's internal 50MB heap handles batching during index construction.
     async fn build_text_index(
         index: &ObjectId,
         column: &str,
@@ -364,8 +383,9 @@ impl IndexBlocksOp {
             Some(blocks.len() as u64),
         );
 
-        // Accumulate text -> rowid mappings
-        let mut text_to_rowids: HashMap<String, Vec<RowId>> = HashMap::new();
+        // Collect documents as (text, rowid) pairs for streaming build
+        // Tantivy's 50MB heap handles batching during indexing
+        let mut documents: Vec<(String, RowId)> = Vec::new();
 
         // Iterate through all blocks and process batches
         iterate_blocks(&block_infos, bundle, &progress, |batch, row_ids| {
@@ -381,23 +401,24 @@ impl IndexBlocksOp {
                     _ => continue, // Skip nulls
                 };
 
-                text_to_rowids
-                    .entry(text_value)
-                    .or_default()
-                    .push(*row_id);
+                documents.push((text_value, *row_id));
             }
             Ok(())
         })
         .await?;
 
-        // Build the text index using Tantivy
-        let text_index =
-            TextColumnIndex::build(column, text_to_rowids, tokenizer_config).map_err(|e| {
-                BundlebaseError::from(format!(
-                    "Failed to build text index for column '{}': {}",
-                    column, e
-                ))
-            })?;
+        // Build the text index using streaming builder
+        let text_index = TextColumnIndex::build_streaming(
+            column,
+            documents.into_iter(),
+            tokenizer_config,
+        )
+        .map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to build text index for column '{}': {}",
+                column, e
+            ))
+        })?;
 
         let doc_count = text_index.doc_count();
 
