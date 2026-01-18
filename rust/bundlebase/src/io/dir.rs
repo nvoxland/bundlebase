@@ -97,6 +97,15 @@ pub trait IOReadDir: Send + Sync + Debug {
 /// Not implemented by read-only backends (FTP, SFTP when used as sources).
 #[async_trait]
 pub trait IOReadWriteDir: IOReadDir {
+    /// Check if this directory uses local filesystem storage.
+    /// Used to determine optimal temp directory location for index building.
+    ///
+    /// Returns `true` for local storage backends (file://, tar://, memory://)
+    /// and `false` for remote storage backends (s3://, gs://, azure://).
+    fn is_local_storage(&self) -> bool {
+        matches!(self.url().scheme(), "file" | "tar" | "memory")
+    }
+
     /// Get a writable subdirectory reference.
     /// The subdirectory is not validated to exist.
     fn writable_subdir(&self, name: &str) -> Result<Box<dyn IOReadWriteDir>, BundlebaseError>;

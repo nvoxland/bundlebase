@@ -441,6 +441,156 @@ impl ColumnIndex {
         })
     }
 
+    /// Build index from iterator of sorted (value, rowid) entries.
+    ///
+    /// This method builds the index incrementally without holding all values in memory.
+    /// The input iterator MUST yield entries in sorted order by (value, rowid).
+    ///
+    /// # Arguments
+    /// * `column_name` - Name of the column being indexed
+    /// * `data_type` - Arrow data type of the column
+    /// * `sorted_entries` - Iterator yielding (IndexedValue, RowId) pairs in sorted order
+    ///
+    /// # Returns
+    /// A new ColumnIndex built from the sorted entries.
+    pub fn build_streaming<I>(
+        column_name: &str,
+        data_type: &DataType,
+        sorted_entries: I,
+    ) -> Result<Self, BundlebaseError>
+    where
+        I: Iterator<Item = Result<(IndexedValue, RowId), BundlebaseError>>,
+    {
+        // Track current value for grouping row_ids
+        let mut current_value: Option<IndexedValue> = None;
+        let mut current_row_ids: Vec<RowId> = Vec::new();
+
+        // Block building state
+        let mut blocks: Vec<IndexBlock> = Vec::new();
+        let mut current_block_entries: Vec<BlockEntryValue> = Vec::new();
+        let mut current_block_size: usize = 0;
+
+        // Statistics
+        let mut total_entries: u64 = 0;
+        let mut total_rows: u64 = 0;
+
+        // Helper to flush current value to block
+        let flush_value_to_block = |value: IndexedValue,
+                                         row_ids: Vec<RowId>,
+                                         block_entries: &mut Vec<BlockEntryValue>,
+                                         block_size: &mut usize,
+                                         blocks: &mut Vec<IndexBlock>,
+                                         total_entries: &mut u64,
+                                         total_rows: &mut u64| {
+            let entry_size = value.size_bytes() + 2 + (row_ids.len() * 8);
+
+            // Check if we need to start a new block
+            if *block_size + entry_size > TARGET_BLOCK_SIZE && !block_entries.is_empty() {
+                blocks.push(IndexBlock {
+                    entries: std::mem::take(block_entries),
+                });
+                *block_size = 0;
+            }
+
+            *total_entries += 1;
+            *total_rows += row_ids.len() as u64;
+            *block_size += entry_size;
+            block_entries.push(BlockEntryValue { value, row_ids });
+        };
+
+        // Process all entries
+        for entry_result in sorted_entries {
+            let (value, row_id) = entry_result?;
+
+            match &current_value {
+                Some(cv) if cv == &value => {
+                    // Same value, add to current row_ids
+                    current_row_ids.push(row_id);
+                }
+                _ => {
+                    // Different value - flush previous if exists
+                    if let Some(prev_value) = current_value.take() {
+                        let prev_row_ids = std::mem::take(&mut current_row_ids);
+                        flush_value_to_block(
+                            prev_value,
+                            prev_row_ids,
+                            &mut current_block_entries,
+                            &mut current_block_size,
+                            &mut blocks,
+                            &mut total_entries,
+                            &mut total_rows,
+                        );
+                    }
+                    // Start new value
+                    current_value = Some(value);
+                    current_row_ids.push(row_id);
+                }
+            }
+        }
+
+        // Flush final value
+        if let Some(final_value) = current_value {
+            flush_value_to_block(
+                final_value,
+                current_row_ids,
+                &mut current_block_entries,
+                &mut current_block_size,
+                &mut blocks,
+                &mut total_entries,
+                &mut total_rows,
+            );
+        }
+
+        // Flush final block
+        if !current_block_entries.is_empty() {
+            blocks.push(IndexBlock {
+                entries: current_block_entries,
+            });
+        }
+
+        // Build directory
+        let mut directory_entries = Vec::with_capacity(blocks.len());
+        let mut current_offset = 0u64;
+
+        for block in &blocks {
+            if block.entries.is_empty() {
+                continue;
+            }
+
+            let min_value = block
+                .entries
+                .first()
+                .expect("BUG: entries must be non-empty")
+                .value
+                .clone();
+            let max_value = block
+                .entries
+                .last()
+                .expect("BUG: entries must be non-empty")
+                .value
+                .clone();
+
+            directory_entries.push(BlockEntry {
+                min_value,
+                max_value,
+                file_offset: current_offset,
+            });
+
+            current_offset += block.serialize().len() as u64;
+        }
+
+        Ok(ColumnIndex {
+            column_name: column_name.to_string(),
+            data_type: data_type.clone(),
+            blocks,
+            directory: BlockDirectory {
+                entries: directory_entries,
+            },
+            total_entries,
+            total_rows,
+        })
+    }
+
     fn partition_into_blocks(
         sorted_entries: Vec<(IndexedValue, Vec<RowId>)>,
     ) -> Result<Vec<IndexBlock>, BundlebaseError> {
@@ -896,5 +1046,90 @@ mod tests {
         };
         let sel = index.estimate_selectivity(&range_pred);
         assert!(sel > 0.0 && sel <= 1.0);
+    }
+
+    #[test]
+    fn test_build_streaming_basic() {
+        // Create sorted entries (must be pre-sorted for build_streaming)
+        let entries: Vec<Result<(IndexedValue, RowId), BundlebaseError>> = vec![
+            Ok((IndexedValue::Int64(1), RowId::from(100u64))),
+            Ok((IndexedValue::Int64(1), RowId::from(101u64))), // Same value, different rowid
+            Ok((IndexedValue::Int64(2), RowId::from(200u64))),
+            Ok((IndexedValue::Int64(3), RowId::from(300u64))),
+        ];
+
+        let index =
+            ColumnIndex::build_streaming("test_col", &DataType::Int64, entries.into_iter())
+                .unwrap();
+
+        // Verify structure
+        assert_eq!(index.column_name(), "test_col");
+        assert_eq!(index.cardinality(), 3); // 3 distinct values
+        assert_eq!(index.total_rows(), 4); // 4 total rows
+
+        // Point lookup for value with multiple rows
+        let result = index.lookup_exact(&IndexedValue::Int64(1));
+        assert_eq!(result.len(), 2);
+
+        // Point lookup for single-row value
+        let result = index.lookup_exact(&IndexedValue::Int64(2));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].as_u64(), 200);
+    }
+
+    #[test]
+    fn test_build_streaming_matches_build() {
+        // Build index using HashMap method
+        let mut value_map = HashMap::new();
+        value_map.insert(IndexedValue::Int64(1), vec![RowId::from(100u64)]);
+        value_map.insert(IndexedValue::Int64(2), vec![RowId::from(200u64)]);
+        value_map.insert(
+            IndexedValue::Int64(3),
+            vec![RowId::from(300u64), RowId::from(301u64)],
+        );
+
+        let index_from_map =
+            ColumnIndex::build("test_col", &DataType::Int64, value_map).unwrap();
+
+        // Build same index using streaming method (entries must be sorted)
+        let entries: Vec<Result<(IndexedValue, RowId), BundlebaseError>> = vec![
+            Ok((IndexedValue::Int64(1), RowId::from(100u64))),
+            Ok((IndexedValue::Int64(2), RowId::from(200u64))),
+            Ok((IndexedValue::Int64(3), RowId::from(300u64))),
+            Ok((IndexedValue::Int64(3), RowId::from(301u64))),
+        ];
+
+        let index_from_stream =
+            ColumnIndex::build_streaming("test_col", &DataType::Int64, entries.into_iter())
+                .unwrap();
+
+        // Verify both produce same results
+        assert_eq!(index_from_map.cardinality(), index_from_stream.cardinality());
+        assert_eq!(index_from_map.total_rows(), index_from_stream.total_rows());
+
+        // Verify lookups match
+        for i in 1..=3 {
+            let result_map = index_from_map.lookup_exact(&IndexedValue::Int64(i));
+            let result_stream = index_from_stream.lookup_exact(&IndexedValue::Int64(i));
+            assert_eq!(
+                result_map.len(),
+                result_stream.len(),
+                "Mismatch for value {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_streaming_empty() {
+        let entries: Vec<Result<(IndexedValue, RowId), BundlebaseError>> = vec![];
+
+        let index =
+            ColumnIndex::build_streaming("empty_col", &DataType::Int64, entries.into_iter())
+                .unwrap();
+
+        assert_eq!(index.cardinality(), 0);
+        assert_eq!(index.total_rows(), 0);
+        assert!(index.lookup_exact(&IndexedValue::Int64(1)).is_empty());
     }
 }
