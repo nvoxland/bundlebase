@@ -128,7 +128,7 @@ mod tests {
         };
 
         // Verify serialization is possible
-        let serialized = serde_yaml::to_string(&config).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&config).expect("Failed to serialize");
         assert!(serialized.contains("sql"));
         assert!(serialized.contains("parameters"));
         assert!(serialized.contains("float64") || serialized.contains("50000"));
@@ -136,7 +136,7 @@ mod tests {
 
         // Verify we can deserialize back
         let deserialized: SelectOp =
-            serde_yaml::from_str(&serialized).expect("Failed to deserialize");
+            serde_yaml_ng::from_str(&serialized).expect("Failed to deserialize");
         assert_eq!(deserialized.sql, sql);
         assert_eq!(deserialized.parameters.len(), 2);
     }

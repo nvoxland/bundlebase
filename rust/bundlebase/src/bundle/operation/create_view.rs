@@ -92,7 +92,7 @@ impl CreateViewOp {
         let manifest_dir = view_builder.data_dir().writable_subdir(META_DIR)?;
 
         // Write commit: 00001{hash}.yaml
-        let yaml = serde_yaml::to_string(&commit)?;
+        let yaml = serde_yaml_ng::to_string(&commit)?;
         let mut hasher = Sha256::new();
         hasher.update(yaml.as_bytes());
         let hash_bytes = hasher.finalize();

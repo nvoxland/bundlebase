@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn test_set_description_serialization() {
         let op = SetDescriptionOp::setup("Test Description");
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = "description: Test Description\n";
         assert_eq!(serialized, expected);
     }

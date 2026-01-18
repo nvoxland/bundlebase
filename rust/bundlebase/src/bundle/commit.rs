@@ -59,7 +59,7 @@ mod tests {
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             changes: vec![],
         };
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
         let expected = r"author: test-user
 message: Initial commit
@@ -85,7 +85,7 @@ changes: []
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             changes: vec![change],
         };
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
         let expected = r"author: test-user
 message: Remove column
@@ -120,7 +120,7 @@ changes:
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             changes: vec![change],
         };
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
         let expected = r"author: test-user
 message: Multiple ops
@@ -157,7 +157,7 @@ changes:
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             changes: vec![change],
         };
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
         let expected = r"
 author: test-user
@@ -180,7 +180,7 @@ message: Initial commit
 timestamp: '2024-01-01T00:00:00Z'
 changes: []
 ";
-        let commit: BundleCommit = serde_yaml::from_str(yaml).unwrap();
+        let commit: BundleCommit = serde_yaml_ng::from_str(yaml).unwrap();
 
         assert_eq!(commit.message, "Initial commit");
         assert_eq!(commit.author, "test-user");
@@ -196,7 +196,7 @@ message: Extended
 timestamp: '2024-01-01T00:00:00Z'
 changes: []
 ";
-        let commit: BundleCommit = serde_yaml::from_str(yaml).unwrap();
+        let commit: BundleCommit = serde_yaml_ng::from_str(yaml).unwrap();
 
         assert_eq!(commit.message, "Extended");
         assert_eq!(commit.author, "test-user");
@@ -221,7 +221,7 @@ changes:
     oldName: old
     newName: new
 ";
-        let commit: BundleCommit = serde_yaml::from_str(yaml).unwrap();
+        let commit: BundleCommit = serde_yaml_ng::from_str(yaml).unwrap();
 
         assert_eq!(commit.message, "Multiple ops");
         assert_eq!(commit.author, "test-user");
@@ -254,7 +254,7 @@ changes:
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             changes: vec![change],
         };
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
         // Should have oldName and newName in camelCase
         let expected = r"author: test-user
@@ -288,7 +288,7 @@ changes:
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             changes: vec![change],
         };
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
         // Find the operations section within changes and verify type comes first
         let operations_start = yaml.find("operations:").unwrap();
@@ -329,7 +329,7 @@ changes:
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             changes: vec![change],
         };
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
         let expected = r"author: test-user
 message: Set bundle name
@@ -360,7 +360,7 @@ changes:
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             changes: vec![change],
         };
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
         let expected = r"author: test-user
 message: Set description
@@ -393,8 +393,8 @@ changes:
             changes: vec![change],
         };
 
-        let yaml = serde_yaml::to_string(&commit).unwrap();
-        let deserialized: BundleCommit = serde_yaml::from_str(&yaml).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
+        let deserialized: BundleCommit = serde_yaml_ng::from_str(&yaml).unwrap();
 
         assert_eq!(deserialized.message, message);
         assert_eq!(deserialized.author, "test-user");
@@ -418,7 +418,7 @@ changes:
             changes: vec![change],
         };
 
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
         let expected = r"author: test-user
 message: Rename
 timestamp: 2024-01-01T00:00:00Z
@@ -450,8 +450,8 @@ changes:
             changes: vec![change],
         };
 
-        let yaml = serde_yaml::to_string(&commit).unwrap();
-        let deserialized: BundleCommit = serde_yaml::from_str(&yaml).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
+        let deserialized: BundleCommit = serde_yaml_ng::from_str(&yaml).unwrap();
 
         assert_eq!(deserialized.message, "");
         assert_eq!(deserialized.author, "test-user");
@@ -477,8 +477,8 @@ changes:
             changes: vec![change],
         };
 
-        let yaml = serde_yaml::to_string(&commit).unwrap();
-        let deserialized: BundleCommit = serde_yaml::from_str(&yaml).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
+        let deserialized: BundleCommit = serde_yaml_ng::from_str(&yaml).unwrap();
 
         assert_eq!(deserialized.message, long_message);
         assert_eq!(deserialized.author, "test-user");
@@ -502,7 +502,7 @@ changes:
             changes: vec![change],
         };
 
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
         assert!(yaml.contains("Unicode: 你好世界 🚀 Ñoño"));
         assert!(yaml.contains("author: test-user"));
         assert!(yaml.contains("timestamp: 2024-01-01T00:00:00Z"));
@@ -525,8 +525,8 @@ changes:
             changes: vec![change],
         };
 
-        let yaml = serde_yaml::to_string(&commit).unwrap();
-        let deserialized: BundleCommit = serde_yaml::from_str(&yaml).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
+        let deserialized: BundleCommit = serde_yaml_ng::from_str(&yaml).unwrap();
 
         assert_eq!(deserialized.message, "Setup");
         assert_eq!(deserialized.author, "test-user");
@@ -583,14 +583,14 @@ changes:
         };
 
         // Serialize to YAML
-        let yaml = serde_yaml::to_string(&commit).unwrap();
+        let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
         // Verify type field appears for each operation
         assert!(yaml.contains("type: attachBlock"));
         assert!(yaml.contains("type: dropColumn"));
 
         // Deserialize back
-        let deserialized: BundleCommit = serde_yaml::from_str(&yaml).unwrap();
+        let deserialized: BundleCommit = serde_yaml_ng::from_str(&yaml).unwrap();
 
         assert_eq!(deserialized.operations().len(), 2);
         assert!(matches!(
@@ -630,7 +630,7 @@ changes:
         metadata: {}
       metadata: {}
 "#;
-        let commit: BundleCommit = serde_yaml::from_str(yaml).unwrap();
+        let commit: BundleCommit = serde_yaml_ng::from_str(yaml).unwrap();
 
         assert_eq!(commit.message, "Attach data");
         assert_eq!(commit.operations().len(), 1);
@@ -694,7 +694,7 @@ changes:
     newName: name
 "#;
 
-        let commit: BundleCommit = serde_yaml::from_str(yaml).unwrap();
+        let commit: BundleCommit = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(commit.author, "nvoxland");
         assert_eq!(commit.message, "First commit");
         assert_eq!(commit.operations().len(), 3);

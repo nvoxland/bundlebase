@@ -143,7 +143,7 @@ mod tests {
             new_name: "new_join".to_string(),
         };
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = format!("id: {}\nnewName: new_join\n", pack_id);
         assert_eq!(serialized, expected);
     }
@@ -153,7 +153,7 @@ mod tests {
         let pack_id_str = "a5";
         let yaml = format!("id: {}\nnewName: renamed_join\n", pack_id_str);
 
-        let op: RenameJoinOp = serde_yaml::from_str(&yaml).expect("Failed to deserialize");
+        let op: RenameJoinOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
 
         assert_eq!(op.id.to_string(), pack_id_str);
         assert_eq!(op.new_name, "renamed_join");

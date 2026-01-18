@@ -272,8 +272,8 @@ impl BundleBuilder {
             changes,
         };
 
-        // Serialize directly using serde_yaml
-        let yaml = serde_yaml::to_string(&commit_struct)?;
+        // Serialize directly using serde_yaml_ng
+        let yaml = serde_yaml_ng::to_string(&commit_struct)?;
 
         // Calculate SHA256 hash of the YAML content
         let mut hasher = Sha256::new();

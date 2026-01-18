@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn test_set_name_serialization() {
         let op = SetNameOp::setup("Test Name");
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = "name: Test Name\n";
         assert_eq!(serialized, expected);
     }

@@ -136,7 +136,7 @@ mod tests {
             new_name: "new_view".to_string(),
         };
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = format!("id: {}\nnewName: new_view\n", view_id);
         assert_eq!(serialized, expected);
     }
@@ -146,7 +146,7 @@ mod tests {
         let view_id_str = "a5";
         let yaml = format!("id: {}\nnewName: renamed_view\n", view_id_str);
 
-        let op: RenameViewOp = serde_yaml::from_str(&yaml).expect("Failed to deserialize");
+        let op: RenameViewOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
 
         assert_eq!(op.id.to_string(), view_id_str);
         assert_eq!(op.new_name, "renamed_view");

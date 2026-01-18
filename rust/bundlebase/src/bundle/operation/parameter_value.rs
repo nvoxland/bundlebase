@@ -81,7 +81,7 @@ impl<'de> Deserialize<'de> for ParameterValue {
                 A: MapAccess<'de>,
             {
                 let mut type_str: Option<String> = None;
-                let mut value: Option<serde_yaml::Value> = None;
+                let mut value: Option<serde_yaml_ng::Value> = None;
 
                 while let Some(key) = map.next_key()? {
                     match key {
@@ -181,9 +181,9 @@ mod tests {
         ];
 
         for value in values {
-            let serialized = serde_yaml::to_string(&value).expect("serialize");
+            let serialized = serde_yaml_ng::to_string(&value).expect("serialize");
             let deserialized: ParameterValue =
-                serde_yaml::from_str(&serialized).expect("deserialize");
+                serde_yaml_ng::from_str(&serialized).expect("deserialize");
             assert_eq!(value, deserialized);
         }
     }

@@ -188,7 +188,7 @@ mod tests {
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
-        let yaml = serde_yaml::to_string(&op).unwrap();
+        let yaml = serde_yaml_ng::to_string(&op).unwrap();
         assert!(yaml.contains("id: '01'"));
         assert!(yaml.contains("pack: '02'"));
         assert!(yaml.contains("function: remote_dir"));
