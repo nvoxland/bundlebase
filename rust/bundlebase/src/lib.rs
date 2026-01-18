@@ -15,6 +15,7 @@ pub mod row_id;
 pub mod source;
 #[allow(clippy::unwrap_used)]
 pub mod test_utils;
+pub mod udf;
 mod versioning;
 
 pub use crate::bundle::{

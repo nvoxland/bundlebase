@@ -1,6 +1,5 @@
-#![allow(dead_code)]
-
 use crate::data::RowId;
+use crate::index::{Index, IndexType};
 use crate::BundlebaseError;
 use arrow::datatypes::DataType;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -445,8 +444,14 @@ impl ColumnIndex {
     fn partition_into_blocks(
         sorted_entries: Vec<(IndexedValue, Vec<RowId>)>,
     ) -> Result<Vec<IndexBlock>, BundlebaseError> {
-        let mut blocks = Vec::new();
-        let mut current_block = Vec::new();
+        // Estimate number of blocks based on total entries and target block size
+        // Assume average entry is ~20 bytes (type tag + value + rowid count + avg 1 rowid)
+        const ESTIMATED_AVG_ENTRY_SIZE: usize = 20;
+        let estimated_entries_per_block = TARGET_BLOCK_SIZE / ESTIMATED_AVG_ENTRY_SIZE;
+        let estimated_block_count = (sorted_entries.len() / estimated_entries_per_block).max(1);
+
+        let mut blocks = Vec::with_capacity(estimated_block_count);
+        let mut current_block = Vec::with_capacity(estimated_entries_per_block);
         let mut current_size = 0;
 
         for (value, row_ids) in sorted_entries {
@@ -456,7 +461,7 @@ impl ColumnIndex {
                 blocks.push(IndexBlock {
                     entries: current_block,
                 });
-                current_block = Vec::new();
+                current_block = Vec::with_capacity(estimated_entries_per_block);
                 current_size = 0;
             }
 
@@ -731,6 +736,28 @@ impl ColumnIndex {
             )),
             _ => Err(format!("Unknown data type tag: {}", tag).into()),
         }
+    }
+}
+
+impl Index for ColumnIndex {
+    fn serialize(&self) -> Result<Bytes, BundlebaseError> {
+        self.serialize()
+    }
+
+    fn cardinality(&self) -> u64 {
+        self.total_entries
+    }
+
+    fn column_name(&self) -> &str {
+        &self.column_name
+    }
+
+    fn index_type(&self) -> IndexType {
+        IndexType::Column
+    }
+
+    fn total_rows(&self) -> u64 {
+        self.total_rows
     }
 }
 

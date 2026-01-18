@@ -52,9 +52,10 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "s
 scraper = "0.22"
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
 postgres-types = { version = "0.2", features = ["derive"] }
+tantivy = "0.25"
+tempfile = "3.24"
 
 [dev-dependencies]
-tempfile = "3.24"
 rstest = { workspace = true }
 env_logger = "0.11"
 serial_test = "3.3"

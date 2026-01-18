@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::data::RowId;
 use crate::metrics;
 use lazy_static::lazy_static;
