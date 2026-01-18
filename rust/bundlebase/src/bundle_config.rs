@@ -406,8 +406,8 @@ mod tests {
         config.set("region", "us-west-2", None);
         config.set("endpoint", "http://localhost", Some("s3://test/"));
 
-        let serialized = serde_yaml::to_string(&config).unwrap();
-        let deserialized: BundleConfig = serde_yaml::from_str(&serialized).unwrap();
+        let serialized = serde_yaml_ng::to_string(&config).unwrap();
+        let deserialized: BundleConfig = serde_yaml_ng::from_str(&serialized).unwrap();
 
         assert_eq!(config, deserialized);
     }

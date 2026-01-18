@@ -40,7 +40,7 @@ pub async fn latest_commit(
             Ok(yaml.map(|content| {
                 (
                     content.clone(),
-                    serde_yaml::from_str(&content).unwrap(),
+                    serde_yaml_ng::from_str(&content).unwrap(),
                     file.url.clone(),
                 )
             }))

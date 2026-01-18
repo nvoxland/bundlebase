@@ -406,7 +406,7 @@ schema:
                 for_yaml(pack),
                 for_yaml(version),
             ),
-            serde_yaml::to_string(&op)?
+            serde_yaml_ng::to_string(&op)?
         );
         Ok(())
     }

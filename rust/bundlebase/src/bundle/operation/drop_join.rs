@@ -83,7 +83,7 @@ mod tests {
         let pack_id: ObjectId = "a5".try_into().unwrap();
         let op = DropJoinOp { id: pack_id };
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = format!("id: {}\n", pack_id);
         assert_eq!(serialized, expected);
     }
@@ -93,7 +93,7 @@ mod tests {
         let pack_id_str = "a5";
         let yaml = format!("id: {}\n", pack_id_str);
 
-        let op: DropJoinOp = serde_yaml::from_str(&yaml).expect("Failed to deserialize");
+        let op: DropJoinOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
 
         assert_eq!(op.id.to_string(), pack_id_str);
     }

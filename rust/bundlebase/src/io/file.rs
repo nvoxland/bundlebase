@@ -99,7 +99,7 @@ pub async fn read_yaml<T: DeserializeOwned>(
     file: &dyn IOReadFile,
 ) -> Result<Option<T>, BundlebaseError> {
     match file.read_str().await? {
-        Some(str) => Ok(Some(serde_yaml::from_str(&str)?)),
+        Some(str) => Ok(Some(serde_yaml_ng::from_str(&str)?)),
         None => Ok(None),
     }
 }
@@ -109,6 +109,6 @@ pub async fn write_yaml<T: Serialize + ?Sized>(
     file: &dyn IOReadWriteFile,
     value: &T,
 ) -> Result<(), BundlebaseError> {
-    let yaml = serde_yaml::to_string(value)?;
+    let yaml = serde_yaml_ng::to_string(value)?;
     file.write(Bytes::from(yaml)).await
 }

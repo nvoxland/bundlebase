@@ -80,11 +80,11 @@ mod tests {
         let op = CreateFunctionOp::setup(FunctionSignature::new("test_func", schema));
 
         // Verify serialization is possible
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
 
         // Verify we can deserialize back
         let _deserialized: CreateFunctionOp =
-            serde_yaml::from_str(&serialized).expect("Failed to deserialize");
+            serde_yaml_ng::from_str(&serialized).expect("Failed to deserialize");
     }
 
     #[test]
@@ -97,9 +97,9 @@ mod tests {
         let op = CreateFunctionOp::setup(FunctionSignature::new("count_rows", schema));
 
         // Verify serialization and deserialization round-trip
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let deserialized: CreateFunctionOp =
-            serde_yaml::from_str(&serialized).expect("Failed to deserialize");
+            serde_yaml_ng::from_str(&serialized).expect("Failed to deserialize");
 
         assert_eq!(deserialized.signature.name(), "count_rows");
         assert_eq!(deserialized.signature.output().fields().len(), 1);

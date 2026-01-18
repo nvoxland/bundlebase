@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn test_serialization_default() {
         let op = SetConfigOp::setup("region", "us-west-2", None);
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = "key: region\nvalue: us-west-2\n";
         assert_eq!(serialized, expected);
     }
@@ -117,11 +117,11 @@ mod tests {
     #[test]
     fn test_serialization_url_specific() {
         let op = SetConfigOp::setup("endpoint", "http://localhost:9000", Some("s3://test/"));
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
 
         // Deserialize to verify round-trip
         let deserialized: SetConfigOp =
-            serde_yaml::from_str(&serialized).expect("Failed to deserialize");
+            serde_yaml_ng::from_str(&serialized).expect("Failed to deserialize");
         assert_eq!(deserialized, op);
     }
 
@@ -132,7 +132,7 @@ key: region
 value: us-east-1
 urlPrefix: s3://my-bucket/
 "#;
-        let op: SetConfigOp = serde_yaml::from_str(yaml).expect("Failed to deserialize");
+        let op: SetConfigOp = serde_yaml_ng::from_str(yaml).expect("Failed to deserialize");
         assert_eq!(op.key, "region");
         assert_eq!(op.value, "us-east-1");
         assert_eq!(op.url_prefix, Some("s3://my-bucket/".to_string()));

@@ -85,7 +85,7 @@ mod tests {
     fn test_config_serialization() {
         let op = RenameColumnOp::setup("first_name", "fname");
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = r#"oldName: first_name
 newName: fname
 "#;
@@ -102,7 +102,7 @@ newName: fname
 
         for (old, new, expected) in cases {
             let op = RenameColumnOp::setup(old, new);
-            let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+            let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
             assert_eq!(serialized, expected);
         }
     }

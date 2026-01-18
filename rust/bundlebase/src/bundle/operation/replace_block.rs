@@ -254,7 +254,7 @@ mod tests {
             source_info: None,
         };
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(serialized.contains("id: a5"));
         assert!(serialized.contains("newLocation: file:///new/path.csv"));
         assert!(serialized.contains("newVersion:"), "serialized: {}", serialized);
@@ -281,7 +281,7 @@ mod tests {
             }),
         };
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(serialized.contains("id: a5"));
         assert!(serialized.contains("newLocation: file:///new/path.csv"));
         assert!(serialized.contains("newVersion:"), "serialized: {}", serialized);
@@ -300,7 +300,7 @@ newVersion: 'etag:abc123'
 newHash: 0000000000000000000000000000000000000000000000000000000000000000
 "#;
 
-        let op: ReplaceBlockOp = serde_yaml::from_str(yaml).expect("Failed to deserialize");
+        let op: ReplaceBlockOp = serde_yaml_ng::from_str(yaml).expect("Failed to deserialize");
 
         assert_eq!(op.id.to_string(), "a5");
         assert_eq!(op.new_location, "file:///new/path.csv");
@@ -321,7 +321,7 @@ source:
   version: 'etag:abc123'
 "#;
 
-        let op: ReplaceBlockOp = serde_yaml::from_str(yaml).expect("Failed to deserialize");
+        let op: ReplaceBlockOp = serde_yaml_ng::from_str(yaml).expect("Failed to deserialize");
 
         assert_eq!(op.id.to_string(), "a5");
         assert_eq!(op.new_location, "file:///new/path.csv");

@@ -33,7 +33,7 @@ pub fn test_adapter_factory() -> Arc<DataReaderFactory> {
 
 /// Serialize an optional string to YAML for testing
 pub fn for_yaml(value: String) -> String {
-    serde_yaml::to_string(&value).unwrap().trim().to_string()
+    serde_yaml_ng::to_string(&value).unwrap().trim().to_string()
 }
 
 pub async fn empty_bundle() -> BundleBuilder {

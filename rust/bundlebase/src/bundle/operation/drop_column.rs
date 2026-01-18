@@ -65,7 +65,7 @@ mod tests {
     fn test_serialization() {
         let op = DropColumnOp::setup(vec!["col1", "col2"]);
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = r#"names:
 - col1
 - col2
@@ -77,7 +77,7 @@ mod tests {
     fn test_serialization_single() {
         let op = DropColumnOp::setup(vec!["title"]);
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = r#"names:
 - title
 "#;

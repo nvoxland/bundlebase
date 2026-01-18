@@ -1,6 +1,6 @@
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_yaml::{Mapping, Value};
+use serde_yaml_ng::{Mapping, Value};
 use std::sync::Arc;
 
 /// Helper struct for field serialization
@@ -140,7 +140,7 @@ fn serialize_data_type(dt: &DataType) -> Result<Value, String> {
             );
 
             // Serialize the field recursively
-            let element_value = serde_yaml::to_value(serialize_field_internal(field)?)
+            let element_value = serde_yaml_ng::to_value(serialize_field_internal(field)?)
                 .map_err(|e| e.to_string())?;
             map.insert(Value::String("element".to_string()), element_value);
 
@@ -164,7 +164,7 @@ fn serialize_data_type(dt: &DataType) -> Result<Value, String> {
             for f in fields.iter() {
                 let serialized_field = serialize_field_internal(f).expect("should deserialize");
                 let field_value =
-                    serde_yaml::to_value(serialized_field).map_err(|e| e.to_string())?;
+                    serde_yaml_ng::to_value(serialized_field).map_err(|e| e.to_string())?;
                 fields_value.push(field_value);
             }
 
@@ -174,7 +174,7 @@ fn serialize_data_type(dt: &DataType) -> Result<Value, String> {
         }
 
         // For other complex types, use a simple string representation
-        _ => serde_yaml::to_value(dt).map_err(|e| e.to_string()),
+        _ => serde_yaml_ng::to_value(dt).map_err(|e| e.to_string()),
     }
 }
 
@@ -182,7 +182,7 @@ fn serialize_data_type(dt: &DataType) -> Result<Value, String> {
 fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
     match value {
         Value::String(s) => {
-            let dt: DataType = serde_yaml::from_str(s).map_err(|e| e.to_string())?;
+            let dt: DataType = serde_yaml_ng::from_str(s).map_err(|e| e.to_string())?;
             Ok(dt)
         }
         Value::Mapping(map) => {
@@ -363,7 +363,7 @@ fn deserialize_data_type(value: &Value) -> Result<DataType, String> {
 }
 
 fn serialize_field_internal(field: &Field) -> Result<SerializedField, String> {
-    let metadata_map = serde_yaml::to_value(field.metadata())
+    let metadata_map = serde_yaml_ng::to_value(field.metadata())
         .ok()
         .and_then(|v| v.as_mapping().cloned())
         .unwrap_or_default();
@@ -430,7 +430,7 @@ where
         .filter_map(|f| {
             serialize_field_internal(f)
                 .ok()
-                .and_then(|sf| serde_yaml::to_value(sf).ok())
+                .and_then(|sf| serde_yaml_ng::to_value(sf).ok())
         })
         .collect();
 
@@ -443,7 +443,7 @@ where
         Value::Mapping(Mapping::new()),
     );
 
-    serde_yaml::to_value(&map)
+    serde_yaml_ng::to_value(&map)
         .map_err(serde::ser::Error::custom)
         .and_then(|v| v.serialize(serializer))
 }
@@ -467,7 +467,7 @@ pub fn deserialize_schema_option<'de, D>(deserializer: D) -> Result<Option<Arc<S
 where
     D: Deserializer<'de>,
 {
-    let value: Option<serde_yaml::Value> =
+    let value: Option<serde_yaml_ng::Value> =
         Option::deserialize(deserializer).map_err(serde::de::Error::custom)?;
     match value {
         Some(v) => deserialize_schema_internal(&v)
@@ -477,7 +477,7 @@ where
     }
 }
 
-fn deserialize_schema_internal(value: &serde_yaml::Value) -> Result<Arc<Schema>, String> {
+fn deserialize_schema_internal(value: &serde_yaml_ng::Value) -> Result<Arc<Schema>, String> {
     let map = value
         .as_mapping()
         .ok_or_else(|| "Schema must be a mapping".to_string())?;
@@ -678,7 +678,7 @@ mod tests {
 
         let serialized = serialize_field_internal(&field).expect("should serialize");
         let deserialized = deserialize_field_internal(
-            &serde_yaml::to_value(&serialized).expect("should serialize"),
+            &serde_yaml_ng::to_value(&serialized).expect("should serialize"),
         )
         .unwrap();
 
@@ -697,7 +697,7 @@ mod tests {
 
         let serialized = serialize_field_internal(&field).expect("should serialize");
         let deserialized = deserialize_field_internal(
-            &serde_yaml::to_value(&serialized).expect("should serialize"),
+            &serde_yaml_ng::to_value(&serialized).expect("should serialize"),
         )
         .unwrap();
 
@@ -714,7 +714,7 @@ mod tests {
 
         let serialized = serialize_field_internal(&field).expect("should serialize");
         let deserialized = deserialize_field_internal(
-            &serde_yaml::to_value(&serialized).expect("should serialize"),
+            &serde_yaml_ng::to_value(&serialized).expect("should serialize"),
         )
         .unwrap();
 
@@ -732,7 +732,7 @@ mod tests {
         ];
         let schema = Arc::new(Schema::new(fields));
 
-        let serialized = serde_yaml::to_value(schema.clone()).expect("should serialize");
+        let serialized = serde_yaml_ng::to_value(schema.clone()).expect("should serialize");
         let deserialized = deserialize_schema_internal(&serialized).unwrap();
 
         assert_eq!(schema.fields().len(), deserialized.fields().len());
@@ -763,7 +763,7 @@ mod tests {
             .filter_map(|f| {
                 serialize_field_internal(f)
                     .ok()
-                    .and_then(|sf| serde_yaml::to_value(sf).ok())
+                    .and_then(|sf| serde_yaml_ng::to_value(sf).ok())
             })
             .collect();
         map.insert(
@@ -874,7 +874,7 @@ mod tests {
     #[test]
     fn test_serialize_null_schema_option() {
         let schema: Option<Arc<Schema>> = None;
-        let value = serde_yaml::to_value(&schema).expect("should serialize");
+        let value = serde_yaml_ng::to_value(&schema).expect("should serialize");
         assert!(value.is_null(), "None should serialize to null");
     }
 

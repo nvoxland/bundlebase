@@ -86,7 +86,7 @@ mod tests {
             expression: "base.id = customers.id".to_string(),
         };
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(serialized.contains("id: a5"));
         assert!(serialized.contains("name: customers"));
         assert!(serialized.contains("joinType: left"));

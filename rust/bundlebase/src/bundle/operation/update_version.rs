@@ -115,7 +115,7 @@ mod tests {
         let block_id: ObjectId = "a5".try_into().expect("Failed to create ObjectId");
         let op = UpdateVersionOp::setup(block_id, "etag:abc123".to_string());
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(serialized.contains("block: a5"));
         assert!(serialized.contains("newVersion: 'etag:abc123'") || serialized.contains("newVersion: etag:abc123"));
     }
@@ -126,7 +126,7 @@ mod tests {
 newVersion: 'etag:abc123'
 "#;
 
-        let op: UpdateVersionOp = serde_yaml::from_str(yaml).expect("Failed to deserialize");
+        let op: UpdateVersionOp = serde_yaml_ng::from_str(yaml).expect("Failed to deserialize");
 
         assert_eq!(op.block.to_string(), "a5");
         assert_eq!(op.new_version, "etag:abc123");

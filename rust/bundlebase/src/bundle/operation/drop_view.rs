@@ -96,7 +96,7 @@ mod tests {
         let view_id: ObjectId = "a5".try_into().unwrap();
         let op = DropViewOp { id: view_id };
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = format!("id: {}\n", view_id);
         assert_eq!(serialized, expected);
     }
@@ -106,7 +106,7 @@ mod tests {
         let view_id_str = "a5";
         let yaml = format!("id: {}\n", view_id_str);
 
-        let op: DropViewOp = serde_yaml::from_str(&yaml).expect("Failed to deserialize");
+        let op: DropViewOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
 
         assert_eq!(op.id.to_string(), view_id_str);
     }

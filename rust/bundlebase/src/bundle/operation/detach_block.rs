@@ -121,7 +121,7 @@ mod tests {
         let block_id: ObjectId = "a5".try_into().unwrap();
         let op = DetachBlockOp { id: block_id };
 
-        let serialized = serde_yaml::to_string(&op).expect("Failed to serialize");
+        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = format!("id: {}\n", block_id);
         assert_eq!(serialized, expected);
     }
@@ -131,7 +131,7 @@ mod tests {
         let block_id_str = "a5";
         let yaml = format!("id: {}\n", block_id_str);
 
-        let op: DetachBlockOp = serde_yaml::from_str(&yaml).expect("Failed to deserialize");
+        let op: DetachBlockOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
 
         assert_eq!(op.id.to_string(), block_id_str);
     }
