@@ -1385,12 +1385,65 @@ impl BundleBuilder {
 
     /// Create an index on a column
     pub async fn index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
-        let column = column.to_string();
+        self.index_with_type(column, None, None).await
+    }
 
-        self.do_change(&format!("Index column {}", column), |builder| {
+    /// Create an index on a column with a specific type
+    ///
+    /// # Arguments
+    /// * `column` - The column name to index
+    /// * `index_type` - Optional index type: "column" (default) or "text"
+    /// * `tokenizer` - Optional tokenizer for text indexes: "simple", "en_stem", etc.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Column index (default)
+    /// builder.index_with_type("email", None, None).await?;
+    ///
+    /// // Text/BM25 index with English stemming
+    /// builder.index_with_type("content", Some("text"), Some("en_stem")).await?;
+    /// ```
+    pub async fn index_with_type(
+        &mut self,
+        column: &str,
+        index_type: Option<&str>,
+        tokenizer: Option<&str>,
+    ) -> Result<&mut Self, BundlebaseError> {
+        use crate::index::{IndexType, TokenizerConfig};
+        use std::str::FromStr;
+
+        let column = column.to_string();
+        let index_type_str = index_type.unwrap_or("column");
+
+        // Parse index type using FromStr implementation
+        let mut idx_type = IndexType::from_str(index_type_str).map_err(|e| {
+            BundlebaseError::from(format!("{}", e))
+        })?;
+
+        // For text indexes, parse the tokenizer if provided
+        if idx_type.is_text() {
+            let tokenizer_config = match tokenizer {
+                Some(tok) => TokenizerConfig::from_str(tok).map_err(|e| {
+                    BundlebaseError::from(format!("Invalid tokenizer: {}", e))
+                })?,
+                None => TokenizerConfig::default(),
+            };
+            idx_type = idx_type.with_tokenizer(Some(tokenizer_config));
+        }
+
+        let desc = match &idx_type {
+            IndexType::Column => format!("Index column {}", column),
+            IndexType::Text { tokenizer } => {
+                format!("Text index column {} (tokenizer: {:?})", column, tokenizer)
+            }
+        };
+
+        self.do_change(&desc, |builder| {
+            let idx_type = idx_type.clone();
+            let column = column.clone();
             Box::pin(async move {
                 builder
-                    .apply_operation(CreateIndexOp::setup(&column).await?.into())
+                    .apply_operation(CreateIndexOp::setup_with_type(&column, idx_type).await?.into())
                     .await?;
 
                 builder.reindex().await?;

@@ -1031,18 +1031,44 @@ impl PyBundleBuilder {
     }
 
     /// Create an index on the specified column for optimized lookups
+    ///
+    /// # Arguments
+    /// * `column` - The column name to index
+    /// * `index_type` - Optional index type: "column" (default) or "text"
+    /// * `tokenizer` - Optional tokenizer for text indexes: "simple", "en_stem", "de_stem", etc.
+    ///
+    /// # Example
+    /// ```python
+    /// # Column index (default)
+    /// c = await c.index("email")
+    ///
+    /// # Text/BM25 index with English stemming
+    /// c = await c.index("content", index_type="text", tokenizer="en_stem")
+    /// ```
+    #[pyo3(signature = (column, index_type=None, tokenizer=None))]
     fn index<'py>(
         slf: PyRef<'_, Self>,
         column: &str,
+        index_type: Option<&str>,
+        tokenizer: Option<&str>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let column = column.to_string();
+        let index_type = index_type.map(|s| s.to_string());
+        let tokenizer = tokenizer.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
-            builder.index(&column).await.map_err(|e| {
-                to_py_error(&format!("Failed to create index on column '{}'", column), e)
-            })?;
+            builder
+                .index_with_type(
+                    &column,
+                    index_type.as_deref(),
+                    tokenizer.as_deref(),
+                )
+                .await
+                .map_err(|e| {
+                    to_py_error(&format!("Failed to create index on column '{}'", column), e)
+                })?;
             drop(builder);
             Python::attach(|py| {
                 Py::new(
