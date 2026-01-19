@@ -37,6 +37,7 @@ maturin-import-hook = "^0.3.0"
 pytest = "^8.4"
 pytest-asyncio = "^1.2"
 pytest-timeout = "^2.3.1"
+pytest-benchmark = "^5.1"
 mypy = "^1.18.2"
 snakeviz = "^2.2"
 
