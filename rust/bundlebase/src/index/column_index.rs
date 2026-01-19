@@ -202,7 +202,7 @@ impl Ord for IndexedValue {
                 } else if b.0.is_nan() {
                     Ordering::Less
                 } else {
-                    a.partial_cmp(b).expect("BUG: neither float should be NaN at this point")
+                    a.partial_cmp(b).unwrap_or(Ordering::Equal)
                 }
             }
             (IndexedValue::Utf8(a), IndexedValue::Utf8(b)) => a.cmp(b),
@@ -412,12 +412,13 @@ impl ColumnIndex {
         let mut current_offset = 0u64; // Will be updated when writing to file
 
         for block in &blocks {
-            if block.entries.is_empty() {
-                continue;
-            }
-
-            let min_value = block.entries.first().expect("BUG: entries must be non-empty").value.clone();
-            let max_value = block.entries.last().expect("BUG: entries must be non-empty").value.clone();
+            let (min_value, max_value) = if let (Some(first), Some(last)) =
+                (block.entries.first(), block.entries.last())
+            {
+                (first.value.clone(), last.value.clone())
+            } else {
+                continue; // Empty block, skip
+            };
 
             directory_entries.push(BlockEntry {
                 min_value,
@@ -553,22 +554,13 @@ impl ColumnIndex {
         let mut current_offset = 0u64;
 
         for block in &blocks {
-            if block.entries.is_empty() {
-                continue;
-            }
-
-            let min_value = block
-                .entries
-                .first()
-                .expect("BUG: entries must be non-empty")
-                .value
-                .clone();
-            let max_value = block
-                .entries
-                .last()
-                .expect("BUG: entries must be non-empty")
-                .value
-                .clone();
+            let (min_value, max_value) = if let (Some(first), Some(last)) =
+                (block.entries.first(), block.entries.last())
+            {
+                (first.value.clone(), last.value.clone())
+            } else {
+                continue; // Empty block, skip
+            };
 
             directory_entries.push(BlockEntry {
                 min_value,
