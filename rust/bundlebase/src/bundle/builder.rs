@@ -16,7 +16,7 @@ use crate::data::{ObjectId, VersionedBlockId};
 use crate::source::{FetchAction, FetchResults};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
-use crate::index::IndexDefinition;
+use crate::index::{IndexDefinition, IndexType};
 use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
 use crate::BundleConfig;
 use crate::BundlebaseError;
@@ -1384,54 +1384,31 @@ impl BundleBuilder {
     }
 
     /// Create an index on a column
-    pub async fn index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
-        self.index_with_type(column, None, None).await
-    }
-
-    /// Create an index on a column with a specific type
     ///
     /// # Arguments
     /// * `column` - The column name to index
-    /// * `index_type` - Optional index type: "column" (default) or "text"
-    /// * `tokenizer` - Optional tokenizer for text indexes: "simple", "en_stem", etc.
+    /// * `index_type` - The type of index to create (Column or Text), already configured
     ///
     /// # Example
     /// ```ignore
-    /// // Column index (default)
-    /// builder.index_with_type("email", None, None).await?;
+    /// use bundlebase::IndexType;
+    ///
+    /// // Column index
+    /// builder.create_index("email", IndexType::Column).await?;
     ///
     /// // Text/BM25 index with English stemming
-    /// builder.index_with_type("content", Some("text"), Some("en_stem")).await?;
+    /// builder.create_index("content", IndexType::Text {
+    ///     tokenizer: TokenizerConfig::EnglishStem
+    /// }).await?;
     /// ```
-    pub async fn index_with_type(
+    pub async fn create_index(
         &mut self,
         column: &str,
-        index_type: Option<&str>,
-        tokenizer: Option<&str>,
+        index_type: IndexType,
     ) -> Result<&mut Self, BundlebaseError> {
-        use crate::index::{IndexType, TokenizerConfig};
-        use std::str::FromStr;
-
         let column = column.to_string();
-        let index_type_str = index_type.unwrap_or("column");
 
-        // Parse index type using FromStr implementation
-        let mut idx_type = IndexType::from_str(index_type_str).map_err(|e| {
-            BundlebaseError::from(format!("{}", e))
-        })?;
-
-        // For text indexes, parse the tokenizer if provided
-        if idx_type.is_text() {
-            let tokenizer_config = match tokenizer {
-                Some(tok) => TokenizerConfig::from_str(tok).map_err(|e| {
-                    BundlebaseError::from(format!("Invalid tokenizer: {}", e))
-                })?,
-                None => TokenizerConfig::default(),
-            };
-            idx_type = idx_type.with_tokenizer(Some(tokenizer_config));
-        }
-
-        let desc = match &idx_type {
+        let desc = match &index_type {
             IndexType::Column => format!("Index column {}", column),
             IndexType::Text { tokenizer } => {
                 format!("Text index column {} (tokenizer: {:?})", column, tokenizer)
@@ -1439,11 +1416,11 @@ impl BundleBuilder {
         };
 
         self.do_change(&desc, |builder| {
-            let idx_type = idx_type.clone();
+            let index_type = index_type.clone();
             let column = column.clone();
             Box::pin(async move {
                 builder
-                    .apply_operation(CreateIndexOp::setup_with_type(&column, idx_type).await?.into())
+                    .apply_operation(CreateIndexOp::setup(&column, index_type).await?.into())
                     .await?;
 
                 builder.reindex().await?;
@@ -2205,7 +2182,7 @@ mod tests {
         assert_eq!(orig_indexes_count, clone_indexes_count);
 
         // Now add an index to the clone
-        bundle_clone.index("id").await.unwrap();
+        bundle_clone.create_index("id", IndexType::Column).await.unwrap();
 
         // Original should still have 0 indexes, clone should have 1
         let orig_indexes_after = bundle.bundle.indexes.read().len();

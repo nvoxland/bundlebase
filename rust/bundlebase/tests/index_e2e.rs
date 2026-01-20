@@ -1,7 +1,7 @@
 use arrow::record_batch::RecordBatch;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
-use bundlebase::{assert_regexp, Bundle, BundlebaseError, Operation};
+use bundlebase::{assert_regexp, Bundle, BundlebaseError, IndexType, Operation};
 use datafusion::common::ScalarValue;
 
 mod common;
@@ -39,7 +39,7 @@ FilterExec: Email@\d+ = elizabethbarr@ewing.com, projection=\[Index@\d+, City@\d
         explain
     );
 
-    bundle.index("Email").await?;
+    bundle.create_index("Email", IndexType::Column).await?;
 
     assert_eq!(1, bundle.status().changes().len());
     assert_eq!(
@@ -113,7 +113,7 @@ async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseE
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email column
-    bundle.index("Email").await?;
+    bundle.create_index("Email", IndexType::Column).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query with exact match on indexed column
@@ -150,7 +150,7 @@ async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email column
-    bundle.index("Email").await?;
+    bundle.create_index("Email", IndexType::Column).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query with IN list on indexed column
@@ -215,7 +215,7 @@ async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email but query on City (not indexed)
-    bundle.index("Email").await?;
+    bundle.create_index("Email", IndexType::Column).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query on non-indexed column should fall back to full scan
@@ -246,7 +246,7 @@ async fn test_index_selectivity() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Customer Id (should be unique)
-    bundle.index("Customer Id").await?;
+    bundle.create_index("Customer Id", IndexType::Column).await?;
     bundle.commit("Created index on Customer Id").await?;
 
     // Query for specific customer

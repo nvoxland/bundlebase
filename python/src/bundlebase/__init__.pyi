@@ -777,18 +777,26 @@ class PyBundleBuilder:
         """
         ...
 
-    def create_index(self, column: str) -> "OperationChain":
+    def create_index(
+        self,
+        column: str,
+        index_type: str,
+        args: Optional[Dict[str, str]] = None
+    ) -> "OperationChain":
         """
         Create an index on a column.
 
         Args:
             column: Name of the column to index
+            index_type: Index type - "column" or "text"
+            args: Optional index-specific arguments (e.g., {"tokenizer": "en_stem"} for text indexes)
 
         Returns:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.create_index("user_id")
+            c = await c.create_index("user_id", "column")
+            c = await c.create_index("content", "text", {"tokenizer": "en_stem"})
         """
         ...
 
@@ -1165,7 +1173,12 @@ class OperationChain:
         """Queue a create_view operation."""
         ...
 
-    def create_index(self, column: str) -> "OperationChain":
+    def create_index(
+        self,
+        column: str,
+        index_type: str,
+        args: Optional[Dict[str, str]] = None
+    ) -> "OperationChain":
         """Queue a create_index operation."""
         ...
 
@@ -1277,7 +1290,12 @@ class CreateChain:
         """Queue a create_view operation."""
         ...
 
-    def create_index(self, column: str) -> "CreateChain":
+    def create_index(
+        self,
+        column: str,
+        index_type: str,
+        args: Optional[Dict[str, str]] = None
+    ) -> "CreateChain":
         """Queue a create_index operation."""
         ...
 
@@ -1389,7 +1407,12 @@ class ExtendChain:
         """Queue a create_view operation."""
         ...
 
-    def create_index(self, column: str) -> "ExtendChain":
+    def create_index(
+        self,
+        column: str,
+        index_type: str,
+        args: Optional[Dict[str, str]] = None
+    ) -> "ExtendChain":
         """Queue a create_index operation."""
         ...
 

@@ -54,6 +54,51 @@ impl IndexType {
             IndexType::Column => self,
         }
     }
+
+    /// Validate args and return configured IndexType.
+    ///
+    /// Each index type validates its own arguments and returns an error for
+    /// unknown arguments.
+    ///
+    /// # Arguments
+    /// * `args` - HashMap of argument name to value
+    ///
+    /// # Supported Arguments
+    /// - **Column index**: No arguments accepted
+    /// - **Text index**: `tokenizer` (optional) - tokenizer name (e.g., "simple", "en_stem")
+    pub fn with_args(self, args: &HashMap<String, String>) -> Result<Self, IndexTypeConfigError> {
+        match self {
+            IndexType::Column => {
+                // Column index accepts no args
+                if let Some(unknown) = args.keys().next() {
+                    return Err(IndexTypeConfigError(format!(
+                        "Unknown argument '{}' for column index",
+                        unknown
+                    )));
+                }
+                Ok(self)
+            }
+            IndexType::Text { .. } => {
+                let mut tokenizer = TokenizerConfig::default();
+                for (key, value) in args {
+                    match key.as_str() {
+                        "tokenizer" => {
+                            tokenizer = TokenizerConfig::from_str(value).map_err(|e| {
+                                IndexTypeConfigError(format!("Invalid tokenizer: {}", e))
+                            })?;
+                        }
+                        unknown => {
+                            return Err(IndexTypeConfigError(format!(
+                                "Unknown argument '{}' for text index. Valid arguments: tokenizer",
+                                unknown
+                            )));
+                        }
+                    }
+                }
+                Ok(IndexType::Text { tokenizer })
+            }
+        }
+    }
 }
 
 /// Error type for parsing index type from string
@@ -67,6 +112,18 @@ impl std::fmt::Display for ParseIndexTypeError {
 }
 
 impl std::error::Error for ParseIndexTypeError {}
+
+/// Error type for configuring index type with arguments
+#[derive(Debug, Clone)]
+pub struct IndexTypeConfigError(pub String);
+
+impl std::fmt::Display for IndexTypeConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for IndexTypeConfigError {}
 
 impl FromStr for IndexType {
     type Err = ParseIndexTypeError;
