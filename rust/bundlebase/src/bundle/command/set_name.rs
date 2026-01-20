@@ -1,6 +1,7 @@
 //! SetName command implementation.
 
-use crate::bundle::command::{Command, CommandContext};
+use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::SetNameOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -21,14 +22,67 @@ impl SetNameCommand {
 
 #[async_trait]
 impl Command for SetNameCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         ctx.apply_operation(SetNameOp::setup(&self.name).into())
             .await?;
         Ok(())
     }
 
+    fn rule() -> Option<Rule> {
+        Some(Rule::set_name_stmt)
+    }
+
+    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        let mut name = None;
+
+        for inner in pair.into_inner() {
+            if inner.as_rule() == Rule::quoted_string {
+                name = Some(extract_string_content(inner.as_str())?);
+            }
+        }
+
+        let name = name.ok_or_else(|| -> BundlebaseError { "SET NAME missing name".into() })?;
+
+        Ok(SetNameCommand::new(name))
+    }
+
     fn to_statement(&self) -> String {
-        use crate::bundle::command::parser::escape_string;
         format!("SET NAME {}", escape_string(&self.name))
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_set_name() {
+        let input = "SET NAME 'My Bundle'";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::SetName(c) => {
+                assert_eq!(c.name, "My Bundle");
+            }
+            _ => panic!("Expected SetName variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let cmd = SetNameCommand::new("Test Bundle");
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "SET NAME 'Test Bundle'");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::SetName(c) => {
+                assert_eq!(c.name, "Test Bundle");
+            }
+            _ => panic!("Expected SetName variant"),
+        }
     }
 }

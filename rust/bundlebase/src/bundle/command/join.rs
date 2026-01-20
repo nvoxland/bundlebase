@@ -41,6 +41,8 @@ impl JoinCommand {
 
 #[async_trait]
 impl Command for JoinCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         // Step 1: Create a new pack with join metadata
         let join_pack_id = ObjectId::generate();

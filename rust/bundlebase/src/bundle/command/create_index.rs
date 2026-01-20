@@ -1,6 +1,6 @@
 //! CreateIndex command implementation.
 
-use crate::bundle::command::{Command, CommandContext};
+use crate::bundle::command::{Command, CommandContext, Rule};
 use crate::bundle::operation::CreateIndexOp;
 use crate::index::IndexType;
 use crate::BundlebaseError;
@@ -28,6 +28,8 @@ impl CreateIndexCommand {
 
 #[async_trait]
 impl Command for CreateIndexCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         ctx.apply_operation(
             CreateIndexOp::setup(&self.column, self.index_type.clone())
@@ -43,12 +45,67 @@ impl Command for CreateIndexCommand {
         Ok(())
     }
 
+    fn rule() -> Option<Rule> {
+        Some(Rule::create_index_stmt)
+    }
+
+    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        let mut column = None;
+
+        for inner in pair.into_inner() {
+            if inner.as_rule() == Rule::identifier {
+                column = Some(inner.as_str().to_string());
+            }
+        }
+
+        let column = column.ok_or_else(|| -> BundlebaseError {
+            "CREATE INDEX statement missing column name".into()
+        })?;
+
+        // Default to column index type
+        Ok(CreateIndexCommand::new(column, IndexType::Column))
+    }
+
     fn to_statement(&self) -> String {
         match &self.index_type {
             IndexType::Column => format!("CREATE INDEX ON {}", self.column),
             IndexType::Text { tokenizer } => {
                 format!("CREATE TEXT INDEX ON {} (tokenizer: {:?})", self.column, tokenizer)
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_create_index() {
+        let input = "CREATE INDEX ON user_id";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateIndex(c) => {
+                assert_eq!(c.column, "user_id");
+            }
+            _ => panic!("Expected CreateIndex variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let cmd = CreateIndexCommand::new("email", IndexType::Column);
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "CREATE INDEX ON email");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::CreateIndex(c) => {
+                assert_eq!(c.column, "email");
+            }
+            _ => panic!("Expected CreateIndex variant"),
         }
     }
 }

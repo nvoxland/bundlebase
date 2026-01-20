@@ -26,6 +26,8 @@ impl RenameViewCommand {
 
 #[async_trait]
 impl Command for RenameViewCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let op = RenameViewOp::setup(&self.old_name, &self.new_name, ctx.bundle()).await?;
         ctx.apply_operation(op.into()).await?;

@@ -24,6 +24,8 @@ impl DropIndexCommand {
 
 #[async_trait]
 impl Command for DropIndexCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         // Find the index ID for the given column
         let index_id = {

@@ -28,6 +28,8 @@ impl FilterCommand {
 
 #[async_trait]
 impl Command for FilterCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let statement = self.to_statement();
         ctx.apply_operation(

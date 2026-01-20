@@ -21,6 +21,8 @@ impl DropJoinCommand {
 
 #[async_trait]
 impl Command for DropJoinCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let op = DropJoinOp::setup(&self.name, ctx.bundle()).await?;
         ctx.apply_operation(op.into()).await?;

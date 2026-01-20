@@ -1,6 +1,7 @@
 //! SetDescription command implementation.
 
-use crate::bundle::command::{Command, CommandContext};
+use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::SetDescriptionOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -23,14 +24,69 @@ impl SetDescriptionCommand {
 
 #[async_trait]
 impl Command for SetDescriptionCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         ctx.apply_operation(SetDescriptionOp::setup(&self.description).into())
             .await?;
         Ok(())
     }
 
+    fn rule() -> Option<Rule> {
+        Some(Rule::set_description_stmt)
+    }
+
+    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        let mut description = None;
+
+        for inner in pair.into_inner() {
+            if inner.as_rule() == Rule::quoted_string {
+                description = Some(extract_string_content(inner.as_str())?);
+            }
+        }
+
+        let description = description.ok_or_else(|| -> BundlebaseError {
+            "SET DESCRIPTION missing description".into()
+        })?;
+
+        Ok(SetDescriptionCommand::new(description))
+    }
+
     fn to_statement(&self) -> String {
-        use crate::bundle::command::parser::escape_string;
         format!("SET DESCRIPTION {}", escape_string(&self.description))
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_set_description() {
+        let input = "SET DESCRIPTION 'A test bundle'";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::SetDescription(c) => {
+                assert_eq!(c.description, "A test bundle");
+            }
+            _ => panic!("Expected SetDescription variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let cmd = SetDescriptionCommand::new("My bundle description");
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "SET DESCRIPTION 'My bundle description'");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::SetDescription(c) => {
+                assert_eq!(c.description, "My bundle description");
+            }
+            _ => panic!("Expected SetDescription variant"),
+        }
     }
 }

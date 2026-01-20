@@ -22,6 +22,8 @@ impl CreateFunctionCommand {
 
 #[async_trait]
 impl Command for CreateFunctionCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let op = CreateFunctionOp::setup(self.signature);
         ctx.apply_operation(op.into()).await?;

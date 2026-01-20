@@ -20,7 +20,7 @@ COMMENT = _{ "--" ~ (!"\n" ~ ANY)* ~ "\n" }
 // Entry Point
 // ============================================================================
 
-statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt | create_source_stmt | fetch_stmt | drop_join_stmt | rename_join_stmt | select_stmt | drop_index_stmt | rename_view_stmt) ~ EOI }
+statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt | create_source_stmt | fetch_stmt | drop_join_stmt | rename_join_stmt | select_stmt | drop_index_stmt | rename_view_stmt | reset_stmt | undo_stmt | commit_stmt | detach_stmt | rebuild_index_stmt | set_config_stmt | replace_stmt | set_name_stmt | set_description_stmt | drop_view_stmt | create_view_stmt | create_index_stmt | drop_column_stmt | rename_column_stmt | verify_data_stmt) ~ EOI }
 
 // ============================================================================
 // FILTER Statement
@@ -229,4 +229,143 @@ escape_sequence = @{
 
 number = @{
     "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
+}
+
+// ============================================================================
+// RESET Statement
+// ============================================================================
+// Syntax: RESET
+
+reset_stmt = {
+    ^"reset"
+}
+
+// ============================================================================
+// UNDO Statement
+// ============================================================================
+// Syntax: UNDO
+
+undo_stmt = {
+    ^"undo"
+}
+
+// ============================================================================
+// COMMIT Statement
+// ============================================================================
+// Syntax: COMMIT 'message'
+
+commit_stmt = {
+    ^"commit" ~ quoted_string
+}
+
+// ============================================================================
+// DETACH Statement
+// ============================================================================
+// Syntax: DETACH 'location'
+
+detach_stmt = {
+    ^"detach" ~ quoted_string
+}
+
+// ============================================================================
+// REBUILD INDEX Statement
+// ============================================================================
+// Syntax: REBUILD INDEX ON <column>
+
+rebuild_index_stmt = {
+    ^"rebuild" ~ ^"index" ~ ^"on" ~ identifier
+}
+
+// ============================================================================
+// SET CONFIG Statement
+// ============================================================================
+// Syntax: SET CONFIG <key> = '<value>' [FOR '<url_prefix>']
+
+set_config_stmt = {
+    ^"set" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ (^"for" ~ quoted_string)?
+}
+
+// ============================================================================
+// REPLACE Statement
+// ============================================================================
+// Syntax: REPLACE '<old_location>' WITH '<new_location>'
+
+replace_stmt = {
+    ^"replace" ~ quoted_string ~ ^"with" ~ quoted_string
+}
+
+// ============================================================================
+// SET NAME Statement
+// ============================================================================
+// Syntax: SET NAME '<name>'
+
+set_name_stmt = {
+    ^"set" ~ ^"name" ~ quoted_string
+}
+
+// ============================================================================
+// SET DESCRIPTION Statement
+// ============================================================================
+// Syntax: SET DESCRIPTION '<description>'
+
+set_description_stmt = {
+    ^"set" ~ ^"description" ~ quoted_string
+}
+
+// ============================================================================
+// DROP VIEW Statement
+// ============================================================================
+// Syntax: DROP VIEW <name>
+
+drop_view_stmt = {
+    ^"drop" ~ ^"view" ~ identifier
+}
+
+// ============================================================================
+// CREATE VIEW Statement
+// ============================================================================
+// Syntax: CREATE VIEW <name> AS <sql>
+
+create_view_stmt = {
+    ^"create" ~ ^"view" ~ identifier ~ ^"as" ~ view_sql
+}
+
+view_sql = @{
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// CREATE INDEX Statement
+// ============================================================================
+// Syntax: CREATE INDEX ON <column>
+
+create_index_stmt = {
+    ^"create" ~ ^"index" ~ ^"on" ~ identifier
+}
+
+// ============================================================================
+// DROP COLUMN Statement
+// ============================================================================
+// Syntax: DROP COLUMN <name>
+
+drop_column_stmt = {
+    ^"drop" ~ ^"column" ~ identifier
+}
+
+// ============================================================================
+// RENAME COLUMN Statement
+// ============================================================================
+// Syntax: RENAME COLUMN <old_name> TO <new_name>
+
+rename_column_stmt = {
+    ^"rename" ~ ^"column" ~ identifier ~ ^"to" ~ identifier
+}
+
+// ============================================================================
+// VERIFY DATA Statement
+// ============================================================================
+// Syntax: VERIFY DATA [UPDATE]
+
+verify_data_stmt = {
+    ^"verify" ~ ^"data" ~ (^"update")?
 }

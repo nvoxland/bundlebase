@@ -1,7 +1,7 @@
 //! DetachBlock command implementation.
 
-use crate::bundle::command::{Command, CommandContext};
-use crate::bundle::command::parser::escape_string;
+use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::DetachBlockOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -25,6 +25,8 @@ impl DetachBlockCommand {
 
 #[async_trait]
 impl Command for DetachBlockCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let op = DetachBlockOp::setup(&self.location, ctx.bundle()).await?;
         ctx.apply_operation(op.into()).await?;
@@ -32,7 +34,61 @@ impl Command for DetachBlockCommand {
         Ok(())
     }
 
+    fn rule() -> Option<Rule> {
+        Some(Rule::detach_stmt)
+    }
+
+    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        let mut location = None;
+
+        for inner in pair.into_inner() {
+            if inner.as_rule() == Rule::quoted_string {
+                location = Some(extract_string_content(inner.as_str())?);
+            }
+        }
+
+        let location = location.ok_or_else(|| -> BundlebaseError {
+            "DETACH statement missing location".into()
+        })?;
+
+        Ok(DetachBlockCommand::new(location))
+    }
+
     fn to_statement(&self) -> String {
         format!("DETACH {}", escape_string(&self.location))
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_detach() {
+        let input = "DETACH 's3://bucket/data.parquet'";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::DetachBlock(c) => {
+                assert_eq!(c.location, "s3://bucket/data.parquet");
+            }
+            _ => panic!("Expected DetachBlock variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let cmd = DetachBlockCommand::new("file:///data/test.csv");
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "DETACH 'file:///data/test.csv'");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::DetachBlock(c) => {
+                assert_eq!(c.location, "file:///data/test.csv");
+            }
+            _ => panic!("Expected DetachBlock variant"),
+        }
     }
 }

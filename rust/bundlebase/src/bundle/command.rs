@@ -36,6 +36,7 @@ mod set_config;
 mod set_description;
 mod set_name;
 mod undo;
+mod verify_data;
 
 // Re-export command structs
 pub use attach::AttachCommand;
@@ -64,6 +65,7 @@ pub use set_config::SetConfigCommand;
 pub use set_description::SetDescriptionCommand;
 pub use set_name::SetNameCommand;
 pub use undo::UndoCommand;
+pub use verify_data::VerifyDataCommand;
 
 /// Context provided to commands during execution.
 ///
@@ -108,6 +110,31 @@ impl<'a> CommandContext<'a> {
     pub async fn reindex_internal(&mut self) -> Result<(), BundlebaseError> {
         self.builder.reindex_internal().await
     }
+
+    /// Clear all uncommitted status changes
+    pub fn clear_status(&mut self) {
+        self.builder.status.clear();
+    }
+
+    /// Pop the last uncommitted change from status
+    pub fn pop_status(&mut self) {
+        self.builder.status.pop();
+    }
+
+    /// Get a reference to the bundle status
+    pub fn status(&self) -> &crate::bundle::builder::BundleStatus {
+        &self.builder.status
+    }
+
+    /// Reload the bundle from the last committed state
+    pub async fn reload_bundle(&mut self) -> Result<(), BundlebaseError> {
+        self.builder.reload_bundle().await
+    }
+
+    /// Get the uncommitted changes list for reapplying
+    pub fn status_changes(&self) -> &Vec<crate::bundle::operation::BundleChange> {
+        self.builder.status.changes()
+    }
 }
 
 /// Trait for self-contained commands that can be executed on a BundleBuilder.
@@ -125,8 +152,15 @@ impl<'a> CommandContext<'a> {
 /// - `to_statement()` - Serializes back to command string (round-trip support)
 #[async_trait]
 pub trait Command: Send + Sync {
+    /// The type returned by execute().
+    ///
+    /// Most commands return `()`. Commands that need to return values
+    /// (like fetch returning results, or verify_data returning verification results)
+    /// can specify a different type.
+    type Output;
+
     /// Execute the command using the provided context
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError>;
+    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<Self::Output, BundlebaseError>;
 
     /// The pest rule that matches this command (if applicable).
     ///
@@ -251,6 +285,9 @@ pub enum BundleCommand {
 
     /// Fetch new files from all defined sources
     FetchAll(FetchAllCommand),
+
+    /// Verify data integrity
+    VerifyData(VerifyDataCommand),
 }
 
 impl BundleCommand {
@@ -380,6 +417,10 @@ impl BundleCommand {
             }
             BundleCommand::Undo(_) => {
                 builder.undo().await?;
+                Ok(())
+            }
+            BundleCommand::VerifyData(cmd) => {
+                builder.run_command(cmd).await?;
                 Ok(())
             }
         }

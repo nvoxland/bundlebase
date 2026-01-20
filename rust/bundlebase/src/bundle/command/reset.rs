@@ -1,8 +1,9 @@
 //! Reset command implementation.
 
-use crate::bundle::command::{Command, CommandContext};
+use crate::bundle::command::{Command, CommandContext, Rule};
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use log::info;
 
 /// Command to reset all uncommitted changes.
 #[derive(Debug, Clone, Default)]
@@ -17,13 +18,63 @@ impl ResetCommand {
 
 #[async_trait]
 impl Command for ResetCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        // Reset is special - we call the builder's reset method directly
-        ctx.builder_mut().reset().await?;
+        if ctx.status().is_empty() {
+            return Err("No uncommitted changes".into());
+        }
+
+        // Clear all uncommitted changes
+        ctx.clear_status();
+
+        // Reload the bundle from the last committed state
+        ctx.reload_bundle().await?;
+
+        info!("All uncommitted changes discarded");
+
         Ok(())
+    }
+
+    fn rule() -> Option<Rule> {
+        Some(Rule::reset_stmt)
+    }
+
+    fn from_pest(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        Ok(ResetCommand::new())
     }
 
     fn to_statement(&self) -> String {
         "RESET".to_string()
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_reset() {
+        let input = "RESET";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::Reset(_) => {}
+            _ => panic!("Expected Reset variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let cmd = ResetCommand::new();
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "RESET");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::Reset(_) => {}
+            _ => panic!("Expected Reset variant"),
+        }
     }
 }
