@@ -96,7 +96,7 @@ _original_methods = {
     "create_function": _PyBundleBuilder.create_function,
 
     # Index operations
-    "create_index": _PyBundleBuilder.index,  # Rust: "index", Python API: "create_index"
+    "create_index": _PyBundleBuilder.create_index,
     "drop_index": _PyBundleBuilder.drop_index,
     "rebuild_index": _PyBundleBuilder.rebuild_index,
     "reindex": _PyBundleBuilder.reindex,

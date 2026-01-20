@@ -1,10 +1,118 @@
-use crate::{BundleBuilder, BundleFacade, BundlebaseError};
+use crate::bundle::operation::AnyOperation;
+use crate::bundle::Bundle;
+use crate::{BundleBuilder, BundlebaseError};
+use async_trait::async_trait;
 use datafusion::common::ScalarValue;
 use std::collections::HashMap;
 use crate::bundle::pack::JoinTypeOption;
 
 pub mod parser;
 pub mod parser_pest;
+
+// Command struct modules
+mod attach;
+mod commit;
+mod create_index;
+mod create_source;
+mod create_view;
+mod drop_column;
+mod drop_index;
+mod drop_join;
+mod drop_view;
+mod fetch;
+mod filter;
+mod join;
+mod reindex;
+mod rename_column;
+mod rename_join;
+mod rename_view;
+mod reset;
+mod select;
+mod set_description;
+mod set_name;
+mod undo;
+
+// Re-export command structs
+pub use attach::AttachCommand;
+pub use commit::CommitCommand;
+pub use create_index::CreateIndexCommand;
+pub use create_source::CreateSourceCommand;
+pub use create_view::CreateViewCommand;
+pub use drop_column::DropColumnCommand;
+pub use drop_index::DropIndexCommand;
+pub use drop_join::DropJoinCommand;
+pub use drop_view::DropViewCommand;
+pub use fetch::{FetchAllCommand, FetchCommand};
+pub use filter::FilterCommand;
+pub use join::JoinCommand;
+pub use reindex::ReindexCommand;
+pub use rename_column::RenameColumnCommand;
+pub use rename_join::RenameJoinCommand;
+pub use rename_view::RenameViewCommand;
+pub use reset::ResetCommand;
+pub use select::SelectCommand;
+pub use set_description::SetDescriptionCommand;
+pub use set_name::SetNameCommand;
+pub use undo::UndoCommand;
+
+/// Context provided to commands during execution.
+///
+/// This provides a controlled interface for commands to interact with the
+/// BundleBuilder without exposing its internals directly.
+pub struct CommandContext<'a> {
+    pub(crate) builder: &'a mut BundleBuilder,
+}
+
+impl<'a> CommandContext<'a> {
+    /// Create a new CommandContext wrapping a BundleBuilder
+    pub fn new(builder: &'a mut BundleBuilder) -> Self {
+        Self { builder }
+    }
+
+    /// Apply an operation to the bundle
+    pub async fn apply_operation(&mut self, op: AnyOperation) -> Result<(), BundlebaseError> {
+        self.builder.apply_operation(op).await
+    }
+
+    /// Get a reference to the bundle
+    pub fn bundle(&self) -> &Bundle {
+        &self.builder.bundle
+    }
+
+    /// Get a mutable reference to the bundle
+    pub fn bundle_mut(&mut self) -> &mut Bundle {
+        &mut self.builder.bundle
+    }
+
+    /// Get a reference to the builder (for methods that need full builder access)
+    pub fn builder(&self) -> &BundleBuilder {
+        self.builder
+    }
+
+    /// Get a mutable reference to the builder (for methods that need full builder access)
+    pub fn builder_mut(&mut self) -> &mut BundleBuilder {
+        self.builder
+    }
+
+    /// Rebuild indexes after changes
+    pub async fn reindex_internal(&mut self) -> Result<(), BundlebaseError> {
+        self.builder.reindex_internal().await
+    }
+}
+
+/// Trait for self-contained commands that can be executed on a BundleBuilder.
+///
+/// Commands encapsulate all the logic needed to perform a specific operation
+/// on a bundle. They are constructed with all necessary parameters and then
+/// executed via the `execute` method.
+#[async_trait]
+pub trait Command: Send + Sync {
+    /// A human-readable description of what this command does
+    fn description(&self) -> String;
+
+    /// Execute the command using the provided context
+    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError>;
+}
 
 /// Command that can be executed on a BundleBuilder.
 ///
@@ -131,11 +239,12 @@ pub enum BundleCommand {
 impl BundleCommand {
     /// Execute this SQL command on a BundleBuilder.
     ///
-    /// This method delegates to the appropriate BundleBuilder method based on the command variant.
+    /// This method constructs the appropriate command struct and executes it via
+    /// `execute_command`, which provides a self-contained command pattern.
     ///
     /// # Arguments
     ///
-    /// * `bundle` - Mutable reference to the BundleBuilder to execute the command on
+    /// * `builder` - Mutable reference to the BundleBuilder to execute the command on
     ///
     /// # Returns
     ///
@@ -145,36 +254,38 @@ impl BundleCommand {
     /// # Examples
     ///
     /// ```ignore
-    /// let cmd = BundleCommand::Attach { path: "data.parquet".to_string() };
-    /// cmd.execute(&mut bundle).await?;
+    /// let cmd = BundleCommand::Attach { path: "data.parquet".to_string(), pack: None };
+    /// cmd.execute(&mut builder).await?;
     /// ```
-    pub async fn execute(self, bundle: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    pub async fn execute(self, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
         match self {
             BundleCommand::Attach { path, pack } => {
-                bundle.attach(&path, pack.as_deref()).await?;
+                builder.execute_command(AttachCommand::new(path, pack)).await?;
                 Ok(())
             }
             BundleCommand::Filter {
                 where_clause,
                 params,
             } => {
-                bundle.filter(&where_clause, params).await?;
+                builder.execute_command(FilterCommand::new(where_clause, params)).await?;
                 Ok(())
             }
             BundleCommand::DropColumn { name } => {
-                bundle.drop_column(&name).await?;
+                builder.execute_command(DropColumnCommand::new(name)).await?;
                 Ok(())
             }
             BundleCommand::RenameColumn { old_name, new_name } => {
-                bundle.rename_column(&old_name, &new_name).await?;
+                builder.execute_command(RenameColumnCommand::new(old_name, new_name)).await?;
                 Ok(())
             }
             BundleCommand::RenameView { old_name, new_name } => {
-                bundle.rename_view(&old_name, &new_name).await?;
+                builder.execute_command(RenameViewCommand::new(old_name, new_name)).await?;
                 Ok(())
             }
             BundleCommand::Select { sql, params } => {
-                bundle.select(&sql, params).await?;
+                // Select is special - it returns a new BundleBuilder, not modifying in place
+                // For the command pattern, we apply the SelectOp to modify the current builder
+                builder.execute_command(SelectCommand::new(sql, params)).await?;
                 Ok(())
             }
             BundleCommand::Join {
@@ -183,53 +294,55 @@ impl BundleCommand {
                 expression,
                 join_type,
             } => {
-                bundle
-                    .join(&name, &expression, location.as_deref(), join_type)
-                    .await?;
+                builder.execute_command(JoinCommand::new(name, expression, location, join_type)).await?;
                 Ok(())
             }
             BundleCommand::CreateIndex { column, index_type } => {
-                bundle.create_index(&column, index_type).await?;
+                builder.execute_command(CreateIndexCommand::new(column, index_type)).await?;
                 Ok(())
             }
             BundleCommand::DropIndex { column } => {
-                bundle.drop_index(&column).await?;
+                builder.execute_command(DropIndexCommand::new(column)).await?;
                 Ok(())
             }
             BundleCommand::DropView { name } => {
-                bundle.drop_view(&name).await?;
+                builder.execute_command(DropViewCommand::new(name)).await?;
                 Ok(())
             }
             BundleCommand::DropJoin { name } => {
-                bundle.drop_join(&name).await?;
+                builder.execute_command(DropJoinCommand::new(name)).await?;
                 Ok(())
             }
             BundleCommand::RenameJoin { old_name, new_name } => {
-                bundle.rename_join(&old_name, &new_name).await?;
+                builder.execute_command(RenameJoinCommand::new(old_name, new_name)).await?;
                 Ok(())
             }
             BundleCommand::Reindex => {
-                bundle.reindex().await?;
+                builder.execute_command(ReindexCommand::new()).await?;
                 Ok(())
             }
             BundleCommand::SetName { name } => {
-                bundle.set_name(&name).await?;
+                builder.execute_command(SetNameCommand::new(name)).await?;
                 Ok(())
             }
             BundleCommand::SetDescription { description } => {
-                bundle.set_description(&description).await?;
+                builder.execute_command(SetDescriptionCommand::new(description)).await?;
                 Ok(())
             }
             BundleCommand::Commit { message } => {
-                bundle.commit(&message).await?;
+                // Commit is special - it doesn't go through execute_command
+                // because it needs to finalize all pending changes
+                builder.commit(&message).await?;
                 Ok(())
             }
             BundleCommand::Reset => {
-                bundle.reset().await?;
+                // Reset is special - it doesn't go through execute_command
+                builder.reset().await?;
                 Ok(())
             }
             BundleCommand::Undo => {
-                bundle.undo().await?;
+                // Undo is special - it doesn't go through execute_command
+                builder.undo().await?;
                 Ok(())
             }
             BundleCommand::CreateSource {
@@ -237,17 +350,15 @@ impl BundleCommand {
                 args,
                 pack,
             } => {
-                bundle
-                    .create_source(&function, args, pack.as_deref())
-                    .await?;
+                builder.execute_command(CreateSourceCommand::new(function, args, pack)).await?;
                 Ok(())
             }
             BundleCommand::Fetch { pack } => {
-                bundle.fetch(pack.as_deref()).await?;
+                builder.execute_command(FetchCommand::new(pack)).await?;
                 Ok(())
             }
             BundleCommand::FetchAll => {
-                bundle.fetch_all().await?;
+                builder.execute_command(FetchAllCommand::new()).await?;
                 Ok(())
             }
         }

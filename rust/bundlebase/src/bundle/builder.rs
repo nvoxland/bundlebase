@@ -1,3 +1,4 @@
+use crate::bundle::command::{Command, CommandContext};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::SetNameOp;
@@ -379,7 +380,7 @@ impl BundleBuilder {
         Ok(())
     }
 
-    async fn apply_operation(&mut self, op: AnyOperation) -> Result<(), BundlebaseError> {
+    pub(crate) async fn apply_operation(&mut self, op: AnyOperation) -> Result<(), BundlebaseError> {
         if self.bundle.is_view() && !op.allowed_on_view() {
             return Err(format!(
                 "Operation '{}' is not allowed on a view",
@@ -411,7 +412,7 @@ impl BundleBuilder {
     ///
     /// # Errors
     /// Returns any error from the closure. On error, the in-progress change is discarded.
-    async fn do_change<F>(&mut self, description: &str, f: F) -> Result<(), BundlebaseError>
+    pub(crate) async fn do_change<F>(&mut self, description: &str, f: F) -> Result<(), BundlebaseError>
     where
         F: for<'a> FnOnce(&'a mut Self) -> BoxFuture<'a, Result<(), BundlebaseError>>,
     {
@@ -453,6 +454,32 @@ impl BundleBuilder {
         }
     }
 
+    /// Execute a command on this BundleBuilder.
+    ///
+    /// This is the primary way to execute commands that implement the `Command` trait.
+    /// The command's description is used as the change description for tracking.
+    ///
+    /// # Arguments
+    /// * `cmd` - The command to execute
+    ///
+    /// # Returns
+    /// * `Ok(&mut Self)` - Command executed successfully
+    /// * `Err(BundlebaseError)` - Execution failed
+    pub async fn execute_command<C: Command + 'static>(
+        &mut self,
+        cmd: C,
+    ) -> Result<&mut Self, BundlebaseError> {
+        let description = cmd.description();
+        self.do_change(&description, |builder| {
+            Box::pin(async move {
+                let mut ctx = CommandContext::new(builder);
+                Box::new(cmd).execute(&mut ctx).await
+            })
+        })
+        .await?;
+        Ok(self)
+    }
+
     /// Attach a data block to the bundle.
     ///
     /// # Arguments
@@ -464,34 +491,8 @@ impl BundleBuilder {
         path: &str,
         pack: Option<&str>,
     ) -> Result<&mut Self, BundlebaseError> {
-        let pack_id = match pack {
-            None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *self
-                .bundle
-                .pack_by_name(join_name)
-                .ok_or(format!("Unknown join '{}'", join_name))?
-                .id(),
-        };
-
-        let path = path.to_string();
-        let pack_name = pack.unwrap_or("base").to_string();
-
-        self.do_change(&format!("Attach {} to {}", path, pack_name), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(
-                        AttachBlockOp::setup(&pack_id, &path, builder).await?.into(),
-                    )
-                    .await?;
-
-                info!("Attached {} to {}", path, pack_name);
-
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::AttachCommand;
+        self.execute_command(AttachCommand::new(path, pack.map(|s| s.to_string()))).await
     }
 
     /// Detach a data block from the bundle by its location.
@@ -1155,22 +1156,8 @@ impl BundleBuilder {
 
     /// Drop a column (mutates self)
     pub async fn drop_column(&mut self, name: &str) -> Result<&mut Self, BundlebaseError> {
-        let name = name.to_string();
-
-        self.do_change(&format!("Drop column {}", name), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(DropColumnOp::setup(vec![name.as_str()]).into())
-                    .await?;
-
-                info!("Dropped column \"{}\"", name);
-
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::DropColumnCommand;
+        self.execute_command(DropColumnCommand::new(name)).await
     }
 
     /// Rename a column (mutates self)
@@ -1179,26 +1166,8 @@ impl BundleBuilder {
         old_name: &str,
         new_name: &str,
     ) -> Result<&mut Self, BundlebaseError> {
-        debug!("Staring rename column {} to {}", old_name, new_name);
-
-        let old_name = old_name.to_string();
-        let new_name = new_name.to_string();
-
-        self.do_change(
-            &format!("Rename column '{}' to '{}'", old_name, new_name),
-            |builder| {
-                Box::pin(async move {
-                    builder
-                        .apply_operation(RenameColumnOp::setup(&old_name, &new_name).into())
-                        .await?;
-                    info!("Renamed \"{}\" to \"{}\"", old_name, new_name);
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::RenameColumnCommand;
+        self.execute_command(RenameColumnCommand::new(old_name, new_name)).await
     }
 
     /// Filter rows with a WHERE clause (mutates self)
@@ -1208,20 +1177,8 @@ impl BundleBuilder {
         where_clause: &str,
         params: Vec<ScalarValue>,
     ) -> Result<&mut Self, BundlebaseError> {
-        let where_clause = where_clause.to_string();
-
-        self.do_change(&format!("Filter: {}", where_clause), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(FilterOp::setup(&where_clause, params).await?.into())
-                    .await?;
-                info!("Filtered by {}", where_clause);
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::FilterCommand;
+        self.execute_command(FilterCommand::new(where_clause, params)).await
     }
 
     /// Join with another data source (mutates self)
@@ -1235,44 +1192,8 @@ impl BundleBuilder {
         location: Option<&str>,
         join_type: JoinTypeOption,
     ) -> Result<&mut Self, BundlebaseError> {
-        let name = name.to_string();
-        let location = location.map(|s| s.to_string());
-        let expression = expression.to_string();
-
-        self.do_change(&format!("Join '{}' on {}", name, expression), |builder| {
-            Box::pin(async move {
-                // Step 1: Create a new pack with join metadata
-                let join_pack_id = ObjectId::generate();
-                builder
-                    .apply_operation(
-                        CreateJoinOp::setup(&join_pack_id, &name, &expression, join_type)
-                            .await?
-                            .into(),
-                    )
-                    .await?;
-
-                // Step 2: Attach the location data to the join pack (if provided)
-                if let Some(loc) = &location {
-                    builder
-                        .apply_operation(
-                            AttachBlockOp::setup(&join_pack_id, loc, builder)
-                                .await?
-                                .into(),
-                        )
-                        .await?;
-                }
-
-                match &location {
-                    Some(loc) => info!("Joined: {} as \"{}\"", loc, name),
-                    None => info!("Created join point \"{}\" (no initial data)", name),
-                }
-
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::JoinCommand;
+        self.execute_command(JoinCommand::new(name, expression, location.map(|s| s.to_string()), join_type)).await
     }
 
     /// Create a custom function (mutates self)
@@ -1307,19 +1228,8 @@ impl BundleBuilder {
 
     /// Set the bundle's name (mutates self)
     pub async fn set_name(&mut self, name: &str) -> Result<&mut Self, BundlebaseError> {
-        let name = name.to_string();
-
-        self.do_change(&format!("Set name to {}", name), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(SetNameOp::setup(&name).into())
-                    .await?;
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::SetNameCommand;
+        self.execute_command(SetNameCommand::new(name)).await
     }
 
     /// Set the bundle's description (mutates self)
@@ -1327,19 +1237,8 @@ impl BundleBuilder {
         &mut self,
         description: &str,
     ) -> Result<&mut Self, BundlebaseError> {
-        let description = description.to_string();
-
-        self.do_change(&format!("Set description to {}", description), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(SetDescriptionOp::setup(&description).into())
-                    .await?;
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::SetDescriptionCommand;
+        self.execute_command(SetDescriptionCommand::new(description)).await
     }
 
     /// Set a configuration value (mutates self)
@@ -1406,66 +1305,14 @@ impl BundleBuilder {
         column: &str,
         index_type: IndexType,
     ) -> Result<&mut Self, BundlebaseError> {
-        let column = column.to_string();
-
-        let desc = match &index_type {
-            IndexType::Column => format!("Index column {}", column),
-            IndexType::Text { tokenizer } => {
-                format!("Text index column {} (tokenizer: {:?})", column, tokenizer)
-            }
-        };
-
-        self.do_change(&desc, |builder| {
-            let index_type = index_type.clone();
-            let column = column.clone();
-            Box::pin(async move {
-                builder
-                    .apply_operation(CreateIndexOp::setup(&column, index_type).await?.into())
-                    .await?;
-
-                builder.reindex().await?;
-
-                info!("Created index on: \"{}\"", column);
-
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::CreateIndexCommand;
+        self.execute_command(CreateIndexCommand::new(column, index_type)).await
     }
 
     /// Drop an index on a column
     pub async fn drop_index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
-        let column = column.to_string();
-
-        self.do_change(&format!("Drop index on column {}", column), |builder| {
-            Box::pin(async move {
-                // Find the index ID for the given column
-                let index_id = {
-                    let indexes = builder.bundle.indexes().read();
-                    let index = indexes.iter().find(|idx| idx.column() == column.as_str());
-
-                    match index {
-                        Some(idx) => *idx.id(),
-                        None => {
-                            return Err(format!("No index found for column '{}'", column).into());
-                        }
-                    }
-                };
-
-                builder
-                    .apply_operation(DropIndexOp::setup(&index_id).await?.into())
-                    .await?;
-
-                info!("Dropped index on: \"{}\"", column);
-
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::DropIndexCommand;
+        self.execute_command(DropIndexCommand::new(column)).await
     }
 
     /// Creates index files for anything missing based on the defined indexes.
@@ -1493,107 +1340,114 @@ impl BundleBuilder {
 
         self.do_change("Reindex", |builder| {
             Box::pin(async move {
-                // Group blocks by (index_id, column_name) for batching
-                let mut blocks_to_index: HashMap<(ObjectId, String), Vec<(ObjectId, String)>> =
-                    HashMap::new();
-
-                // Ensure dataframe is set up for queries
-                let df = builder.dataframe().await?;
-
-                // Collect index definitions before the loop to avoid holding the lock across awaits
-                let index_defs: Vec<Arc<IndexDefinition>> =
-                    builder.bundle.indexes.read().iter().cloned().collect();
-
-                for index_def in &index_defs {
-                    let logical_col = index_def.column().to_string();
-                    let index_id = index_def.id();
-                    debug!("Checking index on {}", &logical_col);
-
-                    // Pass packs to expand pack tables into block tables
-                    let sources = match sql::column_sources_from_df(
-                        logical_col.as_str(),
-                        &df,
-                        Some(builder.bundle.packs()),
-                    )
-                    .await
-                    {
-                        Ok(Some(s)) => s,
-                        Ok(None) => {
-                            return Err(format!(
-                                "No physical sources found for column '{}'",
-                                logical_col
-                            )
-                            .into());
-                        }
-                        Err(e) => {
-                            return Err(format!(
-                                "Failed to find source for column '{}': {}",
-                                logical_col, e
-                            )
-                            .into());
-                        }
-                    };
-
-                    for (source_table, source_col) in sources {
-                        // Extract block ID from table name "blocks.__block_{hex_id}"
-                        let block_id = DataBlock::parse_id(&source_table).ok_or_else(|| {
-                            BundlebaseError::from(format!("Invalid table: {}", source_table))
-                        })?;
-
-                        // Find the block and get its version
-                        let block_version = builder
-                            .find_block_version(&block_id)
-                            .ok_or_else(|| format!("Block {} not found in packs", block_id))?;
-                        debug!(
-                            "Physical source: block {} version {}",
-                            &block_id, &block_version
-                        );
-
-                        // Check if index already exists at this version
-                        let versioned_block =
-                            VersionedBlockId::new(block_id, block_version.clone());
-                        let needs_index = builder
-                            .bundle()
-                            .get_index(&source_col, &versioned_block)
-                            .is_none();
-                        debug!("Needs index? {}", needs_index);
-
-                        if needs_index {
-                            blocks_to_index
-                                .entry((*index_id, source_col.clone()))
-                                .or_default()
-                                .push((block_id, block_version));
-                        }
-                    }
-                }
-
-                // Create IndexBlocksOp for each group of blocks
-                for ((index_id, column), blocks) in blocks_to_index {
-                    if !blocks.is_empty() {
-                        debug!(
-                            "Creating IndexBlocksOp for column {} with {} blocks",
-                            column,
-                            blocks.len()
-                        );
-
-                        builder
-                            .apply_operation(
-                                IndexBlocksOp::setup(&index_id, &column, blocks, &builder.bundle)
-                                    .await?
-                                    .into(),
-                            )
-                            .await?;
-                    }
-                }
-
-                info!("Reindexed all columns");
-
-                Ok(())
+                builder.reindex_internal().await
             })
         })
         .await?;
 
         Ok(self)
+    }
+
+    /// Internal reindex implementation that doesn't wrap in do_change.
+    ///
+    /// This is used by commands that need to reindex within their own change context.
+    pub(crate) async fn reindex_internal(&mut self) -> Result<(), BundlebaseError> {
+        // Group blocks by (index_id, column_name) for batching
+        let mut blocks_to_index: HashMap<(ObjectId, String), Vec<(ObjectId, String)>> =
+            HashMap::new();
+
+        // Ensure dataframe is set up for queries
+        let df = self.dataframe().await?;
+
+        // Collect index definitions before the loop to avoid holding the lock across awaits
+        let index_defs: Vec<Arc<IndexDefinition>> =
+            self.bundle.indexes.read().iter().cloned().collect();
+
+        for index_def in &index_defs {
+            let logical_col = index_def.column().to_string();
+            let index_id = index_def.id();
+            debug!("Checking index on {}", &logical_col);
+
+            // Pass packs to expand pack tables into block tables
+            let sources = match sql::column_sources_from_df(
+                logical_col.as_str(),
+                &df,
+                Some(self.bundle.packs()),
+            )
+            .await
+            {
+                Ok(Some(s)) => s,
+                Ok(None) => {
+                    return Err(format!(
+                        "No physical sources found for column '{}'",
+                        logical_col
+                    )
+                    .into());
+                }
+                Err(e) => {
+                    return Err(format!(
+                        "Failed to find source for column '{}': {}",
+                        logical_col, e
+                    )
+                    .into());
+                }
+            };
+
+            for (source_table, source_col) in sources {
+                // Extract block ID from table name "blocks.__block_{hex_id}"
+                let block_id = DataBlock::parse_id(&source_table).ok_or_else(|| {
+                    BundlebaseError::from(format!("Invalid table: {}", source_table))
+                })?;
+
+                // Find the block and get its version
+                let block_version = self
+                    .find_block_version(&block_id)
+                    .ok_or_else(|| format!("Block {} not found in packs", block_id))?;
+                debug!(
+                    "Physical source: block {} version {}",
+                    &block_id, &block_version
+                );
+
+                // Check if index already exists at this version
+                let versioned_block =
+                    VersionedBlockId::new(block_id, block_version.clone());
+                let needs_index = self
+                    .bundle()
+                    .get_index(&source_col, &versioned_block)
+                    .is_none();
+                debug!("Needs index? {}", needs_index);
+
+                if needs_index {
+                    blocks_to_index
+                        .entry((*index_id, source_col.clone()))
+                        .or_default()
+                        .push((block_id, block_version));
+                }
+            }
+        }
+
+        // Create IndexBlocksOp for each group of blocks
+        for ((index_id, column), blocks) in blocks_to_index {
+            if !blocks.is_empty() {
+                debug!(
+                    "Creating IndexBlocksOp for column {} with {} blocks",
+                    column,
+                    blocks.len()
+                );
+
+                self
+                    .apply_operation(
+                        IndexBlocksOp::setup(&index_id, &column, blocks, &self.bundle)
+                            .await?
+                            .into(),
+                    )
+                    .await?;
+            }
+        }
+
+        info!("Reindexed all columns");
+
+        Ok(())
     }
 
     /// Find the version of a block by its ID
