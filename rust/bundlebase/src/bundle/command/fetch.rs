@@ -24,6 +24,8 @@ impl FetchCommand {
 
 #[async_trait]
 impl Command for FetchCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let pack_name = self.pack.as_deref().unwrap_or("base");
         let pack_id = match self.pack.as_deref() {
@@ -88,6 +90,8 @@ impl FetchAllCommand {
 
 #[async_trait]
 impl Command for FetchAllCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         // Collect sources with their pack info to avoid borrow issues
         let sources_with_packs: Vec<_> = ctx

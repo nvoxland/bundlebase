@@ -16,6 +16,7 @@ pub use builder::{BundleBuilder, BundleStatus};
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
 pub use command::parser::parse_command;
 pub use command::BundleCommand;
+pub use command::{CommitCommand, ResetCommand, UndoCommand};
 pub use commit::{manifest_version, BundleCommit};
 pub use data_block::DataBlock;
 pub use pack::Pack;

@@ -56,7 +56,7 @@ impl BundleStatus {
         self.changes.is_empty()
     }
 
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.changes.clear();
     }
 
@@ -133,7 +133,7 @@ impl std::fmt::Display for BundleStatus {
 /// ```
 pub struct BundleBuilder {
     pub bundle: Bundle,
-    status: BundleStatus,
+    pub(crate) status: BundleStatus,
     in_progress_change: Option<BundleChange>,
 }
 
@@ -308,17 +308,8 @@ impl BundleBuilder {
     /// bundle.reset().await?;  // Discards attach and filter operations
     /// ```
     pub async fn reset(&mut self) -> Result<&mut Self, BundlebaseError> {
-        if self.status.is_empty() {
-            return Err("No uncommitted changes".into());
-        }
-
-        // Clear all uncommitted changes
-        self.status.clear();
-
-        self.reload_bundle().await?;
-
-        info!("All uncommitted changes discarded");
-
+        use crate::bundle::command::ResetCommand;
+        self.run_command(ResetCommand::new()).await?;
         Ok(self)
     }
 
@@ -335,28 +326,12 @@ impl BundleBuilder {
     /// // Bundle now has only the attach change pending
     /// ```
     pub async fn undo(&mut self) -> Result<&mut Self, BundlebaseError> {
-        if self.status.is_empty() {
-            return Err("No uncommitted changes to undo".into());
-        }
-
-        // Remove the last change
-        self.status.pop();
-
-        self.reload_bundle().await?;
-
-        // Reapply all remaining operations
-        for change in &self.status.changes {
-            for op in &change.operations {
-                self.bundle.apply_operation(op.clone()).await?;
-            }
-        }
-
-        info!("Last operation undone");
-
+        use crate::bundle::command::UndoCommand;
+        self.run_command(UndoCommand::new()).await?;
         Ok(self)
     }
 
-    async fn reload_bundle(&mut self) -> Result<(), BundlebaseError> {
+    pub(crate) async fn reload_bundle(&mut self) -> Result<(), BundlebaseError> {
         // Reload the bundle from the last committed state
         let empty = self.bundle.commits.is_empty();
         self.bundle = if empty {
@@ -458,7 +433,7 @@ impl BundleBuilder {
     /// # Returns
     /// * `Ok(&mut Self)` - Command executed successfully
     /// * `Err(BundlebaseError)` - Execution failed
-    pub async fn execute_command<C: Command + 'static>(
+    pub async fn execute_command<C: Command<Output = ()> + 'static>(
         &mut self,
         cmd: C,
     ) -> Result<&mut Self, BundlebaseError> {
@@ -471,6 +446,28 @@ impl BundleBuilder {
         })
         .await?;
         Ok(self)
+    }
+
+    /// Execute a command that can return a value without wrapping in do_change.
+    ///
+    /// This is useful for commands like reset, undo, fetch, and verify_data
+    /// that don't represent trackable changes or need to return results.
+    ///
+    /// # Type Parameters
+    /// * `C` - The command type
+    ///
+    /// # Arguments
+    /// * `cmd` - The command to execute
+    ///
+    /// # Returns
+    /// * The command's output on success
+    /// * `Err(BundlebaseError)` - Execution failed
+    pub async fn run_command<C: Command + 'static>(
+        &mut self,
+        cmd: C,
+    ) -> Result<C::Output, BundlebaseError> {
+        let mut ctx = CommandContext::new(self);
+        Box::new(cmd).execute(&mut ctx).await
     }
 
     /// Attach a data block to the bundle.

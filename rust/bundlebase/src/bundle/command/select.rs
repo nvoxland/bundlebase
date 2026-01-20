@@ -28,6 +28,8 @@ impl SelectCommand {
 
 #[async_trait]
 impl Command for SelectCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let sql = if !self.sql.to_lowercase().starts_with("select ") {
             format!("SELECT {}", self.sql)

@@ -4,7 +4,8 @@
 //! it directly manipulates the builder's commit state rather than applying
 //! operations within a change context.
 
-use crate::bundle::command::{Command, CommandContext};
+use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::parser::extract_string_content;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 
@@ -30,6 +31,8 @@ impl CommitCommand {
 
 #[async_trait]
 impl Command for CommitCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         // Commit is special - we need to call the builder's commit method directly
         // This will commit all pending changes (including any that were just added)
@@ -37,8 +40,62 @@ impl Command for CommitCommand {
         Ok(())
     }
 
+    fn rule() -> Option<Rule> {
+        Some(Rule::commit_stmt)
+    }
+
+    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        let mut message = None;
+
+        for inner in pair.into_inner() {
+            if inner.as_rule() == Rule::quoted_string {
+                message = Some(extract_string_content(inner.as_str())?);
+            }
+        }
+
+        let message = message.ok_or_else(|| -> BundlebaseError {
+            "COMMIT statement missing message".into()
+        })?;
+
+        Ok(CommitCommand::new(message))
+    }
+
     fn to_statement(&self) -> String {
         use crate::bundle::command::parser::escape_string;
         format!("COMMIT {}", escape_string(&self.message))
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_commit() {
+        let input = "COMMIT 'Added new data'";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::Commit(c) => {
+                assert_eq!(c.message, "Added new data");
+            }
+            _ => panic!("Expected Commit variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let cmd = CommitCommand::new("Test commit message");
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "COMMIT 'Test commit message'");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::Commit(c) => {
+                assert_eq!(c.message, "Test commit message");
+            }
+            _ => panic!("Expected Commit variant"),
+        }
     }
 }

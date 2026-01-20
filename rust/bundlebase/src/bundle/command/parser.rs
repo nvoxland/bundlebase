@@ -22,9 +22,12 @@ pub use pest_parser::{
 };
 
 use crate::bundle::command::{
-    AttachCommand, BundleCommand, Command, CreateSourceCommand, DropIndexCommand, DropJoinCommand,
-    FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, ReindexCommand, RenameJoinCommand,
-    RenameViewCommand, SelectCommand,
+    AttachCommand, BundleCommand, Command, CommitCommand, CreateIndexCommand, CreateSourceCommand,
+    DetachBlockCommand, DropColumnCommand, DropIndexCommand, DropJoinCommand, DropViewCommand,
+    FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand, ReindexCommand,
+    RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand, ResetCommand,
+    SelectCommand, SetConfigCommand, SetDescriptionCommand, SetNameCommand, UndoCommand,
+    VerifyDataCommand,
 };
 use crate::BundlebaseError;
 use pest::Parser;
@@ -145,6 +148,42 @@ fn try_parse_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseError> {
                 }
                 Rule::rename_view_stmt => {
                     BundleCommand::RenameView(RenameViewCommand::from_pest(inner_stmt)?)
+                }
+                Rule::reset_stmt => BundleCommand::Reset(ResetCommand::from_pest(inner_stmt)?),
+                Rule::undo_stmt => BundleCommand::Undo(UndoCommand::from_pest(inner_stmt)?),
+                Rule::commit_stmt => BundleCommand::Commit(CommitCommand::from_pest(inner_stmt)?),
+                Rule::detach_stmt => {
+                    BundleCommand::DetachBlock(DetachBlockCommand::from_pest(inner_stmt)?)
+                }
+                Rule::rebuild_index_stmt => {
+                    BundleCommand::RebuildIndex(RebuildIndexCommand::from_pest(inner_stmt)?)
+                }
+                Rule::set_config_stmt => {
+                    BundleCommand::SetConfig(SetConfigCommand::from_pest(inner_stmt)?)
+                }
+                Rule::replace_stmt => {
+                    BundleCommand::ReplaceBlock(ReplaceBlockCommand::from_pest(inner_stmt)?)
+                }
+                Rule::set_name_stmt => {
+                    BundleCommand::SetName(SetNameCommand::from_pest(inner_stmt)?)
+                }
+                Rule::set_description_stmt => {
+                    BundleCommand::SetDescription(SetDescriptionCommand::from_pest(inner_stmt)?)
+                }
+                Rule::drop_view_stmt => {
+                    BundleCommand::DropView(DropViewCommand::from_pest(inner_stmt)?)
+                }
+                Rule::create_index_stmt => {
+                    BundleCommand::CreateIndex(CreateIndexCommand::from_pest(inner_stmt)?)
+                }
+                Rule::drop_column_stmt => {
+                    BundleCommand::DropColumn(DropColumnCommand::from_pest(inner_stmt)?)
+                }
+                Rule::rename_column_stmt => {
+                    BundleCommand::RenameColumn(RenameColumnCommand::from_pest(inner_stmt)?)
+                }
+                Rule::verify_data_stmt => {
+                    BundleCommand::VerifyData(VerifyDataCommand::from_pest(inner_stmt)?)
                 }
                 _ => return Err("Unexpected statement type".into()),
             };

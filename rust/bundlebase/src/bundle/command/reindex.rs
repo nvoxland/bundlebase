@@ -17,6 +17,8 @@ impl ReindexCommand {
 
 #[async_trait]
 impl Command for ReindexCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         ctx.reindex_internal().await
     }

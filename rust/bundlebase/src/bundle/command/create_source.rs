@@ -37,6 +37,8 @@ impl CreateSourceCommand {
 
 #[async_trait]
 impl Command for CreateSourceCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let pack_id = match self.pack.as_deref() {
             None | Some("base") => ObjectId::BASE_PACK,

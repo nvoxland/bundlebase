@@ -1,8 +1,9 @@
 //! Undo command implementation.
 
-use crate::bundle::command::{Command, CommandContext};
+use crate::bundle::command::{Command, CommandContext, Rule};
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use log::info;
 
 /// Command to undo the last uncommitted change.
 #[derive(Debug, Clone, Default)]
@@ -17,13 +18,71 @@ impl UndoCommand {
 
 #[async_trait]
 impl Command for UndoCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        // Undo is special - we call the builder's undo method directly
-        ctx.builder_mut().undo().await?;
+        if ctx.status().is_empty() {
+            return Err("No uncommitted changes to undo".into());
+        }
+
+        // Remove the last change
+        ctx.pop_status();
+
+        // Reload the bundle from the last committed state
+        ctx.reload_bundle().await?;
+
+        // Reapply all remaining operations
+        let changes = ctx.status_changes().clone();
+        for change in &changes {
+            for op in &change.operations {
+                ctx.bundle_mut().apply_operation(op.clone()).await?;
+            }
+        }
+
+        info!("Last operation undone");
+
         Ok(())
+    }
+
+    fn rule() -> Option<Rule> {
+        Some(Rule::undo_stmt)
+    }
+
+    fn from_pest(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        Ok(UndoCommand::new())
     }
 
     fn to_statement(&self) -> String {
         "UNDO".to_string()
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_undo() {
+        let input = "UNDO";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::Undo(_) => {}
+            _ => panic!("Expected Undo variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let cmd = UndoCommand::new();
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "UNDO");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::Undo(_) => {}
+            _ => panic!("Expected Undo variant"),
+        }
     }
 }

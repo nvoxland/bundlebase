@@ -1,7 +1,7 @@
 //! ReplaceBlock command implementation.
 
-use crate::bundle::command::{Command, CommandContext};
-use crate::bundle::command::parser::escape_string;
+use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::ReplaceBlockOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -28,11 +28,41 @@ impl ReplaceBlockCommand {
 
 #[async_trait]
 impl Command for ReplaceBlockCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let op = ReplaceBlockOp::setup(&self.old_location, &self.new_location, ctx.builder()).await?;
         ctx.apply_operation(op.into()).await?;
         info!("Replaced block {} -> {}", self.old_location, self.new_location);
         Ok(())
+    }
+
+    fn rule() -> Option<Rule> {
+        Some(Rule::replace_stmt)
+    }
+
+    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        let mut old_location = None;
+        let mut new_location = None;
+
+        for inner in pair.into_inner() {
+            if inner.as_rule() == Rule::quoted_string {
+                if old_location.is_none() {
+                    old_location = Some(extract_string_content(inner.as_str())?);
+                } else if new_location.is_none() {
+                    new_location = Some(extract_string_content(inner.as_str())?);
+                }
+            }
+        }
+
+        let old_location = old_location.ok_or_else(|| -> BundlebaseError {
+            "REPLACE statement missing old location".into()
+        })?;
+        let new_location = new_location.ok_or_else(|| -> BundlebaseError {
+            "REPLACE statement missing new location".into()
+        })?;
+
+        Ok(ReplaceBlockCommand::new(old_location, new_location))
     }
 
     fn to_statement(&self) -> String {
@@ -41,5 +71,41 @@ impl Command for ReplaceBlockCommand {
             escape_string(&self.old_location),
             escape_string(&self.new_location)
         )
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_replace() {
+        let input = "REPLACE 's3://old/data.parquet' WITH 's3://new/data.parquet'";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::ReplaceBlock(c) => {
+                assert_eq!(c.old_location, "s3://old/data.parquet");
+                assert_eq!(c.new_location, "s3://new/data.parquet");
+            }
+            _ => panic!("Expected ReplaceBlock variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let cmd = ReplaceBlockCommand::new("file:///old.csv", "file:///new.csv");
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "REPLACE 'file:///old.csv' WITH 'file:///new.csv'");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::ReplaceBlock(c) => {
+                assert_eq!(c.old_location, "file:///old.csv");
+                assert_eq!(c.new_location, "file:///new.csv");
+            }
+            _ => panic!("Expected ReplaceBlock variant"),
+        }
     }
 }

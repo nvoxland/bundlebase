@@ -1,7 +1,6 @@
 use crate::state::State;
-use bundlebase::bundle::BundleCommand;
 use bundlebase::{
-    bundle::{parse_command, BundleFacade},
+    bundle::{parse_command, BundleCommand, BundleFacade},
     BundlebaseError,
 };
 use std::sync::Arc;
@@ -68,25 +67,6 @@ pub fn parse(input: &str) -> Result<Command, String> {
             None
         };
         return Ok(Command::Show { limit });
-    }
-
-    // Handle bundle lifecycle commands (BundleCommand but with special REPL parsing)
-    if upper == "RESET" {
-        return Ok(Command::Sql(BundleCommand::Reset));
-    } else if upper == "UNDO" {
-        return Ok(Command::Sql(BundleCommand::Undo));
-    } else if upper.starts_with("COMMIT") {
-        // Parse: COMMIT '<message>'
-        let message = input
-            .strip_prefix("COMMIT")
-            .ok_or("Invalid COMMIT syntax")?
-            .trim()
-            .trim_matches(|c| c == '\'' || c == '"')
-            .to_string();
-        if message.is_empty() {
-            return Err("COMMIT requires a message".to_string());
-        }
-        return Ok(Command::Sql(BundleCommand::Commit { message }));
     }
 
     // Everything else is SQL - parse and wrap
@@ -157,6 +137,10 @@ Indexing:
   CREATE INDEX ON bundle(<column>)       Create index on column
   REINDEX                              Rebuild all indexes
 
+Data Integrity:
+  VERIFY DATA                          Verify all data file hashes
+  VERIFY DATA UPDATE                   Verify and update version strings
+
 Persistence:
   COMMIT '<message>'                   Commit changes with message
   RESET                                Discard all uncommitted changes
@@ -207,9 +191,9 @@ mod tests {
     fn test_parse_attach() {
         let cmd = parse("ATTACH 'data.parquet'").unwrap();
         match cmd {
-            Command::Sql(BundleCommand::Attach { path, pack }) => {
-                assert_eq!(path, "data.parquet");
-                assert_eq!(pack, None);
+            Command::Sql(BundleCommand::Attach(attach_cmd)) => {
+                assert_eq!(attach_cmd.path, "data.parquet");
+                assert_eq!(attach_cmd.pack, None);
             }
             _ => panic!("Expected Sql(Attach) command"),
         }
@@ -219,8 +203,8 @@ mod tests {
     fn test_parse_filter() {
         let cmd = parse("FILTER WHERE country = 'USA'").unwrap();
         match cmd {
-            Command::Sql(BundleCommand::Filter { where_clause, .. }) => {
-                assert_eq!(where_clause, "country = 'USA'")
+            Command::Sql(BundleCommand::Filter(filter_cmd)) => {
+                assert_eq!(filter_cmd.where_clause, "country = 'USA'")
             }
             _ => panic!("Expected Sql(Filter) command"),
         }
@@ -238,8 +222,8 @@ mod tests {
     fn test_parse_commit() {
         let cmd = parse("COMMIT 'my commit message'").unwrap();
         match cmd {
-            Command::Sql(BundleCommand::Commit { message }) => {
-                assert_eq!(message, "my commit message")
+            Command::Sql(BundleCommand::Commit(commit_cmd)) => {
+                assert_eq!(commit_cmd.message, "my commit message")
             }
             _ => panic!("Expected Sql(Commit) command"),
         }

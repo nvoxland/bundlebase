@@ -1,6 +1,6 @@
 //! DropView command implementation.
 
-use crate::bundle::command::{Command, CommandContext};
+use crate::bundle::command::{Command, CommandContext, Rule};
 use crate::bundle::operation::DropViewOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -21,13 +21,67 @@ impl DropViewCommand {
 
 #[async_trait]
 impl Command for DropViewCommand {
+    type Output = ();
+
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let op = DropViewOp::setup(&self.name, ctx.bundle()).await?;
         ctx.apply_operation(op.into()).await?;
         Ok(())
     }
 
+    fn rule() -> Option<Rule> {
+        Some(Rule::drop_view_stmt)
+    }
+
+    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        let mut name = None;
+
+        for inner in pair.into_inner() {
+            if inner.as_rule() == Rule::identifier {
+                name = Some(inner.as_str().to_string());
+            }
+        }
+
+        let name = name.ok_or_else(|| -> BundlebaseError { "DROP VIEW missing name".into() })?;
+
+        Ok(DropViewCommand::new(name))
+    }
+
     fn to_statement(&self) -> String {
         format!("DROP VIEW {}", self.name)
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_drop_view() {
+        let input = "DROP VIEW summary";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::DropView(c) => {
+                assert_eq!(c.name, "summary");
+            }
+            _ => panic!("Expected DropView variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let cmd = DropViewCommand::new("my_view");
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "DROP VIEW my_view");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::DropView(c) => {
+                assert_eq!(c.name, "my_view");
+            }
+            _ => panic!("Expected DropView variant"),
+        }
     }
 }
