@@ -4,21 +4,19 @@
 //!
 //! # Architecture
 //!
-//! The parser uses a two-stage approach:
-//! 1. **Pest grammar** for bundlebase-specific syntax (FILTER, ATTACH, JOIN, etc.)
-//! 2. **sqlparser-rs** for standard SQL (CREATE INDEX, etc.)
+//! The parser uses a Pest grammar to handle all bundlebase commands (FILTER, ATTACH, JOIN, etc.).
 //!
 //! Each command struct implements parsing methods via the `Command` trait:
 //! - `rule()` - Returns the pest Rule for this command
-//! - `from_pest(pair)` - Parses from a pest Pair
+//! - `from_statement(pair)` - Parses from a pest Pair
 //! - `to_statement()` - Serializes back to command string (round-trip support)
 
 mod pest_parser;
 
 // Re-export pest parser infrastructure
 pub use pest_parser::{
-    escape_string, extract_string_content, format_pest_error, is_likely_custom_syntax,
-    parse_join_type, BundlebaseParser, Rule,
+    escape_string, extract_string_content, format_pest_error, parse_join_type, BundlebaseParser,
+    Rule,
 };
 
 use crate::bundle::command::{
@@ -31,19 +29,11 @@ use crate::bundle::command::{
 };
 use crate::BundlebaseError;
 use pest::Parser;
-use sqlparser::ast::Statement;
-use sqlparser::dialect::GenericDialect;
-use sqlparser::parser::Parser as SqlParser;
 
 /// Parse a command statement into a BundleCommand.
 ///
 /// This is the main entry point for parsing command statements into BundleCommand that can be
 /// executed on a BundleBuilder.
-///
-/// It handles:
-/// 1. Parsing custom bundlebase syntax (FILTER, ATTACH, JOIN, REINDEX) using Pest
-/// 2. Parsing standard SQL (SELECT, CREATE INDEX, etc.) using sqlparser-rs
-/// 3. Converting parsed statements into BundleCommand variants
 ///
 /// # Arguments
 ///
@@ -72,163 +62,98 @@ use sqlparser::parser::Parser as SqlParser;
 /// cmd.execute(&mut bundle).await?;
 /// ```
 pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError> {
-    // First, try Pest grammar for bundlebase syntax (FILTER, ATTACH, JOIN, SELECT, etc.)
-    if let Some(cmd) = try_parse_pest(command_str)? {
-        return Ok(cmd);
-    }
+    let mut pairs = BundlebaseParser::parse(Rule::statement, command_str)
+        .map_err(|e| format_pest_error(e, command_str))?;
 
-    // Otherwise, use sqlparser-rs for standard SQL (CREATE INDEX, etc.)
-    let dialect = GenericDialect {};
-    let ast = SqlParser::parse_sql(&dialect, command_str)
-        .map_err(|e| -> BundlebaseError { format!("SQL parse error: {}", e).into() })?;
+    // Get the top-level statement rule
+    let statement = pairs
+        .next()
+        .ok_or_else(|| BundlebaseError::from("Parser produced empty result"))?;
 
-    if ast.is_empty() {
-        return Err("Empty SQL statement".into());
-    }
+    // Get the category rule (data_modification_stmt, schema_stmt, etc.)
+    let category_stmt = statement
+        .into_inner()
+        .next()
+        .ok_or_else(|| BundlebaseError::from("Parser produced empty inner statement"))?;
 
-    if ast.len() > 1 {
-        return Err(
-            "Multiple statements not supported. Please execute one statement at a time.".into(),
-        );
-    }
+    // Get the actual statement type from the category
+    let inner_stmt = category_stmt
+        .into_inner()
+        .next()
+        .ok_or_else(|| BundlebaseError::from("Parser produced empty statement in category"))?;
 
-    let stmt = &ast[0];
-
-    // Dispatch to appropriate operation based on statement type
-    dispatch_statement(stmt)
-}
-
-/// Try to parse using Pest grammar.
-///
-/// Returns Ok(Some(cmd)) if successfully parsed, Ok(None) if not custom syntax,
-/// or Err if it looks like custom syntax but failed to parse.
-fn try_parse_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseError> {
-    let parse_result = BundlebaseParser::parse(Rule::statement, sql);
-
-    match parse_result {
-        Ok(mut pairs) => {
-            // Get the top-level statement rule
-            let statement = pairs
-                .next()
-                .ok_or_else(|| BundlebaseError::from("Parser produced empty result"))?;
-
-            // Get the category rule (data_modification_stmt, schema_stmt, etc.)
-            let category_stmt = statement
-                .into_inner()
-                .next()
-                .ok_or_else(|| BundlebaseError::from("Parser produced empty inner statement"))?;
-
-            // Get the actual statement type from the category
-            let inner_stmt = category_stmt
-                .into_inner()
-                .next()
-                .ok_or_else(|| BundlebaseError::from("Parser produced empty statement in category"))?;
-
-            let cmd = match inner_stmt.as_rule() {
-                Rule::filter_stmt => BundleCommand::Filter(FilterCommand::from_pest(inner_stmt)?),
-                Rule::attach_stmt => BundleCommand::Attach(AttachCommand::from_pest(inner_stmt)?),
-                Rule::join_stmt => BundleCommand::Join(JoinCommand::from_pest(inner_stmt)?),
-                Rule::reindex_stmt => BundleCommand::Reindex(ReindexCommand::from_pest(inner_stmt)?),
-                Rule::create_source_stmt => {
-                    BundleCommand::CreateSource(CreateSourceCommand::from_pest(inner_stmt)?)
-                }
-                Rule::fetch_stmt => {
-                    // FETCH can be either FetchCommand or FetchAllCommand
-                    // Check if it's FETCH ALL
-                    let raw = inner_stmt.as_str().to_uppercase();
-                    if raw.contains("ALL") {
-                        BundleCommand::FetchAll(FetchAllCommand::from_pest(inner_stmt)?)
-                    } else {
-                        BundleCommand::Fetch(FetchCommand::from_pest(inner_stmt)?)
-                    }
-                }
-                Rule::drop_join_stmt => {
-                    BundleCommand::DropJoin(DropJoinCommand::from_pest(inner_stmt)?)
-                }
-                Rule::rename_join_stmt => {
-                    BundleCommand::RenameJoin(RenameJoinCommand::from_pest(inner_stmt)?)
-                }
-                Rule::select_stmt => BundleCommand::Select(SelectCommand::from_pest(inner_stmt)?),
-                Rule::drop_index_stmt => {
-                    BundleCommand::DropIndex(DropIndexCommand::from_pest(inner_stmt)?)
-                }
-                Rule::rename_view_stmt => {
-                    BundleCommand::RenameView(RenameViewCommand::from_pest(inner_stmt)?)
-                }
-                Rule::reset_stmt => BundleCommand::Reset(ResetCommand::from_pest(inner_stmt)?),
-                Rule::undo_stmt => BundleCommand::Undo(UndoCommand::from_pest(inner_stmt)?),
-                Rule::commit_stmt => BundleCommand::Commit(CommitCommand::from_pest(inner_stmt)?),
-                Rule::detach_stmt => {
-                    BundleCommand::DetachBlock(DetachBlockCommand::from_pest(inner_stmt)?)
-                }
-                Rule::rebuild_index_stmt => {
-                    BundleCommand::RebuildIndex(RebuildIndexCommand::from_pest(inner_stmt)?)
-                }
-                Rule::set_config_stmt => {
-                    BundleCommand::SetConfig(SetConfigCommand::from_pest(inner_stmt)?)
-                }
-                Rule::replace_stmt => {
-                    BundleCommand::ReplaceBlock(ReplaceBlockCommand::from_pest(inner_stmt)?)
-                }
-                Rule::set_name_stmt => {
-                    BundleCommand::SetName(SetNameCommand::from_pest(inner_stmt)?)
-                }
-                Rule::set_description_stmt => {
-                    BundleCommand::SetDescription(SetDescriptionCommand::from_pest(inner_stmt)?)
-                }
-                Rule::drop_view_stmt => {
-                    BundleCommand::DropView(DropViewCommand::from_pest(inner_stmt)?)
-                }
-                Rule::create_index_stmt => {
-                    BundleCommand::CreateIndex(CreateIndexCommand::from_pest(inner_stmt)?)
-                }
-                Rule::drop_column_stmt => {
-                    BundleCommand::DropColumn(DropColumnCommand::from_pest(inner_stmt)?)
-                }
-                Rule::rename_column_stmt => {
-                    BundleCommand::RenameColumn(RenameColumnCommand::from_pest(inner_stmt)?)
-                }
-                Rule::verify_data_stmt => {
-                    BundleCommand::VerifyData(VerifyDataCommand::from_pest(inner_stmt)?)
-                }
-                Rule::create_view_stmt => {
-                    return Err("CREATE VIEW cannot be parsed from SQL. Use builder.create_view() API instead.".into());
-                }
-                _ => return Err("Unexpected statement type".into()),
-            };
-            Ok(Some(cmd))
-        }
-        Err(e) => {
-            // Not custom syntax or parse error
-            if is_likely_custom_syntax(sql) {
-                // If it looks like custom syntax but failed to parse, report error
-                Err(format_pest_error(e, sql))
+    match inner_stmt.as_rule() {
+        Rule::filter_stmt => Ok(BundleCommand::Filter(FilterCommand::from_statement(inner_stmt)?)),
+        Rule::attach_stmt => Ok(BundleCommand::Attach(AttachCommand::from_statement(inner_stmt)?)),
+        Rule::join_stmt => Ok(BundleCommand::Join(JoinCommand::from_statement(inner_stmt)?)),
+        Rule::reindex_stmt => Ok(BundleCommand::Reindex(ReindexCommand::from_statement(inner_stmt)?)),
+        Rule::create_source_stmt => Ok(BundleCommand::CreateSource(
+            CreateSourceCommand::from_statement(inner_stmt)?,
+        )),
+        Rule::fetch_stmt => {
+            // FETCH can be either FetchCommand or FetchAllCommand
+            let raw = inner_stmt.as_str().to_uppercase();
+            if raw.contains("ALL") {
+                Ok(BundleCommand::FetchAll(FetchAllCommand::from_statement(
+                    inner_stmt,
+                )?))
             } else {
-                // Not custom syntax, return None to let sqlparser handle it
-                Ok(None)
+                Ok(BundleCommand::Fetch(FetchCommand::from_statement(inner_stmt)?))
             }
         }
-    }
-}
-
-/// Dispatch a SQL statement to the appropriate BundleCommand.
-///
-/// This function examines the statement type and creates the appropriate BundleCommand variant
-/// for statements not handled by pest grammar.
-///
-/// Note: Most statements (SELECT, DROP INDEX, RENAME VIEW, etc.) are now handled by pest.
-/// This function only handles legacy/rare SQL statements.
-fn dispatch_statement(stmt: &Statement) -> Result<BundleCommand, BundlebaseError> {
-    match stmt {
-        // CREATE INDEX -> Index
-        Statement::CreateIndex { .. } => {
-            // sqlparser 0.59 changed CreateIndex structure
-            // For now, return error - use REINDEX or custom INDEX commands instead
-            Err("CREATE INDEX via standard SQL is not yet supported. Use bundlebase INDEX command or REINDEX.".into())
-        }
-
-        // Unrecognized statement types
-        _ => Err(format!("Unsupported SQL statement type: {:?}", stmt).into()),
+        Rule::drop_join_stmt => Ok(BundleCommand::DropJoin(DropJoinCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::rename_join_stmt => Ok(BundleCommand::RenameJoin(RenameJoinCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::select_stmt => Ok(BundleCommand::Select(SelectCommand::from_statement(inner_stmt)?)),
+        Rule::drop_index_stmt => Ok(BundleCommand::DropIndex(DropIndexCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::rename_view_stmt => Ok(BundleCommand::RenameView(RenameViewCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::reset_stmt => Ok(BundleCommand::Reset(ResetCommand::from_statement(inner_stmt)?)),
+        Rule::undo_stmt => Ok(BundleCommand::Undo(UndoCommand::from_statement(inner_stmt)?)),
+        Rule::commit_stmt => Ok(BundleCommand::Commit(CommitCommand::from_statement(inner_stmt)?)),
+        Rule::detach_stmt => Ok(BundleCommand::DetachBlock(DetachBlockCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::rebuild_index_stmt => Ok(BundleCommand::RebuildIndex(
+            RebuildIndexCommand::from_statement(inner_stmt)?,
+        )),
+        Rule::set_config_stmt => Ok(BundleCommand::SetConfig(SetConfigCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::replace_stmt => Ok(BundleCommand::ReplaceBlock(ReplaceBlockCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::set_name_stmt => Ok(BundleCommand::SetName(SetNameCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::set_description_stmt => Ok(BundleCommand::SetDescription(
+            SetDescriptionCommand::from_statement(inner_stmt)?,
+        )),
+        Rule::drop_view_stmt => Ok(BundleCommand::DropView(DropViewCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::create_index_stmt => Ok(BundleCommand::CreateIndex(CreateIndexCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::drop_column_stmt => Ok(BundleCommand::DropColumn(DropColumnCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::rename_column_stmt => Ok(BundleCommand::RenameColumn(
+            RenameColumnCommand::from_statement(inner_stmt)?,
+        )),
+        Rule::verify_data_stmt => Ok(BundleCommand::VerifyData(VerifyDataCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::create_view_stmt => Err(
+            "CREATE VIEW cannot be parsed from SQL. Use builder.create_view() API instead.".into(),
+        ),
+        _ => Err("Unexpected statement type".into()),
     }
 }
 
@@ -241,7 +166,7 @@ mod tests {
         let result = parse_command("");
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("Empty"));
+        assert!(err_msg.contains("Syntax error"));
     }
 
     #[test]

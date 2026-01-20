@@ -52,11 +52,11 @@ impl Command for FetchCommand {
         Ok(results)
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::fetch_stmt)
+    fn rule() -> Rule {
+        Rule::fetch_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         // Check for identifier (pack name) that is NOT "all"
         for inner_pair in pair.into_inner() {
             if inner_pair.as_rule() == Rule::identifier {
@@ -120,11 +120,11 @@ impl Command for FetchAllCommand {
         Ok(results)
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::fetch_stmt)
+    fn rule() -> Rule {
+        Rule::fetch_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         // Check if the raw contains "ALL"
         let raw = pair.as_str().to_uppercase();
         if raw.contains("ALL") {

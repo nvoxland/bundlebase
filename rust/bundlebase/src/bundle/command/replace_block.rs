@@ -37,11 +37,11 @@ impl Command for ReplaceBlockCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::replace_stmt)
+    fn rule() -> Rule {
+        Rule::replace_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut old_location = None;
         let mut new_location = None;
 

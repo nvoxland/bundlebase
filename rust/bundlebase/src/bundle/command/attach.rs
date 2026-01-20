@@ -51,11 +51,11 @@ impl Command for AttachCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::attach_stmt)
+    fn rule() -> Rule {
+        Rule::attach_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut path = None;
         let mut pack = None;
         let raw = pair.as_str().to_string();

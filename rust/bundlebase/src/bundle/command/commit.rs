@@ -40,11 +40,11 @@ impl Command for CommitCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::commit_stmt)
+    fn rule() -> Rule {
+        Rule::commit_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut message = None;
 
         for inner in pair.into_inner() {

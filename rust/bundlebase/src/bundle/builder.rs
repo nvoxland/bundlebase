@@ -730,31 +730,33 @@ impl BundleBuilder {
         name: &str,
         source: &BundleBuilder,
     ) -> Result<&mut Self, BundlebaseError> {
-        use crate::bundle::command::CreateViewCommand;
+        use crate::bundle::operation::CreateViewOp;
 
-        // Check if source has uncommitted operations that will be captured for the view
+        let name = name.to_string();
         let source_ops_count = source.status().operations().len();
         let changes_before = self.status.changes.len();
-
-        // Detect if source and self share the same underlying bundle by comparing bundle IDs
-        // This is important for the Python case where source and self share the same Arc<Mutex<BundleBuilder>>
         let source_is_self = self.bundle.id() == source.bundle.id();
+        let source_clone = source.clone();
 
-        // Execute the command
-        self.execute_command(CreateViewCommand::new(name, source)).await?;
+        self.do_change(&format!("Create view '{}'", name), |builder| {
+            Box::pin(async move {
+                let op = CreateViewOp::setup(&name, &source_clone, builder).await?;
+                builder.apply_operation(op.into()).await?;
+                info!("Attached view '{}'", name);
+                Ok(())
+            })
+        })
+        .await?;
 
         // After creating view, if source had uncommitted operations and source is the same
         // as self, we need to remove those operations to prevent double-commit.
         if source_is_self && source_ops_count > 0 && changes_before >= source_ops_count {
-            // Source and self share the same bundle - the source operations are in self's status
-            // Remove the captured operations (keep only changes before source ops + CreateViewOp)
-            let create_view_change = self.status.changes.pop(); // Remove CreateViewOp
-            let keep_count = changes_before - source_ops_count; // Changes before source operations
-            self.status.changes.truncate(keep_count); // Remove source ops
+            let create_view_change = self.status.changes.pop();
+            let keep_count = changes_before - source_ops_count;
+            self.status.changes.truncate(keep_count);
             if let Some(create_view_change) = create_view_change {
-                self.status.changes.push(create_view_change); // Add back CreateViewOp
+                self.status.changes.push(create_view_change);
             }
-
             debug!(
                 "Removed {} changes that were captured for view (prevents double-commit)",
                 source_ops_count
@@ -914,8 +916,21 @@ impl BundleBuilder {
         &mut self,
         signature: FunctionSignature,
     ) -> Result<&mut Self, BundlebaseError> {
-        use crate::bundle::command::CreateFunctionCommand;
-        self.execute_command(CreateFunctionCommand::new(signature)).await
+        use crate::bundle::operation::CreateFunctionOp;
+
+        let name = signature.name().to_string();
+
+        self.do_change(&format!("Create function {}", name), |builder| {
+            Box::pin(async move {
+                builder
+                    .apply_operation(CreateFunctionOp::setup(signature).into())
+                    .await?;
+                Ok(())
+            })
+        })
+        .await?;
+
+        Ok(self)
     }
 
     /// Set the implementation for a function (mutates self)

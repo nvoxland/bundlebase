@@ -42,11 +42,11 @@ impl Command for SetConfigCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::set_config_stmt)
+    fn rule() -> Rule {
+        Rule::set_config_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut key = None;
         let mut value = None;
         let mut url_prefix = None;

@@ -30,11 +30,11 @@ impl Command for SetNameCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::set_name_stmt)
+    fn rule() -> Rule {
+        Rule::set_name_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut name = None;
 
         for inner in pair.into_inner() {

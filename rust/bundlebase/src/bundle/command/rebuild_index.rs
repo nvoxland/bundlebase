@@ -31,11 +31,11 @@ impl Command for RebuildIndexCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::rebuild_index_stmt)
+    fn rule() -> Rule {
+        Rule::rebuild_index_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut column = None;
 
         for inner in pair.into_inner() {

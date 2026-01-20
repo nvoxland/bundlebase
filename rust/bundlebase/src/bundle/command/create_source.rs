@@ -93,11 +93,11 @@ impl Command for CreateSourceCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::create_source_stmt)
+    fn rule() -> Rule {
+        Rule::create_source_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut function = None;
         let mut args = HashMap::new();
         let mut pack = None;

@@ -67,11 +67,11 @@ impl Command for JoinCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::join_stmt)
+    fn rule() -> Rule {
+        Rule::join_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut join_type = JoinTypeOption::Inner;
         let mut location = None;
         let mut name = None;

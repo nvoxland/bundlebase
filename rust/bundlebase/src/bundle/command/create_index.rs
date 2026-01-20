@@ -45,11 +45,11 @@ impl Command for CreateIndexCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::create_index_stmt)
+    fn rule() -> Rule {
+        Rule::create_index_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut column = None;
 
         for inner in pair.into_inner() {
