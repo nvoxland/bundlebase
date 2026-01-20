@@ -185,6 +185,9 @@ fn try_parse_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseError> {
                 Rule::verify_data_stmt => {
                     BundleCommand::VerifyData(VerifyDataCommand::from_pest(inner_stmt)?)
                 }
+                Rule::create_view_stmt => {
+                    return Err("CREATE VIEW cannot be parsed from SQL. Use builder.create_view() API instead.".into());
+                }
                 _ => return Err("Unexpected statement type".into()),
             };
             Ok(Some(cmd))

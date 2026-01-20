@@ -3,10 +3,11 @@
 use crate::bundle::command::{Command, CommandContext, Rule};
 use crate::bundle::operation::{AttachBlockOp, DetachBlockOp, SourceInfo};
 use crate::data::ObjectId;
-use crate::source::FetchAction;
+use crate::source::{FetchAction, FetchResults};
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use std::sync::Arc;
 
 /// Command to fetch from sources for a specific pack.
 #[derive(Debug, Clone)]
@@ -24,10 +25,10 @@ impl FetchCommand {
 
 #[async_trait]
 impl Command for FetchCommand {
-    type Output = ();
+    type Output = Vec<FetchResults>;
 
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let pack_name = self.pack.as_deref().unwrap_or("base");
+    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<Vec<FetchResults>, BundlebaseError> {
+        let pack_name = self.pack.as_deref().unwrap_or("base").to_string();
         let pack_id = match self.pack.as_deref() {
             None | Some("base") => ObjectId::BASE_PACK,
             Some(join_name) => *ctx
@@ -42,11 +43,13 @@ impl Command for FetchCommand {
             return Err(format!("No sources defined for pack '{}'", pack_name).into());
         }
 
+        let mut results = Vec::new();
         for source in sources {
-            fetch_from_source(ctx, &source, &pack_id, pack_name).await?;
+            let result = fetch_from_source(ctx, &source, &pack_id, &pack_name).await?;
+            results.push(result);
         }
 
-        Ok(())
+        Ok(results)
     }
 
     fn rule() -> Option<Rule> {
@@ -90,9 +93,9 @@ impl FetchAllCommand {
 
 #[async_trait]
 impl Command for FetchAllCommand {
-    type Output = ();
+    type Output = Vec<FetchResults>;
 
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<Vec<FetchResults>, BundlebaseError> {
         // Collect sources with their pack info to avoid borrow issues
         let sources_with_packs: Vec<_> = ctx
             .bundle()
@@ -108,11 +111,13 @@ impl Command for FetchAllCommand {
             })
             .collect();
 
+        let mut results = Vec::new();
         for (source, pack_id, pack_name) in sources_with_packs {
-            fetch_from_source(ctx, &source, &pack_id, &pack_name).await?;
+            let result = fetch_from_source(ctx, &source, &pack_id, &pack_name).await?;
+            results.push(result);
         }
 
-        Ok(())
+        Ok(results)
     }
 
     fn rule() -> Option<Rule> {
@@ -147,19 +152,24 @@ impl Command for FetchAllCommand {
 /// Helper to fetch from a single source.
 async fn fetch_from_source(
     ctx: &mut CommandContext<'_>,
-    source: &std::sync::Arc<crate::bundle::Source>,
+    source: &Arc<crate::bundle::Source>,
     pack_id: &ObjectId,
     pack_name: &str,
-) -> Result<(), BundlebaseError> {
+) -> Result<FetchResults, BundlebaseError> {
     let registry = ctx.bundle().source_function_registry();
     let source_id = *source.id();
+    let source_function = source.function().to_string();
+    let source_url = source.args().get("url").cloned().unwrap_or_default();
 
     let actions = source
-        .fetch(ctx.builder().data_dir(), ctx.bundle().config(), &registry)
+        .fetch(ctx.data_dir(), ctx.bundle().config(), &registry)
         .await?;
 
+    // Process actions and collect them for the result
+    let mut processed_actions = Vec::new();
+
     for action in actions {
-        match action {
+        match &action {
             FetchAction::Add(data) => {
                 let mut op = AttachBlockOp::setup_for_source(
                     pack_id,
@@ -171,7 +181,7 @@ async fn fetch_from_source(
                 .await?;
                 op.source_info = Some(SourceInfo {
                     id: source_id,
-                    location: data.source_location,
+                    location: data.source_location.clone(),
                     version: op.version.clone(),
                 });
                 ctx.apply_operation(op.into()).await?;
@@ -183,7 +193,7 @@ async fn fetch_from_source(
             } => {
                 // Find and detach the old block
                 let old_location =
-                    find_block_location_by_source(ctx, &source_id, &old_source_location)?;
+                    find_block_location_by_source(ctx, &source_id, old_source_location)?;
                 let detach_op = DetachBlockOp::setup(&old_location, ctx.bundle()).await?;
                 ctx.apply_operation(detach_op.into()).await?;
 
@@ -198,22 +208,28 @@ async fn fetch_from_source(
                 .await?;
                 op.source_info = Some(SourceInfo {
                     id: source_id,
-                    location: data.source_location,
+                    location: data.source_location.clone(),
                     version: op.version.clone(),
                 });
                 ctx.apply_operation(op.into()).await?;
                 info!("Replaced {} in {}", data.attach_location, pack_name);
             }
             FetchAction::Remove { source_location } => {
-                let location = find_block_location_by_source(ctx, &source_id, &source_location)?;
+                let location = find_block_location_by_source(ctx, &source_id, source_location)?;
                 let detach_op = DetachBlockOp::setup(&location, ctx.bundle()).await?;
                 ctx.apply_operation(detach_op.into()).await?;
                 info!("Removed {} from {}", location, pack_name);
             }
         }
+        processed_actions.push(action);
     }
 
-    Ok(())
+    Ok(FetchResults::from_actions(
+        source_function,
+        source_url,
+        pack_name.to_string(),
+        processed_actions,
+    ))
 }
 
 /// Find the current location of a block that was attached from a source.
