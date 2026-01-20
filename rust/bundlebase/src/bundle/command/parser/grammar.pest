@@ -17,10 +17,69 @@ WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = _{ "--" ~ (!"\n" ~ ANY)* ~ "\n" }
 
 // ============================================================================
-// Entry Point
+// Entry Point - Statement Types by Category
 // ============================================================================
+// Statements are organized into semantic groups for easier navigation.
+// When adding a new statement, add it to the appropriate category below.
 
-statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt | create_source_stmt | fetch_stmt | drop_join_stmt | rename_join_stmt | select_stmt | drop_index_stmt | rename_view_stmt | reset_stmt | undo_stmt | commit_stmt | detach_stmt | rebuild_index_stmt | set_config_stmt | replace_stmt | set_name_stmt | set_description_stmt | drop_view_stmt | create_view_stmt | create_index_stmt | drop_column_stmt | rename_column_stmt | verify_data_stmt) ~ EOI }
+statement = { SOI ~ (
+    data_modification_stmt
+    | schema_stmt
+    | source_stmt
+    | index_stmt
+    | transaction_stmt
+    | metadata_stmt
+) ~ EOI }
+
+// Data modification statements - operations that change bundle data content
+data_modification_stmt = {
+    filter_stmt
+    | select_stmt
+    | attach_stmt
+    | detach_stmt
+    | replace_stmt
+}
+
+// Schema modification statements - operations that change bundle structure
+schema_stmt = {
+    join_stmt
+    | drop_join_stmt
+    | rename_join_stmt
+    | drop_column_stmt
+    | rename_column_stmt
+    | create_view_stmt
+    | drop_view_stmt
+    | rename_view_stmt
+}
+
+// Source management statements - operations for data sources
+source_stmt = {
+    create_source_stmt
+    | fetch_stmt
+}
+
+// Index management statements - operations for search indexes
+index_stmt = {
+    create_index_stmt
+    | drop_index_stmt
+    | rebuild_index_stmt
+    | reindex_stmt
+}
+
+// Transaction control statements - operations for version control
+transaction_stmt = {
+    commit_stmt
+    | reset_stmt
+    | undo_stmt
+    | verify_data_stmt
+}
+
+// Metadata statements - operations for bundle metadata
+metadata_stmt = {
+    set_name_stmt
+    | set_description_stmt
+    | set_config_stmt
+}
 
 // ============================================================================
 // FILTER Statement

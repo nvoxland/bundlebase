@@ -112,11 +112,17 @@ fn try_parse_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseError> {
                 .next()
                 .ok_or_else(|| BundlebaseError::from("Parser produced empty result"))?;
 
-            // Get the inner statement type (filter_stmt, attach_stmt, etc.)
-            let inner_stmt = statement
+            // Get the category rule (data_modification_stmt, schema_stmt, etc.)
+            let category_stmt = statement
                 .into_inner()
                 .next()
                 .ok_or_else(|| BundlebaseError::from("Parser produced empty inner statement"))?;
+
+            // Get the actual statement type from the category
+            let inner_stmt = category_stmt
+                .into_inner()
+                .next()
+                .ok_or_else(|| BundlebaseError::from("Parser produced empty statement in category"))?;
 
             let cmd = match inner_stmt.as_rule() {
                 Rule::filter_stmt => BundleCommand::Filter(FilterCommand::from_pest(inner_stmt)?),
