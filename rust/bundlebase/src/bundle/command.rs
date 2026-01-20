@@ -62,9 +62,7 @@ pub use parser::Rule;
 mod attach;
 mod commit;
 mod create_index;
-mod create_function;
 mod create_source;
-mod create_view;
 mod detach_block;
 mod drop_column;
 mod drop_index;
@@ -90,10 +88,8 @@ mod verify_data;
 // Re-export command structs
 pub use attach::AttachCommand;
 pub use commit::CommitCommand;
-pub use create_function::CreateFunctionCommand;
 pub use create_index::CreateIndexCommand;
 pub use create_source::CreateSourceCommand;
-pub use create_view::CreateViewCommand;
 pub use detach_block::DetachBlockCommand;
 pub use drop_column::DropColumnCommand;
 pub use drop_index::DropIndexCommand;
@@ -250,13 +246,11 @@ impl<'a> CommandContext<'a> {
 /// Commands encapsulate all the logic needed to perform a specific operation
 /// on a bundle, including parsing and serialization for round-trip support.
 ///
-/// # Parsing Methods
+/// # Required Methods
 ///
-/// Commands that can be parsed from text implement:
+/// All commands must implement:
 /// - `rule()` - Returns the pest Rule that matches this command
-/// - `from_pest()` - Parses from a pest Pair that matched the rule
-///
-/// All commands implement:
+/// - `from_statement()` - Parses from a pest Pair that matched the rule
 /// - `to_statement()` - Serializes back to command string (round-trip support)
 #[async_trait]
 pub trait Command: Send + Sync {
@@ -270,27 +264,17 @@ pub trait Command: Send + Sync {
     /// Execute the command using the provided context
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<Self::Output, BundlebaseError>;
 
-    /// The pest rule that matches this command (if applicable).
+    /// The pest rule that matches this command.
     ///
-    /// Returns `None` by default. Commands that can be parsed from pest grammar
-    /// override this to return the appropriate Rule variant.
-    fn rule() -> Option<Rule>
+    /// Every command must have an associated grammar rule for SQL parsing.
+    fn rule() -> Rule
     where
-        Self: Sized,
-    {
-        None
-    }
+        Self: Sized;
 
     /// Parse from a pest Pair that matched `Self::rule()`.
-    ///
-    /// Returns an error by default. Commands that can be parsed from pest grammar
-    /// override this to implement parsing logic.
-    fn from_pest(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError>
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError>
     where
-        Self: Sized,
-    {
-        Err("Parsing not implemented for this command".into())
-    }
+        Self: Sized;
 
     /// Serialize this command back to a statement string.
     ///
@@ -339,9 +323,6 @@ pub enum BundleCommand {
 
     /// Join with another data source
     Join(JoinCommand),
-
-    /// Create a custom function
-    CreateFunction(CreateFunctionCommand),
 
     /// Create an index on a column
     CreateIndex(CreateIndexCommand),
@@ -450,10 +431,6 @@ impl BundleCommand {
                 Ok(CommandOutput::Unit)
             }
             BundleCommand::Join(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Unit)
-            }
-            BundleCommand::CreateFunction(cmd) => {
                 builder.execute_command(cmd).await?;
                 Ok(CommandOutput::Unit)
             }

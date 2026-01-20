@@ -36,11 +36,11 @@ impl Command for ResetCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::reset_stmt)
+    fn rule() -> Rule {
+        Rule::reset_stmt
     }
 
-    fn from_pest(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         Ok(ResetCommand::new())
     }
 

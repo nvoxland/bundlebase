@@ -43,11 +43,11 @@ impl Command for SelectCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::select_stmt)
+    fn rule() -> Rule {
+        Rule::select_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         // Capture the full SELECT statement as raw SQL
         let raw = pair.as_str().to_string();
         Ok(SelectCommand::new(raw, vec![]))

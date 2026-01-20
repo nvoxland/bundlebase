@@ -44,11 +44,11 @@ impl Command for UndoCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::undo_stmt)
+    fn rule() -> Rule {
+        Rule::undo_stmt
     }
 
-    fn from_pest(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         Ok(UndoCommand::new())
     }
 

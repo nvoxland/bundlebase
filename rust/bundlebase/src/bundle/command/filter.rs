@@ -42,11 +42,11 @@ impl Command for FilterCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::filter_stmt)
+    fn rule() -> Rule {
+        Rule::filter_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut where_clause = None;
 
         for inner_pair in pair.into_inner() {

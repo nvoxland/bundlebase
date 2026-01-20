@@ -33,11 +33,11 @@ impl Command for DropColumnCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::drop_column_stmt)
+    fn rule() -> Rule {
+        Rule::drop_column_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut name = None;
 
         for inner in pair.into_inner() {

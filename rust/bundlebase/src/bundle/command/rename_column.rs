@@ -36,11 +36,11 @@ impl Command for RenameColumnCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::rename_column_stmt)
+    fn rule() -> Rule {
+        Rule::rename_column_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut old_name = None;
         let mut new_name = None;
 

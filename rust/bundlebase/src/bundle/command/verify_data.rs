@@ -125,11 +125,11 @@ impl Command for VerifyDataCommand {
         Ok(verification_results)
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::verify_data_stmt)
+    fn rule() -> Rule {
+        Rule::verify_data_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         // Check if UPDATE keyword is present
         let raw = pair.as_str().to_uppercase();
         let update_versions = raw.contains("UPDATE");

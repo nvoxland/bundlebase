@@ -23,11 +23,11 @@ impl Command for ReindexCommand {
         ctx.reindex_internal().await
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::reindex_stmt)
+    fn rule() -> Rule {
+        Rule::reindex_stmt
     }
 
-    fn from_pest(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         // REINDEX has no parameters
         Ok(ReindexCommand::new())
     }

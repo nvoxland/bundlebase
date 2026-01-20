@@ -17,33 +17,6 @@ use pest_derive::Parser;
 #[grammar = "bundle/command/parser/grammar.pest"]
 pub struct BundlebaseParser;
 
-/// Check if input looks like custom bundlebase syntax.
-///
-/// Used to determine whether to report pest parse errors or fall back to sqlparser.
-pub fn is_likely_custom_syntax(sql: &str) -> bool {
-    let upper = sql.trim().to_uppercase();
-    upper.starts_with("FILTER")
-        || upper.starts_with("ATTACH")
-        || upper.starts_with("REINDEX")
-        || upper.starts_with("JOIN")
-        || upper.starts_with("LEFT JOIN")
-        || upper.starts_with("RIGHT JOIN")
-        || upper.starts_with("FULL JOIN")
-        || upper.starts_with("INNER JOIN")
-        || upper.starts_with("CREATE SOURCE")
-        || upper.starts_with("CREATE VIEW")
-        || upper.starts_with("FETCH")
-        || upper.starts_with("DROP JOIN")
-        || upper.starts_with("RENAME JOIN")
-        || upper.starts_with("DROP INDEX")
-        || upper.starts_with("RENAME VIEW")
-        || upper.starts_with("SELECT")
-        || upper.starts_with("SET NAME")
-        || upper.starts_with("SET DESCRIPTION")
-        || upper.starts_with("SET CONFIG")
-        || upper.starts_with("VERIFY")
-}
-
 /// Format a pest error into a user-friendly BundlebaseError.
 pub fn format_pest_error(error: pest::error::Error<Rule>, sql: &str) -> BundlebaseError {
     let (line, col) = match &error.line_col {

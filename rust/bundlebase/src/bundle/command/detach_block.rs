@@ -34,11 +34,11 @@ impl Command for DetachBlockCommand {
         Ok(())
     }
 
-    fn rule() -> Option<Rule> {
-        Some(Rule::detach_stmt)
+    fn rule() -> Rule {
+        Rule::detach_stmt
     }
 
-    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut location = None;
 
         for inner in pair.into_inner() {
