@@ -485,7 +485,7 @@ class TestSyncCreateView:
             # Most recent commit should only have CreateViewOp, not SelectOp
             assert len(history) == 2
             assert history[-1].message == "Added view"
-            assert "Create view 'limited'" in history[-1].changes[0].description
+            assert "CREATE VIEW limited" in history[-1].changes[0].description
 
 
 class TestSyncStatus:
@@ -515,7 +515,7 @@ class TestSyncStatus:
         change = status.changes[0]
         assert isinstance(change.id, str)
         assert len(change.id) > 0
-        assert change.description == "Set name to Test Bundle"
+        assert change.description == "SET NAME 'Test Bundle'"
         assert change.operation_count == 1
 
     def test_sync_status_multiple_operations(self):
@@ -527,8 +527,8 @@ class TestSyncStatus:
         # Should have 2 changes: set_name + set_description
         status = c.status()
         assert len(status.changes) == 2
-        assert status.changes[0].description == "Set name to Test Bundle"
-        assert status.changes[1].description == "Set description to A test description"
+        assert status.changes[0].description == "SET NAME 'Test Bundle'"
+        assert status.changes[1].description == "SET DESCRIPTION 'A test description'"
 
     def test_sync_status_chained_operations(self):
         """Test status() with chained operations."""
