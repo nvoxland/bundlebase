@@ -31,12 +31,17 @@ pub fn is_likely_custom_syntax(sql: &str) -> bool {
         || upper.starts_with("FULL JOIN")
         || upper.starts_with("INNER JOIN")
         || upper.starts_with("CREATE SOURCE")
+        || upper.starts_with("CREATE VIEW")
         || upper.starts_with("FETCH")
         || upper.starts_with("DROP JOIN")
         || upper.starts_with("RENAME JOIN")
         || upper.starts_with("DROP INDEX")
         || upper.starts_with("RENAME VIEW")
         || upper.starts_with("SELECT")
+        || upper.starts_with("SET NAME")
+        || upper.starts_with("SET DESCRIPTION")
+        || upper.starts_with("SET CONFIG")
+        || upper.starts_with("VERIFY")
 }
 
 /// Format a pest error into a user-friendly BundlebaseError.

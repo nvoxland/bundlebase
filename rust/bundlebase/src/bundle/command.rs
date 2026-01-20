@@ -1,5 +1,54 @@
+//! Command system for bundlebase operations.
+//!
+//! This module provides the command pattern implementation for bundlebase operations.
+//! Commands encapsulate operation logic and can be executed via SQL parsing or direct API calls.
+//!
+//! # Command Execution Paths
+//!
+//! Commands can be executed through different paths depending on their characteristics:
+//!
+//! ## 1. `execute_command()` - For tracked unit commands
+//!
+//! Used for commands where `Output = ()` and changes should be tracked in status.
+//! Wraps execution in `do_change()` for change tracking.
+//!
+//! ```ignore
+//! builder.execute_command(AttachCommand::new("data.parquet", None)).await?;
+//! ```
+//!
+//! ## 2. `run_command()` - For commands returning values
+//!
+//! Used for commands with `Output != ()`. Does not wrap in `do_change()`.
+//! Operations within the command are still tracked at the operation level.
+//!
+//! ```ignore
+//! let results: Vec<FetchResults> = builder.run_command(FetchCommand::new(None)).await?;
+//! let verification = builder.run_command(VerifyDataCommand::new(false)).await?;
+//! ```
+//!
+//! ## 3. Direct builder methods - For complex operations
+//!
+//! Some operations like `commit()`, `create_view()` have dedicated builder methods
+//! that may perform additional logic beyond a single command.
+//!
+//! # Adding New Commands
+//!
+//! When adding a new command:
+//!
+//! 1. Create command struct in a new file under `command/`
+//! 2. Implement the `Command` trait with appropriate `Output` type
+//! 3. Add `mod` + `pub use` in this file
+//! 4. Add variant to `BundleCommand` enum
+//! 5. Add match arm in `BundleCommand::execute()`
+//! 6. (If parseable) Add grammar rule in `parser/grammar.pest`
+//! 7. (If parseable) Add match arm in `parser.rs::try_parse_pest()`
+//!
+//! Use `execute_command()` path if `Output = ()` and changes should be tracked.
+//! Use `run_command()` path if the command returns meaningful results.
+
 use crate::bundle::operation::AnyOperation;
-use crate::bundle::Bundle;
+use crate::bundle::{Bundle, VerificationResults};
+use crate::source::FetchResults;
 use crate::{BundleBuilder, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::ScalarValue;
@@ -67,10 +116,56 @@ pub use set_name::SetNameCommand;
 pub use undo::UndoCommand;
 pub use verify_data::VerifyDataCommand;
 
+/// Output from executing a BundleCommand.
+///
+/// Most commands return Unit, but some commands return specific results
+/// that may be useful to callers.
+#[derive(Debug)]
+pub enum CommandOutput {
+    /// Command completed with no specific output
+    Unit,
+    /// Verification results from VERIFY DATA
+    Verification(VerificationResults),
+    /// Fetch results from FETCH / FETCH ALL
+    Fetch(Vec<FetchResults>),
+}
+
+impl CommandOutput {
+    /// Returns true if this is a Unit output
+    pub fn is_unit(&self) -> bool {
+        matches!(self, CommandOutput::Unit)
+    }
+
+    /// Get verification results if this is a Verification output
+    pub fn into_verification(self) -> Option<VerificationResults> {
+        match self {
+            CommandOutput::Verification(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// Get fetch results if this is a Fetch output
+    pub fn into_fetch(self) -> Option<Vec<FetchResults>> {
+        match self {
+            CommandOutput::Fetch(r) => Some(r),
+            _ => None,
+        }
+    }
+}
+
 /// Context provided to commands during execution.
 ///
 /// This provides a controlled interface for commands to interact with the
 /// BundleBuilder without exposing its internals directly.
+///
+/// # Preferred Access Patterns
+///
+/// Commands should use specific methods when available:
+/// - `bundle()` - For read-only access to bundle state
+/// - `data_dir()` - For the data directory (instead of `builder().data_dir()`)
+/// - `apply_operation()` - To apply operations
+///
+/// Only use `builder()` when required by operation `setup()` methods.
 pub struct CommandContext<'a> {
     pub(crate) builder: &'a mut BundleBuilder,
 }
@@ -96,12 +191,25 @@ impl<'a> CommandContext<'a> {
         &mut self.builder.bundle
     }
 
-    /// Get a reference to the builder (for methods that need full builder access)
+    /// Get the data directory for the bundle.
+    ///
+    /// Use this instead of `builder().data_dir()`.
+    pub fn data_dir(&self) -> &dyn crate::io::IOReadWriteDir {
+        self.builder.data_dir()
+    }
+
+    /// Get a reference to the builder.
+    ///
+    /// This should only be used when required by operation `setup()` methods.
+    /// For other access, prefer specific methods like `bundle()` or `data_dir()`.
     pub fn builder(&self) -> &BundleBuilder {
         self.builder
     }
 
-    /// Get a mutable reference to the builder (for methods that need full builder access)
+    /// Get a mutable reference to the builder.
+    ///
+    /// This should only be used when required by methods that need mutable builder access.
+    /// For most command implementations, use `apply_operation()` instead.
     pub fn builder_mut(&mut self) -> &mut BundleBuilder {
         self.builder
     }
@@ -301,149 +409,168 @@ impl BundleCommand {
     ///
     /// # Returns
     ///
-    /// * `Ok(())` - Command executed successfully
+    /// * `Ok(CommandOutput)` - Command executed successfully with optional output
     /// * `Err(BundlebaseError)` - Execution failed
     ///
     /// # Examples
     ///
     /// ```ignore
     /// let cmd = BundleCommand::Attach(AttachCommand::new("data.parquet", None));
-    /// cmd.execute(&mut builder).await?;
+    /// let output = cmd.execute(&mut builder).await?;
     /// ```
-    pub async fn execute(self, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    pub async fn execute(self, builder: &mut BundleBuilder) -> Result<CommandOutput, BundlebaseError> {
         match self {
             // Standard commands delegate to execute_command
             BundleCommand::Attach(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::DetachBlock(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::Filter(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::DropColumn(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::RenameColumn(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::RenameView(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::Select(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::Join(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::CreateFunction(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::CreateIndex(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::DropIndex(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::DropView(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::DropJoin(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::RenameJoin(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::RebuildIndex(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::Reindex(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::ReplaceBlock(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::SetName(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::SetDescription(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::SetConfig(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::CreateSource(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::Fetch(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(())
+                let results = builder.run_tracked_command(cmd).await?;
+                Ok(CommandOutput::Fetch(results))
             }
             BundleCommand::FetchAll(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(())
+                let results = builder.run_tracked_command(cmd).await?;
+                Ok(CommandOutput::Fetch(results))
             }
 
             // Special commands bypass execute_command
             BundleCommand::Commit(cmd) => {
                 builder.commit(&cmd.message).await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::Reset(_) => {
                 builder.reset().await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::Undo(_) => {
                 builder.undo().await?;
-                Ok(())
+                Ok(CommandOutput::Unit)
             }
             BundleCommand::VerifyData(cmd) => {
-                builder.run_command(cmd).await?;
-                Ok(())
+                let results = builder.run_command(cmd).await?;
+                Ok(CommandOutput::Verification(results))
             }
         }
     }
 
     /// Add parameters to this command for parameterized queries.
     ///
-    /// This method is used to bind parameters ($1, $2, etc.) in SQL statements if applicable.
+    /// This method is used to bind parameters ($1, $2, etc.) in SQL statements.
+    ///
+    /// # Supported Commands
+    ///
+    /// Only the following commands support parameters:
+    /// - `Filter` - Parameters in WHERE clause expressions
+    /// - `Select` - Parameters in full SQL queries
+    ///
+    /// For other commands, this method returns the command unchanged.
     ///
     /// # Arguments
     ///
-    /// * `params` - Vector of ScalarValue parameters
+    /// * `params` - Vector of ScalarValue parameters to bind
     ///
     /// # Returns
     ///
-    /// * `Self` - The command with parameters added
+    /// * `Self` - The command with parameters added (or unchanged if unsupported)
     ///
     /// # Examples
     ///
     /// ```ignore
+    /// // Filter with parameter
     /// let cmd = BundleCommand::Filter(FilterCommand::new("salary > $1", vec![]));
     /// let cmd_with_params = cmd.with_params(vec![
     ///     ScalarValue::Float64(Some(50000.0))
+    /// ]);
+    ///
+    /// // Select with parameters
+    /// let cmd = BundleCommand::Select(SelectCommand::new(
+    ///     "SELECT * FROM bundle WHERE id = $1 AND name = $2",
+    ///     vec![]
+    /// ));
+    /// let cmd_with_params = cmd.with_params(vec![
+    ///     ScalarValue::Int64(Some(42)),
+    ///     ScalarValue::Utf8(Some("test".to_string())),
     /// ]);
     /// ```
     pub fn with_params(self, params: Vec<ScalarValue>) -> Self {
@@ -456,7 +583,8 @@ impl BundleCommand {
                 cmd.params = params;
                 BundleCommand::Select(cmd)
             }
-            other => other, // Other commands don't support parameters
+            // Other commands don't support parameters - return unchanged
+            other => other,
         }
     }
 }

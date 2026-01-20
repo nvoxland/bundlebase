@@ -62,7 +62,7 @@ impl Command for CreateSourceCommand {
 
         let registry = ctx.bundle().source_function_registry();
         let actions = source
-            .fetch(ctx.builder().data_dir(), ctx.bundle().config(), &registry)
+            .fetch(ctx.data_dir(), ctx.bundle().config(), &registry)
             .await?;
 
         // Process fetch actions

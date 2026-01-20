@@ -1,6 +1,6 @@
 use crate::state::State;
 use bundlebase::{
-    bundle::{parse_command, BundleCommand, BundleFacade},
+    bundle::{parse_command, BundleCommand, BundleFacade, CommandOutput},
     BundlebaseError,
 };
 use std::sync::Arc;
@@ -82,8 +82,45 @@ pub async fn execute(cmd: Command, state: &Arc<State>) -> Result<ExecuteResult, 
     match cmd {
         // SQL operations - delegate to BundleCommand
         Command::Sql(sql_cmd) => {
-            sql_cmd.execute(&mut state.bundle.write()).await?;
-            Ok(ExecuteResult::None)
+            let output = sql_cmd.execute(&mut state.bundle.write()).await?;
+            match output {
+                CommandOutput::Unit => Ok(ExecuteResult::None),
+                CommandOutput::Verification(results) => {
+                    if results.all_passed {
+                        Ok(ExecuteResult::Message(format!(
+                            "All {} files verified successfully",
+                            results.passed_count
+                        )))
+                    } else {
+                        let mut msg = format!(
+                            "Verification: {} passed, {} failed\n",
+                            results.passed_count, results.failed_count
+                        );
+                        for file in results.files.iter().filter(|f| !f.passed) {
+                            msg.push_str(&format!("  FAILED: {}", file.location));
+                            if let Some(ref err) = file.error {
+                                msg.push_str(&format!(" ({})", err));
+                            }
+                            msg.push('\n');
+                        }
+                        Ok(ExecuteResult::Message(msg))
+                    }
+                }
+                CommandOutput::Fetch(results) => {
+                    if results.is_empty() {
+                        Ok(ExecuteResult::Message("No sources to fetch from".to_string()))
+                    } else {
+                        let summary: Vec<String> = results
+                            .iter()
+                            .map(|r| {
+                                let changes = r.added.len() + r.replaced.len() + r.removed.len();
+                                format!("{}: {} changes", r.pack, changes)
+                            })
+                            .collect();
+                        Ok(ExecuteResult::Message(format!("Fetched: {}", summary.join(", "))))
+                    }
+                }
+            }
         }
 
         // REPL-only commands

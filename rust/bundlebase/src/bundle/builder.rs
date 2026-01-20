@@ -1,13 +1,13 @@
-use crate::bundle::command::{Command, CommandContext};
+use crate::bundle::command::{Command, CommandContext, FetchAllCommand, FetchCommand};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
-use crate::bundle::operation::{AnyOperation, AttachBlockOp, SelectOp, SourceInfo};
+use crate::bundle::operation::{AnyOperation, SelectOp};
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
-use crate::bundle::{sql, Bundle, Source};
+use crate::bundle::{sql, Bundle};
 use super::DataBlock;
 use crate::data::{ObjectId, VersionedBlockId};
-use crate::source::{FetchAction, FetchResults};
+use crate::source::FetchResults;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::{IndexDefinition, IndexType};
@@ -450,8 +450,11 @@ impl BundleBuilder {
 
     /// Execute a command that can return a value without wrapping in do_change.
     ///
-    /// This is useful for commands like reset, undo, fetch, and verify_data
-    /// that don't represent trackable changes or need to return results.
+    /// This is useful for commands like reset and undo that don't represent
+    /// trackable changes.
+    ///
+    /// **Note**: Commands that call `apply_operation` should use `run_tracked_command`
+    /// instead, as `apply_operation` requires an active change context.
     ///
     /// # Type Parameters
     /// * `C` - The command type
@@ -468,6 +471,70 @@ impl BundleBuilder {
     ) -> Result<C::Output, BundlebaseError> {
         let mut ctx = CommandContext::new(self);
         Box::new(cmd).execute(&mut ctx).await
+    }
+
+    /// Execute a command that returns a value while tracking changes.
+    ///
+    /// This combines the change tracking of `execute_command` with the ability
+    /// to return a value like `run_command`. Use this for commands that:
+    /// - Call `apply_operation` (which requires an active change context)
+    /// - Need to return meaningful results (like fetch results)
+    ///
+    /// # Type Parameters
+    /// * `C` - The command type
+    ///
+    /// # Arguments
+    /// * `cmd` - The command to execute
+    ///
+    /// # Returns
+    /// * The command's output on success
+    /// * `Err(BundlebaseError)` - Execution failed
+    pub async fn run_tracked_command<C: Command + 'static>(
+        &mut self,
+        cmd: C,
+    ) -> Result<C::Output, BundlebaseError> {
+        use crate::bundle::operation::BundleChange;
+
+        let description = cmd.to_statement();
+
+        // Check for nested changes
+        let is_nested = match &self.in_progress_change {
+            Some(in_progress) => {
+                log::debug!(
+                    "Change {} already in progress, not going to separately track {}",
+                    in_progress.description, description
+                );
+                true
+            }
+            None => {
+                let change = BundleChange::new(&description);
+                self.in_progress_change = Some(change);
+                false
+            }
+        };
+
+        // Execute the command
+        let mut ctx = CommandContext::new(self);
+        let result = Box::new(cmd).execute(&mut ctx).await;
+
+        // Only finalize the change if we created it (not nested)
+        match &result {
+            Ok(_) => {
+                if !is_nested {
+                    if let Some(change) = self.in_progress_change.take() {
+                        self.status.changes.push(change);
+                    }
+                }
+            }
+            Err(_) => {
+                if !is_nested {
+                    // On failure, discard the in-progress change
+                    self.in_progress_change.take();
+                }
+            }
+        }
+
+        result
     }
 
     /// Attach a data block to the bundle.
@@ -600,28 +667,7 @@ impl BundleBuilder {
     /// # }
     /// ```
     pub async fn fetch(&mut self, pack: Option<&str>) -> Result<Vec<FetchResults>, BundlebaseError> {
-        let pack_name = pack.unwrap_or("base").to_string();
-        let pack_id = match pack {
-            None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *self
-                .bundle
-                .pack_by_name(join_name)
-                .ok_or(format!("Unknown join '{}'", join_name))?
-                .id(),
-        };
-
-        let sources = self.bundle.get_sources_for_pack(&pack_id);
-        if sources.is_empty() {
-            return Err(format!("No sources defined for pack '{}'", pack.unwrap_or("base")).into());
-        }
-
-        let mut results = Vec::new();
-        for source in sources {
-            let result = self.fetch_source(&source, &pack_name).await?;
-            results.push(result);
-        }
-
-        Ok(results)
+        self.run_tracked_command(FetchCommand::new(pack.map(|s| s.to_string()))).await
     }
 
     /// Fetch from all defined sources - discover and attach new files.
@@ -652,197 +698,7 @@ impl BundleBuilder {
     /// # }
     /// ```
     pub async fn fetch_all(&mut self) -> Result<Vec<FetchResults>, BundlebaseError> {
-        let mut results = Vec::new();
-
-        // Collect sources with their pack names to avoid borrow issues
-        let sources_with_packs: Vec<_> = self
-            .bundle
-            .sources()
-            .values()
-            .map(|source| {
-                let pack_name = self.bundle.pack_name(source.pack()).unwrap_or("base".to_string());
-                (source.clone(), pack_name)
-            })
-            .collect();
-
-        for (source, pack_name) in sources_with_packs {
-            let result = self.fetch_source(&source, &pack_name).await?;
-            results.push(result);
-        }
-
-        Ok(results)
-    }
-
-    /// Internal helper to fetch from a single source.
-    async fn fetch_source(
-        &mut self,
-        source: &Arc<Source>,
-        pack_name: &str,
-    ) -> Result<FetchResults, BundlebaseError> {
-        let registry = self.bundle.source_function_registry();
-        let pack_id = *source.pack();
-        let source_id = *source.id();
-        let source_function = source.function().to_string();
-        let source_url = source.args().get("url").cloned().unwrap_or_default();
-
-        // Get fetch actions from the source function
-        let actions = source
-            .fetch(
-                self.data_dir(),
-                self.bundle.config(),
-                &registry,
-            )
-            .await?;
-
-        // Process actions and collect them for the result
-        let mut processed_actions = Vec::new();
-
-        for action in actions {
-            match &action {
-                FetchAction::Add(data) => {
-                    let attach_location = data.attach_location.clone();
-                    let source_location = data.source_location.clone();
-                    let source_url_for_op = data.source_url.clone();
-                    let hash = data.hash.clone();
-
-                    self.do_change(
-                        &format!("Fetch: attach {}", source_location),
-                        |builder| {
-                            let attach_location = attach_location.clone();
-                            let source_location = source_location.clone();
-                            let source_url_for_op = source_url_for_op.clone();
-                            let hash = hash.clone();
-
-                            Box::pin(async move {
-                                // Use setup_for_source to read version from source_url
-                                let mut op = AttachBlockOp::setup_for_source(
-                                    &pack_id,
-                                    &attach_location,
-                                    &source_url_for_op,
-                                    &hash,
-                                    builder,
-                                )
-                                .await?;
-                                // Create SourceInfo with the source version from the operation
-                                op.source_info = Some(SourceInfo {
-                                    id: source_id,
-                                    location: source_location,
-                                    version: op.version.clone(),
-                                });
-                                builder.apply_operation(op.into()).await?;
-                                Ok(())
-                            })
-                        },
-                    )
-                    .await?;
-                }
-                FetchAction::Replace {
-                    old_source_location,
-                    data,
-                } => {
-                    // Find the old block's location and detach it
-                    let old_location = self.find_block_location_by_source(
-                        &source_id,
-                        old_source_location,
-                    )?;
-                    self.detach_block(&old_location).await?;
-
-                    // Attach the new block
-                    let attach_location = data.attach_location.clone();
-                    let source_location = data.source_location.clone();
-                    let source_url_for_op = data.source_url.clone();
-                    let hash = data.hash.clone();
-
-                    self.do_change(
-                        &format!("Fetch: replace {}", source_location),
-                        |builder| {
-                            let attach_location = attach_location.clone();
-                            let source_location = source_location.clone();
-                            let source_url_for_op = source_url_for_op.clone();
-                            let hash = hash.clone();
-
-                            Box::pin(async move {
-                                let mut op = AttachBlockOp::setup_for_source(
-                                    &pack_id,
-                                    &attach_location,
-                                    &source_url_for_op,
-                                    &hash,
-                                    builder,
-                                )
-                                .await?;
-                                // Create SourceInfo with the source version from the operation
-                                op.source_info = Some(SourceInfo {
-                                    id: source_id,
-                                    location: source_location,
-                                    version: op.version.clone(),
-                                });
-                                builder.apply_operation(op.into()).await?;
-                                Ok(())
-                            })
-                        },
-                    )
-                    .await?;
-                }
-                FetchAction::Remove { source_location } => {
-                    // Find the block's location and detach it
-                    let location =
-                        self.find_block_location_by_source(&source_id, source_location)?;
-                    self.detach_block(&location).await?;
-                }
-            }
-            processed_actions.push(action);
-        }
-
-        Ok(FetchResults::from_actions(
-            source_function,
-            source_url,
-            pack_name.to_string(),
-            processed_actions,
-        ))
-    }
-
-    /// Find the current location of a block that was attached from a source with the given source_location.
-    ///
-    /// This searches through both AttachBlockOp and ReplaceBlockOp operations to find the
-    /// current location of a block. If the block was replaced, returns the new location.
-    fn find_block_location_by_source(
-        &self,
-        source_id: &ObjectId,
-        source_location: &str,
-    ) -> Result<String, BundlebaseError> {
-        // First, check ReplaceBlockOp operations (in reverse order to get most recent)
-        // to see if the block was replaced and has updated source_info
-        for op in self.bundle.operations.iter().rev() {
-            if let AnyOperation::ReplaceBlock(replace) = op {
-                if let Some(ref info) = replace.source_info {
-                    if &info.id == source_id && info.location == source_location {
-                        return Ok(replace.new_location.clone());
-                    }
-                }
-            }
-        }
-
-        // If not found in ReplaceBlockOp, check AttachBlockOp
-        self.bundle
-            .operations
-            .iter()
-            .find_map(|op| {
-                if let AnyOperation::AttachBlock(attach) = op {
-                    if let Some(ref info) = attach.source_info {
-                        if &info.id == source_id && info.location == source_location {
-                            return Some(attach.location.clone());
-                        }
-                    }
-                }
-                None
-            })
-            .ok_or_else(|| {
-                format!(
-                    "No block found for source_location '{}'",
-                    source_location
-                )
-                .into()
-            })
+        self.run_tracked_command(FetchAllCommand::new()).await
     }
 
     /// Attach a view from another BundleBuilder
