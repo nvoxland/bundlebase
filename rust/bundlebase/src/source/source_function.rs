@@ -228,6 +228,22 @@ impl FetchResults {
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.replaced.is_empty() && self.removed.is_empty()
     }
+
+    /// Format a single result for display.
+    pub fn summary(&self) -> String {
+        let changes = self.added.len() + self.replaced.len() + self.removed.len();
+        format!("{}: {} changes", self.pack, changes)
+    }
+}
+
+/// Format a slice of FetchResults for display.
+pub fn format_fetch_summary(results: &[FetchResults]) -> String {
+    if results.is_empty() {
+        "No sources to fetch from".to_string()
+    } else {
+        let summary: Vec<String> = results.iter().map(|r| r.summary()).collect();
+        format!("Fetched: {}", summary.join(", "))
+    }
 }
 
 /// Trait for source function implementations.

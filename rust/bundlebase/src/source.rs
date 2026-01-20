@@ -9,7 +9,7 @@ mod web_scrape;
 pub use postgres::PostgresFunction;
 pub use remote_dir::RemoteDirFunction;
 pub use source_function::{
-    AttachedFileInfo, FetchAction, FetchedBlock, FetchResults, MaterializedData, SourceFunction,
-    SourceFunctionRegistry, SyncMode,
+    format_fetch_summary, AttachedFileInfo, FetchAction, FetchedBlock, FetchResults,
+    MaterializedData, SourceFunction, SourceFunctionRegistry, SyncMode,
 };
 pub use web_scrape::WebScrapeFunction;

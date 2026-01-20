@@ -1,6 +1,7 @@
 use crate::state::State;
 use bundlebase::{
     bundle::{parse_command, BundleCommand, BundleFacade, CommandOutput},
+    source::format_fetch_summary,
     BundlebaseError,
 };
 use std::sync::Arc;
@@ -39,33 +40,25 @@ pub fn parse(input: &str) -> Result<Command, String> {
 
     let upper = input.to_uppercase();
 
-    // Handle REPL-specific commands (not SQL)
-    if upper == "HELP" {
-        return Ok(Command::Help);
-    } else if upper == "EXIT" || upper == "QUIT" {
-        return Ok(Command::Exit);
-    } else if upper == "CLEAR" {
-        return Ok(Command::Clear);
-    } else if upper == "SCHEMA" {
-        return Ok(Command::Schema);
-    } else if upper == "COUNT" {
-        return Ok(Command::Count);
-    } else if upper == "EXPLAIN" {
-        return Ok(Command::Explain);
-    } else if upper == "HISTORY" {
-        return Ok(Command::History);
-    } else if upper == "STATUS" {
-        return Ok(Command::Status);
-    } else if upper.starts_with("SHOW") {
-        // Parse: SHOW [LIMIT <n>]
-        let limit = if let Some(limit_str) = upper
+    // Handle single-word REPL commands
+    match upper.as_str() {
+        "HELP" => return Ok(Command::Help),
+        "EXIT" | "QUIT" => return Ok(Command::Exit),
+        "CLEAR" => return Ok(Command::Clear),
+        "SCHEMA" => return Ok(Command::Schema),
+        "COUNT" => return Ok(Command::Count),
+        "EXPLAIN" => return Ok(Command::Explain),
+        "HISTORY" => return Ok(Command::History),
+        "STATUS" => return Ok(Command::Status),
+        _ => {}
+    }
+
+    // Handle SHOW with optional LIMIT
+    if upper.starts_with("SHOW") {
+        let limit = upper
             .strip_prefix("SHOW")
             .and_then(|s| s.trim().strip_prefix("LIMIT"))
-        {
-            limit_str.trim().parse().ok()
-        } else {
-            None
-        };
+            .and_then(|s| s.trim().parse().ok());
         return Ok(Command::Show { limit });
     }
 
@@ -86,39 +79,10 @@ pub async fn execute(cmd: Command, state: &Arc<State>) -> Result<ExecuteResult, 
             match output {
                 CommandOutput::Unit => Ok(ExecuteResult::None),
                 CommandOutput::Verification(results) => {
-                    if results.all_passed {
-                        Ok(ExecuteResult::Message(format!(
-                            "All {} files verified successfully",
-                            results.passed_count
-                        )))
-                    } else {
-                        let mut msg = format!(
-                            "Verification: {} passed, {} failed\n",
-                            results.passed_count, results.failed_count
-                        );
-                        for file in results.files.iter().filter(|f| !f.passed) {
-                            msg.push_str(&format!("  FAILED: {}", file.location));
-                            if let Some(ref err) = file.error {
-                                msg.push_str(&format!(" ({})", err));
-                            }
-                            msg.push('\n');
-                        }
-                        Ok(ExecuteResult::Message(msg))
-                    }
+                    Ok(ExecuteResult::Message(results.to_string()))
                 }
                 CommandOutput::Fetch(results) => {
-                    if results.is_empty() {
-                        Ok(ExecuteResult::Message("No sources to fetch from".to_string()))
-                    } else {
-                        let summary: Vec<String> = results
-                            .iter()
-                            .map(|r| {
-                                let changes = r.added.len() + r.replaced.len() + r.removed.len();
-                                format!("{}: {} changes", r.pack, changes)
-                            })
-                            .collect();
-                        Ok(ExecuteResult::Message(format!("Fetched: {}", summary.join(", "))))
-                    }
+                    Ok(ExecuteResult::Message(format_fetch_summary(&results)))
                 }
             }
         }
