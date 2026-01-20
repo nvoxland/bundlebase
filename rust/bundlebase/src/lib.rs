@@ -26,6 +26,7 @@ pub use crate::bundle_config::BundleConfig;
 pub use crate::data::DataGenerator;
 pub use crate::progress::{get_tracker, set_tracker, with_tracker, ProgressId, ProgressTracker};
 pub use functions::{FunctionImpl, FunctionSignature};
+pub use crate::index::{IndexType, IndexTypeConfigError, ParseIndexTypeError, TokenizerConfig};
 use std::error::Error;
 pub use bundle::JoinTypeOption;
 

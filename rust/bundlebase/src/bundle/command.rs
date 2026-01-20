@@ -65,8 +65,11 @@ pub enum BundleCommand {
     },
 
     /// Create an index on a column
-    /// Maps to: `bundle.index(&column)`
-    Index { column: String },
+    /// Maps to: `bundle.create_index(&column, index_type)`
+    CreateIndex {
+        column: String,
+        index_type: crate::index::IndexType,
+    },
 
     /// Drop an index on a column
     /// Maps to: `bundle.drop_index(&column)`
@@ -185,8 +188,8 @@ impl BundleCommand {
                     .await?;
                 Ok(())
             }
-            BundleCommand::Index { column } => {
-                bundle.index(&column).await?;
+            BundleCommand::CreateIndex { column, index_type } => {
+                bundle.create_index(&column, index_type).await?;
                 Ok(())
             }
             BundleCommand::DropIndex { column } => {

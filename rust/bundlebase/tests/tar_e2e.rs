@@ -1,6 +1,6 @@
 use bundlebase::bundle::{BundleBuilder, BundleFacade};
 use bundlebase::test_utils::{random_memory_url, test_datafile};
-use bundlebase::Bundle;
+use bundlebase::{Bundle, IndexType};
 use tempfile::TempDir;
 
 /// Tests exporting a bundle to tar and reopening it
@@ -166,7 +166,7 @@ async fn test_create_index_in_tar() {
         .await
         .unwrap();
     let mut builder = BundleBuilder::extend(opened.into(), None).unwrap();
-    builder.index("id").await.unwrap();
+    builder.create_index("id", IndexType::Column).await.unwrap();
     builder.commit("v2 - added index").await.unwrap();
 
     // Reopen and verify index exists

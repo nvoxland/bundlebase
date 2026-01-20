@@ -1034,37 +1034,43 @@ impl PyBundleBuilder {
     ///
     /// # Arguments
     /// * `column` - The column name to index
-    /// * `index_type` - Optional index type: "column" (default) or "text"
-    /// * `tokenizer` - Optional tokenizer for text indexes: "simple", "en_stem", "de_stem", etc.
+    /// * `index_type` - Index type: "column" or "text"
+    /// * `args` - Optional index-specific arguments (e.g., {"tokenizer": "en_stem"} for text indexes)
     ///
     /// # Example
     /// ```python
-    /// # Column index (default)
-    /// c = await c.index("email")
+    /// # Column index (no args needed)
+    /// c = await c.create_index("id", "column")
     ///
     /// # Text/BM25 index with English stemming
-    /// c = await c.index("content", index_type="text", tokenizer="en_stem")
+    /// c = await c.create_index("content", "text", {"tokenizer": "en_stem"})
+    ///
+    /// # Text index with default tokenizer
+    /// c = await c.create_index("title", "text")
     /// ```
-    #[pyo3(signature = (column, index_type=None, tokenizer=None))]
-    fn index<'py>(
+    #[pyo3(signature = (column, index_type, args=None))]
+    fn create_index<'py>(
         slf: PyRef<'_, Self>,
         column: &str,
-        index_type: Option<&str>,
-        tokenizer: Option<&str>,
+        index_type: &str,
+        args: Option<HashMap<String, String>>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
+        use pyo3::exceptions::PyValueError;
+
         let inner = slf.inner.clone();
         let column = column.to_string();
-        let index_type = index_type.map(|s| s.to_string());
-        let tokenizer = tokenizer.map(|s| s.to_string());
+
+        // Convert string + args → configured IndexType
+        let configured_type = bundlebase::IndexType::from_str(index_type)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?
+            .with_args(&args.unwrap_or_default())
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut builder = inner.lock().await;
             builder
-                .index_with_type(
-                    &column,
-                    index_type.as_deref(),
-                    tokenizer.as_deref(),
-                )
+                .create_index(&column, configured_type)
                 .await
                 .map_err(|e| {
                     to_py_error(&format!("Failed to create index on column '{}'", column), e)
