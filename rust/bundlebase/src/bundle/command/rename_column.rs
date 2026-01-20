@@ -27,14 +27,14 @@ impl RenameColumnCommand {
 
 #[async_trait]
 impl Command for RenameColumnCommand {
-    fn description(&self) -> String {
-        format!("Rename column '{}' to '{}'", self.old_name, self.new_name)
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         ctx.apply_operation(RenameColumnOp::setup(&self.old_name, &self.new_name).into())
             .await?;
         info!("Renamed \"{}\" to \"{}\"", self.old_name, self.new_name);
         Ok(())
+    }
+
+    fn to_statement(&self) -> String {
+        format!("RENAME COLUMN {} TO {}", self.old_name, self.new_name)
     }
 }

@@ -43,7 +43,7 @@ FilterExec: Email@\d+ = elizabethbarr@ewing.com, projection=\[Index@\d+, City@\d
 
     assert_eq!(1, bundle.status().changes().len());
     assert_eq!(
-        "Index column Email",
+        "CREATE INDEX ON Email",
         bundle.status().changes()[0].description
     );
 

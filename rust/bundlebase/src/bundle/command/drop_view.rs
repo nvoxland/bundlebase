@@ -21,13 +21,13 @@ impl DropViewCommand {
 
 #[async_trait]
 impl Command for DropViewCommand {
-    fn description(&self) -> String {
-        format!("Drop view '{}'", self.name)
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let op = DropViewOp::setup(&self.name, ctx.bundle()).await?;
         ctx.apply_operation(op.into()).await?;
         Ok(())
+    }
+
+    fn to_statement(&self) -> String {
+        format!("DROP VIEW {}", self.name)
     }
 }

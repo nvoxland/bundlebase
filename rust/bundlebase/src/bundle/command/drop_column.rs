@@ -22,10 +22,6 @@ impl DropColumnCommand {
 
 #[async_trait]
 impl Command for DropColumnCommand {
-    fn description(&self) -> String {
-        format!("Drop column {}", self.name)
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         ctx.apply_operation(DropColumnOp::setup(vec![self.name.as_str()]).into())
             .await?;
@@ -33,5 +29,9 @@ impl Command for DropColumnCommand {
         info!("Dropped column \"{}\"", self.name);
 
         Ok(())
+    }
+
+    fn to_statement(&self) -> String {
+        format!("DROP COLUMN {}", self.name)
     }
 }

@@ -40,14 +40,14 @@ impl CreateViewCommand {
 
 #[async_trait]
 impl Command for CreateViewCommand {
-    fn description(&self) -> String {
-        format!("Create view '{}'", self.name)
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let op = CreateViewOp::setup(&self.name, &self.source, ctx.builder()).await?;
         ctx.apply_operation(op.into()).await?;
         info!("Attached view '{}'", self.name);
         Ok(())
+    }
+
+    fn to_statement(&self) -> String {
+        format!("CREATE VIEW {}", self.name)
     }
 }

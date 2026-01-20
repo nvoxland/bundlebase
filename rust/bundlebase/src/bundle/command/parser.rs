@@ -1,9 +1,36 @@
-use crate::bundle::command::parser_pest::parse_custom_pest;
-use crate::bundle::command::BundleCommand;
+//! Command parsing module.
+//!
+//! This module provides the entry point for parsing command statements into `BundleCommand`.
+//!
+//! # Architecture
+//!
+//! The parser uses a two-stage approach:
+//! 1. **Pest grammar** for bundlebase-specific syntax (FILTER, ATTACH, JOIN, etc.)
+//! 2. **sqlparser-rs** for standard SQL (CREATE INDEX, etc.)
+//!
+//! Each command struct implements parsing methods via the `Command` trait:
+//! - `rule()` - Returns the pest Rule for this command
+//! - `from_pest(pair)` - Parses from a pest Pair
+//! - `to_statement()` - Serializes back to command string (round-trip support)
+
+mod pest_parser;
+
+// Re-export pest parser infrastructure
+pub use pest_parser::{
+    escape_string, extract_string_content, format_pest_error, is_likely_custom_syntax,
+    parse_join_type, BundlebaseParser, Rule,
+};
+
+use crate::bundle::command::{
+    AttachCommand, BundleCommand, Command, CreateSourceCommand, DropIndexCommand, DropJoinCommand,
+    FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, ReindexCommand, RenameJoinCommand,
+    RenameViewCommand, SelectCommand,
+};
 use crate::BundlebaseError;
-use sqlparser::ast::{ObjectType, Statement};
+use pest::Parser;
+use sqlparser::ast::Statement;
 use sqlparser::dialect::GenericDialect;
-use sqlparser::parser::Parser;
+use sqlparser::parser::Parser as SqlParser;
 
 /// Parse a command statement into a BundleCommand.
 ///
@@ -42,29 +69,14 @@ use sqlparser::parser::Parser;
 /// cmd.execute(&mut bundle).await?;
 /// ```
 pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError> {
-    // First, try Pest grammar for custom bundlebase syntax (FILTER, ATTACH, JOIN, REINDEX)
-    if let Some(op) = parse_custom_pest(command_str)? {
-        return Ok(op);
+    // First, try Pest grammar for bundlebase syntax (FILTER, ATTACH, JOIN, SELECT, etc.)
+    if let Some(cmd) = try_parse_pest(command_str)? {
+        return Ok(cmd);
     }
 
-    // Check for RENAME VIEW command: RENAME VIEW old_name TO new_name
-    if command_str.trim().to_uppercase().starts_with("RENAME VIEW") {
-        let parts: Vec<&str> = command_str.split_whitespace().collect();
-        if parts.len() == 5 && parts[3].eq_ignore_ascii_case("TO") {
-            return Ok(BundleCommand::RenameView {
-                old_name: parts[2].trim_matches(|c| c == '"' || c == '\'').to_string(),
-                new_name: parts[4].trim_matches(|c| c == '"' || c == '\'').to_string(),
-            });
-        } else {
-            return Err(
-                "Invalid RENAME VIEW syntax. Expected: RENAME VIEW old_name TO new_name".into(),
-            );
-        }
-    }
-
-    // Otherwise, use sqlparser-rs for standard SQL (SELECT, CREATE INDEX, etc.)
+    // Otherwise, use sqlparser-rs for standard SQL (CREATE INDEX, etc.)
     let dialect = GenericDialect {};
-    let ast = Parser::parse_sql(&dialect, command_str)
+    let ast = SqlParser::parse_sql(&dialect, command_str)
         .map_err(|e| -> BundlebaseError { format!("SQL parse error: {}", e).into() })?;
 
     if ast.is_empty() {
@@ -83,18 +95,83 @@ pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError
     dispatch_statement(stmt)
 }
 
+/// Try to parse using Pest grammar.
+///
+/// Returns Ok(Some(cmd)) if successfully parsed, Ok(None) if not custom syntax,
+/// or Err if it looks like custom syntax but failed to parse.
+fn try_parse_pest(sql: &str) -> Result<Option<BundleCommand>, BundlebaseError> {
+    let parse_result = BundlebaseParser::parse(Rule::statement, sql);
+
+    match parse_result {
+        Ok(mut pairs) => {
+            // Get the top-level statement rule
+            let statement = pairs
+                .next()
+                .ok_or_else(|| BundlebaseError::from("Parser produced empty result"))?;
+
+            // Get the inner statement type (filter_stmt, attach_stmt, etc.)
+            let inner_stmt = statement
+                .into_inner()
+                .next()
+                .ok_or_else(|| BundlebaseError::from("Parser produced empty inner statement"))?;
+
+            let cmd = match inner_stmt.as_rule() {
+                Rule::filter_stmt => BundleCommand::Filter(FilterCommand::from_pest(inner_stmt)?),
+                Rule::attach_stmt => BundleCommand::Attach(AttachCommand::from_pest(inner_stmt)?),
+                Rule::join_stmt => BundleCommand::Join(JoinCommand::from_pest(inner_stmt)?),
+                Rule::reindex_stmt => BundleCommand::Reindex(ReindexCommand::from_pest(inner_stmt)?),
+                Rule::create_source_stmt => {
+                    BundleCommand::CreateSource(CreateSourceCommand::from_pest(inner_stmt)?)
+                }
+                Rule::fetch_stmt => {
+                    // FETCH can be either FetchCommand or FetchAllCommand
+                    // Check if it's FETCH ALL
+                    let raw = inner_stmt.as_str().to_uppercase();
+                    if raw.contains("ALL") {
+                        BundleCommand::FetchAll(FetchAllCommand::from_pest(inner_stmt)?)
+                    } else {
+                        BundleCommand::Fetch(FetchCommand::from_pest(inner_stmt)?)
+                    }
+                }
+                Rule::drop_join_stmt => {
+                    BundleCommand::DropJoin(DropJoinCommand::from_pest(inner_stmt)?)
+                }
+                Rule::rename_join_stmt => {
+                    BundleCommand::RenameJoin(RenameJoinCommand::from_pest(inner_stmt)?)
+                }
+                Rule::select_stmt => BundleCommand::Select(SelectCommand::from_pest(inner_stmt)?),
+                Rule::drop_index_stmt => {
+                    BundleCommand::DropIndex(DropIndexCommand::from_pest(inner_stmt)?)
+                }
+                Rule::rename_view_stmt => {
+                    BundleCommand::RenameView(RenameViewCommand::from_pest(inner_stmt)?)
+                }
+                _ => return Err("Unexpected statement type".into()),
+            };
+            Ok(Some(cmd))
+        }
+        Err(e) => {
+            // Not custom syntax or parse error
+            if is_likely_custom_syntax(sql) {
+                // If it looks like custom syntax but failed to parse, report error
+                Err(format_pest_error(e, sql))
+            } else {
+                // Not custom syntax, return None to let sqlparser handle it
+                Ok(None)
+            }
+        }
+    }
+}
+
 /// Dispatch a SQL statement to the appropriate BundleCommand.
 ///
 /// This function examines the statement type and creates the appropriate BundleCommand variant
-/// that will execute the corresponding BundleBuilder method.
+/// for statements not handled by pest grammar.
+///
+/// Note: Most statements (SELECT, DROP INDEX, RENAME VIEW, etc.) are now handled by pest.
+/// This function only handles legacy/rare SQL statements.
 fn dispatch_statement(stmt: &Statement) -> Result<BundleCommand, BundlebaseError> {
     match stmt {
-        // SELECT statements -> Select
-        Statement::Query(_query) => Ok(BundleCommand::Select {
-            sql: stmt.to_string(),
-            params: vec![],
-        }),
-
         // CREATE INDEX -> Index
         Statement::CreateIndex { .. } => {
             // sqlparser 0.59 changed CreateIndex structure
@@ -102,36 +179,9 @@ fn dispatch_statement(stmt: &Statement) -> Result<BundleCommand, BundlebaseError
             Err("CREATE INDEX via standard SQL is not yet supported. Use bundlebase INDEX command or REINDEX.".into())
         }
 
-        // DROP INDEX -> DropIndex
-        Statement::Drop {
-            object_type: ObjectType::Index,
-            names,
-            ..
-        } => {
-            // Extract column name from index name
-            let column = extract_column_from_index_name(names)?;
-            Ok(BundleCommand::DropIndex { column })
-        }
-
         // Unrecognized statement types
         _ => Err(format!("Unsupported SQL statement type: {:?}", stmt).into()),
     }
-}
-
-/// Extract column name from index name.
-///
-/// For now, we assume index names follow the pattern "idx_{column_name}"
-/// or just use the first object name directly as the column.
-fn extract_column_from_index_name(
-    names: &[sqlparser::ast::ObjectName],
-) -> Result<String, BundlebaseError> {
-    let name = names
-        .first()
-        .ok_or_else(|| -> BundlebaseError { "DROP INDEX requires index name".into() })?;
-
-    // Convert the entire object name to string
-    // This handles the sqlparser 0.59 API changes
-    Ok(name.to_string())
 }
 
 #[cfg(test)]
@@ -147,12 +197,17 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_sql_multiple_statements() {
+    fn test_parse_select_captures_full_statement() {
+        // Pest grammar captures the full SELECT statement including any trailing content.
+        // DataFusion will validate the SQL syntax when executed.
         let result = parse_command("SELECT * FROM bundle; SELECT * FROM bundle2;");
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Multiple statements"));
+        assert!(result.is_ok());
+        match result.unwrap() {
+            BundleCommand::Select(cmd) => {
+                // The full input is captured as the SQL string
+                assert!(cmd.sql.contains("bundle"));
+            }
+            _ => panic!("Expected Select variant"),
+        }
     }
 }

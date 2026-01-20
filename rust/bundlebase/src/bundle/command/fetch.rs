@@ -1,6 +1,6 @@
 //! Fetch command implementations.
 
-use crate::bundle::command::{Command, CommandContext};
+use crate::bundle::command::{Command, CommandContext, Rule};
 use crate::bundle::operation::{AttachBlockOp, DetachBlockOp, SourceInfo};
 use crate::data::ObjectId;
 use crate::source::FetchAction;
@@ -24,11 +24,6 @@ impl FetchCommand {
 
 #[async_trait]
 impl Command for FetchCommand {
-    fn description(&self) -> String {
-        let pack_name = self.pack.as_deref().unwrap_or("base");
-        format!("Fetch sources for {}", pack_name)
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let pack_name = self.pack.as_deref().unwrap_or("base");
         let pack_id = match self.pack.as_deref() {
@@ -51,6 +46,33 @@ impl Command for FetchCommand {
 
         Ok(())
     }
+
+    fn rule() -> Option<Rule> {
+        Some(Rule::fetch_stmt)
+    }
+
+    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        // Check for identifier (pack name) that is NOT "all"
+        for inner_pair in pair.into_inner() {
+            if inner_pair.as_rule() == Rule::identifier {
+                let ident = inner_pair.as_str();
+                // If it's "all", this should be FetchAllCommand
+                if !ident.eq_ignore_ascii_case("all") {
+                    return Ok(FetchCommand::new(Some(ident.to_string())));
+                }
+            }
+        }
+
+        // Just "FETCH" with no pack - fetch from base pack
+        Ok(FetchCommand::new(None))
+    }
+
+    fn to_statement(&self) -> String {
+        match &self.pack {
+            Some(pack) if pack != "base" => format!("FETCH {}", pack),
+            _ => "FETCH".to_string(),
+        }
+    }
 }
 
 /// Command to fetch from all defined sources.
@@ -66,10 +88,6 @@ impl FetchAllCommand {
 
 #[async_trait]
 impl Command for FetchAllCommand {
-    fn description(&self) -> String {
-        "Fetch all sources".to_string()
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         // Collect sources with their pack info to avoid borrow issues
         let sources_with_packs: Vec<_> = ctx
@@ -91,6 +109,34 @@ impl Command for FetchAllCommand {
         }
 
         Ok(())
+    }
+
+    fn rule() -> Option<Rule> {
+        Some(Rule::fetch_stmt)
+    }
+
+    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        // Check if the raw contains "ALL"
+        let raw = pair.as_str().to_uppercase();
+        if raw.contains("ALL") {
+            return Ok(FetchAllCommand::new());
+        }
+
+        // Also check for identifier "all"
+        for inner_pair in pair.into_inner() {
+            if inner_pair.as_rule() == Rule::identifier {
+                let ident = inner_pair.as_str();
+                if ident.eq_ignore_ascii_case("all") {
+                    return Ok(FetchAllCommand::new());
+                }
+            }
+        }
+
+        Err("Expected FETCH ALL".into())
+    }
+
+    fn to_statement(&self) -> String {
+        "FETCH ALL".to_string()
     }
 }
 
@@ -206,4 +252,73 @@ fn find_block_location_by_source(
             )
             .into()
         })
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_fetch_base() {
+        let input = "FETCH";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::Fetch(c) => {
+                assert_eq!(c.pack, None);
+            }
+            _ => panic!("Expected Fetch variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fetch_pack() {
+        let input = "FETCH users";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::Fetch(c) => {
+                assert_eq!(c.pack, Some("users".to_string()));
+            }
+            _ => panic!("Expected Fetch variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fetch_all() {
+        let input = "FETCH ALL";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::FetchAll(_) => {}
+            _ => panic!("Expected FetchAll variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip_fetch() {
+        let cmd = FetchCommand::new(None);
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "FETCH");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::Fetch(c) => {
+                assert_eq!(c.pack, None);
+            }
+            _ => panic!("Expected Fetch variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip_fetch_all() {
+        let cmd = FetchAllCommand::new();
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "FETCH ALL");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::FetchAll(_) => {}
+            _ => panic!("Expected FetchAll variant"),
+        }
+    }
 }

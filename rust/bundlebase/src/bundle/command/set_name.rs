@@ -21,13 +21,14 @@ impl SetNameCommand {
 
 #[async_trait]
 impl Command for SetNameCommand {
-    fn description(&self) -> String {
-        format!("Set name to {}", self.name)
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         ctx.apply_operation(SetNameOp::setup(&self.name).into())
             .await?;
         Ok(())
+    }
+
+    fn to_statement(&self) -> String {
+        use crate::bundle::command::parser::escape_string;
+        format!("SET NAME {}", escape_string(&self.name))
     }
 }

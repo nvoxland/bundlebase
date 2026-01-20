@@ -1,6 +1,6 @@
 //! DropIndex command implementation.
 
-use crate::bundle::command::{Command, CommandContext};
+use crate::bundle::command::{Command, CommandContext, Rule};
 use crate::bundle::operation::DropIndexOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -24,10 +24,6 @@ impl DropIndexCommand {
 
 #[async_trait]
 impl Command for DropIndexCommand {
-    fn description(&self) -> String {
-        format!("Drop index on column {}", self.column)
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         // Find the index ID for the given column
         let index_id = {
@@ -50,5 +46,63 @@ impl Command for DropIndexCommand {
         info!("Dropped index on: \"{}\"", self.column);
 
         Ok(())
+    }
+
+    fn rule() -> Option<Rule> {
+        Some(Rule::drop_index_stmt)
+    }
+
+    fn from_pest(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        let mut column = None;
+
+        for inner_pair in pair.into_inner() {
+            if inner_pair.as_rule() == Rule::identifier {
+                column = Some(inner_pair.as_str().to_string());
+            }
+        }
+
+        let column = column.ok_or_else(|| -> BundlebaseError {
+            "DROP INDEX statement missing column name".into()
+        })?;
+
+        Ok(DropIndexCommand::new(column))
+    }
+
+    fn to_statement(&self) -> String {
+        format!("DROP INDEX {}", self.column)
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::bundle::command::parser::parse_command;
+    use crate::bundle::command::BundleCommand;
+
+    #[test]
+    fn test_parse_drop_index() {
+        let input = "DROP INDEX user_id";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::DropIndex(c) => {
+                assert_eq!(c.column, "user_id");
+            }
+            _ => panic!("Expected DropIndex variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip() {
+        let cmd = DropIndexCommand::new("email");
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "DROP INDEX email");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::DropIndex(c) => {
+                assert_eq!(c.column, "email");
+            }
+            _ => panic!("Expected DropIndex variant"),
+        }
     }
 }

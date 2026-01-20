@@ -30,14 +30,15 @@ impl CommitCommand {
 
 #[async_trait]
 impl Command for CommitCommand {
-    fn description(&self) -> String {
-        format!("Commit: {}", self.message)
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         // Commit is special - we need to call the builder's commit method directly
         // This will commit all pending changes (including any that were just added)
         ctx.builder_mut().commit(&self.message).await?;
         Ok(())
+    }
+
+    fn to_statement(&self) -> String {
+        use crate::bundle::command::parser::escape_string;
+        format!("COMMIT {}", escape_string(&self.message))
     }
 }
