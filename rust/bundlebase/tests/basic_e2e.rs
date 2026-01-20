@@ -147,13 +147,13 @@ changes:
         metadata: {{}}
       metadata: {{}}
 - id: {}
-  description: Drop column title
+  description: DROP COLUMN title
   operations:
   - type: dropColumn
     names:
     - title
 - id: {}
-  description: Rename column 'first_name' to 'name'
+  description: RENAME COLUMN first_name TO name
   operations:
   - type: renameColumn
     oldName: first_name
@@ -335,25 +335,25 @@ changes:
         metadata: {{}}
       metadata: {{}}
 - id: {}
-  description: Drop column title
+  description: DROP COLUMN title
   operations:
   - type: dropColumn
     names:
     - title
 - id: {}
-  description: Drop column comments
+  description: DROP COLUMN comments
   operations:
   - type: dropColumn
     names:
     - comments
 - id: {}
-  description: Rename column 'first_name' to 'fname'
+  description: RENAME COLUMN first_name TO fname
   operations:
   - type: renameColumn
     oldName: first_name
     newName: fname
 - id: {}
-  description: Rename column 'last_name' to 'lname'
+  description: RENAME COLUMN last_name TO lname
   operations:
   - type: renameColumn
     oldName: last_name

@@ -23,13 +23,14 @@ impl SetDescriptionCommand {
 
 #[async_trait]
 impl Command for SetDescriptionCommand {
-    fn description(&self) -> String {
-        format!("Set description to {}", self.description)
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         ctx.apply_operation(SetDescriptionOp::setup(&self.description).into())
             .await?;
         Ok(())
+    }
+
+    fn to_statement(&self) -> String {
+        use crate::bundle::command::parser::escape_string;
+        format!("SET DESCRIPTION {}", escape_string(&self.description))
     }
 }

@@ -17,13 +17,13 @@ impl UndoCommand {
 
 #[async_trait]
 impl Command for UndoCommand {
-    fn description(&self) -> String {
-        "Undo".to_string()
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         // Undo is special - we call the builder's undo method directly
         ctx.builder_mut().undo().await?;
         Ok(())
+    }
+
+    fn to_statement(&self) -> String {
+        "UNDO".to_string()
     }
 }

@@ -28,15 +28,6 @@ impl CreateIndexCommand {
 
 #[async_trait]
 impl Command for CreateIndexCommand {
-    fn description(&self) -> String {
-        match &self.index_type {
-            IndexType::Column => format!("Index column {}", self.column),
-            IndexType::Text { tokenizer } => {
-                format!("Text index column {} (tokenizer: {:?})", self.column, tokenizer)
-            }
-        }
-    }
-
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         ctx.apply_operation(
             CreateIndexOp::setup(&self.column, self.index_type.clone())
@@ -50,5 +41,14 @@ impl Command for CreateIndexCommand {
         info!("Created index on: \"{}\"", self.column);
 
         Ok(())
+    }
+
+    fn to_statement(&self) -> String {
+        match &self.index_type {
+            IndexType::Column => format!("CREATE INDEX ON {}", self.column),
+            IndexType::Text { tokenizer } => {
+                format!("CREATE TEXT INDEX ON {} (tokenizer: {:?})", self.column, tokenizer)
+            }
+        }
     }
 }

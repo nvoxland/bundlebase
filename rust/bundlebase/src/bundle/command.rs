@@ -3,11 +3,11 @@ use crate::bundle::Bundle;
 use crate::{BundleBuilder, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::ScalarValue;
-use std::collections::HashMap;
-use crate::bundle::pack::JoinTypeOption;
 
 pub mod parser;
-pub mod parser_pest;
+
+// Re-export Rule from parser for use by commands
+pub use parser::Rule;
 
 // Command struct modules
 mod attach;
@@ -103,144 +103,135 @@ impl<'a> CommandContext<'a> {
 /// Trait for self-contained commands that can be executed on a BundleBuilder.
 ///
 /// Commands encapsulate all the logic needed to perform a specific operation
-/// on a bundle. They are constructed with all necessary parameters and then
-/// executed via the `execute` method.
+/// on a bundle, including parsing and serialization for round-trip support.
+///
+/// # Parsing Methods
+///
+/// Commands that can be parsed from text implement:
+/// - `rule()` - Returns the pest Rule that matches this command
+/// - `from_pest()` - Parses from a pest Pair that matched the rule
+///
+/// All commands implement:
+/// - `to_statement()` - Serializes back to command string (round-trip support)
 #[async_trait]
 pub trait Command: Send + Sync {
-    /// A human-readable description of what this command does
-    fn description(&self) -> String;
-
     /// Execute the command using the provided context
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError>;
+
+    /// The pest rule that matches this command (if applicable).
+    ///
+    /// Returns `None` by default. Commands that can be parsed from pest grammar
+    /// override this to return the appropriate Rule variant.
+    fn rule() -> Option<Rule>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
+    /// Parse from a pest Pair that matched `Self::rule()`.
+    ///
+    /// Returns an error by default. Commands that can be parsed from pest grammar
+    /// override this to implement parsing logic.
+    fn from_pest(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError>
+    where
+        Self: Sized,
+    {
+        Err("Parsing not implemented for this command".into())
+    }
+
+    /// Serialize this command back to a statement string.
+    ///
+    /// This is used for:
+    /// - Round-trip testing (parse -> to_statement -> re-parse)
+    /// - Logging and debugging
+    /// - Command history display
+    fn to_statement(&self) -> String;
 }
 
 /// Command that can be executed on a BundleBuilder.
 ///
-/// This enum represents statements as user-facing Bundle/BundleBuilder method calls.
+/// This enum wraps command structs, providing a single source of truth for command parameters.
+/// Each variant delegates to its wrapped command struct for execution.
 ///
 /// # Examples
 ///
 /// ```ignore
-/// use bundlebase::bundle::BundleCommand;
+/// use bundlebase::bundle::{BundleCommand, AttachCommand};
 ///
-/// let cmd = BundleCommand::Attach { path: "data.parquet".to_string() };
-/// cmd.execute(&mut bundle).await?;
+/// let cmd = BundleCommand::Attach(AttachCommand::new("data.parquet", None));
+/// cmd.execute(&mut builder).await?;
 /// ```
 #[derive(Debug, Clone)]
 pub enum BundleCommand {
     /// Attach a data source
-    /// Maps to: `bundle.attach(&path, pack.as_deref())`
-    /// If pack is None or "base", attaches to the base pack. Otherwise, attaches to the join pack.
-    Attach {
-        path: String,
-        pack: Option<String>,
-    },
+    Attach(AttachCommand),
 
     /// Filter rows by a WHERE condition
-    /// Maps to: `bundle.filter(&where_clause, params)`
-    Filter {
-        where_clause: String,
-        params: Vec<ScalarValue>,
-    },
+    Filter(FilterCommand),
 
     /// Remove a column
-    /// Maps to: `bundle.remove_column(&name)`
-    DropColumn { name: String },
+    DropColumn(DropColumnCommand),
 
     /// Rename a column
-    /// Maps to: `bundle.rename_column(&old_name, &new_name)`
-    RenameColumn { old_name: String, new_name: String },
+    RenameColumn(RenameColumnCommand),
 
     /// Rename a view
-    /// Maps to: `bundle.rename_view(&old_name, &new_name)`
-    RenameView { old_name: String, new_name: String },
+    RenameView(RenameViewCommand),
 
     /// Execute a full SQL query
-    /// Maps to: `bundle.select(&sql, params)`
-    Select {
-        sql: String,
-        params: Vec<ScalarValue>,
-    },
+    Select(SelectCommand),
 
     /// Join with another data source
-    /// Maps to: `bundle.join(&name, location.as_deref(), &expression, join_type)`
-    /// If location is None, creates a join point without initial data.
-    Join {
-        name: String,
-        location: Option<String>,
-        expression: String,
-        join_type: JoinTypeOption,
-    },
+    Join(JoinCommand),
 
     /// Create an index on a column
-    /// Maps to: `bundle.create_index(&column, index_type)`
-    CreateIndex {
-        column: String,
-        index_type: crate::index::IndexType,
-    },
+    CreateIndex(CreateIndexCommand),
 
     /// Drop an index on a column
-    /// Maps to: `bundle.drop_index(&column)`
-    DropIndex { column: String },
+    DropIndex(DropIndexCommand),
 
     /// Drop a view
-    /// Maps to: `bundle.drop_view(&name)`
-    DropView { name: String },
+    DropView(DropViewCommand),
 
     /// Drop a join
-    /// Maps to: `bundle.drop_join(&name)`
-    DropJoin { name: String },
+    DropJoin(DropJoinCommand),
 
     /// Rename a join
-    /// Maps to: `bundle.rename_join(&old_name, &new_name)`
-    RenameJoin { old_name: String, new_name: String },
+    RenameJoin(RenameJoinCommand),
 
     /// Rebuild all indexes
-    /// Maps to: `bundle.reindex()`
-    Reindex,
+    Reindex(ReindexCommand),
 
     /// Set bundle name
-    /// Maps to: `bundle.set_name(&name)`
-    SetName { name: String },
+    SetName(SetNameCommand),
 
     /// Set bundle description
-    /// Maps to: `bundle.set_description(&description)`
-    SetDescription { description: String },
+    SetDescription(SetDescriptionCommand),
 
     /// Commit changes
-    /// Maps to: `bundle.commit(&message)`
-    Commit { message: String },
+    Commit(CommitCommand),
 
     /// Reset uncommitted changes
-    /// Maps to: `bundle.reset()`
-    Reset,
+    Reset(ResetCommand),
 
     /// Undo last change
-    /// Maps to: `bundle.undo()`
-    Undo,
+    Undo(UndoCommand),
 
     /// Create a data source for fetching files
-    /// Maps to: `bundle.create_source(&function, args, pack.as_deref())`
-    CreateSource {
-        function: String,
-        args: HashMap<String, String>,
-        pack: Option<String>,
-    },
+    CreateSource(CreateSourceCommand),
 
     /// Fetch new files from sources for a pack
-    /// Maps to: `bundle.fetch(pack.as_deref())`
-    Fetch { pack: Option<String> },
+    Fetch(FetchCommand),
 
     /// Fetch new files from all defined sources
-    /// Maps to: `bundle.fetch_all()`
-    FetchAll,
+    FetchAll(FetchAllCommand),
 }
 
 impl BundleCommand {
-    /// Execute this SQL command on a BundleBuilder.
+    /// Execute this command on a BundleBuilder.
     ///
-    /// This method constructs the appropriate command struct and executes it via
-    /// `execute_command`, which provides a self-contained command pattern.
+    /// This method delegates to the wrapped command struct via `execute_command`.
     ///
     /// # Arguments
     ///
@@ -254,111 +245,96 @@ impl BundleCommand {
     /// # Examples
     ///
     /// ```ignore
-    /// let cmd = BundleCommand::Attach { path: "data.parquet".to_string(), pack: None };
+    /// let cmd = BundleCommand::Attach(AttachCommand::new("data.parquet", None));
     /// cmd.execute(&mut builder).await?;
     /// ```
     pub async fn execute(self, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
         match self {
-            BundleCommand::Attach { path, pack } => {
-                builder.execute_command(AttachCommand::new(path, pack)).await?;
+            // Standard commands delegate to execute_command
+            BundleCommand::Attach(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::Filter {
-                where_clause,
-                params,
-            } => {
-                builder.execute_command(FilterCommand::new(where_clause, params)).await?;
+            BundleCommand::Filter(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::DropColumn { name } => {
-                builder.execute_command(DropColumnCommand::new(name)).await?;
+            BundleCommand::DropColumn(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::RenameColumn { old_name, new_name } => {
-                builder.execute_command(RenameColumnCommand::new(old_name, new_name)).await?;
+            BundleCommand::RenameColumn(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::RenameView { old_name, new_name } => {
-                builder.execute_command(RenameViewCommand::new(old_name, new_name)).await?;
+            BundleCommand::RenameView(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::Select { sql, params } => {
-                // Select is special - it returns a new BundleBuilder, not modifying in place
-                // For the command pattern, we apply the SelectOp to modify the current builder
-                builder.execute_command(SelectCommand::new(sql, params)).await?;
+            BundleCommand::Select(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::Join {
-                name,
-                location,
-                expression,
-                join_type,
-            } => {
-                builder.execute_command(JoinCommand::new(name, expression, location, join_type)).await?;
+            BundleCommand::Join(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::CreateIndex { column, index_type } => {
-                builder.execute_command(CreateIndexCommand::new(column, index_type)).await?;
+            BundleCommand::CreateIndex(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::DropIndex { column } => {
-                builder.execute_command(DropIndexCommand::new(column)).await?;
+            BundleCommand::DropIndex(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::DropView { name } => {
-                builder.execute_command(DropViewCommand::new(name)).await?;
+            BundleCommand::DropView(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::DropJoin { name } => {
-                builder.execute_command(DropJoinCommand::new(name)).await?;
+            BundleCommand::DropJoin(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::RenameJoin { old_name, new_name } => {
-                builder.execute_command(RenameJoinCommand::new(old_name, new_name)).await?;
+            BundleCommand::RenameJoin(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::Reindex => {
-                builder.execute_command(ReindexCommand::new()).await?;
+            BundleCommand::Reindex(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::SetName { name } => {
-                builder.execute_command(SetNameCommand::new(name)).await?;
+            BundleCommand::SetName(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::SetDescription { description } => {
-                builder.execute_command(SetDescriptionCommand::new(description)).await?;
+            BundleCommand::SetDescription(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::Commit { message } => {
-                // Commit is special - it doesn't go through execute_command
-                // because it needs to finalize all pending changes
-                builder.commit(&message).await?;
+            BundleCommand::CreateSource(cmd) => {
+                builder.execute_command(cmd).await?;
                 Ok(())
             }
-            BundleCommand::Reset => {
-                // Reset is special - it doesn't go through execute_command
+            BundleCommand::Fetch(cmd) => {
+                builder.execute_command(cmd).await?;
+                Ok(())
+            }
+            BundleCommand::FetchAll(cmd) => {
+                builder.execute_command(cmd).await?;
+                Ok(())
+            }
+
+            // Special commands bypass execute_command
+            BundleCommand::Commit(cmd) => {
+                builder.commit(&cmd.message).await?;
+                Ok(())
+            }
+            BundleCommand::Reset(_) => {
                 builder.reset().await?;
                 Ok(())
             }
-            BundleCommand::Undo => {
-                // Undo is special - it doesn't go through execute_command
+            BundleCommand::Undo(_) => {
                 builder.undo().await?;
-                Ok(())
-            }
-            BundleCommand::CreateSource {
-                function,
-                args,
-                pack,
-            } => {
-                builder.execute_command(CreateSourceCommand::new(function, args, pack)).await?;
-                Ok(())
-            }
-            BundleCommand::Fetch { pack } => {
-                builder.execute_command(FetchCommand::new(pack)).await?;
-                Ok(())
-            }
-            BundleCommand::FetchAll => {
-                builder.execute_command(FetchAllCommand::new()).await?;
                 Ok(())
             }
         }
@@ -379,50 +355,43 @@ impl BundleCommand {
     /// # Examples
     ///
     /// ```ignore
-    /// let cmd = BundleCommand::Filter {
-    ///     where_clause: "salary > $1".to_string(),
-    ///     params: vec![],
-    /// };
+    /// let cmd = BundleCommand::Filter(FilterCommand::new("salary > $1", vec![]));
     /// let cmd_with_params = cmd.with_params(vec![
     ///     ScalarValue::Float64(Some(50000.0))
     /// ]);
     /// ```
-    pub fn with_params(mut self, params: Vec<ScalarValue>) -> Self {
-        match &mut self {
-            BundleCommand::Filter {
-                params: ref mut p, ..
-            } => *p = params,
-            BundleCommand::Select {
-                params: ref mut p, ..
-            } => *p = params,
-            _ => {} // Other commands don't support parameters
+    pub fn with_params(self, params: Vec<ScalarValue>) -> Self {
+        match self {
+            BundleCommand::Filter(mut cmd) => {
+                cmd.params = params;
+                BundleCommand::Filter(cmd)
+            }
+            BundleCommand::Select(mut cmd) => {
+                cmd.params = params;
+                BundleCommand::Select(cmd)
+            }
+            other => other, // Other commands don't support parameters
         }
-        self
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::command::BundleCommand;
     use crate::bundle::ScalarValue;
+    use std::collections::HashMap;
+
     #[test]
     fn test_with_params_filter() {
-        let cmd = BundleCommand::Filter {
-            where_clause: "salary > $1".to_string(),
-            params: vec![],
-        };
+        let cmd = BundleCommand::Filter(FilterCommand::new("salary > $1", vec![]));
 
         let params = vec![ScalarValue::Float64(Some(50000.0))];
         let cmd_with_params = cmd.with_params(params.clone());
 
         match cmd_with_params {
-            BundleCommand::Filter {
-                where_clause,
-                params: p,
-            } => {
-                assert_eq!(where_clause, "salary > $1");
-                assert_eq!(p.len(), 1);
+            BundleCommand::Filter(cmd) => {
+                assert_eq!(cmd.where_clause, "salary > $1");
+                assert_eq!(cmd.params.len(), 1);
             }
             _ => panic!("Expected Filter variant"),
         }
@@ -430,38 +399,35 @@ mod tests {
 
     #[test]
     fn test_with_params_select() {
-        let cmd = BundleCommand::Select {
-            sql: "SELECT * FROM bundle WHERE id = $1".to_string(),
-            params: vec![],
-        };
+        let cmd = BundleCommand::Select(SelectCommand::new(
+            "SELECT * FROM bundle WHERE id = $1",
+            vec![],
+        ));
 
         let params = vec![ScalarValue::Int64(Some(42))];
         let cmd_with_params = cmd.with_params(params.clone());
 
         match cmd_with_params {
-            BundleCommand::Select { sql, params: p } => {
-                assert_eq!(sql, "SELECT * FROM bundle WHERE id = $1");
-                assert_eq!(p.len(), 1);
+            BundleCommand::Select(cmd) => {
+                assert_eq!(cmd.sql, "SELECT * FROM bundle WHERE id = $1");
+                assert_eq!(cmd.params.len(), 1);
             }
-            _ => panic!("Expected Query variant"),
+            _ => panic!("Expected Select variant"),
         }
     }
 
     #[test]
     fn test_with_params_other_command() {
         // with_params should have no effect on commands that don't support parameters
-        let cmd = BundleCommand::Attach {
-            path: "data.parquet".to_string(),
-            pack: None,
-        };
+        let cmd = BundleCommand::Attach(AttachCommand::new("data.parquet", None));
 
         let params = vec![ScalarValue::Int64(Some(42))];
         let cmd_with_params = cmd.with_params(params);
 
         match cmd_with_params {
-            BundleCommand::Attach { path, pack } => {
-                assert_eq!(path, "data.parquet");
-                assert_eq!(pack, None);
+            BundleCommand::Attach(cmd) => {
+                assert_eq!(cmd.path, "data.parquet");
+                assert_eq!(cmd.pack, None);
             }
             _ => panic!("Expected Attach variant"),
         }
@@ -469,15 +435,15 @@ mod tests {
 
     #[test]
     fn test_attach_to_pack_command() {
-        let cmd = BundleCommand::Attach {
-            path: "more_users.parquet".to_string(),
-            pack: Some("users".to_string()),
-        };
+        let cmd = BundleCommand::Attach(AttachCommand::new(
+            "more_users.parquet",
+            Some("users".to_string()),
+        ));
 
         match cmd {
-            BundleCommand::Attach { path, pack } => {
-                assert_eq!(path, "more_users.parquet");
-                assert_eq!(pack, Some("users".to_string()));
+            BundleCommand::Attach(cmd) => {
+                assert_eq!(cmd.path, "more_users.parquet");
+                assert_eq!(cmd.pack, Some("users".to_string()));
             }
             _ => panic!("Expected Attach variant"),
         }
@@ -489,22 +455,21 @@ mod tests {
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
         args.insert("patterns".to_string(), "**/*.parquet".to_string());
 
-        let cmd = BundleCommand::CreateSource {
-            function: "remote_dir".to_string(),
-            args: args.clone(),
-            pack: None,
-        };
+        let cmd = BundleCommand::CreateSource(CreateSourceCommand::new(
+            "remote_dir",
+            args.clone(),
+            None,
+        ));
 
         match cmd {
-            BundleCommand::CreateSource {
-                function,
-                args: a,
-                pack,
-            } => {
-                assert_eq!(function, "remote_dir");
-                assert_eq!(a.get("url"), Some(&"s3://bucket/data/".to_string()));
-                assert_eq!(a.get("patterns"), Some(&"**/*.parquet".to_string()));
-                assert_eq!(pack, None);
+            BundleCommand::CreateSource(cmd) => {
+                assert_eq!(cmd.function, "remote_dir");
+                assert_eq!(cmd.args.get("url"), Some(&"s3://bucket/data/".to_string()));
+                assert_eq!(
+                    cmd.args.get("patterns"),
+                    Some(&"**/*.parquet".to_string())
+                );
+                assert_eq!(cmd.pack, None);
             }
             _ => panic!("Expected CreateSource variant"),
         }
@@ -515,20 +480,16 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/users/".to_string());
 
-        let cmd = BundleCommand::CreateSource {
-            function: "remote_dir".to_string(),
+        let cmd = BundleCommand::CreateSource(CreateSourceCommand::new(
+            "remote_dir",
             args,
-            pack: Some("users".to_string()),
-        };
+            Some("users".to_string()),
+        ));
 
         match cmd {
-            BundleCommand::CreateSource {
-                function,
-                args: _,
-                pack,
-            } => {
-                assert_eq!(function, "remote_dir");
-                assert_eq!(pack, Some("users".to_string()));
+            BundleCommand::CreateSource(cmd) => {
+                assert_eq!(cmd.function, "remote_dir");
+                assert_eq!(cmd.pack, Some("users".to_string()));
             }
             _ => panic!("Expected CreateSource variant"),
         }
@@ -536,13 +497,11 @@ mod tests {
 
     #[test]
     fn test_fetch_command() {
-        let cmd = BundleCommand::Fetch {
-            pack: Some("users".to_string()),
-        };
+        let cmd = BundleCommand::Fetch(FetchCommand::new(Some("users".to_string())));
 
         match cmd {
-            BundleCommand::Fetch { pack } => {
-                assert_eq!(pack, Some("users".to_string()));
+            BundleCommand::Fetch(cmd) => {
+                assert_eq!(cmd.pack, Some("users".to_string()));
             }
             _ => panic!("Expected Fetch variant"),
         }
@@ -550,10 +509,10 @@ mod tests {
 
     #[test]
     fn test_fetch_all_command() {
-        let cmd = BundleCommand::FetchAll;
+        let cmd = BundleCommand::FetchAll(FetchAllCommand::new());
 
         match cmd {
-            BundleCommand::FetchAll => {}
+            BundleCommand::FetchAll(_) => {}
             _ => panic!("Expected FetchAll variant"),
         }
     }

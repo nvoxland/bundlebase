@@ -20,7 +20,7 @@ COMMENT = _{ "--" ~ (!"\n" ~ ANY)* ~ "\n" }
 // Entry Point
 // ============================================================================
 
-statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt | create_source_stmt | fetch_stmt | drop_join_stmt | rename_join_stmt) ~ EOI }
+statement = { SOI ~ (filter_stmt | attach_stmt | join_stmt | reindex_stmt | create_source_stmt | fetch_stmt | drop_join_stmt | rename_join_stmt | select_stmt | drop_index_stmt | rename_view_stmt) ~ EOI }
 
 // ============================================================================
 // FILTER Statement
@@ -152,6 +152,46 @@ drop_join_stmt = {
 
 rename_join_stmt = {
     ^"rename" ~ ^"join" ~ identifier ~ ^"to" ~ identifier
+}
+
+// ============================================================================
+// SELECT Statement
+// ============================================================================
+// Syntax: SELECT ...
+// We capture everything after SELECT as raw text - DataFusion parses it later
+// Examples:
+//   SELECT * FROM bundle
+//   SELECT name, email FROM bundle WHERE id > 100
+
+select_stmt = {
+    ^"select" ~ select_body
+}
+
+select_body = @{
+    // Capture everything from SELECT to end as raw text
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// DROP INDEX Statement
+// ============================================================================
+// Syntax: DROP INDEX <column>
+// Examples:
+//   DROP INDEX user_id
+
+drop_index_stmt = {
+    ^"drop" ~ ^"index" ~ identifier
+}
+
+// ============================================================================
+// RENAME VIEW Statement
+// ============================================================================
+// Syntax: RENAME VIEW <old_name> TO <new_name>
+// Examples:
+//   RENAME VIEW old_view TO new_view
+
+rename_view_stmt = {
+    ^"rename" ~ ^"view" ~ identifier ~ ^"to" ~ identifier
 }
 
 // ============================================================================

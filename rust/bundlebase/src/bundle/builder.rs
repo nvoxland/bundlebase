@@ -469,7 +469,7 @@ impl BundleBuilder {
         &mut self,
         cmd: C,
     ) -> Result<&mut Self, BundlebaseError> {
-        let description = cmd.description();
+        let description = cmd.to_statement();
         self.do_change(&description, |builder| {
             Box::pin(async move {
                 let mut ctx = CommandContext::new(builder);
