@@ -77,6 +77,28 @@ pub struct VerificationResults {
     pub all_passed: bool,
 }
 
+impl std::fmt::Display for VerificationResults {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.all_passed {
+            write!(f, "All {} files verified successfully", self.passed_count)
+        } else {
+            writeln!(
+                f,
+                "Verification: {} passed, {} failed",
+                self.passed_count, self.failed_count
+            )?;
+            for file in self.files.iter().filter(|file| !file.passed) {
+                write!(f, "  FAILED: {}", file.location)?;
+                if let Some(ref err) = file.error {
+                    write!(f, " ({})", err)?;
+                }
+                writeln!(f)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 impl VerificationResults {
     /// Create a new VerificationResults from a list of file results
     pub fn from_files(files: Vec<FileVerificationResult>) -> Self {
