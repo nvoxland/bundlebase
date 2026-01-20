@@ -845,7 +845,7 @@ async def test_status_single_operation():
     assert isinstance(change, bundlebase.PyChange)
     assert isinstance(change.id, str)
     assert len(change.id) > 0
-    assert change.description == "Set name to Test Bundle"
+    assert change.description == "SET NAME 'Test Bundle'"
     assert change.operation_count == 1
 
 
@@ -865,11 +865,11 @@ async def test_status_multiple_operations():
     assert status.total_operations == 2
 
     # Check first operation
-    assert status.changes[0].description == "Set name to Test Bundle"
+    assert status.changes[0].description == "SET NAME 'Test Bundle'"
     assert status.changes[0].operation_count == 1
 
     # Check second operation
-    assert status.changes[1].description == "Set description to A test description"
+    assert status.changes[1].description == "SET DESCRIPTION 'A test description'"
     assert status.changes[1].operation_count == 1
 
 

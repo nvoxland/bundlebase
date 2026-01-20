@@ -1,15 +1,8 @@
 use crate::bundle::command::{Command, CommandContext};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
-use crate::bundle::operation::SetNameOp;
-use crate::bundle::operation::{AnyOperation, CreateSourceOp, SelectOp, SourceInfo};
-use crate::bundle::operation::{
-    AttachBlockOp, CreateFunctionOp, CreateJoinOp, CreateViewOp, DetachBlockOp, DropColumnOp,
-    DropJoinOp, DropViewOp, FilterOp, RebuildIndexOp, RenameColumnOp, RenameJoinOp,
-    RenameViewOp, ReplaceBlockOp, SetConfigOp, SetDescriptionOp,
-};
+use crate::bundle::operation::{AnyOperation, AttachBlockOp, SelectOp, SourceInfo};
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
-use crate::bundle::operation::{CreateIndexOp, DropIndexOp};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle, Source};
 use super::DataBlock;
@@ -509,21 +502,8 @@ impl BundleBuilder {
     /// bundle.detach_block("s3://bucket/data.parquet").await?;
     /// ```
     pub async fn detach_block(&mut self, location: &str) -> Result<&mut Self, BundlebaseError> {
-        let location = location.to_string();
-
-        self.do_change(&format!("Detach block at {}", location), |builder| {
-            Box::pin(async move {
-                let op = DetachBlockOp::setup(&location, &builder.bundle).await?;
-                builder.apply_operation(op.into()).await?;
-
-                info!("Detached block from {}", location);
-
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::DetachBlockCommand;
+        self.execute_command(DetachBlockCommand::new(location)).await
     }
 
     /// Replace a block's location in the bundle.
@@ -547,26 +527,8 @@ impl BundleBuilder {
         old_location: &str,
         new_location: &str,
     ) -> Result<&mut Self, BundlebaseError> {
-        let old_location = old_location.to_string();
-        let new_location = new_location.to_string();
-
-        self.do_change(
-            &format!("Replace block {} -> {}", old_location, new_location),
-            |builder| {
-                Box::pin(async move {
-                    let op =
-                        ReplaceBlockOp::setup(&old_location, &new_location, builder).await?;
-                    builder.apply_operation(op.into()).await?;
-
-                    info!("Replaced block {} -> {}", old_location, new_location);
-
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::ReplaceBlockCommand;
+        self.execute_command(ReplaceBlockCommand::new(old_location, new_location)).await
     }
 
     /// Create a data source for a pack.
@@ -605,45 +567,8 @@ impl BundleBuilder {
         args: HashMap<String, String>,
         pack: Option<&str>,
     ) -> Result<&mut Self, BundlebaseError> {
-        let pack = pack.map(|s| s.to_string());
-        let function = function.to_string();
-        let url = args.get("url").cloned().unwrap_or_else(|| "<no url>".to_string());
-        let pack_name = pack.clone().unwrap_or_else(|| "base".to_string());
-
-        self.do_change(
-            &format!("Create source for {} at {}", pack_name, url),
-            |builder| {
-                let pack_name = pack_name.clone();
-                Box::pin(async move {
-                    let pack_id = match pack.as_deref() {
-                        None | Some("base") => ObjectId::BASE_PACK,
-                        Some(join_name) => *builder
-                            .bundle
-                            .pack_by_name(join_name)
-                            .ok_or(format!("Unknown join '{}'", join_name))?
-                            .id(),
-                    };
-
-                    let source_id = ObjectId::generate();
-                    let op = CreateSourceOp::setup(source_id, pack_id, function, args);
-
-                    builder.apply_operation(op.into()).await?;
-
-                    // Automatically fetch from the newly created source
-                    // This runs inside the same change context
-                    let source = builder
-                        .bundle
-                        .get_source(&source_id)
-                        .ok_or_else(|| format!("Source '{}' not found after creation", source_id))?;
-                    let _ = builder.fetch_source(&source, &pack_name).await?;
-
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::CreateSourceCommand;
+        self.execute_command(CreateSourceCommand::new(function, args, pack.map(|s| s.to_string()))).await
     }
 
     /// Fetch from sources for a pack - discover and attach new files.
@@ -952,7 +877,7 @@ impl BundleBuilder {
         name: &str,
         source: &BundleBuilder,
     ) -> Result<&mut Self, BundlebaseError> {
-        let name = name.to_string();
+        use crate::bundle::command::CreateViewCommand;
 
         // Check if source has uncommitted operations that will be captured for the view
         let source_ops_count = source.status().operations().len();
@@ -962,18 +887,8 @@ impl BundleBuilder {
         // This is important for the Python case where source and self share the same Arc<Mutex<BundleBuilder>>
         let source_is_self = self.bundle.id() == source.bundle.id();
 
-        // Clone source to avoid lifetime issues in async move
-        let source_clone = source.clone();
-
-        self.do_change(&format!("Create view '{}'", name), |builder| {
-            Box::pin(async move {
-                let op = CreateViewOp::setup(&name, &source_clone, builder).await?;
-                builder.apply_operation(op.into()).await?;
-                info!("Attached view '{}'", name);
-                Ok(())
-            })
-        })
-        .await?;
+        // Execute the command
+        self.execute_command(CreateViewCommand::new(name, source)).await?;
 
         // After creating view, if source had uncommitted operations and source is the same
         // as self, we need to remove those operations to prevent double-commit.
@@ -1020,24 +935,8 @@ impl BundleBuilder {
         old_name: &str,
         new_name: &str,
     ) -> Result<&mut Self, BundlebaseError> {
-        let old_name = old_name.to_string();
-        let new_name = new_name.to_string();
-
-        self.do_change(
-            &format!("Rename view '{}' to '{}'", old_name, new_name),
-            |builder| {
-                Box::pin(async move {
-                    // Call setup() with bundle reference to look up view_id
-                    let op =
-                        RenameViewOp::setup(&old_name, &new_name, &builder.bundle).await?;
-                    builder.apply_operation(op.into()).await?;
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::RenameViewCommand;
+        self.execute_command(RenameViewCommand::new(old_name, new_name)).await
     }
 
     /// Drop an existing view
@@ -1062,22 +961,8 @@ impl BundleBuilder {
         &mut self,
         view_name: &str,
     ) -> Result<&mut Self, BundlebaseError> {
-        let view_name = view_name.to_string();
-
-        self.do_change(
-            &format!("Drop view '{}'", view_name),
-            |builder| {
-                Box::pin(async move {
-                    // Call setup() with bundle reference to look up view_id
-                    let op = DropViewOp::setup(&view_name, &builder.bundle).await?;
-                    builder.apply_operation(op.into()).await?;
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::DropViewCommand;
+        self.execute_command(DropViewCommand::new(view_name)).await
     }
 
     /// Drop an existing join
@@ -1098,18 +983,8 @@ impl BundleBuilder {
     /// # }
     /// ```
     pub async fn drop_join(&mut self, join_name: &str) -> Result<&mut Self, BundlebaseError> {
-        let join_name = join_name.to_string();
-
-        self.do_change(&format!("Drop join '{}'", join_name), |builder| {
-            Box::pin(async move {
-                let op = DropJoinOp::setup(&join_name, &builder.bundle).await?;
-                builder.apply_operation(op.into()).await?;
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::DropJoinCommand;
+        self.execute_command(DropJoinCommand::new(join_name)).await
     }
 
     /// Rename an existing join
@@ -1135,23 +1010,8 @@ impl BundleBuilder {
         old_name: &str,
         new_name: &str,
     ) -> Result<&mut Self, BundlebaseError> {
-        let old_name = old_name.to_string();
-        let new_name = new_name.to_string();
-
-        self.do_change(
-            &format!("Rename join '{}' to '{}'", old_name, new_name),
-            |builder| {
-                Box::pin(async move {
-                    let op =
-                        RenameJoinOp::setup(&old_name, &new_name, &builder.bundle).await?;
-                    builder.apply_operation(op.into()).await?;
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::RenameJoinCommand;
+        self.execute_command(RenameJoinCommand::new(old_name, new_name)).await
     }
 
     /// Drop a column (mutates self)
@@ -1201,19 +1061,8 @@ impl BundleBuilder {
         &mut self,
         signature: FunctionSignature,
     ) -> Result<&mut Self, BundlebaseError> {
-        let name = signature.name().to_string();
-
-        self.do_change(&format!("Create function {}", name), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(CreateFunctionOp::setup(signature).into())
-                    .await?;
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::CreateFunctionCommand;
+        self.execute_command(CreateFunctionCommand::new(signature)).await
     }
 
     /// Set the implementation for a function (mutates self)
@@ -1258,28 +1107,8 @@ impl BundleBuilder {
         value: &str,
         url_prefix: Option<&str>,
     ) -> Result<&mut Self, BundlebaseError> {
-        let key = key.to_string();
-        let value = value.to_string();
-        let url_prefix_owned = url_prefix.map(|s| s.to_string());
-
-        let description = match &url_prefix_owned {
-            Some(prefix) => format!("Set config [{}]: {}", prefix, key),
-            None => format!("Set config: {}", key),
-        };
-
-        self.do_change(&description, |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(
-                        SetConfigOp::setup(&key, &value, url_prefix_owned.as_deref()).into(),
-                    )
-                    .await?;
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::SetConfigCommand;
+        self.execute_command(SetConfigCommand::new(key, value, url_prefix.map(|s| s.to_string()))).await
     }
 
     /// Create an index on a column
@@ -1336,16 +1165,8 @@ impl BundleBuilder {
     /// This is typically called automatically by `index()` method after defining a new index.
     /// Manual calls are useful when recovering from partial index creation failures.
     pub async fn reindex(&mut self) -> Result<&mut Self, BundlebaseError> {
-        debug!("Starting reindex");
-
-        self.do_change("Reindex", |builder| {
-            Box::pin(async move {
-                builder.reindex_internal().await
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::ReindexCommand;
+        self.execute_command(ReindexCommand::new()).await
     }
 
     /// Internal reindex implementation that doesn't wrap in do_change.
@@ -1464,19 +1285,8 @@ impl BundleBuilder {
 
     /// Rebuild an index on a column (mutates self)
     pub async fn rebuild_index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
-        let column = column.to_string();
-
-        self.do_change(&format!("Rebuild index on column {}", column), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(RebuildIndexOp::setup(column).await?.into())
-                    .await?;
-                Ok(())
-            })
-        })
-        .await?;
-
-        Ok(self)
+        use crate::bundle::command::RebuildIndexCommand;
+        self.execute_command(RebuildIndexCommand::new(column)).await
     }
 
     /// Get the physical source (pack name, column name) for a logical column

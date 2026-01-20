@@ -13,8 +13,10 @@ pub use parser::Rule;
 mod attach;
 mod commit;
 mod create_index;
+mod create_function;
 mod create_source;
 mod create_view;
+mod detach_block;
 mod drop_column;
 mod drop_index;
 mod drop_join;
@@ -22,12 +24,15 @@ mod drop_view;
 mod fetch;
 mod filter;
 mod join;
+mod rebuild_index;
 mod reindex;
+mod replace_block;
 mod rename_column;
 mod rename_join;
 mod rename_view;
 mod reset;
 mod select;
+mod set_config;
 mod set_description;
 mod set_name;
 mod undo;
@@ -35,9 +40,11 @@ mod undo;
 // Re-export command structs
 pub use attach::AttachCommand;
 pub use commit::CommitCommand;
+pub use create_function::CreateFunctionCommand;
 pub use create_index::CreateIndexCommand;
 pub use create_source::CreateSourceCommand;
 pub use create_view::CreateViewCommand;
+pub use detach_block::DetachBlockCommand;
 pub use drop_column::DropColumnCommand;
 pub use drop_index::DropIndexCommand;
 pub use drop_join::DropJoinCommand;
@@ -45,12 +52,15 @@ pub use drop_view::DropViewCommand;
 pub use fetch::{FetchAllCommand, FetchCommand};
 pub use filter::FilterCommand;
 pub use join::JoinCommand;
+pub use rebuild_index::RebuildIndexCommand;
 pub use reindex::ReindexCommand;
 pub use rename_column::RenameColumnCommand;
+pub use replace_block::ReplaceBlockCommand;
 pub use rename_join::RenameJoinCommand;
 pub use rename_view::RenameViewCommand;
 pub use reset::ResetCommand;
 pub use select::SelectCommand;
+pub use set_config::SetConfigCommand;
 pub use set_description::SetDescriptionCommand;
 pub use set_name::SetNameCommand;
 pub use undo::UndoCommand;
@@ -167,6 +177,9 @@ pub enum BundleCommand {
     /// Attach a data source
     Attach(AttachCommand),
 
+    /// Detach a data block by location
+    DetachBlock(DetachBlockCommand),
+
     /// Filter rows by a WHERE condition
     Filter(FilterCommand),
 
@@ -185,6 +198,9 @@ pub enum BundleCommand {
     /// Join with another data source
     Join(JoinCommand),
 
+    /// Create a custom function
+    CreateFunction(CreateFunctionCommand),
+
     /// Create an index on a column
     CreateIndex(CreateIndexCommand),
 
@@ -200,14 +216,23 @@ pub enum BundleCommand {
     /// Rename a join
     RenameJoin(RenameJoinCommand),
 
+    /// Rebuild an index on a column
+    RebuildIndex(RebuildIndexCommand),
+
     /// Rebuild all indexes
     Reindex(ReindexCommand),
+
+    /// Replace a block's location
+    ReplaceBlock(ReplaceBlockCommand),
 
     /// Set bundle name
     SetName(SetNameCommand),
 
     /// Set bundle description
     SetDescription(SetDescriptionCommand),
+
+    /// Set a configuration value
+    SetConfig(SetConfigCommand),
 
     /// Commit changes
     Commit(CommitCommand),
@@ -255,6 +280,10 @@ impl BundleCommand {
                 builder.execute_command(cmd).await?;
                 Ok(())
             }
+            BundleCommand::DetachBlock(cmd) => {
+                builder.execute_command(cmd).await?;
+                Ok(())
+            }
             BundleCommand::Filter(cmd) => {
                 builder.execute_command(cmd).await?;
                 Ok(())
@@ -279,6 +308,10 @@ impl BundleCommand {
                 builder.execute_command(cmd).await?;
                 Ok(())
             }
+            BundleCommand::CreateFunction(cmd) => {
+                builder.execute_command(cmd).await?;
+                Ok(())
+            }
             BundleCommand::CreateIndex(cmd) => {
                 builder.execute_command(cmd).await?;
                 Ok(())
@@ -299,7 +332,15 @@ impl BundleCommand {
                 builder.execute_command(cmd).await?;
                 Ok(())
             }
+            BundleCommand::RebuildIndex(cmd) => {
+                builder.execute_command(cmd).await?;
+                Ok(())
+            }
             BundleCommand::Reindex(cmd) => {
+                builder.execute_command(cmd).await?;
+                Ok(())
+            }
+            BundleCommand::ReplaceBlock(cmd) => {
                 builder.execute_command(cmd).await?;
                 Ok(())
             }
@@ -308,6 +349,10 @@ impl BundleCommand {
                 Ok(())
             }
             BundleCommand::SetDescription(cmd) => {
+                builder.execute_command(cmd).await?;
+                Ok(())
+            }
+            BundleCommand::SetConfig(cmd) => {
                 builder.execute_command(cmd).await?;
                 Ok(())
             }
