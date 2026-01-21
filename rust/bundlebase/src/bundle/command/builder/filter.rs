@@ -1,11 +1,12 @@
 //! Filter command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::FilterOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use datafusion::scalar::ScalarValue;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to filter rows with a WHERE clause.
 #[derive(Debug, Clone)]
@@ -26,22 +27,7 @@ impl FilterCommand {
     }
 }
 
-#[async_trait]
-impl Command for FilterCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let statement = self.to_statement();
-        ctx.apply_operation(
-            FilterOp::setup(&self.where_clause, self.params)
-                .await?
-                .into(),
-        )
-        .await?;
-        info!("Filtered: {}", statement);
-        Ok(())
-    }
-
+impl CommandParsing for FilterCommand {
     fn rule() -> Rule {
         Rule::filter_stmt
     }
@@ -68,6 +54,23 @@ impl Command for FilterCommand {
 
     fn to_statement(&self) -> String {
         format!("FILTER WHERE {}", self.where_clause)
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for FilterCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        let statement = self.to_statement();
+        ctx.apply_operation(
+            FilterOp::setup(&self.where_clause, self.params)
+                .await?
+                .into(),
+        )
+        .await?;
+        info!("Filtered: {}", statement);
+        Ok(())
     }
 }
 

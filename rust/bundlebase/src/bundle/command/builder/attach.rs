@@ -1,12 +1,13 @@
 //! Attach command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::operation::AttachBlockOp;
 use crate::data::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to attach a data block to the bundle.
 #[derive(Debug, Clone)]
@@ -27,30 +28,7 @@ impl AttachCommand {
     }
 }
 
-#[async_trait]
-impl Command for AttachCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let pack_id = match self.pack.as_deref() {
-            None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *ctx
-                .bundle()
-                .pack_by_name(join_name)
-                .ok_or(format!("Unknown join '{}'", join_name))?
-                .id(),
-        };
-
-        let pack_name = self.pack.as_deref().unwrap_or("base");
-
-        let op = AttachBlockOp::setup(&pack_id, &self.path, ctx.builder()).await?;
-        ctx.apply_operation(op.into()).await?;
-
-        info!("Attached {} to {}", self.path, pack_name);
-
-        Ok(())
-    }
-
+impl CommandParsing for AttachCommand {
     fn rule() -> Rule {
         Rule::attach_stmt
     }
@@ -110,6 +88,31 @@ impl Command for AttachCommand {
             }
             _ => format!("ATTACH {}", escape_string(&self.path)),
         }
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for AttachCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        let pack_id = match self.pack.as_deref() {
+            None | Some("base") => ObjectId::BASE_PACK,
+            Some(join_name) => *ctx
+                .bundle()
+                .pack_by_name(join_name)
+                .ok_or(format!("Unknown join '{}'", join_name))?
+                .id(),
+        };
+
+        let pack_name = self.pack.as_deref().unwrap_or("base");
+
+        let op = AttachBlockOp::setup(&pack_id, &self.path, ctx.builder()).await?;
+        ctx.apply_operation(op.into()).await?;
+
+        info!("Attached {} to {}", self.path, pack_name);
+
+        Ok(())
     }
 }
 

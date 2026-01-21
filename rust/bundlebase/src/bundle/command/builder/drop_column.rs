@@ -1,10 +1,11 @@
 //! DropColumn command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::DropColumnOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to drop a column from the bundle.
 #[derive(Debug, Clone)]
@@ -20,19 +21,7 @@ impl DropColumnCommand {
     }
 }
 
-#[async_trait]
-impl Command for DropColumnCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        ctx.apply_operation(DropColumnOp::setup(vec![self.name.as_str()]).into())
-            .await?;
-
-        info!("Dropped column \"{}\"", self.name);
-
-        Ok(())
-    }
-
+impl CommandParsing for DropColumnCommand {
     fn rule() -> Rule {
         Rule::drop_column_stmt
     }
@@ -54,6 +43,20 @@ impl Command for DropColumnCommand {
 
     fn to_statement(&self) -> String {
         format!("DROP COLUMN {}", self.name)
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for DropColumnCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        ctx.apply_operation(DropColumnOp::setup(vec![self.name.as_str()]).into())
+            .await?;
+
+        info!("Dropped column \"{}\"", self.name);
+
+        Ok(())
     }
 }
 

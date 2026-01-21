@@ -1,9 +1,10 @@
 //! RebuildIndex command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RebuildIndexOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to rebuild an index on a column.
 #[derive(Debug, Clone)]
@@ -21,16 +22,7 @@ impl RebuildIndexCommand {
     }
 }
 
-#[async_trait]
-impl Command for RebuildIndexCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let op = RebuildIndexOp::setup(self.column.clone()).await?;
-        ctx.apply_operation(op.into()).await?;
-        Ok(())
-    }
-
+impl CommandParsing for RebuildIndexCommand {
     fn rule() -> Rule {
         Rule::rebuild_index_stmt
     }
@@ -53,6 +45,17 @@ impl Command for RebuildIndexCommand {
 
     fn to_statement(&self) -> String {
         format!("REBUILD INDEX ON {}", self.column)
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for RebuildIndexCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        let op = RebuildIndexOp::setup(self.column.clone()).await?;
+        ctx.apply_operation(op.into()).await?;
+        Ok(())
     }
 }
 

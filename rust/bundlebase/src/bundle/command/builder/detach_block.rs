@@ -1,11 +1,12 @@
 //! DetachBlock command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::DetachBlockOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to detach a data block from the bundle by its location.
 #[derive(Debug, Clone)]
@@ -23,17 +24,7 @@ impl DetachBlockCommand {
     }
 }
 
-#[async_trait]
-impl Command for DetachBlockCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let op = DetachBlockOp::setup(&self.location, ctx.bundle()).await?;
-        ctx.apply_operation(op.into()).await?;
-        info!("Detached block from {}", self.location);
-        Ok(())
-    }
-
+impl CommandParsing for DetachBlockCommand {
     fn rule() -> Rule {
         Rule::detach_stmt
     }
@@ -56,6 +47,18 @@ impl Command for DetachBlockCommand {
 
     fn to_statement(&self) -> String {
         format!("DETACH {}", escape_string(&self.location))
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for DetachBlockCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        let op = DetachBlockOp::setup(&self.location, ctx.bundle()).await?;
+        ctx.apply_operation(op.into()).await?;
+        info!("Detached block from {}", self.location);
+        Ok(())
     }
 }
 

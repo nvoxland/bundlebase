@@ -1,6 +1,6 @@
 //! CreateSource command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::operation::{AttachBlockOp, CreateSourceOp, SourceInfo};
 use crate::data::ObjectId;
@@ -8,6 +8,7 @@ use crate::source::FetchAction;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use std::collections::HashMap;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to create a data source for a pack.
 #[derive(Debug, Clone)]
@@ -35,64 +36,7 @@ impl CreateSourceCommand {
     }
 }
 
-#[async_trait]
-impl Command for CreateSourceCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let pack_id = match self.pack.as_deref() {
-            None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *ctx
-                .bundle()
-                .pack_by_name(join_name)
-                .ok_or(format!("Unknown join '{}'", join_name))?
-                .id(),
-        };
-
-        let source_id = ObjectId::generate();
-        let op = CreateSourceOp::setup(source_id, pack_id, self.function.clone(), self.args.clone());
-
-        ctx.apply_operation(op.into()).await?;
-
-        // Automatically fetch from the newly created source
-        let source = ctx
-            .bundle()
-            .get_source(&source_id)
-            .ok_or_else(|| format!("Source '{}' not found after creation", source_id))?;
-
-        let registry = ctx.bundle().source_function_registry();
-        let actions = source
-            .fetch(ctx.data_dir(), ctx.bundle().config(), &registry)
-            .await?;
-
-        // Process fetch actions
-        for action in actions {
-            match action {
-                FetchAction::Add(data) => {
-                    let mut op = AttachBlockOp::setup_for_source(
-                        &pack_id,
-                        &data.attach_location,
-                        &data.source_url,
-                        &data.hash,
-                        ctx.builder(),
-                    )
-                    .await?;
-                    op.source_info = Some(SourceInfo {
-                        id: source_id,
-                        location: data.source_location,
-                        version: op.version.clone(),
-                    });
-                    ctx.apply_operation(op.into()).await?;
-                }
-                FetchAction::Replace { .. } | FetchAction::Remove { .. } => {
-                    // These shouldn't happen on initial source creation
-                }
-            }
-        }
-
-        Ok(())
-    }
-
+impl CommandParsing for CreateSourceCommand {
     fn rule() -> Rule {
         Rule::create_source_stmt
     }
@@ -167,6 +111,65 @@ impl Command for CreateSourceCommand {
             }
             _ => format!("CREATE SOURCE {} WITH ({})", self.function, args_joined),
         }
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for CreateSourceCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        let pack_id = match self.pack.as_deref() {
+            None | Some("base") => ObjectId::BASE_PACK,
+            Some(join_name) => *ctx
+                .bundle()
+                .pack_by_name(join_name)
+                .ok_or(format!("Unknown join '{}'", join_name))?
+                .id(),
+        };
+
+        let source_id = ObjectId::generate();
+        let op = CreateSourceOp::setup(source_id, pack_id, self.function.clone(), self.args.clone());
+
+        ctx.apply_operation(op.into()).await?;
+
+        // Automatically fetch from the newly created source
+        let source = ctx
+            .bundle()
+            .get_source(&source_id)
+            .ok_or_else(|| format!("Source '{}' not found after creation", source_id))?;
+
+        let registry = ctx.bundle().source_function_registry();
+        let actions = source
+            .fetch(ctx.data_dir(), ctx.bundle().config(), &registry)
+            .await?;
+
+        // Process fetch actions
+        for action in actions {
+            match action {
+                FetchAction::Add(data) => {
+                    let mut op = AttachBlockOp::setup_for_source(
+                        &pack_id,
+                        &data.attach_location,
+                        &data.source_url,
+                        &data.hash,
+                        ctx.builder(),
+                    )
+                    .await?;
+                    op.source_info = Some(SourceInfo {
+                        id: source_id,
+                        location: data.source_location,
+                        version: op.version.clone(),
+                    });
+                    ctx.apply_operation(op.into()).await?;
+                }
+                FetchAction::Replace { .. } | FetchAction::Remove { .. } => {
+                    // These shouldn't happen on initial source creation
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 

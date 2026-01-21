@@ -1,9 +1,10 @@
 //! DropJoin command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::DropJoinOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to drop a join.
 #[derive(Debug, Clone)]
@@ -19,16 +20,7 @@ impl DropJoinCommand {
     }
 }
 
-#[async_trait]
-impl Command for DropJoinCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let op = DropJoinOp::setup(&self.name, ctx.bundle()).await?;
-        ctx.apply_operation(op.into()).await?;
-        Ok(())
-    }
-
+impl CommandParsing for DropJoinCommand {
     fn rule() -> Rule {
         Rule::drop_join_stmt
     }
@@ -51,6 +43,17 @@ impl Command for DropJoinCommand {
 
     fn to_statement(&self) -> String {
         format!("DROP JOIN {}", self.name)
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for DropJoinCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        let op = DropJoinOp::setup(&self.name, ctx.bundle()).await?;
+        ctx.apply_operation(op.into()).await?;
+        Ok(())
     }
 }
 

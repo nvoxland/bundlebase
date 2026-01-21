@@ -1,6 +1,6 @@
 //! Join command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::{extract_string_content, parse_join_type};
 use crate::bundle::operation::{AttachBlockOp, CreateJoinOp};
 use crate::bundle::pack::JoinTypeOption;
@@ -8,6 +8,7 @@ use crate::data::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to join with another data source.
 #[derive(Debug, Clone)]
@@ -39,34 +40,7 @@ impl JoinCommand {
     }
 }
 
-#[async_trait]
-impl Command for JoinCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        // Step 1: Create a new pack with join metadata
-        let join_pack_id = ObjectId::generate();
-        ctx.apply_operation(
-            CreateJoinOp::setup(&join_pack_id, &self.name, &self.expression, self.join_type)
-                .await?
-                .into(),
-        )
-        .await?;
-
-        // Step 2: Attach the location data to the join pack (if provided)
-        if let Some(ref loc) = self.location {
-            let op = AttachBlockOp::setup(&join_pack_id, loc, ctx.builder()).await?;
-            ctx.apply_operation(op.into()).await?;
-        }
-
-        match &self.location {
-            Some(loc) => info!("Joined: {} as \"{}\"", loc, self.name),
-            None => info!("Created join point \"{}\" (no initial data)", self.name),
-        }
-
-        Ok(())
-    }
-
+impl CommandParsing for JoinCommand {
     fn rule() -> Rule {
         Rule::join_stmt
     }
@@ -139,6 +113,35 @@ impl Command for JoinCommand {
                 self.expression
             ),
         }
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for JoinCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        // Step 1: Create a new pack with join metadata
+        let join_pack_id = ObjectId::generate();
+        ctx.apply_operation(
+            CreateJoinOp::setup(&join_pack_id, &self.name, &self.expression, self.join_type)
+                .await?
+                .into(),
+        )
+        .await?;
+
+        // Step 2: Attach the location data to the join pack (if provided)
+        if let Some(ref loc) = self.location {
+            let op = AttachBlockOp::setup(&join_pack_id, loc, ctx.builder()).await?;
+            ctx.apply_operation(op.into()).await?;
+        }
+
+        match &self.location {
+            Some(loc) => info!("Joined: {} as \"{}\"", loc, self.name),
+            None => info!("Created join point \"{}\" (no initial data)", self.name),
+        }
+
+        Ok(())
     }
 }
 

@@ -1,9 +1,10 @@
 //! RenameView command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RenameViewOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to rename a view.
 #[derive(Debug, Clone)]
@@ -24,16 +25,7 @@ impl RenameViewCommand {
     }
 }
 
-#[async_trait]
-impl Command for RenameViewCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let op = RenameViewOp::setup(&self.old_name, &self.new_name, ctx.bundle()).await?;
-        ctx.apply_operation(op.into()).await?;
-        Ok(())
-    }
-
+impl CommandParsing for RenameViewCommand {
     fn rule() -> Rule {
         Rule::rename_view_stmt
     }
@@ -64,6 +56,17 @@ impl Command for RenameViewCommand {
 
     fn to_statement(&self) -> String {
         format!("RENAME VIEW {} TO {}", self.old_name, self.new_name)
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for RenameViewCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        let op = RenameViewOp::setup(&self.old_name, &self.new_name, ctx.bundle()).await?;
+        ctx.apply_operation(op.into()).await?;
+        Ok(())
     }
 }
 

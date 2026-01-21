@@ -1,10 +1,11 @@
 //! SetName command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::SetNameOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to set the bundle's name.
 #[derive(Debug, Clone)]
@@ -20,16 +21,7 @@ impl SetNameCommand {
     }
 }
 
-#[async_trait]
-impl Command for SetNameCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        ctx.apply_operation(SetNameOp::setup(&self.name).into())
-            .await?;
-        Ok(())
-    }
-
+impl CommandParsing for SetNameCommand {
     fn rule() -> Rule {
         Rule::set_name_stmt
     }
@@ -50,6 +42,17 @@ impl Command for SetNameCommand {
 
     fn to_statement(&self) -> String {
         format!("SET NAME {}", escape_string(&self.name))
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for SetNameCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        ctx.apply_operation(SetNameOp::setup(&self.name).into())
+            .await?;
+        Ok(())
     }
 }
 

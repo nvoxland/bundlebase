@@ -1,11 +1,12 @@
 //! CreateIndex command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::CreateIndexOp;
 use crate::index::IndexType;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to create an index on a column.
 #[derive(Debug, Clone)]
@@ -26,25 +27,7 @@ impl CreateIndexCommand {
     }
 }
 
-#[async_trait]
-impl Command for CreateIndexCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        ctx.apply_operation(
-            CreateIndexOp::setup(&self.column, self.index_type.clone())
-                .await?
-                .into(),
-        )
-        .await?;
-
-        ctx.reindex_internal().await?;
-
-        info!("Created index on: \"{}\"", self.column);
-
-        Ok(())
-    }
-
+impl CommandParsing for CreateIndexCommand {
     fn rule() -> Rule {
         Rule::create_index_stmt
     }
@@ -73,6 +56,26 @@ impl Command for CreateIndexCommand {
                 format!("CREATE TEXT INDEX ON {} (tokenizer: {:?})", self.column, tokenizer)
             }
         }
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for CreateIndexCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        ctx.apply_operation(
+            CreateIndexOp::setup(&self.column, self.index_type.clone())
+                .await?
+                .into(),
+        )
+        .await?;
+
+        ctx.reindex_internal().await?;
+
+        info!("Created index on: \"{}\"", self.column);
+
+        Ok(())
     }
 }
 

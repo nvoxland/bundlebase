@@ -1,6 +1,6 @@
 //! Fetch command implementations.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::{AttachBlockOp, DetachBlockOp, SourceInfo};
 use crate::data::ObjectId;
 use crate::source::{FetchAction, FetchResults};
@@ -8,6 +8,7 @@ use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
 use std::sync::Arc;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to fetch from sources for a specific pack.
 #[derive(Debug, Clone)]
@@ -23,35 +24,7 @@ impl FetchCommand {
     }
 }
 
-#[async_trait]
-impl Command for FetchCommand {
-    type Output = Vec<FetchResults>;
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<Vec<FetchResults>, BundlebaseError> {
-        let pack_name = self.pack.as_deref().unwrap_or("base").to_string();
-        let pack_id = match self.pack.as_deref() {
-            None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *ctx
-                .bundle()
-                .pack_by_name(join_name)
-                .ok_or(format!("Unknown join '{}'", join_name))?
-                .id(),
-        };
-
-        let sources = ctx.bundle().get_sources_for_pack(&pack_id);
-        if sources.is_empty() {
-            return Err(format!("No sources defined for pack '{}'", pack_name).into());
-        }
-
-        let mut results = Vec::new();
-        for source in sources {
-            let result = fetch_from_source(ctx, &source, &pack_id, &pack_name).await?;
-            results.push(result);
-        }
-
-        Ok(results)
-    }
-
+impl CommandParsing for FetchCommand {
     fn rule() -> Rule {
         Rule::fetch_stmt
     }
@@ -80,6 +53,36 @@ impl Command for FetchCommand {
     }
 }
 
+#[async_trait]
+impl BundleBuilderCommand for FetchCommand {
+    type Output = Vec<FetchResults>;
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<Vec<FetchResults>, BundlebaseError> {
+        let pack_name = self.pack.as_deref().unwrap_or("base").to_string();
+        let pack_id = match self.pack.as_deref() {
+            None | Some("base") => ObjectId::BASE_PACK,
+            Some(join_name) => *ctx
+                .bundle()
+                .pack_by_name(join_name)
+                .ok_or(format!("Unknown join '{}'", join_name))?
+                .id(),
+        };
+
+        let sources = ctx.bundle().get_sources_for_pack(&pack_id);
+        if sources.is_empty() {
+            return Err(format!("No sources defined for pack '{}'", pack_name).into());
+        }
+
+        let mut results = Vec::new();
+        for source in sources {
+            let result = fetch_from_source(ctx, &source, &pack_id, &pack_name).await?;
+            results.push(result);
+        }
+
+        Ok(results)
+    }
+}
+
 /// Command to fetch from all defined sources.
 #[derive(Debug, Clone, Default)]
 pub struct FetchAllCommand;
@@ -91,35 +94,7 @@ impl FetchAllCommand {
     }
 }
 
-#[async_trait]
-impl Command for FetchAllCommand {
-    type Output = Vec<FetchResults>;
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<Vec<FetchResults>, BundlebaseError> {
-        // Collect sources with their pack info to avoid borrow issues
-        let sources_with_packs: Vec<_> = ctx
-            .bundle()
-            .sources()
-            .values()
-            .map(|source| {
-                let pack_name = ctx
-                    .bundle()
-                    .pack_name(source.pack())
-                    .unwrap_or("base".to_string());
-                let pack_id = *source.pack();
-                (source.clone(), pack_id, pack_name)
-            })
-            .collect();
-
-        let mut results = Vec::new();
-        for (source, pack_id, pack_name) in sources_with_packs {
-            let result = fetch_from_source(ctx, &source, &pack_id, &pack_name).await?;
-            results.push(result);
-        }
-
-        Ok(results)
-    }
-
+impl CommandParsing for FetchAllCommand {
     fn rule() -> Rule {
         Rule::fetch_stmt
     }
@@ -149,9 +124,39 @@ impl Command for FetchAllCommand {
     }
 }
 
+#[async_trait]
+impl BundleBuilderCommand for FetchAllCommand {
+    type Output = Vec<FetchResults>;
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<Vec<FetchResults>, BundlebaseError> {
+        // Collect sources with their pack info to avoid borrow issues
+        let sources_with_packs: Vec<_> = ctx
+            .bundle()
+            .sources()
+            .values()
+            .map(|source| {
+                let pack_name = ctx
+                    .bundle()
+                    .pack_name(source.pack())
+                    .unwrap_or("base".to_string());
+                let pack_id = *source.pack();
+                (source.clone(), pack_id, pack_name)
+            })
+            .collect();
+
+        let mut results = Vec::new();
+        for (source, pack_id, pack_name) in sources_with_packs {
+            let result = fetch_from_source(ctx, &source, &pack_id, &pack_name).await?;
+            results.push(result);
+        }
+
+        Ok(results)
+    }
+}
+
 /// Helper to fetch from a single source.
 async fn fetch_from_source(
-    ctx: &mut CommandContext<'_>,
+    ctx: &mut BuilderCommandContext<'_>,
     source: &Arc<crate::bundle::Source>,
     pack_id: &ObjectId,
     pack_name: &str,
@@ -234,7 +239,7 @@ async fn fetch_from_source(
 
 /// Find the current location of a block that was attached from a source.
 fn find_block_location_by_source(
-    ctx: &CommandContext<'_>,
+    ctx: &BuilderCommandContext<'_>,
     source_id: &ObjectId,
     source_location: &str,
 ) -> Result<String, BundlebaseError> {
