@@ -89,7 +89,7 @@ pub use builder::{
 };
 
 // Re-export facade command structs
-pub use facade::SelectCommand;
+pub use facade::{ExplainPlanCommand, SelectCommand};
 
 /// Output from executing a BundleCommand.
 ///
@@ -103,6 +103,8 @@ pub enum CommandOutput {
     Verification(VerificationResults),
     /// Fetch results from FETCH / FETCH ALL
     Fetch(Vec<FetchResults>),
+    /// Query execution plan from EXPLAIN
+    ExplainPlan(String),
 }
 
 impl CommandOutput {
@@ -123,6 +125,14 @@ impl CommandOutput {
     pub fn into_fetch(self) -> Option<Vec<FetchResults>> {
         match self {
             CommandOutput::Fetch(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// Get explain output if this is an ExplainPlan output
+    pub fn into_explain_plan(self) -> Option<String> {
+        match self {
+            CommandOutput::ExplainPlan(s) => Some(s),
             _ => None,
         }
     }
@@ -303,6 +313,9 @@ pub enum BundleCommand {
 
     /// Execute a full SQL query (returns new BundleBuilder)
     Select(SelectCommand),
+
+    /// Show the query execution plan
+    ExplainPlan(ExplainPlanCommand),
 }
 
 impl BundleCommand {
@@ -435,6 +448,10 @@ impl BundleCommand {
             BundleCommand::VerifyData(cmd) => {
                 let results = builder.execute_command(cmd).await?;
                 Ok(CommandOutput::Verification(results))
+            }
+            BundleCommand::ExplainPlan(_cmd) => {
+                let plan = builder.explain().await?;
+                Ok(CommandOutput::ExplainPlan(plan))
             }
         }
     }

@@ -122,4 +122,7 @@ pub trait BundleFacade {
     /// let archived = Bundle::open("archive.tar", None).await?;
     /// ```
     async fn export_tar(&self, tar_path: &str) -> Result<String, BundlebaseError>;
+
+    /// Returns the query execution plan as a formatted string
+    async fn explain(&self) -> Result<String, BundlebaseError>;
 }
