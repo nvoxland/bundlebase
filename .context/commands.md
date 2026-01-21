@@ -37,30 +37,25 @@ The `statement` rule in `grammar.pest` is organized into semantic categories:
 
 Add new statement rules to the appropriate category for maintainability.
 
-## Execution Path Decision Tree
+## Execution Path
+
+All commands are executed through a single unified method:
 
 ```
-Is Output type ()?
-├─ Yes: Does it modify bundle state?
-│   ├─ Yes → use execute_command()
-│   │         - Wraps in do_change() for tracking
-│   │         - Example: AttachCommand, FilterCommand
-│   └─ No → use run_command()
-│             - No do_change wrapper
-│             - Example: ResetCommand
-└─ No (returns a value):
-    └─ Use run_command()
-          - Returns the command's Output type
-          - Example: FetchCommand → Vec<FetchResults>
-          - Example: VerifyDataCommand → VerificationResults
+execute_command(cmd)
+├─ Always applies change tracking (via do_change())
+├─ Returns C::Output (any type the command defines)
+└─ Examples:
+    - FilterCommand → ()
+    - FetchCommand → Vec<FetchResults>
+    - VerifyDataCommand → VerificationResults
 ```
 
 ### Execution Path Summary
 
 | Path | Output Type | Change Tracking | Use When |
 |------|-------------|-----------------|----------|
-| `execute_command()` | `()` | Yes (wrapped in `do_change()`) | Modifying bundle state |
-| `run_command()` | Any | No | Returning results or read-only ops |
+| `execute_command()` | `C::Output` (any) | Yes (wrapped in `do_change()`) | All commands |
 
 ## Command Template
 
@@ -187,11 +182,11 @@ impl BundleCommand {
             // ... existing matches
             BundleCommand::<Name>(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                Ok(CommandOutput::Empty)
             }
-            // OR for commands returning values:
+            // For commands returning values:
             BundleCommand::<Name>(cmd) => {
-                let results = builder.run_command(cmd).await?;
+                let results = builder.execute_command(cmd).await?;
                 Ok(CommandOutput::<Variant>(results))
             }
         }
@@ -340,7 +335,7 @@ pub enum BundleCommand {
 // Execute match arm
 BundleCommand::Filter(cmd) => {
     builder.execute_command(cmd).await?;
-    Ok(CommandOutput::Unit)
+    Ok(CommandOutput::Empty)
 }
 ```
 
