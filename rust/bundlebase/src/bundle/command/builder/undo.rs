@@ -4,7 +4,8 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to undo the last uncommitted change.
 #[derive(Debug, Clone, Default)]
@@ -35,22 +36,22 @@ impl CommandParsing for UndoCommand {
 impl BundleBuilderCommand for UndoCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
-        if ctx.status().is_empty() {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+        if builder.status().is_empty() {
             return Err("No uncommitted changes to undo".into());
         }
 
         // Remove the last change
-        ctx.pop_status();
+        builder.status.pop();
 
         // Reload the bundle from the last committed state
-        ctx.reload_bundle().await?;
+        builder.reload_bundle().await?;
 
         // Reapply all remaining operations
-        let changes = ctx.status_changes().clone();
+        let changes = builder.status.changes().clone();
         for change in &changes {
             for op in &change.operations {
-                ctx.bundle_mut().apply_operation(op.clone()).await?;
+                builder.bundle_mut().apply_operation(op.clone()).await?;
             }
         }
 

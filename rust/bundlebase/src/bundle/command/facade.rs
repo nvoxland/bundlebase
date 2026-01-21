@@ -1,7 +1,7 @@
-//! Facade command trait and context.
+//! Facade command trait.
 //!
 //! This module provides the `BundleFacadeCommand` trait for read-only commands
-//! that work with `&dyn BundleFacade` and the `FacadeCommandContext` for execution.
+//! that work with `&dyn BundleFacade`.
 //!
 //! Note: SelectCommand is conceptually a facade command but currently implements
 //! BundleBuilderCommand for backwards compatibility. It resides here because
@@ -15,27 +15,6 @@ use async_trait::async_trait;
 mod select;
 
 pub use select::SelectCommand;
-
-/// Context provided to facade commands during execution.
-///
-/// This provides a read-only interface to a bundle through the `BundleFacade` trait.
-/// Facade commands cannot mutate the source bundle - they either return new builders
-/// or compute values from the existing state.
-pub struct FacadeCommandContext<'a> {
-    pub(crate) facade: &'a dyn BundleFacade,
-}
-
-impl<'a> FacadeCommandContext<'a> {
-    /// Create a new FacadeCommandContext wrapping a BundleFacade
-    pub fn new(facade: &'a dyn BundleFacade) -> Self {
-        Self { facade }
-    }
-
-    /// Get a reference to the facade
-    pub fn facade(&self) -> &dyn BundleFacade {
-        self.facade
-    }
-}
 
 /// Trait for read-only commands that work with `BundleFacade`.
 ///
@@ -58,9 +37,9 @@ pub trait BundleFacadeCommand: super::CommandParsing {
     /// Future commands might return other types like `usize` for count operations.
     type Output;
 
-    /// Execute the command using the provided context
+    /// Execute the command on the provided facade
     async fn execute(
         self: Box<Self>,
-        ctx: &FacadeCommandContext<'_>,
+        facade: &dyn BundleFacade,
     ) -> Result<Self::Output, BundlebaseError>;
 }

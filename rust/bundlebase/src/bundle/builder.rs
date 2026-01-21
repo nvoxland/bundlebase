@@ -1,4 +1,4 @@
-use crate::bundle::command::{BundleBuilderCommand, BuilderCommandContext, FetchAllCommand, FetchCommand};
+use crate::bundle::command::{BundleBuilderCommand, FetchAllCommand, FetchCommand};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::{AnyOperation, SelectOp};
@@ -220,6 +220,11 @@ impl BundleBuilder {
         &self.bundle
     }
 
+    /// Get a mutable reference to the bundle
+    pub fn bundle_mut(&mut self) -> &mut Bundle {
+        &mut self.bundle
+    }
+
     /// Returns the bundle status showing uncommitted changes.
     pub fn status(&self) -> &BundleStatus {
         &self.status
@@ -439,10 +444,7 @@ impl BundleBuilder {
     ) -> Result<&mut Self, BundlebaseError> {
         let description = cmd.to_statement();
         self.do_change(&description, |builder| {
-            Box::pin(async move {
-                let mut ctx = BuilderCommandContext::new(builder);
-                Box::new(cmd).execute(&mut ctx).await
-            })
+            Box::pin(async move { Box::new(cmd).execute(builder).await })
         })
         .await?;
         Ok(self)
@@ -469,8 +471,7 @@ impl BundleBuilder {
         &mut self,
         cmd: C,
     ) -> Result<C::Output, BundlebaseError> {
-        let mut ctx = BuilderCommandContext::new(self);
-        Box::new(cmd).execute(&mut ctx).await
+        Box::new(cmd).execute(self).await
     }
 
     /// Execute a builder command that returns a value while tracking changes.
@@ -514,8 +515,7 @@ impl BundleBuilder {
         };
 
         // Execute the command
-        let mut ctx = BuilderCommandContext::new(self);
-        let result = Box::new(cmd).execute(&mut ctx).await;
+        let result = Box::new(cmd).execute(self).await;
 
         // Only finalize the change if we created it (not nested)
         match &result {

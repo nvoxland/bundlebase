@@ -6,7 +6,8 @@ use crate::index::IndexType;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to create an index on a column.
 #[derive(Debug, Clone)]
@@ -63,15 +64,16 @@ impl CommandParsing for CreateIndexCommand {
 impl BundleBuilderCommand for CreateIndexCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
-        ctx.apply_operation(
-            CreateIndexOp::setup(&self.column, self.index_type.clone())
-                .await?
-                .into(),
-        )
-        .await?;
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+        builder
+            .apply_operation(
+                CreateIndexOp::setup(&self.column, self.index_type.clone())
+                    .await?
+                    .into(),
+            )
+            .await?;
 
-        ctx.reindex_internal().await?;
+        builder.reindex_internal().await?;
 
         info!("Created index on: \"{}\"", self.column);
 

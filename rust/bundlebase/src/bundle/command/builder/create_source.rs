@@ -8,7 +8,8 @@ use crate::source::FetchAction;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to create a data source for a pack.
 #[derive(Debug, Clone)]
@@ -118,10 +119,10 @@ impl CommandParsing for CreateSourceCommand {
 impl BundleBuilderCommand for CreateSourceCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
         let pack_id = match self.pack.as_deref() {
             None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *ctx
+            Some(join_name) => *builder
                 .bundle()
                 .pack_by_name(join_name)
                 .ok_or(format!("Unknown join '{}'", join_name))?
@@ -131,17 +132,17 @@ impl BundleBuilderCommand for CreateSourceCommand {
         let source_id = ObjectId::generate();
         let op = CreateSourceOp::setup(source_id, pack_id, self.function.clone(), self.args.clone());
 
-        ctx.apply_operation(op.into()).await?;
+        builder.apply_operation(op.into()).await?;
 
         // Automatically fetch from the newly created source
-        let source = ctx
+        let source = builder
             .bundle()
             .get_source(&source_id)
             .ok_or_else(|| format!("Source '{}' not found after creation", source_id))?;
 
-        let registry = ctx.bundle().source_function_registry();
+        let registry = builder.bundle().source_function_registry();
         let actions = source
-            .fetch(ctx.data_dir(), ctx.bundle().config(), &registry)
+            .fetch(builder.data_dir(), builder.bundle().config(), &registry)
             .await?;
 
         // Process fetch actions
@@ -153,7 +154,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
                         &data.attach_location,
                         &data.source_url,
                         &data.hash,
-                        ctx.builder(),
+                        builder,
                     )
                     .await?;
                     op.source_info = Some(SourceInfo {
@@ -161,7 +162,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
                         location: data.source_location,
                         version: op.version.clone(),
                     });
-                    ctx.apply_operation(op.into()).await?;
+                    builder.apply_operation(op.into()).await?;
                 }
                 FetchAction::Replace { .. } | FetchAction::Remove { .. } => {
                     // These shouldn't happen on initial source creation

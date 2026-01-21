@@ -4,7 +4,8 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to reset all uncommitted changes.
 #[derive(Debug, Clone, Default)]
@@ -35,16 +36,16 @@ impl CommandParsing for ResetCommand {
 impl BundleBuilderCommand for ResetCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
-        if ctx.status().is_empty() {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+        if builder.status().is_empty() {
             return Err("No uncommitted changes".into());
         }
 
         // Clear all uncommitted changes
-        ctx.clear_status();
+        builder.status.clear();
 
         // Reload the bundle from the last committed state
-        ctx.reload_bundle().await?;
+        builder.reload_bundle().await?;
 
         info!("All uncommitted changes discarded");
 

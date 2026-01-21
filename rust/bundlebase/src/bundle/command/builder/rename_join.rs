@@ -4,7 +4,8 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RenameJoinOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to rename a join.
 #[derive(Debug, Clone)]
@@ -63,9 +64,9 @@ impl CommandParsing for RenameJoinCommand {
 impl BundleBuilderCommand for RenameJoinCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
-        let op = RenameJoinOp::setup(&self.old_name, &self.new_name, ctx.bundle()).await?;
-        ctx.apply_operation(op.into()).await?;
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+        let op = RenameJoinOp::setup(&self.old_name, &self.new_name, builder.bundle()).await?;
+        builder.apply_operation(op.into()).await?;
         Ok(())
     }
 }

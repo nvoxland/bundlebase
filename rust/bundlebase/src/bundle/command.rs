@@ -80,8 +80,8 @@ pub mod facade;
 pub use parser::Rule;
 
 // Re-export command traits
-pub use builder::{BuilderCommandContext, BundleBuilderCommand};
-pub use facade::{FacadeCommandContext, BundleFacadeCommand};
+pub use builder::BundleBuilderCommand;
+pub use facade::BundleFacadeCommand;
 
 // Re-export builder command structs
 pub use builder::{
@@ -375,12 +375,12 @@ impl BundleCommand {
                 builder.commit(&cmd.message).await?;
                 Ok(CommandOutput::Unit)
             }
-            BundleCommand::Reset(_) => {
-                builder.reset().await?;
+            BundleCommand::Reset(cmd) => {
+                builder.run_builder_command(cmd).await?;
                 Ok(CommandOutput::Unit)
             }
-            BundleCommand::Undo(_) => {
-                builder.undo().await?;
+            BundleCommand::Undo(cmd) => {
+                builder.run_builder_command(cmd).await?;
                 Ok(CommandOutput::Unit)
             }
             BundleCommand::VerifyData(cmd) => {

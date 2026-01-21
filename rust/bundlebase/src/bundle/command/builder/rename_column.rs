@@ -5,7 +5,8 @@ use crate::bundle::operation::RenameColumnOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to rename a column.
 #[derive(Debug, Clone)]
@@ -64,8 +65,9 @@ impl CommandParsing for RenameColumnCommand {
 impl BundleBuilderCommand for RenameColumnCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
-        ctx.apply_operation(RenameColumnOp::setup(&self.old_name, &self.new_name).into())
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+        builder
+            .apply_operation(RenameColumnOp::setup(&self.old_name, &self.new_name).into())
             .await?;
         info!("Renamed \"{}\" to \"{}\"", self.old_name, self.new_name);
         Ok(())

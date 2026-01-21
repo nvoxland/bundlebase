@@ -4,7 +4,8 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RebuildIndexOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to rebuild an index on a column.
 #[derive(Debug, Clone)]
@@ -52,9 +53,9 @@ impl CommandParsing for RebuildIndexCommand {
 impl BundleBuilderCommand for RebuildIndexCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
         let op = RebuildIndexOp::setup(self.column.clone()).await?;
-        ctx.apply_operation(op.into()).await?;
+        builder.apply_operation(op.into()).await?;
         Ok(())
     }
 }

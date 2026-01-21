@@ -8,7 +8,8 @@ use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
 use std::sync::Arc;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::{Bundle, BundleBuilder};
 
 /// Command to fetch from sources for a specific pack.
 #[derive(Debug, Clone)]
@@ -57,25 +58,25 @@ impl CommandParsing for FetchCommand {
 impl BundleBuilderCommand for FetchCommand {
     type Output = Vec<FetchResults>;
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<Vec<FetchResults>, BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<Vec<FetchResults>, BundlebaseError> {
         let pack_name = self.pack.as_deref().unwrap_or("base").to_string();
         let pack_id = match self.pack.as_deref() {
             None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *ctx
+            Some(join_name) => *builder
                 .bundle()
                 .pack_by_name(join_name)
                 .ok_or(format!("Unknown join '{}'", join_name))?
                 .id(),
         };
 
-        let sources = ctx.bundle().get_sources_for_pack(&pack_id);
+        let sources = builder.bundle().get_sources_for_pack(&pack_id);
         if sources.is_empty() {
             return Err(format!("No sources defined for pack '{}'", pack_name).into());
         }
 
         let mut results = Vec::new();
         for source in sources {
-            let result = fetch_from_source(ctx, &source, &pack_id, &pack_name).await?;
+            let result = fetch_from_source(builder, &source, &pack_id, &pack_name).await?;
             results.push(result);
         }
 
@@ -128,14 +129,14 @@ impl CommandParsing for FetchAllCommand {
 impl BundleBuilderCommand for FetchAllCommand {
     type Output = Vec<FetchResults>;
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<Vec<FetchResults>, BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<Vec<FetchResults>, BundlebaseError> {
         // Collect sources with their pack info to avoid borrow issues
-        let sources_with_packs: Vec<_> = ctx
+        let sources_with_packs: Vec<_> = builder
             .bundle()
             .sources()
             .values()
             .map(|source| {
-                let pack_name = ctx
+                let pack_name = builder
                     .bundle()
                     .pack_name(source.pack())
                     .unwrap_or("base".to_string());
@@ -146,7 +147,7 @@ impl BundleBuilderCommand for FetchAllCommand {
 
         let mut results = Vec::new();
         for (source, pack_id, pack_name) in sources_with_packs {
-            let result = fetch_from_source(ctx, &source, &pack_id, &pack_name).await?;
+            let result = fetch_from_source(builder, &source, &pack_id, &pack_name).await?;
             results.push(result);
         }
 
@@ -156,18 +157,18 @@ impl BundleBuilderCommand for FetchAllCommand {
 
 /// Helper to fetch from a single source.
 async fn fetch_from_source(
-    ctx: &mut BuilderCommandContext<'_>,
+    builder: &mut BundleBuilder,
     source: &Arc<crate::bundle::Source>,
     pack_id: &ObjectId,
     pack_name: &str,
 ) -> Result<FetchResults, BundlebaseError> {
-    let registry = ctx.bundle().source_function_registry();
+    let registry = builder.bundle().source_function_registry();
     let source_id = *source.id();
     let source_function = source.function().to_string();
     let source_url = source.args().get("url").cloned().unwrap_or_default();
 
     let actions = source
-        .fetch(ctx.data_dir(), ctx.bundle().config(), &registry)
+        .fetch(builder.data_dir(), builder.bundle().config(), &registry)
         .await?;
 
     // Process actions and collect them for the result
@@ -181,7 +182,7 @@ async fn fetch_from_source(
                     &data.attach_location,
                     &data.source_url,
                     &data.hash,
-                    ctx.builder(),
+                    builder,
                 )
                 .await?;
                 op.source_info = Some(SourceInfo {
@@ -189,7 +190,7 @@ async fn fetch_from_source(
                     location: data.source_location.clone(),
                     version: op.version.clone(),
                 });
-                ctx.apply_operation(op.into()).await?;
+                builder.apply_operation(op.into()).await?;
                 info!("Fetched {} to {}", data.attach_location, pack_name);
             }
             FetchAction::Replace {
@@ -198,9 +199,9 @@ async fn fetch_from_source(
             } => {
                 // Find and detach the old block
                 let old_location =
-                    find_block_location_by_source(ctx, &source_id, old_source_location)?;
-                let detach_op = DetachBlockOp::setup(&old_location, ctx.bundle()).await?;
-                ctx.apply_operation(detach_op.into()).await?;
+                    find_block_location_by_source(builder.bundle(), &source_id, old_source_location)?;
+                let detach_op = DetachBlockOp::setup(&old_location, builder.bundle()).await?;
+                builder.apply_operation(detach_op.into()).await?;
 
                 // Attach the new block
                 let mut op = AttachBlockOp::setup_for_source(
@@ -208,7 +209,7 @@ async fn fetch_from_source(
                     &data.attach_location,
                     &data.source_url,
                     &data.hash,
-                    ctx.builder(),
+                    builder,
                 )
                 .await?;
                 op.source_info = Some(SourceInfo {
@@ -216,13 +217,13 @@ async fn fetch_from_source(
                     location: data.source_location.clone(),
                     version: op.version.clone(),
                 });
-                ctx.apply_operation(op.into()).await?;
+                builder.apply_operation(op.into()).await?;
                 info!("Replaced {} in {}", data.attach_location, pack_name);
             }
             FetchAction::Remove { source_location } => {
-                let location = find_block_location_by_source(ctx, &source_id, source_location)?;
-                let detach_op = DetachBlockOp::setup(&location, ctx.bundle()).await?;
-                ctx.apply_operation(detach_op.into()).await?;
+                let location = find_block_location_by_source(builder.bundle(), &source_id, source_location)?;
+                let detach_op = DetachBlockOp::setup(&location, builder.bundle()).await?;
+                builder.apply_operation(detach_op.into()).await?;
                 info!("Removed {} from {}", location, pack_name);
             }
         }
@@ -239,14 +240,14 @@ async fn fetch_from_source(
 
 /// Find the current location of a block that was attached from a source.
 fn find_block_location_by_source(
-    ctx: &BuilderCommandContext<'_>,
+    bundle: &Bundle,
     source_id: &ObjectId,
     source_location: &str,
 ) -> Result<String, BundlebaseError> {
     use crate::bundle::operation::AnyOperation;
 
     // First, check ReplaceBlockOp operations (in reverse order to get most recent)
-    for op in ctx.bundle().operations.iter().rev() {
+    for op in bundle.operations.iter().rev() {
         if let AnyOperation::ReplaceBlock(replace) = op {
             if let Some(ref info) = replace.source_info {
                 if &info.id == source_id && info.location == source_location {
@@ -257,7 +258,7 @@ fn find_block_location_by_source(
     }
 
     // If not found in ReplaceBlockOp, check AttachBlockOp
-    ctx.bundle()
+    bundle
         .operations
         .iter()
         .find_map(|op| {

@@ -5,7 +5,8 @@ use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::SetNameOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to set the bundle's name.
 #[derive(Debug, Clone)]
@@ -49,8 +50,9 @@ impl CommandParsing for SetNameCommand {
 impl BundleBuilderCommand for SetNameCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
-        ctx.apply_operation(SetNameOp::setup(&self.name).into())
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+        builder
+            .apply_operation(SetNameOp::setup(&self.name).into())
             .await?;
         Ok(())
     }

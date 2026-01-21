@@ -4,7 +4,8 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::DropJoinOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to drop a join.
 #[derive(Debug, Clone)]
@@ -50,9 +51,9 @@ impl CommandParsing for DropJoinCommand {
 impl BundleBuilderCommand for DropJoinCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
-        let op = DropJoinOp::setup(&self.name, ctx.bundle()).await?;
-        ctx.apply_operation(op.into()).await?;
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+        let op = DropJoinOp::setup(&self.name, builder.bundle()).await?;
+        builder.apply_operation(op.into()).await?;
         Ok(())
     }
 }
