@@ -1652,3 +1652,27 @@ async def test_verify_data_update_versions():
 
     assert results is not None
     assert results.all_passed
+
+
+@pytest.mark.asyncio
+async def test_version_udf():
+    """Test that the version() SQL UDF returns the bundle version."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    # Query using the version() UDF - select() creates a new BundleBuilder with a SelectOp
+    q = await c.select("SELECT version() as ver FROM bundle LIMIT 1")
+
+    # The version should match q's version (the builder executing the query)
+    expected_version = q.version
+
+    results = await q.to_dict()
+
+    # The version() UDF should return the version of the BundleBuilder executing the query
+    assert "ver" in results
+    assert len(results["ver"]) == 1
+    assert results["ver"][0] == expected_version
+
+    # Also verify we get a valid 12-char hex version string
+    assert len(results["ver"][0]) == 12
+    assert all(c in '0123456789abcdef' for c in results["ver"][0])
