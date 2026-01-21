@@ -70,6 +70,7 @@ use crate::bundle::VerificationResults;
 use crate::bundle::facade::BundleFacade;
 use crate::source::FetchResults;
 use crate::{BundleBuilder, BundlebaseError};
+use async_trait::async_trait;
 use datafusion::common::ScalarValue;
 
 pub mod parser;
@@ -78,10 +79,6 @@ pub mod facade;
 
 // Re-export Rule from parser for use by commands
 pub use parser::Rule;
-
-// Re-export command traits
-pub use builder::BundleBuilderCommand;
-pub use facade::BundleFacadeCommand;
 
 // Re-export builder command structs
 pub use builder::{
@@ -156,6 +153,61 @@ pub trait CommandParsing: Send + Sync {
     /// - Logging and debugging
     /// - Command history display
     fn to_statement(&self) -> String;
+}
+
+/// Trait for commands that mutate a BundleBuilder.
+///
+/// These commands require mutable access to a `BundleBuilder` and typically
+/// apply operations that change the bundle's state.
+///
+/// # Required Methods
+///
+/// All commands must implement via `CommandParsing`:
+/// - `rule()` - Returns the pest Rule that matches this command
+/// - `from_statement(pair)` - Parses from a pest Pair that matched the rule
+/// - `to_statement()` - Serializes back to command string (round-trip support)
+#[async_trait]
+pub trait BundleBuilderCommand: CommandParsing {
+    /// The type returned by execute().
+    ///
+    /// Most commands return `()`. Commands that need to return values
+    /// (like fetch returning results, or verify_data returning verification results)
+    /// can specify a different type.
+    type Output;
+
+    /// Execute the command on the provided builder
+    async fn execute(
+        self: Box<Self>,
+        builder: &mut BundleBuilder,
+    ) -> Result<Self::Output, BundlebaseError>;
+}
+
+/// Trait for read-only commands that work with `BundleFacade`.
+///
+/// These commands do not require mutable access to the bundle and can work
+/// with any type that implements `BundleFacade`. They typically either:
+/// - Return a new `BundleBuilder` (like `SelectCommand`)
+/// - Compute and return a value from the current state
+///
+/// # Required Methods
+///
+/// All commands must implement via `CommandParsing`:
+/// - `rule()` - Returns the pest Rule that matches this command
+/// - `from_statement(pair)` - Parses from a pest Pair that matched the rule
+/// - `to_statement()` - Serializes back to command string (round-trip support)
+#[async_trait]
+pub trait BundleFacadeCommand: CommandParsing {
+    /// The type returned by execute().
+    ///
+    /// For `SelectCommand`, this is `BundleBuilder` (a new builder with the query).
+    /// Future commands might return other types like `usize` for count operations.
+    type Output;
+
+    /// Execute the command on the provided facade
+    async fn execute(
+        self: Box<Self>,
+        facade: &dyn BundleFacade,
+    ) -> Result<Self::Output, BundlebaseError>;
 }
 
 /// Command that can be executed on a BundleBuilder.

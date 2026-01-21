@@ -6,7 +6,7 @@ use crate::bundle::operation::ReplaceBlockOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::BundleBuilderCommand;
+use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
 /// Command to replace a block's location in the bundle.

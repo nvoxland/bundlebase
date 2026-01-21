@@ -8,7 +8,7 @@ use crate::source::FetchAction;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use std::collections::HashMap;
-use super::BundleBuilderCommand;
+use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
 /// Command to create a data source for a pack.

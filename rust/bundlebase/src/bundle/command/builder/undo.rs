@@ -4,7 +4,7 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::BundleBuilderCommand;
+use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
 /// Command to undo the last uncommitted change.

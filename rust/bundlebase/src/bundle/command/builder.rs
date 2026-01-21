@@ -1,13 +1,8 @@
-//! Builder command trait.
+//! Builder command implementations.
 //!
-//! This module provides the `BundleBuilderCommand` trait for commands that mutate
-//! a `BundleBuilder`.
+//! This module contains command implementations that mutate a `BundleBuilder`.
 
-use crate::bundle::BundleBuilder;
-use crate::BundlebaseError;
-use async_trait::async_trait;
-
-// Re-export builder command implementations
+// Builder command implementations
 mod attach;
 mod commit;
 mod create_index;
@@ -57,30 +52,3 @@ pub use set_description::SetDescriptionCommand;
 pub use set_name::SetNameCommand;
 pub use undo::UndoCommand;
 pub use verify_data::VerifyDataCommand;
-
-/// Trait for commands that mutate a BundleBuilder.
-///
-/// These commands require mutable access to a `BundleBuilder` and typically
-/// apply operations that change the bundle's state.
-///
-/// # Required Methods
-///
-/// All commands must implement via `CommandParsing`:
-/// - `rule()` - Returns the pest Rule that matches this command
-/// - `from_statement(pair)` - Parses from a pest Pair that matched the rule
-/// - `to_statement()` - Serializes back to command string (round-trip support)
-#[async_trait]
-pub trait BundleBuilderCommand: super::CommandParsing {
-    /// The type returned by execute().
-    ///
-    /// Most commands return `()`. Commands that need to return values
-    /// (like fetch returning results, or verify_data returning verification results)
-    /// can specify a different type.
-    type Output;
-
-    /// Execute the command on the provided builder
-    async fn execute(
-        self: Box<Self>,
-        builder: &mut BundleBuilder,
-    ) -> Result<Self::Output, BundlebaseError>;
-}

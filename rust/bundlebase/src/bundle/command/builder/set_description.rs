@@ -5,7 +5,7 @@ use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::SetDescriptionOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use super::BundleBuilderCommand;
+use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
 /// Command to set the bundle's description.

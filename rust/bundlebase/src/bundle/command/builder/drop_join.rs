@@ -4,7 +4,7 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::DropJoinOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use super::BundleBuilderCommand;
+use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
 /// Command to drop a join.
