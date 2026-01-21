@@ -30,6 +30,7 @@ pub use source::Source;
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
+use crate::udf::VersionUdf;
 use crate::data::{DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::source::SourceFunctionRegistry;
 use crate::functions::FunctionRegistry;
@@ -42,7 +43,7 @@ use async_trait::async_trait;
 use datafusion::catalog::MemorySchemaProvider;
 use datafusion::common::{DFSchema, DFSchemaRef};
 use datafusion::datasource::object_store::ObjectStoreUrl;
-use datafusion::logical_expr::{EmptyRelation, ExplainFormat, ExplainOption, LogicalPlan};
+use datafusion::logical_expr::{EmptyRelation, ExplainFormat, ExplainOption, LogicalPlan, ScalarUDF};
 use datafusion::prelude::*;
 use datafusion::scalar::ScalarValue;
 use log::{debug, info};
@@ -293,6 +294,9 @@ impl Bundle {
             Arc::new(BundleSchemaProvider::new(dataframe.clone())),
         )?;
         catalog.register_schema("temp", Arc::new(MemorySchemaProvider::new()))?;
+
+        // Register version() UDF with initial "empty" version
+        ctx.register_udf(ScalarUDF::new_from_impl(VersionUdf::new("empty".to_string())));
 
         ctx.register_object_store(
             ObjectStoreUrl::parse("memory://")?.as_ref(),
@@ -713,6 +717,10 @@ impl Bundle {
         }
 
         self.version = hex::encode(hasher.finalize())[0..12].to_string();
+
+        // Re-register version() UDF with the updated version
+        self.ctx
+            .register_udf(ScalarUDF::new_from_impl(VersionUdf::new(self.version.clone())));
     }
 
     pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<Pack>) {
@@ -1344,6 +1352,30 @@ mod tests {
             .await?;
 
         assert_eq!(c.version(), "b4ef54330e9a".to_string());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_version_udf_sql() -> Result<(), BundlebaseError> {
+        use arrow::array::StringArray;
+
+        let c = Bundle::empty().await?;
+
+        // Execute SQL query using version() UDF
+        let df = c.ctx().sql("SELECT version() AS ver").await?;
+        let batches = df.collect().await?;
+
+        assert_eq!(batches.len(), 1);
+        let batch = &batches[0];
+        assert_eq!(batch.num_rows(), 1);
+
+        let ver_col = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("version() should return StringArray");
+        assert_eq!(ver_col.value(0), "empty");
 
         Ok(())
     }
