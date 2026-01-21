@@ -32,15 +32,41 @@ pub enum ExecuteResult {
 }
 
 /// Parse input string into Command using SQL syntax
+/// Meta commands start with `/` (e.g., `/help`, `/show`)
+/// All other input is treated as SQL
 pub fn parse(input: &str) -> Result<Command, String> {
     let input = input.trim();
     if input.is_empty() {
         return Err("Empty command".to_string());
     }
 
+    // Check for meta command (starts with /)
+    if input.starts_with('/') {
+        let meta_input = input[1..].trim();
+        if meta_input.is_empty() {
+            return Err("Empty meta command after '/'. Type /help for available commands.".to_string());
+        }
+        return parse_meta_command(meta_input);
+    }
+
+    // Everything else is SQL - parse and wrap
+    let sql_cmd = parse_command(input).map_err(|e| {
+        // Check if the user might have meant a meta command
+        if let Some(suggestion) = suggest_meta_command(input) {
+            format!("Invalid SQL: {}. Did you mean '{}'?", e, suggestion)
+        } else {
+            format!("Invalid SQL: {}", e)
+        }
+    })?;
+
+    Ok(Command::Sql(sql_cmd))
+}
+
+/// Parse a meta command (input without the leading `/`)
+fn parse_meta_command(input: &str) -> Result<Command, String> {
     let upper = input.to_uppercase();
 
-    // Handle single-word REPL commands
+    // Handle single-word meta commands
     match upper.as_str() {
         "HELP" => return Ok(Command::Help),
         "EXIT" | "QUIT" => return Ok(Command::Exit),
@@ -62,10 +88,27 @@ pub fn parse(input: &str) -> Result<Command, String> {
         return Ok(Command::Show { limit });
     }
 
-    // Everything else is SQL - parse and wrap
-    let sql_cmd = parse_command(input).map_err(|e| format!("Invalid SQL: {}", e))?;
+    Err(format!("Unknown meta command: /{}. Type /help for available commands.", input))
+}
 
-    Ok(Command::Sql(sql_cmd))
+/// Check if input looks like a bare meta command and suggest the `/` prefix
+fn suggest_meta_command(input: &str) -> Option<String> {
+    let upper = input.to_uppercase();
+    let first_word = upper.split_whitespace().next().unwrap_or("");
+
+    match first_word {
+        "HELP" => Some("/help".to_string()),
+        "EXIT" => Some("/exit".to_string()),
+        "QUIT" => Some("/quit".to_string()),
+        "CLEAR" => Some("/clear".to_string()),
+        "SCHEMA" => Some("/schema".to_string()),
+        "COUNT" => Some("/count".to_string()),
+        "EXPLAIN" => Some("/explain".to_string()),
+        "HISTORY" => Some("/history".to_string()),
+        "STATUS" => Some("/status".to_string()),
+        "SHOW" => Some("/show".to_string()),
+        _ => None,
+    }
 }
 
 /// Execute a command
@@ -122,7 +165,7 @@ Bundlebase REPL - SQL Interface
 
 Data Operations:
   ATTACH '<path>'                      Attach data source
-  SHOW [LIMIT <n>]                     Display rows (default: 10)
+  /show [limit <n>]                    Display rows (default: 10)
 
 Query & Transform:
   SELECT col1, col2, ... FROM bundle     Select columns (supports full SQL)
@@ -148,16 +191,16 @@ Persistence:
   UNDO                                 Undo the last operation
 
 Schema & Info:
-  SCHEMA                               Show table schema
-  COUNT                                Show row count
-  EXPLAIN                              Show query plan
-  HISTORY                              Show commit history
-  STATUS                               Show uncommitted changes
+  /schema                              Show table schema
+  /count                               Show row count
+  /explain                             Show query plan
+  /history                             Show commit history
+  /status                              Show uncommitted changes
 
 Meta Commands:
-  HELP                                 Show this help
-  EXIT, QUIT                           Exit REPL
-  CLEAR                                Clear screen
+  /help                                Show this help
+  /exit, /quit                         Exit REPL
+  /clear                               Clear screen
 
 Examples:
   ATTACH 'users.parquet'
@@ -213,10 +256,64 @@ mod tests {
 
     #[test]
     fn test_parse_meta_commands() {
-        assert!(matches!(parse("HELP").unwrap(), Command::Help));
-        assert!(matches!(parse("EXIT").unwrap(), Command::Exit));
-        assert!(matches!(parse("SCHEMA").unwrap(), Command::Schema));
-        assert!(matches!(parse("COUNT").unwrap(), Command::Count));
+        // Meta commands require / prefix
+        assert!(matches!(parse("/help").unwrap(), Command::Help));
+        assert!(matches!(parse("/exit").unwrap(), Command::Exit));
+        assert!(matches!(parse("/quit").unwrap(), Command::Exit));
+        assert!(matches!(parse("/schema").unwrap(), Command::Schema));
+        assert!(matches!(parse("/count").unwrap(), Command::Count));
+        assert!(matches!(parse("/explain").unwrap(), Command::Explain));
+        assert!(matches!(parse("/history").unwrap(), Command::History));
+        assert!(matches!(parse("/status").unwrap(), Command::Status));
+        assert!(matches!(parse("/clear").unwrap(), Command::Clear));
+    }
+
+    #[test]
+    fn test_parse_meta_commands_case_insensitive() {
+        // Meta commands are case insensitive
+        assert!(matches!(parse("/HELP").unwrap(), Command::Help));
+        assert!(matches!(parse("/Help").unwrap(), Command::Help));
+        assert!(matches!(parse("/EXIT").unwrap(), Command::Exit));
+        assert!(matches!(parse("/SCHEMA").unwrap(), Command::Schema));
+        assert!(matches!(parse("/COUNT").unwrap(), Command::Count));
+    }
+
+    #[test]
+    fn test_parse_meta_commands_with_space_after_slash() {
+        // Space after / should work
+        assert!(matches!(parse("/ help").unwrap(), Command::Help));
+        assert!(matches!(parse("/  schema").unwrap(), Command::Schema));
+    }
+
+    #[test]
+    fn test_bare_meta_command_errors_with_suggestion() {
+        // Bare meta commands (without /) should fail with suggestion
+        let result = parse("HELP");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("/help"), "Error should suggest /help: {}", err);
+
+        let result = parse("SHOW");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("/show"), "Error should suggest /show: {}", err);
+    }
+
+    #[test]
+    fn test_unknown_meta_command() {
+        let result = parse("/foo");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Unknown meta command: /foo"), "Error: {}", err);
+        assert!(err.contains("/help"), "Error should suggest /help: {}", err);
+    }
+
+    #[test]
+    fn test_empty_meta_command() {
+        let result = parse("/");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Empty meta command"), "Error: {}", err);
     }
 
     #[test]
@@ -232,7 +329,20 @@ mod tests {
 
     #[test]
     fn test_parse_show() {
-        let cmd = parse("SHOW LIMIT 20").unwrap();
+        // Show requires / prefix
+        let cmd = parse("/show").unwrap();
+        match cmd {
+            Command::Show { limit } => assert_eq!(limit, None),
+            _ => panic!("Expected Show command"),
+        }
+
+        let cmd = parse("/show limit 20").unwrap();
+        match cmd {
+            Command::Show { limit } => assert_eq!(limit, Some(20)),
+            _ => panic!("Expected Show command"),
+        }
+
+        let cmd = parse("/SHOW LIMIT 20").unwrap();
         match cmd {
             Command::Show { limit } => assert_eq!(limit, Some(20)),
             _ => panic!("Expected Show command"),
