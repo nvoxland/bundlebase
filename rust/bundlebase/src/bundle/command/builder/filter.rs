@@ -6,7 +6,7 @@ use crate::BundlebaseError;
 use async_trait::async_trait;
 use datafusion::scalar::ScalarValue;
 use log::info;
-use super::BundleBuilderCommand;
+use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
 /// Command to filter rows with a WHERE clause.

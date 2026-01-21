@@ -8,7 +8,7 @@ use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
 use std::sync::Arc;
-use super::BundleBuilderCommand;
+use super::super::BundleBuilderCommand;
 use crate::bundle::{Bundle, BundleBuilder};
 
 /// Command to fetch from sources for a specific pack.

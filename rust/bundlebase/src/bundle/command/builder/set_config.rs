@@ -5,7 +5,7 @@ use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::SetConfigOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use super::BundleBuilderCommand;
+use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
 /// Command to set a configuration value.
