@@ -22,9 +22,9 @@ pub use pest_parser::{
 use crate::bundle::command::{
     AttachCommand, BundleCommand, CommandParsing, CommitCommand, CreateIndexCommand, CreateSourceCommand,
     DetachBlockCommand, DropColumnCommand, DropIndexCommand, DropJoinCommand, DropViewCommand,
-    FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand, ReindexCommand,
-    RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand, ResetCommand,
-    SelectCommand, SetConfigCommand, SetDescriptionCommand, SetNameCommand, UndoCommand,
+    ExplainPlanCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand,
+    ReindexCommand, RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand,
+    ResetCommand, SelectCommand, SetConfigCommand, SetDescriptionCommand, SetNameCommand, UndoCommand,
     VerifyDataCommand,
 };
 use crate::BundlebaseError;
@@ -148,6 +148,9 @@ pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError
             RenameColumnCommand::from_statement(inner_stmt)?,
         )),
         Rule::verify_data_stmt => Ok(BundleCommand::VerifyData(VerifyDataCommand::from_statement(
+            inner_stmt,
+        )?)),
+        Rule::explain_stmt => Ok(BundleCommand::ExplainPlan(ExplainPlanCommand::from_statement(
             inner_stmt,
         )?)),
         Rule::create_view_stmt => Err(

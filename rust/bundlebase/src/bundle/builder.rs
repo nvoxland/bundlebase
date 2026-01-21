@@ -1479,6 +1479,10 @@ impl BundleFacade for BundleBuilder {
         // Delegate to the Bundle's implementation via BundleFacade
         self.bundle.export_tar(tar_path).await
     }
+
+    async fn explain(&self) -> Result<String, BundlebaseError> {
+        self.bundle.explain().await
+    }
 }
 
 #[cfg(test)]

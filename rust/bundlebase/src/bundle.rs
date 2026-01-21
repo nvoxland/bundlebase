@@ -1251,6 +1251,10 @@ impl BundleFacade for Bundle {
         info!("Exported bundle to tar archive: {}", tar_path);
         Ok(format!("Exported bundle to {}", tar_path))
     }
+
+    async fn explain(&self) -> Result<String, BundlebaseError> {
+        Bundle::explain(self).await
+    }
 }
 
 #[derive(Debug)]

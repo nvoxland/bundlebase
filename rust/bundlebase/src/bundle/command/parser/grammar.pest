@@ -72,6 +72,7 @@ transaction_stmt = {
     | reset_stmt
     | undo_stmt
     | verify_data_stmt
+    | explain_stmt
 }
 
 // Metadata statements - operations for bundle metadata
@@ -427,4 +428,13 @@ rename_column_stmt = {
 
 verify_data_stmt = {
     ^"verify" ~ ^"data" ~ (^"update")?
+}
+
+// ============================================================================
+// EXPLAIN PLAN Statement
+// ============================================================================
+// Syntax: EXPLAIN PLAN
+
+explain_stmt = {
+    ^"explain" ~ ^"plan"
 }

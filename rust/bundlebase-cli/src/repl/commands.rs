@@ -15,7 +15,6 @@ pub enum Command {
     Show { limit: Option<usize> },
     Schema,
     Count,
-    Explain,
     History,
     Status,
 
@@ -73,7 +72,6 @@ fn parse_meta_command(input: &str) -> Result<Command, String> {
         "CLEAR" => return Ok(Command::Clear),
         "SCHEMA" => return Ok(Command::Schema),
         "COUNT" => return Ok(Command::Count),
-        "EXPLAIN" => return Ok(Command::Explain),
         "HISTORY" => return Ok(Command::History),
         "STATUS" => return Ok(Command::Status),
         _ => {}
@@ -103,7 +101,6 @@ fn suggest_meta_command(input: &str) -> Option<String> {
         "CLEAR" => Some("/clear".to_string()),
         "SCHEMA" => Some("/schema".to_string()),
         "COUNT" => Some("/count".to_string()),
-        "EXPLAIN" => Some("/explain".to_string()),
         "HISTORY" => Some("/history".to_string()),
         "STATUS" => Some("/status".to_string()),
         "SHOW" => Some("/show".to_string()),
@@ -127,6 +124,7 @@ pub async fn execute(cmd: Command, state: &Arc<State>) -> Result<ExecuteResult, 
                 CommandOutput::Fetch(results) => {
                     Ok(ExecuteResult::Message(format_fetch_summary(&results)))
                 }
+                CommandOutput::ExplainPlan(plan) => Ok(ExecuteResult::Message(plan)),
             }
         }
 
@@ -144,10 +142,6 @@ pub async fn execute(cmd: Command, state: &Arc<State>) -> Result<ExecuteResult, 
         Command::Count => {
             let count = state.bundle.read().num_rows().await?;
             Ok(ExecuteResult::Message(format!("Row count: {}", count)))
-        }
-        Command::Explain => {
-            let plan = state.bundle.read().bundle.explain().await?;
-            Ok(ExecuteResult::Message(plan))
         }
         Command::History => {
             let commits = state.bundle.read().history();
@@ -193,7 +187,7 @@ Persistence:
 Schema & Info:
   /schema                              Show table schema
   /count                               Show row count
-  /explain                             Show query plan
+  EXPLAIN PLAN                         Show query plan
   /history                             Show commit history
   /status                              Show uncommitted changes
 
@@ -262,7 +256,6 @@ mod tests {
         assert!(matches!(parse("/quit").unwrap(), Command::Exit));
         assert!(matches!(parse("/schema").unwrap(), Command::Schema));
         assert!(matches!(parse("/count").unwrap(), Command::Count));
-        assert!(matches!(parse("/explain").unwrap(), Command::Explain));
         assert!(matches!(parse("/history").unwrap(), Command::History));
         assert!(matches!(parse("/status").unwrap(), Command::Status));
         assert!(matches!(parse("/clear").unwrap(), Command::Clear));

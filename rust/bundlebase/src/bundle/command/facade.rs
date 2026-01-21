@@ -8,6 +8,8 @@
 //! it could work with a read-only BundleFacade to produce a new BundleBuilder.
 
 // Facade command implementations
+mod explain;
 mod select;
 
+pub use explain::ExplainPlanCommand;
 pub use select::SelectCommand;
