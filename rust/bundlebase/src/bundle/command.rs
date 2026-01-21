@@ -24,13 +24,13 @@
 //!
 //! Commands can be executed through different paths depending on their characteristics:
 //!
-//! ## 1. `execute_builder_command()` - For tracked unit commands
+//! ## 1. `execute_command()` - For tracked unit commands
 //!
 //! Used for commands where `Output = ()` and changes should be tracked in status.
 //! Wraps execution in `do_change()` for change tracking.
 //!
 //! ```ignore
-//! builder.execute_builder_command(AttachCommand::new("data.parquet", None)).await?;
+//! builder.execute_command(AttachCommand::new("data.parquet", None)).await?;
 //! ```
 //!
 //! ## 2. `run_builder_command()` - For commands returning values
@@ -63,7 +63,7 @@
 //! 7. (If parseable) Add grammar rule in `parser/grammar.pest`
 //! 8. (If parseable) Add match arm in `parser.rs::try_parse_pest()`
 //!
-//! Use `execute_builder_command()` path if `Output = ()` and changes should be tracked.
+//! Use `execute_command()` path if `Output = ()` and changes should be tracked.
 //! Use `run_builder_command()` path if the command returns meaningful results.
 
 use crate::bundle::VerificationResults;
@@ -71,7 +71,6 @@ use crate::bundle::facade::BundleFacade;
 use crate::source::FetchResults;
 use crate::{BundleBuilder, BundlebaseError};
 use async_trait::async_trait;
-use datafusion::common::ScalarValue;
 
 pub mod parser;
 pub mod builder;
@@ -94,12 +93,12 @@ pub use facade::SelectCommand;
 
 /// Output from executing a BundleCommand.
 ///
-/// Most commands return Unit, but some commands return specific results
+/// Most commands return Empty, but some commands return specific results
 /// that may be useful to callers.
 #[derive(Debug)]
 pub enum CommandOutput {
     /// Command completed with no specific output
-    Unit,
+    Empty,
     /// Verification results from VERIFY DATA
     Verification(VerificationResults),
     /// Fetch results from FETCH / FETCH ALL
@@ -107,9 +106,9 @@ pub enum CommandOutput {
 }
 
 impl CommandOutput {
-    /// Returns true if this is a Unit output
-    pub fn is_unit(&self) -> bool {
-        matches!(self, CommandOutput::Unit)
+    /// Returns true if this is a Empty output
+    pub fn is_empty(&self) -> bool {
+        matches!(self, CommandOutput::Empty)
     }
 
     /// Get verification results if this is a Verification output
@@ -225,8 +224,6 @@ pub trait BundleFacadeCommand: CommandParsing {
 /// ```
 #[derive(Debug, Clone)]
 pub enum BundleCommand {
-    // === Builder Commands (mutate state) ===
-
     /// Attach a data source
     Attach(AttachCommand),
 
@@ -311,7 +308,7 @@ pub enum BundleCommand {
 impl BundleCommand {
     /// Execute this command on a BundleBuilder.
     ///
-    /// This method delegates to the wrapped command struct via `execute_builder_command`.
+    /// This method delegates to the wrapped command struct via `execute_command`.
     ///
     /// # Arguments
     ///
@@ -330,169 +327,115 @@ impl BundleCommand {
     /// ```
     pub async fn execute(self, builder: &mut BundleBuilder) -> Result<CommandOutput, BundlebaseError> {
         match self {
-            // Builder commands delegate to execute_builder_command
+            // Builder commands delegate to execute_command
             BundleCommand::Attach(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::DetachBlock(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::Filter(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::DropColumn(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::RenameColumn(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::RenameView(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::Select(cmd) => {
                 // Select uses the BundleFacade's select() method which returns a new builder
                 let new_builder = builder.select(&cmd.sql, cmd.params).await?;
                 *builder = new_builder;
-                Ok(CommandOutput::Unit)
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::Join(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::CreateIndex(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::DropIndex(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::DropView(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::DropJoin(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::RenameJoin(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::RebuildIndex(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::Reindex(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::ReplaceBlock(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::SetName(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::SetDescription(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::SetConfig(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::CreateSource(cmd) => {
-                builder.execute_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::Fetch(cmd) => {
-                let results = builder.run_tracked_builder_command(cmd).await?;
+                let results = builder.execute_command(cmd).await?;
                 Ok(CommandOutput::Fetch(results))
             }
             BundleCommand::FetchAll(cmd) => {
-                let results = builder.run_tracked_builder_command(cmd).await?;
+                let results = builder.execute_command(cmd).await?;
                 Ok(CommandOutput::Fetch(results))
             }
 
-            // Special commands bypass execute_builder_command
+            // Special commands bypass execute_command
             BundleCommand::Commit(cmd) => {
                 builder.commit(&cmd.message).await?;
-                Ok(CommandOutput::Unit)
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::Reset(cmd) => {
-                builder.run_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::Undo(cmd) => {
-                builder.run_builder_command(cmd).await?;
-                Ok(CommandOutput::Unit)
+                builder.execute_command(cmd).await?;
+                Ok(CommandOutput::Empty)
             }
             BundleCommand::VerifyData(cmd) => {
-                let results = builder.run_builder_command(cmd).await?;
+                let results = builder.execute_command(cmd).await?;
                 Ok(CommandOutput::Verification(results))
             }
-        }
-    }
-
-    /// Add parameters to this command for parameterized queries.
-    ///
-    /// This method is used to bind parameters ($1, $2, etc.) in SQL statements.
-    ///
-    /// # Supported Commands
-    ///
-    /// Only the following commands support parameters:
-    /// - `Filter` - Parameters in WHERE clause expressions
-    /// - `Select` - Parameters in full SQL queries
-    ///
-    /// For other commands, this method returns the command unchanged.
-    ///
-    /// # Arguments
-    ///
-    /// * `params` - Vector of ScalarValue parameters to bind
-    ///
-    /// # Returns
-    ///
-    /// * `Self` - The command with parameters added (or unchanged if unsupported)
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// // Filter with parameter
-    /// let cmd = BundleCommand::Filter(FilterCommand::new("salary > $1", vec![]));
-    /// let cmd_with_params = cmd.with_params(vec![
-    ///     ScalarValue::Float64(Some(50000.0))
-    /// ]);
-    ///
-    /// // Select with parameters
-    /// let cmd = BundleCommand::Select(SelectCommand::new(
-    ///     "SELECT * FROM bundle WHERE id = $1 AND name = $2",
-    ///     vec![]
-    /// ));
-    /// let cmd_with_params = cmd.with_params(vec![
-    ///     ScalarValue::Int64(Some(42)),
-    ///     ScalarValue::Utf8(Some("test".to_string())),
-    /// ]);
-    /// ```
-    pub fn with_params(self, params: Vec<ScalarValue>) -> Self {
-        match self {
-            BundleCommand::Filter(mut cmd) => {
-                cmd.params = params;
-                BundleCommand::Filter(cmd)
-            }
-            BundleCommand::Select(mut cmd) => {
-                cmd.params = params;
-                BundleCommand::Select(cmd)
-            }
-            // Other commands don't support parameters - return unchanged
-            other => other,
         }
     }
 }
@@ -500,60 +443,7 @@ impl BundleCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::ScalarValue;
     use std::collections::HashMap;
-
-    #[test]
-    fn test_with_params_filter() {
-        let cmd = BundleCommand::Filter(FilterCommand::new("salary > $1", vec![]));
-
-        let params = vec![ScalarValue::Float64(Some(50000.0))];
-        let cmd_with_params = cmd.with_params(params.clone());
-
-        match cmd_with_params {
-            BundleCommand::Filter(cmd) => {
-                assert_eq!(cmd.where_clause, "salary > $1");
-                assert_eq!(cmd.params.len(), 1);
-            }
-            _ => panic!("Expected Filter variant"),
-        }
-    }
-
-    #[test]
-    fn test_with_params_select() {
-        let cmd = BundleCommand::Select(SelectCommand::new(
-            "SELECT * FROM bundle WHERE id = $1",
-            vec![],
-        ));
-
-        let params = vec![ScalarValue::Int64(Some(42))];
-        let cmd_with_params = cmd.with_params(params.clone());
-
-        match cmd_with_params {
-            BundleCommand::Select(cmd) => {
-                assert_eq!(cmd.sql, "SELECT * FROM bundle WHERE id = $1");
-                assert_eq!(cmd.params.len(), 1);
-            }
-            _ => panic!("Expected Select variant"),
-        }
-    }
-
-    #[test]
-    fn test_with_params_other_command() {
-        // with_params should have no effect on commands that don't support parameters
-        let cmd = BundleCommand::Attach(AttachCommand::new("data.parquet", None));
-
-        let params = vec![ScalarValue::Int64(Some(42))];
-        let cmd_with_params = cmd.with_params(params);
-
-        match cmd_with_params {
-            BundleCommand::Attach(cmd) => {
-                assert_eq!(cmd.path, "data.parquet");
-                assert_eq!(cmd.pack, None);
-            }
-            _ => panic!("Expected Attach variant"),
-        }
-    }
 
     #[test]
     fn test_attach_to_pack_command() {

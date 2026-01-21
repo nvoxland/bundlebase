@@ -77,7 +77,7 @@ pub async fn execute(cmd: Command, state: &Arc<State>) -> Result<ExecuteResult, 
         Command::Sql(sql_cmd) => {
             let output = sql_cmd.execute(&mut state.bundle.write()).await?;
             match output {
-                CommandOutput::Unit => Ok(ExecuteResult::None),
+                CommandOutput::Empty => Ok(ExecuteResult::None),
                 CommandOutput::Verification(results) => {
                     Ok(ExecuteResult::Message(results.to_string()))
                 }
