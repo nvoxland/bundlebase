@@ -8,7 +8,8 @@ use crate::data::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to join with another data source.
 #[derive(Debug, Clone)]
@@ -120,20 +121,21 @@ impl CommandParsing for JoinCommand {
 impl BundleBuilderCommand for JoinCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
         // Step 1: Create a new pack with join metadata
         let join_pack_id = ObjectId::generate();
-        ctx.apply_operation(
-            CreateJoinOp::setup(&join_pack_id, &self.name, &self.expression, self.join_type)
-                .await?
-                .into(),
-        )
-        .await?;
+        builder
+            .apply_operation(
+                CreateJoinOp::setup(&join_pack_id, &self.name, &self.expression, self.join_type)
+                    .await?
+                    .into(),
+            )
+            .await?;
 
         // Step 2: Attach the location data to the join pack (if provided)
         if let Some(ref loc) = self.location {
-            let op = AttachBlockOp::setup(&join_pack_id, loc, ctx.builder()).await?;
-            ctx.apply_operation(op.into()).await?;
+            let op = AttachBlockOp::setup(&join_pack_id, loc, builder).await?;
+            builder.apply_operation(op.into()).await?;
         }
 
         match &self.location {

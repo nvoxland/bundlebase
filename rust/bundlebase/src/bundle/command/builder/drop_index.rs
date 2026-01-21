@@ -5,7 +5,8 @@ use crate::bundle::operation::DropIndexOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to drop an index on a column.
 #[derive(Debug, Clone)]
@@ -53,10 +54,10 @@ impl CommandParsing for DropIndexCommand {
 impl BundleBuilderCommand for DropIndexCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
         // Find the index ID for the given column
         let index_id = {
-            let indexes = ctx.bundle().indexes().read();
+            let indexes = builder.bundle().indexes().read();
             let index = indexes
                 .iter()
                 .find(|idx| idx.column() == self.column.as_str());
@@ -69,7 +70,8 @@ impl BundleBuilderCommand for DropIndexCommand {
             }
         };
 
-        ctx.apply_operation(DropIndexOp::setup(&index_id).await?.into())
+        builder
+            .apply_operation(DropIndexOp::setup(&index_id).await?.into())
             .await?;
 
         info!("Dropped index on: \"{}\"", self.column);

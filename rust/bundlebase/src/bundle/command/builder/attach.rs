@@ -7,7 +7,8 @@ use crate::data::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to attach a data block to the bundle.
 #[derive(Debug, Clone)]
@@ -95,10 +96,10 @@ impl CommandParsing for AttachCommand {
 impl BundleBuilderCommand for AttachCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
         let pack_id = match self.pack.as_deref() {
             None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *ctx
+            Some(join_name) => *builder
                 .bundle()
                 .pack_by_name(join_name)
                 .ok_or(format!("Unknown join '{}'", join_name))?
@@ -107,8 +108,8 @@ impl BundleBuilderCommand for AttachCommand {
 
         let pack_name = self.pack.as_deref().unwrap_or("base");
 
-        let op = AttachBlockOp::setup(&pack_id, &self.path, ctx.builder()).await?;
-        ctx.apply_operation(op.into()).await?;
+        let op = AttachBlockOp::setup(&pack_id, &self.path, builder).await?;
+        builder.apply_operation(op.into()).await?;
 
         info!("Attached {} to {}", self.path, pack_name);
 

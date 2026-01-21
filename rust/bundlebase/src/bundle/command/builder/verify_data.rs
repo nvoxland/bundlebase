@@ -8,7 +8,8 @@ use crate::data::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to verify the integrity of bundle data files.
 #[derive(Debug, Clone)]
@@ -52,15 +53,15 @@ impl BundleBuilderCommand for VerifyDataCommand {
 
     async fn execute(
         self: Box<Self>,
-        ctx: &mut BuilderCommandContext<'_>,
+        builder: &mut BundleBuilder,
     ) -> Result<VerificationResults, BundlebaseError> {
         let mut results = Vec::new();
-        let block_hashes = ctx.bundle().build_block_hash_map();
-        let block_locations = ctx.bundle().build_block_location_map();
+        let block_hashes = builder.bundle().build_block_hash_map();
+        let block_locations = builder.bundle().build_block_location_map();
 
         // Collect block info first to avoid borrowing issues
         let blocks_to_verify: Vec<(ObjectId, String, Option<String>, String)> = {
-            let packs = ctx.bundle().packs().read().clone();
+            let packs = builder.bundle().packs().read().clone();
             let mut result = Vec::new();
             for pack in packs.values() {
                 for block in pack.blocks() {
@@ -80,8 +81,8 @@ impl BundleBuilderCommand for VerifyDataCommand {
         // Process each block
         for (block_id, location, expected_hash, current_version) in blocks_to_verify {
             // Compute actual hash
-            let data_dir = ctx.bundle().data_dir();
-            let config = ctx.bundle().config();
+            let data_dir = builder.bundle().data_dir();
+            let config = builder.bundle().config();
             let hash_result = compute_file_hash(&location, data_dir, config).await;
 
             match hash_result {
@@ -101,7 +102,7 @@ impl BundleBuilderCommand for VerifyDataCommand {
                         if needs_update {
                             // Create update operation
                             let op = UpdateVersionOp::setup(block_id, actual_hash.clone());
-                            ctx.apply_operation(op.into()).await?;
+                            builder.apply_operation(op.into()).await?;
                             true
                         } else {
                             false

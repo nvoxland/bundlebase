@@ -1,20 +1,16 @@
 //! Commit command implementation.
-//!
-//! Note: Commit is special - it doesn't use the normal Command trait because
-//! it directly manipulates the builder's commit state rather than applying
-//! operations within a change context.
 
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::extract_string_content;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to commit changes.
 ///
-/// Note: This command is somewhat special because commit() is typically
-/// called directly on BundleBuilder rather than through execute_builder_command(),
-/// since it finalizes all pending changes rather than being a tracked change itself.
+/// The commit logic lives in `BundleBuilder::commit()`. This command
+/// provides the parsing/serialization interface and delegates to that method.
 #[derive(Debug, Clone)]
 pub struct CommitCommand {
     /// The commit message
@@ -61,10 +57,10 @@ impl CommandParsing for CommitCommand {
 impl BundleBuilderCommand for CommitCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
         // Commit is special - we need to call the builder's commit method directly
         // This will commit all pending changes (including any that were just added)
-        ctx.builder_mut().commit(&self.message).await?;
+        builder.commit(&self.message).await?;
         Ok(())
     }
 }

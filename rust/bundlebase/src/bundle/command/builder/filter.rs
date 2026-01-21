@@ -6,7 +6,8 @@ use crate::BundlebaseError;
 use async_trait::async_trait;
 use datafusion::scalar::ScalarValue;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to filter rows with a WHERE clause.
 #[derive(Debug, Clone)]
@@ -61,14 +62,15 @@ impl CommandParsing for FilterCommand {
 impl BundleBuilderCommand for FilterCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
         let statement = self.to_statement();
-        ctx.apply_operation(
-            FilterOp::setup(&self.where_clause, self.params)
-                .await?
-                .into(),
-        )
-        .await?;
+        builder
+            .apply_operation(
+                FilterOp::setup(&self.where_clause, self.params)
+                    .await?
+                    .into(),
+            )
+            .await?;
         info!("Filtered: {}", statement);
         Ok(())
     }

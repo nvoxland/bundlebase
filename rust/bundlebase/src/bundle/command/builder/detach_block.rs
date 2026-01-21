@@ -6,7 +6,8 @@ use crate::bundle::operation::DetachBlockOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to detach a data block from the bundle by its location.
 #[derive(Debug, Clone)]
@@ -54,9 +55,9 @@ impl CommandParsing for DetachBlockCommand {
 impl BundleBuilderCommand for DetachBlockCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
-        let op = DetachBlockOp::setup(&self.location, ctx.bundle()).await?;
-        ctx.apply_operation(op.into()).await?;
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+        let op = DetachBlockOp::setup(&self.location, builder.bundle()).await?;
+        builder.apply_operation(op.into()).await?;
         info!("Detached block from {}", self.location);
         Ok(())
     }

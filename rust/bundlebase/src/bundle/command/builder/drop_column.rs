@@ -5,7 +5,8 @@ use crate::bundle::operation::DropColumnOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
-use super::{BuilderCommandContext, BundleBuilderCommand};
+use super::BundleBuilderCommand;
+use crate::bundle::BundleBuilder;
 
 /// Command to drop a column from the bundle.
 #[derive(Debug, Clone)]
@@ -50,8 +51,9 @@ impl CommandParsing for DropColumnCommand {
 impl BundleBuilderCommand for DropColumnCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
-        ctx.apply_operation(DropColumnOp::setup(vec![self.name.as_str()]).into())
+    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+        builder
+            .apply_operation(DropColumnOp::setup(vec![self.name.as_str()]).into())
             .await?;
 
         info!("Dropped column \"{}\"", self.name);
