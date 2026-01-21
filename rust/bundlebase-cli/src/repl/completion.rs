@@ -12,25 +12,25 @@ pub struct BundleCompleter {
 impl BundleCompleter {
     pub fn new(state: Arc<State>) -> Self {
         let commands = vec![
+            // SQL commands (no prefix)
             "attach".to_string(),
-            "show".to_string(),
             "filter".to_string(),
             "select".to_string(),
-            "remove".to_string(),
-            "rename".to_string(),
-            "join".to_string(),
-            "schema".to_string(),
-            "count".to_string(),
-            "explain".to_string(),
-            "history".to_string(),
-            "index".to_string(),
-            "drop-index".to_string(),
-            "reindex".to_string(),
             "commit".to_string(),
-            "help".to_string(),
-            "exit".to_string(),
-            "quit".to_string(),
-            "clear".to_string(),
+            "reset".to_string(),
+            "undo".to_string(),
+            "reindex".to_string(),
+            // Meta commands (with / prefix)
+            "/show".to_string(),
+            "/schema".to_string(),
+            "/count".to_string(),
+            "/explain".to_string(),
+            "/history".to_string(),
+            "/status".to_string(),
+            "/help".to_string(),
+            "/exit".to_string(),
+            "/quit".to_string(),
+            "/clear".to_string(),
         ];
 
         Self { state, commands }

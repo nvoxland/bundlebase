@@ -17,7 +17,7 @@ use tracing::{error, info};
 
 pub fn print_header() {
     info!("Bundlebase REPL");
-    info!("Type 'help' for available commands, 'exit' to quit");
+    info!("Type '/help' for available commands, '/exit' to quit");
     info!("----------------------------------------------------------");
 }
 
