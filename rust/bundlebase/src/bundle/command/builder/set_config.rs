@@ -1,10 +1,11 @@
 //! SetConfig command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::SetConfigOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to set a configuration value.
 #[derive(Debug, Clone)]
@@ -32,16 +33,7 @@ impl SetConfigCommand {
     }
 }
 
-#[async_trait]
-impl Command for SetConfigCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let op = SetConfigOp::setup(&self.key, &self.value, self.url_prefix.as_deref());
-        ctx.apply_operation(op.into()).await?;
-        Ok(())
-    }
-
+impl CommandParsing for SetConfigCommand {
     fn rule() -> Rule {
         Rule::set_config_stmt
     }
@@ -85,6 +77,17 @@ impl Command for SetConfigCommand {
             ),
             None => format!("SET CONFIG {} = {}", self.key, escape_string(&self.value)),
         }
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for SetConfigCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        let op = SetConfigOp::setup(&self.key, &self.value, self.url_prefix.as_deref());
+        ctx.apply_operation(op.into()).await?;
+        Ok(())
     }
 }
 

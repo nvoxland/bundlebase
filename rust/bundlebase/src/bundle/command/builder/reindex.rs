@@ -1,8 +1,9 @@
 //! Reindex command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to rebuild all indexes.
 #[derive(Debug, Clone, Default)]
@@ -15,14 +16,7 @@ impl ReindexCommand {
     }
 }
 
-#[async_trait]
-impl Command for ReindexCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        ctx.reindex_internal().await
-    }
-
+impl CommandParsing for ReindexCommand {
     fn rule() -> Rule {
         Rule::reindex_stmt
     }
@@ -34,6 +28,15 @@ impl Command for ReindexCommand {
 
     fn to_statement(&self) -> String {
         "REINDEX".to_string()
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for ReindexCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        ctx.reindex_internal().await
     }
 }
 

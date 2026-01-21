@@ -1,4 +1,4 @@
-use crate::bundle::command::{Command, CommandContext, FetchAllCommand, FetchCommand};
+use crate::bundle::command::{BundleBuilderCommand, BuilderCommandContext, FetchAllCommand, FetchCommand};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::{AnyOperation, SelectOp};
@@ -309,7 +309,7 @@ impl BundleBuilder {
     /// ```
     pub async fn reset(&mut self) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::ResetCommand;
-        self.run_command(ResetCommand::new()).await?;
+        self.run_builder_command(ResetCommand::new()).await?;
         Ok(self)
     }
 
@@ -327,7 +327,7 @@ impl BundleBuilder {
     /// ```
     pub async fn undo(&mut self) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::UndoCommand;
-        self.run_command(UndoCommand::new()).await?;
+        self.run_builder_command(UndoCommand::new()).await?;
         Ok(self)
     }
 
@@ -422,9 +422,9 @@ impl BundleBuilder {
         }
     }
 
-    /// Execute a command on this BundleBuilder.
+    /// Execute a builder command on this BundleBuilder.
     ///
-    /// This is the primary way to execute commands that implement the `Command` trait.
+    /// This is the primary way to execute commands that implement the `BundleBuilderCommand` trait.
     /// The command's description is used as the change description for tracking.
     ///
     /// # Arguments
@@ -433,14 +433,14 @@ impl BundleBuilder {
     /// # Returns
     /// * `Ok(&mut Self)` - Command executed successfully
     /// * `Err(BundlebaseError)` - Execution failed
-    pub async fn execute_command<C: Command<Output = ()> + 'static>(
+    pub async fn execute_builder_command<C: BundleBuilderCommand<Output = ()> + 'static>(
         &mut self,
         cmd: C,
     ) -> Result<&mut Self, BundlebaseError> {
         let description = cmd.to_statement();
         self.do_change(&description, |builder| {
             Box::pin(async move {
-                let mut ctx = CommandContext::new(builder);
+                let mut ctx = BuilderCommandContext::new(builder);
                 Box::new(cmd).execute(&mut ctx).await
             })
         })
@@ -448,12 +448,12 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Execute a command that can return a value without wrapping in do_change.
+    /// Execute a builder command that can return a value without wrapping in do_change.
     ///
     /// This is useful for commands like reset and undo that don't represent
     /// trackable changes.
     ///
-    /// **Note**: Commands that call `apply_operation` should use `run_tracked_command`
+    /// **Note**: Commands that call `apply_operation` should use `run_tracked_builder_command`
     /// instead, as `apply_operation` requires an active change context.
     ///
     /// # Type Parameters
@@ -465,18 +465,18 @@ impl BundleBuilder {
     /// # Returns
     /// * The command's output on success
     /// * `Err(BundlebaseError)` - Execution failed
-    pub async fn run_command<C: Command + 'static>(
+    pub async fn run_builder_command<C: BundleBuilderCommand + 'static>(
         &mut self,
         cmd: C,
     ) -> Result<C::Output, BundlebaseError> {
-        let mut ctx = CommandContext::new(self);
+        let mut ctx = BuilderCommandContext::new(self);
         Box::new(cmd).execute(&mut ctx).await
     }
 
-    /// Execute a command that returns a value while tracking changes.
+    /// Execute a builder command that returns a value while tracking changes.
     ///
-    /// This combines the change tracking of `execute_command` with the ability
-    /// to return a value like `run_command`. Use this for commands that:
+    /// This combines the change tracking of `execute_builder_command` with the ability
+    /// to return a value like `run_builder_command`. Use this for commands that:
     /// - Call `apply_operation` (which requires an active change context)
     /// - Need to return meaningful results (like fetch results)
     ///
@@ -489,7 +489,7 @@ impl BundleBuilder {
     /// # Returns
     /// * The command's output on success
     /// * `Err(BundlebaseError)` - Execution failed
-    pub async fn run_tracked_command<C: Command + 'static>(
+    pub async fn run_tracked_builder_command<C: BundleBuilderCommand + 'static>(
         &mut self,
         cmd: C,
     ) -> Result<C::Output, BundlebaseError> {
@@ -514,7 +514,7 @@ impl BundleBuilder {
         };
 
         // Execute the command
-        let mut ctx = CommandContext::new(self);
+        let mut ctx = BuilderCommandContext::new(self);
         let result = Box::new(cmd).execute(&mut ctx).await;
 
         // Only finalize the change if we created it (not nested)
@@ -549,7 +549,7 @@ impl BundleBuilder {
         pack: Option<&str>,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::AttachCommand;
-        self.execute_command(AttachCommand::new(path, pack.map(|s| s.to_string()))).await
+        self.execute_builder_command(AttachCommand::new(path, pack.map(|s| s.to_string()))).await
     }
 
     /// Detach a data block from the bundle by its location.
@@ -567,7 +567,7 @@ impl BundleBuilder {
     /// ```
     pub async fn detach_block(&mut self, location: &str) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::DetachBlockCommand;
-        self.execute_command(DetachBlockCommand::new(location)).await
+        self.execute_builder_command(DetachBlockCommand::new(location)).await
     }
 
     /// Replace a block's location in the bundle.
@@ -592,7 +592,7 @@ impl BundleBuilder {
         new_location: &str,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::ReplaceBlockCommand;
-        self.execute_command(ReplaceBlockCommand::new(old_location, new_location)).await
+        self.execute_builder_command(ReplaceBlockCommand::new(old_location, new_location)).await
     }
 
     /// Create a data source for a pack.
@@ -632,7 +632,7 @@ impl BundleBuilder {
         pack: Option<&str>,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::CreateSourceCommand;
-        self.execute_command(CreateSourceCommand::new(function, args, pack.map(|s| s.to_string()))).await
+        self.execute_builder_command(CreateSourceCommand::new(function, args, pack.map(|s| s.to_string()))).await
     }
 
     /// Fetch from sources for a pack - discover and attach new files.
@@ -667,7 +667,7 @@ impl BundleBuilder {
     /// # }
     /// ```
     pub async fn fetch(&mut self, pack: Option<&str>) -> Result<Vec<FetchResults>, BundlebaseError> {
-        self.run_tracked_command(FetchCommand::new(pack.map(|s| s.to_string()))).await
+        self.run_tracked_builder_command(FetchCommand::new(pack.map(|s| s.to_string()))).await
     }
 
     /// Fetch from all defined sources - discover and attach new files.
@@ -698,7 +698,7 @@ impl BundleBuilder {
     /// # }
     /// ```
     pub async fn fetch_all(&mut self) -> Result<Vec<FetchResults>, BundlebaseError> {
-        self.run_tracked_command(FetchAllCommand::new()).await
+        self.run_tracked_builder_command(FetchAllCommand::new()).await
     }
 
     /// Attach a view from another BundleBuilder
@@ -791,7 +791,7 @@ impl BundleBuilder {
         new_name: &str,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::RenameViewCommand;
-        self.execute_command(RenameViewCommand::new(old_name, new_name)).await
+        self.execute_builder_command(RenameViewCommand::new(old_name, new_name)).await
     }
 
     /// Drop an existing view
@@ -817,7 +817,7 @@ impl BundleBuilder {
         view_name: &str,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::DropViewCommand;
-        self.execute_command(DropViewCommand::new(view_name)).await
+        self.execute_builder_command(DropViewCommand::new(view_name)).await
     }
 
     /// Drop an existing join
@@ -839,7 +839,7 @@ impl BundleBuilder {
     /// ```
     pub async fn drop_join(&mut self, join_name: &str) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::DropJoinCommand;
-        self.execute_command(DropJoinCommand::new(join_name)).await
+        self.execute_builder_command(DropJoinCommand::new(join_name)).await
     }
 
     /// Rename an existing join
@@ -866,13 +866,13 @@ impl BundleBuilder {
         new_name: &str,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::RenameJoinCommand;
-        self.execute_command(RenameJoinCommand::new(old_name, new_name)).await
+        self.execute_builder_command(RenameJoinCommand::new(old_name, new_name)).await
     }
 
     /// Drop a column (mutates self)
     pub async fn drop_column(&mut self, name: &str) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::DropColumnCommand;
-        self.execute_command(DropColumnCommand::new(name)).await
+        self.execute_builder_command(DropColumnCommand::new(name)).await
     }
 
     /// Rename a column (mutates self)
@@ -882,7 +882,7 @@ impl BundleBuilder {
         new_name: &str,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::RenameColumnCommand;
-        self.execute_command(RenameColumnCommand::new(old_name, new_name)).await
+        self.execute_builder_command(RenameColumnCommand::new(old_name, new_name)).await
     }
 
     /// Filter rows with a WHERE clause (mutates self)
@@ -893,7 +893,7 @@ impl BundleBuilder {
         params: Vec<ScalarValue>,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::FilterCommand;
-        self.execute_command(FilterCommand::new(where_clause, params)).await
+        self.execute_builder_command(FilterCommand::new(where_clause, params)).await
     }
 
     /// Join with another data source (mutates self)
@@ -908,7 +908,7 @@ impl BundleBuilder {
         join_type: JoinTypeOption,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::JoinCommand;
-        self.execute_command(JoinCommand::new(name, expression, location.map(|s| s.to_string()), join_type)).await
+        self.execute_builder_command(JoinCommand::new(name, expression, location.map(|s| s.to_string()), join_type)).await
     }
 
     /// Create a custom function (mutates self)
@@ -946,7 +946,7 @@ impl BundleBuilder {
     /// Set the bundle's name (mutates self)
     pub async fn set_name(&mut self, name: &str) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::SetNameCommand;
-        self.execute_command(SetNameCommand::new(name)).await
+        self.execute_builder_command(SetNameCommand::new(name)).await
     }
 
     /// Set the bundle's description (mutates self)
@@ -955,7 +955,7 @@ impl BundleBuilder {
         description: &str,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::SetDescriptionCommand;
-        self.execute_command(SetDescriptionCommand::new(description)).await
+        self.execute_builder_command(SetDescriptionCommand::new(description)).await
     }
 
     /// Set a configuration value (mutates self)
@@ -976,7 +976,7 @@ impl BundleBuilder {
         url_prefix: Option<&str>,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::SetConfigCommand;
-        self.execute_command(SetConfigCommand::new(key, value, url_prefix.map(|s| s.to_string()))).await
+        self.execute_builder_command(SetConfigCommand::new(key, value, url_prefix.map(|s| s.to_string()))).await
     }
 
     /// Create an index on a column
@@ -1003,13 +1003,13 @@ impl BundleBuilder {
         index_type: IndexType,
     ) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::CreateIndexCommand;
-        self.execute_command(CreateIndexCommand::new(column, index_type)).await
+        self.execute_builder_command(CreateIndexCommand::new(column, index_type)).await
     }
 
     /// Drop an index on a column
     pub async fn drop_index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::DropIndexCommand;
-        self.execute_command(DropIndexCommand::new(column)).await
+        self.execute_builder_command(DropIndexCommand::new(column)).await
     }
 
     /// Creates index files for anything missing based on the defined indexes.
@@ -1034,7 +1034,7 @@ impl BundleBuilder {
     /// Manual calls are useful when recovering from partial index creation failures.
     pub async fn reindex(&mut self) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::ReindexCommand;
-        self.execute_command(ReindexCommand::new()).await
+        self.execute_builder_command(ReindexCommand::new()).await
     }
 
     /// Internal reindex implementation that doesn't wrap in do_change.
@@ -1154,7 +1154,7 @@ impl BundleBuilder {
     /// Rebuild an index on a column (mutates self)
     pub async fn rebuild_index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
         use crate::bundle::command::RebuildIndexCommand;
-        self.execute_command(RebuildIndexCommand::new(column)).await
+        self.execute_builder_command(RebuildIndexCommand::new(column)).await
     }
 
     /// Get the physical source (pack name, column name) for a logical column

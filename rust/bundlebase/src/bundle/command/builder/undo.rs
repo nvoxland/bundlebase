@@ -1,9 +1,10 @@
 //! Undo command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to undo the last uncommitted change.
 #[derive(Debug, Clone, Default)]
@@ -16,11 +17,25 @@ impl UndoCommand {
     }
 }
 
+impl CommandParsing for UndoCommand {
+    fn rule() -> Rule {
+        Rule::undo_stmt
+    }
+
+    fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        Ok(UndoCommand::new())
+    }
+
+    fn to_statement(&self) -> String {
+        "UNDO".to_string()
+    }
+}
+
 #[async_trait]
-impl Command for UndoCommand {
+impl BundleBuilderCommand for UndoCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
         if ctx.status().is_empty() {
             return Err("No uncommitted changes to undo".into());
         }
@@ -42,18 +57,6 @@ impl Command for UndoCommand {
         info!("Last operation undone");
 
         Ok(())
-    }
-
-    fn rule() -> Rule {
-        Rule::undo_stmt
-    }
-
-    fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        Ok(UndoCommand::new())
-    }
-
-    fn to_statement(&self) -> String {
-        "UNDO".to_string()
     }
 }
 

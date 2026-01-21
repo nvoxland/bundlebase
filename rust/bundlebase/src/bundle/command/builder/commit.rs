@@ -4,15 +4,16 @@
 //! it directly manipulates the builder's commit state rather than applying
 //! operations within a change context.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::extract_string_content;
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to commit changes.
 ///
 /// Note: This command is somewhat special because commit() is typically
-/// called directly on BundleBuilder rather than through execute_command(),
+/// called directly on BundleBuilder rather than through execute_builder_command(),
 /// since it finalizes all pending changes rather than being a tracked change itself.
 #[derive(Debug, Clone)]
 pub struct CommitCommand {
@@ -29,17 +30,7 @@ impl CommitCommand {
     }
 }
 
-#[async_trait]
-impl Command for CommitCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        // Commit is special - we need to call the builder's commit method directly
-        // This will commit all pending changes (including any that were just added)
-        ctx.builder_mut().commit(&self.message).await?;
-        Ok(())
-    }
-
+impl CommandParsing for CommitCommand {
     fn rule() -> Rule {
         Rule::commit_stmt
     }
@@ -63,6 +54,18 @@ impl Command for CommitCommand {
     fn to_statement(&self) -> String {
         use crate::bundle::command::parser::escape_string;
         format!("COMMIT {}", escape_string(&self.message))
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for CommitCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        // Commit is special - we need to call the builder's commit method directly
+        // This will commit all pending changes (including any that were just added)
+        ctx.builder_mut().commit(&self.message).await?;
+        Ok(())
     }
 }
 

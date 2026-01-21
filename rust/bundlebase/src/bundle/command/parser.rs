@@ -6,7 +6,7 @@
 //!
 //! The parser uses a Pest grammar to handle all bundlebase commands (FILTER, ATTACH, JOIN, etc.).
 //!
-//! Each command struct implements parsing methods via the `Command` trait:
+//! Each command struct implements parsing methods via the `CommandParsing` trait:
 //! - `rule()` - Returns the pest Rule for this command
 //! - `from_statement(pair)` - Parses from a pest Pair
 //! - `to_statement()` - Serializes back to command string (round-trip support)
@@ -20,7 +20,7 @@ pub use pest_parser::{
 };
 
 use crate::bundle::command::{
-    AttachCommand, BundleCommand, Command, CommitCommand, CreateIndexCommand, CreateSourceCommand,
+    AttachCommand, BundleCommand, CommandParsing, CommitCommand, CreateIndexCommand, CreateSourceCommand,
     DetachBlockCommand, DropColumnCommand, DropIndexCommand, DropJoinCommand, DropViewCommand,
     FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand, ReindexCommand,
     RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand, ResetCommand,

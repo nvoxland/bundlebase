@@ -1,10 +1,11 @@
 //! SetDescription command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::SetDescriptionOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to set the bundle's description.
 #[derive(Debug, Clone)]
@@ -22,16 +23,7 @@ impl SetDescriptionCommand {
     }
 }
 
-#[async_trait]
-impl Command for SetDescriptionCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        ctx.apply_operation(SetDescriptionOp::setup(&self.description).into())
-            .await?;
-        Ok(())
-    }
-
+impl CommandParsing for SetDescriptionCommand {
     fn rule() -> Rule {
         Rule::set_description_stmt
     }
@@ -54,6 +46,17 @@ impl Command for SetDescriptionCommand {
 
     fn to_statement(&self) -> String {
         format!("SET DESCRIPTION {}", escape_string(&self.description))
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for SetDescriptionCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        ctx.apply_operation(SetDescriptionOp::setup(&self.description).into())
+            .await?;
+        Ok(())
     }
 }
 

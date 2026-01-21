@@ -1,9 +1,10 @@
 //! Reset command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to reset all uncommitted changes.
 #[derive(Debug, Clone, Default)]
@@ -16,11 +17,25 @@ impl ResetCommand {
     }
 }
 
+impl CommandParsing for ResetCommand {
+    fn rule() -> Rule {
+        Rule::reset_stmt
+    }
+
+    fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        Ok(ResetCommand::new())
+    }
+
+    fn to_statement(&self) -> String {
+        "RESET".to_string()
+    }
+}
+
 #[async_trait]
-impl Command for ResetCommand {
+impl BundleBuilderCommand for ResetCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
         if ctx.status().is_empty() {
             return Err("No uncommitted changes".into());
         }
@@ -34,18 +49,6 @@ impl Command for ResetCommand {
         info!("All uncommitted changes discarded");
 
         Ok(())
-    }
-
-    fn rule() -> Rule {
-        Rule::reset_stmt
-    }
-
-    fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        Ok(ResetCommand::new())
-    }
-
-    fn to_statement(&self) -> String {
-        "RESET".to_string()
     }
 }
 

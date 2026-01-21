@@ -1,10 +1,11 @@
 //! RenameColumn command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RenameColumnOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to rename a column.
 #[derive(Debug, Clone)]
@@ -25,17 +26,7 @@ impl RenameColumnCommand {
     }
 }
 
-#[async_trait]
-impl Command for RenameColumnCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        ctx.apply_operation(RenameColumnOp::setup(&self.old_name, &self.new_name).into())
-            .await?;
-        info!("Renamed \"{}\" to \"{}\"", self.old_name, self.new_name);
-        Ok(())
-    }
-
+impl CommandParsing for RenameColumnCommand {
     fn rule() -> Rule {
         Rule::rename_column_stmt
     }
@@ -66,6 +57,18 @@ impl Command for RenameColumnCommand {
 
     fn to_statement(&self) -> String {
         format!("RENAME COLUMN {} TO {}", self.old_name, self.new_name)
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for RenameColumnCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        ctx.apply_operation(RenameColumnOp::setup(&self.old_name, &self.new_name).into())
+            .await?;
+        info!("Renamed \"{}\" to \"{}\"", self.old_name, self.new_name);
+        Ok(())
     }
 }
 

@@ -1,9 +1,10 @@
 //! DropView command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::DropViewOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to drop a view.
 #[derive(Debug, Clone)]
@@ -19,16 +20,7 @@ impl DropViewCommand {
     }
 }
 
-#[async_trait]
-impl Command for DropViewCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let op = DropViewOp::setup(&self.name, ctx.bundle()).await?;
-        ctx.apply_operation(op.into()).await?;
-        Ok(())
-    }
-
+impl CommandParsing for DropViewCommand {
     fn rule() -> Rule {
         Rule::drop_view_stmt
     }
@@ -49,6 +41,17 @@ impl Command for DropViewCommand {
 
     fn to_statement(&self) -> String {
         format!("DROP VIEW {}", self.name)
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for DropViewCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        let op = DropViewOp::setup(&self.name, ctx.bundle()).await?;
+        ctx.apply_operation(op.into()).await?;
+        Ok(())
     }
 }
 

@@ -1,13 +1,19 @@
 //! Select command implementation.
+//!
+//! SelectCommand is a facade command - it works with `BundleFacade::select()` to
+//! produce a new BundleBuilder. It does not mutate the source bundle.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
-use crate::bundle::operation::SelectOp;
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use datafusion::scalar::ScalarValue;
-use log::info;
 
 /// Command to execute a SQL SELECT query.
+///
+/// SelectCommand is executed via `BundleFacade.select()` which returns a new
+/// BundleBuilder with the query applied. The source bundle is not modified.
+///
+/// When executed via `BundleCommand.execute()`, the builder is replaced with
+/// the result of the select operation.
 #[derive(Debug, Clone)]
 pub struct SelectCommand {
     /// The SQL query
@@ -26,23 +32,7 @@ impl SelectCommand {
     }
 }
 
-#[async_trait]
-impl Command for SelectCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let sql = if !self.sql.to_lowercase().starts_with("select ") {
-            format!("SELECT {}", self.sql)
-        } else {
-            self.sql
-        };
-
-        ctx.apply_operation(SelectOp::setup(sql, self.params).await?.into())
-            .await?;
-        info!("Created query");
-        Ok(())
-    }
-
+impl CommandParsing for SelectCommand {
     fn rule() -> Rule {
         Rule::select_stmt
     }

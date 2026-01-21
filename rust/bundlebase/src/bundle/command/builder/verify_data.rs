@@ -1,6 +1,6 @@
 //! VerifyData command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::{FileVerificationResult, VerificationResults};
 use crate::bundle::operation::UpdateVersionOp;
 use crate::io::readable_file_from_path;
@@ -8,6 +8,7 @@ use crate::data::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to verify the integrity of bundle data files.
 #[derive(Debug, Clone)]
@@ -23,13 +24,35 @@ impl VerifyDataCommand {
     }
 }
 
+impl CommandParsing for VerifyDataCommand {
+    fn rule() -> Rule {
+        Rule::verify_data_stmt
+    }
+
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        // Check if UPDATE keyword is present
+        let raw = pair.as_str().to_uppercase();
+        let update_versions = raw.contains("UPDATE");
+
+        Ok(VerifyDataCommand::new(update_versions))
+    }
+
+    fn to_statement(&self) -> String {
+        if self.update_versions {
+            "VERIFY DATA UPDATE".to_string()
+        } else {
+            "VERIFY DATA".to_string()
+        }
+    }
+}
+
 #[async_trait]
-impl Command for VerifyDataCommand {
+impl BundleBuilderCommand for VerifyDataCommand {
     type Output = VerificationResults;
 
     async fn execute(
         self: Box<Self>,
-        ctx: &mut CommandContext<'_>,
+        ctx: &mut BuilderCommandContext<'_>,
     ) -> Result<VerificationResults, BundlebaseError> {
         let mut results = Vec::new();
         let block_hashes = ctx.bundle().build_block_hash_map();
@@ -123,26 +146,6 @@ impl Command for VerifyDataCommand {
         }
 
         Ok(verification_results)
-    }
-
-    fn rule() -> Rule {
-        Rule::verify_data_stmt
-    }
-
-    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        // Check if UPDATE keyword is present
-        let raw = pair.as_str().to_uppercase();
-        let update_versions = raw.contains("UPDATE");
-
-        Ok(VerifyDataCommand::new(update_versions))
-    }
-
-    fn to_statement(&self) -> String {
-        if self.update_versions {
-            "VERIFY DATA UPDATE".to_string()
-        } else {
-            "VERIFY DATA".to_string()
-        }
     }
 }
 

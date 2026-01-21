@@ -1,11 +1,12 @@
 //! ReplaceBlock command implementation.
 
-use crate::bundle::command::{Command, CommandContext, Rule};
+use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::ReplaceBlockOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use log::info;
+use super::{BuilderCommandContext, BundleBuilderCommand};
 
 /// Command to replace a block's location in the bundle.
 #[derive(Debug, Clone)]
@@ -26,17 +27,7 @@ impl ReplaceBlockCommand {
     }
 }
 
-#[async_trait]
-impl Command for ReplaceBlockCommand {
-    type Output = ();
-
-    async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
-        let op = ReplaceBlockOp::setup(&self.old_location, &self.new_location, ctx.builder()).await?;
-        ctx.apply_operation(op.into()).await?;
-        info!("Replaced block {} -> {}", self.old_location, self.new_location);
-        Ok(())
-    }
-
+impl CommandParsing for ReplaceBlockCommand {
     fn rule() -> Rule {
         Rule::replace_stmt
     }
@@ -71,6 +62,18 @@ impl Command for ReplaceBlockCommand {
             escape_string(&self.old_location),
             escape_string(&self.new_location)
         )
+    }
+}
+
+#[async_trait]
+impl BundleBuilderCommand for ReplaceBlockCommand {
+    type Output = ();
+
+    async fn execute(self: Box<Self>, ctx: &mut BuilderCommandContext<'_>) -> Result<(), BundlebaseError> {
+        let op = ReplaceBlockOp::setup(&self.old_location, &self.new_location, ctx.builder()).await?;
+        ctx.apply_operation(op.into()).await?;
+        info!("Replaced block {} -> {}", self.old_location, self.new_location);
+        Ok(())
     }
 }
 
