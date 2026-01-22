@@ -60,7 +60,7 @@ impl AttachBlockOp {
     ) -> Result<String, BundlebaseError> {
         let temp_id = ObjectId::generate();
         let adapter = builder
-            .bundle
+            .bundle()
             .adapter_factory
             .reader(url, &temp_id, builder.bundle(), None, None, None)
             .await?;
@@ -126,7 +126,7 @@ impl AttachBlockOp {
         } else {
             // Normal file-based hash computation for other schemes
             let file =
-                readable_file_from_path(location, builder.data_dir(), builder.bundle.config())?;
+                readable_file_from_path(location, builder.data_dir(), builder.bundle().config())?;
             file.compute_hash().await?
         };
 
@@ -152,7 +152,7 @@ impl AttachBlockOp {
 
         _progress.update(1, Some("Creating adapter"));
         let adapter = builder
-            .bundle
+            .bundle()
             .adapter_factory
             .reader(location, &block_id, builder.bundle(), None, None, None)
             .await?;

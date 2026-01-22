@@ -174,7 +174,7 @@ mod tests {
         assert!(result.is_ok(), "Failed to create bundle with memory:// URL");
 
         let builder = result.unwrap();
-        assert!(builder.bundle.url().to_string().starts_with("memory://"));
+        assert!(builder.bundle().url().to_string().starts_with("memory://"));
     }
 
     #[tokio::test]
@@ -218,7 +218,7 @@ mod tests {
             assert!(result.is_ok(), "Failed to create bundle at {}", url);
 
             let builder = result.unwrap();
-            assert_eq!(builder.bundle.url().to_string(), url);
+            assert_eq!(builder.bundle().url().to_string(), url);
         }
     }
 
@@ -228,7 +228,7 @@ mod tests {
             .await
             .expect("Failed to create empty bundle");
 
-        let schema = builder.bundle.schema().await.expect("Failed to get schema");
+        let schema = builder.bundle().schema().await.expect("Failed to get schema");
 
         // Empty bundle should have no fields
         assert_eq!(schema.fields().len(), 0);
@@ -241,7 +241,7 @@ mod tests {
         assert!(result.is_ok(), "Failed to create bundle with file:// URL");
 
         let builder = result.unwrap();
-        assert!(builder.bundle.url().to_string().starts_with("file://"));
+        assert!(builder.bundle().url().to_string().starts_with("file://"));
     }
 
     #[tokio::test]
@@ -252,7 +252,7 @@ mod tests {
 
         let builder = result.unwrap();
         // Should have converted to a proper URL internally
-        assert!(!builder.bundle.url().to_string().is_empty());
+        assert!(!builder.bundle().url().to_string().is_empty());
     }
 
     #[tokio::test]
@@ -269,7 +269,7 @@ mod tests {
             if should_succeed {
                 assert!(result.is_ok(), "Failed to create bundle with URL: {}", url);
                 let builder = result.unwrap();
-                assert_eq!(builder.bundle.url().to_string(), url);
+                assert_eq!(builder.bundle().url().to_string(), url);
             } else {
                 assert!(result.is_err(), "Expected failure for URL: {}", url);
             }

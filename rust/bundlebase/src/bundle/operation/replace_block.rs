@@ -46,14 +46,14 @@ impl ReplaceBlockOp {
         // Find block ID by searching AttachBlockOp operations for matching location
         // Also check ReplaceBlockOp in case the block was already replaced
         let (block_id, old_source_info) =
-            Self::find_block_by_location(old_location, &builder.bundle.operations).ok_or_else(
+            Self::find_block_by_location(old_location, &builder.bundle().operations).ok_or_else(
                 || BundlebaseError::from(format!("No block found at location '{}'", old_location)),
             )?;
 
         // Create adapter to read version from the new location
         let temp_id = ObjectId::generate();
         let adapter = builder
-            .bundle
+            .bundle()
             .adapter_factory
             .reader(new_location, &temp_id, builder.bundle(), None, None, None)
             .await?;
@@ -69,7 +69,7 @@ impl ReplaceBlockOp {
             hex::encode(hasher.finalize())
         } else {
             let file =
-                readable_file_from_path(new_location, builder.data_dir(), builder.bundle.config())?;
+                readable_file_from_path(new_location, builder.data_dir(), builder.bundle().config())?;
             file.compute_hash().await?
         };
 
