@@ -37,17 +37,7 @@ impl BundleBuilderCommand for ResetCommand {
     type Output = ();
 
     async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
-        if builder.status().is_empty() {
-            return Err("No uncommitted changes".into());
-        }
-
-        // Clear all uncommitted changes
-        builder.status.clear();
-
-        // Reload the bundle from the last committed state
-        builder.reload_bundle().await?;
-
-        info!("All uncommitted changes discarded");
+        builder.reset().await?;
 
         Ok(())
     }

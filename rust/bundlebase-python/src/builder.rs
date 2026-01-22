@@ -215,7 +215,7 @@ impl PyBundleBuilder {
         self.inner
             .try_lock()
             .ok()
-            .map(|builder| builder.bundle.id().to_string())
+            .map(|builder| builder.bundle().id().to_string())
     }
 
     #[getter]
@@ -223,7 +223,7 @@ impl PyBundleBuilder {
         self.inner
             .try_lock()
             .ok()
-            .and_then(|builder| builder.bundle.name().map(|s| s.to_string()))
+            .and_then(|builder| builder.bundle().name().map(|s| s.to_string()))
     }
 
     /// Set the bundle name. Mutates the bundle in place.
@@ -258,7 +258,7 @@ impl PyBundleBuilder {
         self.inner
             .try_lock()
             .ok()
-            .and_then(|builder| builder.bundle.description().map(|s| s.to_string()))
+            .and_then(|builder| builder.bundle().description().map(|s| s.to_string()))
     }
 
     /// Set the bundle description. Mutates the bundle in place and returns it for chaining.
@@ -755,7 +755,7 @@ impl PyBundleBuilder {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let builder = inner.lock().await;
 
-            let df_future = builder.bundle.dataframe();
+            let df_future = builder.bundle().dataframe();
             let dataframe = df_future
                 .await
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
@@ -779,7 +779,7 @@ impl PyBundleBuilder {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let builder = inner.lock().await;
 
-            let df_future = builder.bundle.dataframe();
+            let df_future = builder.bundle().dataframe();
             let dataframe = df_future
                 .await
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
@@ -877,7 +877,7 @@ impl PyBundleBuilder {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let builder = inner.lock().await;
 
-            let num_rows_future = builder.bundle.num_rows();
+            let num_rows_future = builder.bundle().num_rows();
             num_rows_future
                 .await
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
@@ -890,7 +890,7 @@ impl PyBundleBuilder {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let builder = inner.lock().await;
 
-            let schema_future = builder.bundle.schema();
+            let schema_future = builder.bundle().schema();
             let schema = schema_future
                 .await
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
@@ -988,7 +988,7 @@ impl PyBundleBuilder {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let builder = inner.lock().await;
 
-            let explain_future = builder.bundle.explain();
+            let explain_future = builder.bundle().explain();
             explain_future
                 .await
                 .map_err(|e| to_py_error("Failed to explain query", e))
@@ -1000,7 +1000,7 @@ impl PyBundleBuilder {
         self.inner
             .try_lock()
             .ok()
-            .map(|builder| builder.bundle.version())
+            .map(|builder| builder.bundle().version())
             .unwrap_or_default()
     }
 
@@ -1011,7 +1011,7 @@ impl PyBundleBuilder {
             .and_then(|builder| {
                 Some(
                     builder
-                        .bundle
+                        .bundle()
                         .history()
                         .into_iter()
                         .map(|commit| PyCommit::new(commit))
@@ -1026,7 +1026,7 @@ impl PyBundleBuilder {
         self.inner
             .try_lock()
             .ok()
-            .map(|builder| builder.bundle.url().to_string())
+            .map(|builder| builder.bundle().url().to_string())
             .unwrap_or_default()
     }
 
@@ -1174,7 +1174,7 @@ impl PyBundleBuilder {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let builder = inner.lock().await;
 
-            let ctx = builder.bundle.ctx();
+            let ctx = builder.bundle().ctx();
 
             Python::attach(|py| {
                 Py::new(py, super::session_context::PySessionContext::new(ctx))

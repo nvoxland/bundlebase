@@ -132,8 +132,8 @@ impl std::fmt::Display for BundleStatus {
 ///     .commit("Filter high-value transactions").await?;
 /// ```
 pub struct BundleBuilder {
-    pub bundle: Bundle,
-    pub(crate) status: BundleStatus,
+    bundle: Bundle,
+    status: BundleStatus,
     in_progress_change: Option<BundleChange>,
 }
 
@@ -218,11 +218,6 @@ impl BundleBuilder {
     /// The bundle being built
     pub fn bundle(&self) -> &Bundle {
         &self.bundle
-    }
-
-    /// Get a mutable reference to the bundle
-    pub fn bundle_mut(&mut self) -> &mut Bundle {
-        &mut self.bundle
     }
 
     /// Returns the bundle status showing uncommitted changes.
@@ -313,8 +308,18 @@ impl BundleBuilder {
     /// bundle.reset().await?;  // Discards attach and filter operations
     /// ```
     pub async fn reset(&mut self) -> Result<&mut Self, BundlebaseError> {
-        use crate::bundle::command::ResetCommand;
-        self.execute_command(ResetCommand::new()).await?;
+        if self.status().is_empty() {
+            return Err("No uncommitted changes".into());
+        }
+
+        // Clear all uncommitted changes
+        self.status.clear();
+
+        // Reload the bundle from the last committed state
+        self.reload_bundle().await?;
+
+        info!("All uncommitted changes discarded");
+
         Ok(self)
     }
 
@@ -331,8 +336,26 @@ impl BundleBuilder {
     /// // Bundle now has only the attach change pending
     /// ```
     pub async fn undo(&mut self) -> Result<&mut Self, BundlebaseError> {
-        use crate::bundle::command::UndoCommand;
-        self.execute_command(UndoCommand::new()).await?;
+        if self.status().is_empty() {
+            return Err("No uncommitted changes to undo".into());
+        }
+
+        // Remove the last change
+        self.status.pop();
+
+        // Reload the bundle from the last committed state
+        self.reload_bundle().await?;
+
+        // Reapply all remaining operations
+        let changes = self.status.changes().clone();
+        for change in &changes {
+            for op in &change.operations {
+                self.bundle.apply_operation(op.clone()).await?;
+            }
+        }
+
+        info!("Last operation undone");
+
         Ok(self)
     }
 
