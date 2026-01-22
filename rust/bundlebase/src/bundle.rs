@@ -179,7 +179,7 @@ pub struct Bundle {
     last_manifest_version: u32,
 
     data_dir: Arc<dyn IOReadWriteDir>,
-    commits: Vec<BundleCommit>,
+    commits: Arc<RwLock<Vec<BundleCommit>>>,
     operations: Vec<AnyOperation>,
 
     packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
@@ -227,7 +227,7 @@ impl Clone for Bundle {
             name: self.name.clone(),
             description: self.description.clone(),
             data_dir: Arc::clone(&self.data_dir),
-            commits: self.commits.clone(),
+            commits: Arc::clone(&self.commits),
             operations: self.operations.clone(),
             version: self.version.clone(),
             last_manifest_version: self.last_manifest_version,
@@ -266,6 +266,7 @@ impl Bundle {
         let ctx = Arc::new(SessionContext::new_with_config(config));
 
         let packs = Arc::new(RwLock::new(HashMap::new()));
+        let commits = Arc::new(RwLock::new(vec![]));
 
         let empty_dataframe = DataFrame::new(
             ctx.state(),
@@ -291,7 +292,7 @@ impl Bundle {
         )?;
         catalog.register_schema(
             "public",
-            Arc::new(BundleSchemaProvider::new(dataframe.clone())),
+            Arc::new(BundleSchemaProvider::new(dataframe.clone(), commits.clone())),
         )?;
         catalog.register_schema("temp", Arc::new(MemorySchemaProvider::new()))?;
 
@@ -329,7 +330,7 @@ impl Bundle {
             last_manifest_version: 0,
             version: "empty".to_string(),
             data_dir: writable_dir_from_url(&url, BundleConfig::default().into())?,
-            commits: vec![],
+            commits,
             dataframe,
             config: Arc::new(crate::BundleConfig::new()),
             passed_config: None,
@@ -487,7 +488,7 @@ impl Bundle {
                 commit.changes.len()
             );
 
-            bundle.commits.push(commit.clone());
+            bundle.commits.write().push(commit.clone());
 
             // Apply operations from this manifest's changes
             for change in commit.changes {
@@ -1039,12 +1040,13 @@ impl BundleFacade for Bundle {
         self.data_dir.url()
     }
 
-    fn from(&self) -> Option<&Url> {
+    fn from(&self) -> Option<Url> {
         self.commits
+            .read()
             .iter()
             .filter(|x| x.data_dir != Some(self.data_dir.url().clone()))
             .last()
-            .and_then(|c| c.data_dir.as_ref())
+            .and_then(|c| c.data_dir.clone())
     }
 
     fn version(&self) -> String {
@@ -1053,7 +1055,7 @@ impl BundleFacade for Bundle {
 
     /// Returns the commit history for this bundle, starting with any base bundles
     fn history(&self) -> Vec<BundleCommit> {
-        self.commits.clone()
+        self.commits.read().clone()
     }
 
     fn operations(&self) -> Vec<AnyOperation> {

@@ -10,5 +10,7 @@ pub use pack_union_table::PackUnionTable;
 
 /// Alias dataframe is registered in the ctx under. User can select from this
 pub static DATAFRAME_ALIAS: &str = "bundle";
+/// Table name for bundle commit history
+pub static BUNDLE_HISTORY_TABLE: &str = "bundle_history";
 /// Datafusion catalog name used
 pub static CATALOG_NAME: &str = "bundlebase";

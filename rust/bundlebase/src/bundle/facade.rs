@@ -24,7 +24,7 @@ pub trait BundleFacade {
     fn url(&self) -> &Url;
 
     /// The base bundle this was extended from
-    fn from(&self) -> Option<&Url>;
+    fn from(&self) -> Option<Url>;
 
     /// Unique version for this bundle
     fn version(&self) -> String;
