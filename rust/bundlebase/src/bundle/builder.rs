@@ -241,7 +241,7 @@ impl BundleBuilder {
         if self.bundle.last_manifest_version == 0 {
             let from = self.bundle.from();
             let init_file = manifest_dir.writable_file(INIT_FILENAME)?;
-            write_yaml(init_file.as_ref(), &InitCommit::new(from)).await?;
+            write_yaml(init_file.as_ref(), &InitCommit::new(from.as_ref())).await?;
         };
 
         // Calculate next version number
@@ -361,7 +361,7 @@ impl BundleBuilder {
 
     pub(in crate::bundle) async fn reload_bundle(&mut self) -> Result<(), BundlebaseError> {
         // Reload the bundle from the last committed state
-        let empty = self.bundle.commits.is_empty();
+        let empty = self.bundle.commits.read().is_empty();
         self.bundle = if empty {
             let mut new = Bundle::empty().await?;
             new.passed_config = self.bundle.passed_config.clone();
@@ -1429,7 +1429,7 @@ impl BundleFacade for BundleBuilder {
         self.bundle.url()
     }
 
-    fn from(&self) -> Option<&Url> {
+    fn from(&self) -> Option<Url> {
         self.bundle.from()
     }
 
