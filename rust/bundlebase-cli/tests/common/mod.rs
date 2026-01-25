@@ -4,11 +4,9 @@
 
 use arrow_flight::flight_service_server::FlightServiceServer;
 use arrow_flight::sql::client::FlightSqlServiceClient;
-use bundlebase::BundleBuilder;
+use bundlebase_cli::auth::BundlebaseAuthenticator;
 use bundlebase_cli::flight::BundlebaseFlightSqlService as FlightService;
-use bundlebase_cli::BundleState;
 use std::net::{SocketAddr, TcpListener};
-use std::sync::Arc;
 use tokio::sync::oneshot;
 use tonic::transport::{Channel, Server};
 
@@ -31,31 +29,30 @@ pub struct FlightTestServer {
 impl FlightTestServer {
     /// Start a new Flight SQL test server with an empty bundle.
     pub async fn start() -> Self {
-        let builder = BundleBuilder::create(
-            &format!(
-                "memory:///flight_test_{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .expect("System time before UNIX epoch")
-                    .as_nanos()
-            ),
-            None,
-        )
-        .await
-        .expect("Failed to create test bundle");
+        let bundle_path = format!(
+            "memory:///flight_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("System time before UNIX epoch")
+                .as_nanos()
+        );
 
-        Self::start_with_builder(builder).await
+        Self::start_with_bundle_path(&bundle_path, true).await
     }
 
-    /// Start a new Flight SQL test server with the given bundle builder.
-    pub async fn start_with_builder(builder: BundleBuilder) -> Self {
+    /// Start a new Flight SQL test server with the given bundle path.
+    pub async fn start_with_bundle_path(bundle_path: &str, create: bool) -> Self {
         let port = get_available_port();
         let addr: SocketAddr = format!("127.0.0.1:{}", port)
             .parse()
             .expect("Invalid address");
 
-        let state = Arc::new(BundleState::new(builder));
-        let flight_service = FlightService::new(state);
+        let flight_service = FlightService::new(
+            bundle_path.to_string(),
+            None,
+            create,
+            BundlebaseAuthenticator::default(),
+        );
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
@@ -94,7 +91,13 @@ impl FlightTestServer {
             }
         };
 
-        let client = FlightSqlServiceClient::new(channel);
+        let mut client = FlightSqlServiceClient::new(channel);
+
+        // Authenticate with default credentials (admin:password)
+        client
+            .handshake("admin", "password")
+            .await
+            .expect("Handshake should succeed with default credentials");
 
         Self {
             addr,

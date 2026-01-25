@@ -11,60 +11,34 @@ mod service;
 
 // Re-export public API
 pub use server::start;
-pub use service::{BundlebaseFlightService, BundlebaseFlightSqlService};
+pub use service::BundlebaseFlightSqlService;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::state::BundleState;
-    use arrow::datatypes::Schema;
-    use bundlebase::BundleBuilder;
-    use std::sync::Arc;
+    use crate::auth::BundlebaseAuthenticator;
+    use super::service::BundlebaseFlightSqlService;
 
     #[tokio::test]
-    async fn test_flight_sql_service_with_memory_bundle() {
-        // Create a bundle and wrap it in a Flight SQL service
-        let builder = BundleBuilder::create("memory:///flight_test", None)
-            .await
-            .expect("Failed to create bundle");
-
-        let _service = BundlebaseFlightSqlService::new(Arc::new(BundleState::new(builder)));
-
-        // Service should instantiate successfully
+    async fn test_flight_sql_service_instantiation() {
+        // Service should instantiate successfully with bundle path
+        let _service = BundlebaseFlightSqlService::new(
+            "memory:///flight_test".to_string(),
+            None,
+            true,
+            BundlebaseAuthenticator::default(),
+        );
     }
 
     #[tokio::test]
-    async fn test_prepared_statement_lifecycle() {
-        let builder = BundleBuilder::create("memory:///prepared_stmt_test", None)
-            .await
-            .expect("Failed to create bundle");
-
-        let service = BundlebaseFlightSqlService::new(Arc::new(BundleState::new(builder)));
-
-        // Verify we can create and close prepared statements via the internal state
-        let handle = "test-handle".to_string();
-        let schema = Arc::new(Schema::new(vec![arrow::datatypes::Field::new(
-            "num",
-            arrow::datatypes::DataType::Int64,
-            false,
-        )]));
-
-        // Insert a prepared statement
-        service.prepared_statements().write().insert(
-            handle.clone(),
-            prepared_statements::PreparedStatement {
-                sql: "SELECT 1".to_string(),
-                schema: schema.clone(),
-            },
+    async fn test_session_store_lifecycle() {
+        let service = BundlebaseFlightSqlService::new(
+            "memory:///session_test".to_string(),
+            None,
+            true,
+            BundlebaseAuthenticator::default(),
         );
 
-        // Verify it exists
-        assert!(service.prepared_statements().read().contains_key(&handle));
-
-        // Remove it
-        service.prepared_statements().write().remove(&handle);
-
-        // Verify it's gone
-        assert!(!service.prepared_statements().read().contains_key(&handle));
+        // Sessions store should start empty
+        assert!(!service.has_sessions());
     }
 }

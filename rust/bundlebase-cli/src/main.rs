@@ -115,32 +115,35 @@ async fn main() -> Result<(), BundlebaseError> {
 
     init_logging(&args);
 
-    if args.mode == Mode::Repl {
-        repl::print_header();
-    }
-
-    let state = if args.create {
-        info!("Creating bundle at: {}", args.bundle);
-        Arc::new(BundleState::new(BundleBuilder::create(&args.bundle, None).await?))
-    } else {
-        info!("Loading bundle from: {}", args.bundle);
-        Arc::new(BundleState::new(
-            Bundle::open(&args.bundle, None)
-                .await?
-                .extend(None)?,
-        ))
-    };
-
     match args.mode {
         Mode::Repl => {
+            repl::print_header();
+
+            let state = if args.create {
+                info!("Creating bundle at: {}", args.bundle);
+                Arc::new(BundleState::new(
+                    BundleBuilder::create(&args.bundle, None).await?,
+                ))
+            } else {
+                info!("Loading bundle from: {}", args.bundle);
+                Arc::new(BundleState::new(
+                    Bundle::open(&args.bundle, None).await?.extend(None)?,
+                ))
+            };
+
             repl::start(state).await?;
         }
         Mode::Flight => {
+            info!(
+                "{} bundle at: {}",
+                if args.create { "Creating" } else { "Opening" },
+                args.bundle
+            );
             let port = args.port.unwrap_or(50051);
             let addr = format!("{}:{}", args.host, port)
                 .parse()
                 .map_err(|e| BundlebaseError::from(format!("Invalid address: {}", e)))?;
-            flight::start(state, addr).await?;
+            flight::start(&args.bundle, args.create, addr).await?;
         }
     }
 

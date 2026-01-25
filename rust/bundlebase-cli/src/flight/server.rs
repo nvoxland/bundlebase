@@ -1,10 +1,9 @@
 //! Flight SQL server startup.
 
 use super::service::BundlebaseFlightSqlService;
-use crate::state::BundleState;
+use crate::auth::BundlebaseAuthenticator;
 use arrow_flight::flight_service_server::FlightServiceServer;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tonic::transport::Server;
 use tracing::info;
 
@@ -15,7 +14,8 @@ use tracing::info;
 ///
 /// # Arguments
 ///
-/// * `state` - The shared bundle state
+/// * `bundle_path` - Path to the bundle (URL or filesystem path)
+/// * `create` - If true, create the bundle; if false, open existing
 /// * `addr` - The address to bind to (e.g., "0.0.0.0:50051")
 ///
 /// # Returns
@@ -23,12 +23,18 @@ use tracing::info;
 /// * `Ok(())` - Server shut down cleanly
 /// * `Err(BundlebaseError)` - Server failed to start or encountered an error
 pub async fn start(
-    state: Arc<BundleState>,
+    bundle_path: &str,
+    create: bool,
     addr: SocketAddr,
 ) -> Result<(), bundlebase::BundlebaseError> {
     info!("Starting Arrow Flight SQL server on {}", addr);
 
-    let flight_service = BundlebaseFlightSqlService::new(state);
+    let flight_service = BundlebaseFlightSqlService::new(
+        bundle_path.to_string(),
+        None,
+        create,
+        BundlebaseAuthenticator::default(),
+    );
 
     Server::builder()
         .add_service(FlightServiceServer::new(flight_service))
