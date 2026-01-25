@@ -35,3 +35,7 @@ test_data/*.dbc
 
 site
 /TODO.txt
+
+.cargo
+ideas
+repl-history.txt
