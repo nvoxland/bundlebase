@@ -65,7 +65,7 @@ async fn test_remove() -> Result<(), BundlebaseError> {
     bundle.drop_column("title").await?;
 
     assert!(!bundle
-        .bundle
+        .bundle()
         .dataframe()
         .await?
         .schema()

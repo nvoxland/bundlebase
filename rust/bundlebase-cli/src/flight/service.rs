@@ -1,4 +1,8 @@
 //! Core Flight SQL service implementation.
+//!
+//! This service implements session-based state isolation: each authenticated session
+//! gets its own `BundleState` instance, ensuring that operations in one session don't
+//! affect other sessions. Anonymous requests (without auth token) use a shared default state.
 
 use super::execution::execute_query_streaming;
 use super::metadata;
@@ -21,27 +25,76 @@ use arrow_flight::{
     FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, Ticket,
 };
 use bundlebase::bundle::BundleFacade;
+use bundlebase::{Bundle, BundleBuilder, BundleConfig};
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
+use parking_lot::RwLock;
 use prost::Message;
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::info;
 use uuid::Uuid;
 
+/// Store for session states, keyed by auth token.
+pub type SessionStore = Arc<RwLock<HashMap<String, Arc<BundleState>>>>;
+
+/// Create a new session store.
+pub fn new_session_store() -> SessionStore {
+    Arc::new(RwLock::new(HashMap::new()))
+}
+
 /// The bundlebase Flight SQL service implementation.
+///
+/// This service supports session-based state isolation. Each authenticated session
+/// (identified by auth token) gets its own `BundleState` instance. This ensures
+/// that concurrent connections from different clients don't interfere with each other.
+///
+/// # Session Lifecycle
+///
+/// 1. Client calls `do_handshake` with credentials
+/// 2. Server validates credentials and creates a new `BundleState` for the session
+/// 3. Server returns an auth token in the handshake response
+/// 4. Client includes the token in the `authorization` header of subsequent requests
+/// 5. Server looks up the session state by token for each request
+///
+/// # Anonymous Requests
+///
+/// Requests without an auth token use the default shared state for backward compatibility.
 pub struct BundlebaseFlightSqlService {
-    state: Arc<BundleState>,
+    /// Default state for anonymous requests (backward compatibility)
+    default_state: Arc<BundleState>,
+    /// Bundle path for creating new session states
+    bundle_path: String,
+    /// Bundle config for creating new session states
+    bundle_config: Option<BundleConfig>,
+    /// Whether to create bundles (vs open existing)
+    create_bundle: bool,
+    /// Session states keyed by auth token
+    sessions: SessionStore,
     authenticator: BundlebaseAuthenticator,
     prepared_statements: PreparedStatementStore,
 }
 
 impl BundlebaseFlightSqlService {
     /// Create a new Flight SQL service with the given bundle state.
+    ///
+    /// This constructor maintains backward compatibility by using the provided state
+    /// as both the default state and for deriving the bundle path for new sessions.
     pub fn new(state: Arc<BundleState>) -> Self {
+        // Extract bundle path from the state for creating new sessions
+        let bundle_path = {
+            let guard = state.bundle.read();
+            guard.bundle().url().to_string()
+        };
+
         Self {
-            state,
+            default_state: state,
+            bundle_path,
+            bundle_config: None,
+            create_bundle: false,
+            sessions: new_session_store(),
             authenticator: BundlebaseAuthenticator::default(),
             prepared_statements: super::prepared_statements::new_store(),
         }
@@ -52,15 +105,65 @@ impl BundlebaseFlightSqlService {
         state: Arc<BundleState>,
         authenticator: BundlebaseAuthenticator,
     ) -> Self {
+        let bundle_path = {
+            let guard = state.bundle.read();
+            guard.bundle().url().to_string()
+        };
+
         Self {
-            state,
+            default_state: state,
+            bundle_path,
+            bundle_config: None,
+            create_bundle: false,
+            sessions: new_session_store(),
             authenticator,
             prepared_statements: super::prepared_statements::new_store(),
         }
     }
 
+    /// Get the session state for a request.
+    ///
+    /// Looks up the session by auth token from request metadata. If no token is found
+    /// or the token is invalid, returns the default shared state.
+    fn get_session_state<T>(&self, request: &Request<T>) -> Arc<BundleState> {
+        // Try to extract auth token from request metadata
+        if let Some(auth_header) = request.metadata().get("authorization") {
+            if let Ok(auth_str) = auth_header.to_str() {
+                // Token format: "Bearer <token>" or just "<token>"
+                let token = auth_str
+                    .strip_prefix("Bearer ")
+                    .unwrap_or(auth_str);
+
+                // Look up session state by token
+                if let Some(state) = self.sessions.read().get(token) {
+                    return Arc::clone(state);
+                }
+            }
+        }
+
+        // Fall back to default state for anonymous requests
+        Arc::clone(&self.default_state)
+    }
+
+    /// Create a new session state for an authenticated user.
+    async fn create_session_state(&self) -> Result<Arc<BundleState>, Status> {
+        let builder = if self.create_bundle {
+            BundleBuilder::create(&self.bundle_path, self.bundle_config.clone())
+                .await
+                .map_err(|e| Status::internal(format!("Failed to create bundle: {}", e)))?
+        } else {
+            Bundle::open(&self.bundle_path, self.bundle_config.clone())
+                .await
+                .map_err(|e| Status::internal(format!("Failed to open bundle: {}", e)))?
+                .extend(None)
+                .map_err(|e| Status::internal(format!("Failed to extend bundle: {}", e)))?
+        };
+
+        Ok(Arc::new(BundleState::new(builder)))
+    }
+
     /// Get the schema for a SQL query by planning it.
-    async fn get_query_schema(&self, sql: &str) -> Result<SchemaRef, Status> {
+    async fn get_query_schema(&self, state: &Arc<BundleState>, sql: &str) -> Result<SchemaRef, Status> {
         // First check if it's a bundlebase command with known schema
         if let Some(schema) = sql_executor::get_command_schema(sql) {
             return Ok(schema);
@@ -68,7 +171,7 @@ impl BundlebaseFlightSqlService {
 
         // For standard SQL, we need to plan the query to get the schema
         let builder = {
-            let guard = self.state.bundle.read();
+            let guard = state.bundle.read();
             guard.clone()
         };
 
@@ -91,6 +194,12 @@ impl BundlebaseFlightSqlService {
     pub fn prepared_statements(&self) -> &PreparedStatementStore {
         &self.prepared_statements
     }
+
+    /// Get the sessions store (for testing).
+    #[cfg(test)]
+    pub fn sessions(&self) -> &SessionStore {
+        &self.sessions
+    }
 }
 
 #[tonic::async_trait]
@@ -98,6 +207,9 @@ impl FlightSqlService for BundlebaseFlightSqlService {
     type FlightService = BundlebaseFlightSqlService;
 
     /// Handle handshake for authentication.
+    ///
+    /// On successful authentication, creates a new `BundleState` for the session
+    /// and returns an auth token that the client should include in subsequent requests.
     async fn do_handshake(
         &self,
         request: Request<Streaming<HandshakeRequest>>,
@@ -135,8 +247,18 @@ impl FlightSqlService for BundlebaseFlightSqlService {
             return Err(Status::unauthenticated("Invalid credentials"));
         }
 
-        // Return success response with a token
+        // Create a new session state for this authenticated connection
+        let session_state = self.create_session_state().await?;
+
+        // Generate a unique token for this session
         let token = format!("token-{}", Uuid::new_v4());
+
+        // Store the session state
+        self.sessions.write().insert(token.clone(), session_state);
+
+        info!("Created new session for user '{}': {}", username, token);
+
+        // Return success response with the token
         let response = HandshakeResponse {
             protocol_version: 1,
             payload: Bytes::from(token),
@@ -150,15 +272,18 @@ impl FlightSqlService for BundlebaseFlightSqlService {
     async fn do_action_create_prepared_statement(
         &self,
         query: ActionCreatePreparedStatementRequest,
-        _request: Request<arrow_flight::Action>,
+        request: Request<arrow_flight::Action>,
     ) -> Result<ActionCreatePreparedStatementResult, Status> {
         let sql = query.query.clone();
         let handle = Uuid::new_v4().to_string();
 
         info!("Creating prepared statement: {} -> {}", handle, sql);
 
+        // Get session state for this request
+        let state = self.get_session_state(&request);
+
         // Get schema by planning query (not executing)
-        let schema = self.get_query_schema(&sql).await?;
+        let schema = self.get_query_schema(&state, &sql).await?;
 
         // Store prepared statement
         self.prepared_statements.write().insert(
@@ -238,7 +363,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
     async fn do_get_prepared_statement(
         &self,
         cmd: CommandPreparedStatementQuery,
-        _request: Request<Ticket>,
+        request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let handle = String::from_utf8(cmd.prepared_statement_handle.to_vec())
             .map_err(|_| Status::invalid_argument("Invalid prepared statement handle"))?;
@@ -254,7 +379,10 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         info!("Executing prepared statement: {} -> {}", handle, sql);
 
-        execute_query_streaming(&self.state, sql).await
+        // Get session state for this request
+        let state = self.get_session_state(&request);
+
+        execute_query_streaming(&state, sql).await
     }
 
     /// Execute a prepared statement update (DML).
@@ -302,8 +430,11 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         info!("Getting flight info for statement: {}", sql);
 
+        // Get session state for this request
+        let state = self.get_session_state(&request);
+
         // Get schema by planning the query
-        let schema = self.get_query_schema(&sql).await?;
+        let schema = self.get_query_schema(&state, &sql).await?;
 
         // Create a TicketStatementQuery with SQL in statement_handle
         let ticket_stmt = TicketStatementQuery {
@@ -333,7 +464,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
     async fn do_get_statement(
         &self,
         ticket: TicketStatementQuery,
-        _request: Request<Ticket>,
+        request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         // Decode SQL from statement_handle (we stored the SQL bytes directly)
         let sql = String::from_utf8(ticket.statement_handle.to_vec())
@@ -341,7 +472,10 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         info!("Executing direct statement: {}", sql);
 
-        execute_query_streaming(&self.state, sql).await
+        // Get session state for this request
+        let state = self.get_session_state(&request);
+
+        execute_query_streaming(&state, sql).await
     }
 
     /// Fallback handler for unknown ticket types (backward compatibility).
@@ -350,11 +484,14 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         request: Request<Ticket>,
         _message: Any,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        // Get session state before consuming the request
+        let state = self.get_session_state(&request);
+
         // Try raw SQL in ticket (existing behavior for backward compatibility)
         let ticket = request.into_inner();
         if let Ok(sql) = String::from_utf8(ticket.ticket.to_vec()) {
             info!("Executing fallback query: {}", sql);
-            return execute_query_streaming(&self.state, sql).await;
+            return execute_query_streaming(&state, sql).await;
         }
         Err(Status::unimplemented("Unknown ticket format"))
     }

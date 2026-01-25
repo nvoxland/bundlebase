@@ -23,7 +23,7 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
         .await?;
     assert_eq!(1, rs.num_rows().await?);
 
-    let explain = rs.bundle.explain().await?;
+    let explain = rs.bundle().explain().await?;
     assert_regexp!(
         r#"
 \*\*\* logical_plan \*\*\*
@@ -85,7 +85,7 @@ FilterExec: Email@\d+ = elizabethbarr@ewing.com, projection=\[Index@\d+, City@\d
         .await?;
     assert_eq!(1, rs.num_rows().await?);
 
-    let explain = rs.bundle.explain().await?;
+    let explain = rs.bundle().explain().await?;
     assert_regexp!(
         r#"
 \*\*\* logical_plan \*\*\*

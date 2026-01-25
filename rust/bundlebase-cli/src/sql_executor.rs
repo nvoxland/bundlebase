@@ -89,6 +89,17 @@ pub async fn execute_sql(state: &Arc<BundleState>, sql: &str) -> Result<SqlResul
 }
 
 /// Execute standard SQL via DataFusion.
+///
+/// This function handles two cases:
+/// 1. Bundle-referencing queries (FROM bundle, JOIN bundle): Uses `builder.select()` to
+///    ensure all operations are applied to the dataframe before the query is executed.
+/// 2. Non-bundle queries (SELECT 1, etc.): Uses `ctx.sql()` directly on the SessionContext.
+///
+/// NOTE: We cannot use `ctx.sql()` for bundle queries because the SessionContext's
+/// schema provider holds a reference to the original Bundle's DataFrameHolder, not the
+/// cloned builder's. Operations applied to the clone (ATTACH, FILTER, etc.) are not
+/// visible to the schema provider. The `builder.select()` path explicitly builds the
+/// dataframe with all operations applied before executing the query.
 async fn execute_standard_sql(
     state: &Arc<BundleState>,
     sql: &str,
@@ -100,12 +111,10 @@ async fn execute_standard_sql(
     };
 
     // Check if the query references the bundle table.
-    // Queries referencing "bundle" need to go through builder.select() to get the
-    // up-to-date dataframe with all operations applied.
-    // Queries not referencing "bundle" (like "SELECT 1") can run directly on the context.
     let sql_upper = sql.to_uppercase();
     if sql_upper.contains("FROM BUNDLE") || sql_upper.contains("JOIN BUNDLE") {
-        // Use builder.select() for bundle-referencing queries
+        // Use builder.select() for bundle-referencing queries to get the
+        // up-to-date dataframe with all operations applied.
         let result_builder = builder.select(sql, vec![]).await?;
         let df = result_builder.dataframe().await?;
         let stream = df.as_ref().clone().execute_stream().await?;

@@ -20,51 +20,28 @@
 //! Currently only `SelectCommand` is a facade command - it returns a NEW builder
 //! with the query applied rather than mutating the source.
 //!
-//! # Command Execution Paths
-//!
-//! Commands can be executed through different paths depending on their characteristics:
-//!
-//! ## 1. `execute_command()` - For tracked unit commands
-//!
-//! Used for commands where `Output = ()` and changes should be tracked in status.
-//! Wraps execution in `do_change()` for change tracking.
-//!
-//! ```ignore
-//! builder.execute_command(AttachCommand::new("data.parquet", None)).await?;
-//! ```
-//!
-//! ## 2. `run_builder_command()` - For commands returning values
-//!
-//! Used for commands with `Output != ()`. Does not wrap in `do_change()`.
-//! Operations within the command are still tracked at the operation level.
-//!
-//! ```ignore
-//! let results: Vec<FetchResults> = builder.run_builder_command(FetchCommand::new(None)).await?;
-//! let verification = builder.run_builder_command(VerifyDataCommand::new(false)).await?;
-//! ```
-//!
-//! ## 3. Direct builder methods - For complex operations
-//!
-//! Some operations like `commit()`, `create_view()` have dedicated builder methods
-//! that may perform additional logic beyond a single command.
-//!
 //! # Adding New Commands
 //!
-//! When adding a new command:
+//! Adding a new command is simplified via the `register_commands!` macro. You need to:
 //!
-//! 1. Determine if it's a builder command (mutates state) or facade command (read-only)
-//! 2. Create command struct in appropriate directory:
-//!    - `command/builder/` for BundleBuilderCommand
-//!    - `command/facade/` for BundleFacadeCommand
-//! 3. Implement the `CommandParsing` trait for parsing/serialization
-//! 4. Implement the appropriate command trait (`BundleBuilderCommand` or `BundleFacadeCommand`)
-//! 5. Add variant to `BundleCommand` enum
-//! 6. Add match arm in `BundleCommand::execute()`
-//! 7. (If parseable) Add grammar rule in `parser/grammar.pest`
-//! 8. (If parseable) Add match arm in `parser.rs::try_parse_pest()`
+//! 1. Create command struct in `command/builder/<name>.rs` or `command/facade/<name>.rs`
+//! 2. Implement `CommandParsing` trait (`rule()`, `from_statement()`, `to_statement()`)
+//! 3. Implement `BundleBuilderCommand` or `BundleFacadeCommand` trait
+//! 4. Add re-export in `command/builder/mod.rs` or `command/facade/mod.rs`
+//! 5. **Add one line to the `register_commands!` macro invocation** (see below)
+//! 6. (If parseable) Add grammar rule in `parser/grammar.pest`
 //!
-//! Use `execute_command()` path if `Output = ()` and changes should be tracked.
-//! Use `run_builder_command()` path if the command returns meaningful results.
+//! The macro generates:
+//! - `BundleCommand` enum variant
+//! - Match arm in `BundleCommand::execute()`
+//! - Match arm in `parse_from_rule()` for parser.rs
+//!
+//! # Command Categories (for the macro)
+//!
+//! - `message`: Commands that return `CommandOutput::Message(ok())` (most common)
+//! - `fetch`: Commands that return `CommandOutput::Fetch(results)`
+//! - `verification`: Commands that return `CommandOutput::Verification(results)`
+//! - `custom`: Commands with special execution logic (Commit, Select, ExplainPlan)
 
 use crate::bundle::VerificationResults;
 use crate::bundle::facade::BundleFacade;
@@ -272,255 +249,211 @@ pub trait BundleFacadeCommand: CommandParsing {
     ) -> Result<Self::Output, BundlebaseError>;
 }
 
-/// Command that can be executed on a BundleBuilder.
+/// Macro to register all commands with their categories.
 ///
-/// This enum wraps command structs, providing a single source of truth for command parameters.
-/// Each variant delegates to its wrapped command struct for execution.
+/// This macro generates:
+/// - `BundleCommand` enum variants
+/// - Match arms in `BundleCommand::execute()`
+/// - `parse_from_rule()` function for centralized rule-to-command mapping
 ///
-/// # Examples
+/// # Categories
 ///
-/// ```ignore
-/// use bundlebase::bundle::{BundleCommand, AttachCommand};
+/// - `message`: Commands using `execute_command()` returning `CommandOutput::Message`
+/// - `fetch_special`: Commands returning `CommandOutput::Fetch` with special parsing (handled in parser.rs)
+/// - `verification`: Commands returning `CommandOutput::Verification`
+/// - `custom`: Commands with custom execution logic (handled manually in execute)
 ///
-/// let cmd = BundleCommand::Attach(AttachCommand::new("data.parquet", None));
-/// cmd.execute(&mut builder).await?;
-/// ```
-#[derive(Debug, Clone)]
-pub enum BundleCommand {
-    /// Attach a data source
-    Attach(AttachCommand),
+/// Note: `fetch_special` commands are NOT included in `parse_from_rule()` because they share
+/// grammar rules (e.g., fetch_stmt -> Fetch or FetchAll). They must be handled specially in parser.rs.
+macro_rules! register_commands {
+    (
+        // Commands that return MessageResponse::ok()
+        message {
+            $( $msg_variant:ident($msg_cmd:ty) => $msg_rule:path ),* $(,)?
+        }
+        // Commands that return CommandOutput::Fetch but need special parsing (shared rules)
+        fetch_special {
+            $( $fetch_variant:ident($fetch_cmd:ty) ),* $(,)?
+        }
+        // Commands that return CommandOutput::Verification
+        verification {
+            $( $verify_variant:ident($verify_cmd:ty) => $verify_rule:path ),* $(,)?
+        }
+        // Commands with custom execution logic (execute body provided separately)
+        custom {
+            $( $custom_variant:ident($custom_cmd:ty) => $custom_rule:path ),* $(,)?
+        }
+    ) => {
+        /// Command that can be executed on a BundleBuilder.
+        ///
+        /// This enum wraps command structs, providing a single source of truth for command parameters.
+        /// Each variant delegates to its wrapped command struct for execution.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// use bundlebase::bundle::{BundleCommand, AttachCommand};
+        ///
+        /// let cmd = BundleCommand::Attach(AttachCommand::new("data.parquet", None));
+        /// cmd.execute(&mut builder).await?;
+        /// ```
+        #[derive(Debug, Clone)]
+        pub enum BundleCommand {
+            // Message commands
+            $( $msg_variant($msg_cmd), )*
+            // Fetch commands (special parsing)
+            $( $fetch_variant($fetch_cmd), )*
+            // Verification commands
+            $( $verify_variant($verify_cmd), )*
+            // Custom commands
+            $( $custom_variant($custom_cmd), )*
+        }
 
-    /// Detach a data block by location
-    DetachBlock(DetachBlockCommand),
+        impl BundleCommand {
+            /// Execute this command on a BundleBuilder.
+            ///
+            /// This method delegates to the wrapped command struct via `execute_command`.
+            pub async fn execute(self, builder: &mut BundleBuilder) -> Result<CommandOutput, BundlebaseError> {
+                match self {
+                    // Message commands - standard execute_command pattern
+                    $(
+                        BundleCommand::$msg_variant(cmd) => {
+                            builder.execute_command(cmd).await?;
+                            Ok(CommandOutput::Message(MessageResponse::ok()))
+                        }
+                    )*
+                    // Fetch commands - return fetch results
+                    $(
+                        BundleCommand::$fetch_variant(cmd) => {
+                            let results = builder.execute_command(cmd).await?;
+                            Ok(CommandOutput::Fetch(results))
+                        }
+                    )*
+                    // Verification commands - return verification results
+                    $(
+                        BundleCommand::$verify_variant(cmd) => {
+                            let results = builder.execute_command(cmd).await?;
+                            Ok(CommandOutput::Verification(results))
+                        }
+                    )*
+                    // Custom commands - handled individually below
+                    BundleCommand::Commit(cmd) => {
+                        builder.commit(&cmd.message).await?;
+                        Ok(CommandOutput::Message(MessageResponse::ok()))
+                    }
+                    BundleCommand::Select(cmd) => {
+                        let new_builder = builder.select(&cmd.sql, cmd.params).await?;
+                        *builder = new_builder;
+                        Ok(CommandOutput::Message(MessageResponse::ok()))
+                    }
+                    BundleCommand::ExplainPlan(_cmd) => {
+                        let plan = builder.explain().await?;
+                        Ok(CommandOutput::Plan(plan))
+                    }
+                }
+            }
 
-    /// Filter rows by a WHERE condition
-    Filter(FilterCommand),
+            /// Returns the Arrow schema that this command will produce when executed.
+            pub fn output_schema(&self) -> SchemaRef {
+                match self {
+                    // Fetch commands
+                    $( BundleCommand::$fetch_variant(_) => fetch_schema(), )*
+                    // Verification commands
+                    $( BundleCommand::$verify_variant(_) => verification_schema(), )*
+                    // ExplainPlan returns plan schema
+                    BundleCommand::ExplainPlan(_) => plan_schema(),
+                    // All other commands return message schema
+                    _ => message_schema(),
+                }
+            }
+        }
 
-    /// Remove a column
-    DropColumn(DropColumnCommand),
-
-    /// Rename a column
-    RenameColumn(RenameColumnCommand),
-
-    /// Rename a view
-    RenameView(RenameViewCommand),
-
-    /// Join with another data source
-    Join(JoinCommand),
-
-    /// Create an index on a column
-    CreateIndex(CreateIndexCommand),
-
-    /// Drop an index on a column
-    DropIndex(DropIndexCommand),
-
-    /// Drop a view
-    DropView(DropViewCommand),
-
-    /// Drop a join
-    DropJoin(DropJoinCommand),
-
-    /// Rename a join
-    RenameJoin(RenameJoinCommand),
-
-    /// Rebuild an index on a column
-    RebuildIndex(RebuildIndexCommand),
-
-    /// Rebuild all indexes
-    Reindex(ReindexCommand),
-
-    /// Replace a block's location
-    ReplaceBlock(ReplaceBlockCommand),
-
-    /// Set bundle name
-    SetName(SetNameCommand),
-
-    /// Set bundle description
-    SetDescription(SetDescriptionCommand),
-
-    /// Set a configuration value
-    SetConfig(SetConfigCommand),
-
-    /// Commit changes
-    Commit(CommitCommand),
-
-    /// Reset uncommitted changes
-    Reset(ResetCommand),
-
-    /// Undo last change
-    Undo(UndoCommand),
-
-    /// Create a data source for fetching files
-    CreateSource(CreateSourceCommand),
-
-    /// Fetch new files from sources for a pack
-    Fetch(FetchCommand),
-
-    /// Fetch new files from all defined sources
-    FetchAll(FetchAllCommand),
-
-    /// Verify data integrity
-    VerifyData(VerifyDataCommand),
-
-    // === Facade Commands (read-only, return new BundleBuilder) ===
-
-    /// Execute a full SQL query (returns new BundleBuilder)
-    Select(SelectCommand),
-
-    /// Show the query execution plan
-    ExplainPlan(ExplainPlanCommand),
+        /// Parse a command from a pest Rule and Pair.
+        ///
+        /// This function provides centralized rule-to-command mapping, ensuring
+        /// that adding a command only requires updating the `register_commands!` macro.
+        ///
+        /// Note: Commands in `fetch_special` category are NOT handled here because they
+        /// share grammar rules. Handle them in `parse_command()` directly.
+        ///
+        /// # Arguments
+        ///
+        /// * `rule` - The pest Rule that was matched
+        /// * `pair` - The pest Pair containing the parsed content
+        ///
+        /// # Returns
+        ///
+        /// * `Some(BundleCommand)` - If the rule matches a registered command
+        /// * `None` - If the rule is not a command rule (use special handling in parser)
+        pub fn parse_from_rule(rule: Rule, pair: pest::iterators::Pair<Rule>) -> Result<Option<BundleCommand>, BundlebaseError> {
+            match rule {
+                // Message commands
+                $( $msg_rule => Ok(Some(BundleCommand::$msg_variant(<$msg_cmd>::from_statement(pair)?))), )*
+                // Note: fetch_special commands are handled in parser.rs, not here
+                // Verification commands
+                $( $verify_rule => Ok(Some(BundleCommand::$verify_variant(<$verify_cmd>::from_statement(pair)?))), )*
+                // Custom commands
+                $( $custom_rule => Ok(Some(BundleCommand::$custom_variant(<$custom_cmd>::from_statement(pair)?))), )*
+                // Unknown rule - return None for special handling
+                _ => Ok(None),
+            }
+        }
+    };
 }
 
-impl BundleCommand {
-    /// Execute this command on a BundleBuilder.
-    ///
-    /// This method delegates to the wrapped command struct via `execute_command`.
-    ///
-    /// # Arguments
-    ///
-    /// * `builder` - Mutable reference to the BundleBuilder to execute the command on
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(CommandOutput)` - Command executed successfully with optional output
-    /// * `Err(BundlebaseError)` - Execution failed
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let cmd = BundleCommand::Attach(AttachCommand::new("data.parquet", None));
-    /// let output = cmd.execute(&mut builder).await?;
-    /// ```
-    pub async fn execute(self, builder: &mut BundleBuilder) -> Result<CommandOutput, BundlebaseError> {
-        match self {
-            // Builder commands delegate to execute_command
-            BundleCommand::Attach(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::DetachBlock(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::Filter(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::DropColumn(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::RenameColumn(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::RenameView(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::Select(cmd) => {
-                // Select uses the BundleFacade's select() method which returns a new builder
-                let new_builder = builder.select(&cmd.sql, cmd.params).await?;
-                *builder = new_builder;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::Join(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::CreateIndex(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::DropIndex(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::DropView(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::DropJoin(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::RenameJoin(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::RebuildIndex(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::Reindex(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::ReplaceBlock(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::SetName(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::SetDescription(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::SetConfig(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::CreateSource(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::Fetch(cmd) => {
-                let results = builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Fetch(results))
-            }
-            BundleCommand::FetchAll(cmd) => {
-                let results = builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Fetch(results))
-            }
+// Register all commands using the macro
+//
+// NOTE: Commands in `fetch_special` share the fetch_stmt rule and are handled
+// specially in parser.rs::parse_command() rather than through parse_from_rule().
+register_commands! {
+    message {
+        // Data modification commands
+        Attach(AttachCommand) => Rule::attach_stmt,
+        DetachBlock(DetachBlockCommand) => Rule::detach_stmt,
+        Filter(FilterCommand) => Rule::filter_stmt,
+        Join(JoinCommand) => Rule::join_stmt,
+        ReplaceBlock(ReplaceBlockCommand) => Rule::replace_stmt,
 
-            // Special commands bypass execute_command
-            BundleCommand::Commit(cmd) => {
-                builder.commit(&cmd.message).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::Reset(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::Undo(cmd) => {
-                builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
-            BundleCommand::VerifyData(cmd) => {
-                let results = builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Verification(results))
-            }
-            BundleCommand::ExplainPlan(_cmd) => {
-                let plan = builder.explain().await?;
-                Ok(CommandOutput::Plan(plan))
-            }
-        }
+        // Schema commands
+        DropColumn(DropColumnCommand) => Rule::drop_column_stmt,
+        RenameColumn(RenameColumnCommand) => Rule::rename_column_stmt,
+        CreateIndex(CreateIndexCommand) => Rule::create_index_stmt,
+        DropIndex(DropIndexCommand) => Rule::drop_index_stmt,
+        RebuildIndex(RebuildIndexCommand) => Rule::rebuild_index_stmt,
+        Reindex(ReindexCommand) => Rule::reindex_stmt,
+
+        // View commands
+        RenameView(RenameViewCommand) => Rule::rename_view_stmt,
+        DropView(DropViewCommand) => Rule::drop_view_stmt,
+
+        // Join management commands
+        DropJoin(DropJoinCommand) => Rule::drop_join_stmt,
+        RenameJoin(RenameJoinCommand) => Rule::rename_join_stmt,
+
+        // Metadata commands
+        SetName(SetNameCommand) => Rule::set_name_stmt,
+        SetDescription(SetDescriptionCommand) => Rule::set_description_stmt,
+        SetConfig(SetConfigCommand) => Rule::set_config_stmt,
+
+        // Source commands
+        CreateSource(CreateSourceCommand) => Rule::create_source_stmt,
+
+        // Transaction commands
+        Reset(ResetCommand) => Rule::reset_stmt,
+        Undo(UndoCommand) => Rule::undo_stmt,
     }
-
-    /// Returns the Arrow schema that this command will produce when executed.
-    ///
-    /// This allows callers to know the output schema before execution,
-    /// useful for clients that need to describe result sets upfront.
-    pub fn output_schema(&self) -> SchemaRef {
-        match self {
-            BundleCommand::Fetch(_) | BundleCommand::FetchAll(_) => fetch_schema(),
-            BundleCommand::VerifyData(_) => verification_schema(),
-            BundleCommand::ExplainPlan(_) => plan_schema(),
-            // All other commands return a simple message
-            _ => message_schema(),
-        }
+    fetch_special {
+        // These commands share Rule::fetch_stmt - handled in parser.rs
+        Fetch(FetchCommand),
+        FetchAll(FetchAllCommand),
+    }
+    verification {
+        VerifyData(VerifyDataCommand) => Rule::verify_data_stmt,
+    }
+    custom {
+        Commit(CommitCommand) => Rule::commit_stmt,
+        Select(SelectCommand) => Rule::select_stmt,
+        ExplainPlan(ExplainPlanCommand) => Rule::explain_stmt,
     }
 }
 

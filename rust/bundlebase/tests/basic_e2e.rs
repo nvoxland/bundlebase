@@ -40,7 +40,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
         .expect("init commit doesn't exist");
     assert_eq!(
         init_content.trim(),
-        format!("id: {}", bundle.bundle.id()).trim()
+        format!("id: {}", bundle.bundle().id()).trim()
     );
 
     // Find and read the versioned manifest file
@@ -416,20 +416,20 @@ async fn test_name_and_description() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Default should be None
-    assert!(bundle.bundle.name().is_none());
-    assert!(bundle.bundle.description().is_none());
+    assert!(bundle.bundle().name().is_none());
+    assert!(bundle.bundle().description().is_none());
 
     // Set name and verify getter
     bundle.set_name("My Bundle").await?;
     bundle.set_description("My Bundle Desc").await?;
 
-    assert_eq!(bundle.bundle.name(), Some("My Bundle"));
-    assert_eq!(bundle.bundle.description(), Some("My Bundle Desc"));
+    assert_eq!(bundle.bundle().name(), Some("My Bundle"));
+    assert_eq!(bundle.bundle().description(), Some("My Bundle Desc"));
 
     bundle.commit("Commit changes").await?;
 
-    assert_eq!(bundle.bundle.name(), Some("My Bundle"));
-    assert_eq!(bundle.bundle.description(), Some("My Bundle Desc"));
+    assert_eq!(bundle.bundle().name(), Some("My Bundle"));
+    assert_eq!(bundle.bundle().description(), Some("My Bundle Desc"));
 
     // Open and verify
     let loaded = Bundle::open(data_dir.as_str(), None).await?;
