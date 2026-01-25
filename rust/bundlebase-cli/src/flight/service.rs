@@ -9,12 +9,13 @@ use crate::state::BundleState;
 use arrow::datatypes::{Schema, SchemaRef};
 use arrow_flight::flight_service_server::FlightService;
 use arrow_flight::sql::server::FlightSqlService;
+use arrow_flight::sql::server::PeekableFlightDataStream;
 use arrow_flight::sql::{
     ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest,
     ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas,
     CommandGetPrimaryKeys, CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables,
-    CommandPreparedStatementQuery, CommandStatementQuery, ProstMessageExt, SqlInfo,
-    TicketStatementQuery,
+    CommandPreparedStatementQuery, CommandPreparedStatementUpdate, CommandStatementQuery,
+    ProstMessageExt, SqlInfo, TicketStatementQuery,
 };
 use arrow_flight::{
     FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, Ticket,
@@ -254,6 +255,41 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         info!("Executing prepared statement: {} -> {}", handle, sql);
 
         execute_query_streaming(&self.state, sql).await
+    }
+
+    /// Execute a prepared statement update (DML).
+    /// Bundlebase is read-only, so this returns 0 affected rows for SELECT
+    /// and errors for actual DML statements.
+    async fn do_put_prepared_statement_update(
+        &self,
+        cmd: CommandPreparedStatementUpdate,
+        _request: Request<PeekableFlightDataStream>,
+    ) -> Result<i64, Status> {
+        let handle = String::from_utf8(cmd.prepared_statement_handle.to_vec())
+            .map_err(|_| Status::invalid_argument("Invalid prepared statement handle"))?;
+
+        let sql = {
+            let stmts = self.prepared_statements.read();
+            stmts
+                .get(&handle)
+                .ok_or_else(|| Status::not_found("Prepared statement not found"))?
+                .sql
+                .clone()
+        };
+
+        // Check if this is actually a SELECT query (read-only)
+        let trimmed = sql.trim().to_uppercase();
+        if trimmed.starts_with("SELECT") || trimmed.starts_with("WITH") {
+            // For SELECT statements, return 0 rows affected
+            // The client should use do_get_prepared_statement instead
+            info!("Prepared statement update called for SELECT: {}", handle);
+            Ok(0)
+        } else {
+            // Actual DML is not supported
+            Err(Status::unimplemented(
+                "Bundlebase is read-only; INSERT/UPDATE/DELETE are not supported",
+            ))
+        }
     }
 
     /// Handle direct SQL statement queries (non-prepared).

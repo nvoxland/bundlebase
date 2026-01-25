@@ -132,7 +132,6 @@ pub fn all_statement_keywords() -> &'static [&'static str] {
         "SET",
         "VERIFY",
         "EXPLAIN",
-        "SELECT", // SELECT is also handled by bundlebase for views
     ]
 }
 
@@ -218,7 +217,8 @@ mod tests {
         assert!(is_command_statement("FILTER WHERE x = 1"));
         assert!(is_command_statement("ATTACH 'file.csv'"));
         assert!(is_command_statement("COMMIT 'message'"));
-        assert!(is_command_statement("SELECT * FROM bundle"));
+        // SELECT is standard SQL, not a bundlebase command
+        assert!(!is_command_statement("SELECT * FROM bundle"));
         // Standard SQL that doesn't start with our keywords
         assert!(!is_command_statement("INSERT INTO table VALUES (1)"));
         assert!(!is_command_statement("UPDATE table SET x = 1"));
