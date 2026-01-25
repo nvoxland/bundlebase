@@ -142,6 +142,14 @@ async fn execute_standard_sql(
 pub fn get_command_schema(sql: &str) -> Option<SchemaRef> {
     let sql = sql.trim();
 
+    // SELECT statements don't have a known schema at parse time -
+    // they need to be planned to determine the result schema.
+    // This matches the behavior in execute_sql() which routes SELECT
+    // statements to standard SQL execution.
+    if sql.to_uppercase().starts_with("SELECT ") {
+        return None;
+    }
+
     if !is_command_statement(sql) {
         return None;
     }
@@ -188,6 +196,21 @@ mod tests {
     fn test_get_command_schema_standard_sql() {
         // Standard SQL that doesn't start with a bundlebase keyword
         let schema = get_command_schema("INSERT INTO table VALUES (1)");
+        assert!(schema.is_none());
+    }
+
+    #[test]
+    fn test_get_command_schema_select_returns_none() {
+        // SELECT statements should return None so Flight SQL will plan the query
+        // to determine the actual result schema, rather than using the bundlebase
+        // SELECT command schema which just returns ["message"].
+        let schema = get_command_schema("SELECT * FROM bundle");
+        assert!(schema.is_none());
+
+        let schema = get_command_schema("select col1, col2 from bundle");
+        assert!(schema.is_none());
+
+        let schema = get_command_schema("  SELECT * FROM bundle WHERE x > 1  ");
         assert!(schema.is_none());
     }
 }

@@ -290,9 +290,12 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         // Get schema by planning the query
         let schema = self.get_query_schema(&sql).await?;
 
-        // Create a ticket that contains the statement query command
+        // Create a TicketStatementQuery with SQL in statement_handle
+        let ticket_stmt = TicketStatementQuery {
+            statement_handle: sql.into_bytes().into(),
+        };
         let ticket = Ticket {
-            ticket: cmd.as_any().encode_to_vec().into(),
+            ticket: ticket_stmt.as_any().encode_to_vec().into(),
         };
 
         let endpoint = FlightEndpoint {
@@ -314,15 +317,16 @@ impl FlightSqlService for BundlebaseFlightSqlService {
     /// Execute a direct SQL statement query.
     async fn do_get_statement(
         &self,
-        _ticket: TicketStatementQuery,
+        ticket: TicketStatementQuery,
         _request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
-        // TicketStatementQuery contains a statement_handle that points to the query
-        // For simple implementations, we can decode the original CommandStatementQuery
-        // But typically we'd need to store it. For now, return unimplemented.
-        Err(Status::unimplemented(
-            "do_get_statement not yet implemented - use prepared statements",
-        ))
+        // Decode SQL from statement_handle (we stored the SQL bytes directly)
+        let sql = String::from_utf8(ticket.statement_handle.to_vec())
+            .map_err(|_| Status::invalid_argument("Invalid statement handle encoding"))?;
+
+        info!("Executing direct statement: {}", sql);
+
+        execute_query_streaming(&self.state, sql).await
     }
 
     /// Fallback handler for unknown ticket types (backward compatibility).

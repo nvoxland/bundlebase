@@ -41,7 +41,7 @@ impl TestData {
     }
 }
 
-/// Execute a SQL query via Flight SQL and collect the results.
+/// Execute a SQL query via Flight SQL prepared statement and collect the results.
 async fn execute_query(
     server: &mut FlightTestServer,
     sql: &str,
@@ -85,6 +85,39 @@ async fn execute_query(
         .await
         .map_err(|e| format!("Failed to close statement: {}", e))?;
 
+    Ok(batches)
+}
+
+/// Execute a SQL query via direct statement (not prepared statement).
+async fn execute_query_direct(
+    server: &mut FlightTestServer,
+    sql: &str,
+) -> Result<Vec<RecordBatch>, String> {
+    // Use direct statement workflow (CommandStatementQuery -> TicketStatementQuery)
+    let flight_info = server
+        .client_mut()
+        .execute(sql.to_string(), None)
+        .await
+        .map_err(|e| format!("Failed to execute statement: {}", e))?;
+
+    // Fetch results from endpoints
+    let mut batches = Vec::new();
+    for endpoint in flight_info.endpoint {
+        if let Some(ticket) = endpoint.ticket {
+            let batch_stream = server
+                .client_mut()
+                .do_get(ticket)
+                .await
+                .map_err(|e| format!("Failed to do_get: {}", e))?;
+
+            let endpoint_batches: Vec<RecordBatch> = batch_stream
+                .try_collect()
+                .await
+                .map_err(|e| format!("Failed to collect batches: {}", e))?;
+
+            batches.extend(endpoint_batches);
+        }
+    }
     Ok(batches)
 }
 
@@ -278,4 +311,75 @@ async fn test_state_persistence_in_connection() {
 
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total_rows, 1, "Should have 1 row after filter (Alice only)");
+}
+
+// =============================================================================
+// Direct Statement Tests (non-prepared statement path)
+// =============================================================================
+
+#[tokio::test]
+async fn test_direct_select_literal() {
+    let mut server = FlightTestServer::start().await;
+    let batches = execute_query_direct(&mut server, "SELECT 1 as num")
+        .await
+        .expect("Direct SELECT 1 should succeed");
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert!(total_rows >= 1, "Should return at least one row");
+}
+
+#[tokio::test]
+async fn test_direct_select_after_attach() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+
+    // ATTACH via direct statement
+    execute_query_direct(&mut server, &data.attach_sql)
+        .await
+        .expect("Direct ATTACH should succeed");
+
+    // SELECT via direct statement
+    let batches = execute_query_direct(&mut server, "SELECT * FROM bundle")
+        .await
+        .expect("Direct SELECT should succeed after ATTACH");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 2, "Should have 2 rows (Alice and Bob)");
+
+    // Verify actual columns exist (not just "message")
+    assert!(!batches.is_empty(), "Should have at least one batch");
+    let schema = batches[0].schema();
+    let column_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+    assert!(column_names.contains(&"id"), "Should have 'id' column");
+    assert!(column_names.contains(&"name"), "Should have 'name' column");
+}
+
+#[tokio::test]
+async fn test_direct_attach_command() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+
+    let result = execute_query_direct(&mut server, &data.attach_sql).await;
+    assert!(result.is_ok(), "Direct ATTACH should succeed");
+}
+
+#[tokio::test]
+async fn test_direct_filter_and_select() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::with_content("id,name\n1,Alice\n2,Bob\n3,Carol\n");
+
+    // ATTACH, FILTER, SELECT all via direct statements
+    execute_query_direct(&mut server, &data.attach_sql)
+        .await
+        .expect("Direct ATTACH should succeed");
+
+    execute_query_direct(&mut server, "FILTER WHERE id > 1")
+        .await
+        .expect("Direct FILTER should succeed");
+
+    let batches = execute_query_direct(&mut server, "SELECT * FROM bundle")
+        .await
+        .expect("Direct SELECT should succeed");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 2, "Should have 2 rows after filter");
 }
