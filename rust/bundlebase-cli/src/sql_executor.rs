@@ -47,14 +47,7 @@ pub enum SqlResult {
 pub async fn execute_sql(state: &Arc<BundleState>, sql: &str) -> Result<SqlResult, BundlebaseError> {
     let sql = sql.trim();
 
-    // SELECT statements should go through standard SQL execution to return actual data.
-    // The bundlebase SELECT command just modifies builder state and returns "OK",
-    // which is not what Flight SQL clients expect.
-    if sql.to_uppercase().starts_with("SELECT ") {
-        return execute_standard_sql(state, sql).await;
-    }
-
-    // Check if this is a bundlebase command
+    // Check if this is a bundlebase command (ATTACH, FILTER, etc. - but NOT SELECT)
     if is_command_statement(sql) {
         // Try to parse as a bundlebase command
         match parse_command(sql) {
@@ -79,7 +72,7 @@ pub async fn execute_sql(state: &Arc<BundleState>, sql: &str) -> Result<SqlResul
             }
             Err(e) => {
                 // If parsing fails, it might be standard SQL that happens to start
-                // with one of our keywords (e.g., a complex SELECT). Try as standard SQL.
+                // with one of our keywords. Try as standard SQL.
                 let err_msg = e.to_string();
                 if err_msg.contains("Syntax error") {
                     // Could be standard SQL, try executing directly
@@ -90,7 +83,7 @@ pub async fn execute_sql(state: &Arc<BundleState>, sql: &str) -> Result<SqlResul
             }
         }
     } else {
-        // Standard SQL - execute directly via DataFusion
+        // Standard SQL (including SELECT) - execute directly via DataFusion
         execute_standard_sql(state, sql).await
     }
 }
@@ -142,14 +135,8 @@ async fn execute_standard_sql(
 pub fn get_command_schema(sql: &str) -> Option<SchemaRef> {
     let sql = sql.trim();
 
-    // SELECT statements don't have a known schema at parse time -
-    // they need to be planned to determine the result schema.
-    // This matches the behavior in execute_sql() which routes SELECT
-    // statements to standard SQL execution.
-    if sql.to_uppercase().starts_with("SELECT ") {
-        return None;
-    }
-
+    // Only bundlebase commands have known schemas at parse time.
+    // Standard SQL (including SELECT) needs to be planned to determine the schema.
     if !is_command_statement(sql) {
         return None;
     }

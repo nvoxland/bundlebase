@@ -2,14 +2,6 @@
 //!
 //! This module provides an Arrow Flight SQL service that allows JDBC clients
 //! to connect and execute SQL queries against bundlebase bundles.
-//!
-//! ## Submodules
-//!
-//! - [`execution`] - Query execution and streaming
-//! - [`metadata`] - Catalog, schema, table metadata handlers
-//! - [`prepared_statements`] - Prepared statement management
-//! - [`server`] - Server startup
-//! - [`service`] - Core Flight SQL service implementation
 
 mod execution;
 mod metadata;
