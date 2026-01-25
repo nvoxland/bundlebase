@@ -1,9 +1,14 @@
+//! Interactive REPL (Read-Eval-Print-Loop) for bundlebase.
+//!
+//! This module provides an interactive command-line interface for working with
+//! bundlebase bundles. It supports SQL commands and REPL-specific meta commands.
+
 mod commands;
 mod completion;
-mod display;
+pub mod display;
 mod progress_impl;
 
-use crate::state::State;
+use crate::state::BundleState;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::BundlebaseError;
 use commands::{Command, ExecuteResult};
@@ -15,13 +20,27 @@ use reedline::{
 use std::sync::Arc;
 use tracing::{error, info};
 
+/// Print the REPL header.
 pub fn print_header() {
     info!("Bundlebase REPL");
     info!("Type '/help' for available commands, '/exit' to quit");
     info!("----------------------------------------------------------");
 }
 
-pub async fn run(state: Arc<State>) -> Result<(), BundlebaseError> {
+/// Start the interactive REPL.
+///
+/// This is the main entry point for the REPL mode. It sets up the readline
+/// interface with history and completion, then enters the read-eval-print loop.
+///
+/// # Arguments
+///
+/// * `state` - The shared bundle state to work with
+///
+/// # Returns
+///
+/// * `Ok(())` - REPL exited normally
+/// * `Err(BundlebaseError)` - An error occurred
+pub async fn start(state: Arc<BundleState>) -> Result<(), BundlebaseError> {
     // Install progress tracker for REPL
     let tracker = Box::new(progress_impl::IndicatifTracker::new());
     bundlebase::progress::set_tracker(tracker);
@@ -92,4 +111,12 @@ pub async fn run(state: Arc<State>) -> Result<(), BundlebaseError> {
     }
 
     Ok(())
+}
+
+/// Run the interactive REPL.
+///
+/// This is an alias for `start()` for backwards compatibility.
+#[deprecated(since = "0.4.0", note = "Use start() instead")]
+pub async fn run(state: Arc<BundleState>) -> Result<(), BundlebaseError> {
+    start(state).await
 }

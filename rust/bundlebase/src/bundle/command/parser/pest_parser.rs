@@ -84,3 +84,171 @@ pub fn escape_string(s: &str) -> String {
         .replace('\t', "\\t");
     format!("'{}'", escaped)
 }
+
+/// Check if a SQL string appears to be a bundlebase command statement.
+///
+/// Returns true if the SQL starts with a bundlebase command keyword,
+/// false if it appears to be standard SQL that should be passed to DataFusion.
+///
+/// This function does a quick keyword check without full parsing.
+pub fn is_command_statement(sql: &str) -> bool {
+    let first_keyword = first_keyword(sql);
+    all_statement_keywords().contains(&first_keyword.as_str())
+}
+
+/// Extract the first keyword from a SQL string.
+pub fn first_keyword(sql: &str) -> String {
+    sql.trim()
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_uppercase()
+}
+
+/// Returns all statement keywords that indicate a bundlebase command.
+///
+/// Returns a static slice to avoid allocation on every call.
+pub fn all_statement_keywords() -> &'static [&'static str] {
+    &[
+        "FILTER",
+        "ATTACH",
+        "DETACH",
+        "REPLACE",
+        "JOIN",
+        "LEFT",
+        "RIGHT",
+        "FULL",
+        "INNER",
+        "OUTER",
+        "DROP",
+        "RENAME",
+        "CREATE",
+        "FETCH",
+        "REINDEX",
+        "REBUILD",
+        "COMMIT",
+        "RESET",
+        "UNDO",
+        "SET",
+        "VERIFY",
+        "EXPLAIN",
+        "SELECT", // SELECT is also handled by bundlebase for views
+    ]
+}
+
+/// Returns a map of command keywords to their syntax descriptions.
+pub fn syntax_map() -> std::collections::HashMap<&'static str, &'static str> {
+    let mut map = std::collections::HashMap::new();
+    map.insert("FILTER", "FILTER WHERE <condition>");
+    map.insert("ATTACH", "ATTACH '<path>' [TO <pack>] [WITH (<options>)]");
+    map.insert("DETACH", "DETACH '<location>'");
+    map.insert("REPLACE", "REPLACE '<old_location>' WITH '<new_location>'");
+    map.insert("JOIN", "[LEFT|RIGHT|FULL|INNER] JOIN '<path>' AS <name> ON <expression>");
+    map.insert("DROP COLUMN", "DROP COLUMN <name>");
+    map.insert("DROP INDEX", "DROP INDEX <column>");
+    map.insert("DROP VIEW", "DROP VIEW <name>");
+    map.insert("DROP JOIN", "DROP JOIN <name>");
+    map.insert("RENAME COLUMN", "RENAME COLUMN <old> TO <new>");
+    map.insert("RENAME VIEW", "RENAME VIEW <old> TO <new>");
+    map.insert("RENAME JOIN", "RENAME JOIN <old> TO <new>");
+    map.insert("CREATE SOURCE", "CREATE SOURCE <function> WITH (<args>) [ON <pack>]");
+    map.insert("CREATE INDEX", "CREATE INDEX ON <column>");
+    map.insert("CREATE VIEW", "CREATE VIEW <name> AS <sql>");
+    map.insert("FETCH", "FETCH [<pack>] | FETCH ALL");
+    map.insert("REINDEX", "REINDEX [ON data(<column>)]");
+    map.insert("REBUILD INDEX", "REBUILD INDEX ON <column>");
+    map.insert("COMMIT", "COMMIT '<message>'");
+    map.insert("RESET", "RESET");
+    map.insert("UNDO", "UNDO");
+    map.insert("SET CONFIG", "SET CONFIG <key> = '<value>' [FOR '<url_prefix>']");
+    map.insert("SET NAME", "SET NAME '<name>'");
+    map.insert("SET DESCRIPTION", "SET DESCRIPTION '<description>'");
+    map.insert("VERIFY DATA", "VERIFY DATA [UPDATE]");
+    map.insert("EXPLAIN PLAN", "EXPLAIN PLAN");
+    map.insert("SELECT", "SELECT <columns> FROM bundle [WHERE <condition>]");
+    map
+}
+
+/// Returns all syntax descriptions for available commands.
+pub fn all_statement_syntaxes() -> Vec<&'static str> {
+    syntax_map().values().copied().collect()
+}
+
+/// Convert a Rule to its syntax description if available.
+pub fn rule_to_syntax(rule: Rule) -> Option<&'static str> {
+    let map = syntax_map();
+    match rule {
+        Rule::filter_stmt => map.get("FILTER").copied(),
+        Rule::attach_stmt => map.get("ATTACH").copied(),
+        Rule::detach_stmt => map.get("DETACH").copied(),
+        Rule::replace_stmt => map.get("REPLACE").copied(),
+        Rule::join_stmt => map.get("JOIN").copied(),
+        Rule::drop_column_stmt => map.get("DROP COLUMN").copied(),
+        Rule::drop_index_stmt => map.get("DROP INDEX").copied(),
+        Rule::drop_view_stmt => map.get("DROP VIEW").copied(),
+        Rule::drop_join_stmt => map.get("DROP JOIN").copied(),
+        Rule::rename_column_stmt => map.get("RENAME COLUMN").copied(),
+        Rule::rename_view_stmt => map.get("RENAME VIEW").copied(),
+        Rule::rename_join_stmt => map.get("RENAME JOIN").copied(),
+        Rule::create_source_stmt => map.get("CREATE SOURCE").copied(),
+        Rule::create_index_stmt => map.get("CREATE INDEX").copied(),
+        Rule::create_view_stmt => map.get("CREATE VIEW").copied(),
+        Rule::fetch_stmt => map.get("FETCH").copied(),
+        Rule::reindex_stmt => map.get("REINDEX").copied(),
+        Rule::rebuild_index_stmt => map.get("REBUILD INDEX").copied(),
+        Rule::commit_stmt => map.get("COMMIT").copied(),
+        Rule::reset_stmt => map.get("RESET").copied(),
+        Rule::undo_stmt => map.get("UNDO").copied(),
+        Rule::set_config_stmt => map.get("SET CONFIG").copied(),
+        Rule::set_name_stmt => map.get("SET NAME").copied(),
+        Rule::set_description_stmt => map.get("SET DESCRIPTION").copied(),
+        Rule::verify_data_stmt => map.get("VERIFY DATA").copied(),
+        Rule::explain_stmt => map.get("EXPLAIN PLAN").copied(),
+        Rule::select_stmt => map.get("SELECT").copied(),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_command_statement() {
+        assert!(is_command_statement("FILTER WHERE x = 1"));
+        assert!(is_command_statement("ATTACH 'file.csv'"));
+        assert!(is_command_statement("COMMIT 'message'"));
+        assert!(is_command_statement("SELECT * FROM bundle"));
+        // Standard SQL that doesn't start with our keywords
+        assert!(!is_command_statement("INSERT INTO table VALUES (1)"));
+        assert!(!is_command_statement("UPDATE table SET x = 1"));
+        assert!(!is_command_statement("DELETE FROM table"));
+    }
+
+    #[test]
+    fn test_first_keyword() {
+        assert_eq!(first_keyword("FILTER WHERE x = 1"), "FILTER");
+        assert_eq!(first_keyword("  attach 'file.csv'"), "ATTACH");
+        assert_eq!(first_keyword(""), "");
+    }
+
+    #[test]
+    fn test_syntax_map_has_entries() {
+        let map = syntax_map();
+        assert!(map.len() > 20);
+        assert!(map.contains_key("FILTER"));
+        assert!(map.contains_key("ATTACH"));
+    }
+
+    #[test]
+    fn test_rule_to_syntax() {
+        assert_eq!(
+            rule_to_syntax(Rule::filter_stmt),
+            Some("FILTER WHERE <condition>")
+        );
+        assert_eq!(
+            rule_to_syntax(Rule::attach_stmt),
+            Some("ATTACH '<path>' [TO <pack>] [WITH (<options>)]")
+        );
+    }
+}

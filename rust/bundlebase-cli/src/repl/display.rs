@@ -1,6 +1,7 @@
 use arrow_schema::SchemaRef;
 use bundlebase::{bundle::BundleCommit, BundlebaseError};
 use comfy_table::{presets::UTF8_FULL, Cell, Color, ContentArrangement, Table};
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion::prelude::DataFrame;
 use futures::StreamExt;
 use std::sync::Arc;
@@ -10,13 +11,20 @@ pub async fn display_dataframe(
     df: &Arc<DataFrame>,
     limit: Option<usize>,
 ) -> Result<String, BundlebaseError> {
+    let stream = df.as_ref().clone().execute_stream().await?;
+    display_stream(stream, limit).await
+}
+
+/// Display a SendableRecordBatchStream as a formatted table
+pub async fn display_stream(
+    stream: SendableRecordBatchStream,
+    limit: Option<usize>,
+) -> Result<String, BundlebaseError> {
     let limit = limit.unwrap_or(10);
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
     table.set_content_arrangement(ContentArrangement::Dynamic);
 
-    let stream: datafusion::execution::SendableRecordBatchStream =
-        df.as_ref().clone().execute_stream().await?;
     let mut row_count = 0;
 
     futures::pin_mut!(stream);

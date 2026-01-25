@@ -1,45 +1,72 @@
+//! Bundlebase CLI - command-line interface for bundlebase.
+//!
+//! This binary provides two modes of operation:
+//! - REPL: Interactive command-line interface
+//! - Flight: Arrow Flight server for SQL queries
+
+mod auth;
+mod flight;
 mod repl;
-mod service;
+mod sql_executor;
 mod state;
 
-use crate::service::BundlebaseFlightService;
-use crate::state::State;
-use arrow_flight::flight_service_server::FlightServiceServer;
+use crate::state::BundleState;
 use bundlebase::{Bundle, BundleBuilder, BundlebaseError};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::sync::Arc;
-use tonic::transport::Server;
 use tracing::info;
 use tracing_log::LogTracer;
 
+/// Mode of operation for the CLI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Mode {
+    /// Interactive REPL mode
+    Repl,
+    /// Arrow Flight server mode
+    Flight,
+}
+
+impl std::fmt::Display for Mode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Mode::Repl => write!(f, "repl"),
+            Mode::Flight => write!(f, "flight"),
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "bundlebase-cli")]
-#[command(about = "Bundlebase Server", long_about = None)]
+#[command(about = "Bundlebase CLI - Interactive REPL and Arrow Flight Server", long_about = None)]
 struct Args {
     /// Path to bundle to load
     #[arg(long)]
     bundle: String,
 
-    /// Start interactive REPL mode
-    #[arg(long)]
-    repl: bool,
+    /// Mode of operation (repl or flight)
+    #[arg(long, value_enum, default_value = "repl")]
+    mode: Mode,
 
     /// Create a new bundle if it doesn't exist or is empty
     #[arg(long)]
     create: bool,
 
-    /// Host address to bind to
+    /// Host address to bind to (Flight mode only)
     #[arg(long, default_value = "0.0.0.0")]
     host: String,
 
-    /// Port to listen on
-    #[arg(long, default_value = "50051")]
-    port: u16,
+    /// Port to listen on (default: 50051 for Flight)
+    #[arg(long)]
+    port: Option<u16>,
 
     /// Logging level (ui, trace, debug, info, warn, error)
     /// ui: Minimal format (message only), INFO level - good for interactive use
     #[arg(long, default_value = "ui")]
     log_level: String,
+
+    /// OpenTelemetry endpoint for tracing (e.g., "http://localhost:4317")
+    #[arg(long)]
+    otel: Option<String>,
 }
 
 /// Configuration for logging
@@ -86,49 +113,41 @@ fn parse_log_level(level_str: &str) -> Result<LogConfig, String> {
 async fn main() -> Result<(), BundlebaseError> {
     let args = Args::parse();
 
-    int_logging(&args);
+    init_logging(&args);
 
-    if args.repl {
+    if args.mode == Mode::Repl {
         repl::print_header();
     }
 
-    let bundle = if args.create {
+    let state = if args.create {
         info!("Creating bundle at: {}", args.bundle);
-        Arc::new(State::new(BundleBuilder::create(&args.bundle, None).await?))
+        Arc::new(BundleState::new(BundleBuilder::create(&args.bundle, None).await?))
     } else {
         info!("Loading bundle from: {}", args.bundle);
-        Arc::new(State::new(
+        Arc::new(BundleState::new(
             Bundle::open(&args.bundle, None)
                 .await?
                 .extend(None)?,
         ))
     };
 
-    if args.repl {
-        // REPL mode
-        repl::run(bundle).await?;
-    } else {
-        // Flight server mode
-        let addr = format!("{}:{}", args.host, args.port).parse()?;
-
-        info!("Starting Arrow Flight SQL server on {}", addr);
-
-        // Create Flight SQL service
-        let flight_service = BundlebaseFlightService::new(bundle);
-
-        // Start server
-        let server = Server::builder()
-            .add_service(FlightServiceServer::new(flight_service))
-            .serve(addr);
-
-        info!("Server listening on {}", addr);
-        server.await?;
+    match args.mode {
+        Mode::Repl => {
+            repl::start(state).await?;
+        }
+        Mode::Flight => {
+            let port = args.port.unwrap_or(50051);
+            let addr = format!("{}:{}", args.host, port)
+                .parse()
+                .map_err(|e| BundlebaseError::from(format!("Invalid address: {}", e)))?;
+            flight::start(state, addr).await?;
+        }
     }
 
     Ok(())
 }
 
-fn int_logging(args: &Args) {
+fn init_logging(args: &Args) {
     // Parse log level from CLI argument
     let log_config = parse_log_level(&args.log_level).unwrap_or_else(|e| {
         eprintln!("Invalid log level '{}': {}", args.log_level, e);
@@ -173,7 +192,7 @@ mod tests {
         let result = BundleBuilder::create("memory:///test_bundle", None).await;
         assert!(result.is_ok(), "Failed to create bundle with memory:// URL");
 
-        let builder = result.unwrap();
+        let builder = result.expect("Should succeed");
         assert!(builder.bundle().url().to_string().starts_with("memory://"));
     }
 
@@ -184,7 +203,7 @@ mod tests {
             "memory:///reopen_test_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .expect("System time before UNIX epoch")
                 .as_nanos()
         );
 
@@ -192,7 +211,7 @@ mod tests {
         let create_result = BundleBuilder::create(&url, None).await;
         assert!(create_result.is_ok(), "Failed to create bundle");
 
-        let mut builder = create_result.unwrap();
+        let mut builder = create_result.expect("Should succeed");
 
         // Commit it so it's persisted
         builder
@@ -204,7 +223,7 @@ mod tests {
         let open_result = Bundle::open(&url, None).await;
         assert!(open_result.is_ok(), "Failed to reopen bundle after commit");
 
-        let bundle = open_result.unwrap();
+        let bundle = open_result.expect("Should succeed");
         assert_eq!(bundle.url().to_string(), url);
     }
 
@@ -217,7 +236,7 @@ mod tests {
             let result = BundleBuilder::create(&url, None).await;
             assert!(result.is_ok(), "Failed to create bundle at {}", url);
 
-            let builder = result.unwrap();
+            let builder = result.expect("Should succeed");
             assert_eq!(builder.bundle().url().to_string(), url);
         }
     }
@@ -240,7 +259,7 @@ mod tests {
         let result = BundleBuilder::create("file:///tmp/bundle_test", None).await;
         assert!(result.is_ok(), "Failed to create bundle with file:// URL");
 
-        let builder = result.unwrap();
+        let builder = result.expect("Should succeed");
         assert!(builder.bundle().url().to_string().starts_with("file://"));
     }
 
@@ -250,7 +269,7 @@ mod tests {
         let result = BundleBuilder::create("memory:///filesystem_compat_test", None).await;
         assert!(result.is_ok());
 
-        let builder = result.unwrap();
+        let builder = result.expect("Should succeed");
         // Should have converted to a proper URL internally
         assert!(!builder.bundle().url().to_string().is_empty());
     }
@@ -268,7 +287,7 @@ mod tests {
             let result = BundleBuilder::create(url, None).await;
             if should_succeed {
                 assert!(result.is_ok(), "Failed to create bundle with URL: {}", url);
-                let builder = result.unwrap();
+                let builder = result.expect("Should succeed");
                 assert_eq!(builder.bundle().url().to_string(), url);
             } else {
                 assert!(result.is_err(), "Expected failure for URL: {}", url);

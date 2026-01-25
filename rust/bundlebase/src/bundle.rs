@@ -14,7 +14,7 @@ mod sql;
 use crate::io::EMPTY_SCHEME;
 pub use builder::{BundleBuilder, BundleStatus};
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
-pub use command::parser::parse_command;
+pub use command::parser::{is_command_statement, parse_command};
 pub use command::BundleCommand;
 pub use command::CommandOutput;
 pub use command::{CommitCommand, ResetCommand, UndoCommand};

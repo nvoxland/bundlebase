@@ -19,8 +19,8 @@ use async_trait::async_trait;
 use chrono::DateTime;
 use datafusion::prelude::DataFrame;
 use datafusion::scalar::ScalarValue;
-use log::{debug, info};
 use sha2::{Digest, Sha256};
+use tracing::{debug, info};
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
@@ -472,7 +472,7 @@ impl BundleBuilder {
         // Check for nested changes
         let is_nested = match &self.in_progress_change {
             Some(in_progress) => {
-                log::debug!(
+                debug!(
                     "Change {} already in progress, not going to separately track {}",
                     in_progress.description, description
                 );
