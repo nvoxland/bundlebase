@@ -1,4 +1,4 @@
-use crate::state::State;
+use crate::state::BundleState;
 use bundlebase::{
     bundle::{parse_command, BundleCommand, BundleFacade, CommandOutput},
     source::format_fetch_summary,
@@ -109,7 +109,7 @@ fn suggest_meta_command(input: &str) -> Option<String> {
 }
 
 /// Execute a command
-pub async fn execute(cmd: Command, state: &Arc<State>) -> Result<ExecuteResult, BundlebaseError> {
+pub async fn execute(cmd: Command, state: &Arc<BundleState>) -> Result<ExecuteResult, BundlebaseError> {
     use crate::repl::display;
 
     match cmd {
@@ -117,14 +117,14 @@ pub async fn execute(cmd: Command, state: &Arc<State>) -> Result<ExecuteResult, 
         Command::Sql(sql_cmd) => {
             let output = sql_cmd.execute(&mut state.bundle.write()).await?;
             match output {
-                CommandOutput::Empty => Ok(ExecuteResult::None),
+                CommandOutput::Message(_) => Ok(ExecuteResult::None),
                 CommandOutput::Verification(results) => {
                     Ok(ExecuteResult::Message(results.to_string()))
                 }
                 CommandOutput::Fetch(results) => {
                     Ok(ExecuteResult::Message(format_fetch_summary(&results)))
                 }
-                CommandOutput::ExplainPlan(plan) => Ok(ExecuteResult::Message(plan)),
+                CommandOutput::Plan(plan) => Ok(ExecuteResult::Message(plan)),
             }
         }
 

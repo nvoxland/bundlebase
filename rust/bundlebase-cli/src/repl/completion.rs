@@ -1,16 +1,16 @@
 use crate::repl::commands;
-use crate::state::State;
+use crate::state::BundleState;
 use bundlebase::bundle::BundleFacade;
 use reedline::{Completer, Span, Suggestion};
 use std::sync::Arc;
 
 pub struct BundleCompleter {
-    state: Arc<State>,
+    state: Arc<BundleState>,
     commands: Vec<String>,
 }
 
 impl BundleCompleter {
-    pub fn new(state: Arc<State>) -> Self {
+    pub fn new(state: Arc<BundleState>) -> Self {
         let commands = vec![
             // SQL commands (no prefix)
             "attach".to_string(),

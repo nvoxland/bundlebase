@@ -17,7 +17,7 @@ authors = ["Nathan Voxland <nathan@voxland.net>"]
 [workspace.dependencies]
 datafusion = { version = "52", features = ["avro"] }
 arrow = { version = "57", features = ["ffi", "pyarrow"] }
-arrow-flight = "57"
+arrow-flight = { version = "57", features = ["flight-sql-experimental"] }
 arrow-schema = { version = "57", features = ["serde"] }
 sqlparser = "0.60"
 pest = "2.8"
@@ -28,6 +28,13 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml_ng = "0.10"
 tar = "0.4"
 rstest = "0.26"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tracing-opentelemetry = "0.29"
+opentelemetry = "0.28"
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic", "logs"] }
+opentelemetry-appender-tracing = "0.28"
 
 [profile.dev]
 opt-level = 0

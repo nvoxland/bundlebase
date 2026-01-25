@@ -70,11 +70,23 @@ use crate::bundle::VerificationResults;
 use crate::bundle::facade::BundleFacade;
 use crate::source::FetchResults;
 use crate::{BundleBuilder, BundlebaseError};
+use arrow::datatypes::SchemaRef;
+use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 
 pub mod parser;
 pub mod builder;
 pub mod facade;
+pub mod response;
+
+// Re-export response types
+pub use response::{
+    CommandResponse, FetchRow, MessageResponse, PlanRow, VerificationRow,
+    fetch_results_to_rows, fetch_schema, fetch_to_record_batch,
+    message_schema, message_to_record_batch,
+    plan_schema, plan_to_record_batch,
+    verification_results_to_rows, verification_schema, verification_to_record_batch,
+};
 
 // Re-export Rule from parser for use by commands
 pub use parser::Rule;
@@ -93,24 +105,31 @@ pub use facade::{ExplainPlanCommand, SelectCommand};
 
 /// Output from executing a BundleCommand.
 ///
-/// Most commands return Empty, but some commands return specific results
-/// that may be useful to callers.
+/// Most commands return Message (simple "OK"), but some commands return specific results
+/// that may be useful to callers. All output types can describe their Arrow schema
+/// and convert to RecordBatch for consistent handling across interfaces.
 #[derive(Debug)]
 pub enum CommandOutput {
-    /// Command completed with no specific output
-    Empty,
+    /// Simple message output (typically "OK" for commands that complete successfully)
+    Message(MessageResponse),
     /// Verification results from VERIFY DATA
     Verification(VerificationResults),
     /// Fetch results from FETCH / FETCH ALL
     Fetch(Vec<FetchResults>),
     /// Query execution plan from EXPLAIN
-    ExplainPlan(String),
+    Plan(String),
 }
 
 impl CommandOutput {
-    /// Returns true if this is a Empty output
+    /// Returns true if this is a Message output
+    pub fn is_message(&self) -> bool {
+        matches!(self, CommandOutput::Message(_))
+    }
+
+    /// Returns true if this is a Message output (alias for backwards compatibility)
+    #[deprecated(since = "0.4.0", note = "Use is_message() instead")]
     pub fn is_empty(&self) -> bool {
-        matches!(self, CommandOutput::Empty)
+        self.is_message()
     }
 
     /// Get verification results if this is a Verification output
@@ -129,11 +148,45 @@ impl CommandOutput {
         }
     }
 
-    /// Get explain output if this is an ExplainPlan output
-    pub fn into_explain_plan(self) -> Option<String> {
+    /// Get plan output if this is a Plan output
+    pub fn into_plan(self) -> Option<String> {
         match self {
-            CommandOutput::ExplainPlan(s) => Some(s),
+            CommandOutput::Plan(s) => Some(s),
             _ => None,
+        }
+    }
+
+    /// Get explain output if this is a Plan output (alias for backwards compatibility)
+    #[deprecated(since = "0.4.0", note = "Use into_plan() instead")]
+    pub fn into_explain_plan(self) -> Option<String> {
+        self.into_plan()
+    }
+
+    /// Get the message if this is a Message output
+    pub fn into_message(self) -> Option<MessageResponse> {
+        match self {
+            CommandOutput::Message(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Returns the Arrow schema for this output type.
+    pub fn schema(&self) -> SchemaRef {
+        match self {
+            CommandOutput::Message(_) => message_schema(),
+            CommandOutput::Verification(_) => verification_schema(),
+            CommandOutput::Fetch(_) => fetch_schema(),
+            CommandOutput::Plan(_) => plan_schema(),
+        }
+    }
+
+    /// Converts this output to a RecordBatch.
+    pub fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
+        match self {
+            CommandOutput::Message(msg) => message_to_record_batch(&msg.message),
+            CommandOutput::Verification(results) => verification_to_record_batch(results),
+            CommandOutput::Fetch(results) => fetch_to_record_batch(results),
+            CommandOutput::Plan(plan) => plan_to_record_batch(plan),
         }
     }
 }
@@ -343,85 +396,85 @@ impl BundleCommand {
             // Builder commands delegate to execute_command
             BundleCommand::Attach(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::DetachBlock(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::Filter(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::DropColumn(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::RenameColumn(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::RenameView(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::Select(cmd) => {
                 // Select uses the BundleFacade's select() method which returns a new builder
                 let new_builder = builder.select(&cmd.sql, cmd.params).await?;
                 *builder = new_builder;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::Join(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::CreateIndex(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::DropIndex(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::DropView(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::DropJoin(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::RenameJoin(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::RebuildIndex(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::Reindex(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::ReplaceBlock(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::SetName(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::SetDescription(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::SetConfig(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::CreateSource(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::Fetch(cmd) => {
                 let results = builder.execute_command(cmd).await?;
@@ -435,15 +488,15 @@ impl BundleCommand {
             // Special commands bypass execute_command
             BundleCommand::Commit(cmd) => {
                 builder.commit(&cmd.message).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::Reset(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::Undo(cmd) => {
                 builder.execute_command(cmd).await?;
-                Ok(CommandOutput::Empty)
+                Ok(CommandOutput::Message(MessageResponse::ok()))
             }
             BundleCommand::VerifyData(cmd) => {
                 let results = builder.execute_command(cmd).await?;
@@ -451,8 +504,22 @@ impl BundleCommand {
             }
             BundleCommand::ExplainPlan(_cmd) => {
                 let plan = builder.explain().await?;
-                Ok(CommandOutput::ExplainPlan(plan))
+                Ok(CommandOutput::Plan(plan))
             }
+        }
+    }
+
+    /// Returns the Arrow schema that this command will produce when executed.
+    ///
+    /// This allows callers to know the output schema before execution,
+    /// useful for clients that need to describe result sets upfront.
+    pub fn output_schema(&self) -> SchemaRef {
+        match self {
+            BundleCommand::Fetch(_) | BundleCommand::FetchAll(_) => fetch_schema(),
+            BundleCommand::VerifyData(_) => verification_schema(),
+            BundleCommand::ExplainPlan(_) => plan_schema(),
+            // All other commands return a simple message
+            _ => message_schema(),
         }
     }
 }
