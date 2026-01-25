@@ -255,7 +255,7 @@ async fn test_view_is_marked_as_view() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Container should not be marked as a view
-    assert!(!c.bundle.is_view(), "Container should not be marked as view");
+    assert!(!c.bundle().is_view(), "Container should not be marked as view");
 
     // Create a view
     let filtered = c.select("select * from bundle limit 10", vec![]).await?;

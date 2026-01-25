@@ -485,7 +485,7 @@ class TestSyncCreateView:
             # Most recent commit should only have CreateViewOp, not SelectOp
             assert len(history) == 2
             assert history[-1].message == "Added view"
-            assert "CREATE VIEW limited" in history[-1].changes[0].description
+            assert "Create view 'limited'" in history[-1].changes[0].description
 
 
 class TestSyncStatus:

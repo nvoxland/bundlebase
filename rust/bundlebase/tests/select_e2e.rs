@@ -162,7 +162,7 @@ async fn test_explain_basic() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Explain should return a non-empty string
-    let plan = bundle.bundle.explain().await?;
+    let plan = bundle.bundle().explain().await?;
     assert!(
         !plan.is_empty(),
         "Explain should return a non-empty query plan"
@@ -185,7 +185,7 @@ async fn test_explain_with_filter() -> Result<(), BundlebaseError> {
     let filtered = bundle
         .filter("salary > $1", vec![ScalarValue::Float64(Some(50000.0))])
         .await?;
-    let plan = filtered.bundle.explain().await?;
+    let plan = filtered.bundle().explain().await?;
 
     assert!(
         !plan.is_empty(),

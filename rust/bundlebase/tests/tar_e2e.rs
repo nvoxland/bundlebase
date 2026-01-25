@@ -196,7 +196,7 @@ async fn test_tar_query_equivalence() {
     mem_bundle.filter("id > 100", vec![]).await.unwrap();
     mem_bundle.commit("filtered").await.unwrap();
 
-    let mem_count = mem_bundle.bundle.num_rows().await.unwrap();
+    let mem_count = mem_bundle.bundle().num_rows().await.unwrap();
 
     // Export to tar and query
     mem_bundle
