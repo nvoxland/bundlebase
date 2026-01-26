@@ -10,18 +10,18 @@ use std::sync::Arc;
 
 /// SchemaProvider that exposes the bundle's cached dataframe as a "bundle" table
 #[derive(Debug)]
-pub struct BundleSchemaProvider {
+pub struct DefaultSchemaProvider {
     dataframe: DataFrameHolder,
 }
 
-impl BundleSchemaProvider {
+impl DefaultSchemaProvider {
     pub fn new(dataframe: DataFrameHolder) -> Self {
         Self { dataframe }
     }
 }
 
 #[async_trait]
-impl SchemaProvider for BundleSchemaProvider {
+impl SchemaProvider for DefaultSchemaProvider {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

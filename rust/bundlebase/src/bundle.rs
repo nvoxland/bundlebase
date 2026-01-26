@@ -29,7 +29,7 @@ pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
 pub use source::Source;
 use std::collections::{HashMap, HashSet};
 
-use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
+use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME};
 use crate::udf::VersionUdf;
 use crate::data::{DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::source::SourceFunctionRegistry;
@@ -260,7 +260,7 @@ impl Bundle {
         let source_function_registry = Arc::new(RwLock::new(SourceFunctionRegistry::new()));
 
         let mut config =
-            SessionConfig::new().with_default_catalog_and_schema(CATALOG_NAME, "public");
+            SessionConfig::new().with_default_catalog_and_schema(CATALOG_NAME, "default");
         let options = config.options_mut();
         options.sql_parser.enable_ident_normalization = false;
         let ctx = Arc::new(SessionContext::new_with_config(config));
@@ -291,8 +291,8 @@ impl Bundle {
             Arc::new(PackSchemaProvider::new(packs.clone())),
         )?;
         catalog.register_schema(
-            "public",
-            Arc::new(BundleSchemaProvider::new(dataframe.clone())),
+            "default",
+            Arc::new(DefaultSchemaProvider::new(dataframe.clone())),
         )?;
         catalog.register_schema(
             "bundle_info",

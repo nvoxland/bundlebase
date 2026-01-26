@@ -186,12 +186,12 @@ pub fn do_get_schemas() -> Result<Response<DoGetStream>, Status> {
         ),
     ]));
 
-    // Return single schema "public"
+    // Return single schema "default"
     let batch = RecordBatch::try_new(
         schema.clone(),
         vec![
             Arc::new(arrow::array::StringArray::from(vec![Some("bundlebase")])),
-            Arc::new(arrow::array::StringArray::from(vec!["public"])),
+            Arc::new(arrow::array::StringArray::from(vec!["default"])),
         ],
     )
     .map_err(|e| Status::internal(format!("Failed to create batch: {}", e)))?;
@@ -258,7 +258,7 @@ pub fn do_get_tables() -> Result<Response<DoGetStream>, Status> {
         schema.clone(),
         vec![
             Arc::new(arrow::array::StringArray::from(vec![Some("bundlebase")])),
-            Arc::new(arrow::array::StringArray::from(vec![Some("public")])),
+            Arc::new(arrow::array::StringArray::from(vec![Some("default")])),
             Arc::new(arrow::array::StringArray::from(vec!["bundle"])),
             Arc::new(arrow::array::StringArray::from(vec!["TABLE"])),
         ],
