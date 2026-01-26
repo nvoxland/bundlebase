@@ -14,5 +14,7 @@ pub use pack_union_table::PackUnionTable;
 pub static DATAFRAME_ALIAS: &str = "bundle";
 /// Table name for bundle commit history (in bundle_info schema)
 pub static BUNDLE_HISTORY_TABLE: &str = "history";
+/// Table name for bundle uncommitted status (in bundle_info schema)
+pub static BUNDLE_STATUS_TABLE: &str = "status";
 /// Datafusion catalog name used
 pub static CATALOG_NAME: &str = "bundlebase";

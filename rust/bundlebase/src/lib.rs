@@ -19,7 +19,7 @@ pub mod udf;
 mod versioning;
 
 pub use crate::bundle::{
-    AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade, BundleStatus,
+    AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade,
     FileVerificationResult, Operation, VerificationResults,
 };
 pub use crate::bundle_config::BundleConfig;

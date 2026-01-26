@@ -1,3 +1,4 @@
+use arrow::array::{Int32Array, StringArray};
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
 use bundlebase::{Bundle, BundleBuilder};
@@ -186,4 +187,161 @@ async fn test_bundle_history_table_multiple_commits() {
     let message_col = batch.column(1).as_any().downcast_ref::<arrow::array::StringArray>().unwrap();
     assert_eq!(message_col.value(0), "Initial data load");
     assert_eq!(message_col.value(1), "Set bundle name");
+}
+
+#[tokio::test]
+async fn test_bundle_status_table_empty() {
+    let data_dir = random_memory_dir();
+    let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
+        .await
+        .unwrap();
+
+    // Query the bundle_info.status table - should be empty since no changes yet
+    let df = bundle.bundle().ctx().sql("SELECT * FROM bundle_info.status").await.unwrap();
+
+    // Verify schema has the expected columns
+    let schema = df.schema();
+    assert_eq!(schema.fields().len(), 4, "bundle_info.status should have 4 columns");
+
+    let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+    assert_eq!(field_names, vec!["id", "change_id", "description", "operation_count"]);
+
+    // Verify no rows (no uncommitted changes)
+    let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
+    let total_rows: usize = batches.iter()
+        .filter_map(|r| r.as_ref().ok())
+        .map(|b| b.num_rows())
+        .sum();
+    assert_eq!(total_rows, 0, "No uncommitted changes should exist");
+}
+
+#[tokio::test]
+async fn test_bundle_status_table_with_uncommitted_changes() {
+    let data_dir = random_memory_dir();
+    let mut bundle = BundleBuilder::create(data_dir.url().as_str(), None)
+        .await
+        .unwrap();
+
+    // Make some changes but don't commit
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await
+        .unwrap();
+
+    // Query the bundle_info.status table - should show the uncommitted change
+    let df = bundle.bundle().ctx().sql("SELECT * FROM bundle_info.status").await.unwrap();
+    let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
+
+    // Verify one uncommitted change exists
+    let total_rows: usize = batches.iter()
+        .filter_map(|r| r.as_ref().ok())
+        .map(|b| b.num_rows())
+        .sum();
+    assert_eq!(total_rows, 1, "One uncommitted change should exist");
+
+    // Verify the change details
+    let batch = batches[0].as_ref().unwrap();
+    let id_col = batch.column(0).as_any().downcast_ref::<Int32Array>().unwrap();
+    let description_col = batch.column(2).as_any().downcast_ref::<StringArray>().unwrap();
+    let op_count_col = batch.column(3).as_any().downcast_ref::<Int32Array>().unwrap();
+
+    assert_eq!(id_col.value(0), 0, "First change should have id 0");
+    assert!(description_col.value(0).contains("ATTACH"), "Description should mention ATTACH");
+    assert!(op_count_col.value(0) >= 1, "Should have at least 1 operation");
+}
+
+#[tokio::test]
+async fn test_bundle_status_table_multiple_changes() {
+    let data_dir = random_memory_dir();
+    let mut bundle = BundleBuilder::create(data_dir.url().as_str(), None)
+        .await
+        .unwrap();
+
+    // Make multiple changes but don't commit
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await
+        .unwrap();
+    bundle.set_name("Test Bundle").await.unwrap();
+    bundle.set_description("A test bundle").await.unwrap();
+
+    // Query the bundle_info.status table
+    let df = bundle.bundle().ctx().sql("SELECT id, description, operation_count FROM bundle_info.status ORDER BY id").await.unwrap();
+    let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
+
+    // Verify three uncommitted changes exist
+    let total_rows: usize = batches.iter()
+        .filter_map(|r| r.as_ref().ok())
+        .map(|b| b.num_rows())
+        .sum();
+    assert_eq!(total_rows, 3, "Three uncommitted changes should exist");
+
+    // Verify the changes are in order
+    let batch = batches[0].as_ref().unwrap();
+    let id_col = batch.column(0).as_any().downcast_ref::<Int32Array>().unwrap();
+    assert_eq!(id_col.value(0), 0);
+    assert_eq!(id_col.value(1), 1);
+    assert_eq!(id_col.value(2), 2);
+}
+
+#[tokio::test]
+async fn test_bundle_status_table_cleared_after_commit() {
+    let data_dir = random_memory_dir();
+    let mut bundle = BundleBuilder::create(data_dir.url().as_str(), None)
+        .await
+        .unwrap();
+
+    // Make changes
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await
+        .unwrap();
+
+    // Verify uncommitted changes exist before commit
+    let df = bundle.bundle().ctx().sql("SELECT * FROM bundle_info.status").await.unwrap();
+    let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
+    let rows_before: usize = batches.iter()
+        .filter_map(|r| r.as_ref().ok())
+        .map(|b| b.num_rows())
+        .sum();
+    assert_eq!(rows_before, 1, "Should have 1 uncommitted change before commit");
+
+    // Commit
+    bundle.commit("Initial commit").await.unwrap();
+
+    // Verify no uncommitted changes after commit
+    let df = bundle.bundle().ctx().sql("SELECT * FROM bundle_info.status").await.unwrap();
+    let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
+    let rows_after: usize = batches.iter()
+        .filter_map(|r| r.as_ref().ok())
+        .map(|b| b.num_rows())
+        .sum();
+    assert_eq!(rows_after, 0, "Should have no uncommitted changes after commit");
+}
+
+#[tokio::test]
+async fn test_bundle_status_table_readonly_bundle() {
+    let data_dir = random_memory_dir();
+    let mut bundle = BundleBuilder::create(data_dir.url().as_str(), None)
+        .await
+        .unwrap();
+
+    // Commit some changes
+    bundle
+        .attach(test_datafile("userdata.parquet"), None)
+        .await
+        .unwrap();
+    bundle.commit("Initial commit").await.unwrap();
+
+    // Open as read-only Bundle
+    let readonly_bundle = Bundle::open(data_dir.url().as_str(), None).await.unwrap();
+
+    // Query the bundle_info.status table - should be empty since Bundle doesn't track uncommitted changes
+    let df = readonly_bundle.ctx().sql("SELECT * FROM bundle_info.status").await.unwrap();
+    let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
+    let total_rows: usize = batches.iter()
+        .filter_map(|r| r.as_ref().ok())
+        .map(|b| b.num_rows())
+        .sum();
+    assert_eq!(total_rows, 0, "Read-only bundle should have no uncommitted changes");
 }

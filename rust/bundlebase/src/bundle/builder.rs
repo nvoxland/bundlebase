@@ -64,6 +64,18 @@ impl BundleStatus {
         self.changes.pop();
     }
 
+    pub fn pop_change(&mut self) -> Option<BundleChange> {
+        self.changes.pop()
+    }
+
+    pub fn push_change(&mut self, change: BundleChange) {
+        self.changes.push(change);
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        self.changes.truncate(len);
+    }
+
     pub fn changes(&self) -> &Vec<BundleChange> {
         &self.changes
     }
@@ -133,7 +145,6 @@ impl std::fmt::Display for BundleStatus {
 /// ```
 pub struct BundleBuilder {
     bundle: Bundle,
-    status: BundleStatus,
     in_progress_change: Option<BundleChange>,
 }
 
@@ -141,7 +152,6 @@ impl Clone for BundleBuilder {
     fn clone(&self) -> Self {
         Self {
             bundle: self.bundle.clone(),
-            status: self.status.clone(),
             in_progress_change: self.in_progress_change.clone(),
         }
     }
@@ -184,7 +194,6 @@ impl BundleBuilder {
         }
 
         let builder = BundleBuilder {
-            status: BundleStatus::new(),
             bundle: existing,
             in_progress_change: None,
         };
@@ -210,7 +219,6 @@ impl BundleBuilder {
 
         Ok(BundleBuilder {
             bundle: new_bundle,
-            status: BundleStatus::new(),
             in_progress_change: None,
         })
     }
@@ -221,8 +229,8 @@ impl BundleBuilder {
     }
 
     /// Returns the bundle status showing uncommitted changes.
-    pub fn status(&self) -> &BundleStatus {
-        &self.status
+    pub fn status(&self) -> BundleStatus {
+        self.bundle.status().read().clone()
     }
 
     /// Commits all operations in the bundle to persistent storage.
@@ -255,7 +263,7 @@ impl BundleBuilder {
         let author = std::env::var("BUNDLEBASE_AUTHOR")
             .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
 
-        let changes = self.status.changes().clone();
+        let changes = self.bundle.status().read().changes().clone();
 
         let commit_struct = commit::BundleCommit {
             url: None, //no need to set, we're just writing it and then will re-read it back
@@ -290,7 +298,7 @@ impl BundleBuilder {
         let config = self.bundle.passed_config.clone();
         self.bundle = Bundle::open(self.url().as_str(), config).await?;
         // Clear status since the operations have been persisted
-        self.status.clear();
+        self.bundle.status().write().clear();
 
         info!("Committed version {}", self.bundle.version());
 
@@ -313,7 +321,7 @@ impl BundleBuilder {
         }
 
         // Clear all uncommitted changes
-        self.status.clear();
+        self.bundle.status().write().clear();
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
@@ -341,13 +349,13 @@ impl BundleBuilder {
         }
 
         // Remove the last change
-        self.status.pop();
+        self.bundle.status().write().pop();
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
 
         // Reapply all remaining operations
-        let changes = self.status.changes().clone();
+        let changes = self.bundle.status().read().changes().clone();
         for change in &changes {
             for op in &change.operations {
                 self.bundle.apply_operation(op.clone()).await?;
@@ -436,7 +444,7 @@ impl BundleBuilder {
             Ok(_) => {
                 if !is_nested {
                     if let Some(change) = self.in_progress_change.take() {
-                        self.status.changes.push(change);
+                        self.bundle.status().write().push_change(change);
                     }
                 }
                 Ok(())
@@ -493,7 +501,7 @@ impl BundleBuilder {
             Ok(_) => {
                 if !is_nested {
                     if let Some(change) = self.in_progress_change.take() {
-                        self.status.changes.push(change);
+                        self.bundle.status().write().push_change(change);
                     }
                 }
             }
@@ -709,7 +717,7 @@ impl BundleBuilder {
 
         let name = name.to_string();
         let source_ops_count = source.status().operations().len();
-        let changes_before = self.status.changes.len();
+        let changes_before = self.bundle.status().read().changes().len();
         let source_is_self = self.bundle.id() == source.bundle.id();
         let source_clone = source.clone();
 
@@ -726,11 +734,12 @@ impl BundleBuilder {
         // After creating view, if source had uncommitted operations and source is the same
         // as self, we need to remove those operations to prevent double-commit.
         if source_is_self && source_ops_count > 0 && changes_before >= source_ops_count {
-            let create_view_change = self.status.changes.pop();
+            let mut status = self.bundle.status().write();
+            let create_view_change = status.pop_change();
             let keep_count = changes_before - source_ops_count;
-            self.status.changes.truncate(keep_count);
+            status.truncate(keep_count);
             if let Some(create_view_change) = create_view_change {
-                self.status.changes.push(create_view_change);
+                status.push_change(create_view_change);
             }
             debug!(
                 "Removed {} changes that were captured for view (prevents double-commit)",
@@ -1443,7 +1452,7 @@ impl BundleFacade for BundleBuilder {
 
     fn operations(&self) -> Vec<AnyOperation> {
         let mut ops = self.bundle.operations.clone();
-        ops.append(&mut self.status.operations().clone());
+        ops.append(&mut self.status().operations().clone());
 
         ops
     }
