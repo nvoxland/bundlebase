@@ -25,7 +25,6 @@ use arrow_flight::{
     FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, Ticket,
 };
 use base64::prelude::*;
-use bundlebase::bundle::BundleFacade;
 use bundlebase::{Bundle, BundleBuilder, BundleConfig};
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
@@ -78,6 +77,8 @@ pub struct BundlebaseFlightSqlService {
     bundle_config: Option<BundleConfig>,
     /// Whether to create bundles (vs open existing)
     create_bundle: bool,
+    /// Whether to open bundles in read-only mode
+    read_only: bool,
     /// Session states keyed by auth token
     sessions: SessionStore,
     authenticator: BundlebaseAuthenticator,
@@ -91,17 +92,20 @@ impl BundlebaseFlightSqlService {
     /// * `bundle_path` - Path to the bundle (URL or filesystem path)
     /// * `bundle_config` - Optional bundle configuration
     /// * `create_bundle` - If true, create the bundle; if false, open existing
+    /// * `read_only` - If true, sessions will be read-only (only SELECT/EXPLAIN allowed)
     /// * `authenticator` - Authenticator for validating credentials
     pub fn new(
         bundle_path: String,
         bundle_config: Option<BundleConfig>,
         create_bundle: bool,
+        read_only: bool,
         authenticator: BundlebaseAuthenticator,
     ) -> Self {
         Self {
             bundle_path,
             bundle_config,
             create_bundle,
+            read_only,
             sessions: new_session_store(),
             authenticator,
         }
@@ -151,20 +155,30 @@ impl BundlebaseFlightSqlService {
     ///
     /// Creates a new `BundleState` and prepared statement storage for the session.
     async fn create_session(&self) -> Result<Session, Status> {
-        let builder = if self.create_bundle {
-            BundleBuilder::create(&self.bundle_path, self.bundle_config.clone())
+        let state = if self.create_bundle {
+            // Creating always needs read-write mode
+            let builder = BundleBuilder::create(&self.bundle_path, self.bundle_config.clone())
                 .await
-                .map_err(|e| Status::internal(format!("Failed to create bundle: {}", e)))?
+                .map_err(|e| Status::internal(format!("Failed to create bundle: {}", e)))?;
+            Arc::new(BundleState::read_write(builder))
+        } else if self.read_only {
+            // Read-only mode - open as Bundle
+            let bundle = Bundle::open(&self.bundle_path, self.bundle_config.clone())
+                .await
+                .map_err(|e| Status::internal(format!("Failed to open bundle: {}", e)))?;
+            Arc::new(BundleState::read_only(bundle))
         } else {
-            Bundle::open(&self.bundle_path, self.bundle_config.clone())
+            // Read-write mode - open and extend
+            let builder = Bundle::open(&self.bundle_path, self.bundle_config.clone())
                 .await
                 .map_err(|e| Status::internal(format!("Failed to open bundle: {}", e)))?
                 .extend(None)
-                .map_err(|e| Status::internal(format!("Failed to extend bundle: {}", e)))?
+                .map_err(|e| Status::internal(format!("Failed to extend bundle: {}", e)))?;
+            Arc::new(BundleState::read_write(builder))
         };
 
         Ok(Session {
-            state: Arc::new(BundleState::new(builder)),
+            state,
             prepared_statements: HashMap::new(),
         })
     }
@@ -181,23 +195,10 @@ impl BundlebaseFlightSqlService {
         }
 
         // For standard SQL, we need to plan the query to get the schema
-        let builder = {
-            let guard = state.bundle.read();
-            guard.clone()
-        };
-
-        // Use select to plan the query and get the schema
-        let result_builder = builder
-            .select(sql, vec![])
+        state
+            .get_query_schema(sql)
             .await
-            .map_err(|e| Status::internal(format!("Failed to plan query: {}", e)))?;
-
-        let df = result_builder
-            .dataframe()
-            .await
-            .map_err(|e| Status::internal(format!("Failed to get dataframe: {}", e)))?;
-
-        Ok(df.schema().inner().clone())
+            .map_err(|e| Status::internal(format!("Failed to plan query: {}", e)))
     }
 
     /// Check if there are any active sessions (for testing).

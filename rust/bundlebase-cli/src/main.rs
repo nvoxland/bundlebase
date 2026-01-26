@@ -51,6 +51,12 @@ struct Args {
     #[arg(long)]
     create: bool,
 
+    /// Open bundle in read-only mode (default: true).
+    /// When true, only SELECT and EXPLAIN PLAN commands are allowed.
+    /// Use --read-only=false to enable ATTACH, FILTER, COMMIT, and other modifying commands.
+    #[arg(long, default_value = "true")]
+    read_only: bool,
+
     /// Host address to bind to (Flight mode only)
     #[arg(long, default_value = "0.0.0.0")]
     host: String,
@@ -115,18 +121,33 @@ async fn main() -> Result<(), BundlebaseError> {
 
     init_logging(&args);
 
+    // Validate flag combinations
+    if args.create && args.read_only {
+        eprintln!("Error: Cannot use --create with --read-only=true. Creating a bundle requires write access.");
+        eprintln!("Use --read-only=false with --create to create a new bundle.");
+        std::process::exit(1);
+    }
+
     match args.mode {
         Mode::Repl => {
             repl::print_header();
 
             let state = if args.create {
+                // Creating a new bundle - always read-write
                 info!("Creating bundle at: {}", args.bundle);
-                Arc::new(BundleState::new(
+                Arc::new(BundleState::read_write(
                     BundleBuilder::create(&args.bundle, None).await?,
                 ))
+            } else if args.read_only {
+                // Read-only mode - open as Bundle
+                info!("Opening bundle in read-only mode: {}", args.bundle);
+                Arc::new(BundleState::read_only(
+                    Bundle::open(&args.bundle, None).await?,
+                ))
             } else {
-                info!("Loading bundle from: {}", args.bundle);
-                Arc::new(BundleState::new(
+                // Read-write mode - open and extend
+                info!("Opening bundle in read-write mode: {}", args.bundle);
+                Arc::new(BundleState::read_write(
                     Bundle::open(&args.bundle, None).await?.extend(None)?,
                 ))
             };
@@ -135,15 +156,16 @@ async fn main() -> Result<(), BundlebaseError> {
         }
         Mode::Flight => {
             info!(
-                "{} bundle at: {}",
+                "{} bundle at: {}{}",
                 if args.create { "Creating" } else { "Opening" },
-                args.bundle
+                args.bundle,
+                if args.read_only { " (read-only)" } else { "" }
             );
             let port = args.port.unwrap_or(50051);
             let addr = format!("{}:{}", args.host, port)
                 .parse()
                 .map_err(|e| BundlebaseError::from(format!("Invalid address: {}", e)))?;
-            flight::start(&args.bundle, args.create, addr).await?;
+            flight::start(&args.bundle, args.create, args.read_only, addr).await?;
         }
     }
 

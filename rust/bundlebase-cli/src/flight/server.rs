@@ -16,6 +16,7 @@ use tracing::info;
 ///
 /// * `bundle_path` - Path to the bundle (URL or filesystem path)
 /// * `create` - If true, create the bundle; if false, open existing
+/// * `read_only` - If true, open in read-only mode (only SELECT/EXPLAIN allowed)
 /// * `addr` - The address to bind to (e.g., "0.0.0.0:50051")
 ///
 /// # Returns
@@ -25,14 +26,20 @@ use tracing::info;
 pub async fn start(
     bundle_path: &str,
     create: bool,
+    read_only: bool,
     addr: SocketAddr,
 ) -> Result<(), bundlebase::BundlebaseError> {
-    info!("Starting Arrow Flight SQL server on {}", addr);
+    info!(
+        "Starting Arrow Flight SQL server on {} ({})",
+        addr,
+        if read_only { "read-only" } else { "read-write" }
+    );
 
     let flight_service = BundlebaseFlightSqlService::new(
         bundle_path.to_string(),
         None,
         create,
+        read_only,
         BundlebaseAuthenticator::default(),
     );
 

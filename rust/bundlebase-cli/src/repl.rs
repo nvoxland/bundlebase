@@ -9,7 +9,6 @@ pub mod display;
 mod progress_impl;
 
 use crate::state::BundleState;
-use bundlebase::bundle::BundleFacade;
 use bundlebase::BundlebaseError;
 use commands::{Command, ExecuteResult};
 use completion::BundleCompleter;
@@ -70,7 +69,7 @@ pub async fn start(state: Arc<BundleState>) -> Result<(), BundlebaseError> {
         .with_edit_mode(Box::new(Emacs::new(default_emacs_keybindings())));
 
     let prompt = DefaultPrompt {
-        left_prompt: DefaultPromptSegment::Basic(state.bundle.read().url().to_string()),
+        left_prompt: DefaultPromptSegment::Basic(state.url()),
         right_prompt: DefaultPromptSegment::CurrentDateTime,
     };
 

@@ -1,7 +1,6 @@
 //! Query execution and streaming for Flight SQL.
 
-use crate::sql_executor::{self, SqlResult};
-use crate::state::BundleState;
+use crate::state::{BundleState, SqlResult};
 use arrow_flight::encode::FlightDataEncoderBuilder;
 use arrow_flight::error::FlightError;
 use arrow_flight::FlightData;
@@ -18,7 +17,7 @@ pub async fn execute_query_streaming(
     state: &Arc<BundleState>,
     sql: String,
 ) -> Result<Response<DoGetStream>, Status> {
-    match sql_executor::execute_sql(state, &sql).await {
+    match state.execute_sql(&sql).await {
         Ok(SqlResult::Stream(record_stream)) => {
             // Get schema from the stream
             let schema = record_stream.schema();
