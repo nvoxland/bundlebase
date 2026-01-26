@@ -12,7 +12,8 @@ mod source;
 mod sql;
 
 use crate::io::EMPTY_SCHEME;
-pub use builder::{BundleBuilder, BundleStatus};
+pub use builder::BundleBuilder;
+pub(crate) use builder::BundleStatus;
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
 pub use command::parser::{is_command_statement, parse_command};
 pub use command::BundleCommand;
@@ -180,6 +181,7 @@ pub struct Bundle {
 
     data_dir: Arc<dyn IOReadWriteDir>,
     commits: Arc<RwLock<Vec<BundleCommit>>>,
+    status: Arc<RwLock<BundleStatus>>,
     operations: Vec<AnyOperation>,
 
     packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
@@ -210,7 +212,7 @@ pub struct Bundle {
 
 impl Clone for Bundle {
     fn clone(&self) -> Self {
-        // Deep clone indexes and function_registry for independence
+        // Deep clone indexes, function_registry, and status for independence
         // Share data_packs to maintain compatibility with SessionContext schema providers
         let indexes = {
             let idxs = self.indexes.read();
@@ -222,12 +224,19 @@ impl Clone for Bundle {
             Arc::new(RwLock::new(registry.clone()))
         };
 
+        // Deep clone status so each cloned BundleBuilder has independent change tracking
+        let status = {
+            let s = self.status.read();
+            Arc::new(RwLock::new(s.clone()))
+        };
+
         Self {
             id: self.id.clone(),
             name: self.name.clone(),
             description: self.description.clone(),
             data_dir: Arc::clone(&self.data_dir),
             commits: Arc::clone(&self.commits),
+            status,
             operations: self.operations.clone(),
             version: self.version.clone(),
             last_manifest_version: self.last_manifest_version,
@@ -267,6 +276,7 @@ impl Bundle {
 
         let packs = Arc::new(RwLock::new(HashMap::new()));
         let commits = Arc::new(RwLock::new(vec![]));
+        let status = Arc::new(RwLock::new(BundleStatus::new()));
 
         let empty_dataframe = DataFrame::new(
             ctx.state(),
@@ -296,7 +306,7 @@ impl Bundle {
         )?;
         catalog.register_schema(
             "bundle_info",
-            Arc::new(BundleInfoSchemaProvider::new(commits.clone())),
+            Arc::new(BundleInfoSchemaProvider::new(commits.clone(), status.clone())),
         )?;
         catalog.register_schema("temp", Arc::new(MemorySchemaProvider::new()))?;
 
@@ -335,6 +345,7 @@ impl Bundle {
             version: "empty".to_string(),
             data_dir: writable_dir_from_url(&url, BundleConfig::default().into())?,
             commits,
+            status,
             dataframe,
             config: Arc::new(crate::BundleConfig::new()),
             passed_config: None,
@@ -739,6 +750,11 @@ impl Bundle {
     /// Get read access to the packs map
     pub(crate) fn packs(&self) -> &Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>> {
         &self.packs
+    }
+
+    /// Get access to the status (for BundleBuilder to mutate)
+    pub(crate) fn status(&self) -> &Arc<RwLock<BundleStatus>> {
+        &self.status
     }
 
     /// Find a join pack by its name

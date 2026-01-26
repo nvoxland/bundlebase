@@ -41,15 +41,16 @@ FilterExec: Email@\d+ = elizabethbarr@ewing.com, projection=\[Index@\d+, City@\d
 
     bundle.create_index("Email", IndexType::Column).await?;
 
-    assert_eq!(1, bundle.status().changes().len());
+    let status = bundle.status();
+    assert_eq!(1, status.changes().len());
     assert_eq!(
         "CREATE INDEX ON Email",
-        bundle.status().changes()[0].description
+        status.changes()[0].description
     );
 
     assert_eq!(
         "CREATE INDEX on Email, INDEX BLOCKS",
-        bundle.status().changes()[0]
+        status.changes()[0]
             .operations
             .iter()
             .map(|op| op.describe())

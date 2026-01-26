@@ -562,7 +562,8 @@ async fn test_create_source_creates_single_change() -> Result<(), BundlebaseErro
 
     // After create_source, should have exactly 1 additional change (not multiple)
     // This change should contain both the CreateSourceOp and the AttachBlockOp
-    let changes = bundle.status().changes();
+    let status = bundle.status();
+    let changes = status.changes();
     let changes_added = changes.len() - changes_before;
     assert_eq!(
         changes_added, 1,

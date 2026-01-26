@@ -1,4 +1,4 @@
-use crate::bundle::BundleCommit;
+use crate::bundle::{BundleCommit, BundleStatus};
 use crate::catalog;
 use arrow::array::{Int32Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
@@ -11,15 +11,17 @@ use std::sync::Arc;
 
 /// SchemaProvider that exposes bundle metadata tables in the "bundle_info" schema.
 /// Currently provides:
-/// - `bundle_history`: Commit history for the bundle
+/// - `history`: Commit history for the bundle
+/// - `status`: Uncommitted changes (only populated for BundleBuilder)
 #[derive(Debug)]
 pub struct BundleInfoSchemaProvider {
     commits: Arc<RwLock<Vec<BundleCommit>>>,
+    status: Arc<RwLock<BundleStatus>>,
 }
 
 impl BundleInfoSchemaProvider {
-    pub fn new(commits: Arc<RwLock<Vec<BundleCommit>>>) -> Self {
-        Self { commits }
+    pub fn new(commits: Arc<RwLock<Vec<BundleCommit>>>, status: Arc<RwLock<BundleStatus>>) -> Self {
+        Self { commits, status }
     }
 }
 
@@ -30,7 +32,10 @@ impl SchemaProvider for BundleInfoSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        vec![catalog::BUNDLE_HISTORY_TABLE.to_string()]
+        vec![
+            catalog::BUNDLE_HISTORY_TABLE.to_string(),
+            catalog::BUNDLE_STATUS_TABLE.to_string(),
+        ]
     }
 
     async fn table(&self, name: &str) -> datafusion::error::Result<Option<Arc<dyn TableProvider>>> {
@@ -38,13 +43,17 @@ impl SchemaProvider for BundleInfoSchemaProvider {
             let commits = self.commits.read().clone();
             let table = BundleHistoryTable::new(commits)?;
             Ok(Some(Arc::new(table)))
+        } else if name == catalog::BUNDLE_STATUS_TABLE {
+            let status = self.status.read().clone();
+            let table = BundleStatusTable::new(status)?;
+            Ok(Some(Arc::new(table)))
         } else {
             Ok(None)
         }
     }
 
     fn table_exist(&self, name: &str) -> bool {
-        name == catalog::BUNDLE_HISTORY_TABLE
+        name == catalog::BUNDLE_HISTORY_TABLE || name == catalog::BUNDLE_STATUS_TABLE
     }
 }
 
@@ -93,7 +102,57 @@ impl BundleHistoryTable {
         )?;
 
         let batches = if commits.is_empty() {
-            vec![]
+            // Return empty batch with schema (one partition with zero rows)
+            let empty_batch = RecordBatch::new_empty(Arc::clone(&schema));
+            vec![vec![empty_batch]]
+        } else {
+            vec![vec![batch]]
+        };
+
+        MemTable::try_new(schema, batches)
+    }
+}
+
+/// Helper struct for creating the bundle_status table
+struct BundleStatusTable;
+
+impl BundleStatusTable {
+    fn schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("change_id", DataType::Utf8, false),
+            Field::new("description", DataType::Utf8, false),
+            Field::new("operation_count", DataType::Int32, false),
+        ]))
+    }
+
+    fn new(status: BundleStatus) -> Result<MemTable, DataFusionError> {
+        let schema = Self::schema();
+        let changes = status.changes();
+
+        // Build arrays from changes
+        let ids: Vec<i32> = (0..changes.len() as i32).collect();
+        let change_ids: Vec<String> = changes.iter().map(|c| c.id.to_string()).collect();
+        let descriptions: Vec<&str> = changes.iter().map(|c| c.description.as_str()).collect();
+        let operation_counts: Vec<i32> = changes
+            .iter()
+            .map(|c| c.operations.len() as i32)
+            .collect();
+
+        let batch = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(Int32Array::from(ids)),
+                Arc::new(StringArray::from(change_ids.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+                Arc::new(StringArray::from(descriptions)),
+                Arc::new(Int32Array::from(operation_counts)),
+            ],
+        )?;
+
+        let batches = if changes.is_empty() {
+            // Return empty batch with schema (one partition with zero rows)
+            let empty_batch = RecordBatch::new_empty(Arc::clone(&schema));
+            vec![vec![empty_batch]]
         } else {
             vec![vec![batch]]
         };
