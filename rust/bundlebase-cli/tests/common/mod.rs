@@ -51,6 +51,7 @@ impl FlightTestServer {
             bundle_path.to_string(),
             None,
             create,
+            false, // read_only: false - tests need to modify bundle
             BundlebaseAuthenticator::default(),
         );
 

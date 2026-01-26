@@ -10,7 +10,7 @@ use std::sync::Arc;
 use url::Url;
 
 #[async_trait]
-pub trait BundleFacade {
+pub trait BundleFacade: Send + Sync {
     /// The id of the bundle
     fn id(&self) -> &str;
 

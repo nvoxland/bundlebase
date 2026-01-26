@@ -168,6 +168,101 @@ impl CommandOutput {
     }
 }
 
+/// Commands that can be executed on a BundleFacade (read-only).
+///
+/// This enum contains only commands that do not require mutation of the bundle.
+/// It's a subset of `BundleCommand` that can be executed on a read-only `Bundle`.
+#[derive(Debug, Clone)]
+pub enum FacadeCommand {
+    /// Show query execution plan
+    ExplainPlan(ExplainPlanCommand),
+    /// Execute a SELECT query (returns a new BundleBuilder)
+    Select(SelectCommand),
+}
+
+impl FacadeCommand {
+    /// Execute this command on a BundleFacade.
+    pub async fn execute(
+        self,
+        facade: &dyn BundleFacade,
+    ) -> Result<CommandOutput, BundlebaseError> {
+        match self {
+            FacadeCommand::ExplainPlan(_) => {
+                let plan = facade.explain().await?;
+                Ok(CommandOutput::Plan(plan))
+            }
+            FacadeCommand::Select(cmd) => {
+                // Execute select to validate the query works
+                let _result_builder = facade.select(&cmd.sql, cmd.params).await?;
+                Ok(CommandOutput::Message(MessageResponse::ok()))
+            }
+        }
+    }
+
+    /// Returns the Arrow schema for this command's output.
+    pub fn output_schema(&self) -> SchemaRef {
+        match self {
+            FacadeCommand::ExplainPlan(_) => plan_schema(),
+            FacadeCommand::Select(_) => message_schema(),
+        }
+    }
+}
+
+impl BundleCommand {
+    /// Try to convert this command to a FacadeCommand.
+    ///
+    /// Returns `Ok(FacadeCommand)` if this is a read-only command (ExplainPlan, Select).
+    /// Returns `Err` with a descriptive error message if this is a mutating command.
+    pub fn into_facade_command(self) -> Result<FacadeCommand, BundlebaseError> {
+        match self {
+            BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
+            BundleCommand::Select(cmd) => Ok(FacadeCommand::Select(cmd)),
+            _ => {
+                // Get the command name for the error message
+                let cmd_name = match &self {
+                    BundleCommand::Attach(_) => "ATTACH",
+                    BundleCommand::DetachBlock(_) => "DETACH",
+                    BundleCommand::Filter(_) => "FILTER",
+                    BundleCommand::Join(_) => "JOIN",
+                    BundleCommand::ReplaceBlock(_) => "REPLACE",
+                    BundleCommand::DropColumn(_) => "ALTER TABLE DROP COLUMN",
+                    BundleCommand::RenameColumn(_) => "ALTER TABLE RENAME COLUMN",
+                    BundleCommand::CreateIndex(_) => "CREATE INDEX",
+                    BundleCommand::DropIndex(_) => "DROP INDEX",
+                    BundleCommand::RebuildIndex(_) => "REBUILD INDEX",
+                    BundleCommand::Reindex(_) => "REINDEX",
+                    BundleCommand::RenameView(_) => "RENAME VIEW",
+                    BundleCommand::DropView(_) => "DROP VIEW",
+                    BundleCommand::DropJoin(_) => "DROP JOIN",
+                    BundleCommand::RenameJoin(_) => "RENAME JOIN",
+                    BundleCommand::SetName(_) => "SET NAME",
+                    BundleCommand::SetDescription(_) => "SET DESCRIPTION",
+                    BundleCommand::SetConfig(_) => "SET CONFIG",
+                    BundleCommand::CreateSource(_) => "CREATE SOURCE",
+                    BundleCommand::Reset(_) => "RESET",
+                    BundleCommand::Undo(_) => "UNDO",
+                    BundleCommand::Fetch(_) => "FETCH",
+                    BundleCommand::FetchAll(_) => "FETCH ALL",
+                    BundleCommand::VerifyData(_) => "VERIFY DATA",
+                    BundleCommand::Commit(_) => "COMMIT",
+                    BundleCommand::ExplainPlan(_) | BundleCommand::Select(_) => {
+                        unreachable!("Already handled above")
+                    }
+                };
+                Err(format!(
+                    "Cannot execute '{}' on read-only bundle. Open with --read-only=false to modify.",
+                    cmd_name
+                ).into())
+            }
+        }
+    }
+
+    /// Returns true if this command can be executed on a read-only bundle.
+    pub fn is_facade_command(&self) -> bool {
+        matches!(self, BundleCommand::ExplainPlan(_) | BundleCommand::Select(_))
+    }
+}
+
 /// Trait for command parsing and serialization.
 ///
 /// This trait provides the common parsing/serialization methods that all commands

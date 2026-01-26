@@ -24,7 +24,8 @@ mod tests {
         let _service = BundlebaseFlightSqlService::new(
             "memory:///flight_test".to_string(),
             None,
-            true,
+            true,  // create
+            false, // read_only
             BundlebaseAuthenticator::default(),
         );
     }
@@ -34,7 +35,8 @@ mod tests {
         let service = BundlebaseFlightSqlService::new(
             "memory:///session_test".to_string(),
             None,
-            true,
+            true,  // create
+            false, // read_only
             BundlebaseAuthenticator::default(),
         );
 

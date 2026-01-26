@@ -1,6 +1,6 @@
-use crate::state::BundleState;
+use crate::state::{BundleState, SqlResult};
 use bundlebase::{
-    bundle::{parse_command, BundleCommand, BundleFacade, CommandOutput},
+    bundle::{parse_command, CommandOutput},
     source::format_fetch_summary,
     BundlebaseError,
 };
@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub enum Command {
-    // SQL operations (delegated to BundleCommand)
-    Sql(BundleCommand),
+    // SQL operations (executed via BundleState)
+    Sql(String),
 
     // REPL-only commands (not SQL)
     Show { limit: Option<usize> },
@@ -48,17 +48,23 @@ pub fn parse(input: &str) -> Result<Command, String> {
         return parse_meta_command(meta_input);
     }
 
-    // Everything else is SQL - parse and wrap
-    let sql_cmd = parse_command(input).map_err(|e| {
+    // Try to parse as SQL to validate syntax first
+    // This gives better error messages for invalid SQL
+    if let Err(e) = parse_command(input) {
         // Check if the user might have meant a meta command
         if let Some(suggestion) = suggest_meta_command(input) {
-            format!("Invalid SQL: {}. Did you mean '{}'?", e, suggestion)
-        } else {
-            format!("Invalid SQL: {}", e)
+            return Err(format!("Invalid SQL: {}. Did you mean '{}'?", e, suggestion));
         }
-    })?;
+        // If it's not a meta command suggestion and it's a syntax error,
+        // it might be standard SQL (SELECT, etc.) - let it through
+        let err_msg = e.to_string();
+        if !err_msg.contains("Syntax error") {
+            return Err(format!("Invalid SQL: {}", e));
+        }
+    }
 
-    Ok(Command::Sql(sql_cmd))
+    // Pass the raw SQL string to be executed via BundleState
+    Ok(Command::Sql(input.to_string()))
 }
 
 /// Parse a meta command (input without the leading `/`)
@@ -113,45 +119,54 @@ pub async fn execute(cmd: Command, state: &Arc<BundleState>) -> Result<ExecuteRe
     use crate::repl::display;
 
     match cmd {
-        // SQL operations - delegate to BundleCommand
-        Command::Sql(sql_cmd) => {
-            let output = sql_cmd.execute(&mut state.bundle.write()).await?;
-            match output {
-                CommandOutput::Message(_) => Ok(ExecuteResult::None),
-                CommandOutput::Verification(results) => {
-                    Ok(ExecuteResult::Message(results.to_string()))
+        // SQL operations - execute via BundleState
+        Command::Sql(sql) => {
+            match state.execute_sql(&sql).await? {
+                SqlResult::Stream(stream) => {
+                    // For SELECT queries, display the results as a table (default limit: 10)
+                    let table = display::display_stream(stream, Some(100)).await?;
+                    Ok(ExecuteResult::Table(table))
                 }
-                CommandOutput::Fetch(results) => {
-                    Ok(ExecuteResult::Message(format_fetch_summary(&results)))
+                SqlResult::Output(output) => {
+                    match output {
+                        CommandOutput::Message(_) => Ok(ExecuteResult::None),
+                        CommandOutput::Verification(results) => {
+                            Ok(ExecuteResult::Message(results.to_string()))
+                        }
+                        CommandOutput::Fetch(results) => {
+                            Ok(ExecuteResult::Message(format_fetch_summary(&results)))
+                        }
+                        CommandOutput::Plan(plan) => Ok(ExecuteResult::Message(plan)),
+                    }
                 }
-                CommandOutput::Plan(plan) => Ok(ExecuteResult::Message(plan)),
             }
         }
 
         // REPL-only commands
         Command::Show { limit } => {
-            let df = state.bundle.read().dataframe().await?;
+            let df = state.dataframe().await?;
             let table = display::display_dataframe(&df, limit).await?;
             Ok(ExecuteResult::Table(table))
         }
         Command::Schema => {
-            let schema = state.bundle.read().schema().await?;
+            let schema = state.schema().await?;
             let table = display::display_schema(schema);
             Ok(ExecuteResult::Table(table))
         }
         Command::Count => {
-            let count = state.bundle.read().num_rows().await?;
+            let count = state.num_rows().await?;
             Ok(ExecuteResult::Message(format!("Row count: {}", count)))
         }
         Command::History => {
-            let commits = state.bundle.read().history();
+            let commits = state.history();
             let table = display::display_history(commits);
             Ok(ExecuteResult::Table(table))
         }
         Command::Status => {
-            let guard = state.bundle.read();
-            let status = guard.status();
-            Ok(ExecuteResult::Message(status.to_string()))
+            match state.status() {
+                Some(status) => Ok(ExecuteResult::Message(status.to_string())),
+                None => Ok(ExecuteResult::Message("Read-only mode: no uncommitted changes possible".to_string())),
+            }
         }
         Command::Help => {
             let help_text = r#"
@@ -229,11 +244,11 @@ mod tests {
     fn test_parse_attach() {
         let cmd = parse("ATTACH 'data.parquet'").unwrap();
         match cmd {
-            Command::Sql(BundleCommand::Attach(attach_cmd)) => {
-                assert_eq!(attach_cmd.path, "data.parquet");
-                assert_eq!(attach_cmd.pack, None);
+            Command::Sql(sql) => {
+                assert!(sql.contains("ATTACH"));
+                assert!(sql.contains("data.parquet"));
             }
-            _ => panic!("Expected Sql(Attach) command"),
+            _ => panic!("Expected Sql command"),
         }
     }
 
@@ -241,10 +256,11 @@ mod tests {
     fn test_parse_filter() {
         let cmd = parse("FILTER WHERE country = 'USA'").unwrap();
         match cmd {
-            Command::Sql(BundleCommand::Filter(filter_cmd)) => {
-                assert_eq!(filter_cmd.where_clause, "country = 'USA'")
+            Command::Sql(sql) => {
+                assert!(sql.contains("FILTER"));
+                assert!(sql.contains("country = 'USA'"));
             }
-            _ => panic!("Expected Sql(Filter) command"),
+            _ => panic!("Expected Sql command"),
         }
     }
 
@@ -313,10 +329,11 @@ mod tests {
     fn test_parse_commit() {
         let cmd = parse("COMMIT 'my commit message'").unwrap();
         match cmd {
-            Command::Sql(BundleCommand::Commit(commit_cmd)) => {
-                assert_eq!(commit_cmd.message, "my commit message")
+            Command::Sql(sql) => {
+                assert!(sql.contains("COMMIT"));
+                assert!(sql.contains("my commit message"));
             }
-            _ => panic!("Expected Sql(Commit) command"),
+            _ => panic!("Expected Sql command"),
         }
     }
 

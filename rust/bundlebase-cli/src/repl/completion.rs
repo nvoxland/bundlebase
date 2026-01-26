@@ -1,6 +1,5 @@
 use crate::repl::commands;
 use crate::state::BundleState;
-use bundlebase::bundle::BundleFacade;
 use reedline::{Completer, Span, Suggestion};
 use std::sync::Arc;
 
@@ -38,7 +37,7 @@ impl BundleCompleter {
 
     /// Get column names from current schema
     async fn get_column_names(&self) -> Vec<String> {
-        if let Ok(schema) = self.state.bundle.read().schema().await {
+        if let Ok(schema) = self.state.schema().await {
             return schema
                 .fields()
                 .iter()
