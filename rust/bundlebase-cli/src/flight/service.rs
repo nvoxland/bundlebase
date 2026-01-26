@@ -16,8 +16,9 @@ use arrow_flight::sql::server::FlightSqlService;
 use arrow_flight::sql::server::PeekableFlightDataStream;
 use arrow_flight::sql::{
     ActionClosePreparedStatementRequest, ActionCreatePreparedStatementRequest,
-    ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetDbSchemas,
-    CommandGetPrimaryKeys, CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables,
+    ActionCreatePreparedStatementResult, Any, CommandGetCatalogs, CommandGetCrossReference,
+    CommandGetDbSchemas, CommandGetExportedKeys, CommandGetImportedKeys, CommandGetPrimaryKeys,
+    CommandGetSqlInfo, CommandGetTableTypes, CommandGetTables, CommandGetXdbcTypeInfo,
     CommandPreparedStatementQuery, CommandPreparedStatementUpdate, CommandStatementQuery,
     ProstMessageExt, SqlInfo, TicketStatementQuery,
 };
@@ -41,6 +42,8 @@ use uuid::Uuid;
 struct Session {
     state: Arc<BundleState>,
     prepared_statements: HashMap<String, PreparedStatement>,
+    /// Cached bundle schema (updated when bundle changes).
+    bundle_schema: Option<Arc<Schema>>,
 }
 
 /// Store for sessions, keyed by auth token.
@@ -114,8 +117,9 @@ impl BundlebaseFlightSqlService {
     /// Get the session state for a request.
     ///
     /// Looks up the session by auth token from request metadata.
-    /// Returns an error if no valid token is found.
-    fn get_session_state<T>(&self, request: &Request<T>) -> Result<Arc<BundleState>, Status> {
+    /// If token is valid format but session doesn't exist (e.g., server restarted),
+    /// creates a new session for the token automatically.
+    async fn get_session_state<T>(&self, request: &Request<T>) -> Result<Arc<BundleState>, Status> {
         // Try to extract auth token from request metadata
         if let Some(auth_header) = request.metadata().get("authorization") {
             if let Ok(auth_str) = auth_header.to_str() {
@@ -123,8 +127,24 @@ impl BundlebaseFlightSqlService {
                 let token = auth_str.strip_prefix("Bearer ").unwrap_or(auth_str);
 
                 // Look up session state by token
-                if let Some(session) = self.sessions.read().get(token) {
-                    return Ok(Arc::clone(&session.state));
+                {
+                    let sessions = self.sessions.read();
+                    if let Some(session) = sessions.get(token) {
+                        return Ok(Arc::clone(&session.state));
+                    }
+                }
+
+                // Token looks valid (has our format) but session doesn't exist
+                // This can happen if server restarted. Auto-create a new session.
+                if token.starts_with("token-") {
+                    info!(
+                        "Token {} not found, auto-creating session (server may have restarted)",
+                        token
+                    );
+                    let session = self.create_session().await?;
+                    let state = Arc::clone(&session.state);
+                    self.sessions.write().insert(token.to_string(), session);
+                    return Ok(state);
                 }
             }
         }
@@ -177,9 +197,13 @@ impl BundlebaseFlightSqlService {
             Arc::new(BundleState::read_write(builder))
         };
 
+        // Try to get initial bundle schema (may be empty for new bundles)
+        let bundle_schema = state.schema().await.ok().map(|s| (*s).clone().into());
+
         Ok(Session {
             state,
             prepared_statements: HashMap::new(),
+            bundle_schema,
         })
     }
 
@@ -199,6 +223,24 @@ impl BundlebaseFlightSqlService {
             .get_query_schema(sql)
             .await
             .map_err(|e| Status::internal(format!("Failed to plan query: {}", e)))
+    }
+
+    /// Get the cached bundle schema for a token (if available).
+    fn get_bundle_schema_for_token(&self, token: &str) -> Option<Arc<Schema>> {
+        self.sessions
+            .read()
+            .get(token)
+            .and_then(|session| session.bundle_schema.clone())
+    }
+
+    /// Refresh the cached bundle schema for a session.
+    /// Called after mutations (ATTACH, etc.) that may change the schema.
+    async fn refresh_schema_cache(&self, token: &str, state: &Arc<BundleState>) {
+        if let Ok(schema) = state.schema().await {
+            if let Some(session) = self.sessions.write().get_mut(token) {
+                session.bundle_schema = Some((*schema).clone().into());
+            }
+        }
     }
 
     /// Check if there are any active sessions (for testing).
@@ -287,18 +329,18 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         info!("Created new session for user '{}': {}", username, token);
 
-        // Return success response with the token in the header
+        // Return success response with the token in both payload and header
+        // Flight SQL JDBC driver expects the token in the payload
         let handshake_response = HandshakeResponse {
             protocol_version: 1,
-            payload: Bytes::new(), // Token goes in header, not payload
+            payload: Bytes::from(format!("Bearer {}", token)),
         };
 
         let stream: Pin<Box<dyn Stream<Item = Result<HandshakeResponse, Status>> + Send>> =
             Box::pin(futures::stream::once(async { Ok(handshake_response) }));
         let mut response = Response::new(stream);
 
-        // Set the authorization header with Bearer token format
-        // The client expects: authorization: Bearer <token>
+        // Also set the authorization header for clients that expect it there
         response.metadata_mut().insert(
             "authorization",
             format!("Bearer {}", token)
@@ -322,7 +364,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         // Get token and session state for this request
         let token = self.get_token(&request)?;
-        let state = self.get_session_state(&request)?;
+        let state = self.get_session_state(&request).await?;
 
         // Get schema by planning query (not executing)
         let schema = self.get_query_schema(&state, &sql).await?;
@@ -447,7 +489,14 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         info!("Executing prepared statement: {} -> {}", handle, sql);
 
-        execute_query_streaming(&state, sql).await
+        let result = execute_query_streaming(&state, sql.clone()).await;
+
+        // Refresh schema cache after bundlebase commands that might modify schema
+        if bundlebase::bundle::is_command_statement(&sql) {
+            self.refresh_schema_cache(&token, &state).await;
+        }
+
+        result
     }
 
     /// Execute a prepared statement update (DML).
@@ -502,7 +551,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         info!("Getting flight info for statement: {}", sql);
 
         // Get session state for this request
-        let state = self.get_session_state(&request)?;
+        let state = self.get_session_state(&request).await?;
 
         // Get schema by planning the query
         let schema = self.get_query_schema(&state, &sql).await?;
@@ -543,10 +592,18 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         info!("Executing direct statement: {}", sql);
 
-        // Get session state for this request
-        let state = self.get_session_state(&request)?;
+        // Get token and session state for this request
+        let token = self.get_token(&request)?;
+        let state = self.get_session_state(&request).await?;
 
-        execute_query_streaming(&state, sql).await
+        let result = execute_query_streaming(&state, sql.clone()).await;
+
+        // Refresh schema cache after bundlebase commands that might modify schema
+        if bundlebase::bundle::is_command_statement(&sql) {
+            self.refresh_schema_cache(&token, &state).await;
+        }
+
+        result
     }
 
     /// Fallback handler for unknown ticket types.
@@ -624,10 +681,15 @@ impl FlightSqlService for BundlebaseFlightSqlService {
     /// Get tables data.
     async fn do_get_tables(
         &self,
-        _cmd: CommandGetTables,
-        _request: Request<Ticket>,
+        cmd: CommandGetTables,
+        request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
-        metadata::do_get_tables()
+        // Try to get cached bundle schema from session
+        let bundle_schema = self
+            .get_token(&request)
+            .ok()
+            .and_then(|token| self.get_bundle_schema_for_token(&token));
+        metadata::do_get_tables(cmd, bundle_schema)
     }
 
     /// Get table types info.
@@ -664,6 +726,78 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         _request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         metadata::do_get_primary_keys()
+    }
+
+    /// Get exported keys info.
+    async fn get_flight_info_exported_keys(
+        &self,
+        cmd: CommandGetExportedKeys,
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        metadata::get_flight_info_exported_keys(cmd, request)
+    }
+
+    /// Get exported keys data (returns empty - no foreign key constraints).
+    async fn do_get_exported_keys(
+        &self,
+        _cmd: CommandGetExportedKeys,
+        _request: Request<Ticket>,
+    ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        metadata::do_get_exported_keys()
+    }
+
+    /// Get imported keys info.
+    async fn get_flight_info_imported_keys(
+        &self,
+        cmd: CommandGetImportedKeys,
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        metadata::get_flight_info_imported_keys(cmd, request)
+    }
+
+    /// Get imported keys data (returns empty - no foreign key constraints).
+    async fn do_get_imported_keys(
+        &self,
+        _cmd: CommandGetImportedKeys,
+        _request: Request<Ticket>,
+    ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        metadata::do_get_imported_keys()
+    }
+
+    /// Get cross reference info.
+    async fn get_flight_info_cross_reference(
+        &self,
+        cmd: CommandGetCrossReference,
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        metadata::get_flight_info_cross_reference(cmd, request)
+    }
+
+    /// Get cross reference data (returns empty - no foreign key constraints).
+    async fn do_get_cross_reference(
+        &self,
+        _cmd: CommandGetCrossReference,
+        _request: Request<Ticket>,
+    ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        metadata::do_get_cross_reference()
+    }
+
+    /// Get XDBC type info.
+    async fn get_flight_info_xdbc_type_info(
+        &self,
+        cmd: CommandGetXdbcTypeInfo,
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        metadata::get_flight_info_xdbc_type_info(cmd, request)
+    }
+
+    /// Get XDBC type info data.
+    async fn do_get_xdbc_type_info(
+        &self,
+        _cmd: CommandGetXdbcTypeInfo,
+        _request: Request<Ticket>,
+    ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        metadata::do_get_xdbc_type_info()
     }
 
     /// Register SQL info (not needed for read-only server).

@@ -132,12 +132,13 @@ impl Operation for CreateViewOp {
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Check view name doesn't already exist
+        let views = bundle.views.read();
         debug!(
             "Checking if view '{}' exists. Current views: {:?}",
             self.name,
-            bundle.views.keys().collect::<Vec<_>>()
+            views.keys().collect::<Vec<_>>()
         );
-        if bundle.views.contains_key(&self.name) {
+        if views.contains_key(&self.name) {
             return Err(format!("View '{}' already exists", self.name).into());
         }
         Ok(())
@@ -149,7 +150,7 @@ impl Operation for CreateViewOp {
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         // Store view name->id mapping
-        bundle.views.insert(self.name.clone(), self.id);
+        bundle.views.write().insert(self.name.clone(), self.id);
         Ok(())
     }
 

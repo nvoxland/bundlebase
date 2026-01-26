@@ -17,12 +17,11 @@ pub struct DropViewOp {
 impl DropViewOp {
     pub async fn setup(view_name: &str, bundle: &Bundle) -> Result<Self, BundlebaseError> {
         // Look up the view ID from the name
-        let view_id = *bundle
-            .views
+        let views = bundle.views.read();
+        let view_id = *views
             .get(view_name)
             .ok_or_else(|| {
-                let available_views: Vec<String> = bundle
-                    .views
+                let available_views: Vec<String> = views
                     .iter()
                     .map(|(name, id)| format!("{} ({})", name, id))
                     .collect();
@@ -45,7 +44,7 @@ impl DropViewOp {
 impl Operation for DropViewOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Check that the view id exists
-        let view_exists = bundle.views.values().any(|id| id == &self.id);
+        let view_exists = bundle.views.read().values().any(|id| id == &self.id);
         if !view_exists {
             return Err(format!("View with ID '{}' not found", self.id).into());
         }
@@ -59,7 +58,7 @@ impl Operation for DropViewOp {
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
         // Find and remove the name->id mapping
-        bundle.views.retain(|_, id| id != &self.id);
+        bundle.views.write().retain(|_, id| id != &self.id);
 
         log::info!("Dropped view {}", self.id);
 

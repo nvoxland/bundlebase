@@ -51,10 +51,10 @@ struct Args {
     #[arg(long)]
     create: bool,
 
-    /// Open bundle in read-only mode (default: true).
+    /// Open bundle in read-only mode (default: false).
     /// When true, only SELECT and EXPLAIN PLAN commands are allowed.
-    /// Use --read-only=false to enable ATTACH, FILTER, COMMIT, and other modifying commands.
-    #[arg(long, default_value = "true")]
+    /// Use --read-only to enable read-only mode.
+    #[arg(long, default_value = "false")]
     read_only: bool,
 
     /// Host address to bind to (Flight mode only)

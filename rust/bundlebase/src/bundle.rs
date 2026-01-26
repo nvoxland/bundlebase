@@ -13,7 +13,7 @@ mod sql;
 
 use crate::io::EMPTY_SCHEME;
 pub use builder::BundleBuilder;
-pub(crate) use builder::BundleStatus;
+pub use builder::BundleStatus;
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
 pub use command::parser::{is_command_statement, parse_command};
 pub use command::BundleCommand;
@@ -30,7 +30,7 @@ pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
 pub use source::Source;
 use std::collections::{HashMap, HashSet};
 
-use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME};
+use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, BundleMetadata, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME};
 use crate::udf::VersionUdf;
 use crate::data::{DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::source::SourceFunctionRegistry;
@@ -182,12 +182,13 @@ pub struct Bundle {
     data_dir: Arc<dyn IOReadWriteDir>,
     commits: Arc<RwLock<Vec<BundleCommit>>>,
     status: Arc<RwLock<BundleStatus>>,
+    metadata: Arc<RwLock<BundleMetadata>>,
     operations: Vec<AnyOperation>,
 
     packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
     sources: HashMap<ObjectId, Arc<Source>>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
-    views: HashMap<String, ObjectId>,
+    views: Arc<RwLock<HashMap<String, ObjectId>>>,
     dataframe: DataFrameHolder,
 
     ctx: Arc<SessionContext>,
@@ -230,6 +231,18 @@ impl Clone for Bundle {
             Arc::new(RwLock::new(s.clone()))
         };
 
+        // Deep clone metadata for independence
+        let metadata = {
+            let m = self.metadata.read();
+            Arc::new(RwLock::new(m.clone()))
+        };
+
+        // Deep clone views for independence
+        let views = {
+            let v = self.views.read();
+            Arc::new(RwLock::new(v.clone()))
+        };
+
         Self {
             id: self.id.clone(),
             name: self.name.clone(),
@@ -237,13 +250,14 @@ impl Clone for Bundle {
             data_dir: Arc::clone(&self.data_dir),
             commits: Arc::clone(&self.commits),
             status,
+            metadata,
             operations: self.operations.clone(),
             version: self.version.clone(),
             last_manifest_version: self.last_manifest_version,
             packs: Arc::clone(&self.packs),
             sources: self.sources.clone(),
             indexes,
-            views: self.views.clone(),
+            views,
             dataframe: DataFrameHolder {
                 dataframe: Arc::new(RwLock::new(self.dataframe.dataframe.read().clone())),
             },
@@ -277,6 +291,18 @@ impl Bundle {
         let packs = Arc::new(RwLock::new(HashMap::new()));
         let commits = Arc::new(RwLock::new(vec![]));
         let status = Arc::new(RwLock::new(BundleStatus::new()));
+        let indexes = Arc::new(RwLock::new(Vec::new()));
+        let views = Arc::new(RwLock::new(HashMap::new()));
+
+        let id = Uuid::new_v4().to_string();
+        let metadata = Arc::new(RwLock::new(BundleMetadata {
+            id: id.clone(),
+            name: None,
+            description: None,
+            url: url.clone(),
+            from: None,
+            version: "empty".to_string(),
+        }));
 
         let empty_dataframe = DataFrame::new(
             ctx.state(),
@@ -306,7 +332,14 @@ impl Bundle {
         )?;
         catalog.register_schema(
             "bundle_info",
-            Arc::new(BundleInfoSchemaProvider::new(commits.clone(), status.clone())),
+            Arc::new(BundleInfoSchemaProvider::new(
+                commits.clone(),
+                status.clone(),
+                metadata.clone(),
+                views.clone(),
+                indexes.clone(),
+                packs.clone(),
+            )),
         )?;
         catalog.register_schema("temp", Arc::new(MemorySchemaProvider::new()))?;
 
@@ -324,11 +357,11 @@ impl Bundle {
 
         Ok(Self {
             ctx,
-            id: Uuid::new_v4().to_string(),
+            id,
             packs,
             sources: HashMap::new(),
-            indexes: Arc::new(RwLock::new(Vec::new())),
-            views: HashMap::new(),
+            indexes,
+            views,
             storage: Arc::clone(&storage),
             adapter_factory: DataReaderFactory::new(
                 Arc::clone(&function_registry),
@@ -346,6 +379,7 @@ impl Bundle {
             data_dir: writable_dir_from_url(&url, BundleConfig::default().into())?,
             commits,
             status,
+            metadata,
             dataframe,
             config: Arc::new(crate::BundleConfig::new()),
             passed_config: None,
@@ -538,8 +572,8 @@ impl Bundle {
     }
 
     /// Get the view ID for a given view name
-    pub fn get_view_id(&self, name: &str) -> Option<&ObjectId> {
-        self.views.get(name)
+    pub fn get_view_id(&self, name: &str) -> Option<ObjectId> {
+        self.views.read().get(name).copied()
     }
 
     /// Get the view ID for a given view identifier (either name or ID)
@@ -553,10 +587,12 @@ impl Bundle {
         &self,
         identifier: &str,
     ) -> Result<(ObjectId, String), BundlebaseError> {
+        let views = self.views.read();
+
         // Try to parse as ObjectId first
         if let Ok(id) = ObjectId::try_from(identifier) {
             // Look for this ID in the views map values
-            for (name, view_id) in &self.views {
+            for (name, view_id) in views.iter() {
                 if view_id == &id {
                     return Ok((id, name.clone()));
                 }
@@ -565,15 +601,14 @@ impl Bundle {
         }
 
         // Treat as name
-        if let Some(id) = self.views.get(identifier) {
+        if let Some(id) = views.get(identifier) {
             Ok((*id, identifier.to_string()))
         } else {
             // Provide helpful error message listing available views
-            if self.views.is_empty() {
+            if views.is_empty() {
                 Err(format!("View '{}' not found (no views exist)", identifier).into())
             } else {
-                let available: Vec<String> = self
-                    .views
+                let available: Vec<String> = views
                     .iter()
                     .map(|(name, id)| format!("{} (id: {})", name, id))
                     .collect();
@@ -737,6 +772,20 @@ impl Bundle {
         // Re-register version() UDF with the updated version
         self.ctx
             .register_udf(ScalarUDF::new_from_impl(VersionUdf::new(self.version.clone())));
+
+        // Update metadata for bundle_info.details table
+        self.update_metadata();
+    }
+
+    /// Update the metadata struct to reflect current bundle state
+    fn update_metadata(&self) {
+        let mut metadata = self.metadata.write();
+        metadata.id = self.id.clone();
+        metadata.name = self.name.clone();
+        metadata.description = self.description.clone();
+        metadata.url = self.data_dir.url().clone();
+        metadata.from = self.from();
+        metadata.version = self.version.clone();
     }
 
     pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<Pack>) {
@@ -1192,6 +1241,7 @@ impl BundleFacade for Bundle {
     fn views(&self) -> HashMap<ObjectId, String> {
         // Reverse the name->id HashMap to id->name
         self.views
+            .read()
             .iter()
             .map(|(name, id)| (*id, name.clone()))
             .collect()

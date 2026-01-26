@@ -22,12 +22,11 @@ impl RenameViewOp {
         bundle: &Bundle,
     ) -> Result<Self, BundlebaseError> {
         // Look up the view ID from the old name
-        let view_id = *bundle
-            .views
+        let views = bundle.views.read();
+        let view_id = *views
             .get(old_name)
             .ok_or_else(|| {
-                let available_views: Vec<String> = bundle
-                    .views
+                let available_views: Vec<String> = views
                     .iter()
                     .map(|(name, id)| format!("{} ({})", name, id))
                     .collect();
@@ -52,14 +51,16 @@ impl RenameViewOp {
 #[async_trait]
 impl Operation for RenameViewOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
+        let views = bundle.views.read();
+
         // Check that the view id exists
-        let view_exists = bundle.views.values().any(|id| id == &self.id);
+        let view_exists = views.values().any(|id| id == &self.id);
         if !view_exists {
             return Err(format!("View with ID '{}' not found", self.id).into());
         }
 
         // Check that new_name doesn't already exist
-        if bundle.views.contains_key(&self.new_name) {
+        if views.contains_key(&self.new_name) {
             return Err(format!("View '{}' already exists", self.new_name).into());
         }
 
@@ -67,19 +68,20 @@ impl Operation for RenameViewOp {
     }
 
     async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+        let mut views = bundle.views.write();
+
         // Find and remove the old name->id mapping
-        let old_name = bundle
-            .views
+        let old_name = views
             .iter()
             .find(|(_, id)| *id == &self.id)
             .map(|(name, _)| name.clone());
 
         if let Some(old_name) = old_name {
-            bundle.views.remove(&old_name);
+            views.remove(&old_name);
         }
 
         // Insert new name->id mapping
-        bundle.views.insert(self.new_name.clone(), self.id);
+        views.insert(self.new_name.clone(), self.id);
 
         Ok(())
     }
