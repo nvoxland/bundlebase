@@ -45,11 +45,20 @@ pub async fn start(state: Arc<BundleState>) -> Result<(), BundlebaseError> {
     let tracker = Box::new(progress_impl::IndicatifTracker::new());
     bundlebase::progress::set_tracker(tracker);
 
-    // Setup history
-    let history = Box::new(
-        FileBackedHistory::with_file(1000, "repl-history.txt".into())
-            .unwrap_or_else(|_| FileBackedHistory::default()),
-    );
+    // Setup history in ~/.bundlebase/history.txt
+    let history = Box::new({
+        let history_path = dirs::home_dir()
+            .map(|home| home.join(".bundlebase").join("history.txt"))
+            .unwrap_or_else(|| "repl-history.txt".into());
+
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = history_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        FileBackedHistory::with_file(1000, history_path)
+            .unwrap_or_else(|_| FileBackedHistory::default())
+    });
 
     // Setup completer
     let completer = Box::new(BundleCompleter::new(state.clone()));
