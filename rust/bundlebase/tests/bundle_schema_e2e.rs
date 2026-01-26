@@ -88,12 +88,12 @@ async fn test_bundle_history_table_empty() {
     // Re-open the bundle
     let bundle = Bundle::open(data_dir.url().as_str(), None).await.unwrap();
 
-    // Query the bundle_history table directly via ctx
-    let df = bundle.ctx().sql("SELECT * FROM bundle_history").await.unwrap();
+    // Query the bundle_info.history table directly via ctx
+    let df = bundle.ctx().sql("SELECT * FROM bundle_info.history").await.unwrap();
 
     // Verify schema has the expected columns
     let schema = df.schema();
-    assert_eq!(schema.fields().len(), 6, "bundle_history should have 6 columns");
+    assert_eq!(schema.fields().len(), 6, "bundle_info.history should have 6 columns");
 
     let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
     assert_eq!(field_names, vec!["id", "url", "author", "message", "timestamp", "change_count"]);
@@ -126,8 +126,8 @@ async fn test_bundle_history_table_with_commit() {
         .await
         .unwrap();
 
-    // Query the bundle_history table directly via ctx
-    let df = bundle.ctx().sql("SELECT * FROM bundle_history").await.unwrap();
+    // Query the bundle_info.history table directly via ctx
+    let df = bundle.ctx().sql("SELECT * FROM bundle_info.history").await.unwrap();
 
     // Verify one commit exists
     let batches: Vec<_> = df.clone().execute_stream().await.unwrap().collect::<Vec<_>>().await;
@@ -138,7 +138,7 @@ async fn test_bundle_history_table_with_commit() {
     assert_eq!(total_rows, 1, "One commit should exist");
 
     // Query specific columns
-    let df = bundle.ctx().sql("SELECT message, change_count FROM bundle_history").await.unwrap();
+    let df = bundle.ctx().sql("SELECT message, change_count FROM bundle_info.history").await.unwrap();
     let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
 
     // Verify message column value
@@ -170,8 +170,8 @@ async fn test_bundle_history_table_multiple_commits() {
         .await
         .unwrap();
 
-    // Query the bundle_history table directly via ctx
-    let df = bundle.ctx().sql("SELECT id, message FROM bundle_history ORDER BY id").await.unwrap();
+    // Query the bundle_info.history table directly via ctx
+    let df = bundle.ctx().sql("SELECT id, message FROM bundle_info.history ORDER BY id").await.unwrap();
     let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
 
     // Verify two commits exist

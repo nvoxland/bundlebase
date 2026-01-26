@@ -29,7 +29,7 @@ pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
 pub use source::Source;
 use std::collections::{HashMap, HashSet};
 
-use crate::catalog::{BlockSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
+use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, BundleSchemaProvider, PackSchemaProvider, CATALOG_NAME};
 use crate::udf::VersionUdf;
 use crate::data::{DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::source::SourceFunctionRegistry;
@@ -292,7 +292,11 @@ impl Bundle {
         )?;
         catalog.register_schema(
             "public",
-            Arc::new(BundleSchemaProvider::new(dataframe.clone(), commits.clone())),
+            Arc::new(BundleSchemaProvider::new(dataframe.clone())),
+        )?;
+        catalog.register_schema(
+            "bundle_info",
+            Arc::new(BundleInfoSchemaProvider::new(commits.clone())),
         )?;
         catalog.register_schema("temp", Arc::new(MemorySchemaProvider::new()))?;
 
