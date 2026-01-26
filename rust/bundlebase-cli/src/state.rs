@@ -11,6 +11,7 @@ use bundlebase::bundle::{
 use bundlebase::{Bundle, BundleBuilder, BundlebaseError};
 use datafusion::execution::SendableRecordBatchStream;
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 /// Result of SQL execution.
 ///
@@ -173,10 +174,12 @@ impl BundleState {
 
     /// Get the bundle schema.
     pub async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {
-        match &self.mode {
-            BundleMode::ReadOnly(lock) => lock.read().schema().await,
-            BundleMode::ReadWrite(lock) => lock.read().schema().await,
-        }
+        // Clone the Arc to avoid holding the guard across await
+        let facade: Arc<dyn BundleFacade> = match &self.mode {
+            BundleMode::ReadOnly(lock) => Arc::new(lock.read().clone()),
+            BundleMode::ReadWrite(lock) => Arc::new(lock.read().clone()),
+        };
+        facade.schema().await
     }
 
     /// Get the number of rows in the bundle.
