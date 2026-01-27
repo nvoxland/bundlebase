@@ -1238,14 +1238,6 @@ impl BundleBuilder {
         &self,
         update_versions: bool,
     ) -> Result<super::VerificationResults, BundlebaseError> {
-        self.verify_data_internal(update_versions).await
-    }
-
-    /// Internal implementation of verify_data.
-    async fn verify_data_internal( //todo: why split?
-        &self,
-        update_versions: bool,
-    ) -> Result<super::VerificationResults, BundlebaseError> {
         use super::{FileVerificationResult, VerificationResults};
         use crate::bundle::operation::UpdateVersionOp;
         use crate::io::readable_file_from_path;
