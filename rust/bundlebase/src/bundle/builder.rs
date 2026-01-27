@@ -163,6 +163,8 @@ pub struct BundleBuilder {
     bundle: Arc<Bundle>,
     /// Tracks the current in-progress change being built.
     in_progress_change: RwLock<Option<BundleChange>>,
+    /// Tracks uncommitted changes for this builder.
+    status: RwLock<BundleStatus>,
 }
 
 impl Clone for BundleBuilder {
@@ -170,6 +172,7 @@ impl Clone for BundleBuilder {
         Self {
             bundle: Arc::clone(&self.bundle),
             in_progress_change: RwLock::new(self.in_progress_change.read().clone()),
+            status: RwLock::new(self.status.read().clone()),
         }
     }
 }
@@ -217,6 +220,7 @@ impl BundleBuilder {
         Ok(Arc::new(BundleBuilder {
             bundle: Arc::new(existing),
             in_progress_change: RwLock::new(None),
+            status: RwLock::new(BundleStatus::new()),
         }))
     }
 
@@ -227,15 +231,8 @@ impl BundleBuilder {
     /// The returned builder has **independent** status tracking from the source bundle.
     /// Changes made to this builder will not appear in the original bundle's status,
     /// and vice versa.
-    ///
-    /// See `Bundle::clone()` documentation for details on status sharing semantics.
     pub fn extend(bundle: Arc<Bundle>, data_dir: Option<&str>) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         let mut new_bundle = bundle.deref().clone();
-
-        // TODO: there should be no status in bundles
-        // Create a fresh status for the new builder - don't inherit uncommitted changes
-        // This ensures the derived builder has independent change tracking
-        new_bundle.clear_status_for_extend();
 
         // Detach data_dir and last_manifest_version so modifications don't affect the original
         new_bundle.detach_for_extend();
@@ -254,6 +251,7 @@ impl BundleBuilder {
         Ok(Arc::new(BundleBuilder {
             bundle: Arc::new(new_bundle),
             in_progress_change: RwLock::new(None),
+            status: RwLock::new(BundleStatus::new()),
         }))
     }
 
@@ -264,7 +262,7 @@ impl BundleBuilder {
 
     /// Returns the bundle status showing uncommitted changes.
     pub fn status(&self) -> BundleStatus {
-        self.bundle.status().read().clone()
+        self.status.read().clone()
     }
 
     /// Commits all operations in the bundle to persistent storage.
@@ -282,7 +280,7 @@ impl BundleBuilder {
         let manifest_dir = self.bundle.data_dir().writable_subdir(META_DIR)?;
         let last_manifest_version = *self.bundle.last_manifest_version.read();
         let from = self.bundle.from();
-        let changes = self.bundle.status().read().changes().clone();
+        let changes = self.status.read().changes().clone();
         let config = self.bundle.passed_config.read().clone();
         let url = self.bundle.url().to_string();
         let bundle_id = self.bundle.id();
@@ -340,11 +338,12 @@ impl BundleBuilder {
         // Update base to reflect the committed version
         // Preserve explicit_config from current bundle
         let new_bundle = Bundle::open_to_bundle(&url, config).await?;
-        // Clear status since the operations have been persisted
-        new_bundle.status().write().clear();
 
         // Replace the bundle contents using reload_from to preserve Arc references
         self.bundle.reload_from(new_bundle);
+
+        // Clear status since the operations have been persisted
+        self.status.write().clear();
 
         info!("Committed version {}", self.bundle.version());
 
@@ -368,7 +367,7 @@ impl BundleBuilder {
         }
 
         // Clear all uncommitted changes
-        self.bundle.status().write().clear();
+        self.status.write().clear();
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
@@ -397,13 +396,13 @@ impl BundleBuilder {
         }
 
         // Remove the last change
-        self.bundle.status().write().pop();
+        self.status.write().pop();
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
 
         // Reapply all remaining operations
-        let changes = self.bundle.status().read().changes().clone();
+        let changes = self.status.read().changes().clone();
         for change in &changes {
             for op in &change.operations {
                 self.bundle.apply_operation(op.clone()).await?;
@@ -502,7 +501,7 @@ impl BundleBuilder {
             Ok(_) => {
                 if !is_nested {
                     if let Some(change) = self.in_progress_change.write().take() {
-                        self.bundle.status().write().push_change(change);
+                        self.status.write().push_change(change);
                     }
                 }
                 Ok(())
@@ -563,7 +562,7 @@ impl BundleBuilder {
             Ok(_) => {
                 if !is_nested {
                     if let Some(change) = self.in_progress_change.write().take() {
-                        self.bundle.status().write().push_change(change);
+                        self.status.write().push_change(change);
                     }
                 }
             }
@@ -760,7 +759,7 @@ impl BundleBuilder {
 
         let name = name.to_string();
         let source_ops_count = source.status().operations().len();
-        let changes_before = self.bundle.status().read().changes().len();
+        let changes_before = self.status.read().changes().len();
         let source_clone = source.clone();
 
         self.do_change(&format!("Create view '{}'", name), |builder| {
@@ -774,16 +773,16 @@ impl BundleBuilder {
         .await?;
 
         // After creating view, if source had uncommitted operations and source shares
-        // the same status as self, we need to remove those operations to prevent double-commit.
+        // the same underlying bundle, we need to remove those operations to prevent double-commit.
         // Note: With the current implementation where select() creates a derived builder with
-        // independent status, this block is rarely entered because the status Arcs differ.
+        // independent status, this block is rarely entered because the bundles differ.
         // This check is preserved for cases where the source IS self (not derived from select).
-        let shares_status = Arc::ptr_eq(
-            self.bundle.status(),
-            source.bundle.status(),
+        let shares_bundle = Arc::ptr_eq(
+            &self.bundle,
+            &source.bundle,
         );
-        if shares_status && source_ops_count > 0 && changes_before >= source_ops_count {
-            let mut status = self.bundle.status().write();
+        if shares_bundle && source_ops_count > 0 && changes_before >= source_ops_count {
+            let mut status = self.status.write();
             let create_view_change = status.pop_change();
             let keep_count = changes_before - source_ops_count;
             status.truncate(keep_count);
@@ -1553,7 +1552,11 @@ impl BundleFacade for BundleBuilder {
     }
 
     fn status_changes(&self) -> Vec<BundleChange> {
-        self.bundle.status.read().changes().clone()
+        self.status.read().changes().clone()
+    }
+
+    fn status(&self) -> BundleStatus {
+        self.status.read().clone()
     }
 
     fn indexes(&self) -> Vec<Arc<IndexDefinition>> {

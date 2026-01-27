@@ -1,5 +1,6 @@
 use crate::bundle::operation::BundleChange;
 use crate::bundle::BundleCommit;
+use crate::bundle::BundleStatus;
 use crate::bundle::Pack;
 use crate::index::IndexDefinition;
 use crate::io::{IOReadWriteDir, ObjectId};
@@ -132,6 +133,9 @@ pub trait BundleFacade: Send + Sync {
 
     /// Returns uncommitted changes (empty for Bundle, populated for BundleBuilder)
     fn status_changes(&self) -> Vec<BundleChange>;
+
+    /// Returns the current bundle status
+    fn status(&self) -> BundleStatus;
 
     /// Returns index definitions
     fn indexes(&self) -> Vec<Arc<IndexDefinition>>;
