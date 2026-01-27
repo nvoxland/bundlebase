@@ -6,7 +6,7 @@ use crate::index::{
     TextColumnIndex, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
 };
 use crate::progress::ProgressScope;
-use crate::{Bundle, BundlebaseError};
+use crate::{Bundle, BundleBuilder, BundlebaseError};
 use arrow::record_batch::RecordBatch;
 use arrow_schema::DataType;
 use async_trait::async_trait;
@@ -179,11 +179,13 @@ impl IndexBlocksOp {
     /// - Data types differ between blocks for the same column
     /// - Streaming or index building fails
     pub async fn setup(
-        index: &ObjectId, //todo: Should take BundleBuilder
+        index: &ObjectId,
         column: &str,
         blocks: Vec<(ObjectId, String)>,
-        bundle: &Bundle,
+        builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
+        let bundle = builder.bundle();
+
         // Validate blocks is non-empty early
         if blocks.is_empty() {
             return Err(BundlebaseError::from("Cannot create index with no blocks"));

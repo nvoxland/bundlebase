@@ -66,7 +66,7 @@ impl Operation for UpdateVersionOp {
             &self.new_version,
             old_block.reader(),
             bundle.indexes().clone(),
-            bundle.data_dir_arc(),
+            bundle.data_dir(),
             bundle.config(),
             old_block.source_info().cloned(),
         ));
