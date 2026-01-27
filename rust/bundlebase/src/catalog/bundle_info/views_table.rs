@@ -1,24 +1,46 @@
-use crate::data::ObjectId;
+use crate::bundle::BundleFacade;
 use arrow::array::{RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use datafusion::datasource::MemTable;
-use datafusion::error::DataFusionError;
-use std::collections::HashMap;
+use async_trait::async_trait;
+use datafusion::catalog::Session;
+use datafusion::datasource::{MemTable, TableProvider, TableType};
+use datafusion::error::Result;
+use datafusion::logical_expr::Expr;
+use datafusion::physical_plan::ExecutionPlan;
+use std::any::Any;
 use std::sync::Arc;
 
-/// Helper struct for creating the bundle_views table
-pub(super) struct BundleViewsTable;
+/// TableProvider that queries bundle views dynamically from the BundleFacade.
+pub(super) struct BundleViewsTable {
+    facade: Arc<dyn BundleFacade>,
+    schema: SchemaRef,
+}
+
+impl std::fmt::Debug for BundleViewsTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BundleViewsTable")
+            .field("schema", &self.schema)
+            .finish()
+    }
+}
 
 impl BundleViewsTable {
-    fn schema() -> SchemaRef {
+    pub fn new(facade: Arc<dyn BundleFacade>) -> Self {
+        Self {
+            facade,
+            schema: Self::table_schema(),
+        }
+    }
+
+    fn table_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
             Field::new("name", DataType::Utf8, false),
         ]))
     }
 
-    pub fn new(views: HashMap<String, ObjectId>) -> Result<MemTable, DataFusionError> {
-        let schema = Self::schema();
+    fn build_batch(&self) -> Result<RecordBatch> {
+        let views = self.facade.views_by_name();
 
         // Sort views by name for consistent ordering
         let mut view_list: Vec<_> = views.iter().collect();
@@ -28,20 +50,42 @@ impl BundleViewsTable {
         let names: Vec<&str> = view_list.iter().map(|(name, _)| name.as_str()).collect();
 
         let batch = RecordBatch::try_new(
-            Arc::clone(&schema),
+            Arc::clone(&self.schema),
             vec![
-                Arc::new(StringArray::from(ids.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+                Arc::new(StringArray::from(
+                    ids.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
                 Arc::new(StringArray::from(names)),
             ],
         )?;
 
-        let batches = if views.is_empty() {
-            let empty_batch = RecordBatch::new_empty(Arc::clone(&schema));
-            vec![vec![empty_batch]]
-        } else {
-            vec![vec![batch]]
-        };
+        Ok(batch)
+    }
+}
 
-        MemTable::try_new(schema, batches)
+#[async_trait]
+impl TableProvider for BundleViewsTable {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::Base
+    }
+
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        let batch = self.build_batch()?;
+        let mem_table = MemTable::try_new(self.schema.clone(), vec![vec![batch]])?;
+        mem_table.scan(state, projection, filters, limit).await
     }
 }

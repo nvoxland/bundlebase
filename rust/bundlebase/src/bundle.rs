@@ -254,13 +254,11 @@ impl Clone for Bundle {
 }
 
 impl Bundle {
+    /// Creates an empty bundle wrapped in Arc with schema providers registered.
+    ///
+    /// Returns `Arc<Self>` ready for use. Schema providers are registered with the
+    /// Bundle as the facade. BundleBuilder will re-register with itself as facade.
     pub async fn empty() -> Result<Arc<Self>, BundlebaseError> {
-        Ok(Arc::new(Self::empty_internal().await?))
-    }
-
-    /// Internal helper that creates an empty bundle without wrapping in Arc.
-    /// Used by both `empty()` and `open()`.
-    pub(crate) async fn empty_internal() -> Result<Self, BundlebaseError> {
         let url = Url::parse(EMPTY_URL)?;
 
         let storage = Arc::new(DataStorage::new());
@@ -295,39 +293,6 @@ impl Bundle {
 
         let dataframe = DataFrameHolder::new(Some(empty_dataframe));
 
-        // Register schema providers
-        let catalog = ctx
-            .catalog(CATALOG_NAME)
-            .expect("Default catalog not found");
-        catalog.register_schema(
-            "blocks",
-            Arc::new(BlockSchemaProvider::new(packs.clone())),
-        )?;
-        catalog.register_schema(
-            "packs",
-            Arc::new(PackSchemaProvider::new(packs.clone())),
-        )?;
-        catalog.register_schema(
-            "default",
-            Arc::new(DefaultSchemaProvider::new(dataframe.clone())),
-        )?;
-        catalog.register_schema(
-            "bundle_info",
-            Arc::new(BundleInfoSchemaProvider::new(
-                commits.clone(),
-                id.clone(),
-                name.clone(),
-                description.clone(),
-                url.clone(),
-                None,
-                version.clone(),
-                views.clone(),
-                indexes.clone(),
-                packs.clone(),
-            )),
-        )?;
-        catalog.register_schema("temp", Arc::new(MemorySchemaProvider::new()))?;
-
         // Register version() UDF with initial "empty" version
         ctx.register_udf(ScalarUDF::new_from_impl(VersionUdf::new("empty".to_string())));
 
@@ -343,8 +308,8 @@ impl Bundle {
         let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, BundleConfig::default().into())?));
         let bundle_config = Arc::new(RwLock::new(Arc::new(crate::BundleConfig::new())));
 
-        Ok(Self {
-            ctx,
+        let bundle = Arc::new(Self {
+            ctx: Arc::clone(&ctx),
             id,
             packs,
             sources,
@@ -370,7 +335,45 @@ impl Bundle {
             passed_config: Arc::new(RwLock::new(None)),
             stored_config: Arc::new(RwLock::new(BundleConfig::new())),
             is_view: Arc::new(RwLock::new(false)),
-        })
+        });
+
+        // Register schema providers with Bundle as the facade
+        Self::register_schema_providers(&ctx, bundle.clone())?;
+
+        Ok(bundle)
+    }
+
+    /// Register schema providers with the SessionContext's catalog.
+    ///
+    /// Called after Bundle/BundleBuilder is wrapped in Arc. Creates all schema providers
+    /// with the facade reference and registers them with the catalog.
+    pub(crate) fn register_schema_providers(
+        ctx: &SessionContext,
+        facade: Arc<dyn BundleFacade>,
+    ) -> Result<(), BundlebaseError> {
+        let catalog = ctx.catalog(CATALOG_NAME).expect("Default catalog not found");
+
+        // Register temp schema (doesn't need facade)
+        catalog.register_schema("temp", Arc::new(MemorySchemaProvider::new()))?;
+
+        catalog.register_schema(
+            "blocks",
+            Arc::new(BlockSchemaProvider::new(facade.clone())),
+        )?;
+        catalog.register_schema(
+            "packs",
+            Arc::new(PackSchemaProvider::new(facade.clone())),
+        )?;
+        catalog.register_schema(
+            "default",
+            Arc::new(DefaultSchemaProvider::new(facade.clone())),
+        )?;
+        catalog.register_schema(
+            "bundle_info",
+            Arc::new(BundleInfoSchemaProvider::new(facade)),
+        )?;
+
+        Ok(())
     }
 
     /// Loads a read-only Bundle from persistent storage.
@@ -384,36 +387,34 @@ impl Bundle {
     /// 3. Establishes the complete inheritance chain
     /// 4. Initializes the DataFusion session context with the bundle schema
     ///
+    /// # Note
+    /// Schema providers are registered by `empty()` BEFORE `open_recursive()`,
+    /// because operations during loading may query them (e.g., CreateIndexOp builds a dataframe).
+    ///
     /// # Example
     /// let bundle = Bundle::open("file:///data/my_bundle").await?;
     /// let schema = bundle.schema();
     /// ```
     pub async fn open(path: &str, config: Option<BundleConfig>) -> Result<Arc<Self>, BundlebaseError> {
-        Ok(Arc::new(Self::open_to_bundle(path, config).await?))
-    }
-
-    /// Internal helper that opens a bundle without wrapping in Arc.
-    /// Used by BundleBuilder which needs to own and mutate the Bundle.
-    pub(crate) async fn open_to_bundle(path: &str, config: Option<BundleConfig>) -> Result<Self, BundlebaseError> {
         let mut visited = HashSet::new();
-        let bundle = Self::empty_internal().await?;
+        let arc_bundle = Self::empty().await?;
 
-        bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
+        arc_bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
 
         // Set explicit config if provided and recompute merged config
-        *bundle.passed_config.write() = config;
-        bundle.recompute_config()?;
+        *arc_bundle.passed_config.write() = config;
+        arc_bundle.recompute_config()?;
 
         Self::open_recursive(
             writable_dir_from_str(path, BundleConfig::default().into())?
                 .url()
                 .as_str(),
             &mut visited,
-            &bundle,
+            &arc_bundle,
         )
         .await?;
 
-        Ok(bundle)
+        Ok(arc_bundle)
     }
 
     /// Internal implementation of open() that tracks visited URLs to detect cycles
@@ -1470,7 +1471,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_version() -> Result<(), BundlebaseError> {
-        let c = Bundle::empty_internal().await?;
+        let c = Bundle::empty().await?;
         assert_eq!(c.version(), "empty".to_string());
 
         c.apply_operation(AnyOperation::SetName(SetNameOp {

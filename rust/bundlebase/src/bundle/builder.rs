@@ -198,13 +198,15 @@ impl BundleBuilder {
         path: &str,
         config: Option<BundleConfig>,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
-        let existing = Bundle::empty_internal().await?;
-        *existing.passed_config.write() = config;
-        existing.recompute_config()?;
-        *existing.data_dir.write() = writable_dir_from_str(path, existing.config())?;
+        let bundle = Bundle::empty().await?;
+
+        // Modify the bundle via interior mutability
+        *bundle.passed_config.write() = config;
+        bundle.recompute_config()?;
+        *bundle.data_dir.write() = writable_dir_from_str(path, bundle.config())?;
 
         // Check if a bundle already exists at this location
-        let meta_dir = existing.data_dir().writable_subdir(META_DIR)?;
+        let meta_dir = bundle.data_dir().writable_subdir(META_DIR)?;
         let init_file = meta_dir.file(INIT_FILENAME)?;
         if init_file.exists().await? {
             return Err(format!(
@@ -215,13 +217,20 @@ impl BundleBuilder {
         }
 
         // Automatically create the base pack with a well-known ID
-        existing.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
+        bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
 
-        Ok(Arc::new(BundleBuilder {
-            bundle: Arc::new(existing),
+        let builder = Arc::new(BundleBuilder {
+            bundle,
             in_progress_change: RwLock::new(None),
             status: RwLock::new(BundleStatus::new()),
-        }))
+        });
+
+        // Re-register schema providers with BundleBuilder as facade.
+        // This overwrites the Bundle-facade providers registered by empty_internal(),
+        // so bundle_info tables show uncommitted changes from BundleBuilder.
+        Bundle::register_schema_providers(&builder.bundle.ctx, builder.clone())?;
+
+        Ok(builder)
     }
 
     /// Creates a new BundleBuilder extending from an existing Bundle.
@@ -337,10 +346,11 @@ impl BundleBuilder {
 
         // Update base to reflect the committed version
         // Preserve explicit_config from current bundle
-        let new_bundle = Bundle::open_to_bundle(&url, config).await?;
+        let new_bundle = Bundle::open(&url, config).await?;
 
         // Replace the bundle contents using reload_from to preserve Arc references
-        self.bundle.reload_from(new_bundle);
+        // open_to_bundle returns Arc<Bundle> so we dereference to get the Bundle
+        self.bundle.reload_from((*new_bundle).clone());
 
         // Clear status since the operations have been persisted
         self.status.write().clear();
@@ -420,15 +430,21 @@ impl BundleBuilder {
         let passed_config = self.bundle.passed_config.read().clone();
         let url = self.bundle.url().to_string();
 
-        let new_bundle = if empty {
-            let new = Bundle::empty_internal().await?;
-            *new.passed_config.write() = passed_config;
-            new.recompute_config()?;
-            *new.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, new.config())?;
-            new
+        // Note: reload_from preserves the original ctx and its schema providers
+        // which already have the correct facade set
+        let new_bundle: Bundle = if empty {
+            // empty() returns Arc<Bundle>, clone inner Bundle for reload_from
+            let arc = Bundle::empty().await?;
+            let bundle = (*arc).clone();
+            *bundle.passed_config.write() = passed_config;
+            bundle.recompute_config()?;
+            *bundle.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, bundle.config())?;
+            bundle
         } else {
             // Preserve explicit_config when reopening
-            Bundle::open_to_bundle(&url, passed_config).await?
+            // open returns Arc<Bundle>, so we clone the inner Bundle
+            let arc_bundle = Bundle::open(&url, passed_config).await?;
+            (*arc_bundle).clone()
         };
 
         // Update bundle contents using reload_from to preserve Arc references

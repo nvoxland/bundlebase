@@ -1,6 +1,6 @@
 mod bundle_table;
 
-use crate::bundle::DataFrameHolder;
+use crate::bundle::BundleFacade;
 use async_trait::async_trait;
 use bundle_table::BundleTable;
 use datafusion::catalog::{SchemaProvider, TableProvider};
@@ -9,15 +9,25 @@ use std::sync::Arc;
 /// Alias dataframe is registered in the ctx under. User can select from this
 pub static BUNDLE_TABLE: &str = "bundle";
 
-/// SchemaProvider that exposes the bundle's cached dataframe as a "bundle" table
-#[derive(Debug)]
+/// SchemaProvider that exposes the bundle's cached dataframe as a "bundle" table.
+/// Tables query data dynamically from the BundleFacade on each access,
+/// ensuring they always reflect the current state.
 pub struct DefaultSchemaProvider {
-    dataframe: DataFrameHolder,
+    bundle_table: Arc<BundleTable>,
+}
+
+impl std::fmt::Debug for DefaultSchemaProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DefaultSchemaProvider").finish()
+    }
 }
 
 impl DefaultSchemaProvider {
-    pub fn new(dataframe: DataFrameHolder) -> Self {
-        Self { dataframe }
+    /// Create a new DefaultSchemaProvider with the given BundleFacade.
+    pub fn new(bundle: Arc<dyn BundleFacade>) -> Self {
+        Self {
+            bundle_table: Arc::new(BundleTable::new(bundle)),
+        }
     }
 }
 
@@ -33,9 +43,7 @@ impl SchemaProvider for DefaultSchemaProvider {
 
     async fn table(&self, name: &str) -> datafusion::error::Result<Option<Arc<dyn TableProvider>>> {
         if name == BUNDLE_TABLE {
-            Ok(Some(Arc::new(BundleTable::new(
-                self.dataframe.clone(),
-            ))))
+            Ok(Some(self.bundle_table.clone()))
         } else {
             Ok(None)
         }

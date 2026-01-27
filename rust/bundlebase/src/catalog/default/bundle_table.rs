@@ -1,4 +1,4 @@
-use crate::bundle::DataFrameHolder;
+use crate::bundle::BundleFacade;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::Session;
@@ -8,15 +8,20 @@ use datafusion::logical_expr::{Expr, TableType};
 use datafusion::physical_plan::ExecutionPlan;
 use std::sync::Arc;
 
-/// TableProvider that returns execution plans from the cached DataFrame
-#[derive(Debug)]
+/// TableProvider that returns execution plans from the bundle's DataFrame.
 pub(super) struct BundleTable {
-    dataframe: DataFrameHolder,
+    bundle: Arc<dyn BundleFacade>,
+}
+
+impl std::fmt::Debug for BundleTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BundleTable").finish()
+    }
 }
 
 impl BundleTable {
-    pub fn new(dataframe: DataFrameHolder) -> Self {
-        Self { dataframe }
+    pub fn new(bundle: Arc<dyn BundleFacade>) -> Self {
+        Self { bundle }
     }
 }
 
@@ -27,7 +32,9 @@ impl TableProvider for BundleTable {
     }
 
     fn schema(&self) -> SchemaRef {
-        let df = self.dataframe.dataframe();
+        // TableProvider::schema() is sync, so we must block on the async dataframe() call
+        let df = futures::executor::block_on(self.bundle.dataframe())
+            .expect("Failed to get dataframe for schema");
 
         // Convert DFSchema to Arrow Schema
         SchemaRef::new(df.schema().as_arrow().clone())
@@ -44,8 +51,12 @@ impl TableProvider for BundleTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        // Get the cached dataframe
-        let df = self.dataframe.dataframe();
+        // Get the dataframe directly from the facade
+        let df = self
+            .bundle
+            .dataframe()
+            .await
+            .map_err(|e| DataFusionError::External(e.into()))?;
 
         // Apply filters if any
         let mut df_filtered = df.as_ref().clone();
