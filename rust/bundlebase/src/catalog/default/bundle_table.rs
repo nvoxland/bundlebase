@@ -1,64 +1,27 @@
 use crate::bundle::DataFrameHolder;
-use crate::catalog;
+use arrow_schema::SchemaRef;
 use async_trait::async_trait;
-use datafusion::catalog::{SchemaProvider, Session, TableProvider};
+use datafusion::catalog::Session;
+use datafusion::catalog::TableProvider;
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{Expr, TableType};
 use datafusion::physical_plan::ExecutionPlan;
-use arrow_schema::SchemaRef;
 use std::sync::Arc;
 
-/// SchemaProvider that exposes the bundle's cached dataframe as a "bundle" table
+/// TableProvider that returns execution plans from the cached DataFrame
 #[derive(Debug)]
-pub struct DefaultSchemaProvider {
+pub(super) struct BundleTable {
     dataframe: DataFrameHolder,
 }
 
-impl DefaultSchemaProvider {
+impl BundleTable {
     pub fn new(dataframe: DataFrameHolder) -> Self {
         Self { dataframe }
     }
 }
 
 #[async_trait]
-impl SchemaProvider for DefaultSchemaProvider {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    fn table_names(&self) -> Vec<String> {
-        vec![catalog::DATAFRAME_ALIAS.to_string()]
-    }
-
-    async fn table(&self, name: &str) -> datafusion::error::Result<Option<Arc<dyn TableProvider>>> {
-        if name == catalog::DATAFRAME_ALIAS {
-            Ok(Some(Arc::new(CachedDataFrameTable::new(
-                self.dataframe.clone(),
-            ))))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn table_exist(&self, name: &str) -> bool {
-        name == catalog::DATAFRAME_ALIAS
-    }
-}
-
-/// TableProvider that returns execution plans from the cached DataFrame
-#[derive(Debug)]
-struct CachedDataFrameTable {
-    dataframe: DataFrameHolder,
-}
-
-impl CachedDataFrameTable {
-    fn new(dataframe: DataFrameHolder) -> Self {
-        Self { dataframe }
-    }
-}
-
-#[async_trait]
-impl TableProvider for CachedDataFrameTable {
+impl TableProvider for BundleTable {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

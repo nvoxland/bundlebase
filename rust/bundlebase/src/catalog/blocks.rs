@@ -1,6 +1,9 @@
+mod block_table;
+
 use crate::bundle::{DataBlock, Pack};
 use crate::io::ObjectId;
 use async_trait::async_trait;
+use block_table::BlockTable;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use datafusion::error::Result;
 use parking_lot::RwLock;
@@ -69,7 +72,7 @@ impl SchemaProvider for BlockSchemaProvider {
         match block_id {
             Some(id) => {
                 if let Some(block) = self.find_block(&id) {
-                    Ok(Some(block as Arc<dyn TableProvider>))
+                    Ok(Some(Arc::new(BlockTable::new(block))))
                 } else {
                     Ok(None)
                 }

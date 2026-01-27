@@ -14,13 +14,13 @@ use std::sync::Arc;
 ///
 /// This table lazily constructs the UNION when scanned, maintaining the streaming
 /// execution model. Multiple blocks in a pack are combined using UNION BY NAME.
-pub struct PackUnionTable {
+pub struct PackTable {
     pack_id: ObjectId,
     pack: Arc<Pack>,
     schema: SchemaRef,
 }
 
-impl std::fmt::Debug for PackUnionTable {
+impl std::fmt::Debug for PackTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PackUnionTable")
             .field("pack_id", &self.pack_id)
@@ -30,7 +30,7 @@ impl std::fmt::Debug for PackUnionTable {
     }
 }
 
-impl PackUnionTable {
+impl PackTable {
     pub fn new(pack_id: ObjectId, pack: Arc<Pack>) -> Result<Self> {
         // Get schema from first block
         let blocks = pack.blocks();
@@ -51,7 +51,7 @@ impl PackUnionTable {
 }
 
 #[async_trait]
-impl TableProvider for PackUnionTable {
+impl TableProvider for PackTable {
     fn as_any(&self) -> &dyn Any {
         self
     }

@@ -201,7 +201,7 @@ fn find_orig(plan: &LogicalPlan, target: &str, sources: &mut Vec<(String, String
                     }
                     None => {
                         // No relation specified - use the dataframe alias as source
-                        sources.push((catalog::DATAFRAME_ALIAS.to_string(), col.name.clone()));
+                        sources.push((catalog::BUNDLE_TABLE.to_string(), col.name.clone()));
                         return;
                     }
                 }
