@@ -124,7 +124,7 @@ impl Operation for RebuildIndexOp {
         Ok(())
     }
 
-    async fn apply(&self, _bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, _bundle: &Bundle) -> Result<(), DataFusionError> {
         // Rebuilding an index doesn't change schema or row count
         Ok(())
     }

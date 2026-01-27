@@ -34,7 +34,7 @@ impl Operation for DropIndexOp {
         Ok(())
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Remove index definition from bundle
         bundle
             .indexes

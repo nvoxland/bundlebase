@@ -81,7 +81,7 @@ impl Operation for RenameJoinOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Clone the pack, update name, replace in HashMap
         let old_pack = bundle
             .get_pack(&self.id)

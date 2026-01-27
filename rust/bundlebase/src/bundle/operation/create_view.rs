@@ -148,7 +148,7 @@ impl Operation for CreateViewOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Store view name->id mapping
         bundle.views.write().insert(self.name.clone(), self.id);
         Ok(())

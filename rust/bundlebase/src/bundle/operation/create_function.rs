@@ -34,7 +34,7 @@ impl Operation for CreateFunctionOp {
         Ok(())
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         bundle
             .function_registry
             .write()

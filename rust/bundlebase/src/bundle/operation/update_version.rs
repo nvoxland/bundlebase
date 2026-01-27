@@ -53,7 +53,7 @@ impl Operation for UpdateVersionOp {
         Ok(())
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Find the block and its pack
         let (pack_id, old_block) = self
             .find_block_in_packs(bundle)

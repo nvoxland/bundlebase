@@ -47,7 +47,7 @@ impl ReplaceBlockOp {
         // Find block ID by searching AttachBlockOp operations for matching location
         // Also check ReplaceBlockOp in case the block was already replaced
         let (block_id, old_source_info) =
-            Self::find_block_by_location(old_location, &builder.bundle().operations).ok_or_else(
+            Self::find_block_by_location(old_location, &builder.bundle().operations.read()).ok_or_else(
                 || BundlebaseError::from(format!("No block found at location '{}'", old_location)),
             )?;
 
@@ -143,7 +143,7 @@ impl Operation for ReplaceBlockOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Find the block and its pack
         let (pack_id, old_block) = self
             .find_block_in_packs(bundle)

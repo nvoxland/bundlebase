@@ -186,7 +186,7 @@ impl AttachBlockOp {
         }
 
         _progress.update(5, Some("Building layout"));
-        let data_dir = builder.bundle().data_dir.clone();
+        let data_dir = builder.bundle().data_dir();
         op.layout = match adapter.build_layout(data_dir.as_ref()).await? {
             Some(file) => Some(data_dir.relative_path(file.as_ref())?),
             None => None,
@@ -210,7 +210,7 @@ impl Operation for AttachBlockOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Only validate version for files that are NOT copied from a source.
         // When a file is copied (source_info.is_some()), the stored version is the
         // SOURCE version, not the local copy's version. The local copy is internal

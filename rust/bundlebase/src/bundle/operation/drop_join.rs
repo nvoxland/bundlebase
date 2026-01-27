@@ -54,7 +54,7 @@ impl Operation for DropJoinOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         bundle.packs().write().remove(&self.id);
         log::info!("Dropped join with pack {}", self.id);
         Ok(())

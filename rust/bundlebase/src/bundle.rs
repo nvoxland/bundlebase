@@ -162,102 +162,86 @@ impl VerificationResults {
     }
 }
 
-/// A read-only view of a Bundle loaded from persistent storage.
+/// A thread-safe Bundle loaded from persistent storage.
 ///
 /// `Bundle` represents a bundle that has been committed and persisted to disk.
-/// It is immutable in the sense that it reflects a fixed state from storage, though operations
-/// can be applied by extending it with `BundleBuilder`.
+/// All mutable fields use interior mutability via `Arc<RwLock<T>>` to enable
+/// thread-safe access without requiring `&mut self`.
 ///
 /// # Manifest Chain Loading
 /// When opening a bundle, all parent bundles referenced by the `from` field are loaded
 /// recursively, establishing a complete inheritance chain. This allows bundles to build
 /// upon previously committed versions.
 pub struct Bundle {
-    id: String,
-    name: Option<String>,
-    description: Option<String>,
-    version: String,
-    last_manifest_version: u32,
+    id: Arc<RwLock<String>>,
+    name: Arc<RwLock<Option<String>>>,
+    description: Arc<RwLock<Option<String>>>,
+    version: Arc<RwLock<String>>,
+    last_manifest_version: Arc<RwLock<u32>>,
 
-    data_dir: Arc<dyn IOReadWriteDir>,
+    data_dir: Arc<RwLock<Arc<dyn IOReadWriteDir>>>,
     commits: Arc<RwLock<Vec<BundleCommit>>>,
     pub(crate) status: Arc<RwLock<BundleStatus>>,
 
-    //todo get rid of these:
-    /// Name field wrapped in RwLock for schema provider access
-    name_lock: Arc<RwLock<Option<String>>>,
-    /// Description field wrapped in RwLock for schema provider access
-    description_lock: Arc<RwLock<Option<String>>>,
-    /// Version field wrapped in RwLock for schema provider access
-    version_lock: Arc<RwLock<String>>,
-    pub(crate) operations: Vec<AnyOperation>,
+    pub(crate) operations: Arc<RwLock<Vec<AnyOperation>>>,
 
     packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
-    sources: HashMap<ObjectId, Arc<Source>>,
+    sources: Arc<RwLock<HashMap<ObjectId, Arc<Source>>>>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     views: Arc<RwLock<HashMap<String, ObjectId>>>,
     dataframe: DataFrameHolder,
 
     ctx: Arc<SessionContext>,
     storage: Arc<DataStorage>,
-    reader_factory: Arc<DataReaderFactory>,
+    pub(crate) reader_factory: Arc<DataReaderFactory>,
     function_registry: Arc<RwLock<FunctionRegistry>>,
     source_function_registry: Arc<RwLock<SourceFunctionRegistry>>,
 
     /// Final merged configuration (explicit + stored), used for all operations
     /// This is computed once and updated when SetConfigOp is applied
-    config: Arc<BundleConfig>,
+    config: Arc<RwLock<Arc<BundleConfig>>>,
 
     /// Config passed to create()/open() (preserved for re-merging after SetConfigOp)
-    passed_config: Option<BundleConfig>,
+    passed_config: Arc<RwLock<Option<BundleConfig>>>,
 
     /// Config stored via SetConfigOp operations (preserved for re-merging)
-    stored_config: BundleConfig,
+    stored_config: Arc<RwLock<BundleConfig>>,
 
     /// True if this bundle is a view (has a view field in init commit)
-    is_view: bool,
+    is_view: Arc<RwLock<bool>>,
 }
 
 impl Clone for Bundle {
-    /// Clone the bundle, sharing mutable state via Arc.
+    /// Clone the bundle, sharing all Arc<RwLock<T>> state.
     ///
     /// # Status Sharing Semantics
     ///
-    /// This clone **shares** the `status` Arc with the original. This means:
-    /// - Both bundles see the same uncommitted changes
-    /// - Mutations to status in one clone are visible in the other
+    /// This clone **shares** all Arc fields with the original. This means:
+    /// - Both bundles see the same state for all mutable fields
+    /// - Mutations in one clone are visible in the other
     ///
-    /// This is intentional for internal cloning during `apply_operation()`, where
-    /// we need changes to be reflected back to the original bundle.
+    /// This is intentional for internal operations where changes need to be
+    /// reflected back through schema providers (BundleInfoSchemaProvider).
     ///
     /// For creating independent derived bundles (e.g., from `select()` or `extend()`),
     /// use `clear_status_for_extend()` which creates a **new** independent status Arc.
     ///
     /// # Shared Fields
-    /// - `commits`, `status`, `name_lock`, `description_lock`, `version_lock`, `views`,
-    ///   `indexes`, `packs` - shared with BundleInfoSchemaProvider for live SQL queries
-    /// - `function_registry` - shared with adapter_factory
+    /// All Arc<RwLock<T>> fields are shared, enabling thread-safe mutations
+    /// visible across clones.
     fn clone(&self) -> Self {
-        //todo: check clone logic towards end
-        // Share all Arc fields that are referenced by schema providers (BundleInfoSchemaProvider)
-        // or adapter_factory. This ensures that when we clone for internal apply_operation,
-        // mutations are visible through the shared ctx.
-
         Self {
-            id: self.id.clone(),
-            name: self.name.clone(),
-            description: self.description.clone(),
+            id: Arc::clone(&self.id),
+            name: Arc::clone(&self.name),
+            description: Arc::clone(&self.description),
+            version: Arc::clone(&self.version),
+            last_manifest_version: Arc::clone(&self.last_manifest_version),
             data_dir: Arc::clone(&self.data_dir),
             commits: Arc::clone(&self.commits),
             status: Arc::clone(&self.status),
-            name_lock: Arc::clone(&self.name_lock),
-            description_lock: Arc::clone(&self.description_lock),
-            version_lock: Arc::clone(&self.version_lock),
-            operations: self.operations.clone(),
-            version: self.version.clone(),
-            last_manifest_version: self.last_manifest_version,
+            operations: Arc::clone(&self.operations),
             packs: Arc::clone(&self.packs),
-            sources: self.sources.clone(),
+            sources: Arc::clone(&self.sources),
             indexes: Arc::clone(&self.indexes),
             views: Arc::clone(&self.views),
             dataframe: DataFrameHolder {
@@ -266,13 +250,12 @@ impl Clone for Bundle {
             ctx: Arc::clone(&self.ctx),
             storage: Arc::clone(&self.storage),
             reader_factory: Arc::clone(&self.reader_factory),
-            // Share function_registry - it's referenced by adapter_factory
             function_registry: Arc::clone(&self.function_registry),
             source_function_registry: Arc::clone(&self.source_function_registry),
             config: Arc::clone(&self.config),
-            passed_config: self.passed_config.clone(),
-            stored_config: self.stored_config.clone(),
-            is_view: self.is_view,
+            passed_config: Arc::clone(&self.passed_config),
+            stored_config: Arc::clone(&self.stored_config),
+            is_view: Arc::clone(&self.is_view),
         }
     }
 }
@@ -302,11 +285,13 @@ impl Bundle {
         let status = Arc::new(RwLock::new(BundleStatus::new()));
         let indexes = Arc::new(RwLock::new(Vec::new()));
         let views = Arc::new(RwLock::new(HashMap::new()));
+        let sources = Arc::new(RwLock::new(HashMap::new()));
+        let operations = Arc::new(RwLock::new(Vec::new()));
 
-        let id = Uuid::new_v4().to_string();
-        let name_lock = Arc::new(RwLock::new(None));
-        let description_lock = Arc::new(RwLock::new(None));
-        let version_lock = Arc::new(RwLock::new("empty".to_string()));
+        let id = Arc::new(RwLock::new(Uuid::new_v4().to_string()));
+        let name = Arc::new(RwLock::new(None));
+        let description = Arc::new(RwLock::new(None));
+        let version = Arc::new(RwLock::new("empty".to_string()));
 
         let empty_dataframe = DataFrame::new(
             ctx.state(),
@@ -340,11 +325,11 @@ impl Bundle {
                 commits.clone(),
                 status.clone(),
                 id.clone(),
-                name_lock.clone(),
-                description_lock.clone(),
+                name.clone(),
+                description.clone(),
                 url.clone(),
                 None,
-                version_lock.clone(),
+                version.clone(),
                 views.clone(),
                 indexes.clone(),
                 packs.clone(),
@@ -364,11 +349,14 @@ impl Bundle {
             crate::io::get_null_store(),
         );
 
+        let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, BundleConfig::default().into())?));
+        let bundle_config = Arc::new(RwLock::new(Arc::new(crate::BundleConfig::new())));
+
         Ok(Self {
             ctx,
             id,
             packs,
-            sources: HashMap::new(),
+            sources,
             indexes,
             views,
             storage: Arc::clone(&storage),
@@ -379,23 +367,19 @@ impl Bundle {
                 .into(),
             function_registry,
             source_function_registry,
-            name: None,
-            description: None,
-            operations: vec![],
-
-            last_manifest_version: 0,
-            version: "empty".to_string(),
-            data_dir: writable_dir_from_url(&url, BundleConfig::default().into())?,
+            name,
+            description,
+            operations,
+            last_manifest_version: Arc::new(RwLock::new(0)),
+            version,
+            data_dir,
             commits,
             status,
-            name_lock,
-            description_lock,
-            version_lock,
             dataframe,
-            config: Arc::new(crate::BundleConfig::new()),
-            passed_config: None,
-            stored_config: BundleConfig::new(),
-            is_view: false,
+            config: bundle_config,
+            passed_config: Arc::new(RwLock::new(None)),
+            stored_config: Arc::new(RwLock::new(BundleConfig::new())),
+            is_view: Arc::new(RwLock::new(false)),
         })
     }
 
@@ -422,12 +406,12 @@ impl Bundle {
     /// Used by BundleBuilder which needs to own and mutate the Bundle.
     pub(crate) async fn open_to_bundle(path: &str, config: Option<BundleConfig>) -> Result<Self, BundlebaseError> {
         let mut visited = HashSet::new();
-        let mut bundle = Self::empty_internal().await?;
+        let bundle = Self::empty_internal().await?;
 
         bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
 
         // Set explicit config if provided and recompute merged config
-        bundle.passed_config = config;
+        *bundle.passed_config.write() = config;
         bundle.recompute_config()?;
 
         Self::open_recursive(
@@ -435,7 +419,7 @@ impl Bundle {
                 .url()
                 .as_str(),
             &mut visited,
-            &mut bundle,
+            &bundle,
         )
         .await?;
 
@@ -446,7 +430,7 @@ impl Bundle {
     async fn open_recursive(
         url: &str,
         visited: &mut HashSet<String>,
-        bundle: &mut Bundle,
+        bundle: &Bundle,
     ) -> Result<(), BundlebaseError> {
         if !visited.insert(url.to_string()) {
             return Err(
@@ -493,15 +477,16 @@ impl Bundle {
             Box::pin(Self::open_recursive(resolved_url.as_str(), visited, bundle)).await?;
         };
 
-        // Only set id if provided in init_commit
+        // Set id if provided in init_commit
         // If id is None (extending case), keep the id inherited from parent bundle
-        if let Some(id) = init_commit.id {
-            bundle.id = id;
+        if let Some(id) = &init_commit.id {
+            *bundle.id.write() = id.clone();
         }
-        bundle.data_dir = Arc::clone(&data_dir);
+
+        *bundle.data_dir.write() = Arc::clone(&data_dir);
 
         // Mark this bundle as a view if it has a view field in the init commit
-        bundle.is_view = init_commit.view.is_some();
+        *bundle.is_view.write() = init_commit.view.is_some();
 
         // List files in the manifest directory
         let manifest_files = manifest_dir.list_files().await?;
@@ -539,7 +524,7 @@ impl Bundle {
 
         // Load and apply each manifest in order
         for manifest_file_info in manifest_files {
-            bundle.last_manifest_version = manifest_version(manifest_file_info.filename().unwrap_or(""));
+            *bundle.last_manifest_version.write() = manifest_version(manifest_file_info.filename().unwrap_or(""));
             // Create IOFile from FileInfo to read the manifest
             let manifest_file = readable_file_from_url(&manifest_file_info.url, bundle.config())?;
             let mut commit: BundleCommit = read_yaml(manifest_file.as_ref()).await?.ok_or_else(|| {
@@ -565,7 +550,7 @@ impl Bundle {
                 );
                 for op in change.operations {
                     // Skip view-related operations when loading a view
-                    if bundle.is_view {
+                    if *bundle.is_view.read() {
                         match &op {
                             AnyOperation::CreateView(_) | AnyOperation::RenameView(_) | AnyOperation::DropView(_) => {
                                 debug!("    Skipping (view operation in view): {}", op.describe());
@@ -646,11 +631,11 @@ impl Bundle {
 
     /// Check if this bundle is a view
     pub fn is_view(&self) -> bool {
-        self.is_view
+        *self.is_view.read()
     }
 
-    /// Modifies this bundle with the given operation
-    async fn apply_operation(&mut self, op: AnyOperation) -> Result<(), BundlebaseError> {
+    /// Modifies this bundle with the given operation using interior mutability.
+    pub(crate) async fn apply_operation(&self, op: AnyOperation) -> Result<(), BundlebaseError> {
         let description = &op.describe();
         debug!("Applying operation to bundle: {}...", &description);
 
@@ -659,7 +644,7 @@ impl Bundle {
 
         debug!("Apply: {}", &description);
         op.apply(self).await?;
-        self.operations.push(op);
+        self.operations.write().push(op);
 
         self.compute_version();
         // clear cached values
@@ -671,18 +656,18 @@ impl Bundle {
         Ok(())
     }
 
-    pub fn data_dir(&self) -> &dyn IOReadWriteDir {
-        self.data_dir.as_ref()
+    pub fn data_dir(&self) -> Arc<dyn IOReadWriteDir> {
+        Arc::clone(&*self.data_dir.read())
     }
 
     //todo remove this
     /// Returns the data directory as an Arc for passing to components that need ownership.
     pub fn data_dir_arc(&self) -> Arc<dyn IOReadWriteDir> {
-        Arc::clone(&self.data_dir)
+        Arc::clone(&*self.data_dir.read())
     }
 
     pub fn config(&self) -> Arc<BundleConfig> {
-        Arc::clone(&self.config)
+        Arc::clone(&*self.config.read())
     }
 
     /// Recompute the merged config and recreate data_dir with it
@@ -693,22 +678,53 @@ impl Bundle {
     /// Priority order:
     /// 1. Explicit config passed to create()/open() (highest)
     /// 2. Config stored via SetConfigOp operations (lowest)
-    fn recompute_config(&mut self) -> Result<(), BundlebaseError> {
+    pub(crate) fn recompute_config(&self) -> Result<(), BundlebaseError> {
         // Merge stored_config with explicit_config (explicit takes priority)
-        let merged = if let Some(ref explicit) = self.passed_config {
-            self.stored_config.merge(explicit)
+        let stored_config = self.stored_config.read().clone();
+        let passed_config = self.passed_config.read().clone();
+        let merged = if let Some(ref explicit) = passed_config {
+            stored_config.merge(explicit)
         } else {
-            self.stored_config.clone()
+            stored_config
         };
 
         // Update the config field
-        self.config = Arc::new(merged);
+        let new_config = Arc::new(merged);
+        *self.config.write() = Arc::clone(&new_config);
 
         // Recreate data_dir with the new config
-        let url = self.data_dir.url().clone();
-        self.data_dir = writable_dir_from_url(&url, self.config.clone())?;
+        let url = self.data_dir.read().url().clone();
+        *self.data_dir.write() = writable_dir_from_url(&url, new_config)?;
 
         Ok(())
+    }
+
+    /// Update this bundle's state from another bundle, preserving Arc references.
+    ///
+    /// This is used by BundleBuilder to "reload" without breaking shared references
+    /// held by schema providers. All `Arc<RwLock<T>>` fields have their contents
+    /// replaced with the contents from the other bundle.
+    ///
+    /// The dataframe cache is cleared as it may now be stale.
+    pub(crate) fn reload_from(&self, other: Bundle) {
+        *self.id.write() = other.id.read().clone();
+        *self.name.write() = other.name.read().clone();
+        *self.description.write() = other.description.read().clone();
+        *self.version.write() = other.version.read().clone();
+        *self.last_manifest_version.write() = *other.last_manifest_version.read();
+        *self.operations.write() = other.operations.read().clone();
+        *self.sources.write() = other.sources.read().clone();
+        *self.commits.write() = other.commits.read().clone();
+        *self.status.write() = other.status.read().clone();
+        *self.packs.write() = other.packs.read().clone();
+        *self.indexes.write() = other.indexes.read().clone();
+        *self.views.write() = other.views.read().clone();
+        *self.stored_config.write() = other.stored_config.read().clone();
+        *self.passed_config.write() = other.passed_config.read().clone();
+        *self.config.write() = Arc::clone(&*other.config.read());
+        *self.data_dir.write() = Arc::clone(&*other.data_dir.read());
+        *self.is_view.write() = *other.is_view.read();
+        self.dataframe.clear();
     }
 
     pub fn ctx(&self) -> Arc<SessionContext> {
@@ -778,28 +794,19 @@ impl Bundle {
         )?)
     }
 
-    fn compute_version(&mut self) {
+    fn compute_version(&self) {
         let mut hasher = Sha256::new();
 
-        for op in self.operations.iter() {
+        for op in self.operations.read().iter() {
             hasher.update(op.version().as_bytes());
         }
 
-        self.version = hex::encode(hasher.finalize())[0..12].to_string();
+        let new_version = hex::encode(hasher.finalize())[0..12].to_string();
+        *self.version.write() = new_version.clone();
 
         // Re-register version() UDF with the updated version
         self.ctx
-            .register_udf(ScalarUDF::new_from_impl(VersionUdf::new(self.version.clone())));
-
-        // Update metadata for bundle_info.details table
-        self.update_metadata();
-    }
-
-    /// Update the metadata fields to reflect current bundle state
-    fn update_metadata(&self) {
-        *self.name_lock.write() = self.name.clone();
-        *self.description_lock.write() = self.description.clone();
-        *self.version_lock.write() = self.version.clone();
+            .register_udf(ScalarUDF::new_from_impl(VersionUdf::new(new_version)));
     }
 
     pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<Pack>) {
@@ -839,6 +846,27 @@ impl Bundle {
     /// - `clear_status_for_extend()`: Creates new independent status Arc
     pub(crate) fn clear_status_for_extend(&mut self) {
         self.status = Arc::new(RwLock::new(BundleStatus::new()));
+    }
+
+    /// Detach fields that should be independent for an extend operation.
+    ///
+    /// After cloning, some fields share the same Arc<RwLock> with the original.
+    /// This method creates independent wrappers so modifications don't affect
+    /// the original bundle.
+    ///
+    /// Fields detached:
+    /// - `data_dir`: Extended bundles may have different storage locations
+    /// - `last_manifest_version`: Each bundle tracks its own manifest version
+    /// - `operations`: Each bundle has its own operation list (select/filter adds ops)
+    pub(crate) fn detach_for_extend(&mut self) {
+        // Create independent copies of fields that will be modified
+        // Read values first to avoid borrow conflicts
+        let current_data_dir = Arc::clone(&*self.data_dir.read());
+        let current_manifest_version = *self.last_manifest_version.read();
+        let current_operations = self.operations.read().clone();
+        self.data_dir = Arc::new(RwLock::new(current_data_dir));
+        self.last_manifest_version = Arc::new(RwLock::new(current_manifest_version));
+        self.operations = Arc::new(RwLock::new(current_operations));
     }
 
     /// Find a join pack by its name
@@ -889,21 +917,22 @@ impl Bundle {
     }
 
     /// Add a source definition to the bundle
-    pub(crate) fn add_source(&mut self, op: CreateSourceOp) {
+    pub(crate) fn add_source(&self, op: CreateSourceOp) {
         let registry = self.source_function_registry.read();
         if let Ok(source) = Source::from_op(&op, &registry) {
-            self.sources.insert(op.id, Arc::new(source));
+            self.sources.write().insert(op.id, Arc::new(source));
         }
     }
 
     /// Get a source by its ID
     pub(crate) fn get_source(&self, source_id: &ObjectId) -> Option<Arc<Source>> {
-        self.sources.get(source_id).cloned()
+        self.sources.read().get(source_id).cloned()
     }
 
     /// Get all sources for a specific pack
     pub(crate) fn get_sources_for_pack(&self, pack_id: &ObjectId) -> Vec<Arc<Source>> {
         self.sources
+            .read()
             .values()
             .filter(|s| s.pack() == pack_id)
             .cloned()
@@ -911,8 +940,8 @@ impl Bundle {
     }
 
     /// Get all sources
-    pub(crate) fn sources(&self) -> &HashMap<ObjectId, Arc<Source>> {
-        &self.sources
+    pub(crate) fn sources(&self) -> HashMap<ObjectId, Arc<Source>> {
+        self.sources.read().clone()
     }
 
     /// Find a block by ID across all packs
@@ -941,7 +970,7 @@ impl Bundle {
     pub fn build_block_hash_map(&self) -> HashMap<ObjectId, String> {
         let mut block_hashes: HashMap<ObjectId, String> = HashMap::new();
 
-        for op in &self.operations {
+        for op in self.operations.read().iter() {
             match op {
                 operation::AnyOperation::AttachBlock(attach) => {
                     block_hashes.insert(attach.id, attach.hash.clone());
@@ -961,7 +990,7 @@ impl Bundle {
     fn build_block_location_map(&self) -> HashMap<ObjectId, String> {
         let mut block_locations: HashMap<ObjectId, String> = HashMap::new();
 
-        for op in &self.operations {
+        for op in self.operations.read().iter() {
             match op {
                 operation::AnyOperation::AttachBlock(attach) => {
                     block_locations.insert(attach.id, attach.location.clone());
@@ -1064,7 +1093,7 @@ impl Bundle {
     ) -> Result<(String, bool), BundlebaseError> {
         use crate::io::readable_file_from_path;
 
-        let file = readable_file_from_path(location, self.data_dir.clone(), self.config.clone())?;
+        let file = readable_file_from_path(location, self.data_dir(), self.config())?;
         let actual_hash = file.compute_hash().await?;
 
         let passed = match expected_hash {
@@ -1080,7 +1109,7 @@ impl Bundle {
         use crate::io::plugin::object_store::ObjectStoreFile;
         use crate::io::IOReadFile;
 
-        match ObjectStoreFile::from_str(path, self.data_dir.as_ref(), self.config.clone()) {
+        match ObjectStoreFile::from_str(path, self.data_dir().as_ref(), self.config()) {
             Ok(file) => match file.exists().await {
                 Ok(true) => FileVerificationResult {
                     location: path.to_string(),
@@ -1126,35 +1155,36 @@ impl Bundle {
 #[async_trait]
 impl BundleFacade for Bundle {
     fn id(&self) -> String {
-        self.id.clone()
+        self.id.read().clone()
     }
 
     /// Retrieve the bundle name, if set.
     fn name(&self) -> Option<String> {
-        self.name.clone()
+        self.name.read().clone()
     }
 
     /// Retrieve the bundle description, if set.
     fn description(&self) -> Option<String> {
-        self.description.clone()
+        self.description.read().clone()
     }
 
     /// Retrieve the URL of the base bundle this was loaded from, if any.
     fn url(&self) -> Url {
-        self.data_dir.url().clone()
+        self.data_dir.read().url().clone()
     }
 
     fn from(&self) -> Option<Url> {
+        let current_data_dir_url = self.data_dir.read().url().clone();
         self.commits
             .read()
             .iter()
-            .filter(|x| x.data_dir != Some(self.data_dir.url().clone()))
+            .filter(|x| x.data_dir != Some(current_data_dir_url.clone()))
             .last()
             .and_then(|c| c.data_dir.clone())
     }
 
     fn version(&self) -> String {
-        self.version.clone()
+        self.version.read().clone()
     }
 
     /// Returns the commit history for this bundle, starting with any base bundles
@@ -1163,7 +1193,7 @@ impl BundleFacade for Bundle {
     }
 
     fn operations(&self) -> Vec<AnyOperation> {
-        self.operations.clone()
+        self.operations.read().clone()
     }
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {
@@ -1215,19 +1245,22 @@ impl BundleFacade for Bundle {
                 df = self.dataframe_join(df, &pack).await?;
             }
 
+            // Clone operations to avoid holding lock across async calls
+            let ops = self.operations.read().clone();
+
             // Apply operations to the base DataFrame
             debug!(
                     "dataframe: Applying {} operations to dataframe...",
-                    self.operations().len()
+                    ops.len()
                 );
 
-            for op in self.operations().iter() {
+            for op in ops.iter() {
                 debug!("Applying to dataframe: {}", &op.describe());
                 df = op.apply_dataframe(df, self.ctx.clone()).await?;
             }
             debug!(
                     "dataframe: Applying {} operations to dataframe...DONE",
-                    self.operations().len()
+                    ops.len()
                 );
 
             df
@@ -1269,7 +1302,7 @@ impl BundleFacade for Bundle {
 
         // Open view as Bundle (automatically loads parent via FROM)
         // Preserve explicit_config from current bundle
-        let config = self.passed_config.clone();
+        let config = self.passed_config.read().clone();
         Bundle::open(&view_path, config).await
     }
 
@@ -1293,14 +1326,15 @@ impl BundleFacade for Bundle {
         let mut builder = Builder::new(tar_file);
 
         // Get all files from the bundle's data_dir
-        let files = self.data_dir.list_files().await?;
+        let data_dir = self.data_dir();
+        let files = data_dir.list_files().await?;
 
         debug!("Exporting {} files to tar archive", files.len());
 
         for file in files {
             // Extract relative path from file URL
             let file_url = &file.url;
-            let base_url = self.data_dir.url();
+            let base_url = data_dir.url();
 
             let relative_path = if file_url.as_str().starts_with(base_url.as_str()) {
                 &file_url.as_str()[base_url.as_str().len()..]
@@ -1380,7 +1414,7 @@ impl BundleFacade for Bundle {
     }
 
     fn data_dir(&self) -> Arc<dyn IOReadWriteDir> {
-        Arc::clone(&self.data_dir)
+        Bundle::data_dir(self)
     }
 
     fn config(&self) -> Arc<BundleConfig> {
@@ -1475,7 +1509,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_version() -> Result<(), BundlebaseError> {
-        let mut c = Bundle::empty_internal().await?;
+        let c = Bundle::empty_internal().await?;
         assert_eq!(c.version(), "empty".to_string());
 
         c.apply_operation(AnyOperation::SetName(SetNameOp {

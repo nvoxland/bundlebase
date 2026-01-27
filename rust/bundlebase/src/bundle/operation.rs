@@ -92,10 +92,11 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
     /// For example, this can be used to check that a block is attached before applying a filter operation.
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError>;
 
-    /// Apply this operation to the bundle.
+    /// Apply this operation to the bundle using interior mutability.
     /// For example, this can be used to set the bundle name.
     /// The default implementation does nothing.
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError>;
+    /// TODO: should return the result object, even if it's just a message
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError>;
 
     async fn apply_dataframe(
         &self,
@@ -154,7 +155,7 @@ macro_rules! define_any_operation {
                 }
             }
 
-            async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+            async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
                 match self {
                     $( AnyOperation::$variant(op) => op.apply(bundle).await, )*
                 }

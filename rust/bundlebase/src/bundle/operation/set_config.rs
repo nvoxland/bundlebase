@@ -49,10 +49,11 @@ impl Operation for SetConfigOp {
         Ok(())
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Add to bundle.stored_config
         bundle
             .stored_config
+            .write()
             .set(&self.key, &self.value, self.url_prefix.as_deref());
 
         // Recompute merged config and recreate data_dir with new config

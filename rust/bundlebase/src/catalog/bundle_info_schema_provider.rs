@@ -19,8 +19,8 @@ use url::Url;
 /// into logical groupings to improve API ergonomics.
 #[derive(Debug)]
 pub struct BundleInfoConfig { //todo: remove
-    /// Bundle identifier (immutable)
-    pub id: String,
+    /// Bundle identifier
+    pub id: Arc<RwLock<String>>,
     /// Bundle URL (immutable)
     pub url: Url,
     /// Parent bundle URL, if extended from another bundle (immutable)
@@ -56,7 +56,7 @@ pub struct BundleInfoConfig { //todo: remove
 pub struct BundleInfoSchemaProvider {
     commits: Arc<RwLock<Vec<BundleCommit>>>,
     status: Arc<RwLock<BundleStatus>>,
-    id: String,
+    id: Arc<RwLock<String>>,
     name: Arc<RwLock<Option<String>>>,
     description: Arc<RwLock<Option<String>>>,
     url: Url,
@@ -75,7 +75,7 @@ impl BundleInfoSchemaProvider {
     pub fn new(
         commits: Arc<RwLock<Vec<BundleCommit>>>,
         status: Arc<RwLock<BundleStatus>>,
-        id: String,
+        id: Arc<RwLock<String>>,
         name: Arc<RwLock<Option<String>>>,
         description: Arc<RwLock<Option<String>>>,
         url: Url,
@@ -152,7 +152,7 @@ impl SchemaProvider for BundleInfoSchemaProvider {
             Ok(Some(Arc::new(table)))
         } else if name == catalog::BUNDLE_DETAILS_TABLE {
             let table = BundleDetailsTable::new(
-                &self.id,
+                &self.id.read(),
                 self.name.read().as_deref(),
                 self.description.read().as_deref(),
                 self.url.as_str(),
