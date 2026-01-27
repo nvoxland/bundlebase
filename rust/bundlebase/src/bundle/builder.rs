@@ -257,11 +257,18 @@ impl BundleBuilder {
             }
         }
 
-        Ok(Arc::new(BundleBuilder {
+        let builder = Arc::new(BundleBuilder {
             bundle: Arc::new(new_bundle),
             in_progress_change: RwLock::new(None),
             status: RwLock::new(BundleStatus::new()),
-        }))
+        });
+
+        // Re-register schema providers with BundleBuilder as facade.
+        // This overwrites the Bundle-facade providers registered by Bundle::open(),
+        // so bundle_info tables show uncommitted changes from BundleBuilder.
+        Bundle::register_schema_providers(&builder.bundle.ctx, builder.clone())?;
+
+        Ok(builder)
     }
 
     /// Read access to the inner bundle

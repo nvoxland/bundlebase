@@ -383,3 +383,111 @@ async fn test_direct_filter_and_select() {
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total_rows, 2, "Should have 2 rows after filter");
 }
+
+// =============================================================================
+// bundle_info Tables Tests via Flight
+// =============================================================================
+
+#[tokio::test]
+async fn test_bundle_info_status_after_attach() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    // Query bundle_info.status - should show the uncommitted attach change
+    let batches = execute_query(&mut server, "SELECT * FROM bundle_info.status")
+        .await
+        .expect("SELECT FROM bundle_info.status should succeed");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        total_rows >= 1,
+        "bundle_info.status should have at least 1 row showing the uncommitted attach change"
+    );
+}
+
+#[tokio::test]
+async fn test_bundle_info_blocks_after_attach() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    // Query bundle_info.blocks - should show the attached block
+    let batches = execute_query(&mut server, "SELECT * FROM bundle_info.blocks")
+        .await
+        .expect("SELECT FROM bundle_info.blocks should succeed");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        total_rows >= 1,
+        "bundle_info.blocks should have at least 1 row after attach"
+    );
+}
+
+#[tokio::test]
+async fn test_bundle_info_details_after_attach() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    // Query bundle_info.details - should show bundle metadata
+    let batches = execute_query(&mut server, "SELECT * FROM bundle_info.details")
+        .await
+        .expect("SELECT FROM bundle_info.details should succeed");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(
+        total_rows, 1,
+        "bundle_info.details should have exactly 1 row with bundle metadata"
+    );
+
+    // Verify that we have actual bundle details, not empty data
+    assert!(!batches.is_empty(), "Should have at least one batch");
+    let schema = batches[0].schema();
+    let column_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+    assert!(
+        column_names.contains(&"id") || column_names.contains(&"url"),
+        "bundle_info.details should have id or url column"
+    );
+}
+
+#[tokio::test]
+async fn test_bundle_info_packs_after_attach() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    // Query bundle_info.packs - should show at least the base pack
+    let batches = execute_query(&mut server, "SELECT * FROM bundle_info.packs")
+        .await
+        .expect("SELECT FROM bundle_info.packs should succeed");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        total_rows >= 1,
+        "bundle_info.packs should have at least 1 row (base pack)"
+    );
+}
+
+#[tokio::test]
+async fn test_bundle_info_history_after_commit() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    // Commit the changes
+    execute_query(&mut server, "COMMIT 'Test commit for history'")
+        .await
+        .expect("COMMIT should succeed");
+
+    // Query bundle_info.history - should show the commit
+    let batches = execute_query(&mut server, "SELECT * FROM bundle_info.history")
+        .await
+        .expect("SELECT FROM bundle_info.history should succeed");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        total_rows >= 1,
+        "bundle_info.history should have at least 1 row after commit"
+    );
+}

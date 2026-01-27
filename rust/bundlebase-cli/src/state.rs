@@ -124,9 +124,7 @@ impl BundleState {
     async fn execute_standard_sql(&self, sql: &str) -> Result<SqlResult, BundlebaseError> {
         match &self.mode {
             BundleMode::ReadOnly(bundle) => {
-                let sql_upper = sql.to_uppercase();
-
-                if sql_upper.contains("FROM BUNDLE") || sql_upper.contains("JOIN BUNDLE") {
+                if Self::references_bundle_table(sql) {
                     // Use select() to get the dataframe with all operations applied
                     let result_builder = bundle.select(sql, vec![]).await?;
                     let df = result_builder.dataframe().await?;
@@ -141,9 +139,7 @@ impl BundleState {
                 }
             }
             BundleMode::ReadWrite(builder) => {
-                let sql_upper = sql.to_uppercase();
-
-                if sql_upper.contains("FROM BUNDLE") || sql_upper.contains("JOIN BUNDLE") {
+                if Self::references_bundle_table(sql) {
                     // Use builder.select() for bundle-referencing queries
                     let result_builder = builder.select(sql, vec![]).await?;
                     let df = result_builder.dataframe().await?;
@@ -158,6 +154,34 @@ impl BundleState {
                 }
             }
         }
+    }
+
+    /// Check if SQL references the "bundle" table (not bundle_info or other bundle_* tables).
+    ///
+    /// Uses word boundary detection to avoid false positives like "bundle_info" matching.
+    fn references_bundle_table(sql: &str) -> bool {
+        let sql_upper = sql.to_uppercase();
+
+        // Check for "FROM BUNDLE" or "JOIN BUNDLE" followed by a word boundary
+        // (whitespace, comma, closing paren, semicolon, end of string, or WHERE/ORDER/etc)
+        for pattern in ["FROM BUNDLE", "JOIN BUNDLE"] {
+            if let Some(pos) = sql_upper.find(pattern) {
+                let after_pos = pos + pattern.len();
+                if after_pos >= sql_upper.len() {
+                    // Pattern at end of string
+                    return true;
+                }
+                let next_char = sql_upper.chars().nth(after_pos);
+                match next_char {
+                    // Word boundary characters that indicate "bundle" is the full table name
+                    Some(' ') | Some('\t') | Some('\n') | Some('\r') | Some(',') | Some(')')
+                    | Some(';') => return true,
+                    // Not a word boundary - could be "bundle_info" etc.
+                    _ => continue,
+                }
+            }
+        }
+        false
     }
 
     // =========================================================================
@@ -224,14 +248,28 @@ impl BundleState {
     pub async fn get_query_schema(&self, sql: &str) -> Result<SchemaRef, BundlebaseError> {
         match &self.mode {
             BundleMode::ReadOnly(bundle) => {
-                let result_builder = bundle.select(sql, vec![]).await?;
-                let df = result_builder.dataframe().await?;
-                Ok(df.schema().inner().clone())
+                if Self::references_bundle_table(sql) {
+                    let result_builder = bundle.select(sql, vec![]).await?;
+                    let df = result_builder.dataframe().await?;
+                    Ok(df.schema().inner().clone())
+                } else {
+                    // Execute directly via the SessionContext for non-bundle queries
+                    let ctx = bundle.ctx();
+                    let df = ctx.sql(sql).await?;
+                    Ok(df.schema().inner().clone())
+                }
             }
             BundleMode::ReadWrite(builder) => {
-                let result_builder = builder.select(sql, vec![]).await?;
-                let df = result_builder.dataframe().await?;
-                Ok(df.schema().inner().clone())
+                if Self::references_bundle_table(sql) {
+                    let result_builder = builder.select(sql, vec![]).await?;
+                    let df = result_builder.dataframe().await?;
+                    Ok(df.schema().inner().clone())
+                } else {
+                    // Execute directly via the SessionContext for non-bundle queries
+                    let ctx = builder.bundle().ctx();
+                    let df = ctx.sql(sql).await?;
+                    Ok(df.schema().inner().clone())
+                }
             }
         }
     }
