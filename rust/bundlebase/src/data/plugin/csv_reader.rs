@@ -492,7 +492,7 @@ mod tests {
         // Build the layout file
         let data_dir = binding.data_dir();
         let layout_file = temp_reader
-            .build_layout(data_dir)
+            .build_layout(data_dir.as_ref())
             .await?
             .ok_or_else(|| BundlebaseError::from("Layout should be built for CSV"))?;
 
@@ -586,7 +586,7 @@ mod tests {
         // Build the layout file
         let data_dir = binding.data_dir();
         let layout_file = temp_reader
-            .build_layout(data_dir)
+            .build_layout(data_dir.as_ref())
             .await?
             .ok_or_else(|| BundlebaseError::from("Layout should be built for CSV"))?;
 

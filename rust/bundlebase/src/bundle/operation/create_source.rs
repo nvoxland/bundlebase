@@ -85,7 +85,7 @@ impl Operation for CreateSourceOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         bundle.add_source(self.clone());
         Ok(())
     }

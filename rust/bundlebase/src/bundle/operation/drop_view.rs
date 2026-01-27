@@ -58,7 +58,7 @@ impl Operation for DropViewOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Find and remove the name->id mapping
         bundle.views.write().retain(|_, id| id != &self.id);
 

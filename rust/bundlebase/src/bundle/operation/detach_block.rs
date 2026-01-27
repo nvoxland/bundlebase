@@ -72,7 +72,7 @@ impl Operation for DetachBlockOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Look up block's source info before removing
         if let Some(block) = bundle.find_block(&self.id) {
             if let Some(source_info) = block.source_info() {

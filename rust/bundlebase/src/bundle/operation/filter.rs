@@ -40,7 +40,7 @@ impl Operation for FilterOp {
         Ok(())
     }
 
-    async fn apply(&self, _bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, _bundle: &Bundle) -> Result<(), DataFusionError> {
         // Filter doesn't change the schema, so no reconfiguration needed
         Ok(())
     }

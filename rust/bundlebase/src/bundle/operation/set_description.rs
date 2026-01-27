@@ -24,8 +24,8 @@ impl Operation for SetDescriptionOp {
         Ok(())
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
-        bundle.description = Some(self.description.clone());
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
+        *bundle.description.write() = Some(self.description.clone());
         Ok(())
     }
 

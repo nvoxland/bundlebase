@@ -73,7 +73,7 @@ impl Operation for CreateIndexOp {
         Ok(())
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         bundle
             .indexes
             .write()

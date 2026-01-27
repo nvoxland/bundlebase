@@ -247,7 +247,8 @@ fn find_block_location_by_source(
     use crate::bundle::operation::AnyOperation;
 
     // First, check ReplaceBlockOp operations (in reverse order to get most recent)
-    for op in bundle.operations.iter().rev() {
+    let operations = bundle.operations.read();
+    for op in operations.iter().rev() {
         if let AnyOperation::ReplaceBlock(replace) = op {
             if let Some(ref info) = replace.source_info {
                 if &info.id == source_id && info.location == source_location {
@@ -258,8 +259,7 @@ fn find_block_location_by_source(
     }
 
     // If not found in ReplaceBlockOp, check AttachBlockOp
-    bundle
-        .operations
+    operations
         .iter()
         .find_map(|op| {
             if let AnyOperation::AttachBlock(attach) = op {

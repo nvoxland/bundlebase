@@ -24,8 +24,8 @@ impl Operation for SetNameOp {
         Ok(())
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
-        bundle.name = Some(self.name.clone());
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
+        *bundle.name.write() = Some(self.name.clone());
         Ok(())
     }
 

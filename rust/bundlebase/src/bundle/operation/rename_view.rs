@@ -69,7 +69,7 @@ impl Operation for RenameViewOp {
         Ok(())
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         let mut views = bundle.views.write();
 
         // Find and remove the old name->id mapping

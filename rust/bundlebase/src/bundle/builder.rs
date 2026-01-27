@@ -159,17 +159,16 @@ impl std::fmt::Display for BundleStatus {
 ///     .commit("Filter high-value transactions").await?;
 /// ```
 pub struct BundleBuilder {
-    //todo: Fix lock management. Make Bundle threadsafe so we don't need lock
-    /// The underlying bundle data. Acquire this lock before `in_progress_change`.
-    bundle: RwLock<Bundle>,
-    /// Tracks the current in-progress change being built. Acquire after `bundle` lock.
+    /// The underlying bundle data. Bundle is internally thread-safe via Arc<RwLock<T>> fields.
+    bundle: Arc<Bundle>,
+    /// Tracks the current in-progress change being built.
     in_progress_change: RwLock<Option<BundleChange>>,
 }
 
 impl Clone for BundleBuilder {
     fn clone(&self) -> Self {
         Self {
-            bundle: RwLock::new(self.bundle.read().clone()),
+            bundle: Arc::clone(&self.bundle),
             in_progress_change: RwLock::new(self.in_progress_change.read().clone()),
         }
     }
@@ -196,13 +195,13 @@ impl BundleBuilder {
         path: &str,
         config: Option<BundleConfig>,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
-        let mut existing = Bundle::empty_internal().await?;
-        existing.passed_config = config;
+        let existing = Bundle::empty_internal().await?;
+        *existing.passed_config.write() = config;
         existing.recompute_config()?;
-        existing.data_dir = writable_dir_from_str(path, existing.config.clone())?;
+        *existing.data_dir.write() = writable_dir_from_str(path, existing.config())?;
 
         // Check if a bundle already exists at this location
-        let meta_dir = existing.data_dir.writable_subdir(META_DIR)?;
+        let meta_dir = existing.data_dir().writable_subdir(META_DIR)?;
         let init_file = meta_dir.file(INIT_FILENAME)?;
         if init_file.exists().await? {
             return Err(format!(
@@ -216,7 +215,7 @@ impl BundleBuilder {
         existing.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
 
         Ok(Arc::new(BundleBuilder {
-            bundle: RwLock::new(existing),
+            bundle: Arc::new(existing),
             in_progress_change: RwLock::new(None),
         }))
     }
@@ -238,30 +237,34 @@ impl BundleBuilder {
         // This ensures the derived builder has independent change tracking
         new_bundle.clear_status_for_extend();
 
+        // Detach data_dir and last_manifest_version so modifications don't affect the original
+        new_bundle.detach_for_extend();
+
         // If data_dir is provided and not empty, use it; otherwise keep the current bundle's data_dir
         if let Some(dir) = data_dir {
             if !dir.is_empty() {
-                new_bundle.data_dir = writable_dir_from_str(dir, bundle.config())?;
-                if *new_bundle.data_dir.url() != bundle.url() {
-                    new_bundle.last_manifest_version = 0;
+                let new_data_dir = writable_dir_from_str(dir, bundle.config())?;
+                if *new_data_dir.url() != bundle.url() {
+                    *new_bundle.last_manifest_version.write() = 0;
                 }
+                *new_bundle.data_dir.write() = new_data_dir;
             }
         }
 
         Ok(Arc::new(BundleBuilder {
-            bundle: RwLock::new(new_bundle),
+            bundle: Arc::new(new_bundle),
             in_progress_change: RwLock::new(None),
         }))
     }
 
     /// Read access to the inner bundle
-    pub fn bundle(&self) -> parking_lot::RwLockReadGuard<'_, Bundle> {
-        self.bundle.read()
+    pub fn bundle(&self) -> &Bundle {
+        &self.bundle
     }
 
     /// Returns the bundle status showing uncommitted changes.
     pub fn status(&self) -> BundleStatus {
-        self.bundle.read().status().read().clone()
+        self.bundle.status().read().clone()
     }
 
     /// Commits all operations in the bundle to persistent storage.
@@ -276,20 +279,23 @@ impl BundleBuilder {
     /// builder.commit("Filter high-value transactions").await?;
     /// ```
     pub async fn commit(&self, message: &str) -> Result<&Self, BundlebaseError> {
-        let (manifest_dir, last_manifest_version, from, changes, config, url) = {
-            let bundle = self.bundle.read();
-            let manifest_dir = bundle.data_dir.writable_subdir(META_DIR)?;
-            let last_manifest_version = bundle.last_manifest_version;
-            let from = bundle.from();
-            let changes = bundle.status().read().changes().clone();
-            let config = bundle.passed_config.clone();
-            let url = bundle.url().to_string();
-            (manifest_dir, last_manifest_version, from, changes, config, url)
-        };
+        let manifest_dir = self.bundle.data_dir().writable_subdir(META_DIR)?;
+        let last_manifest_version = *self.bundle.last_manifest_version.read();
+        let from = self.bundle.from();
+        let changes = self.bundle.status().read().changes().clone();
+        let config = self.bundle.passed_config.read().clone();
+        let url = self.bundle.url().to_string();
+        let bundle_id = self.bundle.id();
 
         if last_manifest_version == 0 {
             let init_file = manifest_dir.writable_file(INIT_FILENAME)?;
-            write_yaml(init_file.as_ref(), &InitCommit::new(from.as_ref())).await?;
+            // Use the bundle's existing ID rather than generating a new one
+            let init_commit = InitCommit {
+                id: if from.is_none() { Some(bundle_id) } else { None },
+                from: from.clone(),
+                view: None,
+            };
+            write_yaml(init_file.as_ref(), &init_commit).await?;
         };
 
         // Calculate next version number
@@ -337,10 +343,10 @@ impl BundleBuilder {
         // Clear status since the operations have been persisted
         new_bundle.status().write().clear();
 
-        // Replace the bundle with the new one
-        *self.bundle.write() = new_bundle;
+        // Replace the bundle contents using reload_from to preserve Arc references
+        self.bundle.reload_from(new_bundle);
 
-        info!("Committed version {}", self.bundle.read().version());
+        info!("Committed version {}", self.bundle.version());
 
         Ok(self)
     }
@@ -362,7 +368,7 @@ impl BundleBuilder {
         }
 
         // Clear all uncommitted changes
-        self.bundle.read().status().write().clear();
+        self.bundle.status().write().clear();
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
@@ -391,19 +397,16 @@ impl BundleBuilder {
         }
 
         // Remove the last change
-        self.bundle.read().status().write().pop();
+        self.bundle.status().write().pop();
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
 
         // Reapply all remaining operations
-        let changes = self.bundle.read().status().read().changes().clone();
+        let changes = self.bundle.status().read().changes().clone();
         for change in &changes {
             for op in &change.operations {
-                // Clone to avoid holding guard across await
-                let mut bundle = self.bundle.read().clone();
-                bundle.apply_operation(op.clone()).await?;
-                *self.bundle.write() = bundle;
+                self.bundle.apply_operation(op.clone()).await?;
             }
         }
 
@@ -414,46 +417,36 @@ impl BundleBuilder {
 
     pub(in crate::bundle) async fn reload_bundle(&self) -> Result<(), BundlebaseError> {
         // Reload the bundle from the last committed state
-        let (empty, passed_config, url) = {
-            let bundle = self.bundle.read();
-            let empty = bundle.commits.read().is_empty();
-            let passed_config = bundle.passed_config.clone();
-            let url = bundle.url().to_string();
-            (empty, passed_config, url)
-        };
+        let empty = self.bundle.commits.read().is_empty();
+        let passed_config = self.bundle.passed_config.read().clone();
+        let url = self.bundle.url().to_string();
 
         let new_bundle = if empty {
-            let mut new = Bundle::empty_internal().await?;
-            new.passed_config = passed_config;
+            let new = Bundle::empty_internal().await?;
+            *new.passed_config.write() = passed_config;
             new.recompute_config()?;
-            new.data_dir = writable_dir_from_url(&Url::parse(&url)?, new.config.clone())?;
+            *new.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, new.config())?;
             new
         } else {
             // Preserve explicit_config when reopening
             Bundle::open_to_bundle(&url, passed_config).await?
         };
 
-        *self.bundle.write() = new_bundle;
+        // Update bundle contents using reload_from to preserve Arc references
+        self.bundle.reload_from(new_bundle);
         Ok(())
     }
 
     pub(in crate::bundle) async fn apply_operation(&self, op: AnyOperation) -> Result<(), BundlebaseError> {
-        {
-            let bundle = self.bundle.read();
-            if bundle.is_view() && !op.allowed_on_view() {
-                return Err(format!(
-                    "Operation '{}' is not allowed on a view",
-                    op.describe()
-                )
-                .into());
-            }
+        if self.bundle.is_view() && !op.allowed_on_view() {
+            return Err(format!(
+                "Operation '{}' is not allowed on a view",
+                op.describe()
+            )
+            .into());
         }
 
-        // Clone bundle, apply operation, write back
-        // This avoids holding the lock across the await point
-        let mut bundle = self.bundle.read().clone();
-        bundle.apply_operation(op.clone()).await?;
-        *self.bundle.write() = bundle;
+        self.bundle.apply_operation(op.clone()).await?;
 
         self.in_progress_change
             .write()
@@ -509,7 +502,7 @@ impl BundleBuilder {
             Ok(_) => {
                 if !is_nested {
                     if let Some(change) = self.in_progress_change.write().take() {
-                        self.bundle.read().status().write().push_change(change);
+                        self.bundle.status().write().push_change(change);
                     }
                 }
                 Ok(())
@@ -570,7 +563,7 @@ impl BundleBuilder {
             Ok(_) => {
                 if !is_nested {
                     if let Some(change) = self.in_progress_change.write().take() {
-                        self.bundle.read().status().write().push_change(change);
+                        self.bundle.status().write().push_change(change);
                     }
                 }
             }
@@ -767,7 +760,7 @@ impl BundleBuilder {
 
         let name = name.to_string();
         let source_ops_count = source.status().operations().len();
-        let changes_before = self.bundle.read().status().read().changes().len();
+        let changes_before = self.bundle.status().read().changes().len();
         let source_clone = source.clone();
 
         self.do_change(&format!("Create view '{}'", name), |builder| {
@@ -786,12 +779,11 @@ impl BundleBuilder {
         // independent status, this block is rarely entered because the status Arcs differ.
         // This check is preserved for cases where the source IS self (not derived from select).
         let shares_status = Arc::ptr_eq(
-            self.bundle.read().status(),
-            source.bundle.read().status(),
+            self.bundle.status(),
+            source.bundle.status(),
         );
         if shares_status && source_ops_count > 0 && changes_before >= source_ops_count {
-            let bundle = self.bundle.read();
-            let mut status = bundle.status().write();
+            let mut status = self.bundle.status().write();
             let create_view_change = status.pop_change();
             let keep_count = changes_before - source_ops_count;
             status.truncate(keep_count);
@@ -972,7 +964,7 @@ impl BundleBuilder {
         name: &str,
         def: Arc<dyn FunctionImpl>,
     ) -> Result<&Self, BundlebaseError> {
-        self.bundle.read().function_registry.write().set_impl(name, def)?;
+        self.bundle.function_registry.write().set_impl(name, def)?;
         Ok(self)
     }
 
@@ -1089,9 +1081,9 @@ impl BundleBuilder {
 
         // Collect index definitions before the loop to avoid holding the lock across awaits
         let index_defs: Vec<Arc<IndexDefinition>> =
-            self.bundle.read().indexes.read().iter().cloned().collect();
+            self.bundle.indexes.read().iter().cloned().collect();
 
-        let packs = self.bundle.read().packs().clone();
+        let packs = self.bundle.packs().clone();
 
         for index_def in &index_defs {
             let logical_col = index_def.column().to_string();
@@ -1165,9 +1157,8 @@ impl BundleBuilder {
                     blocks.len()
                 );
 
-                // Clone bundle to avoid holding guard across await
-                let bundle_clone = self.bundle.read().clone();
-                let op = IndexBlocksOp::setup(&index_id, &column, blocks, &bundle_clone).await?;
+                // Bundle is internally thread-safe
+                let op = IndexBlocksOp::setup(&index_id, &column, blocks, &self.bundle).await?;
                 self.apply_operation(op.into()).await?;
             }
         }
@@ -1179,7 +1170,7 @@ impl BundleBuilder {
 
     /// Find the version of a block by its ID
     fn find_block_version(&self, block_id: &ObjectId) -> Option<String> {
-        for pack in self.bundle.read().packs().read().values() {
+        for pack in self.bundle.packs().read().values() {
             for block in pack.blocks() {
                 if block.id() == block_id {
                     return Some(block.version());
@@ -1219,7 +1210,7 @@ impl BundleBuilder {
         analyzer.register_table("__base_0".to_string(), "base".to_string());
 
         // Register joined packs
-        for join_name in self.bundle.read().join_names() {
+        for join_name in self.bundle.join_names() {
             analyzer.register_table(join_name.clone(), join_name.clone());
         }
 
@@ -1261,29 +1252,25 @@ impl BundleBuilder {
         use crate::io::readable_file_from_path;
 
         let mut results = Vec::new();
-        let (block_hashes, block_locations, blocks_to_verify, config) = {
-            let bundle = self.bundle.read();
-            let block_hashes = bundle.build_block_hash_map();
-            let block_locations = bundle.build_block_location_map();
-            let config = bundle.config();
+        let block_hashes = self.bundle.build_block_hash_map();
+        let block_locations = self.bundle.build_block_location_map();
+        let config = self.bundle.config();
 
-            // Collect block info first to avoid borrowing issues
-            let packs = bundle.packs().read().clone();
-            let mut blocks = Vec::new();
-            for pack in packs.values() {
-                for block in pack.blocks() {
-                    let block_id = *block.id();
-                    let location = block_locations
-                        .get(&block_id)
-                        .cloned()
-                        .unwrap_or_else(|| block.reader().url().to_string());
-                    let expected_hash = block_hashes.get(&block_id).cloned();
-                    let current_version = block.version();
-                    blocks.push((block_id, location, expected_hash, current_version));
-                }
+        // Collect block info first to avoid borrowing issues
+        let packs = self.bundle.packs().read().clone();
+        let mut blocks_to_verify = Vec::new();
+        for pack in packs.values() {
+            for block in pack.blocks() {
+                let block_id = *block.id();
+                let location = block_locations
+                    .get(&block_id)
+                    .cloned()
+                    .unwrap_or_else(|| block.reader().url().to_string());
+                let expected_hash = block_hashes.get(&block_id).cloned();
+                let current_version = block.version();
+                blocks_to_verify.push((block_id, location, expected_hash, current_version));
             }
-            (block_hashes, block_locations, blocks, config)
-        };
+        }
 
         // Verify each block
         for (block_id, location, expected_hash, current_version) in blocks_to_verify {
@@ -1302,14 +1289,12 @@ impl BundleBuilder {
             }
 
             // Compute the actual hash
-            let (data_dir, adapter_factory) = {
-                let bundle = self.bundle.read();
-                (bundle.data_dir.clone(), bundle.reader_factory.clone())
-            };
+            let data_dir = self.bundle.data_dir();
+            let adapter_factory = Arc::clone(&self.bundle.reader_factory);
 
             let file = match readable_file_from_path(
                 &location,
-                data_dir.clone(),
+                data_dir,
                 config.clone(),
             ) {
                 Ok(f) => f,
@@ -1408,7 +1393,7 @@ impl BundleBuilder {
         }
 
         // Verify index files exist
-        let indexes = self.bundle.read().indexes().read().clone();
+        let indexes = self.bundle.indexes().read().clone();
         for index_def in indexes.iter() {
             for indexed_blocks in index_def.all_indexed_blocks() {
                 let path = indexed_blocks.path();
@@ -1472,61 +1457,57 @@ impl BundleBuilder {
 #[async_trait]
 impl BundleFacade for BundleBuilder {
     fn id(&self) -> String {
-        self.bundle.read().id()
+        self.bundle.id()
     }
 
     fn name(&self) -> Option<String> {
-        self.bundle.read().name()
+        self.bundle.name()
     }
 
     fn description(&self) -> Option<String> {
-        self.bundle.read().description()
+        self.bundle.description()
     }
 
     fn url(&self) -> Url {
-        self.bundle.read().url()
+        self.bundle.url()
     }
 
     fn from(&self) -> Option<Url> {
-        self.bundle.read().from()
+        self.bundle.from()
     }
 
     fn version(&self) -> String {
-        self.bundle.read().version()
+        self.bundle.version()
     }
 
     fn history(&self) -> Vec<commit::BundleCommit> {
-        self.bundle.read().history()
+        self.bundle.history()
     }
 
     fn operations(&self) -> Vec<AnyOperation> {
-        let bundle = self.bundle.read();
-        let mut ops = bundle.operations.clone();
+        let mut ops = self.bundle.operations.read().clone();
         ops.append(&mut self.status().operations().clone());
         ops
     }
 
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {
-        let bundle = self.bundle.read().clone();
-        bundle.schema().await
+        self.bundle.schema().await
     }
 
     async fn num_rows(&self) -> Result<usize, BundlebaseError> {
-        let bundle = self.bundle.read().clone();
-        bundle.num_rows().await
+        self.bundle.num_rows().await
     }
 
     async fn dataframe(&self) -> Result<Arc<DataFrame>, BundlebaseError> {
-        let bundle = self.bundle.read().clone();
-        bundle.dataframe().await
+        self.bundle.dataframe().await
     }
 
     async fn select(&self, sql: &str, params: Vec<ScalarValue>) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         // Create a new builder based on the current bundle state without modifying self
         // This matches the expected behavior where select() returns a new builder
         // with the query applied, leaving the original unchanged
-        let current_bundle = Arc::new(self.bundle.read().clone()); //todo: don't clone
+        let current_bundle = Arc::new(self.bundle.deref().clone()); //todo: don't clone
         let new_builder = BundleBuilder::extend(current_bundle, None)?;
 
         let sql = sql.to_string();
@@ -1551,12 +1532,11 @@ impl BundleFacade for BundleBuilder {
     }
 
     fn views(&self) -> HashMap<ObjectId, String> {
-        self.bundle.read().views()
+        self.bundle.views()
     }
 
     async fn view(&self, identifier: &str) -> Result<Arc<Bundle>, BundlebaseError> {
-        let bundle = self.bundle.read().clone();
-        bundle.view(identifier).await
+        self.bundle.view(identifier).await
     }
 
     async fn export_tar(&self, tar_path: &str) -> Result<String, BundlebaseError> {
@@ -1565,41 +1545,39 @@ impl BundleFacade for BundleBuilder {
             return Err("Cannot export tar with uncommitted changes. Please commit first.".into());
         }
 
-        let bundle = self.bundle.read().clone();
-        bundle.export_tar(tar_path).await
+        self.bundle.export_tar(tar_path).await
     }
 
     async fn explain(&self) -> Result<String, BundlebaseError> {
-        let bundle = self.bundle.read().clone();
-        bundle.explain().await
+        self.bundle.explain().await
     }
 
     fn status_changes(&self) -> Vec<BundleChange> {
-        self.bundle.read().status.read().changes().clone()
+        self.bundle.status.read().changes().clone()
     }
 
     fn indexes(&self) -> Vec<Arc<IndexDefinition>> {
-        self.bundle.read().indexes.read().clone()
+        self.bundle.indexes.read().clone()
     }
 
     fn packs(&self) -> HashMap<ObjectId, Arc<Pack>> {
-        self.bundle.read().packs.read().clone()
+        self.bundle.packs.read().clone()
     }
 
     fn views_by_name(&self) -> HashMap<String, ObjectId> {
-        self.bundle.read().views.read().clone()
+        self.bundle.views.read().clone()
     }
 
     fn data_dir(&self) -> Arc<dyn IOReadWriteDir> {
-        self.bundle.read().data_dir.clone()
+        self.bundle.data_dir()
     }
 
     fn config(&self) -> Arc<BundleConfig> {
-        self.bundle.read().config()
+        self.bundle.config()
     }
 
     fn ctx(&self) -> Arc<SessionContext> {
-        self.bundle.read().ctx()
+        self.bundle.ctx()
     }
 }
 
@@ -1621,7 +1599,7 @@ mod tests {
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
-        let schema = bundle.bundle.read().schema().await.unwrap();
+        let schema = bundle.bundle.schema().await.unwrap();
         assert!(
             schema.fields().is_empty(),
             "Empty bundle should have empty schema"
@@ -1638,7 +1616,7 @@ mod tests {
             .await
             .unwrap();
 
-        let schema = bundle.bundle.read().schema().await.unwrap();
+        let schema = bundle.bundle.schema().await.unwrap();
         assert!(
             !schema.fields().is_empty(),
             "After attach, schema should have fields"
@@ -1662,11 +1640,11 @@ mod tests {
             .await
             .unwrap();
 
-        let schema_before = &bundle.bundle.read().schema().await.unwrap();
+        let schema_before = &bundle.bundle.schema().await.unwrap();
         assert_eq!(schema_before.fields().len(), 13);
 
         bundle.drop_column("title").await.unwrap();
-        let schema_after = &bundle.bundle.read().schema().await.unwrap();
+        let schema_after = &bundle.bundle.schema().await.unwrap();
         assert_eq!(schema_after.fields().len(), 12);
 
         // Verify 'title' column is gone
@@ -1683,10 +1661,10 @@ mod tests {
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
-        assert_eq!(bundle.bundle.read().name, None, "Empty bundle should have no name");
+        assert_eq!(bundle.bundle.name.read().clone(), None, "Empty bundle should have no name");
 
         bundle.set_name("My Bundle").await.unwrap();
-        let name = bundle.bundle.read().name.as_ref().unwrap().clone();
+        let name = bundle.bundle.name.read().as_ref().unwrap().clone();
         assert_eq!(name, "My Bundle");
     }
 
@@ -1695,14 +1673,14 @@ mod tests {
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
-        assert_eq!(bundle.bundle.read().description, None);
+        assert_eq!(bundle.bundle.description.read().clone(), None);
 
         bundle
             .set_description("This is a test bundle")
             .await
             .unwrap();
         assert_eq!(
-            bundle.bundle.read().description.clone().unwrap_or("NOT SET".to_string()),
+            bundle.bundle.description.read().clone().unwrap_or("NOT SET".to_string()),
             "This is a test bundle"
         );
     }
@@ -1717,10 +1695,10 @@ mod tests {
             .await
             .unwrap();
 
-        let v_no_name = bundle.bundle.read().version();
+        let v_no_name = bundle.bundle.version();
 
         bundle.set_name("Named Bundle").await.unwrap();
-        let v_with_name = bundle.bundle.read().version();
+        let v_with_name = bundle.bundle.version();
 
         // Metadata operations now affect the version hash since they're proper operations
         assert_ne!(
@@ -1728,7 +1706,7 @@ mod tests {
             "Name should be tracked as an operation and change version"
         );
         // Verify the name was actually set
-        assert_eq!(bundle.bundle.read().name(), Some("Named Bundle".to_string()));
+        assert_eq!(bundle.bundle.name(), Some("Named Bundle".to_string()));
     }
 
     #[tokio::test]
@@ -1737,7 +1715,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            bundle.bundle.read().operations().len(),
+            bundle.bundle.operations().len(),
             0,
         );
 
@@ -1745,10 +1723,10 @@ mod tests {
             .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
-        assert_eq!(bundle.bundle.read().operations().len(), 1);
+        assert_eq!(bundle.bundle.operations().len(), 1);
 
         bundle.drop_column("title").await.unwrap();
-        assert_eq!(bundle.bundle.read().operations().len(), 2);
+        assert_eq!(bundle.bundle.operations().len(), 2);
     }
 
     #[tokio::test]
@@ -1786,7 +1764,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(bundle.bundle.read().operations.len(), 3);
+        assert_eq!(bundle.bundle.operations.read().len(), 3);
     }
 
     #[tokio::test]

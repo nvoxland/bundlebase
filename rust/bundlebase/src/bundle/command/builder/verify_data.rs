@@ -80,11 +80,9 @@ impl BundleBuilderCommand for VerifyDataCommand {
 
         // Process each block
         for (block_id, location, expected_hash, current_version) in blocks_to_verify {
-            // Compute actual hash - clone values to avoid holding guard across await
-            let (data_dir, config) = {
-                let bundle = builder.bundle();
-                (bundle.data_dir.clone(), bundle.config())
-            };
+            // Compute actual hash
+            let data_dir = builder.bundle().data_dir();
+            let config = builder.bundle().config();
             let hash_result = compute_file_hash(&location, data_dir, config).await;
 
             match hash_result {
