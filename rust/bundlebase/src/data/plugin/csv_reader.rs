@@ -1,11 +1,11 @@
-use crate::object_id::ObjectId;
+use crate::bundle::BundleFacade;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
-use crate::data::{DataReader, LayoutRowIdProvider, LineOrientedFormat, RowId, RowIdProvider};
+use crate::data::{DataReader, LayoutRowIdProvider, LineOrientedFormat, ObjectId, RowId, RowIdProvider};
 use crate::index::RowIdIndex;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadWriteDir;
-use crate::{Bundle, BundlebaseError};
+use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
 use datafusion::common::stats::Precision;
@@ -53,7 +53,7 @@ impl ReaderPlugin for CsvPlugin {
         &self,
         source: &str,
         block_id: &ObjectId,
-        bundle: &Bundle,
+        bundle: &dyn BundleFacade,
         schema: Option<SchemaRef>,
         layout: Option<String>,
         expected_version: Option<String>,
@@ -70,7 +70,7 @@ impl ReaderPlugin for CsvPlugin {
             None => None,
             Some(x) => Some(ObjectStoreFile::from_str(
                 x.as_str(),
-                bundle.data_dir(),
+                bundle.data_dir().as_ref(),
                 bundle.config(),
             )?),
         };
@@ -239,7 +239,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let result = plugin
-            .reader("file:///test.parquet", &1.into(), &binding, None, None, None)
+            .reader("file:///test.parquet", &1.into(), &*binding, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -253,7 +253,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let invalid_reader = plugin
-            .reader("file:///invalid.csv", &1.into(), &binding, None, None, None)
+            .reader("file:///invalid.csv", &1.into(), &*binding, None, None, None)
             .await?;
 
         assert!(invalid_reader.is_some());
@@ -278,7 +278,7 @@ mod tests {
             .reader(
                 test_datafile("customers-0-100.csv"),
                 &1.into(),
-                &binding,
+                &*binding,
                 None,
                 None,
                 None,
@@ -320,7 +320,7 @@ mod tests {
             .reader(
                 test_datafile("customers-0-100.csv"),
                 &1.into(),
-                &binding,
+                &*binding,
                 Some(schema),
                 None,
                 None,
@@ -328,8 +328,8 @@ mod tests {
             .await?
             .unwrap();
 
-        let binding = Bundle::empty().await?;
-        let ctx = binding.ctx();
+        let binding2 = Bundle::empty().await?;
+        let ctx = binding2.ctx();
         let ds = reader.data_source(None, &[], None, None).await?;
         let results = ds.open(0, ctx.task_ctx())?;
 
@@ -380,7 +380,7 @@ mod tests {
             .reader(
                 test_datafile("customers-0-100.csv"),
                 &1.into(),
-                &binding,
+                &*binding,
                 None,
                 None,
                 None,
@@ -426,7 +426,7 @@ mod tests {
             .reader(
                 test_datafile("customers-0-100.csv"),
                 &1.into(),
-                &binding,
+                &*binding,
                 None,
                 None,
                 None,
@@ -480,11 +480,12 @@ mod tests {
         // Create a bundle with a writable memory-based data directory
         let builder = BundleBuilder::create("memory:///test_csv_extract", None).await?;
         let binding = builder.bundle();
+        let bundle_facade = binding.clone();
 
         // First, create a reader to build the layout
         let csv_url = test_datafile("customers-0-100.csv");
         let temp_reader = plugin
-            .reader(csv_url, &block_id, binding, None, None, None)
+            .reader(csv_url, &block_id, &bundle_facade, None, None, None)
             .await?
             .unwrap();
 
@@ -503,7 +504,7 @@ mod tests {
             .reader(
                 csv_url,
                 &block_id,
-                binding,
+                &bundle_facade,
                 schema,
                 Some(layout_file.url().to_string()),
                 None,
@@ -573,11 +574,12 @@ mod tests {
         // Create a bundle with a writable memory-based data directory
         let builder = BundleBuilder::create("memory:///test_csv_extract_proj", None).await?;
         let binding = builder.bundle();
+        let bundle_facade = binding.clone();
 
         // First, create a reader to build the layout
         let csv_url = test_datafile("customers-0-100.csv");
         let temp_reader = plugin
-            .reader(csv_url, &block_id, binding, None, None, None)
+            .reader(csv_url, &block_id, &bundle_facade, None, None, None)
             .await?
             .unwrap();
 
@@ -596,7 +598,7 @@ mod tests {
             .reader(
                 csv_url,
                 &block_id,
-                binding,
+                &bundle_facade,
                 schema,
                 Some(layout_file.url().to_string()),
                 None,

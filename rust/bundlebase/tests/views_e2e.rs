@@ -27,7 +27,7 @@ async fn test_create_view_basic() -> Result<(), BundlebaseError> {
             "CREATE VIEW: 'chile'",
             "select \\* from bundle where Country = 'Chile'",
         ],
-        describe_ops(&view),
+        describe_ops(view.as_ref()),
     );
 
     let schema = view.schema().await?;
@@ -93,7 +93,7 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
     c_reopened.commit("v3 - more data").await?;
 
     // View should see new parent commits through FROM chain
-    let view_after_parent_change: Bundle = c_reopened.view("active").await?;
+    let view_after_parent_change = c_reopened.view("active").await?;
     let new_ops_count = view_after_parent_change.operations().len();
     println!("Operations count after parent change: {}", new_ops_count);
 
@@ -289,7 +289,7 @@ async fn test_cannot_attach_to_view() -> Result<(), BundlebaseError> {
 
     // Open the view
     let view_bundle = Bundle::open(
-        &c.data_dir().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
+        &c.data_dir().as_ref().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
         None,
     ).await?;
     let mut view_builder = view_bundle.extend(Some(random_memory_url().as_str()))?;
@@ -321,7 +321,7 @@ async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
 
     // Open the view
     let view_bundle = Bundle::open(
-        &c.data_dir().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
+        &c.data_dir().as_ref().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
         None,
     ).await?;
     let mut view_builder = view_bundle.extend(Some(random_memory_url().as_str()))?;
@@ -359,7 +359,7 @@ async fn test_cannot_drop_view_from_view() -> Result<(), BundlebaseError> {
     let views = c.views();
     let view1_id = views.iter().find(|(_, name)| name.as_str() == "view1").map(|(id, _)| id).unwrap();
     let view_bundle = Bundle::open(
-        &c.data_dir().subdir(&format!("view_{}", view1_id))?.url().to_string(),
+        &c.data_dir().as_ref().subdir(&format!("view_{}", view1_id))?.url().to_string(),
         None,
     ).await?;
     let mut view_builder = view_bundle.extend(Some(random_memory_url().as_str()))?;

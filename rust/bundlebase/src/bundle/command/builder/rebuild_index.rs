@@ -53,7 +53,7 @@ impl CommandParsing for RebuildIndexCommand {
 impl BundleBuilderCommand for RebuildIndexCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         let op = RebuildIndexOp::setup(self.column.clone()).await?;
         builder.apply_operation(op.into()).await?;
         Ok(())

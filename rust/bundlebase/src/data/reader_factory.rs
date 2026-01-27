@@ -1,8 +1,9 @@
+use crate::bundle::BundleFacade;
 use crate::data::plugin::{CsvPlugin, FunctionPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin};
 use crate::data::{DataReader, ObjectId};
 use crate::functions::FunctionRegistry;
 use crate::io::DataStorage;
-use crate::{Bundle, BundlebaseError};
+use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
 use datafusion::common::DataFusionError;
 use parking_lot::RwLock;
@@ -38,7 +39,7 @@ impl DataReaderFactory {
     /// # Arguments
     /// * `source` - URL or path to the data source
     /// * `block_id` - ID of the block being read
-    /// * `bundle` - Bundle context
+    /// * `bundle` - Bundle context (as trait object for flexibility)
     /// * `schema` - Optional schema (if already known)
     /// * `layout` - Optional layout file path
     /// * `expected_version` - If provided, validates version on first data access.
@@ -47,7 +48,7 @@ impl DataReaderFactory {
         &self,
         source: &str,
         block_id: &ObjectId,
-        bundle: &Bundle,
+        bundle: &dyn BundleFacade,
         schema: Option<SchemaRef>,
         layout: Option<String>,
         expected_version: Option<String>,

@@ -426,13 +426,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_column_source_from_dataframe() -> Result<(), BundlebaseError> {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None).await?;
+        let bundle = BundleBuilder::create("memory:///test_bundle", None).await?;
         bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
         let df = bundle.dataframe().await?;
 
         // Test with pack expansion - should return only blocks that have the column
-        let sources = column_sources_from_df("first_name", &df, Some(&bundle.bundle().packs))
+        let binding = bundle.bundle();
+        let sources = column_sources_from_df("first_name", &df, Some(&binding.packs))
             .await?
             .ok_or("Could not find columns")?;
 

@@ -49,8 +49,8 @@ impl CommandParsing for DropViewCommand {
 impl BundleBuilderCommand for DropViewCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
-        let op = DropViewOp::setup(&self.name, builder.bundle()).await?;
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+        let op = DropViewOp::setup(&self.name, builder).await?;
         builder.apply_operation(op.into()).await?;
         Ok(())
     }

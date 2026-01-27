@@ -3,6 +3,7 @@ use arrow::datatypes::SchemaRef;
 use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
 use bundlebase::io::{readable_file_from_url, IOReadWriteDir};
 use bundlebase::{BundlebaseError, BundleConfig};
+use std::sync::Arc;
 use url::Url;
 
 #[allow(dead_code)]

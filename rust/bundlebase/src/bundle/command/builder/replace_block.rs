@@ -70,7 +70,7 @@ impl CommandParsing for ReplaceBlockCommand {
 impl BundleBuilderCommand for ReplaceBlockCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         let op = ReplaceBlockOp::setup(&self.old_location, &self.new_location, builder).await?;
         builder.apply_operation(op.into()).await?;
         info!("Replaced block {} -> {}", self.old_location, self.new_location);

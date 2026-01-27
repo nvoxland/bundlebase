@@ -65,7 +65,7 @@ impl CommandParsing for RenameColumnCommand {
 impl BundleBuilderCommand for RenameColumnCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         builder
             .apply_operation(RenameColumnOp::setup(&self.old_name, &self.new_name).into())
             .await?;

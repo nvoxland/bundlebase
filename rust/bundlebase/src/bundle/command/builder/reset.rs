@@ -36,7 +36,7 @@ impl CommandParsing for ResetCommand {
 impl BundleBuilderCommand for ResetCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         builder.reset().await?;
 
         Ok(())

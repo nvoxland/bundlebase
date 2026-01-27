@@ -1,4 +1,5 @@
 use crate::bundle::operation::Operation;
+use crate::bundle::BundleBuilder;
 use crate::data::ObjectId;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
@@ -15,7 +16,8 @@ pub struct DropJoinOp {
 }
 
 impl DropJoinOp {
-    pub async fn setup(join_name: &str, bundle: &Bundle) -> Result<Self, BundlebaseError> {
+    pub async fn setup(join_name: &str, builder: &BundleBuilder) -> Result<Self, BundlebaseError> {
+        let bundle = builder.bundle();
         let pack = bundle.pack_by_name(join_name).ok_or_else(|| {
             let available_joins = bundle.join_names();
             let available_list = if available_joins.is_empty() {

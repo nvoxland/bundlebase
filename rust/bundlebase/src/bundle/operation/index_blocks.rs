@@ -179,7 +179,7 @@ impl IndexBlocksOp {
     /// - Data types differ between blocks for the same column
     /// - Streaming or index building fails
     pub async fn setup(
-        index: &ObjectId,
+        index: &ObjectId, //todo: Should take BundleBuilder
         column: &str,
         blocks: Vec<(ObjectId, String)>,
         bundle: &Bundle,

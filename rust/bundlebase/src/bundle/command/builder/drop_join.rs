@@ -51,8 +51,8 @@ impl CommandParsing for DropJoinCommand {
 impl BundleBuilderCommand for DropJoinCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
-        let op = DropJoinOp::setup(&self.name, builder.bundle()).await?;
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+        let op = DropJoinOp::setup(&self.name, builder).await?;
         builder.apply_operation(op.into()).await?;
         Ok(())
     }

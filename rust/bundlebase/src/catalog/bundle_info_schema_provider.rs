@@ -13,15 +13,34 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 
-/// Bundle metadata for the details table
-#[derive(Debug, Clone)]
-pub struct BundleMetadata {
+/// Configuration for BundleInfoSchemaProvider, grouping related parameters.
+///
+/// This struct organizes the parameters needed to create a BundleInfoSchemaProvider
+/// into logical groupings to improve API ergonomics.
+#[derive(Debug)]
+pub struct BundleInfoConfig { //todo: remove
+    /// Bundle identifier (immutable)
     pub id: String,
-    pub name: Option<String>,
-    pub description: Option<String>,
+    /// Bundle URL (immutable)
     pub url: Url,
+    /// Parent bundle URL, if extended from another bundle (immutable)
     pub from: Option<Url>,
-    pub version: String,
+    /// Bundle name (mutable via operations)
+    pub name: Arc<RwLock<Option<String>>>,
+    /// Bundle description (mutable via operations)
+    pub description: Arc<RwLock<Option<String>>>,
+    /// Bundle version hash (recomputed on each operation)
+    pub version: Arc<RwLock<String>>,
+    /// Commit history
+    pub commits: Arc<RwLock<Vec<BundleCommit>>>,
+    /// Uncommitted changes (empty for read-only Bundle)
+    pub status: Arc<RwLock<BundleStatus>>,
+    /// Views by name
+    pub views: Arc<RwLock<HashMap<String, ObjectId>>>,
+    /// Index definitions
+    pub indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
+    /// Packs by ID
+    pub packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
 }
 
 /// SchemaProvider that exposes bundle metadata tables in the "bundle_info" schema.
@@ -37,17 +56,31 @@ pub struct BundleMetadata {
 pub struct BundleInfoSchemaProvider {
     commits: Arc<RwLock<Vec<BundleCommit>>>,
     status: Arc<RwLock<BundleStatus>>,
-    metadata: Arc<RwLock<BundleMetadata>>,
+    id: String,
+    name: Arc<RwLock<Option<String>>>,
+    description: Arc<RwLock<Option<String>>>,
+    url: Url,
+    from: Option<Url>,
+    version: Arc<RwLock<String>>,
     views: Arc<RwLock<HashMap<String, ObjectId>>>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
 }
 
+//todo: Only pass BundleFacade
 impl BundleInfoSchemaProvider {
+    /// Create a new BundleInfoSchemaProvider with individual parameters.
+    ///
+    /// For a more ergonomic API, consider using `from_config()` instead.
     pub fn new(
         commits: Arc<RwLock<Vec<BundleCommit>>>,
         status: Arc<RwLock<BundleStatus>>,
-        metadata: Arc<RwLock<BundleMetadata>>,
+        id: String,
+        name: Arc<RwLock<Option<String>>>,
+        description: Arc<RwLock<Option<String>>>,
+        url: Url,
+        from: Option<Url>,
+        version: Arc<RwLock<String>>,
         views: Arc<RwLock<HashMap<String, ObjectId>>>,
         indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
         packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
@@ -55,10 +88,35 @@ impl BundleInfoSchemaProvider {
         Self {
             commits,
             status,
-            metadata,
+            id,
+            name,
+            description,
+            url,
+            from,
+            version,
             views,
             indexes,
             packs,
+        }
+    }
+
+    /// Create a new BundleInfoSchemaProvider from a config struct.
+    ///
+    /// This provides a more ergonomic API than `new()` when all parameters
+    /// are available together.
+    pub fn from_config(config: BundleInfoConfig) -> Self {
+        Self {
+            commits: config.commits,
+            status: config.status,
+            id: config.id,
+            name: config.name,
+            description: config.description,
+            url: config.url,
+            from: config.from,
+            version: config.version,
+            views: config.views,
+            indexes: config.indexes,
+            packs: config.packs,
         }
     }
 }
@@ -81,6 +139,8 @@ impl SchemaProvider for BundleInfoSchemaProvider {
         ]
     }
 
+    //todo: these need to take BundleFacade
+    //todo: these need to be singletons, maybe. But also need to get the active bundlefacade
     async fn table(&self, name: &str) -> datafusion::error::Result<Option<Arc<dyn TableProvider>>> {
         if name == catalog::BUNDLE_HISTORY_TABLE {
             let commits = self.commits.read().clone();
@@ -91,8 +151,14 @@ impl SchemaProvider for BundleInfoSchemaProvider {
             let table = BundleStatusTable::new(status)?;
             Ok(Some(Arc::new(table)))
         } else if name == catalog::BUNDLE_DETAILS_TABLE {
-            let metadata = self.metadata.read().clone();
-            let table = BundleDetailsTable::new(metadata)?;
+            let table = BundleDetailsTable::new(
+                &self.id,
+                self.name.read().as_deref(),
+                self.description.read().as_deref(),
+                self.url.as_str(),
+                self.from.as_ref().map(|u| u.as_str()),
+                &self.version.read(),
+            )?;
             Ok(Some(Arc::new(table)))
         } else if name == catalog::BUNDLE_VIEWS_TABLE {
             let views = self.views.read().clone();
@@ -230,6 +296,7 @@ impl BundleStatusTable {
     }
 }
 
+//todo: move these to a sub-module. Maybe still all one, maybe separte
 /// Helper struct for creating the bundle_details table
 struct BundleDetailsTable;
 
@@ -245,18 +312,25 @@ impl BundleDetailsTable {
         ]))
     }
 
-    fn new(metadata: BundleMetadata) -> Result<MemTable, DataFusionError> {
+    fn new(
+        id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        url: &str,
+        from: Option<&str>,
+        version: &str,
+    ) -> Result<MemTable, DataFusionError> {
         let schema = Self::schema();
 
         let batch = RecordBatch::try_new(
             Arc::clone(&schema),
             vec![
-                Arc::new(StringArray::from(vec![metadata.id.as_str()])),
-                Arc::new(StringArray::from(vec![metadata.name.as_deref()])),
-                Arc::new(StringArray::from(vec![metadata.description.as_deref()])),
-                Arc::new(StringArray::from(vec![metadata.url.as_str()])),
-                Arc::new(StringArray::from(vec![metadata.from.as_ref().map(|u| u.as_str())])),
-                Arc::new(StringArray::from(vec![metadata.version.as_str()])),
+                Arc::new(StringArray::from(vec![id])),
+                Arc::new(StringArray::from(vec![name])),
+                Arc::new(StringArray::from(vec![description])),
+                Arc::new(StringArray::from(vec![url])),
+                Arc::new(StringArray::from(vec![from])),
+                Arc::new(StringArray::from(vec![version])),
             ],
         )?;
 

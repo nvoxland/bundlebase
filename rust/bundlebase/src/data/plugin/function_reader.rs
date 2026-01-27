@@ -1,9 +1,10 @@
+use crate::bundle::BundleFacade;
 use crate::data::plugin::ReaderPlugin;
 use crate::data::{DataReader, ObjectId, RowId};
 use crate::functions::FunctionDataSource;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionRegistry;
-use crate::{Bundle, BundlebaseError};
+use crate::BundlebaseError;
 use arrow::array::RecordBatch;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
@@ -31,7 +32,7 @@ impl ReaderPlugin for FunctionPlugin {
         &self,
         source: &str,
         block_id: &ObjectId,
-        _bundle: &Bundle,
+        _bundle: &dyn BundleFacade,
         _schema: Option<SchemaRef>,
         _layout: Option<String>,
         _expected_version: Option<String>, // Functions use their own versioning, not file-based
@@ -174,7 +175,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let result = plugin
-            .reader("file:///test.csv", &1.into(), &binding, None, None, None)
+            .reader("file:///test.csv", &1.into(), &*binding, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -187,11 +188,12 @@ mod tests {
         // function:// without a function name should error
         let plugin = FunctionPlugin::new(Arc::new(RwLock::new(FunctionRegistry::new())));
 
+        let binding = Bundle::empty().await?;
         let error = plugin
             .reader(
                 "function://",
                 &1.into(),
-                &Bundle::empty().await?,
+                &*binding,
                 None,
                 None,
                 None,
@@ -211,11 +213,12 @@ mod tests {
     async fn test_unknown_function() -> Result<(), BundlebaseError> {
         let plugin = FunctionPlugin::new(Arc::new(RwLock::new(FunctionRegistry::new())));
 
+        let binding = Bundle::empty().await?;
         let error = plugin
             .reader(
                 "function://invalid",
                 &1.into(),
-                &Bundle::empty().await?,
+                &*binding,
                 None,
                 None,
                 None,
@@ -260,7 +263,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let reader = plugin
-            .reader("function://mock", &1.into(), &binding, None, None, None)
+            .reader("function://mock", &1.into(), &*binding, None, None, None)
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 

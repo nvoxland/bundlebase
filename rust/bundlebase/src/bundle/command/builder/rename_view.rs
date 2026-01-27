@@ -64,8 +64,8 @@ impl CommandParsing for RenameViewCommand {
 impl BundleBuilderCommand for RenameViewCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
-        let op = RenameViewOp::setup(&self.old_name, &self.new_name, builder.bundle()).await?;
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+        let op = RenameViewOp::setup(&self.old_name, &self.new_name, builder).await?;
         builder.apply_operation(op.into()).await?;
         Ok(())
     }

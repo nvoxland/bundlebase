@@ -312,7 +312,7 @@ pub trait BundleBuilderCommand: CommandParsing {
     /// Execute the command on the provided builder
     async fn execute(
         self: Box<Self>,
-        builder: &mut BundleBuilder,
+        builder: &BundleBuilder,
     ) -> Result<Self::Output, BundlebaseError>;
 }
 
@@ -408,7 +408,7 @@ macro_rules! register_commands {
             /// Execute this command on a BundleBuilder.
             ///
             /// This method delegates to the wrapped command struct via `execute_command`.
-            pub async fn execute(self, builder: &mut BundleBuilder) -> Result<CommandOutput, BundlebaseError> {
+            pub async fn execute(self, builder: &BundleBuilder) -> Result<CommandOutput, BundlebaseError> {
                 match self {
                     // Message commands - standard execute_command pattern
                     $(
@@ -437,8 +437,7 @@ macro_rules! register_commands {
                         Ok(CommandOutput::Message(MessageResponse::ok()))
                     }
                     BundleCommand::Select(cmd) => {
-                        let new_builder = builder.select(&cmd.sql, cmd.params).await?;
-                        *builder = new_builder;
+                        builder.select(&cmd.sql, cmd.params).await?;
                         Ok(CommandOutput::Message(MessageResponse::ok()))
                     }
                     BundleCommand::ExplainPlan(_cmd) => {

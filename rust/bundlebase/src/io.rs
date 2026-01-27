@@ -113,7 +113,7 @@ pub fn writable_file_from_url(
 /// Otherwise, it's a relative path resolved against the base directory.
 pub fn readable_file_from_path(
     path: &str,
-    base: &dyn IOReadDir,
+    base: Arc<dyn IOReadDir>,
     config: Arc<crate::BundleConfig>,
 ) -> Result<Box<dyn IOReadFile>, crate::BundlebaseError> {
     if path.contains(":") {
@@ -131,7 +131,7 @@ pub fn readable_file_from_path(
 /// Otherwise, it's a relative path resolved against the base directory.
 pub fn writable_file_from_path(
     path: &str,
-    base: &dyn IOReadWriteDir,
+    base: Arc<dyn IOReadWriteDir>,
     config: Arc<crate::BundleConfig>,
 ) -> Result<Box<dyn IOReadWriteFile>, crate::BundlebaseError> {
     if path.contains(":") {

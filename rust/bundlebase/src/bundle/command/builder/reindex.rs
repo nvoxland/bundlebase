@@ -36,7 +36,7 @@ impl CommandParsing for ReindexCommand {
 impl BundleBuilderCommand for ReindexCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         builder.reindex_internal().await
     }
 }

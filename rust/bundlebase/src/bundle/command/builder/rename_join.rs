@@ -64,8 +64,8 @@ impl CommandParsing for RenameJoinCommand {
 impl BundleBuilderCommand for RenameJoinCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
-        let op = RenameJoinOp::setup(&self.old_name, &self.new_name, builder.bundle()).await?;
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+        let op = RenameJoinOp::setup(&self.old_name, &self.new_name, builder).await?;
         builder.apply_operation(op.into()).await?;
         Ok(())
     }

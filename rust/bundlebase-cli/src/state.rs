@@ -10,7 +10,6 @@ use bundlebase::bundle::{
 };
 use bundlebase::{Bundle, BundleBuilder, BundlebaseError};
 use datafusion::execution::SendableRecordBatchStream;
-use parking_lot::RwLock;
 use std::sync::Arc;
 
 /// Result of SQL execution.
@@ -26,10 +25,10 @@ pub enum SqlResult {
 
 /// Mode of the bundle state - read-only or read-write.
 enum BundleMode {
-    /// Read-only mode with an immutable Bundle.
-    ReadOnly(RwLock<Bundle>),
-    /// Read-write mode with a mutable BundleBuilder.
-    ReadWrite(RwLock<BundleBuilder>),
+    /// Read-only mode with an immutable Bundle (already in Arc from Bundle::open).
+    ReadOnly(Arc<Bundle>),
+    /// Read-write mode with a BundleBuilder (uses interior mutability).
+    ReadWrite(Arc<BundleBuilder>),
 }
 
 /// Shared state containing the bundle being worked on.
@@ -47,22 +46,22 @@ pub struct BundleState {
 
 impl BundleState {
     /// Create a new read-only state wrapping a bundle.
-    pub fn read_only(bundle: Bundle) -> Self {
+    pub fn read_only(bundle: Arc<Bundle>) -> Self {
         Self {
-            mode: BundleMode::ReadOnly(RwLock::new(bundle)),
+            mode: BundleMode::ReadOnly(bundle),
         }
     }
 
     /// Create a new read-write state wrapping a bundle builder.
-    pub fn read_write(builder: BundleBuilder) -> Self {
+    pub fn read_write(builder: Arc<BundleBuilder>) -> Self {
         Self {
-            mode: BundleMode::ReadWrite(RwLock::new(builder)),
+            mode: BundleMode::ReadWrite(builder),
         }
     }
 
     /// Create a new state wrapping a bundle builder (legacy API, same as read_write).
     #[deprecated(since = "0.5.0", note = "Use read_write() instead")]
-    pub fn new(bundle: BundleBuilder) -> Self {
+    pub fn new(bundle: Arc<BundleBuilder>) -> Self {
         Self::read_write(bundle)
     }
 
@@ -90,20 +89,16 @@ impl BundleState {
             match parse_command(sql) {
                 Ok(cmd) => {
                     match &self.mode {
-                        BundleMode::ReadOnly(lock) => {
+                        BundleMode::ReadOnly(bundle) => {
                             // In read-only mode, only facade commands are allowed
                             let facade_cmd = cmd.into_facade_command()?;
-                            // Clone the bundle to avoid holding lock across await
-                            let bundle = lock.read().clone();
-                            let output = facade_cmd.execute(&bundle).await?;
+                            let output = facade_cmd.execute(bundle.as_ref()).await?;
                             Ok(SqlResult::Output(output))
                         }
-                        BundleMode::ReadWrite(lock) => {
+                        BundleMode::ReadWrite(builder) => {
                             // In read-write mode, all commands are allowed
-                            // Clone-modify-writeback pattern
-                            let mut builder = lock.read().clone();
-                            let output = cmd.execute(&mut builder).await?;
-                            *lock.write() = builder;
+                            // BundleBuilder uses interior mutability, so we can use &self methods
+                            let output = cmd.execute(builder.as_ref()).await?;
                             Ok(SqlResult::Output(output))
                         }
                     }
@@ -128,9 +123,7 @@ impl BundleState {
     /// Execute standard SQL via DataFusion.
     async fn execute_standard_sql(&self, sql: &str) -> Result<SqlResult, BundlebaseError> {
         match &self.mode {
-            BundleMode::ReadOnly(lock) => {
-                // Clone the bundle to avoid holding lock across await
-                let bundle = lock.read().clone();
+            BundleMode::ReadOnly(bundle) => {
                 let sql_upper = sql.to_uppercase();
 
                 if sql_upper.contains("FROM BUNDLE") || sql_upper.contains("JOIN BUNDLE") {
@@ -147,8 +140,7 @@ impl BundleState {
                     Ok(SqlResult::Stream(stream))
                 }
             }
-            BundleMode::ReadWrite(lock) => {
-                let builder = lock.read().clone();
+            BundleMode::ReadWrite(builder) => {
                 let sql_upper = sql.to_uppercase();
 
                 if sql_upper.contains("FROM BUNDLE") || sql_upper.contains("JOIN BUNDLE") {
@@ -174,27 +166,25 @@ impl BundleState {
 
     /// Get the bundle schema.
     pub async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {
-        // Clone the Arc to avoid holding the guard across await
-        let facade: Arc<dyn BundleFacade> = match &self.mode {
-            BundleMode::ReadOnly(lock) => Arc::new(lock.read().clone()),
-            BundleMode::ReadWrite(lock) => Arc::new(lock.read().clone()),
-        };
-        facade.schema().await
+        match &self.mode {
+            BundleMode::ReadOnly(bundle) => bundle.schema().await,
+            BundleMode::ReadWrite(builder) => builder.schema().await,
+        }
     }
 
     /// Get the number of rows in the bundle.
     pub async fn num_rows(&self) -> Result<usize, BundlebaseError> {
         match &self.mode {
-            BundleMode::ReadOnly(lock) => lock.read().num_rows().await,
-            BundleMode::ReadWrite(lock) => lock.read().num_rows().await,
+            BundleMode::ReadOnly(bundle) => bundle.num_rows().await,
+            BundleMode::ReadWrite(builder) => builder.num_rows().await,
         }
     }
 
     /// Get the commit history.
     pub fn history(&self) -> Vec<BundleCommit> {
         match &self.mode {
-            BundleMode::ReadOnly(lock) => lock.read().history(),
-            BundleMode::ReadWrite(lock) => lock.read().history(),
+            BundleMode::ReadOnly(bundle) => bundle.history(),
+            BundleMode::ReadWrite(builder) => builder.history(),
         }
     }
 
@@ -204,7 +194,7 @@ impl BundleState {
     pub fn status(&self) -> Option<BundleStatus> {
         match &self.mode {
             BundleMode::ReadOnly(_) => None,
-            BundleMode::ReadWrite(lock) => Some(lock.read().status().clone()),
+            BundleMode::ReadWrite(builder) => Some(builder.status().clone()),
         }
     }
 
@@ -213,16 +203,16 @@ impl BundleState {
         &self,
     ) -> Result<std::sync::Arc<datafusion::prelude::DataFrame>, BundlebaseError> {
         match &self.mode {
-            BundleMode::ReadOnly(lock) => lock.read().dataframe().await,
-            BundleMode::ReadWrite(lock) => lock.read().dataframe().await,
+            BundleMode::ReadOnly(bundle) => bundle.dataframe().await,
+            BundleMode::ReadWrite(builder) => builder.dataframe().await,
         }
     }
 
     /// Get the bundle URL.
     pub fn url(&self) -> String {
         match &self.mode {
-            BundleMode::ReadOnly(lock) => lock.read().url().to_string(),
-            BundleMode::ReadWrite(lock) => lock.read().bundle().url().to_string(),
+            BundleMode::ReadOnly(bundle) => bundle.url().to_string(),
+            BundleMode::ReadWrite(builder) => builder.bundle().url().to_string(),
         }
     }
 
@@ -233,14 +223,12 @@ impl BundleState {
     /// sets upfront.
     pub async fn get_query_schema(&self, sql: &str) -> Result<SchemaRef, BundlebaseError> {
         match &self.mode {
-            BundleMode::ReadOnly(lock) => {
-                let bundle = lock.read().clone();
+            BundleMode::ReadOnly(bundle) => {
                 let result_builder = bundle.select(sql, vec![]).await?;
                 let df = result_builder.dataframe().await?;
                 Ok(df.schema().inner().clone())
             }
-            BundleMode::ReadWrite(lock) => {
-                let builder = lock.read().clone();
+            BundleMode::ReadWrite(builder) => {
                 let result_builder = builder.select(sql, vec![]).await?;
                 let df = result_builder.dataframe().await?;
                 Ok(df.schema().inner().clone())
@@ -252,23 +240,13 @@ impl BundleState {
     // Read-write only methods
     // =========================================================================
 
-    /// Get a mutable reference to the builder (read-write mode only).
+    /// Get a reference to the builder (read-write mode only).
     ///
     /// Returns `None` in read-only mode.
-    pub fn builder(&self) -> Option<parking_lot::RwLockWriteGuard<'_, BundleBuilder>> {
+    pub fn builder(&self) -> Option<&Arc<BundleBuilder>> {
         match &self.mode {
             BundleMode::ReadOnly(_) => None,
-            BundleMode::ReadWrite(lock) => Some(lock.write()),
-        }
-    }
-
-    /// Get a read reference to the builder (read-write mode only).
-    ///
-    /// Returns `None` in read-only mode.
-    pub fn builder_read(&self) -> Option<parking_lot::RwLockReadGuard<'_, BundleBuilder>> {
-        match &self.mode {
-            BundleMode::ReadOnly(_) => None,
-            BundleMode::ReadWrite(lock) => Some(lock.read()),
+            BundleMode::ReadWrite(builder) => Some(builder),
         }
     }
 }

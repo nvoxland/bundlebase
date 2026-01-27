@@ -62,7 +62,7 @@ impl CommandParsing for FilterCommand {
 impl BundleBuilderCommand for FilterCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         let statement = self.to_statement();
         builder
             .apply_operation(

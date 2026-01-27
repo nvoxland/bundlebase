@@ -36,7 +36,7 @@ pub fn for_yaml(value: String) -> String {
     serde_yaml_ng::to_string(&value).unwrap().trim().to_string()
 }
 
-pub async fn empty_bundle() -> BundleBuilder {
+pub async fn empty_bundle() -> Arc<BundleBuilder> {
     BundleBuilder::create(random_memory_url().as_str(), None)
         .await
         .unwrap()

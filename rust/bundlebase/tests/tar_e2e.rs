@@ -139,8 +139,8 @@ async fn test_tar_preserves_metadata() {
     let tar_bundle = Bundle::open(tar_path.to_str().unwrap(), None)
         .await
         .unwrap();
-    assert_eq!(tar_bundle.name(), Some("Test Bundle"));
-    assert_eq!(tar_bundle.description(), Some("A test bundle for tar export"));
+    assert_eq!(tar_bundle.name(), Some("Test Bundle".to_string()));
+    assert_eq!(tar_bundle.description(), Some("A test bundle for tar export".to_string()));
 }
 
 /// Tests creating an index in a tar bundle
