@@ -218,8 +218,10 @@ async fn test_bundle_status_table_empty() {
 
 #[tokio::test]
 async fn test_bundle_status_table_with_uncommitted_changes() {
+    use bundlebase::BundleFacade;
+
     let data_dir = random_memory_dir();
-    let mut bundle = BundleBuilder::create(data_dir.url().as_str(), None)
+    let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
         .unwrap();
 
@@ -229,32 +231,31 @@ async fn test_bundle_status_table_with_uncommitted_changes() {
         .await
         .unwrap();
 
-    // Query the bundle_info.status table - should show the uncommitted change
+    // Query the bundle_info.status table via SQL - always empty (use status() method instead)
     let df = bundle.bundle().ctx().sql("SELECT * FROM bundle_info.status").await.unwrap();
     let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
 
-    // Verify one uncommitted change exists
+    // SQL table always returns empty - this is expected behavior
     let total_rows: usize = batches.iter()
         .filter_map(|r| r.as_ref().ok())
         .map(|b| b.num_rows())
         .sum();
-    assert_eq!(total_rows, 1, "One uncommitted change should exist");
+    assert_eq!(total_rows, 0, "SQL bundle_info.status always returns empty");
 
-    // Verify the change details
-    let batch = batches[0].as_ref().unwrap();
-    let id_col = batch.column(0).as_any().downcast_ref::<Int32Array>().unwrap();
-    let description_col = batch.column(2).as_any().downcast_ref::<StringArray>().unwrap();
-    let op_count_col = batch.column(3).as_any().downcast_ref::<Int32Array>().unwrap();
-
-    assert_eq!(id_col.value(0), 0, "First change should have id 0");
-    assert!(description_col.value(0).contains("ATTACH"), "Description should mention ATTACH");
-    assert!(op_count_col.value(0) >= 1, "Should have at least 1 operation");
+    // Use the status() method to check uncommitted changes
+    let status = bundle.status();
+    let changes = status.changes();
+    assert_eq!(changes.len(), 1, "One uncommitted change should exist via status()");
+    assert!(changes[0].description.contains("ATTACH"), "Description should mention ATTACH");
+    assert!(changes[0].operations.len() >= 1, "Should have at least 1 operation");
 }
 
 #[tokio::test]
 async fn test_bundle_status_table_multiple_changes() {
+    use bundlebase::BundleFacade;
+
     let data_dir = random_memory_dir();
-    let mut bundle = BundleBuilder::create(data_dir.url().as_str(), None)
+    let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
         .unwrap();
 
@@ -266,29 +267,29 @@ async fn test_bundle_status_table_multiple_changes() {
     bundle.set_name("Test Bundle").await.unwrap();
     bundle.set_description("A test bundle").await.unwrap();
 
-    // Query the bundle_info.status table
+    // Query the bundle_info.status table via SQL - always empty
     let df = bundle.bundle().ctx().sql("SELECT id, description, operation_count FROM bundle_info.status ORDER BY id").await.unwrap();
     let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
 
-    // Verify three uncommitted changes exist
+    // SQL table always returns empty - this is expected behavior
     let total_rows: usize = batches.iter()
         .filter_map(|r| r.as_ref().ok())
         .map(|b| b.num_rows())
         .sum();
-    assert_eq!(total_rows, 3, "Three uncommitted changes should exist");
+    assert_eq!(total_rows, 0, "SQL bundle_info.status always returns empty");
 
-    // Verify the changes are in order
-    let batch = batches[0].as_ref().unwrap();
-    let id_col = batch.column(0).as_any().downcast_ref::<Int32Array>().unwrap();
-    assert_eq!(id_col.value(0), 0);
-    assert_eq!(id_col.value(1), 1);
-    assert_eq!(id_col.value(2), 2);
+    // Use the status() method to check uncommitted changes
+    let status = bundle.status();
+    let changes = status.changes();
+    assert_eq!(changes.len(), 3, "Three uncommitted changes should exist via status()");
 }
 
 #[tokio::test]
 async fn test_bundle_status_table_cleared_after_commit() {
+    use bundlebase::BundleFacade;
+
     let data_dir = random_memory_dir();
-    let mut bundle = BundleBuilder::create(data_dir.url().as_str(), None)
+    let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
         .unwrap();
 
@@ -298,26 +299,16 @@ async fn test_bundle_status_table_cleared_after_commit() {
         .await
         .unwrap();
 
-    // Verify uncommitted changes exist before commit
-    let df = bundle.bundle().ctx().sql("SELECT * FROM bundle_info.status").await.unwrap();
-    let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
-    let rows_before: usize = batches.iter()
-        .filter_map(|r| r.as_ref().ok())
-        .map(|b| b.num_rows())
-        .sum();
-    assert_eq!(rows_before, 1, "Should have 1 uncommitted change before commit");
+    // Verify uncommitted changes exist before commit via status()
+    let status_before = bundle.status();
+    assert_eq!(status_before.changes().len(), 1, "Should have 1 uncommitted change before commit");
 
     // Commit
     bundle.commit("Initial commit").await.unwrap();
 
-    // Verify no uncommitted changes after commit
-    let df = bundle.bundle().ctx().sql("SELECT * FROM bundle_info.status").await.unwrap();
-    let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
-    let rows_after: usize = batches.iter()
-        .filter_map(|r| r.as_ref().ok())
-        .map(|b| b.num_rows())
-        .sum();
-    assert_eq!(rows_after, 0, "Should have no uncommitted changes after commit");
+    // Verify no uncommitted changes after commit via status()
+    let status_after = bundle.status();
+    assert_eq!(status_after.changes().len(), 0, "Should have no uncommitted changes after commit");
 }
 
 #[tokio::test]

@@ -181,7 +181,6 @@ pub struct Bundle {
 
     data_dir: Arc<RwLock<Arc<dyn IOReadWriteDir>>>,
     commits: Arc<RwLock<Vec<BundleCommit>>>,
-    pub(crate) status: Arc<RwLock<BundleStatus>>,
 
     pub(crate) operations: Arc<RwLock<Vec<AnyOperation>>>,
 
@@ -214,17 +213,12 @@ pub struct Bundle {
 impl Clone for Bundle {
     /// Clone the bundle, sharing all Arc<RwLock<T>> state.
     ///
-    /// # Status Sharing Semantics
-    ///
     /// This clone **shares** all Arc fields with the original. This means:
     /// - Both bundles see the same state for all mutable fields
     /// - Mutations in one clone are visible in the other
     ///
     /// This is intentional for internal operations where changes need to be
     /// reflected back through schema providers (BundleInfoSchemaProvider).
-    ///
-    /// For creating independent derived bundles (e.g., from `select()` or `extend()`),
-    /// use `clear_status_for_extend()` which creates a **new** independent status Arc.
     ///
     /// # Shared Fields
     /// All Arc<RwLock<T>> fields are shared, enabling thread-safe mutations
@@ -238,7 +232,6 @@ impl Clone for Bundle {
             last_manifest_version: Arc::clone(&self.last_manifest_version),
             data_dir: Arc::clone(&self.data_dir),
             commits: Arc::clone(&self.commits),
-            status: Arc::clone(&self.status),
             operations: Arc::clone(&self.operations),
             packs: Arc::clone(&self.packs),
             sources: Arc::clone(&self.sources),
@@ -282,7 +275,6 @@ impl Bundle {
 
         let packs = Arc::new(RwLock::new(HashMap::new()));
         let commits = Arc::new(RwLock::new(vec![]));
-        let status = Arc::new(RwLock::new(BundleStatus::new()));
         let indexes = Arc::new(RwLock::new(Vec::new()));
         let views = Arc::new(RwLock::new(HashMap::new()));
         let sources = Arc::new(RwLock::new(HashMap::new()));
@@ -323,7 +315,6 @@ impl Bundle {
             "bundle_info",
             Arc::new(BundleInfoSchemaProvider::new(
                 commits.clone(),
-                status.clone(),
                 id.clone(),
                 name.clone(),
                 description.clone(),
@@ -374,7 +365,6 @@ impl Bundle {
             version,
             data_dir,
             commits,
-            status,
             dataframe,
             config: bundle_config,
             passed_config: Arc::new(RwLock::new(None)),
@@ -709,7 +699,6 @@ impl Bundle {
         *self.operations.write() = other.operations.read().clone();
         *self.sources.write() = other.sources.read().clone();
         *self.commits.write() = other.commits.read().clone();
-        *self.status.write() = other.status.read().clone();
         *self.packs.write() = other.packs.read().clone();
         *self.indexes.write() = other.indexes.read().clone();
         *self.views.write() = other.views.read().clone();
@@ -814,32 +803,6 @@ impl Bundle {
     /// Get read access to the packs map
     pub(crate) fn packs(&self) -> &Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>> {
         &self.packs
-    }
-
-    /// Get access to the status (for BundleBuilder to mutate)
-    pub(crate) fn status(&self) -> &Arc<RwLock<BundleStatus>> {
-        &self.status
-    }
-
-    /// Create a fresh status Arc for derived bundles (via extend/select).
-    ///
-    /// # Status Independence
-    ///
-    /// This method creates a **new** independent status Arc, breaking the shared
-    /// reference from `clone()`. Use this when creating derived bundles that should
-    /// have their own change tracking, such as:
-    /// - `BundleBuilder::extend()` - derived builder shouldn't inherit parent's uncommitted changes
-    /// - `select()` - query result should track its own operations independently
-    ///
-    /// After calling this, the bundle's status is independent from any clones made before.
-    /// Internal cloning via `apply_operation()` still shares the status correctly because
-    /// it calls `clone()` (which shares) after this method has been called.
-    ///
-    /// # Contrast with clone()
-    /// - `clone()`: Shares status Arc (mutations visible in both)
-    /// - `clear_status_for_extend()`: Creates new independent status Arc
-    pub(crate) fn clear_status_for_extend(&mut self) {
-        self.status = Arc::new(RwLock::new(BundleStatus::new()));
     }
 
     /// Detach fields that should be independent for an extend operation.
@@ -1393,6 +1356,10 @@ impl BundleFacade for Bundle {
 
     fn status_changes(&self) -> Vec<operation::BundleChange> {
         Vec::new() // Bundle (read-only) always has empty status
+    }
+
+    fn status(&self) -> BundleStatus {
+        BundleStatus::new() // Bundle (read-only) always has empty status
     }
 
     fn indexes(&self) -> Vec<Arc<IndexDefinition>> {

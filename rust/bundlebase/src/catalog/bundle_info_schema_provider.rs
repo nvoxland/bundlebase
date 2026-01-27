@@ -33,8 +33,6 @@ pub struct BundleInfoConfig { //todo: remove
     pub version: Arc<RwLock<String>>,
     /// Commit history
     pub commits: Arc<RwLock<Vec<BundleCommit>>>,
-    /// Uncommitted changes (empty for read-only Bundle)
-    pub status: Arc<RwLock<BundleStatus>>,
     /// Views by name
     pub views: Arc<RwLock<HashMap<String, ObjectId>>>,
     /// Index definitions
@@ -46,7 +44,7 @@ pub struct BundleInfoConfig { //todo: remove
 /// SchemaProvider that exposes bundle metadata tables in the "bundle_info" schema.
 /// Provides:
 /// - `history`: Commit history for the bundle
-/// - `status`: Uncommitted changes (only populated for BundleBuilder)
+/// - `status`: Uncommitted changes (always empty - use BundleFacade::status() instead)
 /// - `details`: Bundle metadata (id, name, description, url, from, version)
 /// - `views`: List of views in the bundle
 /// - `indexes`: List of indexes in the bundle
@@ -55,7 +53,6 @@ pub struct BundleInfoConfig { //todo: remove
 #[derive(Debug)]
 pub struct BundleInfoSchemaProvider {
     commits: Arc<RwLock<Vec<BundleCommit>>>,
-    status: Arc<RwLock<BundleStatus>>,
     id: Arc<RwLock<String>>,
     name: Arc<RwLock<Option<String>>>,
     description: Arc<RwLock<Option<String>>>,
@@ -74,7 +71,6 @@ impl BundleInfoSchemaProvider {
     /// For a more ergonomic API, consider using `from_config()` instead.
     pub fn new(
         commits: Arc<RwLock<Vec<BundleCommit>>>,
-        status: Arc<RwLock<BundleStatus>>,
         id: Arc<RwLock<String>>,
         name: Arc<RwLock<Option<String>>>,
         description: Arc<RwLock<Option<String>>>,
@@ -87,7 +83,6 @@ impl BundleInfoSchemaProvider {
     ) -> Self {
         Self {
             commits,
-            status,
             id,
             name,
             description,
@@ -107,7 +102,6 @@ impl BundleInfoSchemaProvider {
     pub fn from_config(config: BundleInfoConfig) -> Self {
         Self {
             commits: config.commits,
-            status: config.status,
             id: config.id,
             name: config.name,
             description: config.description,
@@ -147,8 +141,8 @@ impl SchemaProvider for BundleInfoSchemaProvider {
             let table = BundleHistoryTable::new(commits)?;
             Ok(Some(Arc::new(table)))
         } else if name == catalog::BUNDLE_STATUS_TABLE {
-            let status = self.status.read().clone();
-            let table = BundleStatusTable::new(status)?;
+            // Status is always empty via SQL - use BundleFacade::status() for live status
+            let table = BundleStatusTable::new(BundleStatus::new())?;
             Ok(Some(Arc::new(table)))
         } else if name == catalog::BUNDLE_DETAILS_TABLE {
             let table = BundleDetailsTable::new(
