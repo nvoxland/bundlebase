@@ -169,7 +169,7 @@ impl Operation for ReplaceBlockOp {
             &self.new_version,
             reader,
             bundle.indexes().clone(),
-            bundle.data_dir_arc(),
+            bundle.data_dir(),
             bundle.config(),
             self.source_info.clone(),
         ));

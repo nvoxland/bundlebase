@@ -87,7 +87,7 @@ impl Source {
             let func = reg
                 .get(&self.function)
                 .ok_or_else(|| format!("Unknown source function '{}'", self.function))?;
-            (func, bundle.data_dir_arc(), bundle.config())
+            (func, bundle.data_dir(), bundle.config())
         };
 
         // Parse sync mode from args (defaults to "add")

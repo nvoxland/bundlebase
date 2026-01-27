@@ -581,7 +581,7 @@ changes:
     let layout = op_field!(commit.operations()[0], AnyOperation::AttachBlock, layout).unwrap();
     let layout_file = readable_file_from_path(
         &layout,
-        loaded_bundle.data_dir_arc(),
+        loaded_bundle.data_dir(),
         BundleConfig::default().into(),
     )?;
     assert!(

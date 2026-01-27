@@ -660,12 +660,6 @@ impl Bundle {
         Arc::clone(&*self.data_dir.read())
     }
 
-    //todo remove this
-    /// Returns the data directory as an Arc for passing to components that need ownership.
-    pub fn data_dir_arc(&self) -> Arc<dyn IOReadWriteDir> {
-        Arc::clone(&*self.data_dir.read())
-    }
-
     pub fn config(&self) -> Arc<BundleConfig> {
         Arc::clone(&*self.config.read())
     }

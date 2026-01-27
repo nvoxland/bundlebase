@@ -1158,7 +1158,7 @@ impl BundleBuilder {
                 );
 
                 // Bundle is internally thread-safe
-                let op = IndexBlocksOp::setup(&index_id, &column, blocks, &self.bundle).await?;
+                let op = IndexBlocksOp::setup(&index_id, &column, blocks, self).await?;
                 self.apply_operation(op.into()).await?;
             }
         }
