@@ -1,4 +1,7 @@
-use crate::catalog::PackUnionTable;
+mod pack_table;
+
+pub use pack_table::PackTable;
+
 use crate::bundle::Pack;
 use crate::io::ObjectId;
 use async_trait::async_trait;
@@ -64,7 +67,7 @@ impl SchemaProvider for PackSchemaProvider {
                         return Ok(None);
                     }
 
-                    let union_table = PackUnionTable::new(id, pack.clone())?;
+                    let union_table = PackTable::new(id, pack.clone())?;
                     Ok(Some(Arc::new(union_table)))
                 } else {
                     Ok(None)
