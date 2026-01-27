@@ -64,7 +64,7 @@ impl CommandParsing for CreateIndexCommand {
 impl BundleBuilderCommand for CreateIndexCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         builder
             .apply_operation(
                 CreateIndexOp::setup(&self.column, self.index_type.clone())

@@ -1,3 +1,4 @@
+use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
 use crate::data::ObjectId;
@@ -59,10 +60,9 @@ impl AttachBlockOp {
         builder: &BundleBuilder,
     ) -> Result<String, BundlebaseError> {
         let temp_id = ObjectId::generate();
-        let adapter = builder
-            .bundle()
-            .adapter_factory
-            .reader(url, &temp_id, builder.bundle(), None, None, None)
+        let adapter_factory = builder.bundle().reader_factory.clone();
+        let adapter = adapter_factory
+            .reader(url, &temp_id, builder, None, None, None)
             .await?;
         adapter.read_version().await
     }
@@ -125,8 +125,7 @@ impl AttachBlockOp {
             hex::encode(hasher.finalize())
         } else {
             // Normal file-based hash computation for other schemes
-            let file =
-                readable_file_from_path(location, builder.data_dir(), builder.bundle().config())?;
+            let file = readable_file_from_path(location, builder.data_dir(), builder.config())?;
             file.compute_hash().await?
         };
 
@@ -151,10 +150,9 @@ impl AttachBlockOp {
         let block_id = ObjectId::generate();
 
         _progress.update(1, Some("Creating adapter"));
-        let adapter = builder
-            .bundle()
-            .adapter_factory
-            .reader(location, &block_id, builder.bundle(), None, None, None)
+        let adapter_factory = builder.bundle().reader_factory.clone();
+        let adapter = adapter_factory
+            .reader(location, &block_id, builder, None, None, None)
             .await?;
 
         _progress.update(2, Some("Reading version"));
@@ -188,8 +186,9 @@ impl AttachBlockOp {
         }
 
         _progress.update(5, Some("Building layout"));
-        op.layout = match adapter.build_layout(builder.data_dir()).await? {
-            Some(file) => Some(builder.data_dir().relative_path(file.as_ref())?),
+        let data_dir = builder.bundle().data_dir.clone();
+        op.layout = match adapter.build_layout(data_dir.as_ref()).await? {
+            Some(file) => Some(data_dir.relative_path(file.as_ref())?),
             None => None,
         };
 
@@ -223,7 +222,7 @@ impl Operation for AttachBlockOp {
         };
 
         let reader = bundle
-            .adapter_factory
+            .reader_factory
             .reader(
                 self.location.as_str(),
                 &self.id,
@@ -297,8 +296,9 @@ mod tests {
     #[tokio::test]
     async fn test_setup() -> Result<(), BundlebaseError> {
         let datafile = test_datafile("userdata.parquet");
+        let bundle = empty_bundle().await;
         let op =
-            AttachBlockOp::setup(&ObjectId::generate(), datafile, &empty_bundle().await).await?;
+            AttachBlockOp::setup(&ObjectId::generate(), datafile, bundle.as_ref()).await?;
         let block_id = String::from(op.id);
         let pack = String::from(op.pack);
         let version = ObjectStoreFile::from_url(

@@ -53,7 +53,7 @@ impl BundleBuilderCommand for VerifyDataCommand {
 
     async fn execute(
         self: Box<Self>,
-        builder: &mut BundleBuilder,
+        builder: &BundleBuilder,
     ) -> Result<VerificationResults, BundlebaseError> {
         let mut results = Vec::new();
         let block_hashes = builder.bundle().build_block_hash_map();
@@ -80,9 +80,11 @@ impl BundleBuilderCommand for VerifyDataCommand {
 
         // Process each block
         for (block_id, location, expected_hash, current_version) in blocks_to_verify {
-            // Compute actual hash
-            let data_dir = builder.bundle().data_dir();
-            let config = builder.bundle().config();
+            // Compute actual hash - clone values to avoid holding guard across await
+            let (data_dir, config) = {
+                let bundle = builder.bundle();
+                (bundle.data_dir.clone(), bundle.config())
+            };
             let hash_result = compute_file_hash(&location, data_dir, config).await;
 
             match hash_result {
@@ -153,7 +155,7 @@ impl BundleBuilderCommand for VerifyDataCommand {
 /// Compute the SHA256 hash of a file
 async fn compute_file_hash(
     location: &str,
-    data_dir: &dyn crate::io::IOReadDir,
+    data_dir: std::sync::Arc<dyn crate::io::IOReadDir>,
     config: std::sync::Arc<crate::BundleConfig>,
 ) -> Result<String, BundlebaseError> {
     let file = readable_file_from_path(location, data_dir, config)?;

@@ -54,7 +54,7 @@ impl CommandParsing for SetDescriptionCommand {
 impl BundleBuilderCommand for SetDescriptionCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         builder
             .apply_operation(SetDescriptionOp::setup(&self.description).into())
             .await?;

@@ -36,7 +36,7 @@ impl CommandParsing for UndoCommand {
 impl BundleBuilderCommand for UndoCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         builder.undo().await?;
 
         Ok(())

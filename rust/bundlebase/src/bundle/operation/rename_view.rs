@@ -1,4 +1,5 @@
 use crate::bundle::operation::Operation;
+use crate::bundle::BundleBuilder;
 use crate::data::ObjectId;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
@@ -19,8 +20,9 @@ impl RenameViewOp {
     pub async fn setup(
         old_name: &str,
         new_name: &str,
-        bundle: &Bundle,
+        builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
+        let bundle = builder.bundle();
         // Look up the view ID from the old name
         let views = bundle.views.read();
         let view_id = *views

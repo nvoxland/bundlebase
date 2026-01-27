@@ -85,7 +85,7 @@ impl CommandParsing for SetConfigCommand {
 impl BundleBuilderCommand for SetConfigCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         let op = SetConfigOp::setup(&self.key, &self.value, self.url_prefix.as_deref());
         builder.apply_operation(op.into()).await?;
         Ok(())

@@ -54,7 +54,7 @@ async fn test_create_source_basic() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Verify commit file contains createSource operation
-    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
     assert!(contents.contains("type: createSource"));
     assert!(contents.contains("url: memory:///some/path/"));
 
@@ -81,7 +81,7 @@ async fn test_create_source_with_patterns() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Verify patterns are serialized correctly in args (as comma-separated string)
-    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
     assert!(contents.contains("patterns: '**/*.parquet,**/*.csv'"));
 
     Ok(())
@@ -101,7 +101,7 @@ async fn test_create_source_default_patterns() -> Result<(), BundlebaseError> {
 
     // When patterns are not provided, they are not included in args
     // The remote_dir function defaults to "**/*" internally
-    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
     assert!(contents.contains("type: createSource"));
     assert!(contents.contains("url: memory:///data/"));
     // Patterns are not in args when not explicitly provided
@@ -347,7 +347,7 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Verify commit file contains source in attach operation
-    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     // The attach operation should have a source field
     assert!(contents.contains("source:"), "AttachBlock should have source: {}", contents);
@@ -368,7 +368,7 @@ async fn test_create_source_serialization() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Read the commit file and verify CreateSource is serialized
-    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     assert!(contents.contains("type: createSource"));
     assert!(contents.contains("url: memory:///data/"));
@@ -452,7 +452,7 @@ async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Verify commit file contains attach operation with location in bundle data_dir
-    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     // The location should be in the bundle data_dir, not the original source
     // And source should contain the original location
@@ -486,7 +486,7 @@ async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Verify commit file contains attach operation with location at original source
-    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     // The location should be the original source URL (not copied)
     assert!(contents.contains(source_dir.url().as_str()),
@@ -520,7 +520,7 @@ async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> 
     bundle.commit("Defined source").await?;
 
     // Verify commit file contains attach operation with location in bundle data_dir
-    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     // The location should be in the bundle data_dir (copied)
     // And source should contain the original location
@@ -615,7 +615,7 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
     bundle.commit("Defined source").await?;
 
     // Read the commit file and verify the sourceLocation is a relative path
-    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     // Find the attachBlock operation and verify its sourceLocation field
     // The YAML format is now nested:
@@ -699,7 +699,7 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
     bundle.commit("Defined source").await?;
 
     // Read the commit file and verify the attach location is a relative path
-    let (contents, _, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     // The attachBlock location should be a relative path like "ab/cdef12345.parquet"
     // NOT a full URL like "memory:///xxx/ab/cdef12345.parquet"

@@ -1,4 +1,6 @@
 use crate::bundle::operation::Operation;
+use crate::bundle::BundleBuilder;
+use crate::bundle::BundleFacade;
 use crate::data::ObjectId;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
@@ -15,9 +17,9 @@ pub struct DropViewOp {
 }
 
 impl DropViewOp {
-    pub async fn setup(view_name: &str, bundle: &Bundle) -> Result<Self, BundlebaseError> {
+    pub async fn setup(view_name: &str, builder: &BundleBuilder) -> Result<Self, BundlebaseError> {
         // Look up the view ID from the name
-        let views = bundle.views.read();
+        let views = builder.views_by_name();
         let view_id = *views
             .get(view_name)
             .ok_or_else(|| {

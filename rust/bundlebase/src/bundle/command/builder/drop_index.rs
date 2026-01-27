@@ -54,10 +54,11 @@ impl CommandParsing for DropIndexCommand {
 impl BundleBuilderCommand for DropIndexCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         // Find the index ID for the given column
         let index_id = {
-            let indexes = builder.bundle().indexes().read();
+            let bundle = builder.bundle();
+            let indexes = bundle.indexes().read();
             let index = indexes
                 .iter()
                 .find(|idx| idx.column() == self.column.as_str());

@@ -121,7 +121,7 @@ impl CommandParsing for JoinCommand {
 impl BundleBuilderCommand for JoinCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         // Step 1: Create a new pack with join metadata
         let join_pack_id = ObjectId::generate();
         builder

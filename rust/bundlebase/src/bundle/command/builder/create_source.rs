@@ -119,7 +119,7 @@ impl CommandParsing for CreateSourceCommand {
 impl BundleBuilderCommand for CreateSourceCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         let pack_id = match self.pack.as_deref() {
             None | Some("base") => ObjectId::BASE_PACK,
             Some(join_name) => *builder
@@ -140,10 +140,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
             .get_source(&source_id)
             .ok_or_else(|| format!("Source '{}' not found after creation", source_id))?;
 
-        let registry = builder.bundle().source_function_registry();
-        let actions = source
-            .fetch(builder.data_dir(), builder.bundle().config(), &registry)
-            .await?;
+        let actions = source.fetch(builder).await?;
 
         // Process fetch actions
         for action in actions {

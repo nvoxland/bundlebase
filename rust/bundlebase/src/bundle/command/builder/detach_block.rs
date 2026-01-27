@@ -55,8 +55,8 @@ impl CommandParsing for DetachBlockCommand {
 impl BundleBuilderCommand for DetachBlockCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
-        let op = DetachBlockOp::setup(&self.location, builder.bundle()).await?;
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+        let op = DetachBlockOp::setup(&self.location, builder).await?;
         builder.apply_operation(op.into()).await?;
         info!("Detached block from {}", self.location);
         Ok(())

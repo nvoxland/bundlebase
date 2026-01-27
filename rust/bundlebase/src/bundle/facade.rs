@@ -1,10 +1,14 @@
+use crate::bundle::operation::BundleChange;
 use crate::bundle::BundleCommit;
-use crate::io::ObjectId;
-use crate::{AnyOperation, Bundle, BundleBuilder, BundlebaseError};
+use crate::bundle::Pack;
+use crate::index::IndexDefinition;
+use crate::io::{IOReadWriteDir, ObjectId};
+use crate::{AnyOperation, Bundle, BundleBuilder, BundleConfig, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::common::ScalarValue;
 use datafusion::dataframe::DataFrame;
+use datafusion::prelude::SessionContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
@@ -12,16 +16,16 @@ use url::Url;
 #[async_trait]
 pub trait BundleFacade: Send + Sync {
     /// The id of the bundle
-    fn id(&self) -> &str;
+    fn id(&self) -> String;
 
     /// Retrieve the bundle name, if set.
-    fn name(&self) -> Option<&str>;
+    fn name(&self) -> Option<String>;
 
     /// Retrieve the bundle description, if set.
-    fn description(&self) -> Option<&str>;
+    fn description(&self) -> Option<String>;
 
     /// Retrieve the URL of the base bundle this was loaded from, if any.
-    fn url(&self) -> &Url;
+    fn url(&self) -> Url;
 
     /// The base bundle this was extended from
     fn from(&self) -> Option<Url>;
@@ -61,7 +65,7 @@ pub trait BundleFacade: Send + Sync {
         &self,
         sql: &str,
         params: Vec<ScalarValue>,
-    ) -> Result<BundleBuilder, BundlebaseError>;
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError>;
 
     /// Returns a map of view IDs to view names for all views in this container
     fn views(&self) -> HashMap<ObjectId, String>;
@@ -92,7 +96,7 @@ pub trait BundleFacade: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn view(&self, identifier: &str) -> Result<Bundle, BundlebaseError>;
+    async fn view(&self, identifier: &str) -> Result<Arc<Bundle>, BundlebaseError>;
 
     /// Exports the bundle's data directory to an uncompressed tar archive.
     ///
@@ -125,4 +129,25 @@ pub trait BundleFacade: Send + Sync {
 
     /// Returns the query execution plan as a formatted string
     async fn explain(&self) -> Result<String, BundlebaseError>;
+
+    /// Returns uncommitted changes (empty for Bundle, populated for BundleBuilder)
+    fn status_changes(&self) -> Vec<BundleChange>;
+
+    /// Returns index definitions
+    fn indexes(&self) -> Vec<Arc<IndexDefinition>>;
+
+    /// Returns packs (id -> pack)
+    fn packs(&self) -> HashMap<ObjectId, Arc<Pack>>;
+
+    /// Returns views by name (name -> id mapping)
+    fn views_by_name(&self) -> HashMap<String, ObjectId>;
+
+    /// Returns the data directory for this bundle
+    fn data_dir(&self) -> Arc<dyn IOReadWriteDir>;
+
+    /// Returns the bundle configuration
+    fn config(&self) -> Arc<BundleConfig>;
+
+    /// Returns the DataFusion session context
+    fn ctx(&self) -> Arc<SessionContext>;
 }

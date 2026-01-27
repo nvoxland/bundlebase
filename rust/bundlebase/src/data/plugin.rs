@@ -20,8 +20,9 @@ use std::sync::Arc;
 #[cfg(test)]
 pub use mock::MockReader;
 
+use crate::bundle::BundleFacade;
 use crate::object_id::ObjectId;
-use crate::{Bundle, BundlebaseError};
+use crate::BundlebaseError;
 
 #[async_trait]
 pub trait ReaderPlugin: Send + Sync {
@@ -30,7 +31,7 @@ pub trait ReaderPlugin: Send + Sync {
     /// # Arguments
     /// * `source` - URL or path to the data source
     /// * `block_id` - ID of the block being read
-    /// * `bundle` - Bundle context
+    /// * `bundle` - Bundle context (as trait object for flexibility)
     /// * `schema` - Optional schema (if already known)
     /// * `layout` - Optional layout file path
     /// * `expected_version` - If provided, validates version on first data access
@@ -38,7 +39,7 @@ pub trait ReaderPlugin: Send + Sync {
         &self,
         source: &str,
         block_id: &ObjectId,
-        bundle: &Bundle,
+        bundle: &dyn BundleFacade,
         schema: Option<SchemaRef>,
         layout: Option<String>,
         expected_version: Option<String>,

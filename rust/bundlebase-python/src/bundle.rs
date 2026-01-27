@@ -4,6 +4,7 @@ use ::bundlebase::bundle::BundleFacade;
 use ::bundlebase::{Bundle, FileVerificationResult, VerificationResults};
 use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Result of verifying a single file
 #[pyclass]
@@ -128,7 +129,7 @@ impl PyVerificationResults {
 #[pyclass]
 #[derive(Clone)]
 pub struct PyBundle {
-    inner: Bundle,
+    inner: Arc<Bundle>,
 }
 
 #[pymethods]
@@ -398,7 +399,7 @@ impl PyBundle {
 }
 
 impl PyBundle {
-    pub fn new(inner: Bundle) -> Self {
+    pub fn new(inner: Arc<Bundle>) -> Self {
         PyBundle { inner }
     }
 }

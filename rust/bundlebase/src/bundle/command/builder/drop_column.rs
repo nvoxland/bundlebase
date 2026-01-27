@@ -51,7 +51,7 @@ impl CommandParsing for DropColumnCommand {
 impl BundleBuilderCommand for DropColumnCommand {
     type Output = ();
 
-    async fn execute(self: Box<Self>, builder: &mut BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         builder
             .apply_operation(DropColumnOp::setup(vec![self.name.as_str()]).into())
             .await?;

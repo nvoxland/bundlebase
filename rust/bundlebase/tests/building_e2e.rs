@@ -17,7 +17,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     // Create and commit first bundle
     let mut c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
     assert_eq!(None, c1.bundle().from());
-    assert_eq!(temp1.url(), c1.url());
+    assert_eq!(*temp1.url(), c1.url());
     c1.attach(test_datafile("customers-0-100.csv"), None).await?;
     c1.commit("Initial commit").await?;
 
@@ -31,11 +31,11 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     let opened1 = Bundle::open(&temp1.url().to_string(), None).await?;
     assert_eq!(opened1.operations().len(), 1);
     assert_eq!(None, opened1.from());
-    assert_eq!(temp1.url(), opened1.url());
+    assert_eq!(*temp1.url(), opened1.url());
 
     let mut c2 = opened1.extend(Some(&temp2.url().to_string()))?;
     assert_eq!(Some(temp1.url()), c2.bundle().from().as_ref());
-    assert_eq!(temp2.url(), c2.url());
+    assert_eq!(*temp2.url(), c2.url());
 
     // Add operation to extended bundle
     c2.drop_column("country").await?;

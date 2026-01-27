@@ -44,7 +44,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     );
 
     // Find and read the versioned manifest file
-    let (contents, commit, url) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, commit, url) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     let expected = format!(
         r#"author: {}
@@ -423,18 +423,18 @@ async fn test_name_and_description() -> Result<(), BundlebaseError> {
     bundle.set_name("My Bundle").await?;
     bundle.set_description("My Bundle Desc").await?;
 
-    assert_eq!(bundle.bundle().name(), Some("My Bundle"));
-    assert_eq!(bundle.bundle().description(), Some("My Bundle Desc"));
+    assert_eq!(bundle.bundle().name(), Some("My Bundle".to_string()));
+    assert_eq!(bundle.bundle().description(), Some("My Bundle Desc".to_string()));
 
     bundle.commit("Commit changes").await?;
 
-    assert_eq!(bundle.bundle().name(), Some("My Bundle"));
-    assert_eq!(bundle.bundle().description(), Some("My Bundle Desc"));
+    assert_eq!(bundle.bundle().name(), Some("My Bundle".to_string()));
+    assert_eq!(bundle.bundle().description(), Some("My Bundle Desc".to_string()));
 
     // Open and verify
     let loaded = Bundle::open(data_dir.as_str(), None).await?;
-    assert_eq!(loaded.name(), Some("My Bundle"));
-    assert_eq!(loaded.description(), Some("My Bundle Desc"));
+    assert_eq!(loaded.name(), Some("My Bundle".to_string()));
+    assert_eq!(loaded.description(), Some("My Bundle Desc".to_string()));
 
     Ok(())
 }
@@ -449,7 +449,7 @@ async fn test_attach_csv() -> Result<(), BundlebaseError> {
     bundle.commit("CSV commit").await?;
 
     // Find and read the versioned manifest file
-    let (contents, commit, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, commit, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     assert_eq!(
         format!(
@@ -581,7 +581,7 @@ changes:
     let layout = op_field!(commit.operations()[0], AnyOperation::AttachBlock, layout).unwrap();
     let layout_file = readable_file_from_path(
         &layout,
-        loaded_bundle.data_dir(),
+        loaded_bundle.data_dir_arc(),
         BundleConfig::default().into(),
     )?;
     assert!(
@@ -607,7 +607,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     bundle.commit("JSON commit").await?;
 
     // Find and read the versioned manifest file
-    let (contents, commit, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, commit, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     // Verify it contains the expected operations
     assert!(contents.contains("author: "));

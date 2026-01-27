@@ -30,7 +30,7 @@ pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
 pub use source::Source;
 use std::collections::{HashMap, HashSet};
 
-use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, BundleMetadata, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME};
+use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME};
 use crate::udf::VersionUdf;
 use crate::data::{DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::source::SourceFunctionRegistry;
@@ -181,9 +181,16 @@ pub struct Bundle {
 
     data_dir: Arc<dyn IOReadWriteDir>,
     commits: Arc<RwLock<Vec<BundleCommit>>>,
-    status: Arc<RwLock<BundleStatus>>,
-    metadata: Arc<RwLock<BundleMetadata>>,
-    operations: Vec<AnyOperation>,
+    pub(crate) status: Arc<RwLock<BundleStatus>>,
+
+    //todo get rid of these:
+    /// Name field wrapped in RwLock for schema provider access
+    name_lock: Arc<RwLock<Option<String>>>,
+    /// Description field wrapped in RwLock for schema provider access
+    description_lock: Arc<RwLock<Option<String>>>,
+    /// Version field wrapped in RwLock for schema provider access
+    version_lock: Arc<RwLock<String>>,
+    pub(crate) operations: Vec<AnyOperation>,
 
     packs: Arc<RwLock<HashMap<ObjectId, Arc<Pack>>>>,
     sources: HashMap<ObjectId, Arc<Source>>,
@@ -193,7 +200,7 @@ pub struct Bundle {
 
     ctx: Arc<SessionContext>,
     storage: Arc<DataStorage>,
-    adapter_factory: Arc<DataReaderFactory>,
+    reader_factory: Arc<DataReaderFactory>,
     function_registry: Arc<RwLock<FunctionRegistry>>,
     source_function_registry: Arc<RwLock<SourceFunctionRegistry>>,
 
@@ -212,36 +219,29 @@ pub struct Bundle {
 }
 
 impl Clone for Bundle {
+    /// Clone the bundle, sharing mutable state via Arc.
+    ///
+    /// # Status Sharing Semantics
+    ///
+    /// This clone **shares** the `status` Arc with the original. This means:
+    /// - Both bundles see the same uncommitted changes
+    /// - Mutations to status in one clone are visible in the other
+    ///
+    /// This is intentional for internal cloning during `apply_operation()`, where
+    /// we need changes to be reflected back to the original bundle.
+    ///
+    /// For creating independent derived bundles (e.g., from `select()` or `extend()`),
+    /// use `clear_status_for_extend()` which creates a **new** independent status Arc.
+    ///
+    /// # Shared Fields
+    /// - `commits`, `status`, `name_lock`, `description_lock`, `version_lock`, `views`,
+    ///   `indexes`, `packs` - shared with BundleInfoSchemaProvider for live SQL queries
+    /// - `function_registry` - shared with adapter_factory
     fn clone(&self) -> Self {
-        // Deep clone indexes, function_registry, and status for independence
-        // Share data_packs to maintain compatibility with SessionContext schema providers
-        let indexes = {
-            let idxs = self.indexes.read();
-            Arc::new(RwLock::new(idxs.clone()))
-        };
-
-        let function_registry = {
-            let registry = self.function_registry.read();
-            Arc::new(RwLock::new(registry.clone()))
-        };
-
-        // Deep clone status so each cloned BundleBuilder has independent change tracking
-        let status = {
-            let s = self.status.read();
-            Arc::new(RwLock::new(s.clone()))
-        };
-
-        // Deep clone metadata for independence
-        let metadata = {
-            let m = self.metadata.read();
-            Arc::new(RwLock::new(m.clone()))
-        };
-
-        // Deep clone views for independence
-        let views = {
-            let v = self.views.read();
-            Arc::new(RwLock::new(v.clone()))
-        };
+        //todo: check clone logic towards end
+        // Share all Arc fields that are referenced by schema providers (BundleInfoSchemaProvider)
+        // or adapter_factory. This ensures that when we clone for internal apply_operation,
+        // mutations are visible through the shared ctx.
 
         Self {
             id: self.id.clone(),
@@ -249,22 +249,25 @@ impl Clone for Bundle {
             description: self.description.clone(),
             data_dir: Arc::clone(&self.data_dir),
             commits: Arc::clone(&self.commits),
-            status,
-            metadata,
+            status: Arc::clone(&self.status),
+            name_lock: Arc::clone(&self.name_lock),
+            description_lock: Arc::clone(&self.description_lock),
+            version_lock: Arc::clone(&self.version_lock),
             operations: self.operations.clone(),
             version: self.version.clone(),
             last_manifest_version: self.last_manifest_version,
             packs: Arc::clone(&self.packs),
             sources: self.sources.clone(),
-            indexes,
-            views,
+            indexes: Arc::clone(&self.indexes),
+            views: Arc::clone(&self.views),
             dataframe: DataFrameHolder {
                 dataframe: Arc::new(RwLock::new(self.dataframe.dataframe.read().clone())),
             },
             ctx: Arc::clone(&self.ctx),
             storage: Arc::clone(&self.storage),
-            adapter_factory: Arc::clone(&self.adapter_factory),
-            function_registry,
+            reader_factory: Arc::clone(&self.reader_factory),
+            // Share function_registry - it's referenced by adapter_factory
+            function_registry: Arc::clone(&self.function_registry),
             source_function_registry: Arc::clone(&self.source_function_registry),
             config: Arc::clone(&self.config),
             passed_config: self.passed_config.clone(),
@@ -275,7 +278,13 @@ impl Clone for Bundle {
 }
 
 impl Bundle {
-    pub async fn empty() -> Result<Self, BundlebaseError> {
+    pub async fn empty() -> Result<Arc<Self>, BundlebaseError> {
+        Ok(Arc::new(Self::empty_internal().await?))
+    }
+
+    /// Internal helper that creates an empty bundle without wrapping in Arc.
+    /// Used by both `empty()` and `open()`.
+    pub(crate) async fn empty_internal() -> Result<Self, BundlebaseError> {
         let url = Url::parse(EMPTY_URL)?;
 
         let storage = Arc::new(DataStorage::new());
@@ -295,14 +304,9 @@ impl Bundle {
         let views = Arc::new(RwLock::new(HashMap::new()));
 
         let id = Uuid::new_v4().to_string();
-        let metadata = Arc::new(RwLock::new(BundleMetadata {
-            id: id.clone(),
-            name: None,
-            description: None,
-            url: url.clone(),
-            from: None,
-            version: "empty".to_string(),
-        }));
+        let name_lock = Arc::new(RwLock::new(None));
+        let description_lock = Arc::new(RwLock::new(None));
+        let version_lock = Arc::new(RwLock::new("empty".to_string()));
 
         let empty_dataframe = DataFrame::new(
             ctx.state(),
@@ -335,7 +339,12 @@ impl Bundle {
             Arc::new(BundleInfoSchemaProvider::new(
                 commits.clone(),
                 status.clone(),
-                metadata.clone(),
+                id.clone(),
+                name_lock.clone(),
+                description_lock.clone(),
+                url.clone(),
+                None,
+                version_lock.clone(),
                 views.clone(),
                 indexes.clone(),
                 packs.clone(),
@@ -363,7 +372,7 @@ impl Bundle {
             indexes,
             views,
             storage: Arc::clone(&storage),
-            adapter_factory: DataReaderFactory::new(
+            reader_factory: DataReaderFactory::new(
                 Arc::clone(&function_registry),
                 Arc::clone(&storage),
             )
@@ -379,7 +388,9 @@ impl Bundle {
             data_dir: writable_dir_from_url(&url, BundleConfig::default().into())?,
             commits,
             status,
-            metadata,
+            name_lock,
+            description_lock,
+            version_lock,
             dataframe,
             config: Arc::new(crate::BundleConfig::new()),
             passed_config: None,
@@ -403,9 +414,15 @@ impl Bundle {
     /// let bundle = Bundle::open("file:///data/my_bundle").await?;
     /// let schema = bundle.schema();
     /// ```
-    pub async fn open(path: &str, config: Option<BundleConfig>) -> Result<Self, BundlebaseError> {
+    pub async fn open(path: &str, config: Option<BundleConfig>) -> Result<Arc<Self>, BundlebaseError> {
+        Ok(Arc::new(Self::open_to_bundle(path, config).await?))
+    }
+
+    /// Internal helper that opens a bundle without wrapping in Arc.
+    /// Used by BundleBuilder which needs to own and mutate the Bundle.
+    pub(crate) async fn open_to_bundle(path: &str, config: Option<BundleConfig>) -> Result<Self, BundlebaseError> {
         let mut visited = HashSet::new();
-        let mut bundle = Bundle::empty().await?;
+        let mut bundle = Self::empty_internal().await?;
 
         bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
 
@@ -413,7 +430,7 @@ impl Bundle {
         bundle.passed_config = config;
         bundle.recompute_config()?;
 
-        Self::open_internal(
+        Self::open_recursive(
             writable_dir_from_str(path, BundleConfig::default().into())?
                 .url()
                 .as_str(),
@@ -426,7 +443,7 @@ impl Bundle {
     }
 
     /// Internal implementation of open() that tracks visited URLs to detect cycles
-    async fn open_internal(
+    async fn open_recursive(
         url: &str,
         visited: &mut HashSet<String>,
         bundle: &mut Bundle,
@@ -473,7 +490,7 @@ impl Bundle {
             };
 
             // Box the recursive call to avoid infinite future size
-            Box::pin(Self::open_internal(resolved_url.as_str(), visited, bundle)).await?;
+            Box::pin(Self::open_recursive(resolved_url.as_str(), visited, bundle)).await?;
         };
 
         // Only set id if provided in init_commit
@@ -567,7 +584,7 @@ impl Bundle {
 
     /// Creates a BundleBuilder that extends this bundle.
     /// If data_dir is provided, stores the new bundle there; otherwise uses the current bundle's data_dir.
-    pub fn extend(&self, data_dir: Option<&str>) -> Result<BundleBuilder, BundlebaseError> {
+    pub fn extend(&self, data_dir: Option<&str>) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         BundleBuilder::extend(Arc::new(self.clone()), data_dir)
     }
 
@@ -658,6 +675,7 @@ impl Bundle {
         self.data_dir.as_ref()
     }
 
+    //todo remove this
     /// Returns the data directory as an Arc for passing to components that need ownership.
     pub fn data_dir_arc(&self) -> Arc<dyn IOReadWriteDir> {
         Arc::clone(&self.data_dir)
@@ -777,15 +795,11 @@ impl Bundle {
         self.update_metadata();
     }
 
-    /// Update the metadata struct to reflect current bundle state
+    /// Update the metadata fields to reflect current bundle state
     fn update_metadata(&self) {
-        let mut metadata = self.metadata.write();
-        metadata.id = self.id.clone();
-        metadata.name = self.name.clone();
-        metadata.description = self.description.clone();
-        metadata.url = self.data_dir.url().clone();
-        metadata.from = self.from();
-        metadata.version = self.version.clone();
+        *self.name_lock.write() = self.name.clone();
+        *self.description_lock.write() = self.description.clone();
+        *self.version_lock.write() = self.version.clone();
     }
 
     pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<Pack>) {
@@ -804,6 +818,27 @@ impl Bundle {
     /// Get access to the status (for BundleBuilder to mutate)
     pub(crate) fn status(&self) -> &Arc<RwLock<BundleStatus>> {
         &self.status
+    }
+
+    /// Create a fresh status Arc for derived bundles (via extend/select).
+    ///
+    /// # Status Independence
+    ///
+    /// This method creates a **new** independent status Arc, breaking the shared
+    /// reference from `clone()`. Use this when creating derived bundles that should
+    /// have their own change tracking, such as:
+    /// - `BundleBuilder::extend()` - derived builder shouldn't inherit parent's uncommitted changes
+    /// - `select()` - query result should track its own operations independently
+    ///
+    /// After calling this, the bundle's status is independent from any clones made before.
+    /// Internal cloning via `apply_operation()` still shares the status correctly because
+    /// it calls `clone()` (which shares) after this method has been called.
+    ///
+    /// # Contrast with clone()
+    /// - `clone()`: Shares status Arc (mutations visible in both)
+    /// - `clear_status_for_extend()`: Creates new independent status Arc
+    pub(crate) fn clear_status_for_extend(&mut self) {
+        self.status = Arc::new(RwLock::new(BundleStatus::new()));
     }
 
     /// Find a join pack by its name
@@ -1029,7 +1064,7 @@ impl Bundle {
     ) -> Result<(String, bool), BundlebaseError> {
         use crate::io::readable_file_from_path;
 
-        let file = readable_file_from_path(location, self.data_dir.as_ref(), self.config.clone())?;
+        let file = readable_file_from_path(location, self.data_dir.clone(), self.config.clone())?;
         let actual_hash = file.compute_hash().await?;
 
         let passed = match expected_hash {
@@ -1090,23 +1125,23 @@ impl Bundle {
 
 #[async_trait]
 impl BundleFacade for Bundle {
-    fn id(&self) -> &str {
-        &self.id
+    fn id(&self) -> String {
+        self.id.clone()
     }
 
     /// Retrieve the bundle name, if set.
-    fn name(&self) -> Option<&str> {
-        self.name.as_deref()
+    fn name(&self) -> Option<String> {
+        self.name.clone()
     }
 
     /// Retrieve the bundle description, if set.
-    fn description(&self) -> Option<&str> {
-        self.description.as_deref()
+    fn description(&self) -> Option<String> {
+        self.description.clone()
     }
 
     /// Retrieve the URL of the base bundle this was loaded from, if any.
-    fn url(&self) -> &Url {
-        self.data_dir.url()
+    fn url(&self) -> Url {
+        self.data_dir.url().clone()
     }
 
     fn from(&self) -> Option<Url> {
@@ -1216,12 +1251,12 @@ impl BundleFacade for Bundle {
         &self,
         sql: &str,
         params: Vec<ScalarValue>,
-    ) -> Result<BundleBuilder, BundlebaseError> {
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         let bundle = BundleBuilder::extend(Arc::new(self.clone()), None)?;
         bundle.select(sql, params).await
     }
 
-    async fn view(&self, identifier: &str) -> Result<Bundle, BundlebaseError> {
+    async fn view(&self, identifier: &str) -> Result<Arc<Bundle>, BundlebaseError> {
         // Look up view by name or ID
         let (view_id, _name) = self.get_view_id_by_name_or_id(identifier)?;
 
@@ -1327,6 +1362,34 @@ impl BundleFacade for Bundle {
     async fn explain(&self) -> Result<String, BundlebaseError> {
         Bundle::explain(self).await
     }
+
+    fn status_changes(&self) -> Vec<operation::BundleChange> {
+        Vec::new() // Bundle (read-only) always has empty status
+    }
+
+    fn indexes(&self) -> Vec<Arc<IndexDefinition>> {
+        self.indexes.read().clone()
+    }
+
+    fn packs(&self) -> HashMap<ObjectId, Arc<Pack>> {
+        self.packs.read().clone()
+    }
+
+    fn views_by_name(&self) -> HashMap<String, ObjectId> {
+        self.views.read().clone()
+    }
+
+    fn data_dir(&self) -> Arc<dyn IOReadWriteDir> {
+        Arc::clone(&self.data_dir)
+    }
+
+    fn config(&self) -> Arc<BundleConfig> {
+        Bundle::config(self)
+    }
+
+    fn ctx(&self) -> Arc<SessionContext> {
+        Bundle::ctx(self)
+    }
 }
 
 #[derive(Debug)]
@@ -1412,7 +1475,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_version() -> Result<(), BundlebaseError> {
-        let mut c = Bundle::empty().await?;
+        let mut c = Bundle::empty_internal().await?;
         assert_eq!(c.version(), "empty".to_string());
 
         c.apply_operation(AnyOperation::SetName(SetNameOp {
