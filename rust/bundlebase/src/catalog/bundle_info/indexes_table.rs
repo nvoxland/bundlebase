@@ -1,15 +1,38 @@
-use crate::index::IndexDefinition;
+use crate::bundle::BundleFacade;
 use arrow::array::{RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use datafusion::datasource::MemTable;
-use datafusion::error::DataFusionError;
+use async_trait::async_trait;
+use datafusion::catalog::Session;
+use datafusion::datasource::{MemTable, TableProvider, TableType};
+use datafusion::error::Result;
+use datafusion::logical_expr::Expr;
+use datafusion::physical_plan::ExecutionPlan;
+use std::any::Any;
 use std::sync::Arc;
 
-/// Helper struct for creating the bundle_indexes table
-pub(super) struct BundleIndexesTable;
+/// TableProvider that queries bundle indexes dynamically from the BundleFacade.
+pub(super) struct BundleIndexesTable {
+    facade: Arc<dyn BundleFacade>,
+    schema: SchemaRef,
+}
+
+impl std::fmt::Debug for BundleIndexesTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BundleIndexesTable")
+            .field("schema", &self.schema)
+            .finish()
+    }
+}
 
 impl BundleIndexesTable {
-    fn schema() -> SchemaRef {
+    pub fn new(facade: Arc<dyn BundleFacade>) -> Self {
+        Self {
+            facade,
+            schema: Self::table_schema(),
+        }
+    }
+
+    fn table_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
             Field::new("column", DataType::Utf8, false),
@@ -18,8 +41,8 @@ impl BundleIndexesTable {
         ]))
     }
 
-    pub fn new(indexes: Vec<Arc<IndexDefinition>>) -> Result<MemTable, DataFusionError> {
-        let schema = Self::schema();
+    fn build_batch(&self) -> Result<RecordBatch> {
+        let indexes = self.facade.indexes();
 
         let ids: Vec<String> = indexes.iter().map(|idx| idx.id().to_string()).collect();
         let columns: Vec<&str> = indexes.iter().map(|idx| idx.column().as_str()).collect();
@@ -43,9 +66,11 @@ impl BundleIndexesTable {
             .collect();
 
         let batch = RecordBatch::try_new(
-            Arc::clone(&schema),
+            Arc::clone(&self.schema),
             vec![
-                Arc::new(StringArray::from(ids.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+                Arc::new(StringArray::from(
+                    ids.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
                 Arc::new(StringArray::from(columns)),
                 Arc::new(StringArray::from(types)),
                 Arc::new(StringArray::from(
@@ -57,13 +82,33 @@ impl BundleIndexesTable {
             ],
         )?;
 
-        let batches = if indexes.is_empty() {
-            let empty_batch = RecordBatch::new_empty(Arc::clone(&schema));
-            vec![vec![empty_batch]]
-        } else {
-            vec![vec![batch]]
-        };
+        Ok(batch)
+    }
+}
 
-        MemTable::try_new(schema, batches)
+#[async_trait]
+impl TableProvider for BundleIndexesTable {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.schema)
+    }
+
+    fn table_type(&self) -> TableType {
+        TableType::Base
+    }
+
+    async fn scan(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        let batch = self.build_batch()?;
+        let mem_table = MemTable::try_new(self.schema.clone(), vec![vec![batch]])?;
+        mem_table.scan(state, projection, filters, limit).await
     }
 }

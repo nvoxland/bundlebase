@@ -231,18 +231,18 @@ async fn test_bundle_status_table_with_uncommitted_changes() {
         .await
         .unwrap();
 
-    // Query the bundle_info.status table via SQL - always empty (use status() method instead)
+    // Query the bundle_info.status table via SQL - now returns actual uncommitted changes
     let df = bundle.bundle().ctx().sql("SELECT * FROM bundle_info.status").await.unwrap();
     let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
 
-    // SQL table always returns empty - this is expected behavior
+    // SQL table now returns uncommitted changes (previously was always empty)
     let total_rows: usize = batches.iter()
         .filter_map(|r| r.as_ref().ok())
         .map(|b| b.num_rows())
         .sum();
-    assert_eq!(total_rows, 0, "SQL bundle_info.status always returns empty");
+    assert_eq!(total_rows, 1, "SQL bundle_info.status now returns uncommitted changes");
 
-    // Use the status() method to check uncommitted changes
+    // Use the status() method to check uncommitted changes - should match SQL
     let status = bundle.status();
     let changes = status.changes();
     assert_eq!(changes.len(), 1, "One uncommitted change should exist via status()");
@@ -267,18 +267,18 @@ async fn test_bundle_status_table_multiple_changes() {
     bundle.set_name("Test Bundle").await.unwrap();
     bundle.set_description("A test bundle").await.unwrap();
 
-    // Query the bundle_info.status table via SQL - always empty
+    // Query the bundle_info.status table via SQL - now returns actual uncommitted changes
     let df = bundle.bundle().ctx().sql("SELECT id, description, operation_count FROM bundle_info.status ORDER BY id").await.unwrap();
     let batches: Vec<_> = df.execute_stream().await.unwrap().collect::<Vec<_>>().await;
 
-    // SQL table always returns empty - this is expected behavior
+    // SQL table now returns uncommitted changes (previously was always empty)
     let total_rows: usize = batches.iter()
         .filter_map(|r| r.as_ref().ok())
         .map(|b| b.num_rows())
         .sum();
-    assert_eq!(total_rows, 0, "SQL bundle_info.status always returns empty");
+    assert_eq!(total_rows, 3, "SQL bundle_info.status now returns uncommitted changes");
 
-    // Use the status() method to check uncommitted changes
+    // Use the status() method to check uncommitted changes - should match SQL
     let status = bundle.status();
     let changes = status.changes();
     assert_eq!(changes.len(), 3, "Three uncommitted changes should exist via status()");

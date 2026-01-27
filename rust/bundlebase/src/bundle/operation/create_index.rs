@@ -1,6 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::{Bundle, BundleFacade};
-use crate::index::{IndexDefinition, IndexType, TokenizerConfig};
+use crate::index::{IndexDefinition, IndexType};
 use crate::io::ObjectId;
 use crate::BundlebaseError;
 use arrow_schema::DataType;
