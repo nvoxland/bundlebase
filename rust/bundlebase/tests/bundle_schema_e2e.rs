@@ -4,6 +4,7 @@ use bundlebase::IndexType;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
 use bundlebase::{Bundle, BundleBuilder};
 use futures::StreamExt;
+use futures::TryStreamExt;
 
 #[tokio::test]
 async fn test_bundle_data_table() {
@@ -24,12 +25,13 @@ async fn test_bundle_data_table() {
     println!("DataFrame schema has {} fields", df_fields);
     assert!(df_fields > 0, "DataFrame should have fields");
 
-    // Query via select - should return the cached dataframe
-    let result = bundle.select("SELECT * FROM bundle", vec![]).await.unwrap();
-    let result_df = result.dataframe().await.unwrap();
+    // Query via query() - should return record batches with schema
+    let stream = bundle.query("SELECT * FROM bundle", vec![]).await.unwrap();
+    let batches: Vec<_> = stream.try_collect().await.unwrap();
 
     // Verify it works
-    let schema = result_df.schema();
+    assert!(!batches.is_empty(), "Should have at least one batch");
+    let schema = batches[0].schema();
     println!("Result schema has {} fields", schema.fields().len());
     assert!(schema.fields().len() > 0, "Schema should have fields");
 }
@@ -51,10 +53,11 @@ async fn test_data_table_schema() {
     let df = bundle.dataframe().await.unwrap();
     let df_schema = df.schema();
 
-    // Query via select
-    let result = bundle.select("SELECT * FROM bundle", vec![]).await.unwrap();
-    let result_df = result.dataframe().await.unwrap();
-    let result_schema = result_df.schema();
+    // Query via query()
+    let stream = bundle.query("SELECT * FROM bundle", vec![]).await.unwrap();
+    let batches: Vec<_> = stream.try_collect().await.unwrap();
+    assert!(!batches.is_empty(), "Should have at least one batch");
+    let result_schema = batches[0].schema();
 
     // Schemas should match
     assert_eq!(
@@ -469,9 +472,8 @@ async fn test_bundle_views_table_with_views() {
         .await
         .unwrap();
 
-    // Create view by first creating a select query
-    let adults = bundle.select("SELECT * FROM bundle WHERE salary >= 100000", vec![]).await.unwrap();
-    bundle.create_view("high_earners", &adults).await.unwrap();
+    // Create view with SQL
+    bundle.create_view("high_earners", "SELECT * FROM bundle WHERE salary >= 100000").await.unwrap();
     bundle.commit("Initial commit with view").await.unwrap();
 
     let bundle = Bundle::open(data_dir.url().as_str(), None).await.unwrap();

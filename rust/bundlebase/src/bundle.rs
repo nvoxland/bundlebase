@@ -44,6 +44,7 @@ use async_trait::async_trait;
 use datafusion::catalog::MemorySchemaProvider;
 use datafusion::common::{DFSchema, DFSchemaRef};
 use datafusion::datasource::object_store::ObjectStoreUrl;
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::{EmptyRelation, ExplainFormat, ExplainOption, LogicalPlan, ScalarUDF};
 use datafusion::prelude::*;
 use datafusion::scalar::ScalarValue;
@@ -556,12 +557,6 @@ impl Bundle {
             }
         }
         Ok(())
-    }
-
-    /// Creates a BundleBuilder that extends this bundle.
-    /// If data_dir is provided, stores the new bundle there; otherwise uses the current bundle's data_dir.
-    pub fn extend(&self, data_dir: Option<&str>) -> Result<Arc<BundleBuilder>, BundlebaseError> {
-        BundleBuilder::extend(Arc::new(self.clone()), data_dir)
     }
 
     /// Get the view ID for a given view name
@@ -1238,13 +1233,52 @@ impl BundleFacade for Bundle {
         Ok(self.dataframe.dataframe())
     }
 
-    async fn select(
+    fn extend(
+        &self,
+        data_dir: Option<&str>,
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+        BundleBuilder::extend(Arc::new(self.clone()), data_dir)
+    }
+
+    async fn query(
         &self,
         sql: &str,
         params: Vec<ScalarValue>,
-    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
-        let bundle = BundleBuilder::extend(Arc::new(self.clone()), None)?;
-        bundle.select(sql, params).await
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        use crate::bundle::sql::with_temp_table;
+
+        let df = self.dataframe().await?;
+        let df = (*df).clone();
+        let ctx = self.ctx();
+
+        //todo: shouldn't be a temp table?
+        // Execute via temp table pattern with native parameter binding
+        let result_df = with_temp_table(&ctx, df, |table_name| {
+            let sql = sql.replace("bundle", &table_name);
+            let ctx = ctx.clone();
+            let params = params.clone();
+            async move {
+                // Create logical plan from SQL
+                let plan = ctx
+                    .state()
+                    .create_logical_plan(&sql)
+                    .await
+                    .map_err(|e| Box::new(e) as BundlebaseError)?;
+
+                // Apply parameter values using DataFusion's native binding
+                let plan = plan
+                    .with_param_values(params)
+                    .map_err(|e| Box::new(e) as BundlebaseError)?;
+
+                // Execute the parameterized plan
+                ctx.execute_logical_plan(plan)
+                    .await
+                    .map_err(|e| Box::new(e) as BundlebaseError)
+            }
+        })
+        .await?;
+
+        Ok(result_df.execute_stream().await?)
     }
 
     async fn view(&self, identifier: &str) -> Result<Arc<Bundle>, BundlebaseError> {
@@ -1424,43 +1458,6 @@ impl Clone for DataFrameHolder {
         Self {
             dataframe: Arc::clone(&self.dataframe),
         }
-    }
-}
-
-/// Convert a DataFusion ScalarValue to a SQL literal string
-pub fn scalar_value_to_sql_literal(value: &ScalarValue) -> String {
-    match value {
-        ScalarValue::Null => "NULL".to_string(),
-        ScalarValue::Boolean(Some(b)) => if *b { "TRUE" } else { "FALSE" }.to_string(),
-        ScalarValue::Boolean(None) => "NULL".to_string(),
-        ScalarValue::Int8(Some(i)) => i.to_string(),
-        ScalarValue::Int8(None) => "NULL".to_string(),
-        ScalarValue::Int16(Some(i)) => i.to_string(),
-        ScalarValue::Int16(None) => "NULL".to_string(),
-        ScalarValue::Int32(Some(i)) => i.to_string(),
-        ScalarValue::Int32(None) => "NULL".to_string(),
-        ScalarValue::Int64(Some(i)) => i.to_string(),
-        ScalarValue::Int64(None) => "NULL".to_string(),
-        ScalarValue::UInt8(Some(i)) => i.to_string(),
-        ScalarValue::UInt8(None) => "NULL".to_string(),
-        ScalarValue::UInt16(Some(i)) => i.to_string(),
-        ScalarValue::UInt16(None) => "NULL".to_string(),
-        ScalarValue::UInt32(Some(i)) => i.to_string(),
-        ScalarValue::UInt32(None) => "NULL".to_string(),
-        ScalarValue::UInt64(Some(i)) => i.to_string(),
-        ScalarValue::UInt64(None) => "NULL".to_string(),
-        ScalarValue::Float32(Some(f)) => f.to_string(),
-        ScalarValue::Float32(None) => "NULL".to_string(),
-        ScalarValue::Float64(Some(f)) => f.to_string(),
-        ScalarValue::Float64(None) => "NULL".to_string(),
-        ScalarValue::Utf8(Some(s)) => {
-            // Escape single quotes by doubling them (SQL standard)
-            let escaped = s.replace("'", "''");
-            format!("'{}'", escaped)
-        }
-        ScalarValue::Utf8(None) => "NULL".to_string(),
-        // For other types, convert to string representation
-        _ => value.to_string(),
     }
 }
 

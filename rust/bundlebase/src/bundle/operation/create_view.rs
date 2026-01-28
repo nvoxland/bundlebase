@@ -1,5 +1,5 @@
 use crate::bundle::commit::BundleCommit;
-use crate::bundle::operation::{AnyOperation, BundleChange, Operation};
+use crate::bundle::operation::{AnyOperation, BundleChange, FilterOp, Operation};
 use crate::bundle::META_DIR;
 use crate::data::ObjectId;
 use crate::io::write_yaml;
@@ -22,26 +22,27 @@ pub struct CreateViewOp {
 }
 
 impl CreateViewOp {
+    /// Setup a view from an SQL statement.
+    ///
+    /// The SQL statement defines the view's query. The view will be stored
+    /// in a subdirectory of the parent bundle.
+    ///
+    /// Returns the CreateViewOp and the view's BundleBuilder.
     pub async fn setup(
         name: &str,
-        source_builder: &BundleBuilder,
+        sql: &str,
         parent_builder: &BundleBuilder,
-    ) -> Result<Self, BundlebaseError> {
-        debug!("Setting up view '{}' from source builder", name);
+    ) -> Result<(Self, Arc<BundleBuilder>), BundlebaseError> {
+        debug!("Setting up view '{}' with SQL: {}", name, sql);
 
         // 1. Generate view ID
         let view_id = ObjectId::generate();
         debug!("Generated view ID: {}", view_id);
 
-        // 2. Extract uncommitted operations from source_builder
-        let operations: Vec<AnyOperation> = source_builder.status().operations();
-        debug!(
-            "Captured {} operations from source builder",
-            operations.len()
-        );
-        for (i, op) in operations.iter().enumerate() {
-            debug!("  Captured op {}: {}", i, op.describe());
-        }
+        // 2. Create a FilterOp from the SQL
+        let filter_op = FilterOp::new(sql.to_string(), vec![]);
+        let operations: Vec<AnyOperation> = vec![AnyOperation::Filter(filter_op)];
+        debug!("Created FilterOp for view");
 
         // 3. Create view builder by extending parent to view location
         // This handles bundle cloning, config preservation, and directory setup
@@ -117,10 +118,10 @@ impl CreateViewOp {
 
         debug!("View '{}' created at {}", name, view_dir_path);
 
-        Ok(CreateViewOp {
+        Ok((CreateViewOp {
             name: name.to_string(),
             id: view_id,
-        })
+        }, view_builder))
     }
 }
 

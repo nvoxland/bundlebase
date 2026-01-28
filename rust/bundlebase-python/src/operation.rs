@@ -31,7 +31,6 @@ impl PyOperation {
             AnyOperation::DropJoin(_) => "dropJoin".to_string(),
             AnyOperation::DropView(_) => "dropView".to_string(),
             AnyOperation::RebuildIndex(_) => "rebuildIndex".to_string(),
-            AnyOperation::Select(_) => "select".to_string(),
             AnyOperation::CreateSource(_) => "createSource".to_string(),
             AnyOperation::DetachBlock(_) => "detachBlock".to_string(),
             AnyOperation::ReplaceBlock(_) => "replaceBlock".to_string(),

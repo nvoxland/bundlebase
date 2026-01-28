@@ -9,20 +9,20 @@ use log::info;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
-/// Command to filter rows with a WHERE clause.
+/// Command to filter rows with a SELECT query.
 #[derive(Debug, Clone)]
 pub struct FilterCommand {
-    /// The WHERE clause
-    pub where_clause: String,
-    /// Parameters for the WHERE clause ($1, $2, etc.)
+    /// The SELECT query
+    pub query: String,
+    /// Parameters for the query ($1, $2, etc.)
     pub params: Vec<ScalarValue>,
 }
 
 impl FilterCommand {
     /// Create a new FilterCommand.
-    pub fn new(where_clause: impl Into<String>, params: Vec<ScalarValue>) -> Self {
+    pub fn new(query: impl Into<String>, params: Vec<ScalarValue>) -> Self {
         Self {
-            where_clause: where_clause.into(),
+            query: query.into(),
             params,
         }
     }
@@ -34,27 +34,27 @@ impl CommandParsing for FilterCommand {
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        let mut where_clause = None;
+        let mut query = None;
 
         for inner_pair in pair.into_inner() {
-            if let Rule::where_condition = inner_pair.as_rule() {
-                where_clause = Some(inner_pair.as_str().trim().to_string());
+            if let Rule::filter_query = inner_pair.as_rule() {
+                query = Some(inner_pair.as_str().trim().to_string());
             }
         }
 
-        let where_clause = where_clause.ok_or_else(|| -> BundlebaseError {
-            "FILTER statement missing WHERE clause".into()
+        let query = query.ok_or_else(|| -> BundlebaseError {
+            "FILTER statement missing query".into()
         })?;
 
-        if where_clause.is_empty() {
-            return Err("FILTER WHERE clause cannot be empty".into());
+        if query.is_empty() {
+            return Err("FILTER query cannot be empty".into());
         }
 
-        Ok(FilterCommand::new(where_clause, vec![]))
+        Ok(FilterCommand::new(query, vec![]))
     }
 
     fn to_statement(&self) -> String {
-        format!("FILTER WHERE {}", self.where_clause)
+        format!("FILTER WITH {}", self.query)
     }
 }
 
@@ -65,11 +65,7 @@ impl BundleBuilderCommand for FilterCommand {
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
         let statement = self.to_statement();
         builder
-            .apply_operation(
-                FilterOp::setup(&self.where_clause, self.params)
-                    .await?
-                    .into(),
-            )
+            .apply_operation(FilterOp::new(&self.query, self.params).into())
             .await?;
         info!("Filtered: {}", statement);
         Ok(())
@@ -84,11 +80,11 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_filter_simple() {
-        let input = "FILTER WHERE country = 'USA'";
+        let input = "FILTER WITH SELECT * FROM bundle WHERE country = 'USA'";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::Filter(c) => {
-                assert_eq!(c.where_clause, "country = 'USA'");
+                assert_eq!(c.query, "SELECT * FROM bundle WHERE country = 'USA'");
             }
             _ => panic!("Expected Filter variant"),
         }
@@ -96,11 +92,11 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_filter_complex() {
-        let input = "FILTER WHERE age > 21 AND (city = 'NYC' OR city = 'LA')";
+        let input = "FILTER WITH SELECT * FROM bundle WHERE age > 21 AND (city = 'NYC' OR city = 'LA')";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::Filter(c) => {
-                assert_eq!(c.where_clause, "age > 21 AND (city = 'NYC' OR city = 'LA')");
+                assert_eq!(c.query, "SELECT * FROM bundle WHERE age > 21 AND (city = 'NYC' OR city = 'LA')");
             }
             _ => panic!("Expected Filter variant"),
         }
@@ -108,14 +104,14 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip() {
-        let cmd = FilterCommand::new("salary > 50000", vec![]);
+        let cmd = FilterCommand::new("SELECT * FROM bundle WHERE salary > 50000", vec![]);
         let statement = cmd.to_statement();
-        assert_eq!(statement, "FILTER WHERE salary > 50000");
+        assert_eq!(statement, "FILTER WITH SELECT * FROM bundle WHERE salary > 50000");
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::Filter(c) => {
-                assert_eq!(c.where_clause, "salary > 50000");
+                assert_eq!(c.query, "SELECT * FROM bundle WHERE salary > 50000");
             }
             _ => panic!("Expected Filter variant"),
         }

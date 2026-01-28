@@ -26,7 +26,7 @@ use arrow_flight::{
     FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, Ticket,
 };
 use base64::prelude::*;
-use bundlebase::{Bundle, BundleBuilder, BundleConfig};
+use bundlebase::{Bundle, BundleBuilder, BundleConfig, BundleFacade};
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use parking_lot::RwLock;

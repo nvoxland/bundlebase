@@ -3,25 +3,24 @@ use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase::BundlebaseError;
 use datafusion::scalar::ScalarValue;
+use futures::TryStreamExt;
 
 mod common;
 
 #[tokio::test]
-async fn test_select_basic_filter() -> Result<(), BundlebaseError> {
+async fn test_query_basic_filter() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Apply SQL query to filter results
-    let queried = bundle
-        .select(
+    let stream = bundle
+        .query(
             "SELECT first_name, last_name FROM bundle WHERE salary > $1",
             vec![ScalarValue::Float64(Some(50000.0))],
         )
         .await?;
 
-    // Try to query the filtered data
-    let df = queried.dataframe().await?;
-    let record_batches = df.as_ref().clone().collect().await?;
+    let record_batches: Vec<_> = stream.try_collect().await?;
     assert!(
         !record_batches.is_empty(),
         "Should have at least one record batch"
@@ -31,39 +30,12 @@ async fn test_select_basic_filter() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_select_is_not_required() -> Result<(), BundlebaseError> {
+async fn test_query_star() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
-    // Apply SQL query to filter results
-    let queried = bundle
-        .select(
-            "first_name, last_name FROM bundle WHERE salary > $1",
-            vec![ScalarValue::Float64(Some(50000.0))],
-        )
-        .await?;
-
-    // Try to query the filtered data
-    let df = queried.dataframe().await?;
-    let record_batches = df.as_ref().clone().collect().await?;
-    assert!(
-        !record_batches.is_empty(),
-        "Should have at least one record batch"
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_select_star_without_keyword() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle.attach(test_datafile("userdata.parquet"), None).await?;
-
-    // "* FROM bundle LIMIT 10" should work like "SELECT * FROM bundle LIMIT 10"
-    let queried = bundle.select("* FROM bundle LIMIT 10", vec![]).await?;
-
-    let df = queried.dataframe().await?;
-    let result = df.as_ref().clone().collect().await?;
+    let stream = bundle.query("SELECT * FROM bundle LIMIT 10", vec![]).await?;
+    let result: Vec<_> = stream.try_collect().await?;
 
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].num_rows(), 10);
@@ -72,17 +44,15 @@ async fn test_select_star_without_keyword() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_select_lowercase_keyword_not_duplicated() -> Result<(), BundlebaseError> {
+async fn test_query_lowercase_select() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
-    // Lowercase "select" should not be double-prepended
-    let queried = bundle
-        .select("select * from bundle limit 10", vec![])
+    // Lowercase "select" should work
+    let stream = bundle
+        .query("select * from bundle limit 10", vec![])
         .await?;
-
-    let df = queried.dataframe().await?;
-    let result = df.as_ref().clone().collect().await?;
+    let result: Vec<_> = stream.try_collect().await?;
 
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].num_rows(), 10);
@@ -91,13 +61,13 @@ async fn test_select_lowercase_keyword_not_duplicated() -> Result<(), Bundlebase
 }
 
 #[tokio::test]
-async fn test_select_multiple_parameters() -> Result<(), BundlebaseError> {
+async fn test_query_multiple_parameters() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Apply SQL query with multiple parameters
-    let queried = bundle
-        .select(
+    let stream = bundle
+        .query(
             "SELECT id, first_name FROM bundle WHERE salary > $1 OR gender = $2",
             vec![
                 ScalarValue::Float64(Some(100000.0)),
@@ -105,9 +75,7 @@ async fn test_select_multiple_parameters() -> Result<(), BundlebaseError> {
             ],
         )
         .await?;
-
-    let df = queried.dataframe().await?;
-    let result = df.as_ref().clone().collect().await?;
+    let result: Vec<_> = stream.try_collect().await?;
 
     assert_eq!(result.len(), 1);
     assert!(
@@ -117,37 +85,35 @@ async fn test_select_multiple_parameters() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
 #[tokio::test]
-async fn test_select_no_parameters() -> Result<(), BundlebaseError> {
+async fn test_query_no_parameters() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Apply SQL query without parameters
-    let queried = bundle.select("SELECT * FROM bundle LIMIT 10", vec![]).await?;
-
-    let df = queried.dataframe().await?;
-    let result = df.as_ref().clone().collect().await?;
+    let stream = bundle.query("SELECT * FROM bundle LIMIT 10", vec![]).await?;
+    let result: Vec<_> = stream.try_collect().await?;
 
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].num_rows(), 10);
 
     Ok(())
 }
+
 #[tokio::test]
-async fn test_select_with_aggregation() -> Result<(), BundlebaseError> {
+async fn test_query_with_aggregation() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Apply SQL query with GROUP BY
-    let queried = bundle
-        .select(
+    let stream = bundle
+        .query(
             "SELECT gender, COUNT(*) as count FROM bundle GROUP BY gender",
             vec![],
         )
         .await?;
-
-    let df = queried.dataframe().await?;
-    let result = df.as_ref().clone().collect().await?;
+    let result: Vec<_> = stream.try_collect().await?;
 
     assert!(!result.is_empty(), "Should have at least one batch");
     let total_rows: usize = result.iter().map(|batch| batch.num_rows()).sum();
@@ -183,7 +149,7 @@ async fn test_explain_with_filter() -> Result<(), BundlebaseError> {
 
     // Apply a filter and explain
     let filtered = bundle
-        .filter("salary > $1", vec![ScalarValue::Float64(Some(50000.0))])
+        .filter("SELECT * FROM bundle WHERE salary > $1", vec![ScalarValue::Float64(Some(50000.0))])
         .await?;
     let plan = filtered.bundle().explain().await?;
 

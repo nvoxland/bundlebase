@@ -219,13 +219,15 @@ async def test_version():
 
 
 @pytest.mark.asyncio
-async def test_select():
+async def test_query_with_column_selection():
+    """Test query with column selection."""
     c = await bundlebase.create(random_bundle())
     c = await (c.attach(datafile("userdata.parquet"))
-               .filter("salary > $1", [50000.0])
-               .select("id", "salary"))
+               .filter("SELECT * FROM bundle WHERE salary > $1", [50000.0]))
 
-    results = await c.to_dict()
+    # Use query to select specific columns
+    stream = await c.query("SELECT id, salary FROM bundle")
+    results = await stream.to_dict()
     # Filter should reduce rows, select should limit columns
     assert "id" in results
     assert "salary" in results
@@ -233,46 +235,43 @@ async def test_select():
 
 
 @pytest.mark.asyncio
-async def test_select():
+async def test_query():
     c = await (bundlebase.create().attach(datafile("userdata.parquet")))
-    q = c.select("SELECT * FROM bundle LIMIT 10")
+    stream = await c.query("SELECT * FROM bundle LIMIT 10")
 
-    results = await q.to_dict()
+    results = await stream.to_dict()
     assert len(results["id"]) == 10
 
 
 @pytest.mark.asyncio
-async def test_select_without_select_keyword():
-    """Test that select() auto-prepends SELECT if missing."""
+async def test_query_select_star():
+    """Test basic SELECT * query."""
     c = await (bundlebase.create().attach(datafile("userdata.parquet")))
 
-    # Test with "* FROM bundle" - should work like "SELECT * FROM bundle"
-    q = await c.select("* FROM bundle LIMIT 10")
-    results = await q.to_dict()
+    stream = await c.query("SELECT * FROM bundle LIMIT 10")
+    results = await stream.to_dict()
     assert len(results["id"]) == 10
 
 
 @pytest.mark.asyncio
-async def test_select_without_select_keyword_columns():
-    """Test that select() with column list auto-prepends SELECT."""
+async def test_query_select_columns():
+    """Test SELECT with specific columns."""
     c = await (bundlebase.create().attach(datafile("userdata.parquet")))
 
-    # Test with specific columns - should work like "SELECT id, first_name FROM bundle"
-    q = await c.select("id, first_name FROM bundle LIMIT 5")
-    results = await q.to_dict()
+    stream = await c.query("SELECT id, first_name FROM bundle LIMIT 5")
+    results = await stream.to_dict()
     assert len(results["id"]) == 5
     assert "id" in results
     assert "first_name" in results
 
 
 @pytest.mark.asyncio
-async def test_select_lowercase_select():
-    """Test that select() works with lowercase 'select' keyword."""
+async def test_query_lowercase_select():
+    """Test that query() works with lowercase 'select' keyword."""
     c = await (bundlebase.create().attach(datafile("userdata.parquet")))
 
-    # Test with lowercase "select" - should not double-prepend
-    q = await c.select("select * from bundle limit 10")
-    results = await q.to_dict()
+    stream = await c.query("select * from bundle limit 10")
+    results = await stream.to_dict()
     assert len(results["id"]) == 10
 
 
@@ -280,7 +279,7 @@ async def test_select_lowercase_select():
 async def test_filter():
     c = await bundlebase.create(random_bundle())
     c = await (c.attach(datafile("userdata.parquet"))
-               .filter("salary > $1", [50000.0]))
+               .filter("SELECT * FROM bundle WHERE salary > $1", [50000.0]))
 
     results = await c.to_dict()
     assert len(results["id"]) == 798
@@ -442,7 +441,7 @@ async def test_explain_with_filter():
     """Test query plan explanation with filters"""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("userdata.parquet"))
-    c = await c.filter("salary > $1", [50000.0])
+    c = await c.filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
     # Explain should return a plan with the filter applied
     plan = await c.explain()
@@ -509,7 +508,7 @@ async def test_extend_bundle_with_operations():
             c_opened = await bundlebase.open(temp1)
             c_extended = await (c_opened.extend(temp2)
                                 .drop_column("email")
-                                .filter("salary > $1", [50000.0]))
+                                .filter("SELECT * FROM bundle WHERE salary > $1", [50000.0]))
 
             # Verify the extended bundle has the transformations
             schema_ext = await c_extended.schema()
@@ -547,7 +546,7 @@ async def test_extend_bundle_multiple_operations():
             # Open and extend with multiple chained operations
             c_opened = await bundlebase.open(temp1)
             c_extended = await (c_opened.extend(temp2)
-                                .filter("salary > $1", [50000.0])
+                                .filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
                                 .rename_column("first_name", "fname"))
 
             # Verify data
@@ -590,7 +589,7 @@ async def test_extend_bundle_conversion():
             assert temp2 in extended_simple.url
 
             # Now test conversion with chained operations
-            results = await c_opened.extend(temp2).filter("salary > $1", [50000.0]).to_dict()
+            results = await c_opened.extend(temp2).filter("SELECT * FROM bundle WHERE salary > $1", [50000.0]).to_dict()
             assert len(results["id"]) == 798
 
 
@@ -708,7 +707,7 @@ async def test_index_with_operations():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Create index and apply filter
-    c = await c.create_index("salary", "column").filter("salary > $1", [50000.0])
+    c = await c.create_index("salary", "column").filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
     # Verify filtering still works
     results = await c.to_polars()
@@ -892,7 +891,7 @@ async def test_status_chained_operations():
     c = await bundlebase.create(random_bundle())
     c = await (c.attach(datafile("userdata.parquet"))
                .set_name("User Data")
-               .filter("salary > $1", [50000.0]))
+               .filter("SELECT * FROM bundle WHERE salary > $1", [50000.0]))
 
     # Should have multiple changes
     status = c.status()
@@ -941,12 +940,11 @@ async def test_create_view_basic():
     c = await c.attach(datafile("customers-0-100.csv"))
     await c.commit("Initial data")
 
-    # Create view with select
-    adults = await c.select("select * where \"Index\" > 50")
-    c = await c.create_view("high_index", adults)
+    # Create view with SQL - returns the view builder, but registers on parent
+    view_builder = await c.create_view("high_index", "select * from bundle where \"Index\" > 50")
     await c.commit("Add high_index view")
 
-    # Open view
+    # Open view from parent
     view = await c.view("high_index")
     assert view is not None
 
@@ -975,9 +973,8 @@ async def test_view_inherits_parent_changes():
     c = await c.attach(datafile("customers-0-100.csv"))
     await c.commit("v1")
 
-    # Create view
-    active = await c.select("select * where \"Index\" > 50")
-    c = await c.create_view("active", active)
+    # Create view - returns view builder, but we need parent for view lookup
+    view_builder = await c.create_view("active", "select * from bundle where \"Index\" > 50")
     await c.commit("v2")
 
     # Record initial view operations count
@@ -1005,24 +1002,19 @@ async def test_view_with_multiple_operations():
     c = await c.attach(datafile("customers-0-100.csv"))
     await c.commit("Initial data")
 
-    # Create view with multiple operations (select + filter)
-    filtered = await c.select("select * where \"Index\" > 20")
-    filtered = await filtered.filter("\"Index\" < 80")
-
-    c = await c.create_view("mid_range", filtered)
+    # Create view with SQL containing multiple conditions
+    view_builder = await c.create_view("mid_range", "select * from bundle where \"Index\" > 20 AND \"Index\" < 80")
     await c.commit("Add mid_range view")
 
     # Open view and verify it has the operations
     view = await c.view("mid_range")
     operations = view.operations()
 
-    # Should have at least the select and filter operations from the view
+    # Should have the select operation from the view
     op_descriptions = [op.describe for op in operations]
     has_select = any("select" in desc.lower() for desc in op_descriptions)
-    has_filter = any("FILTER" in desc for desc in op_descriptions)
 
     assert has_select, "View should have select operation"
-    assert has_filter, "View should have filter operation"
 
 
 @pytest.mark.asyncio
@@ -1033,14 +1025,12 @@ async def test_duplicate_view_name():
     await c.commit("Initial")
 
     # Create first view
-    adults1 = await c.select("select * where \"Index\" > 50")
-    c = await c.create_view("adults", adults1)
+    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 50")
     await c.commit("Add first adults view")
 
-    # Try to create view with same name
-    adults2 = await c.select("select * where \"Index\" > 70")
+    # Try to create view with same name on PARENT
     with pytest.raises(Exception) as exc_info:
-        await c.create_view("adults", adults2)
+        await c.create_view("adults", "select * from bundle where \"Index\" > 70")
 
     assert "View 'adults' already exists" in str(exc_info.value)
 
@@ -1053,8 +1043,7 @@ async def test_view_dataframe_execution():
     await c.commit("Initial data")
 
     # Create view with country filter
-    chile = await c.select("select * from bundle where Country = 'Chile'")
-    c = await c.create_view("chile", chile)
+    view_builder = await c.create_view("chile", "select * from bundle where Country = 'Chile'")
     await c.commit("Add chile view")
 
     # Open view and execute dataframe query
@@ -1078,8 +1067,7 @@ async def test_view_to_polars():
     await c.commit("Initial data")
 
     # Create view with a simple filter
-    high_idx = await c.select("select * from bundle where \"Index\" > 50")
-    c = await c.create_view("high_index_polars", high_idx)
+    view_builder = await c.create_view("high_index_polars", "select * from bundle where \"Index\" > 50")
     await c.commit("Add high_index_polars view")
 
     # Open view and convert to Polars
@@ -1103,8 +1091,7 @@ async def test_view_to_pandas():
     await c.commit("Initial data")
 
     # Create view for high index values
-    high_idx = await c.select("select * from bundle where \"Index\" > 80")
-    c = await c.create_view("high_index", high_idx)
+    view_builder = await c.create_view("high_index", "select * from bundle where \"Index\" > 80")
     await c.commit("Add high_index view")
 
     # Open view and convert to Pandas
@@ -1123,17 +1110,15 @@ async def test_view_chaining():
     c = await c.attach(datafile("customers-0-100.csv"))
     await c.commit("Initial data")
 
-    # Create first view
-    view1 = await c.select("select * where \"Index\" > 20")
-    c = await c.create_view("view1", view1)
+    # Create first view - keep reference to parent c
+    view1_builder = await c.create_view("view1", "select * from bundle where \"Index\" > 20")
     await c.commit("Add first view")
 
-    # Create second view from base container
-    view2 = await c.select("select * where \"Index\" < 80")
-    c = await c.create_view("view2", view2)
+    # Create second view from base container (parent c)
+    view2_builder = await c.create_view("view2", "select * from bundle where \"Index\" < 80")
     await c.commit("Add second view")
 
-    # Both views should be accessible
+    # Both views should be accessible from parent
     v1 = await c.view("view1")
     v2 = await c.view("view2")
 
@@ -1152,16 +1137,13 @@ async def test_views_method():
     c = await c.attach(datafile("customers-0-100.csv"))
     await c.commit("Initial data")
 
-    # Create multiple views
-    view1 = await c.select("select * where \"Index\" > 50")
-    c = await c.create_view("high_index", view1)
-
-    view2 = await c.select("select * where \"Index\" < 30")
-    c = await c.create_view("low_index", view2)
+    # Create multiple views - keep reference to parent c
+    view1 = await c.create_view("high_index", "select * from bundle where \"Index\" > 50")
+    view2 = await c.create_view("low_index", "select * from bundle where \"Index\" < 30")
 
     await c.commit("Add views")
 
-    # Get views map (id->name)
+    # Get views map (id->name) from parent
     views_map = c.views()
 
     assert isinstance(views_map, dict), "Should return a dictionary"
@@ -1180,9 +1162,8 @@ async def test_view_lookup_by_name_and_id():
     c = await c.attach(datafile("customers-0-100.csv"))
     await c.commit("Initial data")
 
-    # Create a view
-    high_index = await c.select("select * where \"Index\" > 50")
-    c = await c.create_view("high_index", high_index)
+    # Create a view - keep reference to parent c
+    view_builder = await c.create_view("high_index", "select * from bundle where \"Index\" > 50")
     await c.commit("Add view")
 
     # Get the view ID
@@ -1215,10 +1196,11 @@ async def test_view_lookup_by_name_and_id():
     assert view_id in err_msg, "Error should include view ID"
 
     # Test 5: Non-existent ID should error
+    # Use a long invalid ID that couldn't possibly match as a prefix
     with pytest.raises(Exception) as exc_info:
-        await c.view("ff")
+        await c.view("zzzzzzzzzzzzzzzzzzz")
     err_msg = str(exc_info.value)
-    assert "View with ID" in err_msg, "Error should mention ID not found"
+    assert "View" in err_msg and "not found" in err_msg, "Error should mention view not found"
 
 
 @pytest.mark.asyncio
@@ -1229,12 +1211,11 @@ async def test_rename_view_basic():
     await c.commit("Initial data")
 
     # Create a view
-    adults = await c.select("select * from bundle where \"Index\" > 21")
-    c = await c.create_view("adults", adults)
+    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 21")
     await c.commit("Add adults view")
 
     # Rename the view
-    c = await c.rename_view("adults", "adults_view")
+    await c.rename_view("adults", "adults_view")
     await c.commit("Renamed view")
 
     # Verify old name doesn't work
@@ -1275,11 +1256,8 @@ async def test_rename_view_new_name_exists():
     await c.commit("Initial data")
 
     # Create two views
-    view1 = await c.select("select * from bundle where \"Index\" > 21")
-    c = await c.create_view("view1", view1)
-
-    view2 = await c.select("select * from bundle where \"Index\" < 30")
-    c = await c.create_view("view2", view2)
+    view1 = await c.create_view("view1", "select * from bundle where \"Index\" > 21")
+    view2 = await c.create_view("view2", "select * from bundle where \"Index\" < 30")
     await c.commit("Add two views")
 
     # Try to rename view1 to view2 (conflict)
@@ -1297,8 +1275,7 @@ async def test_rename_view_preserves_view_data():
     await c.commit("Initial data")
 
     # Create a view
-    high_index = await c.select("select * from bundle where \"Index\" > 50")
-    c = await c.create_view("high_index", high_index)
+    view_builder = await c.create_view("high_index", "select * from bundle where \"Index\" > 50")
     await c.commit("Add view")
 
     # Get data before rename
@@ -1307,7 +1284,7 @@ async def test_rename_view_preserves_view_data():
     rows_before = len(df_before)
 
     # Rename the view
-    c = await c.rename_view("high_index", "high_values")
+    await c.rename_view("high_index", "high_values")
     await c.commit("Renamed view")
 
     # Get data after rename
@@ -1327,11 +1304,10 @@ async def test_rename_view_commit_and_reopen():
     await c.commit("Initial data")
 
     # Create and rename a view
-    adults = await c.select("select * from bundle where \"Index\" > 21")
-    c = await c.create_view("adults", adults)
+    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 21")
     await c.commit("Add adults view")
 
-    c = await c.rename_view("adults", "adults_renamed")
+    await c.rename_view("adults", "adults_renamed")
     await c.commit("Renamed view")
 
     # Reopen the bundle
@@ -1360,8 +1336,7 @@ async def test_drop_view_basic():
     await c.commit("Initial data")
 
     # Create a view
-    adults = await c.select("select * from bundle where \"Index\" > 21")
-    c = await c.create_view("adults", adults)
+    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 21")
     await c.commit("Add adults view")
 
     # Verify view exists
@@ -1370,7 +1345,7 @@ async def test_drop_view_basic():
     assert len(c.views()) == 1
 
     # Drop the view
-    c = await c.drop_view("adults")
+    await c.drop_view("adults")
     await c.commit("Dropped view")
 
     # Verify view no longer exists
@@ -1406,11 +1381,10 @@ async def test_drop_view_commit_and_reopen():
     await c.commit("Initial data")
 
     # Create and drop a view
-    adults = await c.select("select * from bundle where \"Index\" > 21")
-    c = await c.create_view("adults", adults)
+    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 21")
     await c.commit("Add adults view")
 
-    c = await c.drop_view("adults")
+    await c.drop_view("adults")
     await c.commit("Dropped view")
 
     # Reopen the bundle
@@ -1433,18 +1407,15 @@ async def test_drop_view_preserves_other_views():
     await c.commit("Initial data")
 
     # Create two views
-    view1 = await c.select("select * from bundle where \"Index\" > 21")
-    c = await c.create_view("view1", view1)
-
-    view2 = await c.select("select * from bundle where \"Index\" < 30")
-    c = await c.create_view("view2", view2)
+    view1 = await c.create_view("view1", "select * from bundle where \"Index\" > 21")
+    view2 = await c.create_view("view2", "select * from bundle where \"Index\" < 30")
     await c.commit("Add two views")
 
     # Verify both views exist
     assert len(c.views()) == 2
 
     # Drop one view
-    c = await c.drop_view("view1")
+    await c.drop_view("view1")
     await c.commit("Dropped view1")
 
     # Verify view1 is gone
@@ -1470,12 +1441,11 @@ async def test_drop_view_twice_fails():
     await c.commit("Initial data")
 
     # Create a view
-    adults = await c.select("select * from bundle where \"Index\" > 21")
-    c = await c.create_view("adults", adults)
+    view_builder = await c.create_view("adults", "select * from bundle where \"Index\" > 21")
     await c.commit("Add adults view")
 
     # Drop the view
-    c = await c.drop_view("adults")
+    await c.drop_view("adults")
     await c.commit("Dropped view")
 
     # Try to drop it again
@@ -1660,13 +1630,12 @@ async def test_version_udf():
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
 
-    # Query using the version() UDF - select() creates a new BundleBuilder with a SelectOp
-    q = await c.select("SELECT version() as ver FROM bundle LIMIT 1")
+    # The version should match c's version (the builder executing the query)
+    expected_version = c.version
 
-    # The version should match q's version (the builder executing the query)
-    expected_version = q.version
-
-    results = await q.to_dict()
+    # Query using the version() UDF
+    result = await c.query("SELECT version() as ver FROM bundle LIMIT 1")
+    results = await result.to_dict()
 
     # The version() UDF should return the version of the BundleBuilder executing the query
     assert "ver" in results
@@ -1675,4 +1644,4 @@ async def test_version_udf():
 
     # Also verify we get a valid 12-char hex version string
     assert len(results["ver"][0]) == 12
-    assert all(c in '0123456789abcdef' for c in results["ver"][0])
+    assert all(ch in '0123456789abcdef' for ch in results["ver"][0])

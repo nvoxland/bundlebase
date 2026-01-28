@@ -52,7 +52,7 @@ async def test_stream_with_operations():
     """Test streaming with operations applied."""
     c = await bundlebase.create()
     c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-    c = await c.filter("gender = 'Male'")
+    c = await c.filter("SELECT * FROM bundle WHERE gender = 'Male'")
 
     # Stream the filtered data
     batches = []
@@ -74,7 +74,7 @@ async def test_stream_batches_empty_bundle():
     c = await bundlebase.create()
     c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
     # Filter that matches nothing
-    c = await c.filter("1 = 0")
+    c = await c.filter("SELECT * FROM bundle WHERE 1 = 0")
 
     batch_count = 0
     async for batch in bundlebase.stream_batches(c):

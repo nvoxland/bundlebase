@@ -24,7 +24,7 @@ class TestUnawaitedOperationChain:
         # Create a chain but don't await it
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            chain = c.filter("id > 100")
+            chain = c.filter("SELECT * FROM bundle WHERE id > 100")
             # Let chain go out of scope without awaiting
             del chain
 
@@ -42,7 +42,7 @@ class TestUnawaitedOperationChain:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            chain = c.filter("id > 100").drop_column("country")
+            chain = c.filter("SELECT * FROM bundle WHERE id > 100").drop_column("country")
             del chain
 
             assert len(w) == 1
@@ -58,7 +58,7 @@ class TestUnawaitedOperationChain:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            c = await c.filter("id > 100")
+            c = await c.filter("SELECT * FROM bundle WHERE id > 100")
             # Should be no warnings
             assert len(w) == 0
 
@@ -104,7 +104,7 @@ class TestUnawaitedCreateChain:
             chain = (
                 bundlebase.create(random_bundle())
                 .attach(datafile("userdata.parquet"))
-                .filter("salary > $1", [50000.0])
+                .filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
                 .drop_column("country")
             )
             del chain
@@ -124,7 +124,7 @@ class TestUnawaitedCreateChain:
 
             c = await bundlebase.create(random_bundle())
             c = await c.attach(datafile("userdata.parquet"))
-            c = await c.filter("id > 100")
+            c = await c.filter("SELECT * FROM bundle WHERE id > 100")
 
             # Should be no warnings
             assert len(w) == 0
@@ -181,7 +181,7 @@ class TestWarningContent:
             warnings.simplefilter("always")
             chain = bundlebase.create(random_bundle()).attach(
                 datafile("userdata.parquet")
-            ).filter("salary > $1", [50000.0])
+            ).filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
             del chain
 
             assert len(w) == 1

@@ -234,20 +234,20 @@ use async_trait::async_trait;
 use datafusion::scalar::ScalarValue;
 use log::info;
 
-/// Command to filter rows with a WHERE clause.
+/// Command to filter rows with a SELECT query.
 #[derive(Debug, Clone)]
 pub struct FilterCommand {
-    /// The WHERE clause
-    pub where_clause: String,
-    /// Parameters for the WHERE clause ($1, $2, etc.)
+    /// The SELECT query
+    pub query: String,
+    /// Parameters for the query ($1, $2, etc.)
     pub params: Vec<ScalarValue>,
 }
 
 impl FilterCommand {
     /// Create a new FilterCommand.
-    pub fn new(where_clause: impl Into<String>, params: Vec<ScalarValue>) -> Self {
+    pub fn new(query: impl Into<String>, params: Vec<ScalarValue>) -> Self {
         Self {
-            where_clause: where_clause.into(),
+            query: query.into(),
             params,
         }
     }
@@ -260,7 +260,7 @@ impl Command for FilterCommand {
     async fn execute(self: Box<Self>, ctx: &mut CommandContext<'_>) -> Result<(), BundlebaseError> {
         let statement = self.to_statement();
         ctx.apply_operation(
-            FilterOp::setup(&self.where_clause, self.params)
+            FilterOp::setup(&self.query, self.params)
                 .await?
                 .into(),
         )
@@ -274,27 +274,27 @@ impl Command for FilterCommand {
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        let mut where_clause = None;
+        let mut query = None;
 
         for inner_pair in pair.into_inner() {
-            if let Rule::where_condition = inner_pair.as_rule() {
-                where_clause = Some(inner_pair.as_str().trim().to_string());
+            if let Rule::filter_query = inner_pair.as_rule() {
+                query = Some(inner_pair.as_str().trim().to_string());
             }
         }
 
-        let where_clause = where_clause.ok_or_else(|| -> BundlebaseError {
-            "FILTER statement missing WHERE clause".into()
+        let query = query.ok_or_else(|| -> BundlebaseError {
+            "FILTER statement missing query".into()
         })?;
 
-        if where_clause.is_empty() {
-            return Err("FILTER WHERE clause cannot be empty".into());
+        if query.is_empty() {
+            return Err("FILTER query cannot be empty".into());
         }
 
-        Ok(FilterCommand::new(where_clause, vec![]))
+        Ok(FilterCommand::new(query, vec![]))
     }
 
     fn to_statement(&self) -> String {
-        format!("FILTER WHERE {}", self.where_clause)
+        format!("FILTER WITH {}", self.query)
     }
 }
 ```
@@ -305,16 +305,16 @@ impl Command for FilterCommand {
 // ============================================================================
 // FILTER Statement
 // ============================================================================
-// Syntax: FILTER WHERE <condition>
-// Example: FILTER WHERE country = 'USA' AND age > 21
+// Syntax: FILTER WITH <query>
+// Example: FILTER WITH SELECT * FROM bundle WHERE country = 'USA' AND age > 21
 
 filter_stmt = {
-    ^"filter" ~ ^"where" ~ where_condition
+    ^"filter" ~ ^"with" ~ filter_query
 }
 
-where_condition = @{
-    // Capture everything from WHERE to end as raw text
-    // This allows DataFusion to parse the expression later
+filter_query = @{
+    // Capture everything from WITH to end as raw text
+    // This allows DataFusion to parse the query later
     (!EOI ~ ANY)+
 }
 ```

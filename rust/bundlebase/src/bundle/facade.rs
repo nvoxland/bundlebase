@@ -9,6 +9,7 @@ use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::common::ScalarValue;
 use datafusion::dataframe::DataFrame;
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion::prelude::SessionContext;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -48,25 +49,57 @@ pub trait BundleFacade: Send + Sync {
     /// Builds and returns the final DataFrame
     async fn dataframe(&self) -> Result<Arc<DataFrame>, BundlebaseError>;
 
-    /// Executes a SQL query against the bundle data. "SELECT" keyword in SQL is optional.
+    // todo: don't extend bundles when uncommitted changes
+    /// Extends this bundle to create a new BundleBuilder.
     ///
-    /// Returns a new `BundleBuilder` with the query applied as an operation.
-    /// Parameters can be used for parameterized queries.
+    /// This is the primary way to create a new BundleBuilder from an existing bundle.
+    /// The new builder can optionally have a different data directory.
     ///
     /// # Arguments
-    /// * `sql` - SQL query string (e.g., "SELECT * FROM table WHERE id = ?")
-    /// * `params` - Optional query parameters for parameterized queries
+    /// * `data_dir` - Optional new data directory. If None, uses the current bundle's data_dir.
     ///
     /// # Returns
-    /// A new bundle with the query operation added to its operation chain.
+    /// A new BundleBuilder extending from this bundle.
     ///
-    /// # Errors
-    /// Returns error if the query is invalid or references non-existent columns.
-    async fn select(
+    /// # Example
+    /// ```ignore
+    /// // Extend with a new data directory
+    /// let builder = bundle.extend(Some("s3://bucket/new"))?;
+    ///
+    /// // Extend and then filter
+    /// let builder = bundle.extend(None)?;
+    /// builder.filter("active = true", vec![]).await?;
+    /// ```
+    fn extend(
+        &self,
+        data_dir: Option<&str>,
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError>;
+
+    /// Executes a SQL query and returns streaming results directly.
+    ///
+    /// Unlike `extend()` with SQL, this does NOT create a new BundleBuilder.
+    /// It directly executes the query and streams the results. Use this when
+    /// you want to read data from the bundle without creating a new builder.
+    ///
+    /// # Arguments
+    /// * `sql` - SQL query string (e.g., "SELECT * FROM bundle WHERE id > 10")
+    /// * `params` - Query parameters for parameterized queries ($1, $2, etc.)
+    ///
+    /// # Returns
+    /// A streaming result set that can be consumed incrementally.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let stream = bundle.query("SELECT COUNT(*) FROM bundle", vec![]).await?;
+    /// while let Some(batch) = stream.next().await {
+    ///     // Process batch
+    /// }
+    /// ```
+    async fn query(
         &self,
         sql: &str,
         params: Vec<ScalarValue>,
-    ) -> Result<Arc<BundleBuilder>, BundlebaseError>;
+    ) -> Result<SendableRecordBatchStream, BundlebaseError>;
 
     /// Returns a map of view IDs to view names for all views in this container
     fn views(&self) -> HashMap<ObjectId, String>;

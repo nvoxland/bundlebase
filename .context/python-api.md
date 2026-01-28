@@ -86,13 +86,13 @@ c = await Bundlebase.open("/my/container/dir")
 - `attach(url)` - Add data source
 - `remove_column(name)` - Remove column
 - `rename_column(old_name, new_name)` - Rename column
-- `filter(where_clause, params)` - Filter rows
-- `select(*columns)` - Select columns
+- `filter(query, params)` - Filter rows with a SELECT query (e.g., `"SELECT * FROM bundle WHERE salary > $1"`)
 - `join(url, expression, join_type)` - Join with another source
-- `select(sql, params)` - Execute custom SQL (SELECT keyword is auto-prepended if missing)
 - `set_name(name)` - Set container name
 - `set_description(description)` - Set container description
 - `create_function(name, output, func)` - Define custom function
+- `create_view(name, sql)` - Create a named view from a SQL query
+- `query(sql, params)` - Execute a SQL query and return streaming results
 
 ## Schema Introspection
 

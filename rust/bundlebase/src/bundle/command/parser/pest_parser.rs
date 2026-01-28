@@ -164,7 +164,6 @@ pub fn syntax_map() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("SET DESCRIPTION", "SET DESCRIPTION '<description>'");
     map.insert("VERIFY DATA", "VERIFY DATA [UPDATE]");
     map.insert("EXPLAIN PLAN", "EXPLAIN PLAN");
-    map.insert("SELECT", "SELECT <columns> FROM bundle [WHERE <condition>]");
     map
 }
 
@@ -203,7 +202,6 @@ pub fn rule_to_syntax(rule: Rule) -> Option<&'static str> {
         Rule::set_description_stmt => map.get("SET DESCRIPTION").copied(),
         Rule::verify_data_stmt => map.get("VERIFY DATA").copied(),
         Rule::explain_stmt => map.get("EXPLAIN PLAN").copied(),
-        Rule::select_stmt => map.get("SELECT").copied(),
         _ => None,
     }
 }

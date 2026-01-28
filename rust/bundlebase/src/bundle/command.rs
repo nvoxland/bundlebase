@@ -15,10 +15,7 @@
 //! ## BundleFacadeCommand - Read-Only Commands
 //!
 //! Commands that work with `&dyn BundleFacade` and don't need to mutate the source.
-//! These typically return a new `BundleBuilder` or compute values.
-//!
-//! Currently only `SelectCommand` is a facade command - it returns a NEW builder
-//! with the query applied rather than mutating the source.
+//! These typically compute values (like ExplainPlan).
 //!
 //! # Adding New Commands
 //!
@@ -41,7 +38,7 @@
 //! - `message`: Commands that return `CommandOutput::Message(ok())` (most common)
 //! - `fetch`: Commands that return `CommandOutput::Fetch(results)`
 //! - `verification`: Commands that return `CommandOutput::Verification(results)`
-//! - `custom`: Commands with special execution logic (Commit, Select, ExplainPlan)
+//! - `custom`: Commands with special execution logic (Commit, ExplainPlan)
 
 use crate::bundle::VerificationResults;
 use crate::bundle::facade::BundleFacade;
@@ -70,15 +67,16 @@ pub use parser::Rule;
 
 // Re-export builder command structs
 pub use builder::{
-    AttachCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand, DetachBlockCommand,
-    DropColumnCommand, DropIndexCommand, DropJoinCommand, DropViewCommand, FetchAllCommand,
-    FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand, ReindexCommand,
-    RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand, ResetCommand,
-    SetConfigCommand, SetDescriptionCommand, SetNameCommand, UndoCommand, VerifyDataCommand,
+    AttachCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand, CreateViewCommand,
+    DetachBlockCommand, DropColumnCommand, DropIndexCommand, DropJoinCommand,
+    DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand,
+    ReindexCommand, RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand,
+    ResetCommand, SetConfigCommand, SetDescriptionCommand, SetNameCommand, UndoCommand,
+    VerifyDataCommand,
 };
 
 // Re-export facade command structs
-pub use facade::{ExplainPlanCommand, SelectCommand};
+pub use facade::ExplainPlanCommand;
 
 /// Output from executing a BundleCommand.
 ///
@@ -176,8 +174,6 @@ impl CommandOutput {
 pub enum FacadeCommand {
     /// Show query execution plan
     ExplainPlan(ExplainPlanCommand),
-    /// Execute a SELECT query (returns a new BundleBuilder)
-    Select(SelectCommand),
 }
 
 impl FacadeCommand {
@@ -191,11 +187,6 @@ impl FacadeCommand {
                 let plan = facade.explain().await?;
                 Ok(CommandOutput::Plan(plan))
             }
-            FacadeCommand::Select(cmd) => {
-                // Execute select to validate the query works
-                let _result_builder = facade.select(&cmd.sql, cmd.params).await?;
-                Ok(CommandOutput::Message(MessageResponse::ok()))
-            }
         }
     }
 
@@ -203,7 +194,6 @@ impl FacadeCommand {
     pub fn output_schema(&self) -> SchemaRef {
         match self {
             FacadeCommand::ExplainPlan(_) => plan_schema(),
-            FacadeCommand::Select(_) => message_schema(),
         }
     }
 }
@@ -211,12 +201,11 @@ impl FacadeCommand {
 impl BundleCommand {
     /// Try to convert this command to a FacadeCommand.
     ///
-    /// Returns `Ok(FacadeCommand)` if this is a read-only command (ExplainPlan, Select).
+    /// Returns `Ok(FacadeCommand)` if this is a read-only command (ExplainPlan).
     /// Returns `Err` with a descriptive error message if this is a mutating command.
     pub fn into_facade_command(self) -> Result<FacadeCommand, BundlebaseError> {
         match self {
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
-            BundleCommand::Select(cmd) => Ok(FacadeCommand::Select(cmd)),
             _ => {
                 // Get the command name for the error message
                 let cmd_name = match &self {
@@ -231,6 +220,7 @@ impl BundleCommand {
                     BundleCommand::DropIndex(_) => "DROP INDEX",
                     BundleCommand::RebuildIndex(_) => "REBUILD INDEX",
                     BundleCommand::Reindex(_) => "REINDEX",
+                    BundleCommand::CreateView(_) => "CREATE VIEW",
                     BundleCommand::RenameView(_) => "RENAME VIEW",
                     BundleCommand::DropView(_) => "DROP VIEW",
                     BundleCommand::DropJoin(_) => "DROP JOIN",
@@ -245,7 +235,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::ExplainPlan(_) | BundleCommand::Select(_) => {
+                    BundleCommand::ExplainPlan(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -259,7 +249,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::ExplainPlan(_) | BundleCommand::Select(_))
+        matches!(self, BundleCommand::ExplainPlan(_))
     }
 }
 
@@ -319,9 +309,8 @@ pub trait BundleBuilderCommand: CommandParsing {
 /// Trait for read-only commands that work with `BundleFacade`.
 ///
 /// These commands do not require mutable access to the bundle and can work
-/// with any type that implements `BundleFacade`. They typically either:
-/// - Return a new `BundleBuilder` (like `SelectCommand`)
-/// - Compute and return a value from the current state
+/// with any type that implements `BundleFacade`. They typically compute
+/// and return a value from the current state (like ExplainPlan).
 ///
 /// # Required Methods
 ///
@@ -332,9 +321,6 @@ pub trait BundleBuilderCommand: CommandParsing {
 #[async_trait]
 pub trait BundleFacadeCommand: CommandParsing {
     /// The type returned by execute().
-    ///
-    /// For `SelectCommand`, this is `BundleBuilder` (a new builder with the query).
-    /// Future commands might return other types like `usize` for count operations.
     type Output;
 
     /// Execute the command on the provided facade
@@ -436,10 +422,6 @@ macro_rules! register_commands {
                         builder.commit(&cmd.message).await?;
                         Ok(CommandOutput::Message(MessageResponse::ok()))
                     }
-                    BundleCommand::Select(cmd) => {
-                        builder.select(&cmd.sql, cmd.params).await?;
-                        Ok(CommandOutput::Message(MessageResponse::ok()))
-                    }
                     BundleCommand::ExplainPlan(_cmd) => {
                         let plan = builder.explain().await?;
                         Ok(CommandOutput::Plan(plan))
@@ -517,6 +499,7 @@ register_commands! {
         Reindex(ReindexCommand) => Rule::reindex_stmt,
 
         // View commands
+        CreateView(CreateViewCommand) => Rule::create_view_stmt,
         RenameView(RenameViewCommand) => Rule::rename_view_stmt,
         DropView(DropViewCommand) => Rule::drop_view_stmt,
 
@@ -546,7 +529,6 @@ register_commands! {
     }
     custom {
         Commit(CommitCommand) => Rule::commit_stmt,
-        Select(SelectCommand) => Rule::select_stmt,
         ExplainPlan(ExplainPlanCommand) => Rule::explain_stmt,
     }
 }

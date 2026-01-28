@@ -1,7 +1,7 @@
 use crate::bundle::command::{BundleBuilderCommand, FetchAllCommand, FetchCommand};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
-use crate::bundle::operation::{AnyOperation, SelectOp};
+use crate::bundle::operation::AnyOperation;
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle};
@@ -17,6 +17,7 @@ use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use chrono::DateTime;
+use datafusion::execution::SendableRecordBatchStream;
 use datafusion::prelude::{DataFrame, SessionContext};
 use datafusion::scalar::ScalarValue;
 use parking_lot::RwLock;
@@ -235,12 +236,19 @@ impl BundleBuilder {
 
     /// Creates a new BundleBuilder extending from an existing Bundle.
     ///
+    /// # Arguments
+    /// * `bundle` - The source bundle to extend from
+    /// * `data_dir` - Optional new data directory. If None, uses the current bundle's data_dir.
+    ///
     /// # Status Independence
     ///
     /// The returned builder has **independent** status tracking from the source bundle.
     /// Changes made to this builder will not appear in the original bundle's status,
     /// and vice versa.
-    pub fn extend(bundle: Arc<Bundle>, data_dir: Option<&str>) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+    pub fn extend(
+        bundle: Arc<Bundle>,
+        data_dir: Option<&str>,
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         let mut new_bundle = bundle.deref().clone();
 
         // Detach data_dir and last_manifest_version so modifications don't affect the original
@@ -753,15 +761,17 @@ impl BundleBuilder {
         self.execute_command(FetchAllCommand::new()).await
     }
 
-    /// Attach a view from another BundleBuilder
+    /// Create a view from a SQL statement
     ///
-    /// Creates a named view that captures all uncommitted operations from the source BundleBuilder.
-    /// The view is stored in a subdirectory under view_{id}/ and automatically inherits
-    /// changes from the parent bundle through the FROM mechanism.
+    /// Creates a named view defined by the SQL query. The view is stored in a subdirectory
+    /// under view_{id}/ and automatically inherits data from the parent bundle.
     ///
     /// # Arguments
     /// * `name` - Name of the view
-    /// * `source` - BundleBuilder containing the operations to capture (typically from a select())
+    /// * `sql` - SQL query that defines the view (e.g., "SELECT * FROM bundle WHERE age > 21")
+    ///
+    /// # Returns
+    /// The BundleBuilder for the created view
     ///
     /// # Example
     /// ```ignore
@@ -769,56 +779,46 @@ impl BundleBuilder {
     /// c.attach("data.csv", None).await?;
     /// c.commit("Initial").await?;
     ///
-    /// let adults = c.select("select * where age > 21", vec![]).await?;
-    /// c.create_view("adults", &adults).await?;
+    /// let view = c.create_view("adults", "SELECT * FROM bundle WHERE age > 21").await?;
     /// c.commit("Add adults view").await?;
     /// ```
     pub async fn create_view(
         &self,
         name: &str,
-        source: &BundleBuilder,
-    ) -> Result<&Self, BundlebaseError> {
+        sql: &str,
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         use crate::bundle::operation::CreateViewOp;
 
-        let name = name.to_string();
-        let source_ops_count = source.status().operations().len();
-        let changes_before = self.status.read().changes().len();
-        let source_clone = source.clone();
+        let name_clone = name.to_string();
+        let sql_clone = sql.to_string();
+
+        // Use a cell to capture the view_builder from inside the closure.
+        // We use parking_lot::RwLock which doesn't poison on panic.
+        let view_builder_cell: Arc<parking_lot::RwLock<Option<Arc<BundleBuilder>>>> =
+            Arc::new(parking_lot::RwLock::new(None));
+        let view_builder_cell_clone = view_builder_cell.clone();
 
         self.do_change(&format!("Create view '{}'", name), |builder| {
+            let name = name_clone.clone();
+            let sql = sql_clone.clone();
+            let cell = view_builder_cell_clone.clone();
             Box::pin(async move {
-                let op = CreateViewOp::setup(&name, &source_clone, builder).await?;
+                let (op, view_builder) = CreateViewOp::setup(&name, &sql, builder).await?;
+                *cell.write() = Some(view_builder);
                 builder.apply_operation(op.into()).await?;
-                info!("Attached view '{}'", name);
+                info!("Created view '{}'", name);
                 Ok(())
             })
         })
         .await?;
 
-        // After creating view, if source had uncommitted operations and source shares
-        // the same underlying bundle, we need to remove those operations to prevent double-commit.
-        // Note: With the current implementation where select() creates a derived builder with
-        // independent status, this block is rarely entered because the bundles differ.
-        // This check is preserved for cases where the source IS self (not derived from select).
-        let shares_bundle = Arc::ptr_eq(
-            &self.bundle,
-            &source.bundle,
-        );
-        if shares_bundle && source_ops_count > 0 && changes_before >= source_ops_count {
-            let mut status = self.status.write();
-            let create_view_change = status.pop_change();
-            let keep_count = changes_before - source_ops_count;
-            status.truncate(keep_count);
-            if let Some(create_view_change) = create_view_change {
-                status.push_change(create_view_change);
-            }
-            debug!(
-                "Removed {} changes that were captured for view (prevents double-commit)",
-                source_ops_count
-            );
-        }
+        // Extract the view builder from the cell
+        let view_builder = view_builder_cell
+            .read()
+            .clone()
+            .ok_or_else(|| BundlebaseError::from("View builder not created"))?;
 
-        Ok(self)
+        Ok(view_builder)
     }
 
     /// Rename an existing view
@@ -831,8 +831,7 @@ impl BundleBuilder {
     /// ```ignore
     /// let c = BundleBuilder::create("memory:///example", None).await?;
     /// c.attach("data.csv", None).await?;
-    /// let adults = c.select("select * from bundle where age > 21", vec![]).await?;
-    /// c.create_view("adults", &adults).await?;
+    /// c.create_view("adults", "SELECT * FROM bundle WHERE age > 21").await?;
     /// c.rename_view("adults", "adults_view").await?;
     /// c.commit("Renamed view").await?;
     /// ```
@@ -855,8 +854,7 @@ impl BundleBuilder {
     /// ```ignore
     /// let c = BundleBuilder::create("memory:///example", None).await?;
     /// c.attach("data.csv", None).await?;
-    /// let adults = c.select("select * from bundle where age > 21", vec![]).await?;
-    /// c.create_view("adults", &adults).await?;
+    /// c.create_view("adults", "SELECT * FROM bundle WHERE age > 21").await?;
     /// c.drop_view("adults").await?;
     /// c.commit("Dropped view").await?;
     /// ```
@@ -930,15 +928,15 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Filter rows with a WHERE clause
-    /// Parameters can be referenced as $1, $2, etc. in the WHERE clause.
+    /// Filter rows with a SELECT query.
+    /// Parameters can be referenced as $1, $2, etc. in the query.
     pub async fn filter(
         &self,
-        where_clause: &str,
+        query: &str,
         params: Vec<ScalarValue>,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::FilterCommand;
-        self.execute_command(FilterCommand::new(where_clause, params)).await?;
+        self.execute_command(FilterCommand::new(query, params)).await?;
         Ok(self)
     }
 
@@ -1517,32 +1515,21 @@ impl BundleFacade for BundleBuilder {
         self.bundle.dataframe().await
     }
 
-    async fn select(&self, sql: &str, params: Vec<ScalarValue>) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+    fn extend(
+        &self,
+        data_dir: Option<&str>,
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         // Create a new builder based on the current bundle state without modifying self
-        // This matches the expected behavior where select() returns a new builder
-        // with the query applied, leaving the original unchanged
-        let current_bundle = Arc::new(self.bundle.deref().clone()); //todo: don't clone
-        let new_builder = BundleBuilder::extend(current_bundle, None)?;
+        let current_bundle = Arc::new(self.bundle.deref().clone());
+        BundleBuilder::extend(current_bundle, data_dir)
+    }
 
-        let sql = sql.to_string();
-        let sql = if !sql.to_lowercase().starts_with("select ") {
-            format!("SELECT {}", sql)
-        } else {
-            sql
-        };
-
-        new_builder.do_change(&format!("Query: {}", sql), |builder| {
-                Box::pin(async move {
-                    builder
-                        .apply_operation(SelectOp::setup(sql, params).await?.into())
-                        .await?;
-                    info!("Created query");
-                    Ok(())
-                })
-            })
-            .await?;
-
-        Ok(new_builder)
+    async fn query(
+        &self,
+        sql: &str,
+        params: Vec<ScalarValue>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        Ok(self.bundle().query(sql, params).await?)
     }
 
     fn views(&self) -> HashMap<ObjectId, String> {
