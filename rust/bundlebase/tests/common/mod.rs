@@ -3,7 +3,7 @@ use arrow::datatypes::SchemaRef;
 use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
 use bundlebase::io::{readable_file_from_url, IOReadWriteDir};
 use bundlebase::{BundlebaseError, BundleConfig};
-use std::sync::Arc;
+use datafusion::dataframe::DataFrame;
 use url::Url;
 
 #[allow(dead_code)]
@@ -47,4 +47,11 @@ pub async fn latest_commit(
             }))
         }
     }
+}
+
+/// Count total rows in a DataFrame by collecting and summing batch row counts
+#[allow(dead_code)]
+pub async fn count_rows(df: &DataFrame) -> Result<usize, BundlebaseError> {
+    let record_batches = df.clone().collect().await?;
+    Ok(record_batches.iter().map(|rb| rb.num_rows()).sum())
 }

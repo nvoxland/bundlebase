@@ -1,12 +1,11 @@
 use crate::bundle::operation::parameter_value::ParameterValue;
 use crate::bundle::operation::Operation;
-use crate::bundle::sql::with_temp_table;
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
-use datafusion::prelude::SessionContext;
+use datafusion::prelude::{SessionConfig, SessionContext};
 use datafusion::scalar::ScalarValue;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -54,36 +53,41 @@ impl Operation for FilterOp {
 
         let timer = OperationTimer::start(OperationCategory::Select, "filter");
 
-        let user_sql = self.query.clone();
-        let parameters = self.parameters.clone();
-        let ctx_for_closure = ctx.clone();
+        // Create an isolated SessionContext for this filter operation that shares
+        // the RuntimeEnv (including object stores) from the original context.
+        // This avoids temp table management and SQL string replacement.
+        let mut config = SessionConfig::new();
+        config.options_mut().sql_parser.enable_ident_normalization = false;
+        let filter_ctx = SessionContext::new_with_config_rt(config, ctx.runtime_env());
 
-        let result = with_temp_table(&ctx, df, |table_name| async move {
-            // Replace "bundle" references with table_name in user SQL
-            let sql = user_sql.replace("bundle", &table_name);
+        // Register the input DataFrame as "bundle" using into_view()
+        // This provides case-insensitive column matching for SQL queries
+        filter_ctx.register_table("bundle", df.into_view())?;
 
-            // Convert parameters to ScalarValues
-            let params: Vec<ScalarValue> =
-                parameters.iter().map(|p| p.to_scalar_value()).collect();
+        // Convert parameters to ScalarValues
+        let params: Vec<ScalarValue> = self
+            .parameters
+            .iter()
+            .map(|p| p.to_scalar_value())
+            .collect();
 
-            // Create logical plan from SQL
-            let plan = ctx_for_closure
+        // Create and execute the plan directly - no SQL replacement needed
+        let result = async {
+            let plan = filter_ctx
                 .state()
-                .create_logical_plan(&sql)
+                .create_logical_plan(&self.query)
                 .await
                 .map_err(|e| Box::new(e) as BundlebaseError)?;
 
-            // Apply parameter values using DataFusion's native binding
             let plan = plan
                 .with_param_values(params)
                 .map_err(|e| Box::new(e) as BundlebaseError)?;
 
-            // Execute the parameterized plan
-            ctx_for_closure
+            filter_ctx
                 .execute_logical_plan(plan)
                 .await
                 .map_err(|e| Box::new(e) as BundlebaseError)
-        })
+        }
         .await;
 
         match &result {
