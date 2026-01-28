@@ -125,10 +125,7 @@ impl BundleState {
         match &self.mode {
             BundleMode::ReadOnly(bundle) => {
                 if Self::references_bundle_table(sql) {
-                    // Use select() to get the dataframe with all operations applied
-                    let result_builder = bundle.select(sql, vec![]).await?;
-                    let df = result_builder.dataframe().await?;
-                    let stream = df.as_ref().clone().execute_stream().await?;
+                    let stream = bundle.query(sql, vec![]).await?;
                     Ok(SqlResult::Stream(stream))
                 } else {
                     // Execute directly via the SessionContext for non-bundle queries
@@ -140,10 +137,7 @@ impl BundleState {
             }
             BundleMode::ReadWrite(builder) => {
                 if Self::references_bundle_table(sql) {
-                    // Use builder.select() for bundle-referencing queries
-                    let result_builder = builder.select(sql, vec![]).await?;
-                    let df = result_builder.dataframe().await?;
-                    let stream = df.as_ref().clone().execute_stream().await?;
+                    let stream = builder.query(sql, vec![]).await?;
                     Ok(SqlResult::Stream(stream))
                 } else {
                     // Execute directly via the SessionContext for non-bundle queries
@@ -249,9 +243,8 @@ impl BundleState {
         match &self.mode {
             BundleMode::ReadOnly(bundle) => {
                 if Self::references_bundle_table(sql) {
-                    let result_builder = bundle.select(sql, vec![]).await?;
-                    let df = result_builder.dataframe().await?;
-                    Ok(df.schema().inner().clone())
+                    let stream = bundle.query(sql, vec![]).await?;
+                    Ok(stream.schema().clone())
                 } else {
                     // Execute directly via the SessionContext for non-bundle queries
                     let ctx = bundle.ctx();
@@ -261,9 +254,8 @@ impl BundleState {
             }
             BundleMode::ReadWrite(builder) => {
                 if Self::references_bundle_table(sql) {
-                    let result_builder = builder.select(sql, vec![]).await?;
-                    let df = result_builder.dataframe().await?;
-                    Ok(df.schema().inner().clone())
+                    let stream = builder.query(sql, vec![]).await?;
+                    Ok(stream.schema().clone())
                 } else {
                     // Execute directly via the SessionContext for non-bundle queries
                     let ctx = builder.bundle().ctx();

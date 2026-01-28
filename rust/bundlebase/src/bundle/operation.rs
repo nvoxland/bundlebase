@@ -17,7 +17,6 @@ mod rebuild_index;
 mod rename_column;
 mod rename_join;
 mod rename_view;
-mod select;
 mod serde_util;
 mod set_config;
 mod set_description;
@@ -42,7 +41,6 @@ pub use crate::bundle::operation::rebuild_index::RebuildIndexOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
 pub use crate::bundle::operation::rename_join::RenameJoinOp;
 pub use crate::bundle::operation::rename_view::RenameViewOp;
-pub use crate::bundle::operation::select::SelectOp;
 pub use crate::bundle::operation::set_config::SetConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
@@ -216,7 +214,6 @@ define_any_operation! {
     RenameJoin(RenameJoinOp),
     RenameView(RenameViewOp),
     ReplaceBlock(ReplaceBlockOp),
-    Select(SelectOp),
     SetConfig(SetConfigOp),
     SetDescription(SetDescriptionOp),
     SetName(SetNameOp),

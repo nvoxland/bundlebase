@@ -11,7 +11,7 @@ mod sql_executor;
 mod state;
 
 use crate::state::BundleState;
-use bundlebase::{Bundle, BundleBuilder, BundlebaseError};
+use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade};
 use clap::{Parser, ValueEnum};
 use std::sync::Arc;
 use tracing::info;

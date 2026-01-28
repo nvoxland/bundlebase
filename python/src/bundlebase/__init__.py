@@ -15,7 +15,7 @@ from ._bundlebase import open as _open
 from ._bundlebase import random_memory_url as random_memory_url
 from ._bundlebase import test_datafile as test_datafile
 from .chain import OperationChain, register_original_method, CreateChain, ExtendChain
-from .conversion import to_pandas, to_polars, to_numpy, to_dict, stream_batches
+from .conversion import to_pandas, to_polars, to_numpy, to_dict, stream_batches, QueryResult
 
 # Configure Rust→Python logging bridge
 _rust_logger = logging.getLogger('bundlebase.rust')
@@ -74,7 +74,7 @@ _original_methods = {
     "join": _PyBundleBuilder.join,
 
     # Query operations
-    "select": _PyBundleBuilder.select,
+    "query": _PyBundleBuilder.query,
 
     # View operations
     "create_view": _PyBundleBuilder.create_view,
@@ -147,9 +147,11 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 # Wrap mutation methods to return OperationChain
 # (but NOT read-only methods like schema, num_rows, explain)
 # Note: fetch is NOT here because it returns a value (count), not PyBundleBuilder
+# Note: query is NOT here because it returns a stream of results, not PyBundleBuilder
+# Note: extend is NOT here because it's synchronous and returns a new builder directly
 mutation_methods = [
     "attach", "detach_block", "replace_block", "create_source",
-    "drop_column", "rename_column", "filter", "select", "join",
+    "drop_column", "rename_column", "filter", "join",
     "create_view", "rename_view", "drop_view", "drop_join", "rename_join",
     "set_name", "set_description", "set_config", "create_function",
     "create_index", "drop_index", "rebuild_index", "reindex",
@@ -228,8 +230,51 @@ PyBundleBuilder.to_polars = lambda self: to_polars(self)
 PyBundleBuilder.to_numpy = lambda self: to_numpy(self)
 PyBundleBuilder.to_dict = lambda self: to_dict(self)
 
+# Wrap query() to return QueryResult
+_original_bundle_query = PyBundle.query
+_original_builder_query = _original_methods["query"]
+
+async def _wrapped_bundle_query(self, sql: str, params=None) -> QueryResult:
+    """Execute a SQL query and return streaming results.
+
+    Args:
+        sql: SQL query string
+        params: Optional list of parameter values for $1, $2 placeholders
+
+    Returns:
+        QueryResult with conversion methods (to_pandas, to_polars, to_dict)
+
+    Example:
+        result = await bundle.query("SELECT * FROM bundle WHERE id > $1", [100])
+        df = await result.to_pandas()
+    """
+    stream = await _original_bundle_query(self, sql, params)
+    return QueryResult(stream)
+
+async def _wrapped_builder_query(self, sql: str, params=None) -> QueryResult:
+    """Execute a SQL query and return streaming results.
+
+    Args:
+        sql: SQL query string
+        params: Optional list of parameter values for $1, $2 placeholders
+
+    Returns:
+        QueryResult with conversion methods (to_pandas, to_polars, to_dict)
+
+    Example:
+        result = await builder.query("SELECT * FROM bundle WHERE id > $1", [100])
+        df = await result.to_pandas()
+    """
+    stream = await _original_builder_query(self, sql, params)
+    return QueryResult(stream)
+
+PyBundle.query = _wrapped_bundle_query
+PyBundleBuilder.query = _wrapped_builder_query
+
 # Wrap extend() on PyBundle to return an ExtendChain
 _original_extend = PyBundle.extend
+register_original_method("extend", _original_extend)
+
 def _wrapped_extend(self, data_dir: Optional[str] = None) -> ExtendChain:
     """Extend a bundle with chainable operations.
 
@@ -258,6 +303,7 @@ __all__ = [
     "PyBundleBuilder",
     "PyChange",
     "PyBundleStatus",
+    "QueryResult",
     "test_datafile",
     "random_memory_url",
     "OperationChain",

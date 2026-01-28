@@ -193,7 +193,7 @@ async fn test_tar_query_equivalence() {
         .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
-    mem_bundle.filter("id > 100", vec![]).await.unwrap();
+    mem_bundle.filter("SELECT * FROM bundle WHERE id > 100", vec![]).await.unwrap();
     mem_bundle.commit("filtered").await.unwrap();
 
     let mem_count = mem_bundle.bundle().num_rows().await.unwrap();

@@ -34,7 +34,6 @@ statement = { SOI ~ (
 // Data modification statements - operations that change bundle data content
 data_modification_stmt = {
     filter_stmt
-    | select_stmt
     | attach_stmt
     | detach_stmt
     | replace_stmt
@@ -85,16 +84,16 @@ metadata_stmt = {
 // ============================================================================
 // FILTER Statement
 // ============================================================================
-// Syntax: FILTER WHERE <condition>
-// Example: FILTER WHERE country = 'USA' AND age > 21
+// Syntax: FILTER WITH <query>
+// Example: FILTER WITH SELECT * FROM bundle WHERE country = 'USA' AND age > 21
 
 filter_stmt = {
-    ^"filter" ~ ^"where" ~ where_condition
+    ^"filter" ~ ^"with" ~ filter_query
 }
 
-where_condition = @{
-    // Capture everything from WHERE to end as raw text
-    // This allows DataFusion to parse the expression later
+filter_query = @{
+    // Capture everything from WITH to end as raw text
+    // This allows DataFusion to parse the query later
     (!EOI ~ ANY)+
 }
 
@@ -212,24 +211,6 @@ drop_join_stmt = {
 
 rename_join_stmt = {
     ^"rename" ~ ^"join" ~ identifier ~ ^"to" ~ identifier
-}
-
-// ============================================================================
-// SELECT Statement
-// ============================================================================
-// Syntax: SELECT ...
-// We capture everything after SELECT as raw text - DataFusion parses it later
-// Examples:
-//   SELECT * FROM bundle
-//   SELECT name, email FROM bundle WHERE id > 100
-
-select_stmt = {
-    ^"select" ~ select_body
-}
-
-select_body = @{
-    // Capture everything from SELECT to end as raw text
-    (!EOI ~ ANY)+
 }
 
 // ============================================================================

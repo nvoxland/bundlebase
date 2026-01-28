@@ -100,10 +100,7 @@ pub fn parse_command(command_str: &str) -> Result<BundleCommand, BundlebaseError
                 Ok(BundleCommand::Fetch(FetchCommand::from_statement(inner_stmt)?))
             }
         }
-        // CREATE VIEW is not supported via SQL parsing
-        Rule::create_view_stmt => Err(
-            "CREATE VIEW cannot be parsed from SQL. Use builder.create_view() API instead.".into(),
-        ),
+
         // All other rules use the centralized parse_from_rule() function
         _ => {
             match parse_from_rule(rule, inner_stmt)? {
@@ -127,17 +124,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_select_captures_full_statement() {
-        // Pest grammar captures the full SELECT statement including any trailing content.
-        // DataFusion will validate the SQL syntax when executed.
-        let result = parse_command("SELECT * FROM bundle; SELECT * FROM bundle2;");
-        assert!(result.is_ok());
-        match result.unwrap() {
-            BundleCommand::Select(cmd) => {
-                // The full input is captured as the SQL string
-                assert!(cmd.sql.contains("bundle"));
-            }
-            _ => panic!("Expected Select variant"),
-        }
+    fn test_parse_create_view() {
+        let cmd = parse_command("CREATE VIEW adults AS SELECT * FROM bundle WHERE age > 21");
+        assert!(cmd.is_ok(), "CREATE VIEW should parse successfully: {:?}", cmd.err());
+        let cmd = cmd.unwrap();
+        assert!(matches!(cmd, BundleCommand::CreateView(_)));
     }
 }

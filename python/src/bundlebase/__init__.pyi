@@ -618,19 +618,19 @@ class PyBundleBuilder:
         """
         ...
 
-    def filter(self, where_clause: str, params: Optional[List[Any]] = None) -> "OperationChain":
+    def filter(self, query: str, params: Optional[List[Any]] = None) -> "OperationChain":
         """
         Queue a filter operation.
 
         Args:
-            where_clause: SQL WHERE clause (e.g., "salary > $1")
+            query: SQL SELECT query (e.g., "SELECT * FROM bundle WHERE salary > $1")
             params: Optional list of parameters for parameterized queries
 
         Returns:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.filter("salary > $1", [50000])
+            c = await c.filter("SELECT * FROM bundle WHERE salary > $1", [50000])
         """
         ...
 
@@ -1103,7 +1103,7 @@ class OperationChain:
         """Queue a rename_column operation."""
         ...
 
-    def filter(self, where_clause: str, params: Optional[List[Any]] = None) -> "OperationChain":
+    def filter(self, query: str, params: Optional[List[Any]] = None) -> "OperationChain":
         """Queue a filter operation."""
         ...
 
@@ -1220,7 +1220,7 @@ class CreateChain:
         """Queue a rename_column operation."""
         ...
 
-    def filter(self, where_clause: str, params: Optional[List[Any]] = None) -> "CreateChain":
+    def filter(self, query: str, params: Optional[List[Any]] = None) -> "CreateChain":
         """Queue a filter operation."""
         ...
 
@@ -1337,7 +1337,7 @@ class ExtendChain:
         """Queue a rename_column operation."""
         ...
 
-    def filter(self, where_clause: str, params: Optional[List[Any]] = None) -> "ExtendChain":
+    def filter(self, query: str, params: Optional[List[Any]] = None) -> "ExtendChain":
         """Queue a filter operation."""
         ...
 

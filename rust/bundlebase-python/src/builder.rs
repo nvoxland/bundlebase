@@ -709,8 +709,18 @@ impl PyBundleBuilder {
         })
     }
 
+    #[pyo3(signature = (data_dir=None))]
+    fn extend(
+        slf: PyRef<'_, Self>,
+        data_dir: Option<&str>,
+    ) -> PyResult<PyBundleBuilder> {
+        let new_builder = slf.inner.extend(data_dir)
+            .map_err(|e| to_py_error("Failed to extend bundle", e))?;
+        Ok(PyBundleBuilder { inner: new_builder })
+    }
+
     #[pyo3(signature = (sql, params=None))]
-    fn select<'py>(
+    fn query<'py>(
         slf: PyRef<'_, Self>,
         sql: &str,
         params: Option<Vec<Py<PyAny>>>,
@@ -725,26 +735,31 @@ impl PyBundleBuilder {
                 vec![]
             };
 
-            let modified_bundle = inner
-                .select(sql.as_str(), params_vec)
+            let stream = inner
+                .query(sql.as_str(), params_vec)
                 .await
                 .map_err(|e| to_py_error("Failed to execute query", e))?;
+
+            let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner: modified_bundle })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(
+                    py,
+                    super::record_batch_stream::PyRecordBatchStream::new(stream, schema),
+                )
+                .map_err(|e| to_py_error("Failed to create stream", e))
             })
         })
     }
 
-    #[pyo3(signature = (where_clause, params=None))]
+    #[pyo3(signature = (query, params=None))]
     fn filter<'py>(
         slf: PyRef<'_, Self>,
-        where_clause: &str,
+        query: &str,
         params: Option<Vec<Py<PyAny>>>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
-        let where_clause = where_clause.to_string();
+        let query = query.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let params_vec = if let Some(params_list) = params {
                 convert_py_params(params_list)?
@@ -753,7 +768,7 @@ impl PyBundleBuilder {
             };
 
             inner
-                .filter(where_clause.as_str(), params_vec)
+                .filter(query.as_str(), params_vec)
                 .await
                 .map_err(|e| to_py_error("Failed to apply filter", e))?;
             Python::attach(|py| {
@@ -1002,28 +1017,33 @@ impl PyBundleBuilder {
         PyBundleStatus::from_rust(&self.inner.status())
     }
 
-    /// Attach a view from another BundleBuilder
+    /// Create a view from a SQL statement
+    ///
+    /// # Arguments
+    /// * `name` - The name of the view
+    /// * `sql` - SQL query that defines the view (e.g., "SELECT * FROM bundle WHERE age > 21")
+    ///
+    /// # Returns
+    /// The BundleBuilder for the created view
     fn create_view<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
-        source: PyRef<'_, PyBundleBuilder>,
+        sql: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
-        let source_inner = source.inner.clone();
         let name = name.to_string();
+        let sql = sql.to_string();
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            // The source_inner is already Arc<BundleBuilder> so we can use it directly
-            // The Rust create_view will clone it internally
-            inner
-                .create_view(&name, source_inner.as_ref())
+            let view_builder = inner
+                .create_view(&name, &sql)
                 .await
                 .map_err(|e| to_py_error(&format!("Failed to create view '{}'", name), e))?;
 
             Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
+                Py::new(py, PyBundleBuilder { inner: view_builder })
+                    .map_err(|e| to_py_error("Failed to create view builder", e))
             })
         })
     }

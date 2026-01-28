@@ -11,11 +11,8 @@ async fn test_create_view_basic() -> Result<(), BundlebaseError> {
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
-    // Create view with select
-    let adults = c
-        .select("select * from bundle where Country = 'Chile'", vec![])
-        .await?;
-    c.create_view("chile", &adults).await?;
+    // Create view with SQL
+    c.create_view("chile", "select * from bundle where Country = 'Chile'").await?;
     c.commit("Add chile view").await?;
 
     // Open view
@@ -73,10 +70,7 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("v1").await?;
 
-    let active_rs = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("active", &active_rs).await?;
+    c.create_view("active", "select * from bundle where \"Index\" > 21").await?;
     c.commit("v2").await?;
 
     // Record initial view operations count
@@ -113,13 +107,8 @@ async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
-    // Create view with multiple operations (select + filter)
-    let mut filtered = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    filtered.filter("\"Index\" < 65", vec![]).await?;
-
-    c.create_view("working_age", &filtered).await?;
+    // Create view with SQL that has multiple conditions
+    c.create_view("working_age", "select * from bundle where \"Index\" > 21 AND \"Index\" < 65").await?;
     c.commit("Add working_age view").await?;
 
     // Open view and verify it has the operations
@@ -131,19 +120,14 @@ async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
         println!("  Op {}: {}", i, op.describe());
     }
 
-    // Should have at least the select and filter operations from the view
+    // Should have the select operation from the view
     // (plus any parent operations like attach)
     let select_ops = operations
         .iter()
         .filter(|op| op.describe().to_lowercase().contains("select"))
         .count();
-    let filter_ops = operations
-        .iter()
-        .filter(|op| op.describe().contains("FILTER"))
-        .count();
 
     assert_eq!(select_ops, 1, "View should have 1 select operation");
-    assert_eq!(filter_ops, 1, "View should have 1 filter operation");
 
     Ok(())
 }
@@ -155,17 +139,11 @@ async fn test_duplicate_view_name() -> Result<(), BundlebaseError> {
     c.commit("Initial").await?;
 
     // Create first view
-    let adults1 = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("adults", &adults1).await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
     c.commit("Add first adults view").await?;
 
     // Try to create view with same name
-    let adults2 = c
-        .select("select * from bundle where \"Index\" > 30", vec![])
-        .await?;
-    let result = c.create_view("adults", &adults2).await;
+    let result = c.create_view("adults", "select * from bundle where \"Index\" > 30").await;
 
     assert!(result.is_err());
     let err_msg = result.err().unwrap().to_string();
@@ -184,10 +162,7 @@ async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("v1").await?;
 
-    let active = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("active", &active).await?;
+    c.create_view("active", "select * from bundle where \"Index\" > 21").await?;
     c.commit("v2").await?;
 
     // Get the view ID
@@ -224,8 +199,7 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
-    let high_index = c.select("select * where \"Index\" > 50", vec![]).await?;
-    c.create_view("high_index", &high_index).await?;
+    c.create_view("high_index", "select * where \"Index\" > 50").await?;
     c.commit("Add view").await?;
 
     let view = c.view("high_index").await?;
@@ -258,8 +232,7 @@ async fn test_view_is_marked_as_view() -> Result<(), BundlebaseError> {
     assert!(!c.bundle().is_view(), "Container should not be marked as view");
 
     // Create a view
-    let filtered = c.select("select * from bundle limit 10", vec![]).await?;
-    c.create_view("filtered", &filtered).await?;
+    c.create_view("filtered", "select * from bundle limit 10").await?;
     c.commit("Add view").await?;
 
     // Open the view
@@ -283,8 +256,7 @@ async fn test_cannot_attach_to_view() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    let filtered = c.select("select * from bundle limit 10", vec![]).await?;
-    c.create_view("filtered", &filtered).await?;
+    c.create_view("filtered", "select * from bundle limit 10").await?;
     c.commit("Add view").await?;
 
     // Open the view
@@ -315,8 +287,7 @@ async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    let filtered = c.select("select * from bundle limit 10", vec![]).await?;
-    c.create_view("filtered", &filtered).await?;
+    c.create_view("filtered", "select * from bundle limit 10").await?;
     c.commit("Add view").await?;
 
     // Open the view
@@ -327,8 +298,7 @@ async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
     let mut view_builder = view_bundle.extend(Some(random_memory_url().as_str()))?;
 
     // Try to create a view on the view - should fail
-    let sub_view = view_builder.select("select * limit 5", vec![]).await?;
-    let result = view_builder.create_view("subview", &sub_view).await;
+    let result = view_builder.create_view("subview", "select * limit 5").await;
     assert!(result.is_err(), "Should not be able to create view on a view");
 
     let err_msg = result.err().unwrap().to_string();
@@ -348,10 +318,8 @@ async fn test_cannot_drop_view_from_view() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create two views
-    let view1 = c.select("select * from bundle limit 10", vec![]).await?;
-    c.create_view("view1", &view1).await?;
-    let view2 = c.select("select * from bundle limit 20", vec![]).await?;
-    c.create_view("view2", &view2).await?;
+    c.create_view("view1", "select * from bundle limit 10").await?;
+    c.create_view("view2", "select * from bundle limit 20").await?;
     c.commit("Add views").await?;
 
     // Open view1
@@ -385,9 +353,9 @@ async fn test_regular_container_select() -> Result<(), BundlebaseError> {
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
-    // Apply select operation
-    c.select("select * where Country = 'Chile'", vec![]).await?;
-    c.commit("After select").await?;
+    // Apply filter operation
+    c.filter("SELECT * FROM bundle WHERE Country = 'Chile'", vec![]).await?;
+    c.commit("After filter").await?;
 
     // Try to get dataframe
     let df = c.dataframe().await?;
@@ -412,10 +380,7 @@ async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
-    let chile = c
-        .select("select * from bundle where Country = 'Chile'", vec![])
-        .await?;
-    c.create_view("chile", &chile).await?;
+    c.create_view("chile", "select * from bundle where Country = 'Chile'").await?;
     c.commit("Add view").await?;
 
     let view = c.view("chile").await?;
@@ -443,11 +408,8 @@ async fn test_views_method() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create multiple views
-    let view1 = c.select("select * where \"Index\" > 50", vec![]).await?;
-    c.create_view("high_index", &view1).await?;
-
-    let view2 = c.select("select * where \"Index\" < 30", vec![]).await?;
-    c.create_view("low_index", &view2).await?;
+    c.create_view("high_index", "select * where \"Index\" > 50").await?;
+    c.create_view("low_index", "select * where \"Index\" < 30").await?;
 
     c.commit("Add views").await?;
 
@@ -471,10 +433,7 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    let adults = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("adults", &adults).await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
     c.commit("Add adults view").await?;
 
     // Get the view ID
@@ -540,10 +499,7 @@ async fn test_rename_view_basic() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    let adults = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("adults", &adults).await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
     c.commit("Add adults view").await?;
 
     // Rename the view
@@ -593,15 +549,8 @@ async fn test_rename_view_new_name_exists() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create two views
-    let view1 = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("view1", &view1).await?;
-
-    let view2 = c
-        .select("select * from bundle where \"Index\" < 30", vec![])
-        .await?;
-    c.create_view("view2", &view2).await?;
+    c.create_view("view1", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("view2", "select * from bundle where \"Index\" < 30").await?;
     c.commit("Add two views").await?;
 
     // Try to rename view1 to view2 (conflict)
@@ -623,10 +572,7 @@ async fn test_rename_view_preserves_view_data() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view and get its dataframe
-    let high_index = c
-        .select("select * from bundle where \"Index\" > 50", vec![])
-        .await?;
-    c.create_view("high_index", &high_index).await?;
+    c.create_view("high_index", "select * from bundle where \"Index\" > 50").await?;
     c.commit("Add view").await?;
 
     let view_before = c.view("high_index").await?;
@@ -658,10 +604,7 @@ async fn test_rename_view_commit_and_reopen() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create and rename a view
-    let adults = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("adults", &adults).await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
     c.commit("Add adults view").await?;
 
     c.rename_view("adults", "adults_renamed").await?;
@@ -688,24 +631,18 @@ async fn test_rename_view_commit_and_reopen() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_create_view_with_uncommitted_operations() -> Result<(), BundlebaseError> {
-    // This test verifies that create_view properly captures operations from source
-    // Note: The Python test test_sync_create_view_no_double_commit verifies the fix
-    // for the double-commit issue, which we cannot test in Rust due to borrow checker
-    // limitations (can't pass &c to c.create_view() which requires &mut c).
+async fn test_create_view_with_sql() -> Result<(), BundlebaseError> {
+    // This test verifies that create_view properly stores the SQL as a select operation
 
     let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial").await?;
 
-    // Select creates uncommitted operations in the builder
-    let view_source = c.select("select * from bundle limit 10", vec![]).await?;
-
-    // Create view from the builder with select operation
-    c.create_view("limited", &view_source).await?;
+    // Create view with SQL directly
+    c.create_view("limited", "select * from bundle limit 10").await?;
     c.commit("Added view").await?;
 
-    // Verify the view itself has the select operation
+    // Verify the view has the select operation
     let bundle = Bundle::open(c.url().as_str(), None).await?;
     let view = bundle.view("limited").await?;
     let view_ops = view.operations();
@@ -722,10 +659,7 @@ async fn test_drop_view_basic() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    let adults = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("adults", &adults).await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
     c.commit("Add adults view").await?;
 
     // Verify view exists
@@ -775,10 +709,7 @@ async fn test_drop_view_commit_and_reopen() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create and drop a view
-    let adults = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("adults", &adults).await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
     c.commit("Add adults view").await?;
 
     c.drop_view("adults").await?;
@@ -805,15 +736,8 @@ async fn test_drop_view_preserves_other_views() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create two views
-    let view1 = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("view1", &view1).await?;
-
-    let view2 = c
-        .select("select * from bundle where \"Index\" < 30", vec![])
-        .await?;
-    c.create_view("view2", &view2).await?;
+    c.create_view("view1", "select * from bundle where \"Index\" > 21").await?;
+    c.create_view("view2", "select * from bundle where \"Index\" < 30").await?;
     c.commit("Add two views").await?;
 
     // Verify both views exist
@@ -846,10 +770,7 @@ async fn test_drop_view_twice_fails() -> Result<(), BundlebaseError> {
     c.commit("Initial data").await?;
 
     // Create a view
-    let adults = c
-        .select("select * from bundle where \"Index\" > 21", vec![])
-        .await?;
-    c.create_view("adults", &adults).await?;
+    c.create_view("adults", "select * from bundle where \"Index\" > 21").await?;
     c.commit("Add adults view").await?;
 
     // Drop the view

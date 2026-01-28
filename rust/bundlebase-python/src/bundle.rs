@@ -248,7 +248,10 @@ impl PyBundle {
     }
 
     #[pyo3(signature = (data_dir=None))]
-    fn extend(&self, data_dir: Option<&str>) -> PyResult<super::builder::PyBundleBuilder> {
+    fn extend(
+        &self,
+        data_dir: Option<&str>,
+    ) -> PyResult<super::builder::PyBundleBuilder> {
         let builder = self.inner.extend(data_dir).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Failed to extend bundle: {}",
@@ -259,7 +262,7 @@ impl PyBundle {
     }
 
     #[pyo3(signature = (sql, params=None))]
-    fn select<'py>(
+    fn query<'py>(
         &self,
         sql: &str,
         params: Option<Vec<Py<PyAny>>>,
@@ -274,8 +277,8 @@ impl PyBundle {
                 vec![]
             };
 
-            let builder = inner
-                .select(&sql, params_vec)
+            let stream = inner
+                .query(&sql, params_vec)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -284,11 +287,12 @@ impl PyBundle {
                     ))
                 })?;
 
+            let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
             Python::attach(|py| {
-                Py::new(py, super::builder::PyBundleBuilder::new(builder))
+                Py::new(py, super::record_batch_stream::PyRecordBatchStream::new(stream, schema))
                     .map_err(|e| {
                         PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                            "Failed to create bundle: {}",
+                            "Failed to create stream: {}",
                             e
                         ))
                     })

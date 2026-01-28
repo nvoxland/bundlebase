@@ -186,7 +186,7 @@ async fn test_filter_command() {
     data.attach(&mut server).await;
 
     // Filter to only rows where id > 1
-    execute_query(&mut server, "FILTER WHERE id > 1")
+    execute_query(&mut server, "FILTER WITH SELECT * FROM bundle WHERE id > 1")
         .await
         .expect("FILTER should succeed");
 
@@ -300,7 +300,7 @@ async fn test_state_persistence_in_connection() {
     data.attach(&mut server).await;
 
     // Filter the data
-    execute_query(&mut server, "FILTER WHERE id = 1")
+    execute_query(&mut server, "FILTER WITH SELECT * FROM bundle WHERE id = 1")
         .await
         .expect("FILTER should succeed");
 
@@ -372,7 +372,7 @@ async fn test_direct_filter_and_select() {
         .await
         .expect("Direct ATTACH should succeed");
 
-    execute_query_direct(&mut server, "FILTER WHERE id > 1")
+    execute_query_direct(&mut server, "FILTER WITH SELECT * FROM bundle WHERE id > 1")
         .await
         .expect("Direct FILTER should succeed");
 

@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn test_get_command_schema_filter() {
-        let schema = get_command_schema("FILTER WHERE x = 1");
+        let schema = get_command_schema("FILTER WITH SELECT * FROM bundle WHERE x = 1");
         assert!(schema.is_some());
         let schema = schema.expect("Schema should be present");
         // FILTER returns a message schema
