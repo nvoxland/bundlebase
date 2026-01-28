@@ -48,13 +48,13 @@ impl CommandParsing for SetNameCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for SetNameCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         builder
             .apply_operation(SetNameOp::setup(&self.name).into())
             .await?;
-        Ok(())
+        Ok(format!("Set bundle name: {}", self.name))
     }
 }
 

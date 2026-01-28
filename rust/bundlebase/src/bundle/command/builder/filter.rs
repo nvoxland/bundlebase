@@ -5,7 +5,6 @@ use crate::bundle::operation::FilterOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use datafusion::scalar::ScalarValue;
-use log::info;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -60,15 +59,13 @@ impl CommandParsing for FilterCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for FilterCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
-        let statement = self.to_statement();
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         builder
-            .apply_operation(FilterOp::new(&self.query, self.params).into())
+            .apply_operation(FilterOp::new(&self.query, self.params.clone()).into())
             .await?;
-        info!("Filtered: {}", statement);
-        Ok(())
+        Ok(format!("Filtered: {}", self.query))
     }
 }
 

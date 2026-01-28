@@ -4,7 +4,6 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RenameColumnOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use log::info;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -63,14 +62,13 @@ impl CommandParsing for RenameColumnCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for RenameColumnCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         builder
             .apply_operation(RenameColumnOp::setup(&self.old_name, &self.new_name).into())
             .await?;
-        info!("Renamed \"{}\" to \"{}\"", self.old_name, self.new_name);
-        Ok(())
+        Ok(format!("Renamed column: {} to {}", self.old_name, self.new_name))
     }
 }
 

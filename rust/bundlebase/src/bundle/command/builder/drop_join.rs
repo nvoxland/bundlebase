@@ -49,12 +49,12 @@ impl CommandParsing for DropJoinCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for DropJoinCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         let op = DropJoinOp::setup(&self.name, builder).await?;
         builder.apply_operation(op.into()).await?;
-        Ok(())
+        Ok(format!("Dropped join: {}", self.name))
     }
 }
 

@@ -34,10 +34,11 @@ impl CommandParsing for ReindexCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for ReindexCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
-        builder.reindex_internal().await
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
+        builder.reindex_internal().await?;
+        Ok("Rebuilt all indexes".to_string())
     }
 }
 

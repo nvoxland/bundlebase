@@ -6,6 +6,10 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
 
+// ============================================================================
+// ExplainPlanCommand
+// ============================================================================
+
 /// Command to show the query execution plan.
 ///
 /// ExplainPlanCommand is executed via `BundleFacade.explain()` which returns a

@@ -1,15 +1,191 @@
 //! VerifyData command implementation.
 
-use crate::bundle::command::{CommandParsing, Rule};
-use crate::bundle::{FileVerificationResult, VerificationResults};
+use crate::bundle::command::{CommandParsing, Rule, ToRecordBatch};
+use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::UpdateVersionOp;
 use crate::io::readable_file_from_path;
+use crate::io::plugin::object_store::ObjectStoreFile;
+use crate::io::IOReadFile;
 use crate::data::ObjectId;
 use crate::BundlebaseError;
+use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
-use log::info;
+use std::sync::Arc;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
+
+// ============================================================================
+// Verification Result Types
+// ============================================================================
+
+/// Result of verifying a single file
+#[derive(Debug, Clone)]
+pub struct FileVerificationResult {
+    pub location: String,
+    pub file_type: String, // "data" or "index"
+    pub expected_hash: Option<String>,
+    pub actual_hash: Option<String>,
+    pub passed: bool,
+    pub error: Option<String>,
+    pub version_updated: bool, // True if version was updated
+}
+
+/// Complete verification results for a bundle
+#[derive(Debug, Clone)]
+pub struct VerificationResults {
+    pub files: Vec<FileVerificationResult>,
+    pub passed_count: usize,
+    pub failed_count: usize,
+    pub skipped_count: usize,
+    pub versions_updated_count: usize,
+    pub all_passed: bool,
+}
+
+impl ToRecordBatch for VerificationResults {
+    fn schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("location", DataType::Utf8, false),
+            Field::new("file_type", DataType::Utf8, false),
+            Field::new("expected_hash", DataType::Utf8, true),
+            Field::new("actual_hash", DataType::Utf8, true),
+            Field::new("passed", DataType::Boolean, false),
+            Field::new("error", DataType::Utf8, true),
+            Field::new("version_updated", DataType::Boolean, false),
+        ]))
+    }
+
+    fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
+        let files = &self.files;
+
+        let location: ArrayRef = Arc::new(StringArray::from(
+            files.iter().map(|r| r.location.as_str()).collect::<Vec<_>>(),
+        ));
+        let file_type: ArrayRef = Arc::new(StringArray::from(
+            files.iter().map(|r| r.file_type.as_str()).collect::<Vec<_>>(),
+        ));
+        let expected_hash: ArrayRef = Arc::new(StringArray::from(
+            files.iter()
+                .map(|r| r.expected_hash.as_deref())
+                .collect::<Vec<_>>(),
+        ));
+        let actual_hash: ArrayRef = Arc::new(StringArray::from(
+            files.iter()
+                .map(|r| r.actual_hash.as_deref())
+                .collect::<Vec<_>>(),
+        ));
+        let passed: ArrayRef = Arc::new(BooleanArray::from(
+            files.iter().map(|r| r.passed).collect::<Vec<_>>(),
+        ));
+        let error: ArrayRef = Arc::new(StringArray::from(
+            files.iter().map(|r| r.error.as_deref()).collect::<Vec<_>>(),
+        ));
+        let version_updated: ArrayRef = Arc::new(BooleanArray::from(
+            files.iter().map(|r| r.version_updated).collect::<Vec<_>>(),
+        ));
+
+        RecordBatch::try_new(
+            Self::schema(),
+            vec![
+                location,
+                file_type,
+                expected_hash,
+                actual_hash,
+                passed,
+                error,
+                version_updated,
+            ],
+        )
+        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+    }
+}
+
+impl std::fmt::Display for VerificationResults {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.all_passed {
+            write!(f, "All {} files verified successfully", self.passed_count)
+        } else {
+            writeln!(
+                f,
+                "Verification: {} passed, {} failed",
+                self.passed_count, self.failed_count
+            )?;
+            for file in self.files.iter().filter(|file| !file.passed) {
+                write!(f, "  FAILED: {}", file.location)?;
+                if let Some(ref err) = file.error {
+                    write!(f, " ({})", err)?;
+                }
+                writeln!(f)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+impl VerificationResults {
+    /// Create a new VerificationResults from a list of file results
+    pub fn from_files(files: Vec<FileVerificationResult>) -> Self {
+        let passed_count = files.iter().filter(|f| f.passed).count();
+        let failed_count = files.iter().filter(|f| !f.passed).count();
+        let skipped_count = files
+            .iter()
+            .filter(|f| f.passed && f.expected_hash.is_none())
+            .count();
+        let versions_updated_count = files.iter().filter(|f| f.version_updated).count();
+        let all_passed = failed_count == 0;
+
+        Self {
+            files,
+            passed_count,
+            failed_count,
+            skipped_count,
+            versions_updated_count,
+            all_passed,
+        }
+    }
+
+    /// Check verification results and return error if any files failed.
+    ///
+    /// Throws an error if:
+    /// - Any file has a checksum mismatch (hash doesn't match)
+    /// - Any file has a verification error
+    pub fn check(&self) -> Result<(), BundlebaseError> {
+        let failures: Vec<&FileVerificationResult> =
+            self.files.iter().filter(|f| !f.passed).collect();
+
+        if failures.is_empty() {
+            return Ok(());
+        }
+
+        let messages: Vec<String> = failures
+            .iter()
+            .map(|f| {
+                if let Some(ref err) = f.error {
+                    format!("{}: {}", f.location, err)
+                } else if f.expected_hash != f.actual_hash {
+                    format!(
+                        "{}: hash mismatch (expected {}, got {})",
+                        f.location,
+                        f.expected_hash.as_deref().unwrap_or("none"),
+                        f.actual_hash.as_deref().unwrap_or("none")
+                    )
+                } else {
+                    format!("{}: verification failed", f.location)
+                }
+            })
+            .collect();
+
+        Err(BundlebaseError::from(format!(
+            "Data verification failed for {} file(s):\n{}",
+            failures.len(),
+            messages.join("\n")
+        )))
+    }
+}
+
+// ============================================================================
+// VerifyDataCommand
+// ============================================================================
 
 /// Command to verify the integrity of bundle data files.
 #[derive(Debug, Clone)]
@@ -58,6 +234,7 @@ impl BundleBuilderCommand for VerifyDataCommand {
         let mut results = Vec::new();
         let block_hashes = builder.bundle().build_block_hash_map();
         let block_locations = builder.bundle().build_block_location_map();
+        let config = builder.bundle().config();
 
         // Collect block info first to avoid borrowing issues
         let blocks_to_verify: Vec<(ObjectId, String, Option<String>, String)> = {
@@ -80,47 +257,24 @@ impl BundleBuilderCommand for VerifyDataCommand {
 
         // Process each block
         for (block_id, location, expected_hash, current_version) in blocks_to_verify {
-            // Compute actual hash
+            // Skip function:// URLs (generated data has no file to verify)
+            if location.starts_with("function://") {
+                results.push(FileVerificationResult {
+                    location,
+                    file_type: "data".to_string(),
+                    expected_hash: None,
+                    actual_hash: None,
+                    passed: true,
+                    error: None,
+                    version_updated: false,
+                });
+                continue;
+            }
+
+            // Compute the actual hash
             let data_dir = builder.bundle().data_dir();
-            let config = builder.bundle().config();
-            let hash_result = compute_file_hash(&location, data_dir, config).await;
-
-            match hash_result {
-                Ok(actual_hash) => {
-                    let passed = expected_hash
-                        .as_ref()
-                        .map(|expected| expected == &actual_hash)
-                        .unwrap_or(true);
-
-                    // Check if version needs updating (hash changed from stored version)
-                    let version_updated = if self.update_versions && passed {
-                        // If there's an expected hash and actual matches, check if version includes it
-                        let needs_update = expected_hash.is_some()
-                            && expected_hash.as_ref() != Some(&actual_hash)
-                            || !current_version.contains(&actual_hash[..8]);
-
-                        if needs_update {
-                            // Create update operation
-                            let op = UpdateVersionOp::setup(block_id, actual_hash.clone());
-                            builder.apply_operation(op.into()).await?;
-                            true
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    };
-
-                    results.push(FileVerificationResult {
-                        location,
-                        file_type: "data".to_string(),
-                        expected_hash,
-                        actual_hash: Some(actual_hash),
-                        passed,
-                        error: None,
-                        version_updated,
-                    });
-                }
+            let file = match readable_file_from_path(&location, data_dir, config.clone()) {
+                Ok(f) => f,
                 Err(e) => {
                     results.push(FileVerificationResult {
                         location,
@@ -128,36 +282,152 @@ impl BundleBuilderCommand for VerifyDataCommand {
                         expected_hash,
                         actual_hash: None,
                         passed: false,
-                        error: Some(e.to_string()),
+                        error: Some(format!("Failed to open file: {}", e)),
                         version_updated: false,
                     });
+                    continue;
                 }
+            };
+
+            let actual_hash = match file.compute_hash().await {
+                Ok(h) => h,
+                Err(e) => {
+                    results.push(FileVerificationResult {
+                        location,
+                        file_type: "data".to_string(),
+                        expected_hash,
+                        actual_hash: None,
+                        passed: false,
+                        error: Some(format!("Failed to compute hash: {}", e)),
+                        version_updated: false,
+                    });
+                    continue;
+                }
+            };
+
+            let hash_matches = expected_hash
+                .as_ref()
+                .map(|expected| expected == &actual_hash)
+                .unwrap_or(true);
+
+            if hash_matches {
+                // Hash matches - check if version needs updating
+                let mut version_updated = false;
+
+                if self.update_versions {
+                    // Read the current version from the file
+                    let adapter_factory = Arc::clone(&builder.bundle().reader_factory);
+                    let temp_id = ObjectId::generate();
+                    if let Ok(adapter) = adapter_factory
+                        .reader(&location, &temp_id, builder, None, None, None)
+                        .await
+                    {
+                        if let Ok(file_version) = adapter.read_version().await {
+                            if file_version != current_version {
+                                // Version changed but hash matches - update version
+                                let op = UpdateVersionOp::setup(block_id, file_version);
+                                if builder
+                                    .do_change(
+                                        &format!("Update version for block {}", block_id),
+                                        |b| {
+                                            let op = op.clone();
+                                            Box::pin(async move {
+                                                b.apply_operation(op.into()).await?;
+                                                Ok(())
+                                            })
+                                        },
+                                    )
+                                    .await
+                                    .is_ok()
+                                {
+                                    version_updated = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                results.push(FileVerificationResult {
+                    location,
+                    file_type: "data".to_string(),
+                    expected_hash,
+                    actual_hash: Some(actual_hash),
+                    passed: true,
+                    error: None,
+                    version_updated,
+                });
+            } else {
+                // Hash mismatch - verification failed
+                results.push(FileVerificationResult {
+                    location,
+                    file_type: "data".to_string(),
+                    expected_hash,
+                    actual_hash: Some(actual_hash),
+                    passed: false,
+                    error: None,
+                    version_updated: false,
+                });
+            }
+        }
+
+        // Verify index files exist
+        let indexes = builder.bundle().indexes().read().clone();
+        for index_def in indexes.iter() {
+            for indexed_blocks in index_def.all_indexed_blocks() {
+                let path = indexed_blocks.path();
+                let result = verify_index_exists(path, builder).await;
+                results.push(result);
             }
         }
 
         let verification_results = VerificationResults::from_files(results);
 
-        if verification_results.all_passed {
-            info!("All {} files verified successfully", verification_results.passed_count);
-        } else {
-            info!(
-                "Verification complete: {} passed, {} failed",
-                verification_results.passed_count, verification_results.failed_count
-            );
-        }
-
         Ok(verification_results)
     }
 }
 
-/// Compute the SHA256 hash of a file
-async fn compute_file_hash(
-    location: &str,
-    data_dir: std::sync::Arc<dyn crate::io::IOReadDir>,
-    config: std::sync::Arc<crate::BundleConfig>,
-) -> Result<String, BundlebaseError> {
-    let file = readable_file_from_path(location, data_dir, config)?;
-    file.compute_hash().await
+/// Verify an index file exists.
+async fn verify_index_exists(path: &str, builder: &BundleBuilder) -> FileVerificationResult {
+    match ObjectStoreFile::from_str(path, builder.data_dir().as_ref(), builder.config()) {
+        Ok(file) => match file.exists().await {
+            Ok(true) => FileVerificationResult {
+                location: path.to_string(),
+                file_type: "index".to_string(),
+                expected_hash: None,
+                actual_hash: None,
+                passed: true,
+                error: None,
+                version_updated: false,
+            },
+            Ok(false) => FileVerificationResult {
+                location: path.to_string(),
+                file_type: "index".to_string(),
+                expected_hash: None,
+                actual_hash: None,
+                passed: false,
+                error: Some("Index file not found".to_string()),
+                version_updated: false,
+            },
+            Err(e) => FileVerificationResult {
+                location: path.to_string(),
+                file_type: "index".to_string(),
+                expected_hash: None,
+                actual_hash: None,
+                passed: false,
+                error: Some(format!("Failed to check index file: {}", e)),
+                version_updated: false,
+            },
+        },
+        Err(e) => FileVerificationResult {
+            location: path.to_string(),
+            file_type: "index".to_string(),
+            expected_hash: None,
+            actual_hash: None,
+            passed: false,
+            error: Some(format!("Failed to create file handle: {}", e)),
+            version_updated: false,
+        },
+    }
 }
 
 #[cfg(test)]

@@ -5,7 +5,6 @@ use crate::bundle::operation::CreateIndexOp;
 use crate::index::IndexType;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use log::info;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -62,9 +61,9 @@ impl CommandParsing for CreateIndexCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for CreateIndexCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         builder
             .apply_operation(
                 CreateIndexOp::setup(&self.column, self.index_type.clone())
@@ -75,9 +74,7 @@ impl BundleBuilderCommand for CreateIndexCommand {
 
         builder.reindex_internal().await?;
 
-        info!("Created index on: \"{}\"", self.column);
-
-        Ok(())
+        Ok(format!("Created index on column: {}", self.column))
     }
 }
 

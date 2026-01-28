@@ -5,7 +5,6 @@ use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::DetachBlockOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use log::info;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -53,13 +52,12 @@ impl CommandParsing for DetachBlockCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for DetachBlockCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         let op = DetachBlockOp::setup(&self.location, builder).await?;
         builder.apply_operation(op.into()).await?;
-        info!("Detached block from {}", self.location);
-        Ok(())
+        Ok(format!("Detached {}", self.location))
     }
 }
 
