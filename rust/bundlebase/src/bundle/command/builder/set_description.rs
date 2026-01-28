@@ -52,13 +52,13 @@ impl CommandParsing for SetDescriptionCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for SetDescriptionCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         builder
             .apply_operation(SetDescriptionOp::setup(&self.description).into())
             .await?;
-        Ok(())
+        Ok("Set bundle description".to_string())
     }
 }
 

@@ -33,12 +33,11 @@ impl CommandParsing for ResetCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for ResetCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         builder.reset().await?;
-
-        Ok(())
+        Ok("Reset to last committed state".to_string())
     }
 }
 

@@ -53,4 +53,4 @@ pub use set_config::SetConfigCommand;
 pub use set_description::SetDescriptionCommand;
 pub use set_name::SetNameCommand;
 pub use undo::UndoCommand;
-pub use verify_data::VerifyDataCommand;
+pub use verify_data::{FileVerificationResult, VerificationResults, VerifyDataCommand};

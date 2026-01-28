@@ -55,13 +55,13 @@ impl CommandParsing for CommitCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for CommitCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         // Commit is special - we need to call the builder's commit method directly
         // This will commit all pending changes (including any that were just added)
         builder.commit(&self.message).await?;
-        Ok(())
+        Ok(format!("Committed: {}", self.message))
     }
 }
 

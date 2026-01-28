@@ -6,7 +6,6 @@ use crate::bundle::operation::AttachBlockOp;
 use crate::data::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use log::info;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -94,9 +93,9 @@ impl CommandParsing for AttachCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for AttachCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         let pack_id = match self.pack.as_deref() {
             None | Some("base") => ObjectId::BASE_PACK,
             Some(join_name) => *builder
@@ -111,9 +110,7 @@ impl BundleBuilderCommand for AttachCommand {
         let op = AttachBlockOp::setup(&pack_id, &self.path, builder).await?;
         builder.apply_operation(op.into()).await?;
 
-        info!("Attached {} to {}", self.path, pack_name);
-
-        Ok(())
+        Ok(format!("Attached {} to {}", self.path, pack_name))
     }
 }
 

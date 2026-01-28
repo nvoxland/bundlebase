@@ -117,9 +117,9 @@ impl CommandParsing for CreateSourceCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for CreateSourceCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         let pack_id = match self.pack.as_deref() {
             None | Some("base") => ObjectId::BASE_PACK,
             Some(join_name) => *builder
@@ -130,6 +130,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
         };
 
         let source_id = ObjectId::generate();
+        let function = self.function.clone();
         let op = CreateSourceOp::setup(source_id, pack_id, self.function.clone(), self.args.clone());
 
         builder.apply_operation(op.into()).await?;
@@ -167,7 +168,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
             }
         }
 
-        Ok(())
+        Ok(format!("Created source: {}", function))
     }
 }
 

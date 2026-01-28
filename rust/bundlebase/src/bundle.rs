@@ -19,6 +19,7 @@ pub use command::parser::{is_command_statement, parse_command};
 pub use command::BundleCommand;
 pub use command::CommandOutput;
 pub use command::{CommitCommand, ResetCommand, UndoCommand};
+pub use command::{FileVerificationResult, VerificationResults};
 pub use commit::{manifest_version, BundleCommit};
 pub use data_block::DataBlock;
 pub use pack::Pack;
@@ -54,114 +55,7 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use url::Url;
 use uuid::Uuid;
-
 pub static META_DIR: &str = "_bundlebase";
-
-/// Result of verifying a single file
-#[derive(Debug, Clone)]
-pub struct FileVerificationResult {
-    pub location: String,
-    pub file_type: String, // "data" or "index"
-    pub expected_hash: Option<String>,
-    pub actual_hash: Option<String>,
-    pub passed: bool,
-    pub error: Option<String>,
-    pub version_updated: bool, // True if version was updated
-}
-
-/// Complete verification results for a bundle
-#[derive(Debug, Clone)]
-pub struct VerificationResults {
-    pub files: Vec<FileVerificationResult>,
-    pub passed_count: usize,
-    pub failed_count: usize,
-    pub skipped_count: usize,
-    pub versions_updated_count: usize,
-    pub all_passed: bool,
-}
-
-impl std::fmt::Display for VerificationResults {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.all_passed {
-            write!(f, "All {} files verified successfully", self.passed_count)
-        } else {
-            writeln!(
-                f,
-                "Verification: {} passed, {} failed",
-                self.passed_count, self.failed_count
-            )?;
-            for file in self.files.iter().filter(|file| !file.passed) {
-                write!(f, "  FAILED: {}", file.location)?;
-                if let Some(ref err) = file.error {
-                    write!(f, " ({})", err)?;
-                }
-                writeln!(f)?;
-            }
-            Ok(())
-        }
-    }
-}
-
-impl VerificationResults {
-    /// Create a new VerificationResults from a list of file results
-    pub fn from_files(files: Vec<FileVerificationResult>) -> Self {
-        let passed_count = files.iter().filter(|f| f.passed).count();
-        let failed_count = files.iter().filter(|f| !f.passed).count();
-        let skipped_count = files
-            .iter()
-            .filter(|f| f.passed && f.expected_hash.is_none())
-            .count();
-        let versions_updated_count = files.iter().filter(|f| f.version_updated).count();
-        let all_passed = failed_count == 0;
-
-        Self {
-            files,
-            passed_count,
-            failed_count,
-            skipped_count,
-            versions_updated_count,
-            all_passed,
-        }
-    }
-
-    /// Check verification results and return error if any files failed.
-    ///
-    /// Throws an error if:
-    /// - Any file has a checksum mismatch (hash doesn't match)
-    /// - Any file has a verification error
-    pub fn check(&self) -> Result<(), BundlebaseError> {
-        let failures: Vec<&FileVerificationResult> =
-            self.files.iter().filter(|f| !f.passed).collect();
-
-        if failures.is_empty() {
-            return Ok(());
-        }
-
-        let messages: Vec<String> = failures
-            .iter()
-            .map(|f| {
-                if let Some(ref err) = f.error {
-                    format!("{}: {}", f.location, err)
-                } else if f.expected_hash != f.actual_hash {
-                    format!(
-                        "{}: hash mismatch (expected {}, got {})",
-                        f.location,
-                        f.expected_hash.as_deref().unwrap_or("none"),
-                        f.actual_hash.as_deref().unwrap_or("none")
-                    )
-                } else {
-                    format!("{}: verification failed", f.location)
-                }
-            })
-            .collect();
-
-        Err(BundlebaseError::from(format!(
-            "Data verification failed for {} file(s):\n{}",
-            failures.len(),
-            messages.join("\n")
-        )))
-    }
-}
 
 /// A thread-safe Bundle loaded from persistent storage.
 ///

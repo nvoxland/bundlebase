@@ -4,7 +4,6 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::DropColumnOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use log::info;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -49,16 +48,14 @@ impl CommandParsing for DropColumnCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for DropColumnCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         builder
             .apply_operation(DropColumnOp::setup(vec![self.name.as_str()]).into())
             .await?;
 
-        info!("Dropped column \"{}\"", self.name);
-
-        Ok(())
+        Ok(format!("Dropped column: {}", self.name))
     }
 }
 

@@ -7,7 +7,6 @@ use crate::bundle::pack::JoinTypeOption;
 use crate::data::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use log::info;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -119,9 +118,9 @@ impl CommandParsing for JoinCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for JoinCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         // Step 1: Create a new pack with join metadata
         let join_pack_id = ObjectId::generate();
         builder
@@ -138,12 +137,10 @@ impl BundleBuilderCommand for JoinCommand {
             builder.apply_operation(op.into()).await?;
         }
 
-        match &self.location {
-            Some(loc) => info!("Joined: {} as \"{}\"", loc, self.name),
-            None => info!("Created join point \"{}\" (no initial data)", self.name),
-        }
-
-        Ok(())
+        Ok(match &self.location {
+            Some(loc) => format!("Joined with {} on {}", loc, self.expression),
+            None => format!("Created join point \"{}\" (no initial data)", self.name),
+        })
     }
 }
 

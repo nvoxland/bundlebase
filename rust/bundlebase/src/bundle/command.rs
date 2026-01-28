@@ -40,7 +40,6 @@
 //! - `verification`: Commands that return `CommandOutput::Verification(results)`
 //! - `custom`: Commands with special execution logic (Commit, ExplainPlan)
 
-use crate::bundle::VerificationResults;
 use crate::bundle::facade::BundleFacade;
 use crate::source::FetchResults;
 use crate::{BundleBuilder, BundlebaseError};
@@ -54,13 +53,7 @@ pub mod facade;
 pub mod response;
 
 // Re-export response types
-pub use response::{
-    CommandResponse, FetchRow, MessageResponse, PlanRow, VerificationRow,
-    fetch_results_to_rows, fetch_schema, fetch_to_record_batch,
-    message_schema, message_to_record_batch,
-    plan_schema, plan_to_record_batch,
-    verification_results_to_rows, verification_schema, verification_to_record_batch,
-};
+pub use response::ToRecordBatch;
 
 // Re-export Rule from parser for use by commands
 pub use parser::Rule;
@@ -75,18 +68,21 @@ pub use builder::{
     VerifyDataCommand,
 };
 
+// Re-export verification result types
+pub use builder::{FileVerificationResult, VerificationResults};
+
 // Re-export facade command structs
 pub use facade::ExplainPlanCommand;
 
 /// Output from executing a BundleCommand.
 ///
-/// Most commands return Message (simple "OK"), but some commands return specific results
-/// that may be useful to callers. All output types can describe their Arrow schema
-/// and convert to RecordBatch for consistent handling across interfaces.
+/// This enum wraps different command output types, all of which implement `ToRecordBatch`.
+/// Commands now return their specific output types directly, but this enum provides
+/// a unified dispatch wrapper for the `BundleCommand::execute()` method.
 #[derive(Debug)]
 pub enum CommandOutput {
     /// Simple message output (typically "OK" for commands that complete successfully)
-    Message(MessageResponse),
+    Message(String),
     /// Verification results from VERIFY DATA
     Verification(VerificationResults),
     /// Fetch results from FETCH / FETCH ALL
@@ -138,30 +134,34 @@ impl CommandOutput {
     }
 
     /// Get the message if this is a Message output
-    pub fn into_message(self) -> Option<MessageResponse> {
+    pub fn into_message(self) -> Option<String> {
         match self {
             CommandOutput::Message(m) => Some(m),
             _ => None,
         }
     }
+}
 
-    /// Returns the Arrow schema for this output type.
+impl CommandOutput {
+    /// Returns the Arrow schema for this output.
+    ///
+    /// Dispatches to the concrete type's schema based on the variant.
     pub fn schema(&self) -> SchemaRef {
         match self {
-            CommandOutput::Message(_) => message_schema(),
-            CommandOutput::Verification(_) => verification_schema(),
-            CommandOutput::Fetch(_) => fetch_schema(),
-            CommandOutput::Plan(_) => plan_schema(),
+            CommandOutput::Message(_) => String::schema(),
+            CommandOutput::Verification(_) => VerificationResults::schema(),
+            CommandOutput::Fetch(_) => Vec::<FetchResults>::schema(),
+            CommandOutput::Plan(_) => String::schema(),
         }
     }
 
     /// Converts this output to a RecordBatch.
     pub fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
         match self {
-            CommandOutput::Message(msg) => message_to_record_batch(&msg.message),
-            CommandOutput::Verification(results) => verification_to_record_batch(results),
-            CommandOutput::Fetch(results) => fetch_to_record_batch(results),
-            CommandOutput::Plan(plan) => plan_to_record_batch(plan),
+            CommandOutput::Message(msg) => msg.to_record_batch(),
+            CommandOutput::Verification(results) => results.to_record_batch(),
+            CommandOutput::Fetch(results) => results.to_record_batch(),
+            CommandOutput::Plan(ref plan) => plan.to_record_batch(),
         }
     }
 }
@@ -193,7 +193,7 @@ impl FacadeCommand {
     /// Returns the Arrow schema for this command's output.
     pub fn output_schema(&self) -> SchemaRef {
         match self {
-            FacadeCommand::ExplainPlan(_) => plan_schema(),
+            FacadeCommand::ExplainPlan(_) => String::schema(),
         }
     }
 }
@@ -294,10 +294,10 @@ pub trait CommandParsing: Send + Sync {
 pub trait BundleBuilderCommand: CommandParsing {
     /// The type returned by execute().
     ///
-    /// Most commands return `()`. Commands that need to return values
-    /// (like fetch returning results, or verify_data returning verification results)
-    /// can specify a different type.
-    type Output;
+    /// All command output types must implement `ToRecordBatch` for consistent
+    /// handling across different interfaces. Most commands return `String`,
+    /// while commands like fetch and verify_data return their specific result types.
+    type Output: ToRecordBatch;
 
     /// Execute the command on the provided builder
     async fn execute(
@@ -321,7 +321,10 @@ pub trait BundleBuilderCommand: CommandParsing {
 #[async_trait]
 pub trait BundleFacadeCommand: CommandParsing {
     /// The type returned by execute().
-    type Output;
+    ///
+    /// All command output types must implement `ToRecordBatch` for consistent
+    /// handling across different interfaces.
+    type Output: ToRecordBatch;
 
     /// Execute the command on the provided facade
     async fn execute(
@@ -394,16 +397,17 @@ macro_rules! register_commands {
             /// Execute this command on a BundleBuilder.
             ///
             /// This method delegates to the wrapped command struct via `execute_command`.
+            /// All commands return types implementing `ToRecordBatch`, wrapped in `CommandOutput`.
             pub async fn execute(self, builder: &BundleBuilder) -> Result<CommandOutput, BundlebaseError> {
                 match self {
-                    // Message commands - standard execute_command pattern
+                    // Message commands - return MessageResponse with contextual message
                     $(
                         BundleCommand::$msg_variant(cmd) => {
-                            builder.execute_command(cmd).await?;
-                            Ok(CommandOutput::Message(MessageResponse::ok()))
+                            let result = builder.execute_command(cmd).await?;
+                            Ok(CommandOutput::Message(result))
                         }
                     )*
-                    // Fetch commands - return fetch results
+                    // Fetch commands - return FetchOutput
                     $(
                         BundleCommand::$fetch_variant(cmd) => {
                             let results = builder.execute_command(cmd).await?;
@@ -419,8 +423,8 @@ macro_rules! register_commands {
                     )*
                     // Custom commands - handled individually below
                     BundleCommand::Commit(cmd) => {
-                        builder.commit(&cmd.message).await?;
-                        Ok(CommandOutput::Message(MessageResponse::ok()))
+                        let result = builder.execute_command(cmd).await?;
+                        Ok(CommandOutput::Message(result))
                     }
                     BundleCommand::ExplainPlan(_cmd) => {
                         let plan = builder.explain().await?;
@@ -433,13 +437,13 @@ macro_rules! register_commands {
             pub fn output_schema(&self) -> SchemaRef {
                 match self {
                     // Fetch commands
-                    $( BundleCommand::$fetch_variant(_) => fetch_schema(), )*
+                    $( BundleCommand::$fetch_variant(_) => Vec::<FetchResults>::schema(), )*
                     // Verification commands
-                    $( BundleCommand::$verify_variant(_) => verification_schema(), )*
-                    // ExplainPlan returns plan schema
-                    BundleCommand::ExplainPlan(_) => plan_schema(),
+                    $( BundleCommand::$verify_variant(_) => VerificationResults::schema(), )*
+                    // ExplainPlan returns plan schema (String)
+                    BundleCommand::ExplainPlan(_) => String::schema(),
                     // All other commands return message schema
-                    _ => message_schema(),
+                    _ => String::schema(),
                 }
             }
         }

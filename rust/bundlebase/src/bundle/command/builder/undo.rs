@@ -33,12 +33,11 @@ impl CommandParsing for UndoCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for UndoCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         builder.undo().await?;
-
-        Ok(())
+        Ok("Undid last operation".to_string())
     }
 }
 

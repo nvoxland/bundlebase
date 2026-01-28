@@ -1,15 +1,68 @@
 //! Fetch command implementations.
 
-use crate::bundle::command::{CommandParsing, Rule};
+use crate::bundle::command::{CommandParsing, Rule, ToRecordBatch};
 use crate::bundle::operation::{AttachBlockOp, DetachBlockOp, SourceInfo};
 use crate::data::ObjectId;
 use crate::source::{FetchAction, FetchResults};
 use crate::BundlebaseError;
+use arrow::array::{ArrayRef, RecordBatch, StringArray, UInt64Array};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use log::info;
 use std::sync::Arc;
 use super::super::BundleBuilderCommand;
 use crate::bundle::{Bundle, BundleBuilder};
+
+impl ToRecordBatch for Vec<FetchResults> {
+    fn schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("source_function", DataType::Utf8, false),
+            Field::new("source_url", DataType::Utf8, false),
+            Field::new("pack", DataType::Utf8, false),
+            Field::new("added_count", DataType::UInt64, false),
+            Field::new("replaced_count", DataType::UInt64, false),
+            Field::new("removed_count", DataType::UInt64, false),
+        ]))
+    }
+
+    fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
+        let source_function: ArrayRef = Arc::new(StringArray::from(
+            self.iter()
+                .map(|r| r.source_function.as_str())
+                .collect::<Vec<_>>(),
+        ));
+        let source_url: ArrayRef = Arc::new(StringArray::from(
+            self.iter()
+                .map(|r| r.source_url.as_str())
+                .collect::<Vec<_>>(),
+        ));
+        let pack: ArrayRef = Arc::new(StringArray::from(
+            self.iter().map(|r| r.pack.as_str()).collect::<Vec<_>>(),
+        ));
+        let added_count: ArrayRef = Arc::new(UInt64Array::from(
+            self.iter().map(|r| r.added.len() as u64).collect::<Vec<_>>(),
+        ));
+        let replaced_count: ArrayRef = Arc::new(UInt64Array::from(
+            self.iter().map(|r| r.replaced.len() as u64).collect::<Vec<_>>(),
+        ));
+        let removed_count: ArrayRef = Arc::new(UInt64Array::from(
+            self.iter().map(|r| r.removed.len() as u64).collect::<Vec<_>>(),
+        ));
+
+        RecordBatch::try_new(
+            Self::schema(),
+            vec![
+                source_function,
+                source_url,
+                pack,
+                added_count,
+                replaced_count,
+                removed_count,
+            ],
+        )
+        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+    }
+}
 
 /// Command to fetch from sources for a specific pack.
 #[derive(Debug, Clone)]

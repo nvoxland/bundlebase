@@ -4,7 +4,6 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::CreateViewOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
-use log::info;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -61,14 +60,12 @@ impl CommandParsing for CreateViewCommand {
 
 #[async_trait]
 impl BundleBuilderCommand for CreateViewCommand {
-    type Output = ();
+    type Output = String;
 
-    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<(), BundlebaseError> {
-        let statement = self.to_statement();
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         let (op, _view_builder) = CreateViewOp::setup(&self.name, &self.sql, builder).await?;
         builder.apply_operation(op.into()).await?;
-        info!("Created view: {}", statement);
-        Ok(())
+        Ok(format!("Created view: {}", self.name))
     }
 }
 
