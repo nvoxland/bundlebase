@@ -1245,38 +1245,15 @@ impl BundleFacade for Bundle {
         sql: &str,
         params: Vec<ScalarValue>,
     ) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        use crate::bundle::sql::with_temp_table;
-
-        let df = self.dataframe().await?;
-        let df = (*df).clone();
         let ctx = self.ctx();
 
-        //todo: shouldn't be a temp table?
-        // Execute via temp table pattern with native parameter binding
-        let result_df = with_temp_table(&ctx, df, |table_name| {
-            let sql = sql.replace("bundle", &table_name);
-            let ctx = ctx.clone();
-            let params = params.clone();
-            async move {
-                // Create logical plan from SQL
-                let plan = ctx
-                    .state()
-                    .create_logical_plan(&sql)
-                    .await
-                    .map_err(|e| Box::new(e) as BundlebaseError)?;
+        let plan = ctx.state().create_logical_plan(sql).await?;
 
-                // Apply parameter values using DataFusion's native binding
-                let plan = plan
-                    .with_param_values(params)
-                    .map_err(|e| Box::new(e) as BundlebaseError)?;
+        // Apply parameter values using DataFusion's native binding
+        let plan = plan.with_param_values(params)?;
 
-                // Execute the parameterized plan
-                ctx.execute_logical_plan(plan)
-                    .await
-                    .map_err(|e| Box::new(e) as BundlebaseError)
-            }
-        })
-        .await?;
+        // Execute the parameterized plan
+        let result_df = ctx.execute_logical_plan(plan).await?;
 
         Ok(result_df.execute_stream().await?)
     }

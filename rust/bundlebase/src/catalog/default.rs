@@ -1,8 +1,5 @@
-mod bundle_table;
-
 use crate::bundle::BundleFacade;
 use async_trait::async_trait;
-use bundle_table::BundleTable;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use std::sync::Arc;
 
@@ -13,7 +10,7 @@ pub static BUNDLE_TABLE: &str = "bundle";
 /// Tables query data dynamically from the BundleFacade on each access,
 /// ensuring they always reflect the current state.
 pub struct DefaultSchemaProvider {
-    bundle_table: Arc<BundleTable>,
+    bundle: Arc<dyn BundleFacade>,
 }
 
 impl std::fmt::Debug for DefaultSchemaProvider {
@@ -25,9 +22,7 @@ impl std::fmt::Debug for DefaultSchemaProvider {
 impl DefaultSchemaProvider {
     /// Create a new DefaultSchemaProvider with the given BundleFacade.
     pub fn new(bundle: Arc<dyn BundleFacade>) -> Self {
-        Self {
-            bundle_table: Arc::new(BundleTable::new(bundle)),
-        }
+        Self { bundle }
     }
 }
 
@@ -43,7 +38,14 @@ impl SchemaProvider for DefaultSchemaProvider {
 
     async fn table(&self, name: &str) -> datafusion::error::Result<Option<Arc<dyn TableProvider>>> {
         if name == BUNDLE_TABLE {
-            Ok(Some(self.bundle_table.clone()))
+
+            let df = self
+                .bundle
+                .dataframe()
+                .await
+                .map_err(|e| datafusion::error::DataFusionError::External(e.into()))?;
+
+            Ok(Some((*df).clone().into_view()))
         } else {
             Ok(None)
         }
