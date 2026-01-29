@@ -35,16 +35,15 @@
 //!
 //! # Command Categories (for the macro)
 //!
-//! - `message`: Commands that return `CommandOutput::Message(ok())` (most common)
-//! - `fetch`: Commands that return `CommandOutput::Fetch(results)`
-//! - `verification`: Commands that return `CommandOutput::Verification(results)`
+//! - `message`: Commands that return String (most common)
+//! - `fetch`: Commands that return `Vec<FetchResults>`
+//! - `verification`: Commands that return `VerificationResults`
 //! - `custom`: Commands with special execution logic (Commit, ExplainPlan)
 
 use crate::bundle::facade::BundleFacade;
 use crate::source::FetchResults;
 use crate::{BundleBuilder, BundlebaseError};
 use arrow::datatypes::SchemaRef;
-use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 
 pub mod parser;
@@ -53,7 +52,8 @@ pub mod facade;
 pub mod response;
 
 // Re-export response types
-pub use response::ToRecordBatch;
+pub use response::OutputShape;
+pub use response::CommandResponse;
 
 // Re-export Rule from parser for use by commands
 pub use parser::Rule;
@@ -74,98 +74,6 @@ pub use builder::{FileVerificationResult, VerificationResults};
 // Re-export facade command structs
 pub use facade::ExplainPlanCommand;
 
-/// Output from executing a BundleCommand.
-///
-/// This enum wraps different command output types, all of which implement `ToRecordBatch`.
-/// Commands now return their specific output types directly, but this enum provides
-/// a unified dispatch wrapper for the `BundleCommand::execute()` method.
-#[derive(Debug)]
-pub enum CommandOutput {
-    /// Simple message output (typically "OK" for commands that complete successfully)
-    Message(String),
-    /// Verification results from VERIFY DATA
-    Verification(VerificationResults),
-    /// Fetch results from FETCH / FETCH ALL
-    Fetch(Vec<FetchResults>),
-    /// Query execution plan from EXPLAIN
-    Plan(String),
-}
-
-impl CommandOutput {
-    /// Returns true if this is a Message output
-    pub fn is_message(&self) -> bool {
-        matches!(self, CommandOutput::Message(_))
-    }
-
-    /// Returns true if this is a Message output (alias for backwards compatibility)
-    #[deprecated(since = "0.4.0", note = "Use is_message() instead")]
-    pub fn is_empty(&self) -> bool {
-        self.is_message()
-    }
-
-    /// Get verification results if this is a Verification output
-    pub fn into_verification(self) -> Option<VerificationResults> {
-        match self {
-            CommandOutput::Verification(r) => Some(r),
-            _ => None,
-        }
-    }
-
-    /// Get fetch results if this is a Fetch output
-    pub fn into_fetch(self) -> Option<Vec<FetchResults>> {
-        match self {
-            CommandOutput::Fetch(r) => Some(r),
-            _ => None,
-        }
-    }
-
-    /// Get plan output if this is a Plan output
-    pub fn into_plan(self) -> Option<String> {
-        match self {
-            CommandOutput::Plan(s) => Some(s),
-            _ => None,
-        }
-    }
-
-    /// Get explain output if this is a Plan output (alias for backwards compatibility)
-    #[deprecated(since = "0.4.0", note = "Use into_plan() instead")]
-    pub fn into_explain_plan(self) -> Option<String> {
-        self.into_plan()
-    }
-
-    /// Get the message if this is a Message output
-    pub fn into_message(self) -> Option<String> {
-        match self {
-            CommandOutput::Message(m) => Some(m),
-            _ => None,
-        }
-    }
-}
-
-impl CommandOutput {
-    /// Returns the Arrow schema for this output.
-    ///
-    /// Dispatches to the concrete type's schema based on the variant.
-    pub fn schema(&self) -> SchemaRef {
-        match self {
-            CommandOutput::Message(_) => String::schema(),
-            CommandOutput::Verification(_) => VerificationResults::schema(),
-            CommandOutput::Fetch(_) => Vec::<FetchResults>::schema(),
-            CommandOutput::Plan(_) => String::schema(),
-        }
-    }
-
-    /// Converts this output to a RecordBatch.
-    pub fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
-        match self {
-            CommandOutput::Message(msg) => msg.to_record_batch(),
-            CommandOutput::Verification(results) => results.to_record_batch(),
-            CommandOutput::Fetch(results) => results.to_record_batch(),
-            CommandOutput::Plan(ref plan) => plan.to_record_batch(),
-        }
-    }
-}
-
 /// Commands that can be executed on a BundleFacade (read-only).
 ///
 /// This enum contains only commands that do not require mutation of the bundle.
@@ -181,11 +89,11 @@ impl FacadeCommand {
     pub async fn execute(
         self,
         facade: &dyn BundleFacade,
-    ) -> Result<CommandOutput, BundlebaseError> {
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         match self {
             FacadeCommand::ExplainPlan(_) => {
                 let plan = facade.explain().await?;
-                Ok(CommandOutput::Plan(plan))
+                Ok(Box::new(plan) as Box<dyn CommandResponse>)
             }
         }
     }
@@ -194,6 +102,13 @@ impl FacadeCommand {
     pub fn output_schema(&self) -> SchemaRef {
         match self {
             FacadeCommand::ExplainPlan(_) => String::schema(),
+        }
+    }
+
+    /// Returns the expected output shape for display formatting.
+    pub fn output_shape(&self) -> OutputShape {
+        match self {
+            FacadeCommand::ExplainPlan(_) => String::output_shape(),
         }
     }
 }
@@ -294,10 +209,10 @@ pub trait CommandParsing: Send + Sync {
 pub trait BundleBuilderCommand: CommandParsing {
     /// The type returned by execute().
     ///
-    /// All command output types must implement `ToRecordBatch` for consistent
+    /// All command output types must implement `CommandResponse` for consistent
     /// handling across different interfaces. Most commands return `String`,
     /// while commands like fetch and verify_data return their specific result types.
-    type Output: ToRecordBatch;
+    type Output: CommandResponse;
 
     /// Execute the command on the provided builder
     async fn execute(
@@ -322,9 +237,9 @@ pub trait BundleBuilderCommand: CommandParsing {
 pub trait BundleFacadeCommand: CommandParsing {
     /// The type returned by execute().
     ///
-    /// All command output types must implement `ToRecordBatch` for consistent
+    /// All command output types must implement `CommandResponse` for consistent
     /// handling across different interfaces.
-    type Output: ToRecordBatch;
+    type Output: CommandResponse;
 
     /// Execute the command on the provided facade
     async fn execute(
@@ -342,9 +257,9 @@ pub trait BundleFacadeCommand: CommandParsing {
 ///
 /// # Categories
 ///
-/// - `message`: Commands using `execute_command()` returning `CommandOutput::Message`
-/// - `fetch_special`: Commands returning `CommandOutput::Fetch` with special parsing (handled in parser.rs)
-/// - `verification`: Commands returning `CommandOutput::Verification`
+/// - `message`: Commands using `execute_command()` returning String (boxed as `dyn CommandResponse`)
+/// - `fetch_special`: Commands returning `Vec<FetchResults>` with special parsing (handled in parser.rs)
+/// - `verification`: Commands returning `VerificationResults`
 /// - `custom`: Commands with custom execution logic (handled manually in execute)
 ///
 /// Note: `fetch_special` commands are NOT included in `parse_from_rule()` because they share
@@ -355,11 +270,11 @@ macro_rules! register_commands {
         message {
             $( $msg_variant:ident($msg_cmd:ty) => $msg_rule:path ),* $(,)?
         }
-        // Commands that return CommandOutput::Fetch but need special parsing (shared rules)
+        // Commands that return Vec<FetchResults> but need special parsing (shared rules)
         fetch_special {
             $( $fetch_variant:ident($fetch_cmd:ty) ),* $(,)?
         }
-        // Commands that return CommandOutput::Verification
+        // Commands that return VerificationResults
         verification {
             $( $verify_variant:ident($verify_cmd:ty) => $verify_rule:path ),* $(,)?
         }
@@ -397,38 +312,38 @@ macro_rules! register_commands {
             /// Execute this command on a BundleBuilder.
             ///
             /// This method delegates to the wrapped command struct via `execute_command`.
-            /// All commands return types implementing `ToRecordBatch`, wrapped in `CommandOutput`.
-            pub async fn execute(self, builder: &BundleBuilder) -> Result<CommandOutput, BundlebaseError> {
+            /// All commands return types implementing `CommandResponse`.
+            pub async fn execute(self, builder: &BundleBuilder) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
                 match self {
-                    // Message commands - return MessageResponse with contextual message
+                    // Message commands - return String boxed as CommandResponse
                     $(
                         BundleCommand::$msg_variant(cmd) => {
                             let result = builder.execute_command(cmd).await?;
-                            Ok(CommandOutput::Message(result))
+                            Ok(Box::new(result) as Box<dyn CommandResponse>)
                         }
                     )*
-                    // Fetch commands - return FetchOutput
+                    // Fetch commands - return Vec<FetchResults> boxed
                     $(
                         BundleCommand::$fetch_variant(cmd) => {
                             let results = builder.execute_command(cmd).await?;
-                            Ok(CommandOutput::Fetch(results))
+                            Ok(Box::new(results) as Box<dyn CommandResponse>)
                         }
                     )*
-                    // Verification commands - return verification results
+                    // Verification commands - return VerificationResults boxed
                     $(
                         BundleCommand::$verify_variant(cmd) => {
                             let results = builder.execute_command(cmd).await?;
-                            Ok(CommandOutput::Verification(results))
+                            Ok(Box::new(results) as Box<dyn CommandResponse>)
                         }
                     )*
                     // Custom commands - handled individually below
                     BundleCommand::Commit(cmd) => {
                         let result = builder.execute_command(cmd).await?;
-                        Ok(CommandOutput::Message(result))
+                        Ok(Box::new(result) as Box<dyn CommandResponse>)
                     }
                     BundleCommand::ExplainPlan(_cmd) => {
                         let plan = builder.explain().await?;
-                        Ok(CommandOutput::Plan(plan))
+                        Ok(Box::new(plan) as Box<dyn CommandResponse>)
                     }
                 }
             }
@@ -444,6 +359,20 @@ macro_rules! register_commands {
                     BundleCommand::ExplainPlan(_) => String::schema(),
                     // All other commands return message schema
                     _ => String::schema(),
+                }
+            }
+
+            /// Returns the expected output shape for display formatting.
+            pub fn output_shape(&self) -> OutputShape {
+                match self {
+                    // Fetch commands return table format
+                    $( BundleCommand::$fetch_variant(_) => Vec::<FetchResults>::output_shape(), )*
+                    // Verification commands return table format
+                    $( BundleCommand::$verify_variant(_) => VerificationResults::output_shape(), )*
+                    // ExplainPlan returns single value (plan text)
+                    BundleCommand::ExplainPlan(_) => String::output_shape(),
+                    // All other commands return single value (OK message)
+                    _ => String::output_shape(),
                 }
             }
         }

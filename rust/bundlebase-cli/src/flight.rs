@@ -3,7 +3,6 @@
 //! This module provides an Arrow Flight SQL service that allows JDBC clients
 //! to connect and execute SQL queries against bundlebase bundles.
 
-mod execution;
 mod metadata;
 mod prepared_statements;
 mod server;

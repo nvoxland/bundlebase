@@ -7,16 +7,18 @@ mod commands;
 mod completion;
 pub mod display;
 mod progress_impl;
+pub mod stream_formatter;
+pub mod table_utils;
 
-use crate::state::BundleState;
-use bundlebase::BundlebaseError;
-use commands::{Command, ExecuteResult};
+use bundlebase::{BundlebaseError, BundleFacade};
+use commands::{Command, ReplCommand};
 use completion::BundleCompleter;
 use reedline::{
     default_emacs_keybindings, DefaultPrompt, DefaultPromptSegment, Emacs, FileBackedHistory,
     Reedline, Signal,
 };
 use std::sync::Arc;
+use stream_formatter::format_stream;
 use tracing::{error, info};
 
 /// Print the REPL header.
@@ -39,7 +41,7 @@ pub fn print_header() {
 ///
 /// * `Ok(())` - REPL exited normally
 /// * `Err(BundlebaseError)` - An error occurred
-pub async fn start(state: Arc<BundleState>) -> Result<(), BundlebaseError> {
+pub async fn start(bundle: Arc<dyn BundleFacade>) -> Result<(), BundlebaseError> {
     // Install progress tracker for REPL
     let tracker = Box::new(progress_impl::IndicatifTracker::new());
     bundlebase::progress::set_tracker(tracker);
@@ -60,7 +62,7 @@ pub async fn start(state: Arc<BundleState>) -> Result<(), BundlebaseError> {
     });
 
     // Setup completer
-    let completer = Box::new(BundleCompleter::new(state.clone()));
+    let completer = Box::new(BundleCompleter::new(bundle.clone()));
 
     // Create reedline editor
     let mut line_editor = Reedline::create()
@@ -69,7 +71,7 @@ pub async fn start(state: Arc<BundleState>) -> Result<(), BundlebaseError> {
         .with_edit_mode(Box::new(Emacs::new(default_emacs_keybindings())));
 
     let prompt = DefaultPrompt {
-        left_prompt: DefaultPromptSegment::Basic(state.url()),
+        left_prompt: DefaultPromptSegment::Basic(bundle.url().to_string()),
         right_prompt: DefaultPromptSegment::CurrentDateTime,
     };
 
@@ -94,18 +96,29 @@ pub async fn start(state: Arc<BundleState>) -> Result<(), BundlebaseError> {
                 };
 
                 // Check for exit command
-                if matches!(cmd, Command::Exit) {
+                if matches!(cmd, Command::Repl(ReplCommand::Exit)) {
                     info!("Goodbye!");
                     break;
                 }
 
                 // Execute command
-                match commands::execute(cmd, &state).await {
-                    Ok(result) => match result {
-                        ExecuteResult::Message(msg) => println!("{}", msg),
-                        ExecuteResult::Table(table) => println!("{}", table),
-                        ExecuteResult::None => {}
-                    },
+                match commands::execute(cmd, &bundle).await {
+                    Ok(Some((stream, shape))) => {
+                        // Use format_stream for consistent output formatting
+                        match format_stream(stream, Some(shape), Some(100)).await {
+                            Ok(output) => {
+                                if !output.is_empty() {
+                                    println!("{}", output);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Error formatting output: {}", e);
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // No output (Clear command)
+                    }
                     Err(e) => {
                         error!("Error executing command: {}", e);
                     }
@@ -119,12 +132,4 @@ pub async fn start(state: Arc<BundleState>) -> Result<(), BundlebaseError> {
     }
 
     Ok(())
-}
-
-/// Run the interactive REPL.
-///
-/// This is an alias for `start()` for backwards compatibility.
-#[deprecated(since = "0.4.0", note = "Use start() instead")]
-pub async fn run(state: Arc<BundleState>) -> Result<(), BundlebaseError> {
-    start(state).await
 }

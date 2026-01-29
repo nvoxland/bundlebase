@@ -11,8 +11,3 @@
 pub mod auth;
 pub mod flight;
 pub mod repl;
-pub mod sql_executor;
-pub mod state;
-
-// Re-export common types
-pub use state::BundleState;

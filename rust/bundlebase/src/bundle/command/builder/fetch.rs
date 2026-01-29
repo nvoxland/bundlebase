@@ -1,6 +1,6 @@
 //! Fetch command implementations.
 
-use crate::bundle::command::{CommandParsing, Rule, ToRecordBatch};
+use crate::bundle::command::{CommandParsing, Rule, CommandResponse};
 use crate::bundle::operation::{AttachBlockOp, DetachBlockOp, SourceInfo};
 use crate::data::ObjectId;
 use crate::source::{FetchAction, FetchResults};
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use super::super::BundleBuilderCommand;
 use crate::bundle::{Bundle, BundleBuilder};
 
-impl ToRecordBatch for Vec<FetchResults> {
+impl CommandResponse for Vec<FetchResults> {
     fn schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("source_function", DataType::Utf8, false),
@@ -23,6 +23,10 @@ impl ToRecordBatch for Vec<FetchResults> {
             Field::new("replaced_count", DataType::UInt64, false),
             Field::new("removed_count", DataType::UInt64, false),
         ]))
+    }
+
+    fn output_shape() -> crate::bundle::command::response::OutputShape {
+        crate::bundle::command::response::OutputShape::Table
     }
 
     fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
@@ -61,6 +65,14 @@ impl ToRecordBatch for Vec<FetchResults> {
             ],
         )
         .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+    }
+
+    fn dyn_schema(&self) -> SchemaRef {
+        Self::schema()
+    }
+
+    fn dyn_output_shape(&self) -> crate::bundle::command::response::OutputShape {
+        Self::output_shape()
     }
 }
 
@@ -113,14 +125,7 @@ impl BundleBuilderCommand for FetchCommand {
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<Vec<FetchResults>, BundlebaseError> {
         let pack_name = self.pack.as_deref().unwrap_or("base").to_string();
-        let pack_id = match self.pack.as_deref() {
-            None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *builder
-                .bundle()
-                .pack_by_name(join_name)
-                .ok_or(format!("Unknown join '{}'", join_name))?
-                .id(),
-        };
+        let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
 
         let sources = builder.bundle().get_sources_for_pack(&pack_id);
         if sources.is_empty() {

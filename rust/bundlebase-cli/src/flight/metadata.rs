@@ -1,6 +1,6 @@
 //! Flight SQL metadata handlers for catalogs, schemas, tables, and SQL info.
 
-use super::execution::DoGetStream;
+use super::service::DoGetStream;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
 use arrow_flight::encode::FlightDataEncoderBuilder;

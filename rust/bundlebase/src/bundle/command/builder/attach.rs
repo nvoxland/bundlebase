@@ -3,7 +3,6 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::operation::AttachBlockOp;
-use crate::data::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
@@ -96,15 +95,7 @@ impl BundleBuilderCommand for AttachCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let pack_id = match self.pack.as_deref() {
-            None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *builder
-                .bundle()
-                .pack_by_name(join_name)
-                .ok_or(format!("Unknown join '{}'", join_name))?
-                .id(),
-        };
-
+        let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
         let pack_name = self.pack.as_deref().unwrap_or("base");
 
         let op = AttachBlockOp::setup(&pack_id, &self.path, builder).await?;

@@ -120,15 +120,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let pack_id = match self.pack.as_deref() {
-            None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *builder
-                .bundle()
-                .pack_by_name(join_name)
-                .ok_or(format!("Unknown join '{}'", join_name))?
-                .id(),
-        };
-
+        let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
         let source_id = ObjectId::generate();
         let function = self.function.clone();
         let op = CreateSourceOp::setup(source_id, pack_id, self.function.clone(), self.args.clone());
