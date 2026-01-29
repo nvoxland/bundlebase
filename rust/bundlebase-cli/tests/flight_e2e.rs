@@ -139,19 +139,13 @@ async fn test_select_literal() {
 async fn test_select_from_empty_bundle() {
     let mut server = FlightTestServer::start().await;
 
-    // Query an empty bundle - should return empty results or error
-    let result = execute_query(&mut server, "SELECT * FROM bundle").await;
+    // Query an empty bundle - should return 0 rows with "no_data" column
+    let batches = execute_query(&mut server, "SELECT * FROM bundle")
+        .await
+        .expect("SELECT from empty bundle should succeed");
 
-    match result {
-        Ok(batches) => {
-            // If it succeeds, there should be no rows
-            let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
-            assert_eq!(total_rows, 0, "Empty bundle should have no rows");
-        }
-        Err(_) => {
-            // It's also acceptable for this to error since bundle might not exist
-        }
-    }
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 0, "Empty bundle should have no rows");
 }
 
 #[tokio::test]
@@ -311,6 +305,155 @@ async fn test_state_persistence_in_connection() {
 
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert_eq!(total_rows, 1, "Should have 1 row after filter (Alice only)");
+}
+
+// =============================================================================
+// Table Alias & DBeaver-style SQL Tests via Flight
+// =============================================================================
+
+#[tokio::test]
+async fn test_alias_qualified_wildcard_empty_bundle() {
+    // Reproduces the "Invalid qualifier t" error observed via IntelliJ/DBeaver.
+    // When the server auto-creates a session (e.g., after restart), the bundle
+    // is empty. Qualified wildcard on an empty bundle must not fail.
+    let mut server = FlightTestServer::start().await;
+    // No data attached — empty bundle
+
+    let batches = execute_query(&mut server, "SELECT t.* FROM bundle t")
+        .await
+        .expect("SELECT t.* FROM bundle t on empty bundle should not error");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 0, "Empty bundle should have no rows");
+}
+
+#[tokio::test]
+async fn test_star_empty_bundle() {
+    // Control test: SELECT * FROM bundle (no alias) on empty bundle
+    let mut server = FlightTestServer::start().await;
+
+    let batches = execute_query(&mut server, "SELECT * FROM bundle")
+        .await
+        .expect("SELECT * FROM bundle on empty bundle should not error");
+
+    // Verify schema has exactly one no_data column (not duplicated)
+    if let Some(batch) = batches.first() {
+        let schema = batch.schema();
+        assert_eq!(schema.fields().len(), 1, "Empty bundle should have exactly 1 column, got: {:?}", schema.fields().iter().map(|f| f.name().as_str()).collect::<Vec<_>>());
+        assert_eq!(schema.field(0).name(), "no_data");
+    }
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 0, "Empty bundle should have no rows");
+}
+
+#[tokio::test]
+async fn test_alias_qualified_columns_empty_bundle() {
+    // SELECT t.no_data FROM bundle t should work on empty bundle
+    let mut server = FlightTestServer::start().await;
+
+    let batches = execute_query(&mut server, "SELECT t.no_data FROM bundle t")
+        .await
+        .expect("SELECT t.no_data FROM bundle t on empty bundle should not error");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 0, "Empty bundle should have no rows");
+}
+
+#[tokio::test]
+async fn test_alias_qualified_wildcard_prepared() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    let batches = execute_query(&mut server, "SELECT t.* FROM bundle t")
+        .await
+        .expect("SELECT t.* FROM bundle t should succeed via prepared statement");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 2, "Should have 2 rows (Alice and Bob)");
+}
+
+#[tokio::test]
+async fn test_alias_qualified_wildcard_direct() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    let batches = execute_query_direct(&mut server, "SELECT t.* FROM bundle t")
+        .await
+        .expect("SELECT t.* FROM bundle t should succeed via direct statement");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 2, "Should have 2 rows (Alice and Bob)");
+}
+
+#[tokio::test]
+async fn test_alias_qualified_columns_prepared() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    let batches = execute_query(&mut server, "SELECT t.id, t.name FROM bundle t")
+        .await
+        .expect("SELECT t.id, t.name FROM bundle t should succeed via prepared statement");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 2, "Should have 2 rows (Alice and Bob)");
+}
+
+#[tokio::test]
+async fn test_quoted_alias_qualified_wildcard() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    // DBeaver-style double-quoting of identifiers
+    let batches = execute_query(
+        &mut server,
+        r#"SELECT "t".* FROM "bundle" "t""#,
+    )
+    .await
+    .expect(r#"SELECT "t".* FROM "bundle" "t" should succeed"#);
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 2, "Should have 2 rows (Alice and Bob)");
+}
+
+#[tokio::test]
+async fn test_fully_qualified_table() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    // Fully qualified catalog.schema.table reference
+    let batches = execute_query(
+        &mut server,
+        r#"SELECT * FROM bundlebase."default".bundle"#,
+    )
+    .await
+    .expect("SELECT * FROM bundlebase.default.bundle should succeed");
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 2, "Should have 2 rows (Alice and Bob)");
+}
+
+#[tokio::test]
+async fn test_fully_qualified_table_with_alias() {
+    let mut server = FlightTestServer::start().await;
+    let data = TestData::new();
+    data.attach(&mut server).await;
+
+    // Full DBeaver combo: fully-qualified table with quoted alias and qualified wildcard
+    let batches = execute_query(
+        &mut server,
+        r#"SELECT "t".* FROM bundlebase."default"."bundle" "t""#,
+    )
+    .await
+    .expect(r#"SELECT "t".* FROM bundlebase."default"."bundle" "t" should succeed"#);
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 2, "Should have 2 rows (Alice and Bob)");
 }
 
 // =============================================================================
