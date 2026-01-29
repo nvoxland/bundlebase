@@ -45,10 +45,9 @@ use arrow::array::Array;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::MemorySchemaProvider;
-use datafusion::common::{DFSchema, DFSchemaRef};
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::logical_expr::{EmptyRelation, ExplainFormat, ExplainOption, LogicalPlan, ScalarUDF};
+use datafusion::logical_expr::{ExplainFormat, ExplainOption, LogicalPlan, ScalarUDF};
 use datafusion::prelude::*;
 use datafusion::scalar::ScalarValue;
 use log::{debug, info};
@@ -180,13 +179,7 @@ impl Bundle {
         let description = Arc::new(RwLock::new(None));
         let version = Arc::new(RwLock::new("empty".to_string()));
 
-        let empty_dataframe = DataFrame::new(
-            ctx.state(),
-            LogicalPlan::EmptyRelation(EmptyRelation {
-                produce_one_row: false,
-                schema: DFSchemaRef::new(DFSchema::empty()),
-            }),
-        );
+        let empty_dataframe = no_data_dataframe(&ctx)?;
 
         let dataframe = DataFrameHolder::new(Some(empty_dataframe));
 
@@ -1115,14 +1108,8 @@ impl BundleFacade for Bundle {
             df
         } else {
             // No base pack, or base pack has no data yet
-            debug!("No base pack or empty base pack, using empty dataframe");
-            DataFrame::new(
-                self.ctx().state(),
-                LogicalPlan::EmptyRelation(EmptyRelation {
-                    produce_one_row: false,
-                    schema: DFSchemaRef::new(DFSchema::empty()),
-                }),
-            )
+            debug!("No base pack or empty base pack, using no-data dataframe");
+            no_data_dataframe(&self.ctx())?
         };
         self.dataframe.replace(df);
         debug!("Building dataframe...DONE");
@@ -1311,6 +1298,23 @@ impl BundleFacade for Bundle {
     }
 }
 
+fn no_data_dataframe(ctx: &SessionContext) -> Result<DataFrame, BundlebaseError> {
+    use arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::common::{DFSchema, DFSchemaRef};
+    use datafusion::logical_expr::EmptyRelation;
+
+    let arrow_schema = Schema::new(vec![Field::new("no_data", DataType::Utf8, true)]);
+    let df_schema = DFSchema::try_from(arrow_schema)?;
+
+    Ok(DataFrame::new(
+        ctx.state(),
+        LogicalPlan::EmptyRelation(EmptyRelation {
+            produce_one_row: false,
+            schema: DFSchemaRef::new(df_schema),
+        }),
+    ))
+}
+
 #[derive(Debug)]
 pub struct DataFrameHolder {
     pub(crate) dataframe: Arc<RwLock<Option<Arc<DataFrame>>>>,
@@ -1400,4 +1404,56 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_empty_bundle_schema() -> Result<(), BundlebaseError> {
+        let bundle = Bundle::empty().await?;
+
+        let schema = bundle.schema().await?;
+        assert_eq!(schema.fields().len(), 1, "Empty bundle should have 1 field");
+        assert_eq!(schema.field(0).name(), "no_data");
+        assert_eq!(
+            schema.field(0).data_type(),
+            &arrow::datatypes::DataType::Utf8
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_empty_bundle_query() -> Result<(), BundlebaseError> {
+        use futures::TryStreamExt;
+
+        let bundle = Bundle::empty().await?;
+
+        let stream = bundle.query("SELECT * FROM bundle", vec![]).await?;
+        let result_schema = stream.schema().clone();
+        let batches: Vec<_> = stream.try_collect().await?;
+
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total_rows, 0, "Empty bundle should have 0 rows");
+
+        // Schema should have the no_data column
+        assert_eq!(result_schema.fields().len(), 1);
+        assert_eq!(result_schema.field(0).name(), "no_data");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_empty_bundle_query_with_alias() -> Result<(), BundlebaseError> {
+        use futures::TryStreamExt;
+
+        let bundle = Bundle::empty().await?;
+
+        // This previously failed with "Invalid qualifier t" when the bundle had 0 columns
+        let stream = bundle.query("SELECT t.* FROM bundle t", vec![]).await?;
+        let batches: Vec<_> = stream.try_collect().await?;
+
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total_rows, 0, "Empty bundle should have 0 rows");
+
+        Ok(())
+    }
+
 }

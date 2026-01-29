@@ -161,3 +161,35 @@ async fn test_explain_with_filter() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_query_table_alias_qualified_wildcard() -> Result<(), BundlebaseError> {
+    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+
+    let stream = bundle.query("SELECT t.* FROM bundle t", vec![]).await?;
+    let result: Vec<_> = stream.try_collect().await?;
+
+    assert_eq!(result.len(), 1);
+    assert!(result[0].num_rows() > 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_query_empty_bundle() -> Result<(), BundlebaseError> {
+    let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+
+    let stream = bundle.query("SELECT * FROM bundle", vec![]).await?;
+    let schema = stream.schema().clone();
+    let result: Vec<_> = stream.try_collect().await?;
+
+    // Should have exactly one column: no_data (not duplicated)
+    assert_eq!(schema.fields().len(), 1, "Empty bundle should have exactly 1 column, not duplicated");
+    assert_eq!(schema.field(0).name(), "no_data");
+
+    let total_rows: usize = result.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 0, "Empty bundle should have 0 rows");
+
+    Ok(())
+}
