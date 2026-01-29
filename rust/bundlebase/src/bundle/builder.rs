@@ -24,7 +24,7 @@ use datafusion::prelude::{DataFrame, SessionContext};
 use datafusion::scalar::ScalarValue;
 use parking_lot::RwLock;
 use sha2::{Digest, Sha256};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
@@ -636,18 +636,21 @@ impl BundleBuilder {
         }
 
         // Execute the command
+        debug!("Executing command: {}", description);
         let result = Box::new(cmd).execute(self).await;
 
         // Only finalize the change if we created it (not nested)
         match &result {
             Ok(_) => {
+                debug!("Command succeeded: {}", description);
                 if !is_nested {
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
                     }
                 }
             }
-            Err(_) => {
+            Err(e) => {
+                warn!("Command failed: {}: {}", description, e);
                 if !is_nested {
                     // On failure, discard the in-progress change
                     self.in_progress_change.write().take();
