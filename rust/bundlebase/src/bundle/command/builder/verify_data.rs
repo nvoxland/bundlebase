@@ -1,6 +1,6 @@
 //! VerifyData command implementation.
 
-use crate::bundle::command::{CommandParsing, Rule, ToRecordBatch};
+use crate::bundle::command::{CommandParsing, Rule, CommandResponse};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::UpdateVersionOp;
 use crate::io::readable_file_from_path;
@@ -42,7 +42,7 @@ pub struct VerificationResults {
     pub all_passed: bool,
 }
 
-impl ToRecordBatch for VerificationResults {
+impl CommandResponse for VerificationResults {
     fn schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("location", DataType::Utf8, false),
@@ -53,6 +53,10 @@ impl ToRecordBatch for VerificationResults {
             Field::new("error", DataType::Utf8, true),
             Field::new("version_updated", DataType::Boolean, false),
         ]))
+    }
+
+    fn output_shape() -> crate::bundle::command::response::OutputShape {
+        crate::bundle::command::response::OutputShape::Table
     }
 
     fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
@@ -97,6 +101,14 @@ impl ToRecordBatch for VerificationResults {
             ],
         )
         .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+    }
+
+    fn dyn_schema(&self) -> SchemaRef {
+        Self::schema()
+    }
+
+    fn dyn_output_shape(&self) -> crate::bundle::command::response::OutputShape {
+        Self::output_shape()
     }
 }
 

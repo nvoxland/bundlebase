@@ -7,10 +7,7 @@
 mod auth;
 mod flight;
 mod repl;
-mod sql_executor;
-mod state;
 
-use crate::state::BundleState;
 use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade};
 use clap::{Parser, ValueEnum};
 use std::sync::Arc;
@@ -132,24 +129,18 @@ async fn main() -> Result<(), BundlebaseError> {
         Mode::Repl => {
             repl::print_header();
 
-            let state = if args.create {
+            let state: Arc<dyn BundleFacade> = if args.create {
                 // Creating a new bundle - always read-write
                 info!("Creating bundle at: {}", args.bundle);
-                Arc::new(BundleState::read_write(
-                    BundleBuilder::create(&args.bundle, None).await?,
-                ))
+                BundleBuilder::create(&args.bundle, None).await?
             } else if args.read_only {
                 // Read-only mode - open as Bundle
                 info!("Opening bundle in read-only mode: {}", args.bundle);
-                Arc::new(BundleState::read_only(
-                    Bundle::open(&args.bundle, None).await?,
-                ))
+                Bundle::open(&args.bundle, None).await?
             } else {
                 // Read-write mode - open and extend
                 info!("Opening bundle in read-write mode: {}", args.bundle);
-                Arc::new(BundleState::read_write(
-                    Bundle::open(&args.bundle, None).await?.extend(None)?,
-                ))
+                Bundle::open(&args.bundle, None).await?.extend(None)?
             };
 
             repl::start(state).await?;

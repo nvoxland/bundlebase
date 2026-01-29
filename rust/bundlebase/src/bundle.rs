@@ -15,9 +15,11 @@ use crate::io::EMPTY_SCHEME;
 pub use builder::BundleBuilder;
 pub use builder::BundleStatus;
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
-pub use command::parser::{is_command_statement, parse_command};
+pub use command::parser::{available_commands, is_command_statement, parse_command};
 pub use command::BundleCommand;
-pub use command::CommandOutput;
+pub use command::CommandResponse;
+pub use command::FacadeCommand;
+pub use command::OutputShape;
 pub use command::{CommitCommand, ResetCommand, UndoCommand};
 pub use command::{FileVerificationResult, VerificationResults};
 pub use commit::{manifest_version, BundleCommit};
@@ -1290,6 +1292,22 @@ impl BundleFacade for Bundle {
 
     fn ctx(&self) -> Arc<SessionContext> {
         Bundle::ctx(self)
+    }
+
+    async fn execute_facade_command(
+        &self,
+        cmd: FacadeCommand,
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+        cmd.execute(self).await
+    }
+
+    async fn execute_command(
+        &self,
+        cmd: BundleCommand,
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+        // Bundle is read-only, so we can only execute facade commands
+        let facade_cmd = cmd.into_facade_command()?;
+        self.execute_facade_command(facade_cmd).await
     }
 }
 

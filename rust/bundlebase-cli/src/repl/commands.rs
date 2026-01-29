@@ -1,37 +1,139 @@
-use crate::state::{BundleState, SqlResult};
-use bundlebase::{
-    bundle::{parse_command, CommandOutput},
-    source::format_fetch_summary,
-    BundlebaseError,
-};
+//! REPL commands module.
+//!
+//! This module contains all REPL commands, each in its own sub-module.
+//! Each command module exports an `INFO` constant with metadata and an `execute` function.
+
+pub mod clear;
+pub mod count;
+pub mod details;
+pub mod exit;
+pub mod help;
+pub mod history;
+pub mod schema;
+pub mod show;
+mod sql;
+pub mod status;
+
+use bundlebase::bundle::{parse_command, CommandResponse, OutputShape};
+use bundlebase::BundlebaseError;
+use bundlebase::BundleFacade;
+use datafusion::execution::SendableRecordBatchStream;
+use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+use futures;
+use futures::future::BoxFuture;
 use std::sync::Arc;
+
+pub type ReplCommandResult = Result<Option<(SendableRecordBatchStream, OutputShape)>, BundlebaseError>;
+
+/// Metadata for a repl command - all info about a command in one place
+pub struct ReplCommandDef {
+    pub name: &'static str,
+    pub aliases: &'static [&'static str],
+    pub description: &'static str,
+    pub usage: &'static str,
+    pub create: fn(&str) -> Result<ReplCommand, String>,
+    pub execute: fn(&ReplCommand, &Arc<dyn BundleFacade>) -> BoxFuture<'static, ReplCommandResult>,
+}
+
+/// Repl commands
+#[derive(Debug, Clone)]
+pub enum ReplCommand {
+    Clear,
+    Count,
+    Details,
+    Exit,
+    Help,
+    History,
+    Schema,
+    Show { limit: Option<usize> },
+    Status,
+}
+
+impl ReplCommand {
+    /// Get command info - references module constants
+    pub fn definition(&self) -> &'static ReplCommandDef {
+        match self {
+            Self::Clear => &clear::DEF,
+            Self::Count => &count::DEF,
+            Self::Details => &details::DEF,
+            Self::Exit => &exit::DEF,
+            Self::Help => &help::DEF,
+            Self::History => &history::DEF,
+            Self::Schema => &schema::DEF,
+            Self::Show { .. } => &show::DEF,
+            Self::Status => &status::DEF,
+        }
+    }
+
+    pub fn all_commands() -> impl Iterator<Item = &'static ReplCommandDef> {
+        [
+            &clear::DEF,
+            &count::DEF,
+            &details::DEF,
+            &exit::DEF,
+            &help::DEF,
+            &history::DEF,
+            &schema::DEF,
+            &show::DEF,
+            &status::DEF,
+        ]
+        .into_iter()
+    }
+
+    /// Parse from input string (without leading `/`)
+    pub fn parse(input: &str) -> Result<Self, String> {
+        let input = input.trim();
+        let upper = input.to_uppercase();
+        let first_word = upper.split_whitespace().next().unwrap_or("");
+        let args = input.get(first_word.len()..).unwrap_or("").trim();
+
+        // Find matching command using names
+        for command_def in Self::all_commands() {
+            if first_word == command_def.name.to_uppercase()
+                || command_def.aliases.iter().any(|a| first_word == a.to_uppercase())
+            {
+                return (command_def.create)(args);
+            }
+        }
+
+        Err(format!(
+            "Unknown command: /{}. Type /help for available commands.",
+            input
+        ))
+    }
+
+    pub async fn execute(
+        &self,
+        bundle: &Arc<dyn BundleFacade>,
+    ) -> ReplCommandResult {
+        (self.definition().execute)(self, bundle).await
+    }
+}
+
+/// Convert a CommandResponse to a stream
+pub fn response_to_stream(
+    response: &dyn CommandResponse,
+) -> Result<(SendableRecordBatchStream, OutputShape), BundlebaseError> {
+    let schema = response.dyn_schema();
+    let shape = response.dyn_output_shape();
+    let batch = response.to_record_batch()?;
+    let stream = Box::pin(RecordBatchStreamAdapter::new(
+        schema,
+        futures::stream::iter(vec![Ok(batch)]),
+    ));
+    Ok((stream, shape))
+}
 
 #[derive(Debug, Clone)]
 pub enum Command {
-    // SQL operations (executed via BundleState)
+    /// SQL operations (executed via BundleFacade)
     Sql(String),
 
-    // REPL-only commands (not SQL)
-    Show { limit: Option<usize> },
-    Schema,
-    Count,
-    History,
-    Status,
-
-    // Meta commands
-    Help,
-    Exit,
-    Clear,
-}
-
-pub enum ExecuteResult {
-    Message(String),
-    Table(String),
-    None,
+    Repl(ReplCommand),
 }
 
 /// Parse input string into Command using SQL syntax
-/// Meta commands start with `/` (e.g., `/help`, `/show`)
+/// Repl commands start with `/` (e.g., `/help`, `/show`)
 /// All other input is treated as SQL
 pub fn parse(input: &str) -> Result<Command, String> {
     let input = input.trim();
@@ -39,23 +141,24 @@ pub fn parse(input: &str) -> Result<Command, String> {
         return Err("Empty command".to_string());
     }
 
-    // Check for meta command (starts with /)
     if input.starts_with('/') {
-        let meta_input = input[1..].trim();
-        if meta_input.is_empty() {
-            return Err("Empty meta command after '/'. Type /help for available commands.".to_string());
+        let repl_input = input[1..].trim();
+        if repl_input.is_empty() {
+            return Err(
+                "Empty command after '/'. Type /help for available commands.".to_string(),
+            );
         }
-        return parse_meta_command(meta_input);
+        return ReplCommand::parse(repl_input).map(Command::Repl);
     }
 
     // Try to parse as SQL to validate syntax first
     // This gives better error messages for invalid SQL
     if let Err(e) = parse_command(input) {
-        // Check if the user might have meant a meta command
-        if let Some(suggestion) = suggest_meta_command(input) {
+        // Check if the user might have meant a repl command
+        if let Some(suggestion) = suggest_repl_command(input) {
             return Err(format!("Invalid SQL: {}. Did you mean '{}'?", e, suggestion));
         }
-        // If it's not a meta command suggestion and it's a syntax error,
+        // If it's not a repl command suggestion and it's a syntax error,
         // it might be standard SQL (SELECT, etc.) - let it through
         let err_msg = e.to_string();
         if !err_msg.contains("Syntax error") {
@@ -67,166 +170,23 @@ pub fn parse(input: &str) -> Result<Command, String> {
     Ok(Command::Sql(input.to_string()))
 }
 
-/// Parse a meta command (input without the leading `/`)
-fn parse_meta_command(input: &str) -> Result<Command, String> {
-    let upper = input.to_uppercase();
-
-    // Handle single-word meta commands
-    match upper.as_str() {
-        "HELP" => return Ok(Command::Help),
-        "EXIT" | "QUIT" => return Ok(Command::Exit),
-        "CLEAR" => return Ok(Command::Clear),
-        "SCHEMA" => return Ok(Command::Schema),
-        "COUNT" => return Ok(Command::Count),
-        "HISTORY" => return Ok(Command::History),
-        "STATUS" => return Ok(Command::Status),
-        _ => {}
-    }
-
-    // Handle SHOW with optional LIMIT
-    if upper.starts_with("SHOW") {
-        let limit = upper
-            .strip_prefix("SHOW")
-            .and_then(|s| s.trim().strip_prefix("LIMIT"))
-            .and_then(|s| s.trim().parse().ok());
-        return Ok(Command::Show { limit });
-    }
-
-    Err(format!("Unknown meta command: /{}. Type /help for available commands.", input))
-}
-
-/// Check if input looks like a bare meta command and suggest the `/` prefix
-fn suggest_meta_command(input: &str) -> Option<String> {
+/// Check if input looks like a bare repl command and suggest the `/` prefix
+fn suggest_repl_command(input: &str) -> Option<String> {
     let upper = input.to_uppercase();
     let first_word = upper.split_whitespace().next().unwrap_or("");
 
-    match first_word {
-        "HELP" => Some("/help".to_string()),
-        "EXIT" => Some("/exit".to_string()),
-        "QUIT" => Some("/quit".to_string()),
-        "CLEAR" => Some("/clear".to_string()),
-        "SCHEMA" => Some("/schema".to_string()),
-        "COUNT" => Some("/count".to_string()),
-        "HISTORY" => Some("/history".to_string()),
-        "STATUS" => Some("/status".to_string()),
-        "SHOW" => Some("/show".to_string()),
-        _ => None,
-    }
-}
-
-/// Execute a command
-pub async fn execute(cmd: Command, state: &Arc<BundleState>) -> Result<ExecuteResult, BundlebaseError> {
-    use crate::repl::display;
-
-    match cmd {
-        // SQL operations - execute via BundleState
-        Command::Sql(sql) => {
-            match state.execute_sql(&sql).await? {
-                SqlResult::Stream(stream) => {
-                    // For SELECT queries, display the results as a table (default limit: 10)
-                    let table = display::display_stream(stream, Some(100)).await?;
-                    Ok(ExecuteResult::Table(table))
-                }
-                SqlResult::Output(output) => {
-                    match output {
-                        CommandOutput::Message(_) => Ok(ExecuteResult::None),
-                        CommandOutput::Verification(results) => {
-                            Ok(ExecuteResult::Message(results.to_string()))
-                        }
-                        CommandOutput::Fetch(results) => {
-                            Ok(ExecuteResult::Message(format_fetch_summary(&results)))
-                        }
-                        CommandOutput::Plan(plan) => Ok(ExecuteResult::Message(plan)),
-                    }
-                }
+    // Check against all repl commands
+    for info in ReplCommand::all_commands() {
+        if first_word == info.name.to_uppercase() {
+            return Some(format!("/{}", info.name));
+        }
+        for alias in info.aliases {
+            if first_word == alias.to_uppercase() {
+                return Some(format!("/{}", alias));
             }
         }
-
-        // REPL-only commands
-        Command::Show { limit } => {
-            let df = state.dataframe().await?;
-            let table = display::display_dataframe(&df, limit).await?;
-            Ok(ExecuteResult::Table(table))
-        }
-        Command::Schema => {
-            let schema = state.schema().await?;
-            let table = display::display_schema(schema);
-            Ok(ExecuteResult::Table(table))
-        }
-        Command::Count => {
-            let count = state.num_rows().await?;
-            Ok(ExecuteResult::Message(format!("Row count: {}", count)))
-        }
-        Command::History => {
-            let commits = state.history();
-            let table = display::display_history(commits);
-            Ok(ExecuteResult::Table(table))
-        }
-        Command::Status => {
-            match state.status() {
-                Some(status) => Ok(ExecuteResult::Message(status.to_string())),
-                None => Ok(ExecuteResult::Message("Read-only mode: no uncommitted changes possible".to_string())),
-            }
-        }
-        Command::Help => {
-            let help_text = r#"
-Bundlebase REPL - SQL Interface
-
-Data Operations:
-  ATTACH '<path>'                      Attach data source
-  /show [limit <n>]                    Display rows (default: 10)
-
-Query & Transform:
-  SELECT col1, col2, ... FROM bundle     Select columns (supports full SQL)
-  FILTER WHERE <condition>             Filter rows by condition
-  ALTER TABLE bundle DROP COLUMN <col>   Remove column
-  ALTER TABLE bundle RENAME COLUMN <old> TO <new>  Rename column
-
-Join Data:
-  [LEFT|RIGHT|FULL|INNER] JOIN AS <name> ON <expression>
-    Example: LEFT JOIN AS users ON bundle.user_id = users.id
-
-Indexing:
-  CREATE INDEX ON bundle(<column>)       Create index on column
-  REINDEX                              Rebuild all indexes
-
-Data Integrity:
-  VERIFY DATA                          Verify all data file hashes
-  VERIFY DATA UPDATE                   Verify and update version strings
-
-Persistence:
-  COMMIT '<message>'                   Commit changes with message
-  RESET                                Discard all uncommitted changes
-  UNDO                                 Undo the last operation
-
-Schema & Info:
-  /schema                              Show table schema
-  /count                               Show row count
-  EXPLAIN PLAN                         Show query plan
-  /history                             Show commit history
-  /status                              Show uncommitted changes
-
-Meta Commands:
-  /help                                Show this help
-  /exit, /quit                         Exit REPL
-  /clear                               Clear screen
-
-Examples:
-  ATTACH 'users.parquet'
-  FILTER WHERE age > 21 AND country = 'USA'
-  SELECT name, email, salary * 1.1 AS new_salary FROM bundle
-  LEFT JOIN AS departments ON bundle.dept_id = departments.id
-  CREATE INDEX ON bundle(email)
-  COMMIT 'Added filtering and joined departments'
-"#;
-            Ok(ExecuteResult::Message(help_text.to_string()))
-        }
-        Command::Clear => {
-            print!("\x1B[2J\x1B[1;1H");
-            Ok(ExecuteResult::None)
-        }
-        Command::Exit => Ok(ExecuteResult::None),
     }
+    None
 }
 
 /// Get SQL command suggestions (for tab completion)
@@ -234,6 +194,20 @@ pub fn get_parameter_names(_command_name: &str) -> Vec<String> {
     // With SQL syntax, we don't need parameter completion
     // This function is kept for compatibility but returns empty
     vec![]
+}
+
+/// Execute a command, returning a stream and output shape (or None for Exit/Clear)
+pub async fn execute(
+    cmd: Command,
+    bundle: &Arc<dyn BundleFacade>,
+) -> ReplCommandResult {
+    match cmd {
+        Command::Sql(sql_str) => {
+            let (stream, shape) = sql::execute(bundle, &sql_str).await?;
+            Ok(Some((stream, shape)))
+        }
+        Command::Repl(repl_cmd) => repl_cmd.execute(bundle).await,
+    }
 }
 
 #[cfg(test)]
@@ -265,38 +239,87 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_meta_commands() {
-        // Meta commands require / prefix
-        assert!(matches!(parse("/help").unwrap(), Command::Help));
-        assert!(matches!(parse("/exit").unwrap(), Command::Exit));
-        assert!(matches!(parse("/quit").unwrap(), Command::Exit));
-        assert!(matches!(parse("/schema").unwrap(), Command::Schema));
-        assert!(matches!(parse("/count").unwrap(), Command::Count));
-        assert!(matches!(parse("/history").unwrap(), Command::History));
-        assert!(matches!(parse("/status").unwrap(), Command::Status));
-        assert!(matches!(parse("/clear").unwrap(), Command::Clear));
+    fn test_parse_repl_commands() {
+        assert!(matches!(
+            parse("/help").unwrap(),
+            Command::Repl(ReplCommand::Help)
+        ));
+        assert!(matches!(
+            parse("/exit").unwrap(),
+            Command::Repl(ReplCommand::Exit)
+        ));
+        assert!(matches!(
+            parse("/quit").unwrap(),
+            Command::Repl(ReplCommand::Exit)
+        ));
+        assert!(matches!(
+            parse("/schema").unwrap(),
+            Command::Repl(ReplCommand::Schema)
+        ));
+        assert!(matches!(
+            parse("/count").unwrap(),
+            Command::Repl(ReplCommand::Count)
+        ));
+        assert!(matches!(
+            parse("/details").unwrap(),
+            Command::Repl(ReplCommand::Details)
+        ));
+        assert!(matches!(
+            parse("/info").unwrap(),
+            Command::Repl(ReplCommand::Details)
+        ));
+        assert!(matches!(
+            parse("/history").unwrap(),
+            Command::Repl(ReplCommand::History)
+        ));
+        assert!(matches!(
+            parse("/status").unwrap(),
+            Command::Repl(ReplCommand::Status)
+        ));
+        assert!(matches!(
+            parse("/clear").unwrap(),
+            Command::Repl(ReplCommand::Clear)
+        ));
     }
 
     #[test]
-    fn test_parse_meta_commands_case_insensitive() {
-        // Meta commands are case insensitive
-        assert!(matches!(parse("/HELP").unwrap(), Command::Help));
-        assert!(matches!(parse("/Help").unwrap(), Command::Help));
-        assert!(matches!(parse("/EXIT").unwrap(), Command::Exit));
-        assert!(matches!(parse("/SCHEMA").unwrap(), Command::Schema));
-        assert!(matches!(parse("/COUNT").unwrap(), Command::Count));
+    fn test_parse_repl_commands_case_insensitive() {
+        assert!(matches!(
+            parse("/HELP").unwrap(),
+            Command::Repl(ReplCommand::Help)
+        ));
+        assert!(matches!(
+            parse("/Help").unwrap(),
+            Command::Repl(ReplCommand::Help)
+        ));
+        assert!(matches!(
+            parse("/EXIT").unwrap(),
+            Command::Repl(ReplCommand::Exit)
+        ));
+        assert!(matches!(
+            parse("/SCHEMA").unwrap(),
+            Command::Repl(ReplCommand::Schema)
+        ));
+        assert!(matches!(
+            parse("/COUNT").unwrap(),
+            Command::Repl(ReplCommand::Count)
+        ));
     }
 
     #[test]
-    fn test_parse_meta_commands_with_space_after_slash() {
-        // Space after / should work
-        assert!(matches!(parse("/ help").unwrap(), Command::Help));
-        assert!(matches!(parse("/  schema").unwrap(), Command::Schema));
+    fn test_parse_repl_commands_with_space_after_slash() {
+        assert!(matches!(
+            parse("/ help").unwrap(),
+            Command::Repl(ReplCommand::Help)
+        ));
+        assert!(matches!(
+            parse("/  schema").unwrap(),
+            Command::Repl(ReplCommand::Schema)
+        ));
     }
 
     #[test]
-    fn test_bare_meta_command_errors_with_suggestion() {
-        // Bare meta commands (without /) should fail with suggestion
+    fn test_bare_repl_command_errors_with_suggestion() {
         let result = parse("HELP");
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -309,20 +332,24 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_meta_command() {
+    fn test_unknown_repl_command() {
         let result = parse("/foo");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("Unknown meta command: /foo"), "Error: {}", err);
+        assert!(
+            err.contains("Unknown command: /foo"),
+            "Error: {}",
+            err
+        );
         assert!(err.contains("/help"), "Error should suggest /help: {}", err);
     }
 
     #[test]
-    fn test_empty_meta_command() {
+    fn test_empty_repl_command() {
         let result = parse("/");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("Empty meta command"), "Error: {}", err);
+        assert!(err.contains("Empty command"), "Error: {}", err);
     }
 
     #[test]
@@ -339,22 +366,21 @@ mod tests {
 
     #[test]
     fn test_parse_show() {
-        // Show requires / prefix
         let cmd = parse("/show").unwrap();
         match cmd {
-            Command::Show { limit } => assert_eq!(limit, None),
+            Command::Repl(ReplCommand::Show { limit }) => assert_eq!(limit, None),
             _ => panic!("Expected Show command"),
         }
 
         let cmd = parse("/show limit 20").unwrap();
         match cmd {
-            Command::Show { limit } => assert_eq!(limit, Some(20)),
+            Command::Repl(ReplCommand::Show { limit }) => assert_eq!(limit, Some(20)),
             _ => panic!("Expected Show command"),
         }
 
         let cmd = parse("/SHOW LIMIT 20").unwrap();
         match cmd {
-            Command::Show { limit } => assert_eq!(limit, Some(20)),
+            Command::Repl(ReplCommand::Show { limit }) => assert_eq!(limit, Some(20)),
             _ => panic!("Expected Show command"),
         }
     }

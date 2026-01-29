@@ -1,4 +1,5 @@
-use crate::bundle::command::{BundleBuilderCommand, FetchAllCommand, FetchCommand};
+use crate::bundle::command::{BundleBuilderCommand, BundleCommand, CommandResponse, FacadeCommand, FetchAllCommand, FetchCommand};
+use crate::bundle::command::response::OutputShape;
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::AnyOperation;
@@ -14,7 +15,8 @@ use crate::index::{IndexDefinition, IndexType};
 use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
 use crate::BundleConfig;
 use crate::BundlebaseError;
-use arrow_schema::SchemaRef;
+use arrow::array::{ArrayRef, Int32Array, RecordBatch, StringArray};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use chrono::DateTime;
 use datafusion::execution::SendableRecordBatchStream;
@@ -125,6 +127,54 @@ impl std::fmt::Display for BundleStatus {
             }
             Ok(())
         }
+    }
+}
+
+impl CommandResponse for BundleStatus {
+    fn schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("change_id", DataType::Utf8, false),
+            Field::new("description", DataType::Utf8, false),
+            Field::new("operation_count", DataType::Int32, false),
+        ]))
+    }
+
+    fn output_shape() -> OutputShape {
+        OutputShape::Table
+    }
+
+    fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
+        let changes = self.changes();
+
+        let ids: Vec<i32> = (0..changes.len() as i32).collect();
+        let change_ids: Vec<String> = changes.iter().map(|c| c.id.to_string()).collect();
+        let descriptions: Vec<&str> = changes.iter().map(|c| c.description.as_str()).collect();
+        let operation_counts: Vec<i32> = changes
+            .iter()
+            .map(|c| c.operations.len() as i32)
+            .collect();
+
+        RecordBatch::try_new(
+            Self::schema(),
+            vec![
+                Arc::new(Int32Array::from(ids)),
+                Arc::new(StringArray::from(
+                    change_ids.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(descriptions)),
+                Arc::new(Int32Array::from(operation_counts)),
+            ],
+        )
+        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+    }
+
+    fn dyn_schema(&self) -> SchemaRef {
+        Self::schema()
+    }
+
+    fn dyn_output_shape(&self) -> OutputShape {
+        Self::output_shape()
     }
 }
 
@@ -1200,6 +1250,28 @@ impl BundleBuilder {
         None
     }
 
+    /// Resolve a pack name to its ObjectId.
+    ///
+    /// This is a helper method used by commands that operate on packs.
+    ///
+    /// # Arguments
+    /// * `pack` - The pack name: `None` or `"base"` for the base pack,
+    ///            otherwise a join name.
+    ///
+    /// # Returns
+    /// * `Ok(ObjectId)` - The resolved pack ID
+    /// * `Err(BundlebaseError)` - If the join name doesn't exist
+    pub fn resolve_pack_id(&self, pack: Option<&str>) -> Result<ObjectId, BundlebaseError> {
+        match pack {
+            None | Some("base") => Ok(ObjectId::BASE_PACK),
+            Some(join_name) => self
+                .bundle()
+                .pack_by_name(join_name)
+                .map(|p| *p.id())
+                .ok_or_else(|| format!("Unknown join '{}'", join_name).into()),
+        }
+    }
+
     /// Rebuild an index on a column
     pub async fn rebuild_index(&self, column: &str) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::RebuildIndexCommand;
@@ -1332,6 +1404,34 @@ impl BundleFacade for BundleBuilder {
         Ok(self.bundle().query(sql, params).await?)
     }
 
+    /// Execute a SQL statement or command, returning streaming results.
+    ///
+    /// Unlike the default implementation in BundleFacade (which only handles read-only commands),
+    /// BundleBuilder can execute ALL commands including mutating ones like ATTACH, FILTER, etc.
+    async fn execute(
+        &self,
+        sql: &str,
+        params: Vec<ScalarValue>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        use super::command::parser::{is_command_statement, parse_command};
+        use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+
+        if is_command_statement(sql) {
+            // Parse and execute as command (BundleBuilder can handle all commands)
+            let cmd = parse_command(sql)?;
+            let output = cmd.execute(self).await?;
+
+            // Convert to stream using dyn methods
+            let schema = output.dyn_schema();
+            let batch = output.to_record_batch()?;
+            let stream = futures::stream::iter(vec![Ok(batch)]);
+            Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
+        } else {
+            // Execute as regular SQL query
+            self.query(sql, params).await
+        }
+    }
+
     fn views(&self) -> HashMap<ObjectId, String> {
         self.bundle.views()
     }
@@ -1383,6 +1483,21 @@ impl BundleFacade for BundleBuilder {
 
     fn ctx(&self) -> Arc<SessionContext> {
         self.bundle.ctx()
+    }
+
+    async fn execute_facade_command(
+        &self,
+        cmd: FacadeCommand,
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+        cmd.execute(self).await
+    }
+
+    async fn execute_command(
+        &self,
+        cmd: BundleCommand,
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+        // BundleBuilder can execute all commands
+        cmd.execute(self).await
     }
 }
 

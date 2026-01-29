@@ -4,13 +4,13 @@
 //! gets its own `BundleState` instance, ensuring that operations in one session don't
 //! affect other sessions. Authentication is required for all requests.
 
-use super::execution::execute_query_streaming;
 use super::metadata;
+use arrow_flight::FlightData;
 use super::prepared_statements::PreparedStatement;
 use crate::auth::BundlebaseAuthenticator;
-use crate::sql_executor;
-use crate::state::BundleState;
 use arrow::datatypes::{Schema, SchemaRef};
+use arrow_flight::encode::FlightDataEncoderBuilder;
+use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_server::FlightService;
 use arrow_flight::sql::server::FlightSqlService;
 use arrow_flight::sql::server::PeekableFlightDataStream;
@@ -28,7 +28,7 @@ use arrow_flight::{
 use base64::prelude::*;
 use bundlebase::{Bundle, BundleBuilder, BundleConfig, BundleFacade};
 use bytes::Bytes;
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::RwLock;
 use prost::Message;
 use std::collections::HashMap;
@@ -38,9 +38,12 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::info;
 use uuid::Uuid;
 
+/// Stream type for FlightData responses.
+pub type DoGetStream = Pin<Box<dyn Stream<Item = Result<FlightData, Status>> + Send>>;
+
 /// Session data including state and prepared statements.
 struct Session {
-    state: Arc<BundleState>,
+    bundle: Arc<dyn BundleFacade>,
     prepared_statements: HashMap<String, PreparedStatement>,
     /// Cached bundle schema (updated when bundle changes).
     bundle_schema: Option<Arc<Schema>>,
@@ -119,7 +122,7 @@ impl BundlebaseFlightSqlService {
     /// Looks up the session by auth token from request metadata.
     /// If token is valid format but session doesn't exist (e.g., server restarted),
     /// creates a new session for the token automatically.
-    async fn get_session_state<T>(&self, request: &Request<T>) -> Result<Arc<BundleState>, Status> {
+    async fn get_bundle<T>(&self, request: &Request<T>) -> Result<Arc<dyn BundleFacade>, Status> {
         // Try to extract auth token from request metadata
         if let Some(auth_header) = request.metadata().get("authorization") {
             if let Ok(auth_str) = auth_header.to_str() {
@@ -130,7 +133,7 @@ impl BundlebaseFlightSqlService {
                 {
                     let sessions = self.sessions.read();
                     if let Some(session) = sessions.get(token) {
-                        return Ok(Arc::clone(&session.state));
+                        return Ok(Arc::clone(&session.bundle));
                     }
                 }
 
@@ -142,7 +145,7 @@ impl BundlebaseFlightSqlService {
                         token
                     );
                     let session = self.create_session().await?;
-                    let state = Arc::clone(&session.state);
+                    let state = Arc::clone(&session.bundle);
                     self.sessions.write().insert(token.to_string(), session);
                     return Ok(state);
                 }
@@ -173,35 +176,32 @@ impl BundlebaseFlightSqlService {
 
     /// Create a new session for an authenticated user.
     ///
-    /// Creates a new `BundleState` and prepared statement storage for the session.
+    /// Creates a new bundle facade and prepared statement storage for the session.
     async fn create_session(&self) -> Result<Session, Status> {
-        let state = if self.create_bundle {
+        let state: Arc<dyn BundleFacade> = if self.create_bundle {
             // Creating always needs read-write mode
-            let builder = BundleBuilder::create(&self.bundle_path, self.bundle_config.clone())
+            BundleBuilder::create(&self.bundle_path, self.bundle_config.clone())
                 .await
-                .map_err(|e| Status::internal(format!("Failed to create bundle: {}", e)))?;
-            Arc::new(BundleState::read_write(builder))
+                .map_err(|e| Status::internal(format!("Failed to create bundle: {}", e)))?
         } else if self.read_only {
             // Read-only mode - open as Bundle
-            let bundle = Bundle::open(&self.bundle_path, self.bundle_config.clone())
+            Bundle::open(&self.bundle_path, self.bundle_config.clone())
                 .await
-                .map_err(|e| Status::internal(format!("Failed to open bundle: {}", e)))?;
-            Arc::new(BundleState::read_only(bundle))
+                .map_err(|e| Status::internal(format!("Failed to open bundle: {}", e)))?
         } else {
             // Read-write mode - open and extend
-            let builder = Bundle::open(&self.bundle_path, self.bundle_config.clone())
+            Bundle::open(&self.bundle_path, self.bundle_config.clone())
                 .await
                 .map_err(|e| Status::internal(format!("Failed to open bundle: {}", e)))?
                 .extend(None)
-                .map_err(|e| Status::internal(format!("Failed to extend bundle: {}", e)))?;
-            Arc::new(BundleState::read_write(builder))
+                .map_err(|e| Status::internal(format!("Failed to extend bundle: {}", e)))?
         };
 
         // Try to get initial bundle schema (may be empty for new bundles)
         let bundle_schema = state.schema().await.ok().map(|s| (*s).clone().into());
 
         Ok(Session {
-            state,
+            bundle: state,
             prepared_statements: HashMap::new(),
             bundle_schema,
         })
@@ -210,19 +210,12 @@ impl BundlebaseFlightSqlService {
     /// Get the schema for a SQL query by planning it.
     async fn get_query_schema(
         &self,
-        state: &Arc<BundleState>,
+        bundle: &Arc<dyn BundleFacade>,
         sql: &str,
     ) -> Result<SchemaRef, Status> {
-        // First check if it's a bundlebase command with known schema
-        if let Some(schema) = sql_executor::get_command_schema(sql) {
-            return Ok(schema);
-        }
-
-        // For standard SQL, we need to plan the query to get the schema
-        state
-            .get_query_schema(sql)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to plan query: {}", e)))
+        let (schema, _shape) = bundle.response_schema(sql).await
+            .map_err(|e| Status::internal(format!("Failed to get schema: {}", e)))?;
+        Ok(schema)
     }
 
     /// Get the cached bundle schema for a token (if available).
@@ -235,8 +228,8 @@ impl BundlebaseFlightSqlService {
 
     /// Refresh the cached bundle schema for a session.
     /// Called after mutations (ATTACH, etc.) that may change the schema.
-    async fn refresh_schema_cache(&self, token: &str, state: &Arc<BundleState>) {
-        if let Ok(schema) = state.schema().await {
+    async fn refresh_schema_cache(&self, token: &str, bundle: &Arc<dyn BundleFacade>) {
+        if let Ok(schema) = bundle.schema().await {
             if let Some(session) = self.sessions.write().get_mut(token) {
                 session.bundle_schema = Some((*schema).clone().into());
             }
@@ -364,10 +357,10 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         // Get token and session state for this request
         let token = self.get_token(&request)?;
-        let state = self.get_session_state(&request).await?;
+        let bundle = self.get_bundle(&request).await?;
 
         // Get schema by planning query (not executing)
-        let schema = self.get_query_schema(&state, &sql).await?;
+        let schema = self.get_query_schema(&bundle, &sql).await?;
 
         // Store prepared statement in the session
         {
@@ -472,7 +465,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         let token = self.get_token(&request)?;
 
-        let (sql, state) = {
+        let (sql, bundle) = {
             let sessions = self.sessions.read();
             let session = sessions.get(&token).ok_or_else(|| {
                 Status::unauthenticated("Session not found. Call do_handshake first.")
@@ -483,20 +476,30 @@ impl FlightSqlService for BundlebaseFlightSqlService {
                 .ok_or_else(|| Status::not_found("Prepared statement not found"))?
                 .sql
                 .clone();
-            let state = Arc::clone(&session.state);
+            let state = Arc::clone(&session.bundle);
             (sql, state)
         };
 
         info!("Executing prepared statement: {} -> {}", handle, sql);
 
-        let result = execute_query_streaming(&state, sql.clone()).await;
+        let record_stream = bundle.execute(&sql, vec![]).await
+            .map_err(|e| Status::internal(format!("Failed to execute: {}", e)))?;
 
         // Refresh schema cache after bundlebase commands that might modify schema
         if bundlebase::bundle::is_command_statement(&sql) {
-            self.refresh_schema_cache(&token, &state).await;
+            self.refresh_schema_cache(&token, &bundle).await;
         }
 
-        result
+        // Convert to FlightData stream
+        let schema = record_stream.schema();
+        let batch_stream = record_stream
+            .map(|result| result.map_err(|e| FlightError::ExternalError(Box::new(e))));
+        let flight_stream = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .build(batch_stream)
+            .map_err(|e| Status::from_error(Box::new(e)));
+
+        Ok(Response::new(Box::pin(flight_stream) as DoGetStream))
     }
 
     /// Execute a prepared statement update (DML).
@@ -551,10 +554,10 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         info!("Getting flight info for statement: {}", sql);
 
         // Get session state for this request
-        let state = self.get_session_state(&request).await?;
+        let bundle = self.get_bundle(&request).await?;
 
         // Get schema by planning the query
-        let schema = self.get_query_schema(&state, &sql).await?;
+        let schema = self.get_query_schema(&bundle, &sql).await?;
 
         // Create a TicketStatementQuery with SQL in statement_handle
         let ticket_stmt = TicketStatementQuery {
@@ -594,16 +597,27 @@ impl FlightSqlService for BundlebaseFlightSqlService {
 
         // Get token and session state for this request
         let token = self.get_token(&request)?;
-        let state = self.get_session_state(&request).await?;
+        let bundle = self.get_bundle(&request).await?;
 
-        let result = execute_query_streaming(&state, sql.clone()).await;
+        // Execute directly via BundleFacade
+        let record_stream = bundle.execute(&sql, vec![]).await
+            .map_err(|e| Status::internal(format!("Failed to execute: {}", e)))?;
 
         // Refresh schema cache after bundlebase commands that might modify schema
         if bundlebase::bundle::is_command_statement(&sql) {
-            self.refresh_schema_cache(&token, &state).await;
+            self.refresh_schema_cache(&token, &bundle).await;
         }
 
-        result
+        // Convert to FlightData stream
+        let schema = record_stream.schema();
+        let batch_stream = record_stream
+            .map(|result| result.map_err(|e| FlightError::ExternalError(Box::new(e))));
+        let flight_stream = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .build(batch_stream)
+            .map_err(|e| Status::from_error(Box::new(e)));
+
+        Ok(Response::new(Box::pin(flight_stream) as DoGetStream))
     }
 
     /// Fallback handler for unknown ticket types.

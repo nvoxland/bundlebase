@@ -107,36 +107,24 @@ pub fn first_keyword(sql: &str) -> String {
 
 /// Returns all statement keywords that indicate a bundlebase command.
 ///
-/// Returns a static slice to avoid allocation on every call.
-pub fn all_statement_keywords() -> &'static [&'static str] {
-    &[
-        "FILTER",
-        "ATTACH",
-        "DETACH",
-        "REPLACE",
-        "JOIN",
-        "LEFT",
-        "RIGHT",
-        "FULL",
-        "INNER",
-        "OUTER",
-        "DROP",
-        "RENAME",
-        "CREATE",
-        "FETCH",
-        "REINDEX",
-        "REBUILD",
-        "COMMIT",
-        "RESET",
-        "UNDO",
-        "SET",
-        "VERIFY",
-        "EXPLAIN",
-    ]
+/// Derived from the first word of each key in `available_commands()`.
+pub fn all_statement_keywords() -> Vec<&'static str> {
+    let mut seen = std::collections::HashSet::new();
+    let mut keywords = Vec::new();
+    for key in available_commands().keys() {
+        let first_word = key.split_whitespace().next().unwrap_or(key);
+        if seen.insert(first_word) {
+            keywords.push(first_word);
+        }
+    }
+    keywords
 }
 
 /// Returns a map of command keywords to their syntax descriptions.
-pub fn syntax_map() -> std::collections::HashMap<&'static str, &'static str> {
+///
+/// This is the single source of truth for all bundlebase command metadata.
+/// Used by `all_statement_keywords()`, `rule_to_syntax()`, and the CLI completer.
+pub fn available_commands() -> std::collections::HashMap<&'static str, &'static str> {
     let mut map = std::collections::HashMap::new();
     map.insert("FILTER", "FILTER WHERE <condition>");
     map.insert("ATTACH", "ATTACH '<path>' [TO <pack>] [WITH (<options>)]");
@@ -167,14 +155,9 @@ pub fn syntax_map() -> std::collections::HashMap<&'static str, &'static str> {
     map
 }
 
-/// Returns all syntax descriptions for available commands.
-pub fn all_statement_syntaxes() -> Vec<&'static str> {
-    syntax_map().values().copied().collect()
-}
-
 /// Convert a Rule to its syntax description if available.
 pub fn rule_to_syntax(rule: Rule) -> Option<&'static str> {
-    let map = syntax_map();
+    let map = available_commands();
     match rule {
         Rule::filter_stmt => map.get("FILTER").copied(),
         Rule::attach_stmt => map.get("ATTACH").copied(),
@@ -231,8 +214,8 @@ mod tests {
     }
 
     #[test]
-    fn test_syntax_map_has_entries() {
-        let map = syntax_map();
+    fn test_available_commands_has_entries() {
+        let map = available_commands();
         assert!(map.len() > 20);
         assert!(map.contains_key("FILTER"));
         assert!(map.contains_key("ATTACH"));
