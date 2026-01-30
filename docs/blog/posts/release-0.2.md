@@ -39,7 +39,7 @@ Also renamed the metadata directory from `_manifest` to `_bundlebase`.
 - **Configuration system**: New `BundleConfig` for things like S3 endpoints and regions. Passed to `create()` and `open()`.
 - **Command parser**: Added a PEG grammar-based command parser for SQL-style commands. Early days, but it's the foundation for a proper command language.
 - **Indexing improvements**: New row ID caching, better column index performance, and a new `drop_index` operation.
-- **Documentation site**: Stood up a MkDocs site at [nvoxland.github.io/bundlebase](https://nvoxland.github.io/bundlebase). Getting started guide, API reference, the basics.
+- **Documentation site**: New docs site at [nvoxland.github.io/bundlebase](https://nvoxland.github.io/bundlebase). Getting started guide, API reference, the basics.
 - **Build improvements**: Narrowed Tokio features to reduce compile times. Tuned codegen-units and enabled incremental builds.
 
 ```
