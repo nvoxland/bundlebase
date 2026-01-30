@@ -31,7 +31,7 @@ use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::RwLock;
 use prost::Message;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::sync::Arc;
 use tonic::{Request, Response, Status, Streaming};
@@ -47,10 +47,18 @@ struct Session {
     prepared_statements: HashMap<String, PreparedStatement>,
     /// Cached bundle schema (updated when bundle changes).
     bundle_schema: Option<Arc<Schema>>,
+    /// Last time this session was accessed (for idle expiration).
+    last_accessed: std::time::Instant,
 }
 
 /// Store for sessions, keyed by auth token.
 type SessionStore = Arc<RwLock<HashMap<String, Session>>>;
+
+/// Maximum idle time before a session is expired (30 minutes).
+const SESSION_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// Interval between session cleanup sweeps (5 minutes).
+const SESSION_CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// Create a new session store.
 fn new_session_store() -> SessionStore {
@@ -87,6 +95,8 @@ pub struct BundlebaseFlightSqlService {
     read_only: bool,
     /// Session states keyed by auth token
     sessions: SessionStore,
+    /// Set of tokens issued by this server instance (for validating reconnections)
+    issued_tokens: Arc<RwLock<HashSet<String>>>,
     authenticator: BundlebaseAuthenticator,
 }
 
@@ -107,12 +117,38 @@ impl BundlebaseFlightSqlService {
         read_only: bool,
         authenticator: BundlebaseAuthenticator,
     ) -> Self {
+        let sessions = new_session_store();
+
+        // Start background task to clean up idle sessions
+        let cleanup_sessions = Arc::clone(&sessions);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(SESSION_CLEANUP_INTERVAL).await;
+                let expired: Vec<String> = {
+                    let sessions = cleanup_sessions.read();
+                    sessions
+                        .iter()
+                        .filter(|(_, session)| session.last_accessed.elapsed() > SESSION_IDLE_TIMEOUT)
+                        .map(|(token, _)| token.clone())
+                        .collect()
+                };
+                if !expired.is_empty() {
+                    let mut sessions = cleanup_sessions.write();
+                    for token in &expired {
+                        sessions.remove(token);
+                    }
+                    info!("Cleaned up {} idle session(s)", expired.len());
+                }
+            }
+        });
+
         Self {
             bundle_path,
             bundle_config,
             create_bundle,
             read_only,
-            sessions: new_session_store(),
+            sessions,
+            issued_tokens: Arc::new(RwLock::new(HashSet::new())),
             authenticator,
         }
     }
@@ -131,17 +167,18 @@ impl BundlebaseFlightSqlService {
 
                 // Look up session state by token
                 {
-                    let sessions = self.sessions.read();
-                    if let Some(session) = sessions.get(token) {
+                    let mut sessions = self.sessions.write();
+                    if let Some(session) = sessions.get_mut(token) {
+                        session.last_accessed = std::time::Instant::now();
                         return Ok(Arc::clone(&session.bundle));
                     }
                 }
 
-                // Token looks valid (has our format) but session doesn't exist
-                // This can happen if server restarted. Auto-create a new session.
-                if token.starts_with("token-") {
+                // Token was issued by this server but session was dropped.
+                // Re-create the session for the existing token.
+                if self.issued_tokens.read().contains(token) {
                     info!(
-                        "Token {} not found, auto-creating session (server may have restarted)",
+                        "Session for token {} expired, re-creating",
                         token
                     );
                     let session = self.create_session().await?;
@@ -204,6 +241,7 @@ impl BundlebaseFlightSqlService {
             bundle: state,
             prepared_statements: HashMap::new(),
             bundle_schema,
+            last_accessed: std::time::Instant::now(),
         })
     }
 
@@ -317,7 +355,8 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         // Generate a unique token for this session
         let token = format!("token-{}", Uuid::new_v4());
 
-        // Store the session
+        // Store the session and track the issued token
+        self.issued_tokens.write().insert(token.clone());
         self.sessions.write().insert(token.clone(), session);
 
         info!("Created new session for user '{}': {}", username, token);

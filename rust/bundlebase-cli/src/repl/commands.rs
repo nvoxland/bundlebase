@@ -1,7 +1,15 @@
 //! REPL commands module.
 //!
 //! This module contains all REPL commands, each in its own sub-module.
-//! Each command module exports an `INFO` constant with metadata and an `execute` function.
+//! Each command module exports a `DEF` constant with metadata and an `execute` function.
+//!
+//! # Adding a new REPL command
+//!
+//! 1. Create a new module file (e.g., `my_command.rs`) with a `pub static DEF: ReplCommandDef`
+//! 2. Add `pub mod my_command;` to the module declarations below
+//! 3. Add a variant to the `ReplCommand` enum
+//! 4. Add `&my_command::DEF` to the `all_commands()` array
+//! 5. Add `Self::MyCommand => &my_command::DEF` to the `definition()` match
 
 pub mod clear;
 pub mod count;

@@ -1,6 +1,7 @@
 //! Fetch command implementations.
 
 use crate::bundle::command::{CommandParsing, Rule, CommandResponse};
+use crate::impl_dyn_command_response;
 use crate::bundle::operation::{AttachBlockOp, DetachBlockOp, SourceInfo};
 use crate::data::ObjectId;
 use crate::source::{FetchAction, FetchResults};
@@ -67,13 +68,7 @@ impl CommandResponse for Vec<FetchResults> {
         .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
     }
 
-    fn dyn_schema(&self) -> SchemaRef {
-        Self::schema()
-    }
-
-    fn dyn_output_shape(&self) -> crate::bundle::command::response::OutputShape {
-        Self::output_shape()
-    }
+    impl_dyn_command_response!(Vec<FetchResults>);
 }
 
 /// Command to fetch from sources for a specific pack.

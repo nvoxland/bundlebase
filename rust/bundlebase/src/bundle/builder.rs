@@ -1,4 +1,5 @@
 use crate::bundle::command::{BundleBuilderCommand, BundleCommand, CommandResponse, FacadeCommand, FetchAllCommand, FetchCommand};
+use crate::impl_dyn_command_response;
 use crate::bundle::command::response::OutputShape;
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
@@ -169,13 +170,7 @@ impl CommandResponse for BundleStatus {
         .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
     }
 
-    fn dyn_schema(&self) -> SchemaRef {
-        Self::schema()
-    }
-
-    fn dyn_output_shape(&self) -> OutputShape {
-        Self::output_shape()
-    }
+    impl_dyn_command_response!(BundleStatus);
 }
 
 /// A modifiable Bundle with interior mutability for thread-safe access.

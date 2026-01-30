@@ -6,6 +6,7 @@ mod packs_table;
 mod status_table;
 mod views_table;
 
+use super::tables;
 use crate::bundle::BundleFacade;
 
 use async_trait::async_trait;
@@ -38,13 +39,13 @@ impl BundleInfoSchemaProvider {
     /// Create a new BundleInfoSchemaProvider with the given BundleFacade.
     pub fn new(bundle: Arc<dyn BundleFacade>) -> Self {
         let mut tables: HashMap<&'static str, Arc<dyn TableProvider>> = HashMap::new();
-        tables.insert("history", Arc::new(BundleHistoryTable::new(bundle.clone())));
-        tables.insert("status", Arc::new(BundleStatusTable::new(bundle.clone())));
-        tables.insert("details", Arc::new(BundleDetailsTable::new(bundle.clone())));
-        tables.insert("views", Arc::new(BundleViewsTable::new(bundle.clone())));
-        tables.insert("indexes", Arc::new(BundleIndexesTable::new(bundle.clone())));
-        tables.insert("packs", Arc::new(BundlePacksTable::new(bundle.clone())));
-        tables.insert("blocks", Arc::new(BundleBlocksTable::new(bundle)));
+        tables.insert(tables::HISTORY, Arc::new(BundleHistoryTable::new(bundle.clone())));
+        tables.insert(tables::STATUS, Arc::new(BundleStatusTable::new(bundle.clone())));
+        tables.insert(tables::DETAILS, Arc::new(BundleDetailsTable::new(bundle.clone())));
+        tables.insert(tables::VIEWS, Arc::new(BundleViewsTable::new(bundle.clone())));
+        tables.insert(tables::INDEXES, Arc::new(BundleIndexesTable::new(bundle.clone())));
+        tables.insert(tables::PACKS, Arc::new(BundlePacksTable::new(bundle.clone())));
+        tables.insert(tables::BLOCKS, Arc::new(BundleBlocksTable::new(bundle)));
         Self { tables }
     }
 }

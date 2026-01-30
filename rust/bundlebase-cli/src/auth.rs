@@ -32,6 +32,11 @@ impl BundlebaseAuthenticator {
         }
     }
 
+    /// Returns true if no custom credentials have been configured.
+    pub fn is_using_defaults(&self) -> bool {
+        self.username.is_none() && self.password.is_none()
+    }
+
     /// Validate username and password.
     pub fn validate(&self, username: &str, password: &str) -> bool {
         let expected_username = self.username.as_deref().unwrap_or(USERNAME);
@@ -41,34 +46,9 @@ impl BundlebaseAuthenticator {
     }
 }
 
-/// Validate username and password using default credentials.
-pub fn validate_credentials(username: &str, password: &str) -> bool {
-    username == USERNAME && password == PASSWORD
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_valid_credentials() {
-        assert!(validate_credentials("admin", "password"));
-    }
-
-    #[test]
-    fn test_invalid_username() {
-        assert!(!validate_credentials("user", "password"));
-    }
-
-    #[test]
-    fn test_invalid_password() {
-        assert!(!validate_credentials("admin", "wrong"));
-    }
-
-    #[test]
-    fn test_invalid_both() {
-        assert!(!validate_credentials("user", "wrong"));
-    }
 
     #[test]
     fn test_authenticator_default() {
@@ -82,5 +62,29 @@ mod tests {
         let auth = BundlebaseAuthenticator::with_credentials("custom", "secret");
         assert!(auth.validate("custom", "secret"));
         assert!(!auth.validate("admin", "password"));
+    }
+
+    #[test]
+    fn test_authenticator_default_invalid_username() {
+        let auth = BundlebaseAuthenticator::default();
+        assert!(!auth.validate("user", "password"));
+    }
+
+    #[test]
+    fn test_authenticator_default_invalid_both() {
+        let auth = BundlebaseAuthenticator::default();
+        assert!(!auth.validate("user", "wrong"));
+    }
+
+    #[test]
+    fn test_uses_default_credentials() {
+        let auth = BundlebaseAuthenticator::new();
+        assert!(auth.is_using_defaults());
+    }
+
+    #[test]
+    fn test_uses_custom_credentials() {
+        let auth = BundlebaseAuthenticator::with_credentials("custom", "secret");
+        assert!(!auth.is_using_defaults());
     }
 }

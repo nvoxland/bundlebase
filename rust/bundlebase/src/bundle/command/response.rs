@@ -62,6 +62,21 @@ pub trait CommandResponse: Send + Sync {
     fn dyn_output_shape(&self) -> OutputShape;
 }
 
+/// Macro to implement the boilerplate `dyn_schema` and `dyn_output_shape` methods
+/// that just delegate to `Self::schema()` and `Self::output_shape()`.
+#[macro_export]
+macro_rules! impl_dyn_command_response {
+    ($ty:ty) => {
+        fn dyn_schema(&self) -> ::arrow::datatypes::SchemaRef {
+            <$ty as $crate::bundle::command::CommandResponse>::schema()
+        }
+
+        fn dyn_output_shape(&self) -> $crate::bundle::command::response::OutputShape {
+            <$ty as $crate::bundle::command::CommandResponse>::output_shape()
+        }
+    };
+}
+
 /// Implement CommandResponse for String to allow simple message outputs.
 impl CommandResponse for String {
     fn schema() -> SchemaRef {
@@ -83,13 +98,7 @@ impl CommandResponse for String {
             .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
     }
 
-    fn dyn_schema(&self) -> SchemaRef {
-        Self::schema()
-    }
-
-    fn dyn_output_shape(&self) -> OutputShape {
-        Self::output_shape()
-    }
+    impl_dyn_command_response!(String);
 }
 
 impl CommandResponse for SchemaRef {
@@ -122,13 +131,7 @@ impl CommandResponse for SchemaRef {
             .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
     }
 
-    fn dyn_schema(&self) -> SchemaRef {
-        Self::schema()
-    }
-
-    fn dyn_output_shape(&self) -> OutputShape {
-        Self::output_shape()
-    }
+    impl_dyn_command_response!(SchemaRef);
 }
 
 /// Implement CommandResponse for usize to allow count outputs.
@@ -147,13 +150,7 @@ impl CommandResponse for usize {
             .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
     }
 
-    fn dyn_schema(&self) -> SchemaRef {
-        Self::schema()
-    }
-
-    fn dyn_output_shape(&self) -> OutputShape {
-        Self::output_shape()
-    }
+    impl_dyn_command_response!(usize);
 }
 
 #[cfg(test)]

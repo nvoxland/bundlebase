@@ -29,6 +29,7 @@ pub use functions::{FunctionImpl, FunctionSignature};
 pub use crate::index::{IndexType, IndexTypeConfigError, ParseIndexTypeError, TokenizerConfig};
 use std::error::Error;
 pub use bundle::JoinTypeOption;
+pub use catalog::{CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA, tables as catalog_tables};
 
 /// Standard error type used throughout the Bundlebase codebase
 pub type BundlebaseError = Box<dyn Error + Send + Sync>;

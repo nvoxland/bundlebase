@@ -17,7 +17,17 @@ use futures::TryStreamExt;
 use once_cell::sync::Lazy;
 use prost::Message;
 use std::sync::Arc;
+use bundlebase::{CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA, catalog_tables};
 use tonic::{Request, Response, Status};
+
+/// Wrap a single RecordBatch into a DoGetStream for Flight SQL responses.
+fn single_batch_stream(schema: Arc<Schema>, batch: RecordBatch) -> Result<Response<DoGetStream>, Status> {
+    let stream = FlightDataEncoderBuilder::new()
+        .with_schema(schema)
+        .build(futures::stream::once(async { Ok(batch) }))
+        .map_err(|e| Status::from_error(Box::new(e)));
+    Ok(Response::new(Box::pin(stream)))
+}
 
 /// SQL Info data for server capabilities.
 pub static SQL_INFO_DATA: Lazy<Vec<(SqlInfo, String)>> = Lazy::new(|| {
@@ -82,12 +92,7 @@ pub fn do_get_sql_info() -> Result<Response<DoGetStream>, Status> {
     )
     .map_err(|e| Status::internal(format!("Failed to create batch: {}", e)))?;
 
-    let stream = FlightDataEncoderBuilder::new()
-        .with_schema(schema)
-        .build(futures::stream::once(async { Ok(batch) }))
-        .map_err(|e| Status::from_error(Box::new(e)));
-
-    Ok(Response::new(Box::pin(stream)))
+    single_batch_stream(schema, batch)
 }
 
 /// Get catalogs flight info.
@@ -129,19 +134,14 @@ pub fn do_get_catalogs() -> Result<Response<DoGetStream>, Status> {
         false,
     )]));
 
-    // Return single catalog "bundlebase"
+    // Return single catalog
     let batch = RecordBatch::try_new(
         schema.clone(),
-        vec![Arc::new(arrow::array::StringArray::from(vec!["bundlebase"]))],
+        vec![Arc::new(arrow::array::StringArray::from(vec![CATALOG_NAME]))],
     )
     .map_err(|e| Status::internal(format!("Failed to create batch: {}", e)))?;
 
-    let stream = FlightDataEncoderBuilder::new()
-        .with_schema(schema)
-        .build(futures::stream::once(async { Ok(batch) }))
-        .map_err(|e| Status::from_error(Box::new(e)));
-
-    Ok(Response::new(Box::pin(stream)))
+    single_batch_stream(schema, batch)
 }
 
 /// Get schemas flight info.
@@ -194,23 +194,18 @@ pub fn do_get_schemas() -> Result<Response<DoGetStream>, Status> {
         schema.clone(),
         vec![
             Arc::new(arrow::array::StringArray::from(vec![
-                Some("bundlebase"),
-                Some("bundlebase"),
+                Some(CATALOG_NAME),
+                Some(CATALOG_NAME),
             ])),
             Arc::new(arrow::array::StringArray::from(vec![
-                "default",
-                "bundle_info",
+                DEFAULT_SCHEMA,
+                BUNDLE_INFO_SCHEMA,
             ])),
         ],
     )
     .map_err(|e| Status::internal(format!("Failed to create batch: {}", e)))?;
 
-    let stream = FlightDataEncoderBuilder::new()
-        .with_schema(schema)
-        .build(futures::stream::once(async { Ok(batch) }))
-        .map_err(|e| Status::from_error(Box::new(e)));
-
-    Ok(Response::new(Box::pin(stream)))
+    single_batch_stream(schema, batch)
 }
 
 /// Get tables flight info.
@@ -261,50 +256,61 @@ fn get_tables_response_schema(include_schema: bool) -> Arc<Schema> {
 /// Get the Arrow schema for a table by schema and table name.
 /// If `bundle_schema` is provided, it will be used for the "default.bundle" table.
 fn get_table_schema(db_schema: &str, table_name: &str, bundle_schema: Option<&Arc<Schema>>) -> Arc<Schema> {
-    match (db_schema, table_name) {
-        ("default", "bundle") => {
-            // Use provided bundle schema if available, otherwise return empty
-            bundle_schema.cloned().unwrap_or_else(|| Arc::new(Schema::empty()))
-        }
-        ("bundle_info", "history") => Arc::new(Schema::new(vec![
+    if db_schema == DEFAULT_SCHEMA && table_name == "bundle" {
+        // Use provided bundle schema if available, otherwise return empty
+        return bundle_schema.cloned().unwrap_or_else(|| Arc::new(Schema::empty()));
+    }
+
+    if db_schema != BUNDLE_INFO_SCHEMA {
+        return Arc::new(Schema::empty());
+    }
+
+    if table_name == catalog_tables::HISTORY {
+        Arc::new(Schema::new(vec![
             arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Int32, false),
             arrow::datatypes::Field::new("url", arrow::datatypes::DataType::Utf8, true),
             arrow::datatypes::Field::new("author", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("message", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("timestamp", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("change_count", arrow::datatypes::DataType::Int32, false),
-        ])),
-        ("bundle_info", "status") => Arc::new(Schema::new(vec![
+        ]))
+    } else if table_name == catalog_tables::STATUS {
+        Arc::new(Schema::new(vec![
             arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Int32, false),
             arrow::datatypes::Field::new("change_id", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("description", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("operation_count", arrow::datatypes::DataType::Int32, false),
-        ])),
-        ("bundle_info", "details") => Arc::new(Schema::new(vec![
+        ]))
+    } else if table_name == catalog_tables::DETAILS {
+        Arc::new(Schema::new(vec![
             arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("name", arrow::datatypes::DataType::Utf8, true),
             arrow::datatypes::Field::new("description", arrow::datatypes::DataType::Utf8, true),
             arrow::datatypes::Field::new("url", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("from", arrow::datatypes::DataType::Utf8, true),
             arrow::datatypes::Field::new("version", arrow::datatypes::DataType::Utf8, false),
-        ])),
-        ("bundle_info", "views") => Arc::new(Schema::new(vec![
+        ]))
+    } else if table_name == catalog_tables::VIEWS {
+        Arc::new(Schema::new(vec![
             arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("name", arrow::datatypes::DataType::Utf8, false),
-        ])),
-        ("bundle_info", "indexes") => Arc::new(Schema::new(vec![
+        ]))
+    } else if table_name == catalog_tables::INDEXES {
+        Arc::new(Schema::new(vec![
             arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("column", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("type", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("tokenizer", arrow::datatypes::DataType::Utf8, true),
-        ])),
-        ("bundle_info", "packs") => Arc::new(Schema::new(vec![
+        ]))
+    } else if table_name == catalog_tables::PACKS {
+        Arc::new(Schema::new(vec![
             arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("name", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("join_type", arrow::datatypes::DataType::Utf8, true),
             arrow::datatypes::Field::new("expression", arrow::datatypes::DataType::Utf8, true),
-        ])),
-        ("bundle_info", "blocks") => Arc::new(Schema::new(vec![
+        ]))
+    } else if table_name == catalog_tables::BLOCKS {
+        Arc::new(Schema::new(vec![
             arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("version", arrow::datatypes::DataType::Utf8, false),
             arrow::datatypes::Field::new("pack_id", arrow::datatypes::DataType::Utf8, false),
@@ -312,8 +318,9 @@ fn get_table_schema(db_schema: &str, table_name: &str, bundle_schema: Option<&Ar
             arrow::datatypes::Field::new("source_id", arrow::datatypes::DataType::Utf8, true),
             arrow::datatypes::Field::new("source_location", arrow::datatypes::DataType::Utf8, true),
             arrow::datatypes::Field::new("source_version", arrow::datatypes::DataType::Utf8, true),
-        ])),
-        _ => Arc::new(Schema::empty()),
+        ]))
+    } else {
+        Arc::new(Schema::empty())
     }
 }
 
@@ -333,14 +340,14 @@ pub fn do_get_tables(cmd: CommandGetTables, bundle_schema: Option<Arc<Schema>>) 
 
     // All available tables: (schema, table_name, table_type)
     let all_tables = vec![
-        ("default", "bundle", "TABLE"),
-        ("bundle_info", "history", "TABLE"),
-        ("bundle_info", "status", "TABLE"),
-        ("bundle_info", "details", "TABLE"),
-        ("bundle_info", "views", "TABLE"),
-        ("bundle_info", "indexes", "TABLE"),
-        ("bundle_info", "packs", "TABLE"),
-        ("bundle_info", "blocks", "TABLE"),
+        (DEFAULT_SCHEMA, "bundle", "TABLE"),
+        (BUNDLE_INFO_SCHEMA, catalog_tables::HISTORY, "TABLE"),
+        (BUNDLE_INFO_SCHEMA, catalog_tables::STATUS, "TABLE"),
+        (BUNDLE_INFO_SCHEMA, catalog_tables::DETAILS, "TABLE"),
+        (BUNDLE_INFO_SCHEMA, catalog_tables::VIEWS, "TABLE"),
+        (BUNDLE_INFO_SCHEMA, catalog_tables::INDEXES, "TABLE"),
+        (BUNDLE_INFO_SCHEMA, catalog_tables::PACKS, "TABLE"),
+        (BUNDLE_INFO_SCHEMA, catalog_tables::BLOCKS, "TABLE"),
     ];
 
     // Filter tables based on request parameters
@@ -349,7 +356,7 @@ pub fn do_get_tables(cmd: CommandGetTables, bundle_schema: Option<Arc<Schema>>) 
         .filter(|(schema_name, table_name, table_type)| {
             // Filter by catalog (if specified)
             if let Some(ref catalog) = cmd.catalog {
-                if catalog != "bundlebase" {
+                if catalog != CATALOG_NAME {
                     return false;
                 }
             }
@@ -380,7 +387,7 @@ pub fn do_get_tables(cmd: CommandGetTables, bundle_schema: Option<Arc<Schema>>) 
         .collect();
 
     // Build arrays from filtered results
-    let catalogs: Vec<Option<&str>> = filtered_tables.iter().map(|_| Some("bundlebase")).collect();
+    let catalogs: Vec<Option<&str>> = filtered_tables.iter().map(|_| Some(CATALOG_NAME)).collect();
     let schemas: Vec<Option<&str>> = filtered_tables.iter().map(|(s, _, _)| Some(*s)).collect();
     let tables: Vec<&str> = filtered_tables.iter().map(|(_, t, _)| *t).collect();
     let types: Vec<&str> = filtered_tables.iter().map(|(_, _, ty)| *ty).collect();
@@ -410,12 +417,7 @@ pub fn do_get_tables(cmd: CommandGetTables, bundle_schema: Option<Arc<Schema>>) 
     let batch = RecordBatch::try_new(response_schema.clone(), columns)
         .map_err(|e| Status::internal(format!("Failed to create batch: {}", e)))?;
 
-    let stream = FlightDataEncoderBuilder::new()
-        .with_schema(response_schema)
-        .build(futures::stream::once(async { Ok(batch) }))
-        .map_err(|e| Status::from_error(Box::new(e)));
-
-    Ok(Response::new(Box::pin(stream)))
+    single_batch_stream(response_schema, batch)
 }
 
 /// Get table types flight info.
@@ -465,12 +467,7 @@ pub fn do_get_table_types() -> Result<Response<DoGetStream>, Status> {
     )
     .map_err(|e| Status::internal(format!("Failed to create batch: {}", e)))?;
 
-    let stream = FlightDataEncoderBuilder::new()
-        .with_schema(schema)
-        .build(futures::stream::once(async { Ok(batch) }))
-        .map_err(|e| Status::from_error(Box::new(e)));
-
-    Ok(Response::new(Box::pin(stream)))
+    single_batch_stream(schema, batch)
 }
 
 /// Get primary keys flight info.
@@ -503,16 +500,8 @@ pub fn get_flight_info_primary_keys(
 /// Get primary keys data (returns empty - no primary keys defined).
 pub fn do_get_primary_keys() -> Result<Response<DoGetStream>, Status> {
     let schema = primary_keys_schema();
-
-    // Return empty batch (no primary keys)
     let batch = RecordBatch::new_empty(schema.clone());
-
-    let stream = FlightDataEncoderBuilder::new()
-        .with_schema(schema)
-        .build(futures::stream::once(async { Ok(batch) }))
-        .map_err(|e| Status::from_error(Box::new(e)));
-
-    Ok(Response::new(Box::pin(stream)))
+    single_batch_stream(schema, batch)
 }
 
 /// Schema for primary keys response.
@@ -634,16 +623,8 @@ pub fn get_flight_info_exported_keys(
 /// Get exported keys data (returns empty - Bundlebase has no foreign key constraints).
 pub fn do_get_exported_keys() -> Result<Response<DoGetStream>, Status> {
     let schema = foreign_keys_schema();
-
-    // Return empty batch (no foreign keys)
     let batch = RecordBatch::new_empty(schema.clone());
-
-    let stream = FlightDataEncoderBuilder::new()
-        .with_schema(schema)
-        .build(futures::stream::once(async { Ok(batch) }))
-        .map_err(|e| Status::from_error(Box::new(e)));
-
-    Ok(Response::new(Box::pin(stream)))
+    single_batch_stream(schema, batch)
 }
 
 /// Get imported keys flight info.
@@ -676,16 +657,8 @@ pub fn get_flight_info_imported_keys(
 /// Get imported keys data (returns empty - Bundlebase has no foreign key constraints).
 pub fn do_get_imported_keys() -> Result<Response<DoGetStream>, Status> {
     let schema = foreign_keys_schema();
-
-    // Return empty batch (no foreign keys)
     let batch = RecordBatch::new_empty(schema.clone());
-
-    let stream = FlightDataEncoderBuilder::new()
-        .with_schema(schema)
-        .build(futures::stream::once(async { Ok(batch) }))
-        .map_err(|e| Status::from_error(Box::new(e)));
-
-    Ok(Response::new(Box::pin(stream)))
+    single_batch_stream(schema, batch)
 }
 
 /// Get cross reference flight info.
@@ -718,16 +691,8 @@ pub fn get_flight_info_cross_reference(
 /// Get cross reference data (returns empty - Bundlebase has no foreign key constraints).
 pub fn do_get_cross_reference() -> Result<Response<DoGetStream>, Status> {
     let schema = foreign_keys_schema();
-
-    // Return empty batch (no foreign keys)
     let batch = RecordBatch::new_empty(schema.clone());
-
-    let stream = FlightDataEncoderBuilder::new()
-        .with_schema(schema)
-        .build(futures::stream::once(async { Ok(batch) }))
-        .map_err(|e| Status::from_error(Box::new(e)));
-
-    Ok(Response::new(Box::pin(stream)))
+    single_batch_stream(schema, batch)
 }
 
 /// Schema for XDBC type info response.
@@ -874,10 +839,5 @@ pub fn do_get_xdbc_type_info() -> Result<Response<DoGetStream>, Status> {
     )
     .map_err(|e| Status::internal(format!("Failed to create batch: {}", e)))?;
 
-    let stream = FlightDataEncoderBuilder::new()
-        .with_schema(schema)
-        .build(futures::stream::once(async { Ok(batch) }))
-        .map_err(|e| Status::from_error(Box::new(e)));
-
-    Ok(Response::new(Box::pin(stream)))
+    single_batch_stream(schema, batch)
 }

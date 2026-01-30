@@ -107,6 +107,85 @@ impl FlightTestServer {
         }
     }
 
+    /// Start a server without authenticating the client.
+    /// Returns the server handle and an unauthenticated client.
+    pub async fn start_unauthenticated() -> (Self, FlightSqlServiceClient<Channel>) {
+        let bundle_path = format!(
+            "memory:///flight_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("System time before UNIX epoch")
+                .as_nanos()
+        );
+
+        let port = get_available_port();
+        let addr: SocketAddr = format!("127.0.0.1:{}", port)
+            .parse()
+            .expect("Invalid address");
+
+        let flight_service = FlightService::new(
+            bundle_path,
+            None,
+            true,
+            false,
+            BundlebaseAuthenticator::default(),
+        );
+
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+
+        let server_addr = addr;
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(FlightServiceServer::new(flight_service))
+                .serve_with_shutdown(server_addr, async {
+                    let _ = shutdown_rx.await;
+                })
+                .await
+                .expect("Flight server failed");
+        });
+
+        // Wait for server to be ready
+        let channel = {
+            let mut attempts = 0;
+            let max_attempts = 20;
+            loop {
+                match Channel::from_shared(format!("http://{}", addr))
+                    .expect("Invalid URI")
+                    .connect()
+                    .await
+                {
+                    Ok(channel) => break channel,
+                    Err(_e) if attempts < max_attempts => {
+                        attempts += 1;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                    }
+                    Err(e) => panic!(
+                        "Failed to connect to Flight SQL server after {} attempts: {}",
+                        max_attempts, e
+                    ),
+                }
+            }
+        };
+
+        // Authenticated client for the server handle
+        let mut auth_client = FlightSqlServiceClient::new(channel.clone());
+        auth_client
+            .handshake("admin", "password")
+            .await
+            .expect("Handshake should succeed");
+
+        // Unauthenticated client for testing
+        let unauth_client = FlightSqlServiceClient::new(channel);
+
+        let server = Self {
+            addr,
+            client: auth_client,
+            shutdown_tx: Some(shutdown_tx),
+        };
+
+        (server, unauth_client)
+    }
+
     /// Get a mutable reference to the Flight SQL client.
     pub fn client_mut(&mut self) -> &mut FlightSqlServiceClient<Channel> {
         &mut self.client
