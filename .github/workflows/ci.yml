@@ -2,8 +2,18 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '.context/**'
+      - '*.md'
+      - 'mkdocs.yml'
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '.context/**'
+      - '*.md'
+      - 'mkdocs.yml'
 
 jobs:
   rust:
