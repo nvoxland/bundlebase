@@ -1,7 +1,6 @@
 //! RebuildIndex command implementation.
 
 use crate::bundle::command::{CommandParsing, Rule};
-use crate::bundle::operation::RebuildIndexOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
@@ -54,8 +53,7 @@ impl BundleBuilderCommand for RebuildIndexCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let op = RebuildIndexOp::setup(self.column.clone()).await?;
-        builder.apply_operation(op.into()).await?;
+        builder.reindex_internal().await?;
         Ok(format!("Rebuilt index on column: {}", self.column))
     }
 }

@@ -13,7 +13,6 @@ mod filter;
 mod index_blocks;
 mod drop_column;
 mod parameter_value;
-mod rebuild_index;
 mod rename_column;
 mod rename_join;
 mod rename_view;
@@ -37,7 +36,6 @@ pub use crate::bundle::operation::filter::FilterOp;
 pub use crate::bundle::operation::replace_block::ReplaceBlockOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
 pub use crate::bundle::operation::drop_column::DropColumnOp;
-pub use crate::bundle::operation::rebuild_index::RebuildIndexOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
 pub use crate::bundle::operation::rename_join::RenameJoinOp;
 pub use crate::bundle::operation::rename_view::RenameViewOp;
@@ -209,7 +207,6 @@ define_any_operation! {
     DropView(DropViewOp),
     Filter(FilterOp),
     IndexBlocks(IndexBlocksOp),
-    RebuildIndex(RebuildIndexOp),
     RenameColumn(RenameColumnOp),
     RenameJoin(RenameJoinOp),
     RenameView(RenameViewOp),
