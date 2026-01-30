@@ -634,3 +634,67 @@ async fn test_bundle_info_history_after_commit() {
         "bundle_info.history should have at least 1 row after commit"
     );
 }
+
+// =============================================================================
+// Authentication Failure Tests
+// =============================================================================
+
+#[tokio::test]
+async fn test_auth_wrong_password() {
+    let (_server, mut client) = FlightTestServer::start_unauthenticated().await;
+
+    let result = client.handshake("admin", "wrong_password").await;
+    assert!(result.is_err(), "Handshake with wrong password should fail");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("Invalid credentials") || err.contains("UNAUTHENTICATED"),
+        "Error should indicate authentication failure, got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_auth_wrong_username() {
+    let (_server, mut client) = FlightTestServer::start_unauthenticated().await;
+
+    let result = client.handshake("unknown_user", "password").await;
+    assert!(result.is_err(), "Handshake with wrong username should fail");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("Invalid credentials") || err.contains("UNAUTHENTICATED"),
+        "Error should indicate authentication failure, got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_query_without_auth() {
+    let (_server, mut client) = FlightTestServer::start_unauthenticated().await;
+
+    // Try to execute a query without authenticating first
+    let result = client.execute("SELECT 1".to_string(), None).await;
+    assert!(
+        result.is_err(),
+        "Query without authentication should fail"
+    );
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("unauthenticated") || err.contains("Authentication required") || err.contains("UNAUTHENTICATED"),
+        "Error should indicate missing auth, got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_fabricated_token_rejected() {
+    let (_server, mut client) = FlightTestServer::start_unauthenticated().await;
+
+    // Manually set a fabricated token that was never issued by the server
+    client.set_token("token-00000000-0000-0000-0000-000000000000".to_string());
+
+    let result = client.execute("SELECT 1".to_string(), None).await;
+    assert!(
+        result.is_err(),
+        "Fabricated token should be rejected"
+    );
+}

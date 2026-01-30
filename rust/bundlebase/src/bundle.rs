@@ -33,7 +33,7 @@ pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
 pub use source::Source;
 use std::collections::{HashMap, HashSet};
 
-use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME};
+use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA};
 use crate::udf::VersionUdf;
 use crate::data::{DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::source::SourceFunctionRegistry;
@@ -255,11 +255,11 @@ impl Bundle {
             Arc::new(PackSchemaProvider::new(facade.clone())),
         )?;
         catalog.register_schema(
-            "default",
+            DEFAULT_SCHEMA,
             Arc::new(DefaultSchemaProvider::new(facade.clone())),
         )?;
         catalog.register_schema(
-            "bundle_info",
+            BUNDLE_INFO_SCHEMA,
             Arc::new(BundleInfoSchemaProvider::new(facade)),
         )?;
 

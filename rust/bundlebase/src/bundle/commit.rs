@@ -3,6 +3,7 @@ use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
 use crate::bundle::command::response::{CommandResponse, OutputShape};
+use crate::impl_dyn_command_response;
 use crate::bundle::operation::{AnyOperation, BundleChange};
 use crate::BundlebaseError;
 use serde::{Deserialize, Serialize};
@@ -73,13 +74,7 @@ impl CommandResponse for Vec<BundleCommit> {
         .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
     }
 
-    fn dyn_schema(&self) -> SchemaRef {
-        Self::schema()
-    }
-
-    fn dyn_output_shape(&self) -> OutputShape {
-        Self::output_shape()
-    }
+    impl_dyn_command_response!(Vec<BundleCommit>);
 }
 
 /// Extracts the version number from a manifest filename.

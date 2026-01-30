@@ -5,7 +5,7 @@ use crate::auth::BundlebaseAuthenticator;
 use arrow_flight::flight_service_server::FlightServiceServer;
 use std::net::SocketAddr;
 use tonic::transport::Server;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Start the Flight SQL server.
 ///
@@ -35,12 +35,17 @@ pub async fn start(
         if read_only { "read-only" } else { "read-write" }
     );
 
+    let authenticator = BundlebaseAuthenticator::default();
+    if authenticator.is_using_defaults() {
+        warn!("Flight server starting with default credentials (admin/password). Set custom credentials for production use.");
+    }
+
     let flight_service = BundlebaseFlightSqlService::new(
         bundle_path.to_string(),
         None,
         create,
         read_only,
-        BundlebaseAuthenticator::default(),
+        authenticator,
     );
 
     Server::builder()
