@@ -107,6 +107,9 @@ markdown_extensions:
   - pymdownx.tilde
 
 extra:
+  analytics:
+    provider: google
+    property: G-2P5BTJ2GNN
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/nvoxland/bundlebase
