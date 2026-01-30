@@ -6,7 +6,9 @@ categories:
 
 # Bundlebase 0.3.0
 
-v0.3.0 is out. The big theme this release is data ingestion -- pulling data into bundles from external systems.
+v0.3.0 is out. The big theme this release is "sources". They allow you to pull data into bundles from external systems.
+
+<!-- more -->
 
 ## New Features
 

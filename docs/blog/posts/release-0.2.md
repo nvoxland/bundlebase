@@ -6,6 +6,10 @@ categories:
 
 # Bundlebase 0.2.0
 
+Views, a new documentation site, and a bunch of internal cleanup.
+
+<!-- more -->
+
 ## New Features
 
 ### Views

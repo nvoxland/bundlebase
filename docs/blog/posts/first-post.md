@@ -10,6 +10,8 @@ Databases are always the big, scary apps that do everything. And as they morphed
 
 But for so much, we just want to easily work with some data we have lying around. Some CSV data, parquet files, or data behind an API.
 
+<!-- more -->
+
 We want to get a bit of data into the shape we want and share it with others, without all the complexity that databases bring.
 
 The goal of Bundlebase is to be "docker, but for data". 

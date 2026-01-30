@@ -8,6 +8,8 @@ categories:
 
 I pushed out the first actual release of Bundlebase today. CI's always a pain, so the first actually working version is 0.1.2.
 
+<!-- more -->
+
 It has the core of what Bundlebase does:
 
 - Attach data from Parquet, CSV, and JSON files
