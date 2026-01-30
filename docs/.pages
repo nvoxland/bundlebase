@@ -4,5 +4,6 @@ nav:
   - User Guide: guide
   - Examples: examples
   - API Reference: api
+  - SQL Reference: sql-reference
   - Blog: blog
   - ...
