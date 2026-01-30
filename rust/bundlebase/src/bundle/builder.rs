@@ -1518,10 +1518,12 @@ mod tests {
             .await
             .unwrap();
         let schema = bundle.bundle.schema().await.unwrap();
-        assert!(
-            schema.fields().is_empty(),
-            "Empty bundle should have empty schema"
+        assert_eq!(
+            schema.fields().len(),
+            1,
+            "Empty bundle should have sentinel no_data field"
         );
+        assert_eq!(schema.field(0).name(), "no_data");
     }
 
     #[tokio::test]
