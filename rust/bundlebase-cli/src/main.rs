@@ -265,8 +265,9 @@ mod tests {
 
         let schema = builder.bundle().schema().await.expect("Failed to get schema");
 
-        // Empty bundle should have no fields
-        assert_eq!(schema.fields().len(), 0);
+        // Empty bundle should have only the sentinel no_data field
+        assert_eq!(schema.fields().len(), 1);
+        assert_eq!(schema.field(0).name(), "no_data");
     }
 
     #[tokio::test]

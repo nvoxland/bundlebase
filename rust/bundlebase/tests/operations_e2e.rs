@@ -14,7 +14,9 @@ mod common;
 async fn test_create() -> Result<(), BundlebaseError> {
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     assert_eq!(0, bundle.num_rows().await?);
-    assert!(bundle.dataframe().await?.schema().columns().is_empty());
+    let schema = bundle.dataframe().await?.schema().clone();
+    assert_eq!(schema.columns().len(), 1, "Empty bundle should have sentinel no_data column");
+    assert_eq!(schema.field(0).name(), "no_data");
 
     Ok(())
 }

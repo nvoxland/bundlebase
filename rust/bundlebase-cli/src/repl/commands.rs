@@ -273,10 +273,6 @@ mod tests {
             Command::Repl(ReplCommand::Details)
         ));
         assert!(matches!(
-            parse("/info").unwrap(),
-            Command::Repl(ReplCommand::Details)
-        ));
-        assert!(matches!(
             parse("/history").unwrap(),
             Command::Repl(ReplCommand::History)
         ));
