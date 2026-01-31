@@ -139,19 +139,18 @@ impl BundleBuilderCommand for CreateSourceCommand {
         for action in actions {
             match action {
                 FetchAction::Add(data) => {
-                    let mut op = AttachBlockOp::setup_for_source(
+                    let op = AttachBlockOp::setup(
                         &pack_id,
                         &data.attach_location,
-                        &data.source_url,
-                        &data.hash,
+                        Some(&data.hash),
+                        Some(SourceInfo {
+                            id: source_id,
+                            location: data.source_location,
+                            version: data.version,
+                        }),
                         builder,
                     )
                     .await?;
-                    op.source_info = Some(SourceInfo {
-                        id: source_id,
-                        location: data.source_location,
-                        version: op.version.clone(),
-                    });
                     builder.apply_operation(op.into()).await?;
                 }
                 FetchAction::Replace { .. } | FetchAction::Remove { .. } => {

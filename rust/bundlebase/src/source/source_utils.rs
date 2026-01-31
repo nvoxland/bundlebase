@@ -298,6 +298,7 @@ where
                             source_location,
                             source_url,
                             hash: result.hash,
+                            version: current_version,
                         },
                     });
                 }
@@ -306,6 +307,7 @@ where
         } else {
             // New file - add it
             let result = materialize(location).await?;
+            let version = result.file.version().await.unwrap_or_else(|_| result.hash.clone());
             // Use relative path if file is in data_dir, otherwise full URL
             let attach_location = data_dir
                 .relative_path(result.file.as_ref())
@@ -315,6 +317,7 @@ where
                 source_location,
                 source_url,
                 hash: result.hash,
+                version,
             }));
         }
     }

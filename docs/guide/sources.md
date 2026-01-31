@@ -210,6 +210,79 @@ Lists files from a remote directory via SFTP. Requires an SSH private key for au
     CREATE SOURCE sftp_directory WITH (url = 'sftp://user@host/data/', key_path = '~/.ssh/id_rsa', patterns = '**/*.parquet')
     ```
 
+### kaggle
+
+Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle REST API. Discovers individual files within a dataset, downloads them as ZIP archives, and extracts the contents automatically.
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `dataset` | Yes | Dataset identifier in `owner/dataset-name` format (e.g., `zillow/zecon`) |
+| `patterns` | No | Comma-separated glob patterns (default: `**/*`) |
+| `mode` | No | Sync mode: `add` (default), `update`, or `sync` |
+| `version` | No | Dataset version number to download (default: latest) |
+
+!!! note "Authentication"
+    Kaggle API credentials are read from `~/.kaggle/kaggle.json`. This file should contain:
+
+    ```json
+    {"username": "YOUR_USERNAME", "key": "YOUR_API_KEY"}
+    ```
+
+    You can create this file by running `kaggle` CLI setup or by generating an API token from your [Kaggle account settings](https://www.kaggle.com/settings).
+
+!!! note
+    Files are always copied into the bundle since Kaggle files are downloaded from a remote API.
+
+=== "Async API"
+
+    ```python
+    # All files from a dataset
+    bundle = await bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon"
+    })
+
+    # Only CSV files
+    bundle = await bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon",
+        "patterns": "*.csv"
+    })
+
+    # With sync mode to detect updates
+    bundle = await bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon",
+        "mode": "update"
+    })
+    ```
+
+=== "Sync API"
+
+    ```python
+    # All files from a dataset
+    bundle = bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon"
+    })
+
+    # Only CSV files
+    bundle = bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon",
+        "patterns": "*.csv"
+    })
+
+    # With sync mode to detect updates
+    bundle = bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon",
+        "mode": "update"
+    })
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')
+    ```
+
 ## Fetching Data
 
 ### fetch()

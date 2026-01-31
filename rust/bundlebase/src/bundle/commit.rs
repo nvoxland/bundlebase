@@ -612,6 +612,7 @@ changes:
             bytes: Some(1000),
             schema: Some(schema),
             source_info: None,
+            read_options: None,
         };
 
         let remove_config = DropColumnOp {

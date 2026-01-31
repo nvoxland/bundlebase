@@ -56,6 +56,7 @@ impl ReaderPlugin for JsonPlugin {
         schema: Option<SchemaRef>,
         _layout: Option<String>,
         expected_version: Option<String>,
+        _read_options: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
         if !self.inner.handles(source) {
             return Ok(None);
@@ -198,7 +199,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let result = plugin
-            .reader("file:///test.csv", &1.into(), &*binding, None, None, None)
+            .reader("file:///test.csv", &1.into(), &*binding, None, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -212,7 +213,7 @@ mod tests {
 
         let binding = Bundle::empty().await?;
         let invalid_reader = plugin
-            .reader("file:///invalid.json", &1.into(), &*binding, None, None, None)
+            .reader("file:///invalid.json", &1.into(), &*binding, None, None, None, None)
             .await?;
 
         assert!(
@@ -244,6 +245,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
@@ -271,6 +273,7 @@ mod tests {
                 &1.into(),
                 &*binding,
                 Some(schema),
+                None,
                 None,
                 None,
             )
@@ -330,6 +333,7 @@ mod tests {
                 test_datafile("objects.json"),
                 &1.into(),
                 &*binding,
+                None,
                 None,
                 None,
                 None,

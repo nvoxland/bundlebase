@@ -328,7 +328,7 @@ impl BundleBuilderCommand for VerifyDataCommand {
                     let adapter_factory = Arc::clone(&builder.bundle().reader_factory);
                     let temp_id = ObjectId::generate();
                     if let Ok(adapter) = adapter_factory
-                        .reader(&location, &temp_id, builder, None, None, None)
+                        .reader(&location, &temp_id, builder, None, None, None, None)
                         .await
                     {
                         if let Ok(file_version) = adapter.read_version().await {

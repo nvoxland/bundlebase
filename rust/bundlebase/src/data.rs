@@ -21,6 +21,7 @@ pub use crate::row_id::{RowId, RowIdBatch, SendableRowIdBatchStream};
 pub use rowid_offset_data_source::{LineOrientedFormat, RowIdOffsetDataSource};
 pub use rowid_provider::{LayoutRowIdProvider, RowIdProvider};
 pub use rowid_stream::RowIdStreamAdapter;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 use url::Url;
@@ -68,6 +69,15 @@ pub trait DataReader: Sync + Send + Debug {
 
     fn rowid_provider(&self) -> Result<Arc<dyn RowIdProvider>, BundlebaseError> {
         Err("rowid_generator not implemented for this adapter".into())
+    }
+
+    /// Return format-specific options detected during schema inference.
+    ///
+    /// These options are stored in the attach operation and passed back when
+    /// creating readers for subsequent reads. For example, the CSV reader
+    /// may detect that `newlines_in_values` is required.
+    fn read_options(&self) -> HashMap<String, String> {
+        HashMap::new()
     }
 
     /// Stream data with RowIds for index building
