@@ -14,6 +14,7 @@
 //! Most implementations only need to implement `discover()`. The default `materialize()`
 //! and `fetch()` implementations handle the common case.
 
+use super::kaggle::KaggleFunction;
 use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
 use super::source_utils;
@@ -68,10 +69,12 @@ pub struct MaterializedData {
     pub attach_location: String,
     /// Original source location identifier (relative path or row range for storage)
     pub source_location: String,
-    /// Full URL to the source file for version reading (may differ from source_location)
+    /// Full URL to the source file (may differ from source_location)
     pub source_url: String,
     /// SHA256 hash of the content (full 64-character hex string)
     pub hash: String,
+    /// Version string for change detection (e.g., ETag, Last-Modified, S3 version)
+    pub version: String,
 }
 
 /// Sync mode for source fetch operations.
@@ -431,6 +434,10 @@ pub trait SourceFunction: Send + Sync {
         for location in discovered {
             let source_url = location.url.to_string();
             let result = self.materialize(&location, args, data_dir, &config).await?;
+            // Read version from the local file's metadata (e.g., ETag, Last-Modified).
+            // Sources that need remote version tracking (e.g., Kaggle dataset version
+            // numbers) should override fetch() to supply their own version string.
+            let version = result.file.version().await.unwrap_or_else(|_| result.hash.clone());
             // Use relative path if file is in data_dir, otherwise full URL
             let attach_location = data_dir
                 .relative_path(result.file.as_ref())
@@ -440,6 +447,7 @@ pub trait SourceFunction: Send + Sync {
                 source_location: location.source_location,
                 source_url,
                 hash: result.hash,
+                version,
             });
         }
 
@@ -510,6 +518,7 @@ impl SourceFunctionRegistry {
         };
 
         // Register built-in functions
+        registry.register(Arc::new(KaggleFunction));
         registry.register(Arc::new(PostgresFunction));
         registry.register(Arc::new(RemoteDirFunction));
         registry.register(Arc::new(WebScrapeFunction));

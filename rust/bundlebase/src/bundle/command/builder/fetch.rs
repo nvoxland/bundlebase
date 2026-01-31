@@ -230,19 +230,18 @@ async fn fetch_from_source(
     for action in actions {
         match &action {
             FetchAction::Add(data) => {
-                let mut op = AttachBlockOp::setup_for_source(
+                let op = AttachBlockOp::setup(
                     pack_id,
                     &data.attach_location,
-                    &data.source_url,
-                    &data.hash,
+                    Some(&data.hash),
+                    Some(SourceInfo {
+                        id: source_id,
+                        location: data.source_location.clone(),
+                        version: data.version.clone(),
+                    }),
                     builder,
                 )
                 .await?;
-                op.source_info = Some(SourceInfo {
-                    id: source_id,
-                    location: data.source_location.clone(),
-                    version: op.version.clone(),
-                });
                 builder.apply_operation(op.into()).await?;
                 info!("Fetched {} to {}", data.attach_location, pack_name);
             }
@@ -258,19 +257,18 @@ async fn fetch_from_source(
                 builder.apply_operation(detach_op.into()).await?;
 
                 // Attach the new block
-                let mut op = AttachBlockOp::setup_for_source(
+                let op = AttachBlockOp::setup(
                     pack_id,
                     &data.attach_location,
-                    &data.source_url,
-                    &data.hash,
+                    Some(&data.hash),
+                    Some(SourceInfo {
+                        id: source_id,
+                        location: data.source_location.clone(),
+                        version: data.version.clone(),
+                    }),
                     builder,
                 )
                 .await?;
-                op.source_info = Some(SourceInfo {
-                    id: source_id,
-                    location: data.source_location.clone(),
-                    version: op.version.clone(),
-                });
                 builder.apply_operation(op.into()).await?;
                 info!("Replaced {} in {}", data.attach_location, pack_name);
             }

@@ -98,7 +98,7 @@ impl BundleBuilderCommand for AttachCommand {
         let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
         let pack_name = self.pack.as_deref().unwrap_or("base");
 
-        let op = AttachBlockOp::setup(&pack_id, &self.path, builder).await?;
+        let op = AttachBlockOp::setup(&pack_id, &self.path, None, None, builder).await?;
         builder.apply_operation(op.into()).await?;
 
         Ok(format!("Attached {} to {}", self.path, pack_name))

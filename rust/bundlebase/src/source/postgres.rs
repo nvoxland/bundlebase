@@ -579,7 +579,10 @@ impl SourceFunction for PostgresFunction {
                                 attach_location: attach_location.clone(),
                                 source_location: source_location.clone(),
                                 source_url: attach_location,
-                                hash: result.hash,
+                                hash: result.hash.clone(),
+                                // Postgres has no native version identifier, so use the
+                                // content hash as a proxy for change detection.
+                                version: result.hash,
                             },
                         });
                     }
@@ -618,7 +621,10 @@ impl SourceFunction for PostgresFunction {
                 attach_location: attach_location.clone(),
                 source_location,
                 source_url: attach_location,
-                hash: result.hash,
+                hash: result.hash.clone(),
+                // Postgres has no native version identifier, so use the
+                // content hash as a proxy for change detection.
+                version: result.hash,
             }));
         }
 

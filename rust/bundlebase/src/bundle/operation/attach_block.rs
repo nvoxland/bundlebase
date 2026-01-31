@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use log::debug;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Information about the source that a block was fetched from.
@@ -34,6 +35,8 @@ pub struct AttachBlockOp {
     pub id: ObjectId,
     pub pack: ObjectId,
     pub location: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_options: Option<HashMap<String, String>>,
     pub version: String,
     /// SHA256 hash of the content (full 64-character hex string)
     pub hash: String,
@@ -54,127 +57,91 @@ pub struct AttachBlockOp {
 }
 
 impl AttachBlockOp {
-    /// Read version from a URL using the adapter factory.
-    async fn read_version_from(
-        url: &str,
-        builder: &BundleBuilder,
-    ) -> Result<String, BundlebaseError> {
-        let temp_id = ObjectId::generate();
-        let adapter_factory = builder.bundle().reader_factory.clone();
-        let adapter = adapter_factory
-            .reader(url, &temp_id, builder, None, None, None)
-            .await?;
-        adapter.read_version().await
-    }
-
-    /// Setup an AttachBlockOp for a file attached via source fetch.
+    /// Setup an AttachBlockOp for a file.
     ///
-    /// Reads version from `source_location` (the remote URL) rather than
-    /// `attach_location` (the local copy). This enables accurate change
-    /// detection on subsequent fetches when `copy=true`.
+    /// Reads schema, version, statistics, and layout from the file at `location`.
     ///
     /// # Arguments
     /// * `pack` - Pack to attach the block to
-    /// * `attach_location` - Where data is stored (local copy if copy=true)
-    /// * `source_location` - Original remote URL for version tracking
-    /// * `hash` - SHA256 hash of the content (computed during copy/materialize)
+    /// * `location` - Where data is stored (URL or path)
+    /// * `hash` - Pre-computed SHA256 hash, or `None` to compute it from the file
+    /// * `source_info` - Source tracking metadata, or `None` for directly-attached files
     /// * `builder` - Bundle builder
-    pub async fn setup_for_source(
-        pack: &ObjectId,
-        attach_location: &str,
-        source_location: &str,
-        hash: &str,
-        builder: &BundleBuilder,
-    ) -> Result<Self, BundlebaseError> {
-        // Read version from SOURCE location for change detection
-        let source_version = Self::read_version_from(source_location, builder).await?;
-
-        // Setup normally for schema/stats from attach_location
-        let mut op = Self::setup_with_hash(pack, attach_location, hash, builder).await?;
-
-        // Override version with source version
-        op.version = source_version;
-
-        Ok(op)
-    }
-
-    /// Setup an AttachBlockOp for a file, computing the hash by streaming.
     pub async fn setup(
         pack: &ObjectId,
         location: &str,
+        hash: Option<&str>,
+        source_info: Option<SourceInfo>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
-        // Create progress scope (indeterminate - we don't know how many steps)
         let _progress = ProgressScope::new(
             &format!("Attaching '{}'", location),
-            None, // indeterminate progress
+            None,
         );
 
-        _progress.update(1, Some("Computing hash"));
+        let hash = match hash {
+            Some(h) => h.to_string(),
+            None => {
+                _progress.update(1, Some("Computing hash"));
 
-        // Check if this is a function:// URL - these don't support file-based hash
-        //todo: do this right
-        let hash = if location.starts_with("function://") {
-            // For functions, use version as hash proxy
-            let version = Self::read_version_from(location, builder).await?;
+                // Check if this is a function:// URL - these don't support file-based hash
+                //todo: do this right
+                if location.starts_with("function://") {
+                    let temp_id = ObjectId::generate();
+                    let adapter_factory = builder.bundle().reader_factory.clone();
+                    let adapter = adapter_factory
+                        .reader(location, &temp_id, builder, None, None, None, None)
+                        .await?;
+                    let version = adapter.read_version().await?;
 
-            // Hash the version string as a proxy for content hash
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(version.as_bytes());
-            hex::encode(hasher.finalize())
-        } else {
-            // Normal file-based hash computation for other schemes
-            let file = readable_file_from_path(location, builder.data_dir(), builder.config())?;
-            file.compute_hash().await?
+                    use sha2::{Digest, Sha256};
+                    let mut hasher = Sha256::new();
+                    hasher.update(version.as_bytes());
+                    hex::encode(hasher.finalize())
+                } else {
+                    let file = readable_file_from_path(location, builder.data_dir(), builder.config())?;
+                    file.compute_hash().await?
+                }
+            }
         };
-
-        Self::setup_with_hash(pack, location, &hash, builder).await
-    }
-
-    /// Setup an AttachBlockOp with a pre-computed hash.
-    ///
-    /// Used when the hash is already known (e.g., from source materialization).
-    pub async fn setup_with_hash(
-        pack: &ObjectId,
-        location: &str,
-        hash: &str,
-        builder: &BundleBuilder,
-    ) -> Result<Self, BundlebaseError> {
-        // Create progress scope (indeterminate - we don't know how many steps)
-        let _progress = ProgressScope::new(
-            &format!("Attaching '{}'", location),
-            None, // indeterminate progress
-        );
 
         let block_id = ObjectId::generate();
 
-        _progress.update(1, Some("Creating adapter"));
+        _progress.update(2, Some("Creating adapter"));
         let adapter_factory = builder.bundle().reader_factory.clone();
         let adapter = adapter_factory
-            .reader(location, &block_id, builder, None, None, None)
+            .reader(location, &block_id, builder, None, None, None, None)
             .await?;
 
-        _progress.update(2, Some("Reading version"));
+        _progress.update(3, Some("Reading version"));
         let version = adapter.read_version().await?;
 
-        _progress.update(3, Some("Reading schema"));
+        _progress.update(4, Some("Reading schema"));
         let schema = adapter.read_schema().await?;
+
+        // Capture any format-specific options detected during schema inference
+        let detected_options = adapter.read_options();
+        let read_options = if detected_options.is_empty() {
+            None
+        } else {
+            Some(detected_options)
+        };
 
         let mut op = AttachBlockOp {
             location: location.to_string(),
             num_rows: None,
             bytes: None,
             version,
-            hash: hash.to_string(),
+            hash,
             schema,
             id: block_id,
             pack: *pack,
             layout: None,
-            source_info: None,
+            source_info,
+            read_options,
         };
 
-        _progress.update(4, Some("Reading statistics"));
+        _progress.update(5, Some("Reading statistics"));
         match adapter.read_statistics().await? {
             Some(stats) => {
                 op.num_rows = stats.num_rows.get_value().copied();
@@ -185,7 +152,7 @@ impl AttachBlockOp {
             }
         }
 
-        _progress.update(5, Some("Building layout"));
+        _progress.update(6, Some("Building layout"));
         let data_dir = builder.bundle().data_dir();
         op.layout = match adapter.build_layout(data_dir.as_ref()).await? {
             Some(file) => Some(data_dir.relative_path(file.as_ref())?),
@@ -230,6 +197,7 @@ impl Operation for AttachBlockOp {
                 self.schema.clone(),
                 self.layout.clone(),
                 expected_version,
+                self.read_options.as_ref(),
             )
             .await?;
 
@@ -288,6 +256,7 @@ mod tests {
             schema: None,
             layout: None,
             source_info: None,
+            read_options: None,
         };
 
         assert_eq!(op.describe(), "ATTACH: file:///test/data.csv");
@@ -298,7 +267,7 @@ mod tests {
         let datafile = test_datafile("userdata.parquet");
         let bundle = empty_bundle().await;
         let op =
-            AttachBlockOp::setup(&ObjectId::generate(), datafile, bundle.as_ref()).await?;
+            AttachBlockOp::setup(&ObjectId::generate(), datafile, None, None, bundle.as_ref()).await?;
         let block_id = String::from(op.id);
         let pack = String::from(op.pack);
         let version = ObjectStoreFile::from_url(
@@ -461,6 +430,7 @@ schema:
             schema: None,
             layout: None,
             source_info: None,
+            read_options: None,
         };
 
         let version = op.version();

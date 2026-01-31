@@ -64,6 +64,33 @@ async def test_create_source_auto_fetch():
 
 
 @pytest.mark.asyncio
+async def test_create_kaggle_source_invalid_dataset():
+    """Test that kaggle source function validates dataset format."""
+    c = await bundlebase.create(random_bundle())
+    with pytest.raises(ValueError, match="Invalid dataset format"):
+        await c.create_source("kaggle", {"dataset": "invalid-no-slash"})
+
+
+@pytest.mark.asyncio
+async def test_create_kaggle_source_missing_dataset():
+    """Test that kaggle source function requires dataset argument."""
+    c = await bundlebase.create(random_bundle())
+    with pytest.raises(ValueError, match="requires a 'dataset' argument"):
+        await c.create_source("kaggle", {})
+
+
+@pytest.mark.asyncio
+async def test_create_kaggle_source_credentials():
+    """Test that kaggle source passes validation and reaches credential check."""
+    c = await bundlebase.create(random_bundle())
+    # With valid args but no ~/.kaggle/kaggle.json, create_source should fail
+    # with a credential error (proving validation passed and discover() was reached)
+    if not os.path.exists(os.path.expanduser("~/.kaggle/kaggle.json")):
+        with pytest.raises(ValueError, match="kaggle.json"):
+            await c.create_source("kaggle", {"dataset": "zillow/zecon"})
+
+
+@pytest.mark.asyncio
 async def test_fetch_returns_results():
     """Test that fetch returns FetchResults with details about attached files."""
     with tempfile.TemporaryDirectory() as source_dir:

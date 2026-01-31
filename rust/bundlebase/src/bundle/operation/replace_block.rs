@@ -55,7 +55,7 @@ impl ReplaceBlockOp {
         let temp_id = ObjectId::generate();
         let adapter_factory = builder.bundle().reader_factory.clone();
         let adapter = adapter_factory
-            .reader(new_location, &temp_id, builder, None, None, None)
+            .reader(new_location, &temp_id, builder, None, None, None, None)
             .await?;
         let new_version = adapter.read_version().await?;
 
@@ -159,6 +159,7 @@ impl Operation for ReplaceBlockOp {
                 Some(old_block.schema()),
                 None, // Layout will be rebuilt if needed
                 Some(self.new_version.clone()), // Validate version during query execution
+                None,
             )
             .await?;
 
