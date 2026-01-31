@@ -5,6 +5,8 @@
 
 use arrow::array::{ArrayRef, Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use datafusion::execution::SendableRecordBatchStream;
+use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use std::sync::Arc;
 
 use crate::BundlebaseError;
@@ -29,7 +31,7 @@ pub enum OutputShape {
 ///
 /// All command output types must implement this trait, enabling consistent handling
 /// of results across different interfaces (REPL, Flight, Python bindings, etc.).
-pub trait CommandResponse: Send + Sync {
+pub trait CommandResponse: Send {
     /// Returns the Arrow schema for this output type.
     ///
     /// This is an associated function that doesn't require an instance,
@@ -48,8 +50,12 @@ pub trait CommandResponse: Send + Sync {
     where
         Self: Sized;
 
-    /// Converts this output to a RecordBatch.
-    fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError>;
+    /// Convert this boxed response into a `SendableRecordBatchStream`.
+    ///
+    /// This is the sole data-producing method on the trait. Batch-based responses
+    /// build a `RecordBatch` and wrap it via [`single_batch_stream`]. Stream-based
+    /// responses (like `SendableRecordBatchStream`) return the stream directly.
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError>;
 
     /// Object-safe method to get schema at runtime via dynamic dispatch.
     ///
@@ -60,6 +66,17 @@ pub trait CommandResponse: Send + Sync {
     ///
     /// This allows getting the output shape from a `Box<dyn CommandResponse>` or `&dyn CommandResponse`.
     fn dyn_output_shape(&self) -> OutputShape;
+}
+
+/// Wrap a single `RecordBatch` into a `SendableRecordBatchStream`.
+///
+/// This is the standard helper for batch-based `CommandResponse` implementations.
+pub fn single_batch_stream(
+    schema: SchemaRef,
+    batch: RecordBatch,
+) -> Result<SendableRecordBatchStream, BundlebaseError> {
+    let stream = futures::stream::iter(vec![Ok(batch)]);
+    Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
 }
 
 /// Macro to implement the boilerplate `dyn_schema` and `dyn_output_shape` methods
@@ -92,10 +109,11 @@ impl CommandResponse for String {
         OutputShape::SingleValue
     }
 
-    fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
         let message_array: ArrayRef = Arc::new(StringArray::from(vec![self.as_str()]));
-        RecordBatch::try_new(Self::schema(), vec![message_array])
-            .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+        let batch = RecordBatch::try_new(Self::schema(), vec![message_array])
+            .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
+        single_batch_stream(Self::schema(), batch)
     }
 
     impl_dyn_command_response!(String);
@@ -114,7 +132,7 @@ impl CommandResponse for SchemaRef {
         OutputShape::Table
     }
 
-    fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
         let columns: Vec<&str> = self.fields().iter().map(|f| f.name().as_str()).collect();
         let types: Vec<String> = self.fields().iter().map(|f| f.data_type().to_string()).collect();
         let nullables: Vec<&str> = self
@@ -127,8 +145,12 @@ impl CommandResponse for SchemaRef {
         let types_array: ArrayRef = Arc::new(StringArray::from(types));
         let nullables_array: ArrayRef = Arc::new(StringArray::from(nullables));
 
-        RecordBatch::try_new(Self::schema(), vec![columns_array, types_array, nullables_array])
-            .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+        let batch =
+            RecordBatch::try_new(Self::schema(), vec![columns_array, types_array, nullables_array])
+                .map_err(|e| {
+                    BundlebaseError::from(format!("Failed to create record batch: {}", e))
+                })?;
+        single_batch_stream(Self::schema(), batch)
     }
 
     impl_dyn_command_response!(SchemaRef);
@@ -144,45 +166,70 @@ impl CommandResponse for usize {
         OutputShape::SingleValue
     }
 
-    fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
         let count_array: ArrayRef = Arc::new(Int64Array::from(vec![*self as i64]));
-        RecordBatch::try_new(Self::schema(), vec![count_array])
-            .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+        let batch = RecordBatch::try_new(Self::schema(), vec![count_array])
+            .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
+        single_batch_stream(Self::schema(), batch)
     }
 
     impl_dyn_command_response!(usize);
 }
 
+/// Implement CommandResponse for SendableRecordBatchStream so that
+/// explain (and other stream-producing commands) can flow through the
+/// normal command execution path without special-casing.
+impl CommandResponse for SendableRecordBatchStream {
+    fn schema() -> SchemaRef {
+        // Not meaningful for streams — callers should use dyn_schema()
+        Arc::new(Schema::empty())
+    }
+
+    fn output_shape() -> OutputShape {
+        OutputShape::Table
+    }
+
+    fn dyn_schema(&self) -> SchemaRef {
+        use datafusion::physical_plan::RecordBatchStream;
+        RecordBatchStream::schema(self.as_ref().get_ref())
+    }
+
+    fn dyn_output_shape(&self) -> OutputShape {
+        OutputShape::Table
+    }
+
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        Ok(*self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
 
-    #[test]
-    fn test_string_schema() {
-        let schema = String::schema();
+    #[tokio::test]
+    async fn test_string_response() {
+        let response: Box<dyn CommandResponse> = Box::new("Test message".to_string());
+        let schema = response.dyn_schema();
         assert_eq!(schema.fields().len(), 1);
         assert_eq!(schema.field(0).name(), "message");
-    }
 
-    #[test]
-    fn test_string_to_record_batch() {
-        let response = "Test message".to_string();
-        let batch = response.to_record_batch().expect("Failed to create batch");
+        let mut stream = response.into_stream().expect("Failed to create stream");
+        let batch = stream.next().await.unwrap().unwrap();
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.num_columns(), 1);
     }
 
-    #[test]
-    fn test_usize_schema() {
-        let schema = usize::schema();
+    #[tokio::test]
+    async fn test_usize_response() {
+        let response: Box<dyn CommandResponse> = Box::new(42_usize);
+        let schema = response.dyn_schema();
         assert_eq!(schema.fields().len(), 1);
         assert_eq!(schema.field(0).name(), "count");
-    }
 
-    #[test]
-    fn test_usize_to_record_batch() {
-        let count: usize = 42;
-        let batch = count.to_record_batch().expect("Failed to create batch");
+        let mut stream = response.into_stream().expect("Failed to create stream");
+        let batch = stream.next().await.unwrap().unwrap();
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.num_columns(), 1);
     }

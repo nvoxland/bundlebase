@@ -1,6 +1,6 @@
 use crate::bundle::command::{BundleBuilderCommand, BundleCommand, CommandResponse, FacadeCommand, FetchAllCommand, FetchCommand};
 use crate::impl_dyn_command_response;
-use crate::bundle::command::response::OutputShape;
+use crate::bundle::command::response::{single_batch_stream, OutputShape};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::AnyOperation;
@@ -145,7 +145,7 @@ impl CommandResponse for BundleStatus {
         OutputShape::Table
     }
 
-    fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
         let changes = self.changes();
 
         let ids: Vec<i32> = (0..changes.len() as i32).collect();
@@ -156,7 +156,7 @@ impl CommandResponse for BundleStatus {
             .map(|c| c.operations.len() as i32)
             .collect();
 
-        RecordBatch::try_new(
+        let batch = RecordBatch::try_new(
             Self::schema(),
             vec![
                 Arc::new(Int32Array::from(ids)),
@@ -167,7 +167,8 @@ impl CommandResponse for BundleStatus {
                 Arc::new(Int32Array::from(operation_counts)),
             ],
         )
-        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
+        single_batch_stream(Self::schema(), batch)
     }
 
     impl_dyn_command_response!(BundleStatus);
@@ -1402,34 +1403,6 @@ impl BundleFacade for BundleBuilder {
         Ok(self.bundle().query(sql, params).await?)
     }
 
-    /// Execute a SQL statement or command, returning streaming results.
-    ///
-    /// Unlike the default implementation in BundleFacade (which only handles read-only commands),
-    /// BundleBuilder can execute ALL commands including mutating ones like ATTACH, FILTER, etc.
-    async fn execute(
-        &self,
-        sql: &str,
-        params: Vec<ScalarValue>,
-    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        use super::command::parser::{is_command_statement, parse_command};
-        use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
-
-        if is_command_statement(sql) {
-            // Parse and execute as command (BundleBuilder can handle all commands)
-            let cmd = parse_command(sql)?;
-            let output = cmd.execute(self).await?;
-
-            // Convert to stream using dyn methods
-            let schema = output.dyn_schema();
-            let batch = output.to_record_batch()?;
-            let stream = futures::stream::iter(vec![Ok(batch)]);
-            Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
-        } else {
-            // Execute as regular SQL query
-            self.query(sql, params).await
-        }
-    }
-
     fn views(&self) -> HashMap<ObjectId, String> {
         self.bundle.views()
     }
@@ -1445,10 +1418,6 @@ impl BundleFacade for BundleBuilder {
         }
 
         self.bundle.export_tar(tar_path).await
-    }
-
-    async fn explain(&self) -> Result<String, BundlebaseError> {
-        self.bundle.explain().await
     }
 
     fn status_changes(&self) -> Vec<BundleChange> {

@@ -26,7 +26,6 @@ use bundlebase::bundle::{parse_command, CommandResponse, OutputShape};
 use bundlebase::BundlebaseError;
 use bundlebase::BundleFacade;
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use futures;
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -120,15 +119,10 @@ impl ReplCommand {
 
 /// Convert a CommandResponse to a stream
 pub fn response_to_stream(
-    response: &dyn CommandResponse,
+    response: Box<dyn CommandResponse>,
 ) -> Result<(SendableRecordBatchStream, OutputShape), BundlebaseError> {
-    let schema = response.dyn_schema();
     let shape = response.dyn_output_shape();
-    let batch = response.to_record_batch()?;
-    let stream = Box::pin(RecordBatchStreamAdapter::new(
-        schema,
-        futures::stream::iter(vec![Ok(batch)]),
-    ));
+    let stream = response.into_stream()?;
     Ok((stream, shape))
 }
 

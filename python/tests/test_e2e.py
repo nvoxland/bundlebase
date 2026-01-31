@@ -424,16 +424,17 @@ async def test_to_dict():
 
 @pytest.mark.asyncio
 async def test_explain():
-    """Test query plan explanation"""
+    """Test query plan explanation returns a stream with plan_type and plan columns"""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("userdata.parquet"))
 
-    # Explain should return a non-empty string with formatted plan type markers
-    plan = await c.explain()
-    assert isinstance(plan, str)
-    assert len(plan) > 0
-    # Should contain plan type markers (*** PLAN_TYPE ***)
-    assert "***" in plan
+    # Explain should return a RecordBatchStream
+    stream = await c.explain()
+    batch = await stream.next_batch()
+    assert batch is not None
+    # Should have plan_type and plan columns
+    assert batch.num_columns == 2
+    assert batch.num_rows > 0
 
 
 @pytest.mark.asyncio
@@ -443,10 +444,82 @@ async def test_explain_with_filter():
     c = await c.attach(datafile("userdata.parquet"))
     c = await c.filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
-    # Explain should return a plan with the filter applied
-    plan = await c.explain()
-    assert isinstance(plan, str)
-    assert len(plan) > 0
+    # Explain should return a stream with plan data
+    stream = await c.explain()
+    batch = await stream.next_batch()
+    assert batch is not None
+    assert batch.num_columns == 2
+    assert batch.num_rows > 0
+
+
+@pytest.mark.asyncio
+async def test_explain_analyze():
+    """Test explain with analyze option"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    stream = await c.explain(analyze=True)
+    batch = await stream.next_batch()
+    assert batch is not None
+    assert batch.num_columns == 2
+    assert batch.num_rows > 0
+
+
+@pytest.mark.asyncio
+async def test_explain_verbose():
+    """Test explain with verbose option"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    stream = await c.explain(verbose=True)
+    batch = await stream.next_batch()
+    assert batch is not None
+    assert batch.num_columns == 2
+    assert batch.num_rows > 0
+
+
+@pytest.mark.asyncio
+async def test_explain_format_tree():
+    """Test explain with tree format"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    stream = await c.explain(format="tree")
+    batch = await stream.next_batch()
+    assert batch is not None
+    assert batch.num_columns == 2
+    assert batch.num_rows > 0
+
+
+@pytest.mark.asyncio
+async def test_explain_with_sql():
+    """Test explain with explicit SQL statement"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    stream = await c.explain(sql="SELECT * FROM bundle WHERE id > 10")
+    batch = await stream.next_batch()
+    assert batch is not None
+    assert batch.num_columns == 2
+    assert batch.num_rows > 0
+
+
+@pytest.mark.asyncio
+async def test_explain_all_options():
+    """Test explain with all options combined"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    stream = await c.explain(
+        analyze=True,
+        verbose=True,
+        format="indent",
+        sql="SELECT id, first_name FROM bundle LIMIT 5",
+    )
+    batch = await stream.next_batch()
+    assert batch is not None
+    assert batch.num_columns == 2
+    assert batch.num_rows > 0
 
 
 @pytest.mark.asyncio

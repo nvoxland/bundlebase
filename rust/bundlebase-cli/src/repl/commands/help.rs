@@ -22,7 +22,7 @@ fn create(_args: &str) -> Result<ReplCommand, String> {
 fn execute(_cmd: &ReplCommand, _bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'static, ReplCommandResult> {
     Box::pin(async {
         let response: Box<dyn bundlebase::bundle::CommandResponse> = Box::new(help_text());
-        let (stream, shape) = super::response_to_stream(response.as_ref())?;
+        let (stream, shape) = super::response_to_stream(response)?;
         Ok(Some((stream, shape)))
     })
 }
@@ -75,11 +75,14 @@ fn help_text() -> String {
 mod tests {
     use super::*;
     use bundlebase::bundle::CommandResponse;
+    use futures::StreamExt;
 
-    #[test]
-    fn test_help_result() {
+    #[tokio::test]
+    async fn test_help_result() {
         let result = help_text();
-        let batch = result.to_record_batch().unwrap();
+        let response: Box<dyn CommandResponse> = Box::new(result);
+        let mut stream = response.into_stream().unwrap();
+        let batch = stream.next().await.unwrap().unwrap();
         assert_eq!(batch.num_rows(), 1);
         assert_eq!(batch.num_columns(), 1);
     }

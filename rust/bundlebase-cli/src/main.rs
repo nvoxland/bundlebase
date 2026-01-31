@@ -49,7 +49,7 @@ struct Args {
     create: bool,
 
     /// Open bundle in read-only mode (default: false).
-    /// When true, only SELECT and EXPLAIN PLAN commands are allowed.
+    /// When true, only SELECT and EXPLAIN commands are allowed.
     /// Use --read-only to enable read-only mode.
     #[arg(long, default_value = "false")]
     read_only: bool,

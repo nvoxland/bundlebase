@@ -29,7 +29,7 @@ fn execute(_cmd: &ReplCommand, bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'sta
         } else {
             Box::new(commits)
         };
-        let (stream, shape) = super::response_to_stream(response.as_ref())?;
+        let (stream, shape) = super::response_to_stream(response)?;
         Ok(Some((stream, shape)))
     })
 }
@@ -37,12 +37,15 @@ fn execute(_cmd: &ReplCommand, bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'sta
 #[cfg(test)]
 mod tests {
     use bundlebase::bundle::{BundleCommit, CommandResponse};
+    use futures::TryStreamExt;
 
-    #[test]
-    fn test_history_result_empty() {
+    #[tokio::test]
+    async fn test_history_result_empty() {
         let commits: Vec<BundleCommit> = vec![];
-        let batch = commits.to_record_batch().unwrap();
-        assert_eq!(batch.num_rows(), 0);
-        assert_eq!(batch.num_columns(), 6);
+        let stream = Box::new(commits).into_stream().unwrap();
+        let batches: Vec<arrow::array::RecordBatch> = stream.try_collect().await.unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].num_rows(), 0);
+        assert_eq!(batches[0].num_columns(), 6);
     }
 }
