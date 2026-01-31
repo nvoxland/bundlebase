@@ -402,14 +402,23 @@ class TestSyncQuery:
         assert len(results_queried["id"]) == 10
 
     def test_sync_explain(self):
-        """Test query explanation synchronously."""
+        """Test query explanation synchronously returns a stream."""
+        from bundlebase.sync import _loop_manager
+
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
         c.filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
-        plan = c.explain()
-        assert isinstance(plan, str)
-        assert len(plan) > 0
+        stream = c.explain()
+        # Stream should be a RecordBatchStream; consume via collect_all
+        async def _collect():
+            return await stream.collect_all()
+
+        batches = _loop_manager.run_sync(_collect())
+        assert batches is not None
+        assert len(batches) > 0
+        # Each batch should have plan_type and plan columns
+        assert batches[0].num_columns == 2
 
 
 class TestSyncCreateView:

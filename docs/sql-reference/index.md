@@ -244,15 +244,30 @@ VERIFY DATA [UPDATE]
 
 See [Versioning](../guide/versioning.md) for details.
 
-### EXPLAIN PLAN
+### EXPLAIN
 
-Shows the pending operations that will be applied on the next commit.
+Shows the query execution plan for the bundle's dataframe or a given SQL statement.
 
 ```sql
-EXPLAIN PLAN
+EXPLAIN [ANALYZE] [VERBOSE] [FORMAT format] [sql]
 ```
 
-See [Versioning](../guide/versioning.md) for details.
+**Options:**
+
+- `ANALYZE` — Run the plan and show actual execution statistics
+- `VERBOSE` — Show more detailed plan information
+- `FORMAT format` — Output format: `INDENT` (default), `TREE`, or `GRAPHVIZ`
+- `sql` — Optional SQL statement to explain (if omitted, explains the bundle's dataframe)
+
+**Examples:**
+
+```sql
+EXPLAIN
+EXPLAIN ANALYZE
+EXPLAIN VERBOSE FORMAT TREE
+EXPLAIN SELECT * FROM bundle WHERE id > 10
+EXPLAIN ANALYZE FORMAT TREE SELECT * FROM bundle WHERE salary > 50000
+```
 
 ## Metadata
 

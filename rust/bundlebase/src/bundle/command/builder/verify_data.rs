@@ -13,9 +13,10 @@ use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use std::sync::Arc;
+use datafusion::execution::SendableRecordBatchStream;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
-
+use crate::bundle::command::response::single_batch_stream;
 // ============================================================================
 // Verification Result Types
 // ============================================================================
@@ -60,7 +61,7 @@ impl CommandResponse for VerificationResults {
         crate::bundle::command::response::OutputShape::Table
     }
 
-    fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
         let files = &self.files;
 
         let location: ArrayRef = Arc::new(StringArray::from(
@@ -89,7 +90,7 @@ impl CommandResponse for VerificationResults {
             files.iter().map(|r| r.version_updated).collect::<Vec<_>>(),
         ));
 
-        RecordBatch::try_new(
+        let batch = RecordBatch::try_new(
             Self::schema(),
             vec![
                 location,
@@ -101,7 +102,8 @@ impl CommandResponse for VerificationResults {
                 version_updated,
             ],
         )
-        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
+        single_batch_stream(Self::schema(), batch)
     }
 
     impl_dyn_command_response!(VerificationResults);

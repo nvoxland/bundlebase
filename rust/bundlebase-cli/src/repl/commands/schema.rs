@@ -29,7 +29,7 @@ fn execute(_cmd: &ReplCommand, bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'sta
         } else {
             Box::new(schema)
         };
-        let (stream, shape) = super::response_to_stream(response.as_ref())?;
+        let (stream, shape) = super::response_to_stream(response)?;
         Ok(Some((stream, shape)))
     })
 }
@@ -39,15 +39,18 @@ mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow_schema::SchemaRef;
     use bundlebase::bundle::CommandResponse;
+    use futures::StreamExt;
     use std::sync::Arc;
 
-    #[test]
-    fn test_schema_result() {
+    #[tokio::test]
+    async fn test_schema_result() {
         let schema: SchemaRef = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int64, false),
             Field::new("name", DataType::Utf8, true),
         ]));
-        let batch = schema.to_record_batch().unwrap();
+        let response: Box<dyn CommandResponse> = Box::new(schema);
+        let mut stream = response.into_stream().unwrap();
+        let batch = stream.next().await.unwrap().unwrap();
         assert_eq!(batch.num_rows(), 2);
         assert_eq!(batch.num_columns(), 3);
     }

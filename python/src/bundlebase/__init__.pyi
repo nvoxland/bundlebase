@@ -124,22 +124,34 @@ class PyBundle:
         """
         ...
 
-    async def explain(self) -> str:
+    async def explain(
+        self,
+        verbose: bool = False,
+        analyze: bool = False,
+        format: Optional[str] = None,
+        sql: Optional[str] = None,
+    ) -> "RecordBatchStream":
         """
-        Get the query execution plan as a string.
+        Get the query execution plan as a stream.
 
         Generates and returns the logical and physical query plan that DataFusion
         will use to execute the operation pipeline.
 
+        Args:
+            verbose: If True, show more detailed plan information
+            analyze: If True, run the plan and show actual execution statistics
+            format: Output format - "indent" (default), "tree", or "graphviz"
+            sql: Optional SQL statement to explain instead of the bundle's dataframe
+
         Returns:
-            String containing the detailed query execution plan
+            RecordBatchStream with plan_type and plan columns
 
         Raises:
             ValueError: If plan generation fails
 
         Example:
-            plan = await bundle.explain()
-            print(plan)  # Shows the query optimization plan
+            stream = await bundle.explain()
+            batch = await stream.next()  # Contains plan_type and plan columns
         """
         ...
 
@@ -968,22 +980,34 @@ class PyBundleBuilder:
         """
         ...
 
-    async def explain(self) -> str:
+    async def explain(
+        self,
+        verbose: bool = False,
+        analyze: bool = False,
+        format: Optional[str] = None,
+        sql: Optional[str] = None,
+    ) -> "RecordBatchStream":
         """
-        Get the query execution plan as a string.
+        Get the query execution plan as a stream.
 
         Generates and returns the logical and physical query plan that DataFusion
         will use to execute the operation pipeline.
 
+        Args:
+            verbose: If True, show more detailed plan information
+            analyze: If True, run the plan and show actual execution statistics
+            format: Output format - "indent" (default), "tree", or "graphviz"
+            sql: Optional SQL statement to explain instead of the bundle's dataframe
+
         Returns:
-            String containing the detailed query execution plan
+            RecordBatchStream with plan_type and plan columns
 
         Raises:
             ValueError: If plan generation fails
 
         Example:
-            plan = await bundle.explain()
-            print(plan)  # Shows the query optimization plan
+            stream = await bundle.explain()
+            batch = await stream.next()  # Contains plan_type and plan columns
         """
         ...
 

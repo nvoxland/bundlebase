@@ -151,7 +151,7 @@ pub fn available_commands() -> std::collections::HashMap<&'static str, &'static 
     map.insert("SET NAME", "SET NAME '<name>'");
     map.insert("SET DESCRIPTION", "SET DESCRIPTION '<description>'");
     map.insert("VERIFY DATA", "VERIFY DATA [UPDATE]");
-    map.insert("EXPLAIN PLAN", "EXPLAIN PLAN");
+    map.insert("EXPLAIN", "EXPLAIN [ANALYZE] [VERBOSE] [FORMAT <format>] [<sql>]");
     map
 }
 
@@ -184,7 +184,7 @@ pub fn rule_to_syntax(rule: Rule) -> Option<&'static str> {
         Rule::set_name_stmt => map.get("SET NAME").copied(),
         Rule::set_description_stmt => map.get("SET DESCRIPTION").copied(),
         Rule::verify_data_stmt => map.get("VERIFY DATA").copied(),
-        Rule::explain_stmt => map.get("EXPLAIN PLAN").copied(),
+        Rule::explain_stmt => map.get("EXPLAIN").copied(),
         _ => None,
     }
 }

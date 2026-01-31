@@ -271,9 +271,9 @@ async fn test_explain_plan() {
     let data = TestData::new();
     data.attach(&mut server).await;
 
-    // EXPLAIN PLAN should return the query plan
-    let result = execute_query(&mut server, "EXPLAIN PLAN").await;
-    assert!(result.is_ok(), "EXPLAIN PLAN should succeed");
+    // EXPLAIN should return the query plan
+    let result = execute_query(&mut server, "EXPLAIN").await;
+    assert!(result.is_ok(), "EXPLAIN should succeed");
 }
 
 #[tokio::test]

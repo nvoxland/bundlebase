@@ -162,7 +162,7 @@ All operations work synchronously without `await`:
 - **`to_polars() -> DataFrame`** - Convert to Polars
 - **`to_dict() -> Dict`** - Convert to dict
 - **`to_numpy() -> Dict`** - Convert to numpy arrays
-- **`explain() -> str`** - Get query plan
+- **`explain(verbose=False, analyze=False, format=None, sql=None) -> RecordBatchStream`** - Get query plan
 
 #### Properties (no `await`)
 

@@ -1,5 +1,5 @@
 use super::command::parser::{is_command_statement, parse_command};
-use super::command::{BundleCommand, FacadeCommand, CommandResponse, OutputShape};
+use super::command::{BundleCommand, ExplainPlanCommand, FacadeCommand, CommandResponse, OutputShape};
 use super::operation::BundleChange;
 use crate::bundle::BundleCommit;
 use crate::bundle::BundleStatus;
@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use datafusion::common::ScalarValue;
 use datafusion::dataframe::DataFrame;
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::prelude::SessionContext;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -130,17 +129,10 @@ pub trait BundleFacade: Send + Sync {
         params: Vec<ScalarValue>,
     ) -> Result<SendableRecordBatchStream, BundlebaseError> {
         if is_command_statement(sql) {
-            // Parse and execute as command via execute_command (object-safe)
             let cmd = parse_command(sql)?;
             let output = self.execute_command(cmd).await?;
-
-            // Convert to stream using dyn methods
-            let schema = output.dyn_schema();
-            let batch = output.to_record_batch()?;
-            let stream = futures::stream::iter(vec![Ok(batch)]);
-            Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
+            output.into_stream()
         } else {
-            // Execute as regular SQL query
             self.query(sql, params).await
         }
     }
@@ -162,7 +154,7 @@ pub trait BundleFacade: Send + Sync {
     /// # Example
     /// ```ignore
     /// // Get schema for a command
-    /// let (schema, shape) = bundle.response_schema("EXPLAIN PLAN").await?;
+    /// let (schema, shape) = bundle.response_schema("EXPLAIN").await?;
     ///
     /// // Get schema for a SQL query
     /// let (schema, shape) = bundle.response_schema("SELECT id, name FROM bundle").await?;
@@ -241,8 +233,31 @@ pub trait BundleFacade: Send + Sync {
     /// ```
     async fn export_tar(&self, tar_path: &str) -> Result<String, BundlebaseError>;
 
-    /// Returns the query execution plan as a formatted string
-    async fn explain(&self) -> Result<String, BundlebaseError>;
+    /// Returns the query execution plan as a stream.
+    ///
+    /// This default implementation creates an `ExplainPlanCommand` and executes it
+    /// through the normal command path.
+    async fn explain(
+        &self,
+        verbose: bool,
+        analyze: bool,
+        format: datafusion::logical_expr::ExplainFormat,
+        sql: Option<&str>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        let format_str = match format {
+            datafusion::logical_expr::ExplainFormat::Tree => Some("TREE".to_string()),
+            datafusion::logical_expr::ExplainFormat::Graphviz => Some("GRAPHVIZ".to_string()),
+            _ => None,
+        };
+        let cmd = ExplainPlanCommand {
+            verbose,
+            analyze,
+            format: format_str,
+            sql: sql.map(|s| s.to_string()),
+        };
+        let response = self.execute_facade_command(FacadeCommand::ExplainPlan(cmd)).await?;
+        response.into_stream()
+    }
 
     /// Returns uncommitted changes (empty for Bundle, populated for BundleBuilder)
     fn status_changes(&self) -> Vec<BundleChange>;
@@ -355,10 +370,10 @@ mod tests {
             .await
             .unwrap();
 
-        // Execute EXPLAIN PLAN command via execute()
+        // Execute EXPLAIN command via execute()
         let mut stream = builder
             .as_ref()
-            .execute("EXPLAIN PLAN", vec![])
+            .execute("EXPLAIN", vec![])
             .await
             .unwrap();
 
@@ -367,9 +382,9 @@ mod tests {
             batches.push(batch_result.unwrap());
         }
 
-        // EXPLAIN should return a single batch with the plan
-        assert_eq!(batches.len(), 1);
-        assert_eq!(batches[0].num_columns(), 1); // Single "message" column
+        // EXPLAIN should return batches with plan_type and plan columns
+        assert!(!batches.is_empty());
+        assert_eq!(batches[0].num_columns(), 2); // plan_type + plan columns
         assert!(batches[0].num_rows() > 0);
     }
 
@@ -471,10 +486,10 @@ mod tests {
         // Open the committed bundle (read-only)
         let bundle = Bundle::open(&bundle_url, None).await.unwrap();
 
-        // Execute EXPLAIN PLAN command via execute()
+        // Execute EXPLAIN command via execute()
         let mut stream = bundle
             .as_ref()
-            .execute("EXPLAIN PLAN", vec![])
+            .execute("EXPLAIN", vec![])
             .await
             .unwrap();
 
@@ -483,9 +498,9 @@ mod tests {
             batches.push(batch_result.unwrap());
         }
 
-        // EXPLAIN should return a single batch with the plan
-        assert_eq!(batches.len(), 1);
-        assert_eq!(batches[0].num_columns(), 1);
+        // EXPLAIN should return batches with plan_type and plan columns
+        assert!(!batches.is_empty());
+        assert_eq!(batches[0].num_columns(), 2); // plan_type + plan columns
         assert!(batches[0].num_rows() > 0);
     }
 

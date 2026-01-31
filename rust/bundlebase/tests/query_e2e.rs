@@ -124,26 +124,30 @@ async fn test_query_with_aggregation() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_explain_basic() -> Result<(), BundlebaseError> {
+    use datafusion::logical_expr::ExplainFormat;
+    use futures::StreamExt;
+
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
-    // Explain should return a non-empty string
-    let plan = bundle.bundle().explain().await?;
-    assert!(
-        !plan.is_empty(),
-        "Explain should return a non-empty query plan"
-    );
-    // Check for the formatted plan with type markers
-    assert!(
-        plan.contains("***"),
-        "Explain should contain plan type markers (*** ***)"
-    );
+    // Explain should return a stream with plan_type and plan columns
+    let mut stream = bundle.bundle().explain(false, false, ExplainFormat::Indent, None).await?;
+    let mut row_count = 0;
+    while let Some(batch_result) = stream.next().await {
+        let batch = batch_result?;
+        assert_eq!(batch.num_columns(), 2, "Should have plan_type and plan columns");
+        row_count += batch.num_rows();
+    }
+    assert!(row_count > 0, "Explain should return at least one row");
 
     Ok(())
 }
 
 #[tokio::test]
 async fn test_explain_with_filter() -> Result<(), BundlebaseError> {
+    use datafusion::logical_expr::ExplainFormat;
+    use futures::StreamExt;
+
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
@@ -151,13 +155,14 @@ async fn test_explain_with_filter() -> Result<(), BundlebaseError> {
     let filtered = bundle
         .filter("SELECT * FROM bundle WHERE salary > $1", vec![ScalarValue::Float64(Some(50000.0))])
         .await?;
-    let plan = filtered.bundle().explain().await?;
+    let mut stream = filtered.bundle().explain(false, false, ExplainFormat::Indent, None).await?;
 
-    assert!(
-        !plan.is_empty(),
-        "Explain should return plan for filtered bundle"
-    );
-    assert!(plan.len() > 0, "Explain should produce meaningful output");
+    let mut row_count = 0;
+    while let Some(batch_result) = stream.next().await {
+        let batch = batch_result?;
+        row_count += batch.num_rows();
+    }
+    assert!(row_count > 0, "Explain should produce at least one row for filtered bundle");
 
     Ok(())
 }

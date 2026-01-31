@@ -6,6 +6,7 @@ use datafusion::datasource::{MemTable, TableProvider, TableType};
 use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
+use futures::TryStreamExt;
 use std::any::Any;
 use std::sync::Arc;
 
@@ -48,10 +49,11 @@ impl TableProvider for BundleHistoryTable {
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let commits = self.facade.history();
-        let batch = commits
-            .to_record_batch()
+        let stream = Box::new(commits)
+            .into_stream()
             .map_err(|e| datafusion::error::DataFusionError::External(e))?;
-        let mem_table = MemTable::try_new(self.schema(), vec![vec![batch]])?;
+        let batches: Vec<_> = stream.try_collect().await?;
+        let mem_table = MemTable::try_new(self.schema(), vec![batches])?;
         mem_table.scan(state, projection, filters, limit).await
     }
 }

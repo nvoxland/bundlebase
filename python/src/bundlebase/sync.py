@@ -196,9 +196,27 @@ class SyncBundle:
         coro = _call_original_method(self._async, "num_rows")
         return _loop_manager.run_sync(coro)
 
-    def explain(self) -> str:
-        """Get the query execution plan."""
-        coro = _call_original_method(self._async, "explain")
+    def explain(
+        self,
+        verbose: bool = False,
+        analyze: bool = False,
+        format: str = None,
+        sql: str = None,
+    ):
+        """Get the query execution plan as a RecordBatchStream.
+
+        Args:
+            verbose: If True, show more detailed plan information
+            analyze: If True, run the plan and show actual execution statistics
+            format: Output format - "indent" (default), "tree", or "graphviz"
+            sql: Optional SQL statement to explain instead of the bundle's dataframe
+
+        Returns:
+            RecordBatchStream with plan_type and plan columns
+        """
+        coro = _call_original_method(
+            self._async, "explain", verbose, analyze, format, sql
+        )
         return _loop_manager.run_sync(coro)
 
     def to_pandas(self) -> Any:

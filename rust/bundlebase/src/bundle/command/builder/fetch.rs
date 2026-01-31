@@ -11,8 +11,10 @@ use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use log::info;
 use std::sync::Arc;
+use datafusion::execution::SendableRecordBatchStream;
 use super::super::BundleBuilderCommand;
 use crate::bundle::{Bundle, BundleBuilder};
+use crate::bundle::command::response::single_batch_stream;
 
 impl CommandResponse for Vec<FetchResults> {
     fn schema() -> SchemaRef {
@@ -30,7 +32,7 @@ impl CommandResponse for Vec<FetchResults> {
         crate::bundle::command::response::OutputShape::Table
     }
 
-    fn to_record_batch(&self) -> Result<RecordBatch, BundlebaseError> {
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
         let source_function: ArrayRef = Arc::new(StringArray::from(
             self.iter()
                 .map(|r| r.source_function.as_str())
@@ -54,7 +56,7 @@ impl CommandResponse for Vec<FetchResults> {
             self.iter().map(|r| r.removed.len() as u64).collect::<Vec<_>>(),
         ));
 
-        RecordBatch::try_new(
+        let batch = RecordBatch::try_new(
             Self::schema(),
             vec![
                 source_function,
@@ -65,7 +67,8 @@ impl CommandResponse for Vec<FetchResults> {
                 removed_count,
             ],
         )
-        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))
+        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
+        single_batch_stream(Self::schema(), batch)
     }
 
     impl_dyn_command_response!(Vec<FetchResults>);

@@ -38,7 +38,7 @@
 //! - `message`: Commands that return String (most common)
 //! - `fetch`: Commands that return `Vec<FetchResults>`
 //! - `verification`: Commands that return `VerificationResults`
-//! - `custom`: Commands with special execution logic (Commit, ExplainPlan)
+//! - `facade`: Read-only commands using `BundleFacadeCommand` (ExplainPlan)
 
 use crate::bundle::facade::BundleFacade;
 use crate::source::FetchResults;
@@ -85,15 +85,15 @@ pub enum FacadeCommand {
 }
 
 impl FacadeCommand {
-    /// Execute this command on a BundleFacade.
+    /// Execute this command on a BundleFacade, returning a boxed CommandResponse.
     pub async fn execute(
         self,
         facade: &dyn BundleFacade,
     ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         match self {
-            FacadeCommand::ExplainPlan(_) => {
-                let plan = facade.explain().await?;
-                Ok(Box::new(plan) as Box<dyn CommandResponse>)
+            FacadeCommand::ExplainPlan(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
             }
         }
     }
@@ -101,14 +101,14 @@ impl FacadeCommand {
     /// Returns the Arrow schema for this command's output.
     pub fn output_schema(&self) -> SchemaRef {
         match self {
-            FacadeCommand::ExplainPlan(_) => String::schema(),
+            FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
         }
     }
 
     /// Returns the expected output shape for display formatting.
     pub fn output_shape(&self) -> OutputShape {
         match self {
-            FacadeCommand::ExplainPlan(_) => String::output_shape(),
+            FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
         }
     }
 }
@@ -260,7 +260,7 @@ pub trait BundleFacadeCommand: CommandParsing {
 /// - `message`: Commands using `execute_command()` returning String (boxed as `dyn CommandResponse`)
 /// - `fetch_special`: Commands returning `Vec<FetchResults>` with special parsing (handled in parser.rs)
 /// - `verification`: Commands returning `VerificationResults`
-/// - `custom`: Commands with custom execution logic (handled manually in execute)
+/// - `facade`: Read-only commands using `BundleFacadeCommand` (schema/shape from command struct)
 ///
 /// Note: `fetch_special` commands are NOT included in `parse_from_rule()` because they share
 /// grammar rules (e.g., fetch_stmt -> Fetch or FetchAll). They must be handled specially in parser.rs.
@@ -278,9 +278,9 @@ macro_rules! register_commands {
         verification {
             $( $verify_variant:ident($verify_cmd:ty) => $verify_rule:path ),* $(,)?
         }
-        // Commands with custom execution logic (execute body provided separately)
-        custom {
-            $( $custom_variant:ident($custom_cmd:ty) => $custom_rule:path ),* $(,)?
+        // Read-only commands using BundleFacadeCommand (e.g. ExplainPlan)
+        facade {
+            $( $facade_variant:ident($facade_cmd:ty) => $facade_rule:path ),* $(,)?
         }
     ) => {
         /// Command that can be executed on a BundleBuilder.
@@ -304,8 +304,8 @@ macro_rules! register_commands {
             $( $fetch_variant($fetch_cmd), )*
             // Verification commands
             $( $verify_variant($verify_cmd), )*
-            // Custom commands
-            $( $custom_variant($custom_cmd), )*
+            // Facade commands (read-only)
+            $( $facade_variant($facade_cmd), )*
         }
 
         impl BundleCommand {
@@ -336,15 +336,13 @@ macro_rules! register_commands {
                             Ok(Box::new(results) as Box<dyn CommandResponse>)
                         }
                     )*
-                    // Custom commands - handled individually below
-                    BundleCommand::Commit(cmd) => {
-                        let result = builder.execute_command(cmd).await?;
-                        Ok(Box::new(result) as Box<dyn CommandResponse>)
-                    }
-                    BundleCommand::ExplainPlan(_cmd) => {
-                        let plan = builder.explain().await?;
-                        Ok(Box::new(plan) as Box<dyn CommandResponse>)
-                    }
+                    // Facade commands - executed via BundleFacadeCommand trait
+                    $(
+                        BundleCommand::$facade_variant(cmd) => {
+                            let result = BundleFacadeCommand::execute(Box::new(cmd), builder).await?;
+                            Ok(Box::new(result))
+                        }
+                    )*
                 }
             }
 
@@ -355,8 +353,8 @@ macro_rules! register_commands {
                     $( BundleCommand::$fetch_variant(_) => Vec::<FetchResults>::schema(), )*
                     // Verification commands
                     $( BundleCommand::$verify_variant(_) => VerificationResults::schema(), )*
-                    // ExplainPlan returns plan schema (String)
-                    BundleCommand::ExplainPlan(_) => String::schema(),
+                    // Facade commands - schema from the command struct
+                    $( BundleCommand::$facade_variant(_) => <$facade_cmd>::output_schema(), )*
                     // All other commands return message schema
                     _ => String::schema(),
                 }
@@ -369,8 +367,8 @@ macro_rules! register_commands {
                     $( BundleCommand::$fetch_variant(_) => Vec::<FetchResults>::output_shape(), )*
                     // Verification commands return table format
                     $( BundleCommand::$verify_variant(_) => VerificationResults::output_shape(), )*
-                    // ExplainPlan returns single value (plan text)
-                    BundleCommand::ExplainPlan(_) => String::output_shape(),
+                    // Facade commands - shape from the command struct
+                    $( BundleCommand::$facade_variant(_) => <$facade_cmd>::output_shape(), )*
                     // All other commands return single value (OK message)
                     _ => String::output_shape(),
                 }
@@ -401,8 +399,8 @@ macro_rules! register_commands {
                 // Note: fetch_special commands are handled in parser.rs, not here
                 // Verification commands
                 $( $verify_rule => Ok(Some(BundleCommand::$verify_variant(<$verify_cmd>::from_statement(pair)?))), )*
-                // Custom commands
-                $( $custom_rule => Ok(Some(BundleCommand::$custom_variant(<$custom_cmd>::from_statement(pair)?))), )*
+                // Facade commands
+                $( $facade_rule => Ok(Some(BundleCommand::$facade_variant(<$facade_cmd>::from_statement(pair)?))), )*
                 // Unknown rule - return None for special handling
                 _ => Ok(None),
             }
@@ -410,7 +408,7 @@ macro_rules! register_commands {
     };
 }
 
-// Register all commands using the macro
+// Register all commands using the macro.
 //
 // NOTE: Commands in `fetch_special` share the fetch_stmt rule and are handled
 // specially in parser.rs::parse_command() rather than through parse_from_rule().
@@ -451,6 +449,7 @@ register_commands! {
         // Transaction commands
         Reset(ResetCommand) => Rule::reset_stmt,
         Undo(UndoCommand) => Rule::undo_stmt,
+        Commit(CommitCommand) => Rule::commit_stmt,
     }
     fetch_special {
         // These commands share Rule::fetch_stmt - handled in parser.rs
@@ -460,8 +459,7 @@ register_commands! {
     verification {
         VerifyData(VerifyDataCommand) => Rule::verify_data_stmt,
     }
-    custom {
-        Commit(CommitCommand) => Rule::commit_stmt,
+    facade {
         ExplainPlan(ExplainPlanCommand) => Rule::explain_stmt,
     }
 }

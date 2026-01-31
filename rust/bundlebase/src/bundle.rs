@@ -47,7 +47,7 @@ use async_trait::async_trait;
 use datafusion::catalog::MemorySchemaProvider;
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::logical_expr::{ExplainFormat, ExplainOption, LogicalPlan, ScalarUDF};
+use datafusion::logical_expr::{LogicalPlan, ScalarUDF};
 use datafusion::prelude::*;
 use datafusion::scalar::ScalarValue;
 use log::{debug, info};
@@ -597,41 +597,6 @@ impl Bundle {
 
     pub fn ctx(&self) -> Arc<SessionContext> {
         self.ctx.clone()
-    }
-
-    pub async fn explain(&self) -> Result<String, BundlebaseError> {
-        let mut result = String::new();
-
-        let df = (*self.dataframe().await?).clone();
-        let plan = df.explain_with_options(ExplainOption {
-            verbose: false,
-            analyze: false,
-            format: ExplainFormat::Indent,
-        })?;
-        let records = plan.collect().await?;
-
-        for batch in records {
-            let plan_type_column = batch.column(0);
-            let plan_column = batch.column(1);
-
-            if let (Some(plan_type_array), Some(plan_array)) = (
-                plan_type_column
-                    .as_any()
-                    .downcast_ref::<arrow::array::StringArray>(),
-                plan_column
-                    .as_any()
-                    .downcast_ref::<arrow::array::StringArray>(),
-            ) {
-                for i in 0..plan_type_column.len() {
-                    if !plan_type_column.is_null(i) && !plan_column.is_null(i) {
-                        let plan_type = plan_type_array.value(i);
-                        let plan_text = plan_array.value(i);
-                        result.push_str(&format!("\n*** {} ***\n{}\n", plan_type, plan_text));
-                    }
-                }
-            }
-        }
-        Ok(result.trim().to_string())
     }
 
     /// Joins the pack with join metadata to the base dataframe
@@ -1245,10 +1210,6 @@ impl BundleFacade for Bundle {
         Ok(format!("Exported bundle to {}", tar_path))
     }
 
-    async fn explain(&self) -> Result<String, BundlebaseError> {
-        Bundle::explain(self).await
-    }
-
     fn status_changes(&self) -> Vec<operation::BundleChange> {
         Vec::new() // Bundle (read-only) always has empty status
     }
@@ -1292,7 +1253,7 @@ impl BundleFacade for Bundle {
         &self,
         cmd: BundleCommand,
     ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
-        // Bundle is read-only, so we can only execute facade commands
+        // Bundle is read-only, so only facade commands are allowed.
         let facade_cmd = cmd.into_facade_command()?;
         self.execute_facade_command(facade_cmd).await
     }

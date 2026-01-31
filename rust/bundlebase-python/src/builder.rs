@@ -861,12 +861,38 @@ impl PyBundleBuilder {
         })
     }
 
-    fn explain<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    #[pyo3(signature = (verbose=false, analyze=false, format=None, sql=None))]
+    fn explain<'py>(
+        &self,
+        verbose: bool,
+        analyze: bool,
+        format: Option<&str>,
+        sql: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
+        let format_str = format.map(|s| s.to_string());
+        let sql_str = sql.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner.explain()
+            let explain_format = match format_str.as_deref() {
+                Some("tree") | Some("TREE") => datafusion::logical_expr::ExplainFormat::Tree,
+                Some("graphviz") | Some("GRAPHVIZ") => {
+                    datafusion::logical_expr::ExplainFormat::Graphviz
+                }
+                _ => datafusion::logical_expr::ExplainFormat::Indent,
+            };
+            let stream = inner
+                .explain(verbose, analyze, explain_format, sql_str.as_deref())
                 .await
-                .map_err(|e| to_py_error("Failed to explain query", e))
+                .map_err(|e| to_py_error("Failed to explain query", e))?;
+            let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    super::record_batch_stream::PyRecordBatchStream::new(stream, schema),
+                )
+                .map_err(|e| to_py_error("Failed to create stream", e))
+            })
         })
     }
 

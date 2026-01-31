@@ -412,10 +412,24 @@ verify_data_stmt = {
 }
 
 // ============================================================================
-// EXPLAIN PLAN Statement
+// EXPLAIN Statement
 // ============================================================================
-// Syntax: EXPLAIN PLAN
+// Syntax: EXPLAIN [ANALYZE] [VERBOSE] [FORMAT format] [sql]
+// Examples:
+//   EXPLAIN
+//   EXPLAIN ANALYZE
+//   EXPLAIN VERBOSE
+//   EXPLAIN ANALYZE VERBOSE FORMAT TREE
+//   EXPLAIN SELECT * FROM bundle WHERE id > 10
 
 explain_stmt = {
-    ^"explain" ~ ^"plan"
+    ^"explain" ~ explain_analyze? ~ explain_verbose? ~ (^"format" ~ explain_format)? ~ explain_sql?
+}
+
+explain_analyze = { ^"analyze" }
+explain_verbose = { ^"verbose" }
+explain_format = { ^"indent" | ^"tree" | ^"graphviz" }
+
+explain_sql = @{
+    (!EOI ~ ANY)+
 }

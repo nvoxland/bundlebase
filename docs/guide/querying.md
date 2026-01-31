@@ -92,24 +92,35 @@ Use `$1`, `$2`, etc. as placeholders to safely pass parameters:
 
 ## Explain Plan
 
-Use `explain()` to see the query execution plan without running the query:
+Use `explain()` to see the query execution plan. It returns a stream of record batches with `plan_type` and `plan` columns:
 
 === "Async API"
 
     ```python
-    plan = await bundle.explain()
-    print(plan)
+    stream = await bundle.explain()
+    batch = await stream.next_batch()
+
+    # With options
+    stream = await bundle.explain(analyze=True, verbose=True, format="tree")
+
+    # Explain a specific SQL statement
+    stream = await bundle.explain(sql="SELECT * FROM bundle WHERE id > 10")
     ```
 
 === "Sync API"
 
     ```python
-    plan = bundle.explain()
-    print(plan)
+    stream = bundle.explain()
+
+    # With options
+    stream = bundle.explain(analyze=True, format="tree")
     ```
 
 === "SQL"
 
     ```sql
-    EXPLAIN PLAN
+    EXPLAIN
+    EXPLAIN ANALYZE VERBOSE
+    EXPLAIN FORMAT TREE
+    EXPLAIN SELECT * FROM bundle WHERE id > 10
     ```
