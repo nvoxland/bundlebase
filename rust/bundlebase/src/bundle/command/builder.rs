@@ -5,6 +5,7 @@
 // Builder command implementations
 mod attach;
 mod commit;
+mod create_config_scope;
 mod create_index;
 mod create_source;
 mod create_view;
@@ -31,6 +32,7 @@ mod verify_data;
 
 pub use attach::AttachCommand;
 pub use commit::CommitCommand;
+pub use create_config_scope::CreateConfigScopeCommand;
 pub use create_index::CreateIndexCommand;
 pub use create_source::CreateSourceCommand;
 pub use create_view::CreateViewCommand;

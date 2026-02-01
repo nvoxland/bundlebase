@@ -28,6 +28,7 @@ statement = { SOI ~ (
     | source_stmt
     | index_stmt
     | transaction_stmt
+    | config_scope_stmt
     | metadata_stmt
 ) ~ EOI }
 
@@ -72,6 +73,11 @@ transaction_stmt = {
     | undo_stmt
     | verify_data_stmt
     | explain_stmt
+}
+
+// Config scope statements - operations for config scope management
+config_scope_stmt = {
+    create_config_scope_stmt
 }
 
 // Metadata statements - operations for bundle metadata
@@ -318,12 +324,22 @@ rebuild_index_stmt = {
 }
 
 // ============================================================================
+// CREATE CONFIG SCOPE Statement
+// ============================================================================
+// Syntax: CREATE CONFIG SCOPE <name> AS '<url>'
+// Example: CREATE CONFIG SCOPE prod AS 's3://my-bucket/'
+
+create_config_scope_stmt = {
+    ^"create" ~ ^"config" ~ ^"scope" ~ identifier ~ ^"as" ~ quoted_string
+}
+
+// ============================================================================
 // SET CONFIG Statement
 // ============================================================================
-// Syntax: SET CONFIG <key> = '<value>' [FOR '<url_prefix>']
+// Syntax: SET CONFIG <key> = '<value>' [FOR '<url_prefix>' | FOR SCOPE <name>]
 
 set_config_stmt = {
-    ^"set" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ (^"for" ~ quoted_string)?
+    ^"set" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ (^"for" ~ (^"scope" ~ identifier | quoted_string))?
 }
 
 // ============================================================================

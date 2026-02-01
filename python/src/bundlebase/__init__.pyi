@@ -612,7 +612,7 @@ class PyBundleBuilder:
         """
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "OperationChain":
+    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None, scope: Optional[str] = None) -> "OperationChain":
         """
         Queue a set_config operation.
 
@@ -620,6 +620,7 @@ class PyBundleBuilder:
             key: Configuration key
             value: Configuration value
             url_prefix: Optional URL prefix for URL-specific config
+            scope: Optional scope name (resolved to url_prefix at execute time)
 
         Returns:
             OperationChain for fluent chaining
@@ -627,6 +628,36 @@ class PyBundleBuilder:
         Example:
             c = await c.set_config("region", "us-west-2")
             c = await c.set_config("endpoint", "http://localhost:9000", url_prefix="s3://test-bucket/")
+            c = await c.set_config("region", "us-east-1", scope="prod")
+        """
+        ...
+
+    def create_config_scope(self, name: str, url: str) -> "OperationChain":
+        """
+        Create a named config scope (name -> URL mapping).
+
+        Config scopes are runtime aliases. Use with ``set_config(..., scope="name")``
+        to set config for the URL associated with the scope.
+
+        Args:
+            name: Scope name (e.g., "prod", "staging")
+            url: URL prefix this scope maps to (e.g., "s3://my-bucket/")
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.create_config_scope("prod", "s3://my-bucket/")
+            c = await c.set_config("region", "us-east-1", scope="prod")
+        """
+        ...
+
+    def config_scopes(self) -> Dict[str, str]:
+        """
+        Get defined config scopes (name -> URL).
+
+        Returns:
+            Dictionary mapping scope names to URL prefixes
         """
         ...
 
@@ -1159,8 +1190,12 @@ class OperationChain:
         """Queue a set_description operation."""
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "OperationChain":
+    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None, scope: Optional[str] = None) -> "OperationChain":
         """Queue a set_config operation."""
+        ...
+
+    def create_config_scope(self, name: str, url: str) -> "OperationChain":
+        """Queue a create_config_scope operation."""
         ...
 
     def create_function(
@@ -1276,8 +1311,12 @@ class CreateChain:
         """Queue a set_description operation."""
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "CreateChain":
+    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None, scope: Optional[str] = None) -> "CreateChain":
         """Queue a set_config operation."""
+        ...
+
+    def create_config_scope(self, name: str, url: str) -> "CreateChain":
+        """Queue a create_config_scope operation."""
         ...
 
     def create_function(
@@ -1393,8 +1432,12 @@ class ExtendChain:
         """Queue a set_description operation."""
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "ExtendChain":
+    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None, scope: Optional[str] = None) -> "ExtendChain":
         """Queue a set_config operation."""
+        ...
+
+    def create_config_scope(self, name: str, url: str) -> "ExtendChain":
+        """Queue a create_config_scope operation."""
         ...
 
     def create_function(

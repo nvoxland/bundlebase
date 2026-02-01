@@ -280,6 +280,9 @@ pub trait BundleFacade: Send + Sync {
     /// Returns the bundle configuration
     fn config(&self) -> Arc<BundleConfig>;
 
+    /// Returns defined config scopes (name -> URL)
+    fn config_scopes(&self) -> HashMap<String, String>;
+
     /// Returns the DataFusion session context
     fn ctx(&self) -> Arc<SessionContext>;
 

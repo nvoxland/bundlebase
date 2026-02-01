@@ -264,22 +264,74 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Create a named config scope (name -> URL mapping).
+    ///
+    /// Config scopes are runtime aliases. Use with `set_config(..., scope="name")`
+    /// to set config for the URL associated with the scope.
+    ///
+    /// # Arguments
+    /// * `name` - Scope name (e.g., "prod", "staging")
+    /// * `url` - URL prefix this scope maps to (e.g., "s3://my-bucket/")
+    fn create_config_scope<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        url: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let url = url.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .create_config_scope(name.as_str(), url.as_str())
+                .await
+                .map_err(|e| {
+                    to_py_error(
+                        &format!("Failed to create config scope '{}' = '{}'", name, url),
+                        e,
+                    )
+                })?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
+    /// Returns defined config scopes (name -> URL).
+    fn config_scopes(&self) -> HashMap<String, String> {
+        self.inner.bundle().config_scopes()
+    }
+
     /// Set a configuration value. Mutates the bundle in place and returns it for chaining.
-    #[pyo3(signature = (key, value, url_prefix=None))]
+    ///
+    /// # Arguments
+    /// * `key` - Configuration key
+    /// * `value` - Configuration value
+    /// * `url_prefix` - Optional URL prefix for URL-specific config
+    /// * `scope` - Optional scope name (resolved to url_prefix at execute time)
+    #[pyo3(signature = (key, value, url_prefix=None, scope=None))]
     fn set_config<'py>(
         slf: PyRef<'_, Self>,
         key: &str,
         value: &str,
         url_prefix: Option<&str>,
+        scope: Option<&str>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let key = key.to_string();
         let value = value.to_string();
         let url_prefix = url_prefix.map(|s| s.to_string());
+        let scope = scope.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .set_config(key.as_str(), value.as_str(), url_prefix.as_deref())
+                .set_config(
+                    key.as_str(),
+                    value.as_str(),
+                    url_prefix.as_deref(),
+                    scope.as_deref(),
+                )
                 .await
                 .map_err(|e| {
                     to_py_error(&format!("Failed to set config '{}' = '{}'", key, value), e)
