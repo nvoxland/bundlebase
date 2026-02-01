@@ -104,6 +104,9 @@ pub struct Bundle {
 
     /// True if this bundle is a view (has a view field in init commit)
     is_view: Arc<RwLock<bool>>,
+
+    /// Named config scopes (name -> URL prefix)
+    config_scopes: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl Clone for Bundle {
@@ -145,6 +148,7 @@ impl Clone for Bundle {
             passed_config: Arc::clone(&self.passed_config),
             stored_config: Arc::clone(&self.stored_config),
             is_view: Arc::clone(&self.is_view),
+            config_scopes: Arc::clone(&self.config_scopes),
         }
     }
 }
@@ -225,6 +229,7 @@ impl Bundle {
             passed_config: Arc::new(RwLock::new(None)),
             stored_config: Arc::new(RwLock::new(BundleConfig::new())),
             is_view: Arc::new(RwLock::new(false)),
+            config_scopes: Arc::new(RwLock::new(HashMap::new())),
         });
 
         // Register schema providers with Bundle as the facade
@@ -539,14 +544,32 @@ impl Bundle {
         Arc::clone(&*self.config.read())
     }
 
+    /// Add a named config scope (name -> URL mapping)
+    pub(crate) fn add_config_scope(&self, name: &str, url: &str) {
+        self.config_scopes
+            .write()
+            .insert(name.to_string(), url.to_string());
+    }
+
+    /// Get the URL for a named config scope
+    pub(crate) fn get_config_scope_url(&self, name: &str) -> Option<String> {
+        self.config_scopes.read().get(name).cloned()
+    }
+
+    /// Returns all defined config scopes (name -> URL)
+    pub fn config_scopes(&self) -> HashMap<String, String> {
+        self.config_scopes.read().clone()
+    }
+
     /// Recompute the merged config and recreate data_dir with it
     ///
-    /// Merges stored_config and explicit_config (with explicit taking priority),
+    /// Merges stored_config, explicit_config, and environment variables,
     /// then recreates data_dir with the new merged config.
     ///
     /// Priority order:
-    /// 1. Explicit config passed to create()/open() (highest)
-    /// 2. Config stored via SetConfigOp operations (lowest)
+    /// 1. Environment variables (BB_*) (highest)
+    /// 2. Explicit config passed to create()/open()
+    /// 3. Config stored via SetConfigOp operations (lowest)
     pub(crate) fn recompute_config(&self) -> Result<(), BundlebaseError> {
         // Merge stored_config with explicit_config (explicit takes priority)
         let stored_config = self.stored_config.read().clone();
@@ -556,6 +579,11 @@ impl Bundle {
         } else {
             stored_config
         };
+
+        // Load env vars using bundle's defined scopes for named scope resolution
+        let scopes = self.config_scopes();
+        let env_config = BundleConfig::from_env(&scopes);
+        let merged = merged.merge(&env_config);
 
         // Update the config field
         let new_config = Arc::new(merged);
@@ -592,6 +620,7 @@ impl Bundle {
         *self.config.write() = Arc::clone(&*other.config.read());
         *self.data_dir.write() = Arc::clone(&*other.data_dir.read());
         *self.is_view.write() = *other.is_view.read();
+        *self.config_scopes.write() = other.config_scopes.read().clone();
         self.dataframe.clear();
     }
 
@@ -1236,6 +1265,10 @@ impl BundleFacade for Bundle {
 
     fn config(&self) -> Arc<BundleConfig> {
         Bundle::config(self)
+    }
+
+    fn config_scopes(&self) -> HashMap<String, String> {
+        Bundle::config_scopes(self)
     }
 
     fn ctx(&self) -> Arc<SessionContext> {

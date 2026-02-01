@@ -17,11 +17,13 @@ use std::sync::Arc;
 
 // Re-export commonly used types for convenience
 #[allow(unused_imports)]
-pub use ftp::{FtpDir, FtpFile, FtpIOFactory};
+pub use ftp::{FtpDir, FtpFile, FtpIOFactory, FTP_CONFIG_SPEC};
 #[allow(unused_imports)]
-pub use object_store::{ObjectStoreFile, ObjectStoreIOFactory};
+pub use object_store::{
+    ObjectStoreFile, ObjectStoreIOFactory, S3_CONFIG_SPEC, GCS_CONFIG_SPEC, AZURE_CONFIG_SPEC,
+};
 #[allow(unused_imports)]
-pub use sftp::{SftpClient, SftpDir, SftpFile, SftpIOFactory};
+pub use sftp::{SftpClient, SftpDir, SftpFile, SftpIOFactory, SFTP_CONFIG_SPEC};
 #[allow(unused_imports)]
 pub use tar::{TarDir, TarFile, TarIOFactory, TarObjectStore};
 #[allow(unused_imports)]

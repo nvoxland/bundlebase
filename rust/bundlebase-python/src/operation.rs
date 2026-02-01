@@ -33,6 +33,7 @@ impl PyOperation {
             AnyOperation::CreateSource(_) => "createSource".to_string(),
             AnyOperation::DetachBlock(_) => "detachBlock".to_string(),
             AnyOperation::ReplaceBlock(_) => "replaceBlock".to_string(),
+            AnyOperation::CreateConfigScope(_) => "createConfigScope".to_string(),
             AnyOperation::UpdateVersion(_) => "updateVersion".to_string(),
         }
     }

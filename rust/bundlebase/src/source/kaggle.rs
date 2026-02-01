@@ -8,6 +8,7 @@ use super::source_function::{
     SyncMode,
 };
 use super::source_utils::{self, MaterializeResult};
+use crate::bundle_config::ConfigKeySpec;
 use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
@@ -15,7 +16,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
 
-const KAGGLE_BASE_URL: &str = "https://www.kaggle.com";
+/// Valid configuration keys for the Kaggle service.
+pub const KAGGLE_CONFIG_SPEC: ConfigKeySpec = ConfigKeySpec {
+    scheme_prefix: "kaggle://",
+    valid_keys: &["base_url", "username", "key"],
+};
+
+const DEFAULT_KAGGLE_BASE_URL: &str = "https://www.kaggle.com";
 
 /// Built-in "kaggle" source function.
 ///
@@ -33,10 +40,34 @@ const KAGGLE_BASE_URL: &str = "https://www.kaggle.com";
 /// - `version` (optional): Dataset version number to download (default: latest)
 pub struct KaggleFunction;
 
+/// Resolve the Kaggle API base URL from config.
+/// Falls back to https://www.kaggle.com.
+fn kaggle_base_url(config: &BundleConfig) -> String {
+    config
+        .get_service_config("kaggle")
+        .get("base_url")
+        .cloned()
+        .unwrap_or_else(|| DEFAULT_KAGGLE_BASE_URL.to_string())
+}
+
+/// Read Kaggle API credentials.
+///
+/// Resolution order:
+/// 1. BundleConfig `kaggle://` prefix (`username` + `key`)
+/// 2. ~/.kaggle/kaggle.json file
+fn read_kaggle_credentials(config: &BundleConfig) -> Result<(String, String), BundlebaseError> {
+    let kaggle_config = config.get_service_config("kaggle");
+    if let (Some(u), Some(k)) = (kaggle_config.get("username"), kaggle_config.get("key")) {
+        return Ok((u.clone(), k.clone()));
+    }
+    // Fall back to file-based credentials
+    read_kaggle_credentials_from_file()
+}
+
 /// Read Kaggle API credentials from `~/.kaggle/kaggle.json`.
 ///
 /// Returns `(username, key)` tuple.
-fn read_kaggle_credentials() -> Result<(String, String), BundlebaseError> {
+fn read_kaggle_credentials_from_file() -> Result<(String, String), BundlebaseError> {
     let path = shellexpand::tilde("~/.kaggle/kaggle.json").to_string();
     let content = std::fs::read_to_string(&path).map_err(|e| {
         BundlebaseError::from(format!(
@@ -180,16 +211,17 @@ impl SourceFunction for KaggleFunction {
         &self,
         args: &HashMap<String, String>,
         attached_locations: &HashSet<String>,
-        _config: &Arc<BundleConfig>,
+        config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
         let dataset = source_utils::require_arg(args, "dataset", self.name())?;
         let (owner, dataset_name) = parse_dataset_arg(dataset)?;
         let patterns = source_utils::get_patterns(args)?;
         let version = args.get("version").map(|s| s.as_str());
-        let (username, key) = read_kaggle_credentials()?;
+        let base_url = kaggle_base_url(config);
+        let (username, key) = read_kaggle_credentials(config)?;
 
         let (all_files, _dataset_version) = Self::list_kaggle_files(
-            KAGGLE_BASE_URL,
+            &base_url,
             &username,
             &key,
             owner,
@@ -214,9 +246,17 @@ impl SourceFunction for KaggleFunction {
         location: &DiscoveredLocation,
         _args: &HashMap<String, String>,
         data_dir: &dyn IOReadWriteDir,
-        _config: &Arc<BundleConfig>,
+        config: &Arc<BundleConfig>,
     ) -> Result<MaterializeResult, BundlebaseError> {
-        Self::download_kaggle_file(&location.url, &location.source_location, data_dir).await
+        let (username, key) = read_kaggle_credentials(config)?;
+        Self::download_kaggle_file(
+            &location.url,
+            &location.source_location,
+            data_dir,
+            &username,
+            &key,
+        )
+        .await
     }
 
     /// Override fetch to use the Kaggle dataset version number instead of
@@ -226,16 +266,17 @@ impl SourceFunction for KaggleFunction {
         args: &HashMap<String, String>,
         attached_locations: HashSet<String>,
         data_dir: &dyn IOReadWriteDir,
-        _config: Arc<BundleConfig>,
+        config: Arc<BundleConfig>,
     ) -> Result<Vec<MaterializedData>, BundlebaseError> {
         let dataset = source_utils::require_arg(args, "dataset", self.name())?;
         let (owner, dataset_name) = parse_dataset_arg(dataset)?;
         let patterns = source_utils::get_patterns(args)?;
         let version = args.get("version").map(|s| s.as_str());
-        let (username, key) = read_kaggle_credentials()?;
+        let base_url = kaggle_base_url(&config);
+        let (username, key) = read_kaggle_credentials(&config)?;
 
         let (all_files, dataset_version) = Self::list_kaggle_files(
-            KAGGLE_BASE_URL,
+            &base_url,
             &username,
             &key,
             owner,
@@ -255,9 +296,14 @@ impl SourceFunction for KaggleFunction {
         let mut results = Vec::with_capacity(new_files.len());
         for location in new_files {
             let source_url = location.url.to_string();
-            let result =
-                Self::download_kaggle_file(&location.url, &location.source_location, data_dir)
-                    .await?;
+            let result = Self::download_kaggle_file(
+                &location.url,
+                &location.source_location,
+                data_dir,
+                &username,
+                &key,
+            )
+            .await?;
             let attach_location = data_dir
                 .relative_path(result.file.as_ref())
                 .unwrap_or_else(|_| result.file.url().to_string());
@@ -296,10 +342,11 @@ impl SourceFunction for KaggleFunction {
                 let (owner, dataset_name) = parse_dataset_arg(dataset)?;
                 let patterns = source_utils::get_patterns(args)?;
                 let version = args.get("version").map(|s| s.as_str());
-                let (username, key) = read_kaggle_credentials()?;
+                let base_url = kaggle_base_url(&config);
+                let (username, key) = read_kaggle_credentials(&config)?;
 
                 let (discovered, dataset_version) = Self::list_kaggle_files(
-                    KAGGLE_BASE_URL,
+                    &base_url,
                     &username,
                     &key,
                     owner,
@@ -335,6 +382,8 @@ impl SourceFunction for KaggleFunction {
                                 &location.url,
                                 &source_location,
                                 data_dir,
+                                &username,
+                                &key,
                             )
                             .await?;
                             let attach_location = data_dir
@@ -357,6 +406,8 @@ impl SourceFunction for KaggleFunction {
                             &location.url,
                             &source_location,
                             data_dir,
+                            &username,
+                            &key,
                         )
                         .await?;
                         let attach_location = data_dir
@@ -594,16 +645,17 @@ impl KaggleFunction {
         url: &Url,
         source_location: &str,
         data_dir: &dyn IOReadWriteDir,
+        username: &str,
+        key: &str,
     ) -> Result<MaterializeResult, BundlebaseError> {
         use futures::StreamExt;
         use tokio::io::AsyncWriteExt;
 
-        let (username, key) = read_kaggle_credentials()?;
         let client = kaggle_client()?;
 
         let response = client
             .get(url.as_str())
-            .basic_auth(&username, Some(&key))
+            .basic_auth(username, Some(key))
             .send()
             .await
             .map_err(|e| {
@@ -933,7 +985,8 @@ mod tests {
     fn test_read_credentials_missing_file() {
         // This test verifies that a clear error message is returned
         // when credentials file doesn't exist (which is likely in CI)
-        let result = read_kaggle_credentials();
+        let config = BundleConfig::new();
+        let result = read_kaggle_credentials(&config);
         // In CI or when credentials aren't configured, this should fail gracefully
         if result.is_err() {
             let err = result.unwrap_err().to_string();
@@ -941,6 +994,44 @@ mod tests {
             assert!(err.contains("username"));
         }
         // If credentials exist, that's fine too - the function works
+    }
+
+    #[test]
+    fn test_read_credentials_from_config() {
+        let mut config = BundleConfig::new();
+        config.set("username", "config_user", Some("kaggle://"));
+        config.set("key", "config_key", Some("kaggle://"));
+
+        let (username, key) = read_kaggle_credentials(&config).unwrap();
+        assert_eq!(username, "config_user");
+        assert_eq!(key, "config_key");
+    }
+
+    #[test]
+    fn test_read_credentials_partial_config_falls_back_to_file() {
+        // If only username is set in config (no key), should fall back to file
+        let mut config = BundleConfig::new();
+        config.set("username", "config_user", Some("kaggle://"));
+
+        let result = read_kaggle_credentials(&config);
+        // Will either succeed (if ~/.kaggle/kaggle.json exists) or fail with file error
+        if result.is_err() {
+            let err = result.unwrap_err().to_string();
+            assert!(err.contains("kaggle.json"));
+        }
+    }
+
+    #[test]
+    fn test_kaggle_base_url_default() {
+        let config = BundleConfig::new();
+        assert_eq!(kaggle_base_url(&config), "https://www.kaggle.com");
+    }
+
+    #[test]
+    fn test_kaggle_base_url_from_config() {
+        let mut config = BundleConfig::new();
+        config.set("base_url", "https://custom.kaggle.com", Some("kaggle://"));
+        assert_eq!(kaggle_base_url(&config), "https://custom.kaggle.com");
     }
 
     // ── extract_from_zip tests ──────────────────────────────────────

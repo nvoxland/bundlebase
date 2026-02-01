@@ -1054,25 +1054,49 @@ impl BundleBuilder {
         Ok(self)
     }
 
+    /// Create a named config scope (name -> URL mapping).
+    ///
+    /// Config scopes are runtime aliases. Use with `set_config(..., scope="name")`
+    /// to set config for the URL associated with the scope.
+    ///
+    /// # Arguments
+    /// * `name` - Scope name (e.g., "prod", "staging")
+    /// * `url` - URL prefix this scope maps to (e.g., "s3://my-bucket/")
+    pub async fn create_config_scope(
+        &self,
+        name: &str,
+        url: &str,
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::CreateConfigScopeCommand;
+        self.execute_command(CreateConfigScopeCommand::new(name, url)).await?;
+        Ok(self)
+    }
+
     /// Set a configuration value
     ///
     /// Config stored via this operation has the lowest priority:
-    /// 1. Explicit config passed to create()/open() (highest)
-    /// 2. Environment variables
+    /// 1. Environment variables (BB_*) (highest)
+    /// 2. Explicit config passed to create()/open()
     /// 3. Config from set_config operations (lowest)
     ///
     /// # Arguments
     /// * `key` - Configuration key (e.g., "region", "access_key_id")
     /// * `value` - Configuration value
     /// * `url_prefix` - Optional URL prefix for URL-specific config (e.g., "s3://bucket/")
+    /// * `scope` - Optional scope name (resolved to url_prefix at execute time)
     pub async fn set_config(
         &self,
         key: &str,
         value: &str,
         url_prefix: Option<&str>,
+        scope: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::SetConfigCommand;
-        self.execute_command(SetConfigCommand::new(key, value, url_prefix.map(|s| s.to_string()))).await?;
+        let cmd = match scope {
+            Some(scope_name) => SetConfigCommand::with_scope(key, value, scope_name),
+            None => SetConfigCommand::new(key, value, url_prefix.map(|s| s.to_string())),
+        };
+        self.execute_command(cmd).await?;
         Ok(self)
     }
 
@@ -1446,6 +1470,10 @@ impl BundleFacade for BundleBuilder {
 
     fn config(&self) -> Arc<BundleConfig> {
         self.bundle.config()
+    }
+
+    fn config_scopes(&self) -> HashMap<String, String> {
+        self.bundle.config_scopes()
     }
 
     fn ctx(&self) -> Arc<SessionContext> {

@@ -34,6 +34,21 @@ pub use catalog::{CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA, tables as ca
 /// Standard error type used throughout the Bundlebase codebase
 pub type BundlebaseError = Box<dyn Error + Send + Sync>;
 
+/// All known configuration key specs for validation.
+///
+/// Each service defines its valid keys in its own module.
+/// This function collects them for use by `BundleConfig::from_map()`.
+pub fn all_config_specs() -> Vec<bundle_config::ConfigKeySpec> {
+    vec![
+        io::plugin::S3_CONFIG_SPEC,
+        io::plugin::GCS_CONFIG_SPEC,
+        io::plugin::AZURE_CONFIG_SPEC,
+        io::plugin::SFTP_CONFIG_SPEC,
+        io::plugin::FTP_CONFIG_SPEC,
+        source::KAGGLE_CONFIG_SPEC,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     // #[tokio::test]

@@ -147,7 +147,8 @@ pub fn available_commands() -> std::collections::HashMap<&'static str, &'static 
     map.insert("COMMIT", "COMMIT '<message>'");
     map.insert("RESET", "RESET");
     map.insert("UNDO", "UNDO");
-    map.insert("SET CONFIG", "SET CONFIG <key> = '<value>' [FOR '<url_prefix>']");
+    map.insert("CREATE CONFIG SCOPE", "CREATE CONFIG SCOPE <name> AS '<url>'");
+    map.insert("SET CONFIG", "SET CONFIG <key> = '<value>' [FOR '<url_prefix>' | FOR SCOPE <name>]");
     map.insert("SET NAME", "SET NAME '<name>'");
     map.insert("SET DESCRIPTION", "SET DESCRIPTION '<description>'");
     map.insert("VERIFY DATA", "VERIFY DATA [UPDATE]");
@@ -173,6 +174,7 @@ pub fn rule_to_syntax(rule: Rule) -> Option<&'static str> {
         Rule::rename_join_stmt => map.get("RENAME JOIN").copied(),
         Rule::create_source_stmt => map.get("CREATE SOURCE").copied(),
         Rule::create_index_stmt => map.get("CREATE INDEX").copied(),
+        Rule::create_config_scope_stmt => map.get("CREATE CONFIG SCOPE").copied(),
         Rule::create_view_stmt => map.get("CREATE VIEW").copied(),
         Rule::fetch_stmt => map.get("FETCH").copied(),
         Rule::reindex_stmt => map.get("REINDEX").copied(),

@@ -98,3 +98,58 @@ async def test_config_none_is_valid():
 
     c2 = await bundlebase.open(path, config=None)
     assert c2 is not None
+
+
+@pytest.mark.asyncio
+async def test_create_config_scope():
+    """Test creating a config scope and reading it back."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.create_config_scope("prod", "s3://my-bucket/")
+
+    scopes = c.config_scopes()
+    assert scopes == {"prod": "s3://my-bucket/"}
+
+
+@pytest.mark.asyncio
+async def test_config_scopes_empty():
+    """Test that a fresh bundle has no config scopes."""
+    c = await bundlebase.create(random_bundle())
+    assert c.config_scopes() == {}
+
+
+@pytest.mark.asyncio
+async def test_set_config_with_scope():
+    """Test setting config using a named scope."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.create_config_scope("prod", "s3://my-bucket/")
+
+    c = await c.set_config("region", "us-west-2", scope="prod")
+
+    commit = await c.commit("Config with scope")
+    assert commit is not None
+
+
+@pytest.mark.asyncio
+async def test_set_config_with_unknown_scope_error():
+    """Test that using an undefined scope raises an error."""
+    c = await bundlebase.create(random_bundle())
+
+    with pytest.raises(ValueError, match="Unknown config scope"):
+        await c.set_config("region", "us-west-2", scope="nonexistent")
+
+
+@pytest.mark.asyncio
+async def test_config_scopes_persisted():
+    """Test that config scopes survive commit and reopen."""
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "bundle")
+
+        c = await bundlebase.create(path)
+        c = await c.create_config_scope("prod", "s3://my-bucket/")
+        await c.commit("Add scope")
+
+        reopened = await bundlebase.open(path)
+        builder = await reopened.extend()
+        assert builder.config_scopes() == {"prod": "s3://my-bucket/"}

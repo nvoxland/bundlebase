@@ -2,12 +2,65 @@
 //!
 //! Supports: file://, s3://, gs://, azure://, az://, memory://, empty://
 
+use crate::bundle_config::ConfigKeySpec;
 use crate::io::registry::IOFactory;
 use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::io::util::{join_path, join_url};
 use crate::io::{get_memory_store, get_null_store, EMPTY_SCHEME, EMPTY_URL};
 use crate::BundleConfig;
 use crate::BundlebaseError;
+
+/// Valid S3 configuration keys (based on object_store's AmazonS3ConfigKey).
+pub const S3_CONFIG_SPEC: ConfigKeySpec = ConfigKeySpec {
+    scheme_prefix: "s3://",
+    valid_keys: &[
+        "region",
+        "access_key_id",
+        "secret_access_key",
+        "session_token",
+        "endpoint",
+        "bucket",
+        "allow_http",
+        "skip_signature",
+        "virtual_hosted_style_request",
+        "token",
+        "imdsv1_fallback",
+        "metadata_endpoint",
+        "container_credentials_relative_uri",
+        "unsigned_payload",
+        "checksum_algorithm",
+        "copy_if_not_exists",
+        "conditional_put",
+    ],
+};
+
+/// Valid GCS configuration keys.
+pub const GCS_CONFIG_SPEC: ConfigKeySpec = ConfigKeySpec {
+    scheme_prefix: "gs://",
+    valid_keys: &[
+        "service_account_key",
+        "service_account_path",
+        "bucket",
+        "application_credentials",
+    ],
+};
+
+/// Valid Azure configuration keys.
+pub const AZURE_CONFIG_SPEC: ConfigKeySpec = ConfigKeySpec {
+    scheme_prefix: "azure://",
+    valid_keys: &[
+        "account",
+        "access_key",
+        "container",
+        "sas_token",
+        "bearer_token",
+        "client_id",
+        "client_secret",
+        "tenant_id",
+        "authority_host",
+        "use_emulator",
+    ],
+};
 use async_trait::async_trait;
 use bytes::Bytes;
 use datafusion::datasource::object_store::ObjectStoreUrl;
