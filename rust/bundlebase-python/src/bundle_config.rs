@@ -48,9 +48,6 @@ pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<PassedBundleConfig> {
             } else {
                 let value_str: String = value.extract()?;
                 // Store all string values as global defaults.
-                // Flat keys with __ patterns (e.g., "s3__region") are stored as-is;
-                // BundleConfig.normalize_key_scope resolves them when scope aliases
-                // become available.
                 config.set(&key_str, &value_str, &Scope::global());
             }
         }

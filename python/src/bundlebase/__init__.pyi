@@ -652,35 +652,6 @@ class PyBundleBuilder:
         """
         ...
 
-    def create_scope_alias(self, name: str, scope: str) -> "OperationChain":
-        """
-        Create a named scope alias (name -> scope mapping).
-
-        Scope aliases are named shortcuts. Use with ``save_config(..., scope="/name")``
-        to set config for the scope associated with the alias.
-
-        Args:
-            name: Alias name (e.g., "prod", "staging")
-            scope: Scope this alias maps to (e.g., "/s3/my-bucket")
-
-        Returns:
-            OperationChain for fluent chaining
-
-        Example:
-            c = await c.create_scope_alias("prod", "/s3/my-bucket")
-            c = await c.save_config("region", "us-east-1", scope="/prod")
-        """
-        ...
-
-    def scope_aliases(self) -> Dict[str, str]:
-        """
-        Get defined scope aliases (name -> scope).
-
-        Returns:
-            Dictionary mapping alias names to scopes
-        """
-        ...
-
     def filter(self, query: str, params: Optional[List[Any]] = None) -> "OperationChain":
         """
         Queue a filter operation.
@@ -1218,10 +1189,6 @@ class OperationChain:
         """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 
-    def create_scope_alias(self, name: str, scope: str) -> "OperationChain":
-        """Queue a create_scope_alias operation."""
-        ...
-
     def create_function(
         self,
         name: str,
@@ -1343,10 +1310,6 @@ class CreateChain:
         """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 
-    def create_scope_alias(self, name: str, scope: str) -> "CreateChain":
-        """Queue a create_scope_alias operation."""
-        ...
-
     def create_function(
         self,
         name: str,
@@ -1466,10 +1429,6 @@ class ExtendChain:
 
     def set_config(self, key: str, value: str, scope: str = "/") -> "ExtendChain":
         """Queue a set_config operation (runtime-only, highest priority)."""
-        ...
-
-    def create_scope_alias(self, name: str, scope: str) -> "ExtendChain":
-        """Queue a create_scope_alias operation."""
         ...
 
     def create_function(

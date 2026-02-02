@@ -12,7 +12,7 @@ use crate::bundle::BundleBuilder;
 /// Command to save a configuration value to the bundle manifest.
 ///
 /// Supports scoped config:
-/// - `SAVE CONFIG key = 'value' FOR '/scope'` -- scope (resolved at execute time, aliases checked)
+/// - `SAVE CONFIG key = 'value' FOR '/scope'` -- scope path (e.g., '/s3/bucket')
 #[derive(Debug, Clone)]
 pub struct SaveConfigCommand {
     /// Configuration key
@@ -97,27 +97,7 @@ impl BundleBuilderCommand for SaveConfigCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        // Resolve scope: global is used directly; single-component scopes are checked
-        // as alias names; multi-component scopes are used as direct scopes.
-        let resolved_scope = if self.scope.is_global() {
-            Scope::global()
-        } else {
-            let scope_str = self.scope.as_str();
-            let potential_name = &scope_str[1..]; // strip leading "/"
-            if let Some(resolved) = builder.bundle().config().resolve_alias(potential_name) {
-                resolved
-            } else if potential_name.contains('/') {
-                // Multi-component scope (e.g., "/s3/bucket") — use as direct scope
-                self.scope.clone()
-            } else {
-                return Err(BundlebaseError::from(format!(
-                    "Unknown scope alias '{}'. Use CREATE SCOPE ALIAS first.",
-                    potential_name
-                )));
-            }
-        };
-
-        let op = SaveConfigOp::setup(&self.key, &self.value, &resolved_scope);
+        let op = SaveConfigOp::setup(&self.key, &self.value, &self.scope);
         builder.apply_operation(op.into()).await?;
 
         let specs = crate::all_config_specs();

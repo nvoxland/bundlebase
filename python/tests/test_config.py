@@ -90,92 +90,14 @@ async def test_config_none_is_valid():
 
 
 @pytest.mark.asyncio
-async def test_create_scope_alias():
-    """Test creating a scope alias and reading it back."""
-    c = await bundlebase.create(random_bundle())
-    c = await c.create_scope_alias("prod", "/s3/my-bucket")
-
-    scopes = c.scope_aliases()
-    assert scopes == {"prod": "/s3/my-bucket"}
-
-
-@pytest.mark.asyncio
-async def test_scope_aliases_empty():
-    """Test that a fresh bundle has no scope aliases."""
-    c = await bundlebase.create(random_bundle())
-    assert c.scope_aliases() == {}
-
-
-@pytest.mark.asyncio
 async def test_save_config_with_scope():
-    """Test setting config using a named scope."""
+    """Test setting config using a direct scope path."""
     c = await bundlebase.create(random_bundle())
-    c = await c.create_scope_alias("prod", "/s3/my-bucket")
 
-    c = await c.save_config("region", "us-west-2", scope="/prod")
+    c = await c.save_config("region", "us-west-2", scope="/s3/my-bucket")
 
     commit = await c.commit("Config with scope")
     assert commit is not None
-
-
-@pytest.mark.asyncio
-async def test_save_config_with_unknown_scope_error():
-    """Test that using an undefined scope raises an error."""
-    c = await bundlebase.create(random_bundle())
-
-    with pytest.raises(ValueError, match="Unknown scope alias"):
-        await c.save_config("region", "us-west-2", scope="/nonexistent")
-
-
-@pytest.mark.asyncio
-async def test_scope_aliases_persisted():
-    """Test that scope aliases survive commit and reopen."""
-    import tempfile, os
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "bundle")
-
-        c = await bundlebase.create(path)
-        c = await c.create_scope_alias("prod", "/s3/my-bucket")
-        await c.commit("Add scope alias")
-
-        reopened = await bundlebase.open(path)
-        builder = await reopened.extend()
-        assert builder.scope_aliases() == {"prod": "/s3/my-bucket"}
-
-
-@pytest.mark.asyncio
-async def test_config_with_flat_scope_key():
-    """Test creating a container with flat scope key (s3__region pattern).
-
-    Keys with __ are unresolved scope references that resolve when a matching
-    scope alias exists. Without a scope alias, they are silently ignored.
-    """
-    config = {
-        "s3__region": "us-west-2",
-        "s3__endpoint": "http://localhost:9000",
-    }
-    c = await bundlebase.create(random_bundle(), config=config)
-    assert c is not None
-
-
-@pytest.mark.asyncio
-async def test_flat_scope_key_resolves_with_scope_alias():
-    """Test that flat scope keys resolve when the bundle has a matching scope alias."""
-    import tempfile, os
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "bundle")
-
-        # Create bundle with a scope alias named "s3"
-        c = await bundlebase.create(path)
-        c = await c.create_scope_alias("s3", "/s3")
-        await c.commit("Add s3 scope alias")
-
-        # Reopen with flat scope key — should resolve via the "s3" scope alias
-        config = {"s3__region": "us-west-2"}
-        c2 = await bundlebase.open(path, config=config)
-        assert c2 is not None
 
 
 @pytest.mark.asyncio
@@ -195,25 +117,6 @@ async def test_config_flat_keys_override_env():
 
 
 @pytest.mark.asyncio
-async def test_config_with_scope_flat_key_on_open():
-    """Test that scope flat keys work when opening a bundle with existing scope aliases."""
-    import tempfile, os
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "bundle")
-
-        # Create bundle with a scope alias
-        c = await bundlebase.create(path)
-        c = await c.create_scope_alias("prod", "/s3/my-bucket")
-        await c.commit("Add scope alias")
-
-        # Reopen with a scope flat key in config
-        config = {"scope_prod__region": "eu-west-1"}
-        c2 = await bundlebase.open(path, config=config)
-        assert c2 is not None
-
-
-@pytest.mark.asyncio
 async def test_set_config_basic():
     """Test set_config sets a runtime config value."""
     c = await bundlebase.create(random_bundle())
@@ -226,15 +129,6 @@ async def test_set_config_with_scope():
     """Test set_config with scope."""
     c = await bundlebase.create(random_bundle())
     c = await c.set_config("region", "us-west-2", scope="/s3/my-bucket")
-    assert c is not None
-
-
-@pytest.mark.asyncio
-async def test_set_config_with_scope_alias():
-    """Test set_config with named scope alias."""
-    c = await bundlebase.create(random_bundle())
-    c = await c.create_scope_alias("prod", "/s3/my-bucket")
-    c = await c.set_config("region", "eu-west-1", scope="/prod")
     assert c is not None
 
 
@@ -344,43 +238,5 @@ async def test_save_config_last_wins_across_commits():
         assert "eu-west-1" in config_ops[1].describe
 
 
-@pytest.mark.asyncio
-async def test_create_scope_alias_last_wins():
-    """Test that when create_scope_alias is called multiple times for the same name, last scope wins."""
-    import tempfile, os
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "bundle")
-
-        c = await bundlebase.create(path)
-        c = await c.create_scope_alias("prod", "/s3/old-bucket")
-        c = await c.create_scope_alias("prod", "/s3/new-bucket")
-        await c.commit("Override scope alias")
-
-        reopened = await bundlebase.open(path)
-        builder = await reopened.extend()
-        scopes = builder.scope_aliases()
-        assert scopes["prod"] == "/s3/new-bucket", f"Expected last scope, got {scopes['prod']}"
-
-
-@pytest.mark.asyncio
-async def test_create_scope_alias_last_wins_across_commits():
-    """Test that create_scope_alias in a later commit overrides an earlier commit."""
-    import tempfile, os
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "bundle")
-
-        c = await bundlebase.create(path)
-        c = await c.create_scope_alias("prod", "/s3/old-bucket")
-        await c.commit("First scope alias")
-
-        c = await c.create_scope_alias("prod", "/s3/new-bucket")
-        await c.commit("Override scope alias")
-
-        reopened = await bundlebase.open(path)
-        builder = await reopened.extend()
-        scopes = builder.scope_aliases()
-        assert scopes["prod"] == "/s3/new-bucket", f"Expected last scope, got {scopes['prod']}"
 
 

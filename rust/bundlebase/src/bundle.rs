@@ -535,13 +535,8 @@ impl Bundle {
         Arc::clone(&self.config)
     }
 
-    /// Returns all defined scope aliases (name -> normalized Scope)
-    pub fn scope_aliases(&self) -> HashMap<String, Scope> {
-        self.config.scope_aliases()
-    }
-
     /// Recreate data_dir from the current URL + config.
-    /// Called after SaveConfigOp or CreateScopeAliasOp changes config.
+    /// Called after SaveConfigOp changes config.
     pub(crate) fn refresh_data_dir(&self) -> Result<(), BundlebaseError> {
         let url = self.data_dir.read().url().clone();
         *self.data_dir.write() = writable_dir_from_url(&url, self.config())?;
@@ -1215,10 +1210,6 @@ impl BundleFacade for Bundle {
 
     fn config(&self) -> Arc<BundleConfig> {
         Bundle::config(self)
-    }
-
-    fn scope_aliases(&self) -> HashMap<String, Scope> {
-        Bundle::scope_aliases(self)
     }
 
     fn set_config(

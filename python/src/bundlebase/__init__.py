@@ -92,7 +92,6 @@ _original_methods = {
     "set_description": _PyBundleBuilder.set_description,
     "save_config": _PyBundleBuilder.save_config,
     "set_config": _PyBundleBuilder.set_config,
-    "create_scope_alias": _PyBundleBuilder.create_scope_alias,
 
     # Custom function operations
     "create_function": _PyBundleBuilder.create_function,
@@ -155,7 +154,7 @@ mutation_methods = [
     "attach", "detach_block", "replace_block", "create_source",
     "drop_column", "rename_column", "filter", "join",
     "create_view", "rename_view", "drop_view", "drop_join", "rename_join",
-    "set_name", "set_description", "save_config", "set_config", "create_scope_alias", "create_function",
+    "set_name", "set_description", "save_config", "set_config", "create_function",
     "create_index", "drop_index", "rebuild_index", "reindex",
     "reset", "undo"
 ]
