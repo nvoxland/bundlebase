@@ -1060,24 +1060,6 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Create a named scope alias (name -> scope URL mapping).
-    ///
-    /// Scope aliases are runtime aliases. Use with `save_config(..., scope="name")`
-    /// to save config for the URL associated with the alias.
-    ///
-    /// # Arguments
-    /// * `name` - Alias name (e.g., "prod", "staging")
-    /// * `scope` - Scope this alias maps to (e.g., `Scope::from_url("s3://my-bucket")`)
-    pub async fn create_scope_alias(
-        &self,
-        name: &str,
-        scope: &Scope,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::CreateScopeAliasCommand;
-        self.execute_command(CreateScopeAliasCommand::new(name, scope.clone())).await?;
-        Ok(self)
-    }
-
     /// Save a configuration value to the bundle manifest
     ///
     /// Config stored via this operation has the lowest priority:
@@ -1470,10 +1452,6 @@ impl BundleFacade for BundleBuilder {
 
     fn config(&self) -> Arc<BundleConfig> {
         self.bundle.config()
-    }
-
-    fn scope_aliases(&self) -> HashMap<String, Scope> {
-        self.bundle.scope_aliases()
     }
 
     fn set_config(

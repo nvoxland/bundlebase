@@ -28,7 +28,6 @@ statement = { SOI ~ (
     | source_stmt
     | index_stmt
     | transaction_stmt
-    | scope_alias_stmt
     | metadata_stmt
 ) ~ EOI }
 
@@ -73,11 +72,6 @@ transaction_stmt = {
     | undo_stmt
     | verify_data_stmt
     | explain_stmt
-}
-
-// Scope alias statements - operations for scope alias management
-scope_alias_stmt = {
-    create_scope_alias_stmt
 }
 
 // Metadata statements - operations for bundle metadata
@@ -322,16 +316,6 @@ detach_stmt = {
 
 rebuild_index_stmt = {
     ^"rebuild" ~ ^"index" ~ ^"on" ~ identifier
-}
-
-// ============================================================================
-// CREATE SCOPE ALIAS Statement
-// ============================================================================
-// Syntax: CREATE SCOPE ALIAS <name> AS '<scope>'
-// Example: CREATE SCOPE ALIAS prod AS 's3://my-bucket/'
-
-create_scope_alias_stmt = {
-    ^"create" ~ ^"scope" ~ ^"alias" ~ identifier ~ ^"as" ~ quoted_string
 }
 
 // ============================================================================

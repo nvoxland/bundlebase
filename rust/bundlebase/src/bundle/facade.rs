@@ -281,9 +281,6 @@ pub trait BundleFacade: Send + Sync {
     /// Returns the bundle configuration
     fn config(&self) -> Arc<BundleConfig>;
 
-    /// Returns defined scope aliases (name -> normalized Scope)
-    fn scope_aliases(&self) -> HashMap<String, Scope>;
-
     /// Set a runtime config value (session-only, highest priority).
     ///
     /// This modifies the runtime config layer which takes precedence over

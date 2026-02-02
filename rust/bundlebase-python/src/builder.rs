@@ -264,49 +264,6 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Create a named scope alias (name -> scope mapping).
-    ///
-    /// Scope aliases let you reference scopes by name.
-    /// Use with `save_config(..., scope="/name")` to save config for the scope
-    /// associated with the alias.
-    ///
-    /// # Arguments
-    /// * `name` - Alias name (e.g., "prod", "staging")
-    /// * `scope` - Scope this alias maps to (e.g., "/s3/my-bucket")
-    fn create_scope_alias<'py>(
-        slf: PyRef<'_, Self>,
-        name: &str,
-        scope: &str,
-        py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let inner = slf.inner.clone();
-        let name = name.to_string();
-        let scope = ::bundlebase::bundle_config::Scope::from_url(scope);
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner
-                .create_scope_alias(name.as_str(), &scope)
-                .await
-                .map_err(|e| {
-                    to_py_error(
-                        &format!("Failed to create scope alias '{}' = '{}'", name, scope),
-                        e,
-                    )
-                })?;
-            Python::attach(|py| {
-                Py::new(py, PyBundleBuilder { inner })
-                    .map_err(|e| to_py_error("Failed to create bundle", e))
-            })
-        })
-    }
-
-    /// Returns defined scope aliases (name -> scope string).
-    fn scope_aliases(&self) -> HashMap<String, String> {
-        self.inner.bundle().scope_aliases()
-            .into_iter()
-            .map(|(name, scope)| (name, scope.as_str().to_string()))
-            .collect()
-    }
-
     /// Save a configuration value to the bundle manifest. Mutates the bundle in place and returns it for chaining.
     ///
     /// # Arguments

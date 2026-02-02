@@ -312,13 +312,3 @@ SAVE CONFIG <key> = '<value>' [FOR '<scope>']
 ```
 
 See [Metadata](../guide/metadata.md) and [Configuration](../guide/configuration.md) for details.
-
-### CREATE SCOPE ALIAS
-
-Creates a named alias for a scope (URL prefix), used for scoping configuration.
-
-```sql
-CREATE SCOPE ALIAS <name> = '<scope>'
-```
-
-See [Metadata](../guide/metadata.md) and [Configuration](../guide/configuration.md) for details.

@@ -60,7 +60,7 @@ pub use parser::Rule;
 
 // Re-export builder command structs
 pub use builder::{
-    AttachCommand, CommitCommand, CreateScopeAliasCommand, CreateIndexCommand, CreateSourceCommand,
+    AttachCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
     CreateViewCommand, DetachBlockCommand, DropColumnCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand,
     ReindexCommand, RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand,
@@ -135,7 +135,6 @@ impl BundleCommand {
                 // Get the command name for the error message
                 let cmd_name = match &self {
                     BundleCommand::Attach(_) => "ATTACH",
-                    BundleCommand::CreateScopeAlias(_) => "CREATE SCOPE ALIAS",
                     BundleCommand::DetachBlock(_) => "DETACH",
                     BundleCommand::Filter(_) => "FILTER",
                     BundleCommand::Join(_) => "JOIN",
@@ -448,9 +447,6 @@ register_commands! {
         // Join management commands
         DropJoin(DropJoinCommand) => Rule::drop_join_stmt,
         RenameJoin(RenameJoinCommand) => Rule::rename_join_stmt,
-
-        // Scope alias commands
-        CreateScopeAlias(CreateScopeAliasCommand) => Rule::create_scope_alias_stmt,
 
         // Metadata commands
         SetName(SetNameCommand) => Rule::set_name_stmt,

@@ -132,8 +132,6 @@ struct ConfigInner {
     /// All config entries, grouped by source.
     /// Within each source, entries are stored in insertion order (last wins for same key+scope).
     entries: HashMap<ConfigSource, Vec<ConfigValue>>,
-    /// Named scope aliases: name -> normalized Scope
-    scope_aliases: HashMap<String, Scope>,
     /// Whether env vars have been loaded into entries[Env].
     env_loaded: bool,
     /// Cached active entries: key -> list of winning (scope, value) entries,
@@ -150,7 +148,6 @@ impl ConfigInner {
     fn new() -> Self {
         Self {
             entries: HashMap::new(),
-            scope_aliases: HashMap::new(),
             env_loaded: false,
             active_cache: None,
             winners_cache: None,
@@ -187,7 +184,6 @@ impl std::fmt::Debug for BundleConfig {
         let inner = self.inner.read();
         f.debug_struct("BundleConfig")
             .field("entries", &inner.entries)
-            .field("scope_aliases", &inner.scope_aliases)
             .finish()
     }
 }
@@ -204,38 +200,24 @@ impl BundleConfig {
     ///
     /// # Arguments
     /// * `key` - Configuration key (e.g., "region", "access_key_id").
-    ///           Supports compound format `"scope__key"` which resolves the scope name.
     /// * `value` - Configuration value
     /// * `scope` - Normalized scope, or global for default.
     ///             Use `Scope::from_url()` to convert raw URLs at the call site.
     /// * `source` - Which config layer this entry belongs to
     pub fn set(&self, key: &str, value: &str, scope: &Scope, source: ConfigSource) {
         let mut inner = self.inner.write();
-        let (resolved_key, resolved_scope) = Self::normalize_key_scope(&inner, key, scope);
-        let scope_str = resolved_scope.as_str().to_string();
+        let scope_str = scope.as_str().to_string();
 
         let entries = inner.entries.entry(source).or_default();
 
         // Remove any existing entry with the same key+scope (last write wins)
-        entries.retain(|e| !(e.key == resolved_key && e.scope == scope_str));
+        entries.retain(|e| !(e.key == key && e.scope == scope_str));
 
         entries.push(ConfigValue {
-            key: resolved_key,
+            key: key.to_string(),
             value: value.to_string(),
             scope: scope_str,
         });
-        inner.active_cache = None;
-        inner.winners_cache = None;
-    }
-
-    /// Add a named scope alias (name -> normalized Scope mapping).
-    /// Invalidates the env cache so env vars re-resolve with updated scope aliases.
-    pub fn add_scope_alias(&self, name: &str, scope: &Scope) {
-        let mut inner = self.inner.write();
-        inner.scope_aliases.insert(name.to_string(), scope.clone());
-        // Invalidate env so it reloads with updated scopes
-        inner.env_loaded = false;
-        inner.entries.remove(&ConfigSource::Env);
         inner.active_cache = None;
         inner.winners_cache = None;
     }
@@ -250,7 +232,6 @@ impl BundleConfig {
 
         // Replace everything from other
         self_inner.entries = other_inner.entries.clone();
-        self_inner.scope_aliases = other_inner.scope_aliases.clone();
         self_inner.env_loaded = false;
         self_inner.entries.remove(&ConfigSource::Env);
 
@@ -267,10 +248,6 @@ impl BundleConfig {
     /// Ensures env cache is populated, then finds the longest matching prefix
     /// across all sources. Among entries sharing the longest prefix, the
     /// highest-priority source wins. Pass `Scope::global()` for an unscoped lookup.
-    ///
-    /// Supports scope names in addition to full scopes:
-    /// - Compound key: `get("scope__key", &Scope::global())` resolves the scope name
-    /// - Scope name: `get("key", &Scope::new("/prod"))` if scope is a known alias
     pub fn get(&self, key: &str, scope: &Scope) -> Option<String> {
         self.ensure_env_cache();
 
@@ -278,9 +255,7 @@ impl BundleConfig {
         {
             let inner = self.inner.read();
             if let Some(cache) = &inner.active_cache {
-                let (resolved_key, resolved_scope) =
-                    Self::normalize_key_scope(&inner, key, scope);
-                return Self::lookup_active(cache, &resolved_key, &resolved_scope);
+                return Self::lookup_active(cache, key, scope);
             }
         }
 
@@ -292,41 +267,10 @@ impl BundleConfig {
             Self::populate_active_cache(&mut inner);
         }
 
-        let (resolved_key, resolved_scope) = Self::normalize_key_scope(&inner, key, scope);
         match &inner.active_cache {
-            Some(cache) => Self::lookup_active(cache, &resolved_key, &resolved_scope),
+            Some(cache) => Self::lookup_active(cache, key, scope),
             None => None, // should not happen after populate_active_cache
         }
-    }
-
-    /// Normalize the (key, scope) pair:
-    /// - If `scope` is non-global and matches a scope alias name, resolve it.
-    /// - If `scope` is global and `key` contains "__", split into scope_name + config_key and resolve.
-    /// Returns the (resolved_key, resolved_scope) pair.
-    fn normalize_key_scope(inner: &ConfigInner, key: &str, scope: &Scope) -> (String, Scope) {
-        // 1. If scope is non-global, check if its path (without leading /) is a scope alias name
-        if !scope.is_global() {
-            // Extract the alias name: strip leading "/" from the scope string
-            let alias_candidate = &scope.as_str()[1..];
-            // Only treat as alias if it's a simple name (no embedded slashes)
-            if !alias_candidate.contains('/') {
-                if let Some(resolved_scope) = inner.scope_aliases.get(alias_candidate) {
-                    return (key.to_string(), resolved_scope.clone());
-                }
-            }
-        }
-
-        // 2. If scope is global and key has "__", parse compound key
-        if scope.is_global() {
-            if let Some((scope_name, config_key)) = key.split_once("__") {
-                if let Some(resolved_scope) = inner.scope_aliases.get(scope_name) {
-                    return (config_key.to_string(), resolved_scope.clone());
-                }
-            }
-        }
-
-        // 3. Pass through unchanged
-        (key.to_string(), scope.clone())
     }
 
     /// Compute the winning value for each (key, scope) pair across all sources.
@@ -339,10 +283,6 @@ impl BundleConfig {
         for (source, entries) in &inner.entries {
             let priority = source.priority();
             for entry in entries {
-                // Skip unresolved scope entries — they haven't been resolved yet
-                if entry.scope.starts_with("unresolved::") {
-                    continue;
-                }
                 let scope = Scope::new(&entry.scope);
                 let map_key = (entry.key.clone(), scope);
                 winners
@@ -400,16 +340,6 @@ impl BundleConfig {
             }
         }
         None
-    }
-
-    /// Returns all defined scope aliases (name -> Scope) as a snapshot.
-    pub fn scope_aliases(&self) -> HashMap<String, Scope> {
-        self.inner.read().scope_aliases.clone()
-    }
-
-    /// Look up a single scope alias by name.
-    pub fn resolve_alias(&self, name: &str) -> Option<Scope> {
-        self.inner.read().scope_aliases.get(name).cloned()
     }
 
     /// Returns all config entries from all layers, with `active` flags
@@ -528,115 +458,17 @@ impl BundleConfig {
         Ok(config)
     }
 
-    /// Parse a flat-key config map using the same patterns as env vars (without BB_ prefix).
-    ///
-    /// Patterns (case-insensitive):
-    /// - `key` -> global default
-    /// - `name__key` -> named scope (deferred until scopes are known)
-    /// - `scope_name__key` -> named scope (deferred, `scope_` prefix is optional)
-    ///
-    /// Keys with scope patterns are stored with scope = None and a special
-    /// compound key format "scope_name::config_key" that will be resolved
-    /// when scopes become available.
-    pub fn from_flat_keys(map: HashMap<String, String>) -> Self {
-        let config = Self::new();
-
-        // Collect unresolved scope keys separately
-        let mut unresolved: Vec<(String, String, String)> = Vec::new(); // (scope_name, config_key, value)
-
-        for (raw_key, value) in map {
-            let key = raw_key.to_lowercase();
-
-            if let Some(scope_rest) = key.strip_prefix("scope_") {
-                // scope_NAME__KEY -> named scope (deferred)
-                if let Some((scope_name, config_key)) = scope_rest.split_once("__") {
-                    unresolved.push((scope_name.to_string(), config_key.to_string(), value));
-                } else {
-                    // No __, treat as global default (key = "scope_something")
-                    config.set(&key, &value, &Scope::global(), ConfigSource::Passed);
-                }
-            } else if let Some((scope_name, config_key)) = key.split_once("__") {
-                // name__key -> named scope (deferred)
-                unresolved.push((scope_name.to_string(), config_key.to_string(), value));
-            } else {
-                // plain key -> global default
-                config.set(&key, &value, &Scope::global(), ConfigSource::Passed);
-            }
-        }
-
-        // Store unresolved scope keys in a temporary format.
-        // We store them as Passed entries with a special internal scope format
-        // "unresolved::scope_name" that will be resolved later.
-        {
-            let mut inner = config.inner.write();
-            for (scope_name, config_key, value) in unresolved {
-                let entries = inner.entries.entry(ConfigSource::Passed).or_default();
-                entries.push(ConfigValue {
-                    key: config_key,
-                    value,
-                    scope: format!("unresolved::{}", scope_name),
-                });
-            }
-            inner.active_cache = None;
-            inner.winners_cache = None;
-        }
-
-        config
-    }
-
-    /// Resolve any unresolved scope keys using the given scopes map.
-    ///
-    /// Returns a new BundleConfig with unresolved keys resolved.
-    pub fn resolve_scopes(&self, scopes: &HashMap<String, String>) -> BundleConfig {
-        let new_config = BundleConfig::new();
-        let inner = self.inner.read();
-
-        for (source, entries) in &inner.entries {
-            for entry in entries {
-                if let Some(scope_name) = entry.scope.strip_prefix("unresolved::") {
-                    // Resolve the scope name to a URL prefix, then normalize
-                    if let Some(url_prefix) = scopes.get(scope_name) {
-                        let scope = Scope::from_url(url_prefix);
-                        new_config.set(
-                            &entry.key,
-                            &entry.value,
-                            &scope,
-                            source.clone(),
-                        );
-                    } else {
-                        tracing::warn!(
-                            scope = scope_name,
-                            key = entry.key.as_str(),
-                            "Config entry dropped: unknown scope name"
-                        );
-                    }
-                } else {
-                    let scope = Scope::new(&entry.scope);
-                    new_config.set(
-                        &entry.key,
-                        &entry.value,
-                        &scope,
-                        source.clone(),
-                    );
-                }
-            }
-        }
-
-        // Copy scope aliases
-        {
-            let mut new_inner = new_config.inner.write();
-            new_inner.scope_aliases = inner.scope_aliases.clone();
-        }
-
-        new_config
-    }
-
     /// Check if a key looks like a URL (contains "://")
     fn is_url_key(key: &str) -> bool {
         key.contains("://")
     }
 
     /// Ensure env vars are loaded into entries[Env]. Reads BB_* env vars on first call.
+    ///
+    /// Env var patterns (suffix after `BB_` is split on `__`):
+    /// - `BB_KEY` -> global scope `/`, key = `key`
+    /// - `BB_S3__REGION` -> scope `/s3`, key = `region`
+    /// - `BB_S3__MY_BUCKET__KEY` -> scope `/s3/my_bucket`, key = `key`
     fn ensure_env_cache(&self) {
         // Fast path: check with read lock
         {
@@ -660,32 +492,26 @@ impl BundleConfig {
                 continue;
             };
 
-            if let Some(scope_rest) = suffix.strip_prefix("SCOPE_") {
-                // BB_SCOPE_{NAME}__{KEY}
-                if let Some((scope_name, key)) = scope_rest.split_once("__") {
-                    if let Some(scope) = inner.scope_aliases.get(&scope_name.to_lowercase()) {
-                        env_entries.push(ConfigValue {
-                            key: key.to_lowercase(),
-                            value,
-                            scope: scope.as_str().to_string(),
-                        });
-                    }
-                }
-            } else if let Some((scope_name, key)) = suffix.split_once("__") {
-                // BB_{NAME}__{KEY} -> named scope
-                if let Some(scope) = inner.scope_aliases.get(&scope_name.to_lowercase()) {
-                    env_entries.push(ConfigValue {
-                        key: key.to_lowercase(),
-                        value,
-                        scope: scope.as_str().to_string(),
-                    });
-                }
-            } else {
-                // BB_{KEY} -> global
+            let parts: Vec<&str> = suffix.split("__").collect();
+            if parts.len() == 1 {
+                // BB_KEY -> global
                 env_entries.push(ConfigValue {
                     key: suffix.to_lowercase(),
                     value,
                     scope: "/".to_string(),
+                });
+            } else {
+                // BB_A__B__...__KEY -> last = key, rest joined with "/" = scope
+                let key = parts.last().expect("split always returns at least one element").to_lowercase();
+                let scope_parts: Vec<String> = parts[..parts.len() - 1]
+                    .iter()
+                    .map(|p| p.to_lowercase())
+                    .collect();
+                let scope = format!("/{}", scope_parts.join("/"));
+                env_entries.push(ConfigValue {
+                    key,
+                    value,
+                    scope,
                 });
             }
         }
@@ -694,19 +520,6 @@ impl BundleConfig {
         inner.env_loaded = true;
         inner.active_cache = None;
         inner.winners_cache = None;
-    }
-
-    /// Check if there are any unresolved scope keys.
-    pub fn has_unresolved_scopes(&self) -> bool {
-        let inner = self.inner.read();
-        for entries in inner.entries.values() {
-            for entry in entries {
-                if entry.scope.starts_with("unresolved::") {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
     /// Merge another config's entries into this one. The other config's entries
@@ -725,14 +538,6 @@ impl BundleConfig {
             }
         }
 
-        // Merge scope aliases (other wins on conflict)
-        for (name, scope) in &other_inner.scope_aliases {
-            self_inner.scope_aliases.insert(name.clone(), scope.clone());
-        }
-
-        // Invalidate env since scopes may have changed
-        self_inner.env_loaded = false;
-        self_inner.entries.remove(&ConfigSource::Env);
         self_inner.active_cache = None;
         self_inner.winners_cache = None;
     }
@@ -751,16 +556,12 @@ impl BundleConfig {
     }
 
     /// Extract all `ConfigSource::Passed` entries back out into a
-    /// `PassedBundleConfig`. Skips entries with unresolved scopes since they
-    /// cannot be represented in `PassedBundleConfig`.
+    /// `PassedBundleConfig`.
     pub fn extract_passed(&self) -> PassedBundleConfig {
         let inner = self.inner.read();
         let mut passed = PassedBundleConfig::new();
         if let Some(entries) = inner.entries.get(&ConfigSource::Passed) {
             for entry in entries {
-                if entry.scope.starts_with("unresolved::") {
-                    continue;
-                }
                 let scope = Scope::new(&entry.scope);
                 passed.set(&entry.key, &entry.value, &scope);
             }
@@ -780,7 +581,6 @@ impl Clone for BundleConfig {
         let inner = self.inner.read();
         let new_inner = ConfigInner {
             entries: inner.entries.clone(),
-            scope_aliases: inner.scope_aliases.clone(),
             env_loaded: inner.env_loaded,
             active_cache: None,
             winners_cache: None,
@@ -1108,66 +908,38 @@ mod tests {
     }
 
     #[test]
-    fn test_from_env_named_scope_without_prefix() {
+    fn test_from_env_scoped() {
         let _lock = ENV_MUTEX.lock();
         std::env::set_var("BB_S3__TESTREGION2", "us-west-2");
 
-        // With no scopes, the key is silently dropped
         let config = BundleConfig::new();
         config.ensure_env_cache();
-        assert!(config.get("testregion2", &Scope::from_url("s3://bucket/file")).is_none());
-
-        // With a matching scope, the key resolves
-        let config2 = BundleConfig::new();
-        config2.add_scope_alias("s3", &Scope::from_url("s3://"));
-        config2.ensure_env_cache();
+        // BB_S3__TESTREGION2 -> scope "/s3", key "testregion2"
         assert_eq!(
-            config2.get("testregion2", &Scope::from_url("s3://bucket/file")),
+            config.get("testregion2", &Scope::new("/s3")),
+            Some("us-west-2".to_string())
+        );
+        // Should also match via prefix matching on child paths
+        assert_eq!(
+            config.get("testregion2", &Scope::new("/s3/bucket")),
             Some("us-west-2".to_string())
         );
         std::env::remove_var("BB_S3__TESTREGION2");
     }
 
     #[test]
-    fn test_from_env_named_scope() {
+    fn test_from_env_multi_segment_scope() {
         let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB_SCOPE_TESTPROD__TESTENDPOINT1", "http://minio");
+        std::env::set_var("BB_S3__MY_BUCKET__TESTKEY3", "value");
 
         let config = BundleConfig::new();
-        config.add_scope_alias("testprod", &Scope::from_url("s3://bucket/"));
         config.ensure_env_cache();
-
+        // BB_S3__MY_BUCKET__TESTKEY3 -> scope "/s3/my_bucket", key "testkey3"
         assert_eq!(
-            config.get("testendpoint1", &Scope::from_url("s3://bucket/file")),
-            Some("http://minio".to_string())
+            config.get("testkey3", &Scope::new("/s3/my_bucket")),
+            Some("value".to_string())
         );
-        std::env::remove_var("BB_SCOPE_TESTPROD__TESTENDPOINT1");
-    }
-
-    #[test]
-    fn test_from_env_named_scope_case_insensitive() {
-        let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB_SCOPE_TestProd2__TESTKEY1", "value");
-
-        let config = BundleConfig::new();
-        config.add_scope_alias("testprod2", &Scope::from_url("s3://bucket2/"));
-        config.ensure_env_cache();
-
-        assert_eq!(config.get("testkey1", &Scope::from_url("s3://bucket2/file")), Some("value".to_string()));
-        std::env::remove_var("BB_SCOPE_TestProd2__TESTKEY1");
-    }
-
-    #[test]
-    fn test_from_env_unknown_named_scope_skipped() {
-        let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB_SCOPE_UNKNOWN99__TESTKEY2", "value");
-
-        let config = BundleConfig::new(); // no matching scope
-        config.ensure_env_cache();
-
-        // Should not have the value since scope is unknown
-        assert!(config.get("testkey2", &Scope::global()).is_none());
-        std::env::remove_var("BB_SCOPE_UNKNOWN99__TESTKEY2");
+        std::env::remove_var("BB_S3__MY_BUCKET__TESTKEY3");
     }
 
     #[test]
@@ -1176,169 +948,6 @@ mod tests {
         let config = BundleConfig::new();
         config.ensure_env_cache();
         let _ = config;
-    }
-
-    #[test]
-    fn test_from_flat_keys_global_default() {
-        let mut map = HashMap::new();
-        map.insert("region".to_string(), "us-west-2".to_string());
-        let config = BundleConfig::from_flat_keys(map);
-        assert_eq!(
-            config.get("region", &Scope::global()),
-            Some("us-west-2".to_string())
-        );
-        assert!(!config.has_unresolved_scopes() || {
-            // Check that there are no unresolved scopes other than what we set
-            true
-        });
-    }
-
-    #[test]
-    fn test_from_flat_keys_named_scope_without_prefix() {
-        let mut map = HashMap::new();
-        map.insert("s3__region".to_string(), "us-west-2".to_string());
-        let config = BundleConfig::from_flat_keys(map);
-
-        // Should have unresolved scope
-        assert!(config.has_unresolved_scopes());
-
-        // Resolves via resolve_scopes()
-        let mut scopes = HashMap::new();
-        scopes.insert("s3".to_string(), "s3://".to_string());
-        let resolved = config.resolve_scopes(&scopes);
-        assert!(!resolved.has_unresolved_scopes());
-
-        assert_eq!(resolved.get("region", &Scope::from_url("s3://bucket/file")), Some("us-west-2".to_string()));
-    }
-
-    #[test]
-    fn test_from_flat_keys_named_scope() {
-        let mut map = HashMap::new();
-        map.insert("scope_prod__region".to_string(), "us-west-2".to_string());
-        let config = BundleConfig::from_flat_keys(map);
-        assert!(config.has_unresolved_scopes());
-    }
-
-    #[test]
-    fn test_from_flat_keys_case_insensitive() {
-        let mut map = HashMap::new();
-        map.insert("S3__REGION".to_string(), "us-west-2".to_string());
-        map.insert("MyKey".to_string(), "value".to_string());
-        let config = BundleConfig::from_flat_keys(map);
-        assert!(config.has_unresolved_scopes());
-        assert_eq!(config.get("mykey", &Scope::global()), Some("value".to_string()));
-    }
-
-    #[test]
-    fn test_from_flat_keys_no_double_underscore() {
-        let mut map = HashMap::new();
-        map.insert("simple_key".to_string(), "value".to_string());
-        let config = BundleConfig::from_flat_keys(map);
-        assert_eq!(
-            config.get("simple_key", &Scope::global()),
-            Some("value".to_string())
-        );
-    }
-
-    #[test]
-    fn test_from_flat_keys_scope_prefix_and_bare_equivalent() {
-        // scope_prod__region and prod__region produce identical unresolved entries
-        let mut map1 = HashMap::new();
-        map1.insert("scope_prod__region".to_string(), "us-west-2".to_string());
-        let config1 = BundleConfig::from_flat_keys(map1);
-
-        let mut map2 = HashMap::new();
-        map2.insert("prod__region".to_string(), "us-west-2".to_string());
-        let config2 = BundleConfig::from_flat_keys(map2);
-
-        // Both should have unresolved scopes
-        assert!(config1.has_unresolved_scopes());
-        assert!(config2.has_unresolved_scopes());
-
-        // Both should resolve the same way
-        let mut scopes = HashMap::new();
-        scopes.insert("prod".to_string(), "s3://my-bucket/".to_string());
-        let resolved1 = config1.resolve_scopes(&scopes);
-        let resolved2 = config2.resolve_scopes(&scopes);
-
-        assert_eq!(
-            resolved1.get("region", &Scope::from_url("s3://my-bucket/file")),
-            Some("us-west-2".to_string())
-        );
-        assert_eq!(
-            resolved2.get("region", &Scope::from_url("s3://my-bucket/file")),
-            Some("us-west-2".to_string())
-        );
-    }
-
-    #[test]
-    fn test_resolve_scopes() {
-        let mut map = HashMap::new();
-        map.insert("scope_prod__region".to_string(), "us-west-2".to_string());
-        map.insert("scope_prod__endpoint".to_string(), "http://minio".to_string());
-        let config = BundleConfig::from_flat_keys(map);
-
-        let mut scopes = HashMap::new();
-        scopes.insert("prod".to_string(), "s3://my-bucket/".to_string());
-        let resolved = config.resolve_scopes(&scopes);
-
-        assert!(!resolved.has_unresolved_scopes());
-        assert_eq!(
-            resolved.get("region", &Scope::from_url("s3://my-bucket/file")),
-            Some("us-west-2".to_string())
-        );
-        assert_eq!(
-            resolved.get("endpoint", &Scope::from_url("s3://my-bucket/file")),
-            Some("http://minio".to_string())
-        );
-    }
-
-    #[test]
-    fn test_resolve_scopes_unknown_skipped() {
-        let mut map = HashMap::new();
-        map.insert("scope_unknown__region".to_string(), "us-west-2".to_string());
-        let config = BundleConfig::from_flat_keys(map);
-
-        let scopes = HashMap::new(); // no matching scope
-        let resolved = config.resolve_scopes(&scopes);
-
-        assert!(!resolved.has_unresolved_scopes());
-        // Should have no entries since the scope was unknown and dropped
-        assert_eq!(resolved.get("region", &Scope::global()), None);
-    }
-
-    #[test]
-    fn test_merge_from_flat_keys() {
-        let config1 = BundleConfig::from_flat_keys({
-            let mut m = HashMap::new();
-            m.insert("scope_prod__region".to_string(), "us-west-2".to_string());
-            m
-        });
-
-        let config2 = BundleConfig::from_flat_keys({
-            let mut m = HashMap::new();
-            m.insert("scope_prod__region".to_string(), "us-east-1".to_string());
-            m.insert("scope_staging__endpoint".to_string(), "http://staging".to_string());
-            m
-        });
-
-        config1.merge(&config2);
-
-        // Both should be resolvable
-        let mut scopes = HashMap::new();
-        scopes.insert("prod".to_string(), "s3://prod-bucket/".to_string());
-        scopes.insert("staging".to_string(), "s3://staging-bucket/".to_string());
-        let resolved = config1.resolve_scopes(&scopes);
-
-        assert_eq!(
-            resolved.get("region", &Scope::from_url("s3://prod-bucket/file")),
-            Some("us-east-1".to_string()) // config2 wins
-        );
-
-        assert_eq!(
-            resolved.get("endpoint", &Scope::from_url("s3://staging-bucket/file")),
-            Some("http://staging".to_string())
-        );
     }
 
     #[test]
@@ -1464,20 +1073,6 @@ mod tests {
     }
 
     #[test]
-    fn test_config_scopes() {
-        let config = BundleConfig::new();
-        config.add_scope_alias("prod", &Scope::from_url("s3://prod-bucket/"));
-        config.add_scope_alias("staging", &Scope::from_url("s3://staging-bucket/"));
-
-        let scopes = config.scope_aliases();
-        assert_eq!(scopes.get("prod"), Some(&Scope::from_url("s3://prod-bucket/")));
-        assert_eq!(scopes.get("staging"), Some(&Scope::from_url("s3://staging-bucket/")));
-
-        assert_eq!(config.resolve_alias("prod"), Some(Scope::from_url("s3://prod-bucket/")));
-        assert_eq!(config.resolve_alias("unknown"), None);
-    }
-
-    #[test]
     fn test_passed_entries() {
         let config = BundleConfig::new();
         config.set("region", "us-west-2", &Scope::global(), ConfigSource::Passed);
@@ -1573,92 +1168,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_get_compound_key_with_scope() {
-        let config = BundleConfig::new();
-        config.add_scope_alias("prod", &Scope::from_url("s3://prod-bucket/"));
-        config.set("region", "us-west-2", &Scope::from_url("s3://prod-bucket/"), ConfigSource::Stored);
-
-        // Compound key: "prod__region" resolves to key="region", scope="/s3/prod-bucket"
-        assert_eq!(
-            config.get("prod__region", &Scope::global()),
-            Some("us-west-2".to_string())
-        );
-    }
-
-    #[test]
-    fn test_get_scope_name_as_url() {
-        let config = BundleConfig::new();
-        config.add_scope_alias("prod", &Scope::from_url("s3://prod-bucket/"));
-        config.set("region", "us-west-2", &Scope::from_url("s3://prod-bucket/"), ConfigSource::Stored);
-
-        // Scope name as scope: get("region", Scope::from_url("prod")) resolves via alias
-        assert_eq!(
-            config.get("region", &Scope::from_url("prod")),
-            Some("us-west-2".to_string())
-        );
-    }
-
-    #[test]
-    fn test_get_compound_key_unknown_scope() {
-        let config = BundleConfig::new();
-        config.add_scope_alias("prod", &Scope::from_url("s3://prod-bucket/"));
-        config.set("region", "us-west-2", &Scope::global(), ConfigSource::Stored);
-
-        // Unknown scope in compound key: falls through as literal key "unknown__region"
-        assert_eq!(config.get("unknown__region", &Scope::global()), None);
-
-        // Global default still works for plain key
-        assert_eq!(config.get("region", &Scope::global()), Some("us-west-2".to_string()));
-    }
-
-    #[test]
-    fn test_get_scope_name_as_url_unknown_scope() {
-        let config = BundleConfig::new();
-        config.set("region", "us-west-2", &Scope::global(), ConfigSource::Stored);
-
-        // Unknown scope name — Scope::from_url("unknown_scope") becomes /unknown_scope
-        // which doesn't match any alias, so normalize_key_scope passes through.
-        // Since global matches everything, should still get the value.
-        assert_eq!(
-            config.get("region", &Scope::from_url("unknown_scope")),
-            Some("us-west-2".to_string())
-        );
-    }
-
-    #[test]
-    fn test_get_url_behavior_unchanged() {
-        let config = BundleConfig::new();
-        config.add_scope_alias("prod", &Scope::from_url("s3://prod-bucket/"));
-        config.set("region", "us-west-2", &Scope::from_url("s3://prod-bucket/"), ConfigSource::Stored);
-        config.set("region", "eu-west-1", &Scope::global(), ConfigSource::Stored);
-
-        // Full URL scope still works
-        assert_eq!(
-            config.get("region", &Scope::from_url("s3://prod-bucket/file")),
-            Some("us-west-2".to_string())
-        );
-
-        // Unscoped lookup still works
-        assert_eq!(
-            config.get("region", &Scope::global()),
-            Some("eu-west-1".to_string())
-        );
-    }
-
-    #[test]
-    fn test_get_compound_key_and_scope_url_agree() {
-        let config = BundleConfig::new();
-        config.add_scope_alias("prod", &Scope::from_url("s3://prod-bucket/"));
-        config.set("region", "us-west-2", &Scope::from_url("s3://prod-bucket/"), ConfigSource::Stored);
-
-        // All three ways of querying should return the same value
-        let via_compound = config.get("prod__region", &Scope::global());
-        let via_scope_name = config.get("region", &Scope::from_url("prod"));
-        let via_full_url = config.get("region", &Scope::from_url("s3://prod-bucket/"));
-
-        assert_eq!(via_compound, Some("us-west-2".to_string()));
-        assert_eq!(via_scope_name, Some("us-west-2".to_string()));
-        assert_eq!(via_full_url, Some("us-west-2".to_string()));
-    }
 }
