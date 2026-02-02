@@ -21,7 +21,7 @@ impl PyOperation {
             AnyOperation::RenameView(_) => "renameView".to_string(),
             AnyOperation::Filter(_) => "filter".to_string(),
             AnyOperation::CreateFunction(_) => "createFunction".to_string(),
-            AnyOperation::SetConfig(_) => "setConfig".to_string(),
+            AnyOperation::SaveConfig(_) => "saveConfig".to_string(),
             AnyOperation::SetName(_) => "setName".to_string(),
             AnyOperation::SetDescription(_) => "setDescription".to_string(),
             AnyOperation::IndexBlocks(_) => "indexBlocks".to_string(),
@@ -33,7 +33,7 @@ impl PyOperation {
             AnyOperation::CreateSource(_) => "createSource".to_string(),
             AnyOperation::DetachBlock(_) => "detachBlock".to_string(),
             AnyOperation::ReplaceBlock(_) => "replaceBlock".to_string(),
-            AnyOperation::CreateConfigScope(_) => "createConfigScope".to_string(),
+            AnyOperation::CreateScopeAlias(_) => "createScopeAlias".to_string(),
             AnyOperation::UpdateVersion(_) => "updateVersion".to_string(),
         }
     }

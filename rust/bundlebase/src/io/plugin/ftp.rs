@@ -4,17 +4,17 @@
 //! but use different underlying libraries (suppaftp vs russh_sftp) with incompatible
 //! types. Extracting a common abstraction would add complexity without clear benefit.
 
-use crate::bundle_config::ConfigKeySpec;
+use crate::bundle_config::ConfigKey;
 use crate::io::registry::IOFactory;
 use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 
-/// Valid FTP configuration keys.
-pub const FTP_CONFIG_SPEC: ConfigKeySpec = ConfigKeySpec {
-    scheme_prefix: "ftp://",
-    valid_keys: &["username", "password"],
-};
+/// FTP configuration keys.
+pub static FTP_CONFIG_SPECS: &[ConfigKey] = &[
+    ConfigKey { key: "username", secure: false },
+    ConfigKey { key: "password", secure: true },
+];
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;

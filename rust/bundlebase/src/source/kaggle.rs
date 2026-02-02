@@ -8,7 +8,7 @@ use super::source_function::{
     SyncMode,
 };
 use super::source_utils::{self, MaterializeResult};
-use crate::bundle_config::ConfigKeySpec;
+use crate::bundle_config::ConfigKey;
 use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
@@ -16,13 +16,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
 
-/// Valid configuration keys for the Kaggle service.
-pub const KAGGLE_CONFIG_SPEC: ConfigKeySpec = ConfigKeySpec {
-    scheme_prefix: "kaggle://",
-    valid_keys: &["base_url", "username", "key"],
-};
+/// Configuration keys for the Kaggle service.
+pub static KAGGLE_CONFIG_SPECS: &[ConfigKey] = &[
+    ConfigKey { key: "base_url", secure: false },
+    ConfigKey { key: "username", secure: false },
+    ConfigKey { key: "key", secure: true },
+];
 
 const DEFAULT_KAGGLE_BASE_URL: &str = "https://www.kaggle.com";
+const KAGGLE_CONFIG_URL: &str = "kaggle://config";
 
 /// Built-in "kaggle" source function.
 ///
@@ -43,10 +45,9 @@ pub struct KaggleFunction;
 /// Resolve the Kaggle API base URL from config.
 /// Falls back to https://www.kaggle.com.
 fn kaggle_base_url(config: &BundleConfig) -> String {
+    let scope = crate::bundle_config::Scope::from_url(KAGGLE_CONFIG_URL);
     config
-        .get_service_config("kaggle")
-        .get("base_url")
-        .cloned()
+        .get("base_url", &scope)
         .unwrap_or_else(|| DEFAULT_KAGGLE_BASE_URL.to_string())
 }
 
@@ -56,9 +57,12 @@ fn kaggle_base_url(config: &BundleConfig) -> String {
 /// 1. BundleConfig `kaggle://` prefix (`username` + `key`)
 /// 2. ~/.kaggle/kaggle.json file
 fn read_kaggle_credentials(config: &BundleConfig) -> Result<(String, String), BundlebaseError> {
-    let kaggle_config = config.get_service_config("kaggle");
-    if let (Some(u), Some(k)) = (kaggle_config.get("username"), kaggle_config.get("key")) {
-        return Ok((u.clone(), k.clone()));
+    let scope = crate::bundle_config::Scope::from_url(KAGGLE_CONFIG_URL);
+    if let (Some(u), Some(k)) = (
+        config.get("username", &scope),
+        config.get("key", &scope),
+    ) {
+        return Ok((u, k));
     }
     // Fall back to file-based credentials
     read_kaggle_credentials_from_file()
@@ -998,9 +1002,10 @@ mod tests {
 
     #[test]
     fn test_read_credentials_from_config() {
-        let mut config = BundleConfig::new();
-        config.set("username", "config_user", Some("kaggle://"));
-        config.set("key", "config_key", Some("kaggle://"));
+        let config = BundleConfig::new();
+        let scope = crate::bundle_config::Scope::from_url("kaggle://");
+        config.set("username", "config_user", &scope, crate::bundle_config::ConfigSource::Passed);
+        config.set("key", "config_key", &scope, crate::bundle_config::ConfigSource::Passed);
 
         let (username, key) = read_kaggle_credentials(&config).unwrap();
         assert_eq!(username, "config_user");
@@ -1010,8 +1015,9 @@ mod tests {
     #[test]
     fn test_read_credentials_partial_config_falls_back_to_file() {
         // If only username is set in config (no key), should fall back to file
-        let mut config = BundleConfig::new();
-        config.set("username", "config_user", Some("kaggle://"));
+        let config = BundleConfig::new();
+        let scope = crate::bundle_config::Scope::from_url("kaggle://");
+        config.set("username", "config_user", &scope, crate::bundle_config::ConfigSource::Passed);
 
         let result = read_kaggle_credentials(&config);
         // Will either succeed (if ~/.kaggle/kaggle.json exists) or fail with file error
@@ -1029,8 +1035,9 @@ mod tests {
 
     #[test]
     fn test_kaggle_base_url_from_config() {
-        let mut config = BundleConfig::new();
-        config.set("base_url", "https://custom.kaggle.com", Some("kaggle://"));
+        let config = BundleConfig::new();
+        let scope = crate::bundle_config::Scope::from_url("kaggle://");
+        config.set("base_url", "https://custom.kaggle.com", &scope, crate::bundle_config::ConfigSource::Passed);
         assert_eq!(kaggle_base_url(&config), "https://custom.kaggle.com");
     }
 

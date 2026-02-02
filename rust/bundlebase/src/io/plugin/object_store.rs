@@ -2,7 +2,7 @@
 //!
 //! Supports: file://, s3://, gs://, azure://, az://, memory://, empty://
 
-use crate::bundle_config::ConfigKeySpec;
+use crate::bundle_config::ConfigKey;
 use crate::io::registry::IOFactory;
 use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::io::util::{join_path, join_url};
@@ -10,57 +10,48 @@ use crate::io::{get_memory_store, get_null_store, EMPTY_SCHEME, EMPTY_URL};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 
-/// Valid S3 configuration keys (based on object_store's AmazonS3ConfigKey).
-pub const S3_CONFIG_SPEC: ConfigKeySpec = ConfigKeySpec {
-    scheme_prefix: "s3://",
-    valid_keys: &[
-        "region",
-        "access_key_id",
-        "secret_access_key",
-        "session_token",
-        "endpoint",
-        "bucket",
-        "allow_http",
-        "skip_signature",
-        "virtual_hosted_style_request",
-        "token",
-        "imdsv1_fallback",
-        "metadata_endpoint",
-        "container_credentials_relative_uri",
-        "unsigned_payload",
-        "checksum_algorithm",
-        "copy_if_not_exists",
-        "conditional_put",
-    ],
-};
+/// S3 configuration keys (based on object_store's AmazonS3ConfigKey).
+pub static S3_CONFIG_SPECS: &[ConfigKey] = &[
+    ConfigKey { key: "region", secure: false },
+    ConfigKey { key: "access_key_id", secure: false },
+    ConfigKey { key: "endpoint", secure: false },
+    ConfigKey { key: "bucket", secure: false },
+    ConfigKey { key: "allow_http", secure: false },
+    ConfigKey { key: "skip_signature", secure: false },
+    ConfigKey { key: "virtual_hosted_style_request", secure: false },
+    ConfigKey { key: "imdsv1_fallback", secure: false },
+    ConfigKey { key: "metadata_endpoint", secure: false },
+    ConfigKey { key: "container_credentials_relative_uri", secure: false },
+    ConfigKey { key: "unsigned_payload", secure: false },
+    ConfigKey { key: "checksum_algorithm", secure: false },
+    ConfigKey { key: "copy_if_not_exists", secure: false },
+    ConfigKey { key: "conditional_put", secure: false },
+    ConfigKey { key: "secret_access_key", secure: true },
+    ConfigKey { key: "session_token", secure: true },
+    ConfigKey { key: "token", secure: true },
+];
 
-/// Valid GCS configuration keys.
-pub const GCS_CONFIG_SPEC: ConfigKeySpec = ConfigKeySpec {
-    scheme_prefix: "gs://",
-    valid_keys: &[
-        "service_account_key",
-        "service_account_path",
-        "bucket",
-        "application_credentials",
-    ],
-};
+/// GCS configuration keys.
+pub static GCS_CONFIG_SPECS: &[ConfigKey] = &[
+    ConfigKey { key: "service_account_path", secure: false },
+    ConfigKey { key: "bucket", secure: false },
+    ConfigKey { key: "application_credentials", secure: false },
+    ConfigKey { key: "service_account_key", secure: true },
+];
 
-/// Valid Azure configuration keys.
-pub const AZURE_CONFIG_SPEC: ConfigKeySpec = ConfigKeySpec {
-    scheme_prefix: "azure://",
-    valid_keys: &[
-        "account",
-        "access_key",
-        "container",
-        "sas_token",
-        "bearer_token",
-        "client_id",
-        "client_secret",
-        "tenant_id",
-        "authority_host",
-        "use_emulator",
-    ],
-};
+/// Azure configuration keys.
+pub static AZURE_CONFIG_SPECS: &[ConfigKey] = &[
+    ConfigKey { key: "account", secure: false },
+    ConfigKey { key: "container", secure: false },
+    ConfigKey { key: "client_id", secure: false },
+    ConfigKey { key: "tenant_id", secure: false },
+    ConfigKey { key: "authority_host", secure: false },
+    ConfigKey { key: "use_emulator", secure: false },
+    ConfigKey { key: "access_key", secure: true },
+    ConfigKey { key: "sas_token", secure: true },
+    ConfigKey { key: "bearer_token", secure: true },
+    ConfigKey { key: "client_secret", secure: true },
+];
 use async_trait::async_trait;
 use bytes::Bytes;
 use datafusion::datasource::object_store::ObjectStoreUrl;
@@ -68,7 +59,6 @@ use futures::stream::{BoxStream, StreamExt, TryStreamExt};
 use object_store::path::Path as ObjectPath;
 use object_store::{ObjectMeta, ObjectStore};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::env::current_dir;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
@@ -92,7 +82,7 @@ pub(crate) fn compute_store_url(url: &Url) -> ObjectStoreUrl {
 /// * `config` - Optional configuration to apply to the ObjectStore
 pub(crate) fn parse_url(
     url: &Url,
-    config: &HashMap<String, String>,
+    config: &BundleConfig,
 ) -> Result<(Arc<dyn ObjectStore>, ObjectPath), BundlebaseError> {
     // Handle tar:// scheme - format is tar:///path/to/archive.tar or tar:///path/to/archive.tar/internal/path
     if url.scheme() == "tar" {
@@ -142,37 +132,39 @@ pub(crate) fn parse_url(
             return Err("Memory URL must be memory:///<path>".into());
         }
         Ok((get_memory_store(), url.path().into()))
-    } else if !config.is_empty() {
-        // Use config to build ObjectStore
-        let store = build_object_store(url, config)?;
-        let path = ObjectPath::from(url.path());
-        Ok((Arc::new(store), path))
     } else {
-        // Fallback to object_store::parse_url when no config
-        let (store, path) = object_store::parse_url(url)?;
+        // Try building with config; the builder will use config.get() per key
+        let url_str = url.as_str();
+        let store = build_object_store(url, url_str, config)?;
+        let path = ObjectPath::from(url.path());
         Ok((Arc::new(store), path))
     }
 }
 
-/// Build an ObjectStore with configuration
+/// Build an ObjectStore with configuration.
 ///
 /// Starts with Builder::from_env() to pick up environment variables,
-/// then applies config values on top (config overrides env vars).
+/// then applies config values on top via `config.get(key, &scope)`.
 fn build_object_store(
     url: &Url,
-    config: &HashMap<String, String>,
+    url_str: &str,
+    config: &BundleConfig,
 ) -> Result<Box<dyn ObjectStore>, BundlebaseError> {
+    use crate::bundle_config::Scope;
     use object_store::aws::AmazonS3Builder;
     use object_store::azure::MicrosoftAzureBuilder;
     use object_store::gcp::GoogleCloudStorageBuilder;
+
+    let scope = Scope::from_url(url_str);
 
     match url.scheme() {
         "s3" => {
             let mut builder = AmazonS3Builder::from_env().with_url(url.as_str());
 
-            // Apply config values
-            for (key, value) in config {
-                builder = builder.with_config(key.parse()?, value);
+            for spec in S3_CONFIG_SPECS {
+                if let Some(value) = config.get(spec.key, &scope) {
+                    builder = builder.with_config(spec.key.parse()?, value);
+                }
             }
 
             Ok(Box::new(builder.build()?))
@@ -180,9 +172,10 @@ fn build_object_store(
         "gs" => {
             let mut builder = GoogleCloudStorageBuilder::from_env().with_url(url.as_str());
 
-            // Apply config values
-            for (key, value) in config {
-                builder = builder.with_config(key.parse()?, value);
+            for spec in GCS_CONFIG_SPECS {
+                if let Some(value) = config.get(spec.key, &scope) {
+                    builder = builder.with_config(spec.key.parse()?, value);
+                }
             }
 
             Ok(Box::new(builder.build()?))
@@ -190,9 +183,10 @@ fn build_object_store(
         "azure" | "az" => {
             let mut builder = MicrosoftAzureBuilder::from_env().with_url(url.as_str());
 
-            // Apply config values
-            for (key, value) in config {
-                builder = builder.with_config(key.parse()?, value);
+            for spec in AZURE_CONFIG_SPECS {
+                if let Some(value) = config.get(spec.key, &scope) {
+                    builder = builder.with_config(spec.key.parse()?, value);
+                }
             }
 
             Ok(Box::new(builder.build()?))
@@ -230,8 +224,7 @@ impl Debug for ObjectStoreFile {
 impl ObjectStoreFile {
     /// Create an IOFile from a URL.
     pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<ObjectStoreFile, BundlebaseError> {
-        let config_map = config.get_config_for_url(url);
-        let (store, path) = parse_url(url, &config_map)?;
+        let (store, path) = parse_url(url, &config)?;
         Self::new(url, store, &path)
     }
 
@@ -486,8 +479,7 @@ impl ObjectStoreDir {
             return Err(format!("Empty URL must be {}<path>", EMPTY_URL).into());
         }
 
-        let config_map = config.get_config_for_url(url);
-        let (store, path) = parse_url(url, &config_map)?;
+        let (store, path) = parse_url(url, &config)?;
 
         ObjectStoreDir::new(url, store, &path, config)
     }

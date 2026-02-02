@@ -26,4 +26,5 @@ pub mod tables {
     pub static INDEXES: &str = "indexes";
     pub static PACKS: &str = "packs";
     pub static BLOCKS: &str = "blocks";
+    pub static CONFIG: &str = "config";
 }

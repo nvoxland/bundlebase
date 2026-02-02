@@ -4,17 +4,16 @@
 //! but use different underlying libraries (suppaftp vs russh_sftp) with incompatible
 //! types. Extracting a common abstraction would add complexity without clear benefit.
 
-use crate::bundle_config::ConfigKeySpec;
+use crate::bundle_config::ConfigKey;
 use crate::io::registry::IOFactory;
 use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteFile};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 
-/// Valid SFTP configuration keys.
-pub const SFTP_CONFIG_SPEC: ConfigKeySpec = ConfigKeySpec {
-    scheme_prefix: "sftp://",
-    valid_keys: &["key_path"],
-};
+/// SFTP configuration keys.
+pub static SFTP_CONFIG_SPECS: &[ConfigKey] = &[
+    ConfigKey { key: "key_path", secure: false },
+];
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
@@ -264,9 +263,7 @@ impl SftpFile {
 
         // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
-            .get_config_for_url(url)
-            .get("key_path")
-            .cloned()
+            .get("key_path", &crate::bundle_config::Scope::from(url.as_str()))
             .or_else(|| std::env::var("SSH_KEY_PATH").ok())
             .unwrap_or_else(|| "~/.ssh/id_rsa".to_string());
 
@@ -397,9 +394,7 @@ impl SftpDir {
 
         // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
-            .get_config_for_url(url)
-            .get("key_path")
-            .cloned()
+            .get("key_path", &crate::bundle_config::Scope::from(url.as_str()))
             .or_else(|| std::env::var("SSH_KEY_PATH").ok())
             .unwrap_or_else(|| "~/.ssh/id_rsa".to_string());
 

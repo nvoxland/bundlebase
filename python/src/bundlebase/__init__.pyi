@@ -5,23 +5,22 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 __version__: str
 
 class BundleConfig:
-    """Configuration for container storage and cloud providers."""
+    """Configuration for container storage and cloud providers.
 
-    def __init__(self) -> None: ...
+    Not directly constructible — returned by the ``config()`` method on bundles and builders.
+    """
 
-    def set(self, key: str, value: str, url_prefix: Optional[str] = None) -> None:
+    def set(self, key: str, value: str, scope: str = "/") -> None:
         """Set a configuration value.
 
         Args:
-            key: Configuration key
+            key: Configuration key. Supports compound "scope__key" format.
             value: Configuration value
-            url_prefix: Optional URL prefix for URL-specific config
+            scope: Scope ("/" for global default, or "/"-prefixed path like "/s3/bucket" or "/prod").
         """
         ...
 
-ConfigType = Union[BundleConfig, Dict[str, Any]]
-
-def create(path: str = ..., config: Optional[ConfigType] = None) -> "CreateChain":
+def create(path: str = ..., config: Optional[Dict[str, Any]] = None) -> "CreateChain":
     """
     Create a new Bundle with fluent chaining support.
 
@@ -29,6 +28,7 @@ def create(path: str = ..., config: Optional[ConfigType] = None) -> "CreateChain
 
     Args:
         path: Optional path for bundle storage
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         CreateChain that can be chained with operations
@@ -40,13 +40,13 @@ def create(path: str = ..., config: Optional[ConfigType] = None) -> "CreateChain
     """
     ...
 
-async def open(path: str, config: Optional[ConfigType] = None) -> PyBundle:
+async def open(path: str, config: Optional[Dict[str, Any]] = None) -> PyBundle:
     """
     Load a bundle definition from a saved file.
 
     Args:
         path: Path to the saved bundle file (YAML format)
-        config: Optional configuration (BundleConfig or dict) for cloud storage settings
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         A PyBundle with the loaded operations (read-only)
@@ -612,52 +612,72 @@ class PyBundleBuilder:
         """
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None, scope: Optional[str] = None) -> "OperationChain":
+    def save_config(self, key: str, value: str, scope: str = "/") -> "OperationChain":
         """
-        Queue a set_config operation.
+        Queue a save_config operation.
 
         Args:
             key: Configuration key
             value: Configuration value
-            url_prefix: Optional URL prefix for URL-specific config
-            scope: Optional scope name (resolved to url_prefix at execute time)
+            scope: Scope ("/" for global default, or "/"-prefixed path like "/s3/bucket" or "/prod")
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.save_config("region", "us-west-2")
+            c = await c.save_config("endpoint", "http://localhost:9000", scope="/s3/test-bucket")
+            c = await c.save_config("region", "us-east-1", scope="/prod")
+        """
+        ...
+
+    def set_config(self, key: str, value: str, scope: str = "/") -> "OperationChain":
+        """
+        Queue a set_config operation (runtime-only, highest priority).
+
+        Unlike save_config, this does not persist the value to the bundle manifest.
+        It only affects the current session. Takes precedence over all other config sources.
+
+        Args:
+            key: Configuration key. Supports compound "scope__key" format.
+            value: Configuration value
+            scope: Scope ("/" for global default, or "/"-prefixed path like "/s3/bucket" or "/prod").
 
         Returns:
             OperationChain for fluent chaining
 
         Example:
             c = await c.set_config("region", "us-west-2")
-            c = await c.set_config("endpoint", "http://localhost:9000", url_prefix="s3://test-bucket/")
-            c = await c.set_config("region", "us-east-1", scope="prod")
+            c = await c.set_config("endpoint", "http://localhost:9000", scope="/s3/test-bucket")
         """
         ...
 
-    def create_config_scope(self, name: str, url: str) -> "OperationChain":
+    def create_scope_alias(self, name: str, scope: str) -> "OperationChain":
         """
-        Create a named config scope (name -> URL mapping).
+        Create a named scope alias (name -> scope mapping).
 
-        Config scopes are runtime aliases. Use with ``set_config(..., scope="name")``
-        to set config for the URL associated with the scope.
+        Scope aliases are named shortcuts. Use with ``save_config(..., scope="/name")``
+        to set config for the scope associated with the alias.
 
         Args:
-            name: Scope name (e.g., "prod", "staging")
-            url: URL prefix this scope maps to (e.g., "s3://my-bucket/")
+            name: Alias name (e.g., "prod", "staging")
+            scope: Scope this alias maps to (e.g., "/s3/my-bucket")
 
         Returns:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.create_config_scope("prod", "s3://my-bucket/")
-            c = await c.set_config("region", "us-east-1", scope="prod")
+            c = await c.create_scope_alias("prod", "/s3/my-bucket")
+            c = await c.save_config("region", "us-east-1", scope="/prod")
         """
         ...
 
-    def config_scopes(self) -> Dict[str, str]:
+    def scope_aliases(self) -> Dict[str, str]:
         """
-        Get defined config scopes (name -> URL).
+        Get defined scope aliases (name -> scope).
 
         Returns:
-            Dictionary mapping scope names to URL prefixes
+            Dictionary mapping alias names to scopes
         """
         ...
 
@@ -1190,12 +1210,16 @@ class OperationChain:
         """Queue a set_description operation."""
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None, scope: Optional[str] = None) -> "OperationChain":
-        """Queue a set_config operation."""
+    def save_config(self, key: str, value: str, scope: str = "/") -> "OperationChain":
+        """Queue a save_config operation."""
         ...
 
-    def create_config_scope(self, name: str, url: str) -> "OperationChain":
-        """Queue a create_config_scope operation."""
+    def set_config(self, key: str, value: str, scope: str = "/") -> "OperationChain":
+        """Queue a set_config operation (runtime-only, highest priority)."""
+        ...
+
+    def create_scope_alias(self, name: str, scope: str) -> "OperationChain":
+        """Queue a create_scope_alias operation."""
         ...
 
     def create_function(
@@ -1311,12 +1335,16 @@ class CreateChain:
         """Queue a set_description operation."""
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None, scope: Optional[str] = None) -> "CreateChain":
-        """Queue a set_config operation."""
+    def save_config(self, key: str, value: str, scope: str = "/") -> "CreateChain":
+        """Queue a save_config operation."""
         ...
 
-    def create_config_scope(self, name: str, url: str) -> "CreateChain":
-        """Queue a create_config_scope operation."""
+    def set_config(self, key: str, value: str, scope: str = "/") -> "CreateChain":
+        """Queue a set_config operation (runtime-only, highest priority)."""
+        ...
+
+    def create_scope_alias(self, name: str, scope: str) -> "CreateChain":
+        """Queue a create_scope_alias operation."""
         ...
 
     def create_function(
@@ -1432,12 +1460,16 @@ class ExtendChain:
         """Queue a set_description operation."""
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None, scope: Optional[str] = None) -> "ExtendChain":
-        """Queue a set_config operation."""
+    def save_config(self, key: str, value: str, scope: str = "/") -> "ExtendChain":
+        """Queue a save_config operation."""
         ...
 
-    def create_config_scope(self, name: str, url: str) -> "ExtendChain":
-        """Queue a create_config_scope operation."""
+    def set_config(self, key: str, value: str, scope: str = "/") -> "ExtendChain":
+        """Queue a set_config operation (runtime-only, highest priority)."""
+        ...
+
+    def create_scope_alias(self, name: str, scope: str) -> "ExtendChain":
+        """Queue a create_scope_alias operation."""
         ...
 
     def create_function(

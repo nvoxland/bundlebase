@@ -251,7 +251,7 @@ mod tests {
         assert!(result.is_err(), "Unknown scheme should be rejected");
         assert_eq!(
             result.err().unwrap().to_string(),
-            "Generic URL error: Unable to recognise URL \"unknown://test\""
+            "Unsupported URL scheme 'unknown': Generic URL error: Unable to recognise URL \"unknown://test\""
         );
     }
 

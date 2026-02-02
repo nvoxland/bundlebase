@@ -1,6 +1,6 @@
 mod builder;
 mod column_lineage;
-mod command;
+pub(crate) mod command;
 mod commit;
 mod data_block;
 mod pack;
@@ -40,6 +40,8 @@ use crate::source::SourceFunctionRegistry;
 use crate::functions::FunctionRegistry;
 use crate::index::IndexDefinition;
 use crate::io::{read_yaml, readable_file_from_url, writable_dir_from_str, writable_dir_from_url, DataStorage, IOReadWriteDir, EMPTY_URL};
+use crate::bundle_config::Scope;
+use crate::bundle_config::PassedBundleConfig;
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::Array;
 use arrow_schema::SchemaRef;
@@ -92,21 +94,12 @@ pub struct Bundle {
     function_registry: Arc<RwLock<FunctionRegistry>>,
     source_function_registry: Arc<RwLock<SourceFunctionRegistry>>,
 
-    /// Final merged configuration (explicit + stored), used for all operations
-    /// This is computed once and updated when SetConfigOp is applied
-    config: Arc<RwLock<Arc<BundleConfig>>>,
-
-    /// Config passed to create()/open() (preserved for re-merging after SetConfigOp)
-    passed_config: Arc<RwLock<Option<BundleConfig>>>,
-
-    /// Config stored via SetConfigOp operations (preserved for re-merging)
-    stored_config: Arc<RwLock<BundleConfig>>,
+    /// Single, self-contained, internally thread-safe config holder.
+    /// All config sources (stored, env, passed, runtime) live inside BundleConfig.
+    config: Arc<BundleConfig>,
 
     /// True if this bundle is a view (has a view field in init commit)
     is_view: Arc<RwLock<bool>>,
-
-    /// Named config scopes (name -> URL prefix)
-    config_scopes: Arc<RwLock<HashMap<String, String>>>,
 }
 
 impl Clone for Bundle {
@@ -145,10 +138,7 @@ impl Clone for Bundle {
             function_registry: Arc::clone(&self.function_registry),
             source_function_registry: Arc::clone(&self.source_function_registry),
             config: Arc::clone(&self.config),
-            passed_config: Arc::clone(&self.passed_config),
-            stored_config: Arc::clone(&self.stored_config),
             is_view: Arc::clone(&self.is_view),
-            config_scopes: Arc::clone(&self.config_scopes),
         }
     }
 }
@@ -199,8 +189,8 @@ impl Bundle {
             crate::io::get_null_store(),
         );
 
-        let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, BundleConfig::default().into())?));
-        let bundle_config = Arc::new(RwLock::new(Arc::new(crate::BundleConfig::new())));
+        let bundle_config = Arc::new(BundleConfig::new());
+        let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, Arc::clone(&bundle_config))?));
 
         let bundle = Arc::new(Self {
             ctx: Arc::clone(&ctx),
@@ -226,10 +216,7 @@ impl Bundle {
             commits,
             dataframe,
             config: bundle_config,
-            passed_config: Arc::new(RwLock::new(None)),
-            stored_config: Arc::new(RwLock::new(BundleConfig::new())),
             is_view: Arc::new(RwLock::new(false)),
-            config_scopes: Arc::new(RwLock::new(HashMap::new())),
         });
 
         // Register schema providers with Bundle as the facade
@@ -290,18 +277,22 @@ impl Bundle {
     /// let bundle = Bundle::open("file:///data/my_bundle").await?;
     /// let schema = bundle.schema();
     /// ```
-    pub async fn open(path: &str, config: Option<BundleConfig>) -> Result<Arc<Self>, BundlebaseError> {
+    pub async fn open(path: &str, config: Option<PassedBundleConfig>) -> Result<Arc<Self>, BundlebaseError> {
         let mut visited = HashSet::new();
         let arc_bundle = Self::empty().await?;
 
         arc_bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
 
-        // Set explicit config if provided and recompute merged config
-        *arc_bundle.passed_config.write() = config;
-        arc_bundle.recompute_config()?;
+        // Load passed config entries into the bundle's config under ConfigSource::Passed
+        if let Some(passed) = config {
+            arc_bundle.config.merge_passed(&passed);
+        }
+
+        // Refresh data_dir with the config
+        arc_bundle.refresh_data_dir()?;
 
         Self::open_recursive(
-            writable_dir_from_str(path, BundleConfig::default().into())?
+            writable_dir_from_str(path, arc_bundle.config())?
                 .url()
                 .as_str(),
             &mut visited,
@@ -541,58 +532,19 @@ impl Bundle {
     }
 
     pub fn config(&self) -> Arc<BundleConfig> {
-        Arc::clone(&*self.config.read())
+        Arc::clone(&self.config)
     }
 
-    /// Add a named config scope (name -> URL mapping)
-    pub(crate) fn add_config_scope(&self, name: &str, url: &str) {
-        self.config_scopes
-            .write()
-            .insert(name.to_string(), url.to_string());
+    /// Returns all defined scope aliases (name -> normalized Scope)
+    pub fn scope_aliases(&self) -> HashMap<String, Scope> {
+        self.config.scope_aliases()
     }
 
-    /// Get the URL for a named config scope
-    pub(crate) fn get_config_scope_url(&self, name: &str) -> Option<String> {
-        self.config_scopes.read().get(name).cloned()
-    }
-
-    /// Returns all defined config scopes (name -> URL)
-    pub fn config_scopes(&self) -> HashMap<String, String> {
-        self.config_scopes.read().clone()
-    }
-
-    /// Recompute the merged config and recreate data_dir with it
-    ///
-    /// Merges stored_config, explicit_config, and environment variables,
-    /// then recreates data_dir with the new merged config.
-    ///
-    /// Priority order:
-    /// 1. Environment variables (BB_*) (highest)
-    /// 2. Explicit config passed to create()/open()
-    /// 3. Config stored via SetConfigOp operations (lowest)
-    pub(crate) fn recompute_config(&self) -> Result<(), BundlebaseError> {
-        // Merge stored_config with explicit_config (explicit takes priority)
-        let stored_config = self.stored_config.read().clone();
-        let passed_config = self.passed_config.read().clone();
-        let merged = if let Some(ref explicit) = passed_config {
-            stored_config.merge(explicit)
-        } else {
-            stored_config
-        };
-
-        // Load env vars using bundle's defined scopes for named scope resolution
-        let scopes = self.config_scopes();
-        let env_config = BundleConfig::from_env(&scopes);
-        let merged = merged.merge(&env_config);
-
-        // Update the config field
-        let new_config = Arc::new(merged);
-        *self.config.write() = Arc::clone(&new_config);
-
-        // Recreate data_dir with the new config
+    /// Recreate data_dir from the current URL + config.
+    /// Called after SaveConfigOp or CreateScopeAliasOp changes config.
+    pub(crate) fn refresh_data_dir(&self) -> Result<(), BundlebaseError> {
         let url = self.data_dir.read().url().clone();
-        *self.data_dir.write() = writable_dir_from_url(&url, new_config)?;
-
+        *self.data_dir.write() = writable_dir_from_url(&url, self.config())?;
         Ok(())
     }
 
@@ -615,12 +567,10 @@ impl Bundle {
         *self.packs.write() = other.packs.read().clone();
         *self.indexes.write() = other.indexes.read().clone();
         *self.views.write() = other.views.read().clone();
-        *self.stored_config.write() = other.stored_config.read().clone();
-        *self.passed_config.write() = other.passed_config.read().clone();
-        *self.config.write() = Arc::clone(&*other.config.read());
+        // Reload config: replace everything except Runtime entries
+        self.config.reload_non_runtime(&other.config);
         *self.data_dir.write() = Arc::clone(&*other.data_dir.read());
         *self.is_view.write() = *other.is_view.read();
-        *self.config_scopes.write() = other.config_scopes.read().clone();
         self.dataframe.clear();
     }
 
@@ -1147,9 +1097,9 @@ impl BundleFacade for Bundle {
             .to_string();
 
         // Open view as Bundle (automatically loads parent via FROM)
-        // Preserve explicit_config from current bundle
-        let config = self.passed_config.read().clone();
-        Bundle::open(&view_path, config).await
+        // Extract passed config entries from current bundle to pass to view
+        let passed_config = self.config.extract_passed();
+        Bundle::open(&view_path, Some(passed_config)).await
     }
 
     fn views(&self) -> HashMap<ObjectId, String> {
@@ -1267,8 +1217,19 @@ impl BundleFacade for Bundle {
         Bundle::config(self)
     }
 
-    fn config_scopes(&self) -> HashMap<String, String> {
-        Bundle::config_scopes(self)
+    fn scope_aliases(&self) -> HashMap<String, Scope> {
+        Bundle::scope_aliases(self)
+    }
+
+    fn set_config(
+        &self,
+        key: &str,
+        value: &str,
+        scope: &Scope,
+    ) -> Result<(), BundlebaseError> {
+        self.config.set(key, value, scope, crate::bundle_config::ConfigSource::Runtime);
+        self.refresh_data_dir()?;
+        Ok(())
     }
 
     fn ctx(&self) -> Arc<SessionContext> {
