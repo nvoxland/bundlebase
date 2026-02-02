@@ -5,7 +5,7 @@
 // Builder command implementations
 mod attach;
 mod commit;
-mod create_config_scope;
+mod create_scope_alias;
 mod create_index;
 mod create_source;
 mod create_view;
@@ -24,7 +24,7 @@ mod rename_join;
 mod rename_view;
 mod replace_block;
 mod reset;
-mod set_config;
+mod save_config;
 mod set_description;
 mod set_name;
 mod undo;
@@ -32,7 +32,7 @@ mod verify_data;
 
 pub use attach::AttachCommand;
 pub use commit::CommitCommand;
-pub use create_config_scope::CreateConfigScopeCommand;
+pub use create_scope_alias::CreateScopeAliasCommand;
 pub use create_index::CreateIndexCommand;
 pub use create_source::CreateSourceCommand;
 pub use create_view::CreateViewCommand;
@@ -51,7 +51,7 @@ pub use rename_join::RenameJoinCommand;
 pub use rename_view::RenameViewCommand;
 pub use replace_block::ReplaceBlockCommand;
 pub use reset::ResetCommand;
-pub use set_config::SetConfigCommand;
+pub use save_config::SaveConfigCommand;
 pub use set_description::SetDescriptionCommand;
 pub use set_name::SetNameCommand;
 pub use undo::UndoCommand;

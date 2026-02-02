@@ -264,30 +264,31 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Create a named config scope (name -> URL mapping).
+    /// Create a named scope alias (name -> scope mapping).
     ///
-    /// Config scopes are runtime aliases. Use with `set_config(..., scope="name")`
-    /// to set config for the URL associated with the scope.
+    /// Scope aliases let you reference scopes by name.
+    /// Use with `save_config(..., scope="/name")` to save config for the scope
+    /// associated with the alias.
     ///
     /// # Arguments
-    /// * `name` - Scope name (e.g., "prod", "staging")
-    /// * `url` - URL prefix this scope maps to (e.g., "s3://my-bucket/")
-    fn create_config_scope<'py>(
+    /// * `name` - Alias name (e.g., "prod", "staging")
+    /// * `scope` - Scope this alias maps to (e.g., "/s3/my-bucket")
+    fn create_scope_alias<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
-        url: &str,
+        scope: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let name = name.to_string();
-        let url = url.to_string();
+        let scope = ::bundlebase::bundle_config::Scope::from_url(scope);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .create_config_scope(name.as_str(), url.as_str())
+                .create_scope_alias(name.as_str(), &scope)
                 .await
                 .map_err(|e| {
                     to_py_error(
-                        &format!("Failed to create config scope '{}' = '{}'", name, url),
+                        &format!("Failed to create scope alias '{}' = '{}'", name, scope),
                         e,
                     )
                 })?;
@@ -298,43 +299,72 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Returns defined config scopes (name -> URL).
-    fn config_scopes(&self) -> HashMap<String, String> {
-        self.inner.bundle().config_scopes()
+    /// Returns defined scope aliases (name -> scope string).
+    fn scope_aliases(&self) -> HashMap<String, String> {
+        self.inner.bundle().scope_aliases()
+            .into_iter()
+            .map(|(name, scope)| (name, scope.as_str().to_string()))
+            .collect()
     }
 
-    /// Set a configuration value. Mutates the bundle in place and returns it for chaining.
+    /// Save a configuration value to the bundle manifest. Mutates the bundle in place and returns it for chaining.
     ///
     /// # Arguments
     /// * `key` - Configuration key
     /// * `value` - Configuration value
-    /// * `url_prefix` - Optional URL prefix for URL-specific config
-    /// * `scope` - Optional scope name (resolved to url_prefix at execute time)
-    #[pyo3(signature = (key, value, url_prefix=None, scope=None))]
-    fn set_config<'py>(
+    /// * `scope` - Scope ("/" for global default, or "/"-prefixed path like "/s3/bucket" or "/prod")
+    #[pyo3(signature = (key, value, scope="/"))]
+    fn save_config<'py>(
         slf: PyRef<'_, Self>,
         key: &str,
         value: &str,
-        url_prefix: Option<&str>,
-        scope: Option<&str>,
+        scope: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let key = key.to_string();
         let value = value.to_string();
-        let url_prefix = url_prefix.map(|s| s.to_string());
-        let scope = scope.map(|s| s.to_string());
+        let scope = ::bundlebase::bundle_config::Scope::from_url(scope);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .set_config(
+                .save_config(
                     key.as_str(),
                     value.as_str(),
-                    url_prefix.as_deref(),
-                    scope.as_deref(),
+                    &scope,
                 )
                 .await
                 .map_err(|e| {
-                    to_py_error(&format!("Failed to set config '{}' = '{}'", key, value), e)
+                    to_py_error(&format!("Failed to save config '{}'", key), e)
+                })?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error("Failed to create bundle", e))
+            })
+        })
+    }
+
+    /// Set a runtime config value (session-only, highest priority).
+    ///
+    /// Unlike save_config, this does not persist the value to the bundle manifest.
+    /// It only affects the current session.
+    #[pyo3(signature = (key, value, scope="/"))]
+    fn set_config<'py>(
+        slf: PyRef<'_, Self>,
+        key: &str,
+        value: &str,
+        scope: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let key = key.to_string();
+        let value = value.to_string();
+        let scope = scope.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let scope = ::bundlebase::bundle_config::Scope::from_url(&scope);
+            inner
+                .set_config(&key, &value, &scope)
+                .map_err(|e| {
+                    to_py_error(&format!("Failed to set config '{}'", key), e)
                 })?;
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })

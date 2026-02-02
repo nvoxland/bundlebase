@@ -610,7 +610,7 @@ def create(path: str = "", config: Optional[Any] = None) -> SyncBundleBuilder:
 
     Args:
         path: Optional path for bundle storage (default: random memory location)
-        config: Optional configuration (BundleConfig or dict) for cloud storage settings
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         SyncBundleBuilder ready for immediate use
@@ -645,7 +645,7 @@ def open(path: str, config: Optional[Any] = None) -> SyncBundle:
 
     Args:
         path: Path to the saved bundle
-        config: Optional configuration (BundleConfig or dict) for cloud storage settings
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         SyncBundle (read-only) with the loaded operations

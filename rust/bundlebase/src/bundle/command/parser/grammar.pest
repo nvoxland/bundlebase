@@ -28,7 +28,7 @@ statement = { SOI ~ (
     | source_stmt
     | index_stmt
     | transaction_stmt
-    | config_scope_stmt
+    | scope_alias_stmt
     | metadata_stmt
 ) ~ EOI }
 
@@ -75,9 +75,9 @@ transaction_stmt = {
     | explain_stmt
 }
 
-// Config scope statements - operations for config scope management
-config_scope_stmt = {
-    create_config_scope_stmt
+// Scope alias statements - operations for scope alias management
+scope_alias_stmt = {
+    create_scope_alias_stmt
 }
 
 // Metadata statements - operations for bundle metadata
@@ -85,6 +85,7 @@ metadata_stmt = {
     set_name_stmt
     | set_description_stmt
     | set_config_stmt
+    | save_config_stmt
 }
 
 // ============================================================================
@@ -324,22 +325,32 @@ rebuild_index_stmt = {
 }
 
 // ============================================================================
-// CREATE CONFIG SCOPE Statement
+// CREATE SCOPE ALIAS Statement
 // ============================================================================
-// Syntax: CREATE CONFIG SCOPE <name> AS '<url>'
-// Example: CREATE CONFIG SCOPE prod AS 's3://my-bucket/'
+// Syntax: CREATE SCOPE ALIAS <name> AS '<scope>'
+// Example: CREATE SCOPE ALIAS prod AS 's3://my-bucket/'
 
-create_config_scope_stmt = {
-    ^"create" ~ ^"config" ~ ^"scope" ~ identifier ~ ^"as" ~ quoted_string
+create_scope_alias_stmt = {
+    ^"create" ~ ^"scope" ~ ^"alias" ~ identifier ~ ^"as" ~ quoted_string
 }
 
 // ============================================================================
-// SET CONFIG Statement
+// SET CONFIG Statement (runtime-only)
 // ============================================================================
-// Syntax: SET CONFIG <key> = '<value>' [FOR '<url_prefix>' | FOR SCOPE <name>]
+// Syntax: SET CONFIG <key> = '<value>' [FOR '<scope>']
+// Sets a config value for the current session only (not persisted).
 
 set_config_stmt = {
-    ^"set" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ (^"for" ~ (^"scope" ~ identifier | quoted_string))?
+    ^"set" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ (^"for" ~ quoted_string)?
+}
+
+// ============================================================================
+// SAVE CONFIG Statement
+// ============================================================================
+// Syntax: SAVE CONFIG <key> = '<value>' [FOR '<scope>']
+
+save_config_stmt = {
+    ^"save" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ (^"for" ~ quoted_string)?
 }
 
 // ============================================================================

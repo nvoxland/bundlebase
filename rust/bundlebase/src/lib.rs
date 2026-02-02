@@ -22,7 +22,7 @@ pub use crate::bundle::{
     AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade,
     FileVerificationResult, Operation, VerificationResults,
 };
-pub use crate::bundle_config::BundleConfig;
+pub use crate::bundle_config::{BundleConfig, ConfigValueDetails, ConfigSource, PassedBundleConfig, Scope};
 pub use crate::data::DataGenerator;
 pub use crate::progress::{get_tracker, set_tracker, with_tracker, ProgressId, ProgressTracker};
 pub use functions::{FunctionImpl, FunctionSignature};
@@ -38,15 +38,15 @@ pub type BundlebaseError = Box<dyn Error + Send + Sync>;
 ///
 /// Each service defines its valid keys in its own module.
 /// This function collects them for use by `BundleConfig::from_map()`.
-pub fn all_config_specs() -> Vec<bundle_config::ConfigKeySpec> {
-    vec![
-        io::plugin::S3_CONFIG_SPEC,
-        io::plugin::GCS_CONFIG_SPEC,
-        io::plugin::AZURE_CONFIG_SPEC,
-        io::plugin::SFTP_CONFIG_SPEC,
-        io::plugin::FTP_CONFIG_SPEC,
-        source::KAGGLE_CONFIG_SPEC,
-    ]
+pub fn all_config_specs() -> Vec<bundle_config::ConfigKey> {
+    let mut specs = Vec::new();
+    specs.extend_from_slice(io::plugin::S3_CONFIG_SPECS);
+    specs.extend_from_slice(io::plugin::GCS_CONFIG_SPECS);
+    specs.extend_from_slice(io::plugin::AZURE_CONFIG_SPECS);
+    specs.extend_from_slice(io::plugin::SFTP_CONFIG_SPECS);
+    specs.extend_from_slice(io::plugin::FTP_CONFIG_SPECS);
+    specs.extend_from_slice(source::KAGGLE_CONFIG_SPECS);
+    specs
 }
 
 #[cfg(test)]

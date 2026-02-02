@@ -14,6 +14,8 @@ use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::{IndexDefinition, IndexType};
 use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
+use crate::bundle_config::Scope;
+use crate::bundle_config::PassedBundleConfig;
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow::array::{ArrayRef, Int32Array, RecordBatch, StringArray};
@@ -243,13 +245,15 @@ impl BundleBuilder {
     /// ```
     pub async fn create(
         path: &str,
-        config: Option<BundleConfig>,
+        config: Option<PassedBundleConfig>,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         let bundle = Bundle::empty().await?;
 
-        // Modify the bundle via interior mutability
-        *bundle.passed_config.write() = config;
-        bundle.recompute_config()?;
+        // Load passed config entries into the bundle's config under ConfigSource::Passed
+        if let Some(passed) = config {
+            bundle.config.merge_passed(&passed);
+        }
+        bundle.refresh_data_dir()?;
         *bundle.data_dir.write() = writable_dir_from_str(path, bundle.config())?;
 
         // Check if a bundle already exists at this location
@@ -351,7 +355,8 @@ impl BundleBuilder {
         let last_manifest_version = *self.bundle.last_manifest_version.read();
         let from = self.bundle.from();
         let changes = self.status.read().changes().clone();
-        let config = self.bundle.passed_config.read().clone();
+        // Extract passed config entries for reopening
+        let passed_config = Some(self.bundle.config.extract_passed());
         let url = self.bundle.url().to_string();
         let bundle_id = self.bundle.id();
 
@@ -407,7 +412,7 @@ impl BundleBuilder {
 
         // Update base to reflect the committed version
         // Preserve explicit_config from current bundle
-        let new_bundle = Bundle::open(&url, config).await?;
+        let new_bundle = Bundle::open(&url, passed_config).await?;
 
         // Replace the bundle contents using reload_from to preserve Arc references
         // open_to_bundle returns Arc<Bundle> so we dereference to get the Bundle
@@ -488,7 +493,8 @@ impl BundleBuilder {
     pub(in crate::bundle) async fn reload_bundle(&self) -> Result<(), BundlebaseError> {
         // Reload the bundle from the last committed state
         let empty = self.bundle.commits.read().is_empty();
-        let passed_config = self.bundle.passed_config.read().clone();
+        // Extract passed config entries for reopening
+        let passed_config = self.bundle.config.extract_passed();
         let url = self.bundle.url().to_string();
 
         // Note: reload_from preserves the original ctx and its schema providers
@@ -497,14 +503,14 @@ impl BundleBuilder {
             // empty() returns Arc<Bundle>, clone inner Bundle for reload_from
             let arc = Bundle::empty().await?;
             let bundle = (*arc).clone();
-            *bundle.passed_config.write() = passed_config;
-            bundle.recompute_config()?;
+            bundle.config.merge_passed(&passed_config);
+            bundle.refresh_data_dir()?;
             *bundle.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, bundle.config())?;
             bundle
         } else {
             // Preserve explicit_config when reopening
             // open returns Arc<Bundle>, so we clone the inner Bundle
-            let arc_bundle = Bundle::open(&url, passed_config).await?;
+            let arc_bundle = Bundle::open(&url, Some(passed_config)).await?;
             (*arc_bundle).clone()
         };
 
@@ -1054,49 +1060,43 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Create a named config scope (name -> URL mapping).
+    /// Create a named scope alias (name -> scope URL mapping).
     ///
-    /// Config scopes are runtime aliases. Use with `set_config(..., scope="name")`
-    /// to set config for the URL associated with the scope.
+    /// Scope aliases are runtime aliases. Use with `save_config(..., scope="name")`
+    /// to save config for the URL associated with the alias.
     ///
     /// # Arguments
-    /// * `name` - Scope name (e.g., "prod", "staging")
-    /// * `url` - URL prefix this scope maps to (e.g., "s3://my-bucket/")
-    pub async fn create_config_scope(
+    /// * `name` - Alias name (e.g., "prod", "staging")
+    /// * `scope` - Scope this alias maps to (e.g., `Scope::from_url("s3://my-bucket")`)
+    pub async fn create_scope_alias(
         &self,
         name: &str,
-        url: &str,
+        scope: &Scope,
     ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::CreateConfigScopeCommand;
-        self.execute_command(CreateConfigScopeCommand::new(name, url)).await?;
+        use crate::bundle::command::CreateScopeAliasCommand;
+        self.execute_command(CreateScopeAliasCommand::new(name, scope.clone())).await?;
         Ok(self)
     }
 
-    /// Set a configuration value
+    /// Save a configuration value to the bundle manifest
     ///
     /// Config stored via this operation has the lowest priority:
-    /// 1. Environment variables (BB_*) (highest)
-    /// 2. Explicit config passed to create()/open()
-    /// 3. Config from set_config operations (lowest)
+    /// 1. Explicit config passed to create()/open() (highest)
+    /// 2. Environment variables (BB_*)
+    /// 3. Config from save_config operations (lowest)
     ///
     /// # Arguments
     /// * `key` - Configuration key (e.g., "region", "access_key_id")
     /// * `value` - Configuration value
-    /// * `url_prefix` - Optional URL prefix for URL-specific config (e.g., "s3://bucket/")
-    /// * `scope` - Optional scope name (resolved to url_prefix at execute time)
-    pub async fn set_config(
+    /// * `scope` - Scope to save config under (e.g., `Scope::global()` or `Scope::from_url("s3://bucket")`)
+    pub async fn save_config(
         &self,
         key: &str,
         value: &str,
-        url_prefix: Option<&str>,
-        scope: Option<&str>,
+        scope: &Scope,
     ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::SetConfigCommand;
-        let cmd = match scope {
-            Some(scope_name) => SetConfigCommand::with_scope(key, value, scope_name),
-            None => SetConfigCommand::new(key, value, url_prefix.map(|s| s.to_string())),
-        };
-        self.execute_command(cmd).await?;
+        use crate::bundle::command::SaveConfigCommand;
+        self.execute_command(SaveConfigCommand::new(key, value, scope.clone())).await?;
         Ok(self)
     }
 
@@ -1472,8 +1472,17 @@ impl BundleFacade for BundleBuilder {
         self.bundle.config()
     }
 
-    fn config_scopes(&self) -> HashMap<String, String> {
-        self.bundle.config_scopes()
+    fn scope_aliases(&self) -> HashMap<String, Scope> {
+        self.bundle.scope_aliases()
+    }
+
+    fn set_config(
+        &self,
+        key: &str,
+        value: &str,
+        scope: &Scope,
+    ) -> Result<(), BundlebaseError> {
+        self.bundle.set_config(key, value, scope)
     }
 
     fn ctx(&self) -> Arc<SessionContext> {

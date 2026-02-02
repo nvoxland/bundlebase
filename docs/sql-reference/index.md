@@ -295,10 +295,30 @@ See [Metadata](../guide/metadata.md) for details.
 
 ### SET CONFIG
 
-Sets a configuration value, optionally scoped to a URL prefix.
+Sets a runtime configuration value for the current session only (not persisted). Takes the highest priority, overriding all other config sources. Works on both read-only bundles and builders.
 
 ```sql
-SET CONFIG <key> = '<value>' [FOR '<url_prefix>']
+SET CONFIG <key> = '<value>' [FOR '<scope>']
 ```
 
-See [Metadata](../guide/metadata.md) for details.
+See [Configuration](../guide/configuration.md) for details.
+
+### SAVE CONFIG
+
+Saves a configuration value to the bundle manifest, optionally scoped to a scope (URL prefix or alias name).
+
+```sql
+SAVE CONFIG <key> = '<value>' [FOR '<scope>']
+```
+
+See [Metadata](../guide/metadata.md) and [Configuration](../guide/configuration.md) for details.
+
+### CREATE SCOPE ALIAS
+
+Creates a named alias for a scope (URL prefix), used for scoping configuration.
+
+```sql
+CREATE SCOPE ALIAS <name> = '<scope>'
+```
+
+See [Metadata](../guide/metadata.md) and [Configuration](../guide/configuration.md) for details.

@@ -1,25 +1,19 @@
-use ::bundlebase::BundleConfig;
+use ::bundlebase::bundle_config::{PassedBundleConfig, Scope};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 #[pyclass(name = "BundleConfig")]
 #[derive(Clone)]
 pub struct PyBundleConfig {
-    pub(crate) inner: BundleConfig,
+    pub(crate) inner: PassedBundleConfig,
 }
 
 #[pymethods]
 impl PyBundleConfig {
-    #[new]
-    fn new() -> Self {
-        Self {
-            inner: BundleConfig::new(),
-        }
-    }
-
-    #[pyo3(signature = (key, value, url_prefix=None))]
-    fn set(&mut self, key: String, value: String, url_prefix: Option<String>) {
-        self.inner.set(&key, &value, url_prefix.as_deref());
+    #[pyo3(signature = (key, value, scope="/"))]
+    fn set(&mut self, key: String, value: String, scope: &str) {
+        let scope = Scope::from_url(scope);
+        self.inner.set(&key, &value, &scope);
     }
 
     fn __repr__(&self) -> String {
@@ -28,21 +22,16 @@ impl PyBundleConfig {
 }
 
 impl PyBundleConfig {
-    pub fn into_inner(self) -> BundleConfig {
+    pub fn into_inner(self) -> PassedBundleConfig {
         self.inner
     }
 }
 
-/// Convert Python dict or BundleConfig to Rust BundleConfig
-pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<BundleConfig> {
-    // If it's already a PyBundleConfig, extract inner
-    if let Ok(py_config) = obj.extract::<PyRef<PyBundleConfig>>() {
-        return Ok(py_config.inner.clone());
-    }
-
-    // If it's a dict, convert to BundleConfig
+/// Convert Python dict to Rust PassedBundleConfig
+pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<PassedBundleConfig> {
+    // config must be a dict
     if let Ok(dict) = obj.downcast::<PyDict>() {
-        let mut config = BundleConfig::new();
+        let mut config = PassedBundleConfig::new();
 
         for (key, value) in dict.iter() {
             let key_str: String = key.extract()?;
@@ -50,15 +39,19 @@ pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<BundleConfig> {
             // Check if value is a nested dict (URL-specific config)
             if let Ok(nested_dict) = value.downcast::<PyDict>() {
                 // URL-specific override
+                let scope = Scope::from_url(&key_str);
                 for (nested_key, nested_value) in nested_dict.iter() {
                     let nested_key_str: String = nested_key.extract()?;
                     let nested_value_str: String = nested_value.extract()?;
-                    config.set(&nested_key_str, &nested_value_str, Some(&key_str));
+                    config.set(&nested_key_str, &nested_value_str, &scope);
                 }
             } else {
-                // Simple string value - default config
                 let value_str: String = value.extract()?;
-                config.set(&key_str, &value_str, None);
+                // Store all string values as global defaults.
+                // Flat keys with __ patterns (e.g., "s3__region") are stored as-is;
+                // BundleConfig.normalize_key_scope resolves them when scope aliases
+                // become available.
+                config.set(&key_str, &value_str, &Scope::global());
             }
         }
 
@@ -66,6 +59,6 @@ pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<BundleConfig> {
     }
 
     Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-        "config must be BundleConfig or dict",
+        "config must be a dict",
     ))
 }

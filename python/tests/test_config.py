@@ -20,24 +20,13 @@ async def test_config_with_dict():
 
 
 @pytest.mark.asyncio
-async def test_config_with_bundle_config():
-    """Test creating a container with BundleConfig object."""
-    config = bundlebase.BundleConfig()
-    config.set("region", "us-west-2")
-    config.set("endpoint", "http://localhost:9000", url_prefix="s3://test-bucket/")
-
-    c = await bundlebase.create(random_bundle(), config=config)
-    assert c is not None
-
-
-@pytest.mark.asyncio
-async def test_set_config_operation():
-    """Test set_config operation for storing config in manifest."""
+async def test_save_config_operation():
+    """Test save_config operation for storing config in manifest."""
     c = await bundlebase.create(random_bundle())
 
     # Set some config values
-    c = await c.set_config("region", "us-east-1")
-    c = await c.set_config("endpoint", "http://localhost:9000", url_prefix="s3://test-bucket/")
+    c = await c.save_config("region", "us-east-1")
+    c = await c.save_config("endpoint", "http://localhost:9000", scope="/s3/test-bucket")
 
     # Commit to persist
     commit = await c.commit("Add config settings")
@@ -45,11 +34,11 @@ async def test_set_config_operation():
 
 
 @pytest.mark.asyncio
-async def test_config_with_url_overrides():
-    """Test config with URL-specific overrides."""
+async def test_config_with_scope_overrides():
+    """Test config with scope-specific overrides."""
     config = {
         "region": "us-west-2",  # Default for all S3
-        "s3://test-bucket/": {
+        "/s3/test-bucket": {
             "endpoint": "http://localhost:9000",
             "allow_http": "true"
         }
@@ -75,11 +64,11 @@ async def test_open_with_config():
 
 
 @pytest.mark.asyncio
-async def test_set_config_chaining():
-    """Test that set_config supports fluent chaining."""
+async def test_save_config_chaining():
+    """Test that save_config supports fluent chaining."""
     c = await (bundlebase.create(random_bundle())
-               .set_config("region", "us-west-2")
-               .set_config("access_key_id", "TESTKEY"))
+               .save_config("region", "us-west-2")
+               .save_config("access_key_id", "TESTKEY"))
 
     assert c is not None
 
@@ -101,55 +90,297 @@ async def test_config_none_is_valid():
 
 
 @pytest.mark.asyncio
-async def test_create_config_scope():
-    """Test creating a config scope and reading it back."""
+async def test_create_scope_alias():
+    """Test creating a scope alias and reading it back."""
     c = await bundlebase.create(random_bundle())
-    c = await c.create_config_scope("prod", "s3://my-bucket/")
+    c = await c.create_scope_alias("prod", "/s3/my-bucket")
 
-    scopes = c.config_scopes()
-    assert scopes == {"prod": "s3://my-bucket/"}
+    scopes = c.scope_aliases()
+    assert scopes == {"prod": "/s3/my-bucket"}
 
 
 @pytest.mark.asyncio
-async def test_config_scopes_empty():
-    """Test that a fresh bundle has no config scopes."""
+async def test_scope_aliases_empty():
+    """Test that a fresh bundle has no scope aliases."""
     c = await bundlebase.create(random_bundle())
-    assert c.config_scopes() == {}
+    assert c.scope_aliases() == {}
 
 
 @pytest.mark.asyncio
-async def test_set_config_with_scope():
+async def test_save_config_with_scope():
     """Test setting config using a named scope."""
     c = await bundlebase.create(random_bundle())
-    c = await c.create_config_scope("prod", "s3://my-bucket/")
+    c = await c.create_scope_alias("prod", "/s3/my-bucket")
 
-    c = await c.set_config("region", "us-west-2", scope="prod")
+    c = await c.save_config("region", "us-west-2", scope="/prod")
 
     commit = await c.commit("Config with scope")
     assert commit is not None
 
 
 @pytest.mark.asyncio
-async def test_set_config_with_unknown_scope_error():
+async def test_save_config_with_unknown_scope_error():
     """Test that using an undefined scope raises an error."""
     c = await bundlebase.create(random_bundle())
 
-    with pytest.raises(ValueError, match="Unknown config scope"):
-        await c.set_config("region", "us-west-2", scope="nonexistent")
+    with pytest.raises(ValueError, match="Unknown scope alias"):
+        await c.save_config("region", "us-west-2", scope="/nonexistent")
 
 
 @pytest.mark.asyncio
-async def test_config_scopes_persisted():
-    """Test that config scopes survive commit and reopen."""
+async def test_scope_aliases_persisted():
+    """Test that scope aliases survive commit and reopen."""
     import tempfile, os
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = os.path.join(tmpdir, "bundle")
 
         c = await bundlebase.create(path)
-        c = await c.create_config_scope("prod", "s3://my-bucket/")
-        await c.commit("Add scope")
+        c = await c.create_scope_alias("prod", "/s3/my-bucket")
+        await c.commit("Add scope alias")
 
         reopened = await bundlebase.open(path)
         builder = await reopened.extend()
-        assert builder.config_scopes() == {"prod": "s3://my-bucket/"}
+        assert builder.scope_aliases() == {"prod": "/s3/my-bucket"}
+
+
+@pytest.mark.asyncio
+async def test_config_with_flat_scope_key():
+    """Test creating a container with flat scope key (s3__region pattern).
+
+    Keys with __ are unresolved scope references that resolve when a matching
+    scope alias exists. Without a scope alias, they are silently ignored.
+    """
+    config = {
+        "s3__region": "us-west-2",
+        "s3__endpoint": "http://localhost:9000",
+    }
+    c = await bundlebase.create(random_bundle(), config=config)
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_flat_scope_key_resolves_with_scope_alias():
+    """Test that flat scope keys resolve when the bundle has a matching scope alias."""
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "bundle")
+
+        # Create bundle with a scope alias named "s3"
+        c = await bundlebase.create(path)
+        c = await c.create_scope_alias("s3", "/s3")
+        await c.commit("Add s3 scope alias")
+
+        # Reopen with flat scope key — should resolve via the "s3" scope alias
+        config = {"s3__region": "us-west-2"}
+        c2 = await bundlebase.open(path, config=config)
+        assert c2 is not None
+
+
+@pytest.mark.asyncio
+async def test_config_flat_keys_override_env():
+    """Test that passed config overrides environment variables."""
+    import os
+
+    env_key = "BB_TESTOVERRIDE1"
+    os.environ[env_key] = "env_value"
+    try:
+        # Passed config should override the env var
+        config = {"testoverride1": "passed_value"}
+        c = await bundlebase.create(random_bundle(), config=config)
+        assert c is not None
+    finally:
+        del os.environ[env_key]
+
+
+@pytest.mark.asyncio
+async def test_config_with_scope_flat_key_on_open():
+    """Test that scope flat keys work when opening a bundle with existing scope aliases."""
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "bundle")
+
+        # Create bundle with a scope alias
+        c = await bundlebase.create(path)
+        c = await c.create_scope_alias("prod", "/s3/my-bucket")
+        await c.commit("Add scope alias")
+
+        # Reopen with a scope flat key in config
+        config = {"scope_prod__region": "eu-west-1"}
+        c2 = await bundlebase.open(path, config=config)
+        assert c2 is not None
+
+
+@pytest.mark.asyncio
+async def test_set_config_basic():
+    """Test set_config sets a runtime config value."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.set_config("region", "us-west-2")
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_set_config_with_scope():
+    """Test set_config with scope."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.set_config("region", "us-west-2", scope="/s3/my-bucket")
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_set_config_with_scope_alias():
+    """Test set_config with named scope alias."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.create_scope_alias("prod", "/s3/my-bucket")
+    c = await c.set_config("region", "eu-west-1", scope="/prod")
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_set_config_unknown_scope_falls_back_to_global():
+    """Test set_config with an unknown scope falls back to global default (like get)."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.set_config("region", "us-west-2", scope="/nonexistent")
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_set_config_chaining():
+    """Test that set_config supports fluent chaining."""
+    c = await (bundlebase.create(random_bundle())
+               .set_config("region", "us-west-2")
+               .set_config("endpoint", "http://localhost:9000"))
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_set_config_not_persisted():
+    """Test that set_config values are not persisted after commit/reopen."""
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "bundle")
+
+        c = await bundlebase.create(path)
+        # Set runtime config and then commit — runtime config should NOT be persisted
+        c = await c.set_config("region", "us-west-2")
+        await c.commit("Initial commit")
+
+        # Reopen — the runtime config should not be there (it's session-only)
+        c2 = await bundlebase.open(path)
+        # We can't directly inspect config, but we verify the bundle opens normally
+        assert c2 is not None
+
+
+@pytest.mark.asyncio
+async def test_save_config_last_wins():
+    """Test that when save_config is called multiple times for the same key, the last value wins.
+
+    Both operations are preserved in the operation history, but the last value
+    is the one that takes effect when the config is resolved.
+    """
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "bundle")
+
+        c = await bundlebase.create(path)
+        c = await c.save_config("region", "us-west-1")
+        c = await c.save_config("region", "us-east-1")
+        await c.commit("Override config")
+
+        # Reopen and verify both operations were persisted
+        reopened = await bundlebase.open(path)
+        builder = await reopened.extend()
+        config_ops = [op for op in builder.operations() if op.op_type == "saveConfig"]
+        assert len(config_ops) == 2
+        # Last operation should be the override
+        assert "us-east-1" in config_ops[1].describe
+
+
+@pytest.mark.asyncio
+async def test_save_config_last_wins_scoped():
+    """Test that scoped save_config last-value-wins works after commit/reopen."""
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "bundle")
+
+        c = await bundlebase.create(path)
+        c = await c.save_config("endpoint", "http://old:9000", scope="/s3/bucket")
+        c = await c.save_config("endpoint", "http://new:9000", scope="/s3/bucket")
+        await c.commit("Override scoped config")
+
+        reopened = await bundlebase.open(path)
+        builder = await reopened.extend()
+        config_ops = [op for op in builder.operations() if op.op_type == "saveConfig"]
+        assert len(config_ops) == 2
+        assert "http://new:9000" in config_ops[1].describe
+
+
+@pytest.mark.asyncio
+async def test_save_config_last_wins_across_commits():
+    """Test that save_config in a later commit overrides an earlier commit."""
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "bundle")
+
+        c = await bundlebase.create(path)
+        c = await c.save_config("region", "us-west-1")
+        await c.commit("First config")
+
+        c = await c.save_config("region", "eu-west-1")
+        await c.commit("Override config")
+
+        reopened = await bundlebase.open(path)
+        builder = await reopened.extend()
+        config_ops = [op for op in builder.operations() if op.op_type == "saveConfig"]
+        assert len(config_ops) == 2
+        # Operations are in commit order — last one wins
+        assert "us-west-1" in config_ops[0].describe
+        assert "eu-west-1" in config_ops[1].describe
+
+
+@pytest.mark.asyncio
+async def test_create_scope_alias_last_wins():
+    """Test that when create_scope_alias is called multiple times for the same name, last scope wins."""
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "bundle")
+
+        c = await bundlebase.create(path)
+        c = await c.create_scope_alias("prod", "/s3/old-bucket")
+        c = await c.create_scope_alias("prod", "/s3/new-bucket")
+        await c.commit("Override scope alias")
+
+        reopened = await bundlebase.open(path)
+        builder = await reopened.extend()
+        scopes = builder.scope_aliases()
+        assert scopes["prod"] == "/s3/new-bucket", f"Expected last scope, got {scopes['prod']}"
+
+
+@pytest.mark.asyncio
+async def test_create_scope_alias_last_wins_across_commits():
+    """Test that create_scope_alias in a later commit overrides an earlier commit."""
+    import tempfile, os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "bundle")
+
+        c = await bundlebase.create(path)
+        c = await c.create_scope_alias("prod", "/s3/old-bucket")
+        await c.commit("First scope alias")
+
+        c = await c.create_scope_alias("prod", "/s3/new-bucket")
+        await c.commit("Override scope alias")
+
+        reopened = await bundlebase.open(path)
+        builder = await reopened.extend()
+        scopes = builder.scope_aliases()
+        assert scopes["prod"] == "/s3/new-bucket", f"Expected last scope, got {scopes['prod']}"
+
+
