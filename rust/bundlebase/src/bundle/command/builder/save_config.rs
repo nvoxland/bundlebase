@@ -69,7 +69,10 @@ impl CommandParsing for SaveConfigCommand {
 
         let key = key.ok_or_else(|| -> BundlebaseError { "SAVE CONFIG missing key".into() })?;
         let value = value.ok_or_else(|| -> BundlebaseError { "SAVE CONFIG missing value".into() })?;
-        let scope = scope.map(|s| Scope::from_url(&s)).unwrap_or_else(Scope::global);
+        let scope = match scope {
+            Some(s) => Scope::from_path(&s)?,
+            None => Scope::global(),
+        };
 
         Ok(SaveConfigCommand {
             key,

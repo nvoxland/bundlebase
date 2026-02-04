@@ -2,56 +2,13 @@
 //!
 //! Supports: file://, s3://, gs://, azure://, az://, memory://, empty://
 
-use crate::bundle_config::ConfigKey;
+use crate::bundle_config::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::io::registry::IOFactory;
 use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::io::util::{join_path, join_url};
 use crate::io::{get_memory_store, get_null_store, EMPTY_SCHEME, EMPTY_URL};
 use crate::BundleConfig;
 use crate::BundlebaseError;
-
-/// S3 configuration keys (based on object_store's AmazonS3ConfigKey).
-pub static S3_CONFIG_SPECS: &[ConfigKey] = &[
-    ConfigKey { key: "region", secure: false },
-    ConfigKey { key: "access_key_id", secure: false },
-    ConfigKey { key: "endpoint", secure: false },
-    ConfigKey { key: "bucket", secure: false },
-    ConfigKey { key: "allow_http", secure: false },
-    ConfigKey { key: "skip_signature", secure: false },
-    ConfigKey { key: "virtual_hosted_style_request", secure: false },
-    ConfigKey { key: "imdsv1_fallback", secure: false },
-    ConfigKey { key: "metadata_endpoint", secure: false },
-    ConfigKey { key: "container_credentials_relative_uri", secure: false },
-    ConfigKey { key: "unsigned_payload", secure: false },
-    ConfigKey { key: "checksum_algorithm", secure: false },
-    ConfigKey { key: "copy_if_not_exists", secure: false },
-    ConfigKey { key: "conditional_put", secure: false },
-    ConfigKey { key: "secret_access_key", secure: true },
-    ConfigKey { key: "session_token", secure: true },
-    ConfigKey { key: "token", secure: true },
-];
-
-/// GCS configuration keys.
-pub static GCS_CONFIG_SPECS: &[ConfigKey] = &[
-    ConfigKey { key: "service_account_path", secure: false },
-    ConfigKey { key: "bucket", secure: false },
-    ConfigKey { key: "application_credentials", secure: false },
-    ConfigKey { key: "service_account_key", secure: true },
-];
-
-/// Azure configuration keys.
-pub static AZURE_CONFIG_SPECS: &[ConfigKey] = &[
-    ConfigKey { key: "account", secure: false },
-    ConfigKey { key: "container", secure: false },
-    ConfigKey { key: "client_id", secure: false },
-    ConfigKey { key: "tenant_id", secure: false },
-    ConfigKey { key: "authority_host", secure: false },
-    ConfigKey { key: "use_emulator", secure: false },
-    ConfigKey { key: "access_key", secure: true },
-    ConfigKey { key: "sas_token", secure: true },
-    ConfigKey { key: "bearer_token", secure: true },
-    ConfigKey { key: "client_secret", secure: true },
-];
 use async_trait::async_trait;
 use bytes::Bytes;
 use datafusion::datasource::object_store::ObjectStoreUrl;
@@ -66,6 +23,60 @@ use std::sync::Arc;
 use url::Url;
 
 use super::tar::TarObjectStore;
+
+// ── Scope constants ─────────────────────────────────────────────────
+
+config_scopes!(object_store_scopes, {
+    pub const S3_SCOPE: ConfigScope = BundleConfig::register_scope("s3");
+    pub const GCS_SCOPE: ConfigScope = BundleConfig::register_scope("gs");
+    pub const AZURE_SCOPE: ConfigScope = BundleConfig::register_scope("azure");
+});
+
+// ── S3 configuration keys ───────────────────────────────────────────
+
+config_keys!(s3_keys, {
+    pub const S3_REGION_CFG: ConfigKey = S3_SCOPE.define("region");
+    pub const S3_ACCESS_KEY_ID_CFG: ConfigKey = S3_SCOPE.define("access_key_id");
+    pub const S3_ENDPOINT_CFG: ConfigKey = S3_SCOPE.define("endpoint");
+    pub const S3_BUCKET_CFG: ConfigKey = S3_SCOPE.define("bucket");
+    pub const S3_ALLOW_HTTP_CFG: ConfigKey = S3_SCOPE.define("allow_http");
+    pub const S3_SKIP_SIGNATURE_CFG: ConfigKey = S3_SCOPE.define("skip_signature");
+    pub const S3_VIRTUAL_HOSTED_STYLE_REQUEST_CFG: ConfigKey = S3_SCOPE.define("virtual_hosted_style_request");
+    pub const S3_IMDSV1_FALLBACK_CFG: ConfigKey = S3_SCOPE.define("imdsv1_fallback");
+    pub const S3_METADATA_ENDPOINT_CFG: ConfigKey = S3_SCOPE.define("metadata_endpoint");
+    pub const S3_CONTAINER_CREDENTIALS_RELATIVE_URI_CFG: ConfigKey = S3_SCOPE.define("container_credentials_relative_uri");
+    pub const S3_UNSIGNED_PAYLOAD_CFG: ConfigKey = S3_SCOPE.define("unsigned_payload");
+    pub const S3_CHECKSUM_ALGORITHM_CFG: ConfigKey = S3_SCOPE.define("checksum_algorithm");
+    pub const S3_COPY_IF_NOT_EXISTS_CFG: ConfigKey = S3_SCOPE.define("copy_if_not_exists");
+    pub const S3_CONDITIONAL_PUT_CFG: ConfigKey = S3_SCOPE.define("conditional_put");
+    pub const S3_SECRET_ACCESS_KEY_CFG: ConfigKey = S3_SCOPE.define_secure("secret_access_key");
+    pub const S3_SESSION_TOKEN_CFG: ConfigKey = S3_SCOPE.define_secure("session_token");
+    pub const S3_TOKEN_CFG: ConfigKey = S3_SCOPE.define_secure("token");
+});
+
+// ── GCS configuration keys ──────────────────────────────────────────
+
+config_keys!(gcs_keys, {
+    pub const GCS_BUCKET_CFG: ConfigKey = GCS_SCOPE.define("bucket");
+    pub const GCS_SERVICE_ACCOUNT_PATH_CFG: ConfigKey = GCS_SCOPE.define("service_account_path");
+    pub const GCS_APPLICATION_CREDENTIALS_CFG: ConfigKey = GCS_SCOPE.define("application_credentials");
+    pub const GCS_SERVICE_ACCOUNT_KEY_CFG: ConfigKey = GCS_SCOPE.define_secure("service_account_key");
+});
+
+// ── Azure configuration keys ────────────────────────────────────────
+
+config_keys!(azure_keys, {
+    pub const AZURE_ACCOUNT_CFG: ConfigKey = AZURE_SCOPE.define("account");
+    pub const AZURE_CONTAINER_CFG: ConfigKey = AZURE_SCOPE.define("container");
+    pub const AZURE_CLIENT_ID_CFG: ConfigKey = AZURE_SCOPE.define("client_id");
+    pub const AZURE_TENANT_ID_CFG: ConfigKey = AZURE_SCOPE.define("tenant_id");
+    pub const AZURE_AUTHORITY_HOST_CFG: ConfigKey = AZURE_SCOPE.define("authority_host");
+    pub const AZURE_USE_EMULATOR_CFG: ConfigKey = AZURE_SCOPE.define("use_emulator");
+    pub const AZURE_ACCESS_KEY_CFG: ConfigKey = AZURE_SCOPE.define_secure("access_key");
+    pub const AZURE_SAS_TOKEN_CFG: ConfigKey = AZURE_SCOPE.define_secure("sas_token");
+    pub const AZURE_BEARER_TOKEN_CFG: ConfigKey = AZURE_SCOPE.define_secure("bearer_token");
+    pub const AZURE_CLIENT_SECRET_CFG: ConfigKey = AZURE_SCOPE.define_secure("client_secret");
+});
 
 // ============================================================================
 // URL and ObjectStore utilities
@@ -155,14 +166,14 @@ fn build_object_store(
     use object_store::azure::MicrosoftAzureBuilder;
     use object_store::gcp::GoogleCloudStorageBuilder;
 
-    let scope = Scope::from_url(url_str);
+    let scope = Scope::normalize(url_str);
 
     match url.scheme() {
         "s3" => {
             let mut builder = AmazonS3Builder::from_env().with_url(url.as_str());
 
-            for spec in S3_CONFIG_SPECS {
-                if let Some(value) = config.get(spec.key, &scope) {
+            for spec in s3_keys() {
+                if let Some(value) = config.get(&scope, spec) {
                     builder = builder.with_config(spec.key.parse()?, value);
                 }
             }
@@ -172,8 +183,8 @@ fn build_object_store(
         "gs" => {
             let mut builder = GoogleCloudStorageBuilder::from_env().with_url(url.as_str());
 
-            for spec in GCS_CONFIG_SPECS {
-                if let Some(value) = config.get(spec.key, &scope) {
+            for spec in gcs_keys() {
+                if let Some(value) = config.get(&scope, spec) {
                     builder = builder.with_config(spec.key.parse()?, value);
                 }
             }
@@ -183,8 +194,8 @@ fn build_object_store(
         "azure" | "az" => {
             let mut builder = MicrosoftAzureBuilder::from_env().with_url(url.as_str());
 
-            for spec in AZURE_CONFIG_SPECS {
-                if let Some(value) = config.get(spec.key, &scope) {
+            for spec in azure_keys() {
+                if let Some(value) = config.get(&scope, spec) {
                     builder = builder.with_config(spec.key.parse()?, value);
                 }
             }

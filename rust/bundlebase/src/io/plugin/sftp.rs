@@ -4,16 +4,10 @@
 //! but use different underlying libraries (suppaftp vs russh_sftp) with incompatible
 //! types. Extracting a common abstraction would add complexity without clear benefit.
 
-use crate::bundle_config::ConfigKey;
+use crate::bundle_config::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::io::registry::IOFactory;
 use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteFile};
-use crate::BundleConfig;
-use crate::BundlebaseError;
-
-/// SFTP configuration keys.
-pub static SFTP_CONFIG_SPECS: &[ConfigKey] = &[
-    ConfigKey { key: "key_path", secure: false },
-];
+use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
@@ -26,6 +20,14 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use url::Url;
+
+config_scopes!(sftp_scopes, {
+    pub const SFTP_SCOPE: ConfigScope = BundleConfig::register_scope("sftp");
+});
+
+config_keys!(sftp_keys, {
+    pub const SFTP_KEY_PATH_CFG: ConfigKey = SFTP_SCOPE.define("ssh_key_path");
+});
 
 /// SSH client handler for russh.
 struct SshHandler;
@@ -263,8 +265,7 @@ impl SftpFile {
 
         // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
-            .get("key_path", &crate::bundle_config::Scope::from(url.as_str()))
-            .or_else(|| std::env::var("SSH_KEY_PATH").ok())
+            .get(&crate::bundle_config::Scope::from(url.as_str()), &SFTP_KEY_PATH_CFG)
             .unwrap_or_else(|| "~/.ssh/id_rsa".to_string());
 
         Ok(Self {
@@ -394,7 +395,7 @@ impl SftpDir {
 
         // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
-            .get("key_path", &crate::bundle_config::Scope::from(url.as_str()))
+            .get(&crate::bundle_config::Scope::from(url.as_str()), &SFTP_KEY_PATH_CFG)
             .or_else(|| std::env::var("SSH_KEY_PATH").ok())
             .unwrap_or_else(|| "~/.ssh/id_rsa".to_string());
 
