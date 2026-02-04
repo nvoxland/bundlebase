@@ -446,7 +446,7 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def fetch(self, pack: str = "base") -> List["FetchResults"]:
+    def fetch(self, pack: str = "base", mode: Optional[str] = None) -> List["FetchResults"]:
         """Fetch data from sources for a pack.
 
         Checks the pack's sources for new files and attaches them to the bundle.
@@ -455,24 +455,34 @@ class SyncBundleBuilder(SyncBundle):
             pack: Which pack to fetch sources for:
                 - "base" (default): The base pack
                 - A join name: A joined pack by its join name
+            mode: Sync mode (default: "add"):
+                - "add": Only attach new files
+                - "update": Add new files and replace changed files
+                - "sync": Add new, replace changed, and remove deleted files
 
         Returns:
             List of FetchResults, one for each source in the pack.
             Each result contains details about blocks added, replaced, and removed.
         """
-        coro = _call_original_method(self._async, "fetch", pack)
+        coro = _call_original_method(self._async, "fetch", pack, mode)
         return _loop_manager.run_sync(coro)
 
-    def fetch_all(self) -> List["FetchResults"]:
+    def fetch_all(self, mode: Optional[str] = None) -> List["FetchResults"]:
         """Fetch data from all defined sources.
 
         Checks all defined sources for new files and attaches them to the bundle.
+
+        Args:
+            mode: Sync mode (default: "add"):
+                - "add": Only attach new files
+                - "update": Add new files and replace changed files
+                - "sync": Add new, replace changed, and remove deleted files
 
         Returns:
             List of FetchResults, one for each source across all packs.
             Includes results for sources with no changes (empty results).
         """
-        coro = _call_original_method(self._async, "fetch_all")
+        coro = _call_original_method(self._async, "fetch_all", mode)
         return _loop_manager.run_sync(coro)
 
     def extend(

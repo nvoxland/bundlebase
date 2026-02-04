@@ -79,6 +79,7 @@ impl Source {
     pub async fn fetch(
         &self,
         builder: &BundleBuilder,
+        mode: SyncMode,
     ) -> Result<Vec<FetchAction>, BundlebaseError> {
         let (func, data_dir, config) = {
             let bundle = builder.bundle();
@@ -89,14 +90,6 @@ impl Source {
                 .ok_or_else(|| format!("Unknown source function '{}'", self.function))?;
             (func, bundle.data_dir(), bundle.config())
         };
-
-        // Parse sync mode from args (defaults to "add")
-        let mode = self
-            .args
-            .get("mode")
-            .map(|s| SyncMode::from_arg(s))
-            .transpose()?
-            .unwrap_or_default();
 
         // Get attached files directly from self
         let attached_files = self.attached_files();

@@ -655,12 +655,14 @@ impl PyBundleBuilder {
     ///
     /// # Arguments
     /// * `pack` - Which pack to fetch sources for ("base" for base pack, or a join name)
+    /// * `mode` - Sync mode: None defaults to "add". Valid values: "add", "update", "sync".
     ///
     /// Returns a list of FetchResults, one for each source in the pack.
-    #[pyo3(signature = (pack="base"))]
+    #[pyo3(signature = (pack="base", mode=None))]
     fn fetch<'py>(
         slf: PyRef<'_, Self>,
         pack: &str,
+        mode: Option<&str>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
@@ -670,9 +672,10 @@ impl PyBundleBuilder {
             Some(pack.to_string())
         };
         let pack_name = pack.clone().unwrap_or_else(|| "base".to_string());
+        let mode = mode.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let results = inner
-                .fetch(pack.as_deref())
+                .fetch(pack.as_deref(), mode.as_deref())
                 .await
                 .map_err(|e| to_py_error(&format!("Failed to fetch from pack '{}'", pack_name), e))?;
             let py_results: Vec<PyFetchResults> = results.iter().map(PyFetchResults::from_rust).collect();
@@ -682,12 +685,17 @@ impl PyBundleBuilder {
 
     /// Fetch from all defined sources - discover and attach new files.
     ///
+    /// # Arguments
+    /// * `mode` - Sync mode: None defaults to "add". Valid values: "add", "update", "sync".
+    ///
     /// Returns a list of FetchResults, one for each source across all packs.
-    fn fetch_all<'py>(slf: PyRef<'_, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    #[pyo3(signature = (mode=None))]
+    fn fetch_all<'py>(slf: PyRef<'_, Self>, mode: Option<&str>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
+        let mode = mode.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let results = inner
-                .fetch_all()
+                .fetch_all(mode.as_deref())
                 .await
                 .map_err(|e| to_py_error("Failed to fetch from sources", e))?;
             let py_results: Vec<PyFetchResults> = results.iter().map(PyFetchResults::from_rust).collect();

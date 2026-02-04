@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_fetch_command() {
-        let cmd = BundleCommand::Fetch(FetchCommand::new(Some("users".to_string())));
+        let cmd = BundleCommand::Fetch(FetchCommand::new(Some("users".to_string()), None));
 
         match cmd {
             BundleCommand::Fetch(cmd) => {
@@ -556,7 +556,7 @@ mod tests {
 
     #[test]
     fn test_fetch_all_command() {
-        let cmd = BundleCommand::FetchAll(FetchAllCommand::new());
+        let cmd = BundleCommand::FetchAll(FetchAllCommand::new(None));
 
         match cmd {
             BundleCommand::FetchAll(_) => {}

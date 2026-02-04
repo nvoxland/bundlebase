@@ -84,10 +84,6 @@ fn read_kaggle_json_field(field: &str) -> Option<String> {
 /// - `dataset` (required): Dataset identifier in `owner/dataset-name` format (e.g., `zillow/zecon`)
 /// - `patterns` (optional): Comma-separated glob patterns to filter files (e.g., "*.csv")
 ///   Defaults to "**/*" (all files)
-/// - `mode` (optional): Sync mode for fetch:
-///   - "add" (default): Only attach new files
-///   - "update": Add new files and replace changed files
-///   - "sync": Add new, replace changed, and remove files no longer at source
 /// - `version` (optional): Dataset version number to download (default: latest)
 pub struct KaggleSource;
 
@@ -112,12 +108,6 @@ impl SourceFunction for KaggleSource {
                 default: Some("**/*"),
             },
             ArgSpec {
-                name: "mode",
-                description: "Sync mode: 'add' (default), 'update', or 'sync'",
-                required: false,
-                default: Some("add"),
-            },
-            ArgSpec {
                 name: "version",
                 description: "Dataset version number to download (default: latest)",
                 required: false,
@@ -132,11 +122,6 @@ impl SourceFunction for KaggleSource {
         // Validate dataset format
         let dataset = source_utils::require_arg(args, "dataset", self.name())?;
         parse_dataset_arg(dataset)?;
-
-        // Validate mode if provided
-        if let Some(mode) = args.get("mode") {
-            SyncMode::from_arg(mode)?;
-        }
 
         // Validate version if provided — must be a positive integer
         if let Some(version) = args.get("version") {
@@ -704,10 +689,9 @@ mod tests {
     fn test_arg_specs() {
         let func = KaggleSource;
         let specs = func.arg_specs();
-        assert_eq!(specs.len(), 4);
+        assert_eq!(specs.len(), 3);
         assert!(specs.iter().any(|s| s.name == "dataset" && s.required));
         assert!(specs.iter().any(|s| s.name == "patterns" && !s.required));
-        assert!(specs.iter().any(|s| s.name == "mode" && !s.required));
         assert!(specs.iter().any(|s| s.name == "version" && !s.required));
     }
 
@@ -771,33 +755,11 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_args_invalid_mode() {
-        let func = KaggleSource;
-        let mut args = HashMap::new();
-        args.insert("dataset".to_string(), "zillow/zecon".to_string());
-        args.insert("mode".to_string(), "invalid".to_string());
-
-        let result = func.validate_args(&args);
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("Invalid mode"));
-    }
-
-    #[test]
     fn test_validate_args_with_patterns() {
         let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("patterns".to_string(), "*.csv".to_string());
-        assert!(func.validate_args(&args).is_ok());
-    }
-
-    #[test]
-    fn test_validate_args_with_mode() {
-        let func = KaggleSource;
-        let mut args = HashMap::new();
-        args.insert("dataset".to_string(), "zillow/zecon".to_string());
-        args.insert("mode".to_string(), "sync".to_string());
         assert!(func.validate_args(&args).is_ok());
     }
 
