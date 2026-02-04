@@ -1,13 +1,13 @@
 //! Source module for source function definitions and discovery.
 
-mod kaggle;
+pub(crate) mod kaggle;
 mod postgres;
 mod remote_dir;
 mod source_function;
 mod source_utils;
 mod web_scrape;
 
-pub use kaggle::{KaggleFunction, KAGGLE_CONFIG_SPECS};
+pub use kaggle::KaggleSource;
 pub use postgres::PostgresFunction;
 pub use remote_dir::RemoteDirFunction;
 pub use source_function::{

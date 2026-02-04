@@ -13,7 +13,7 @@ from conftest import random_bundle
 async def test_config_with_dict():
     """Test creating a container with config dict."""
     config = {
-        "region": "us-west-2",
+        "s3://": {"region": "us-west-2"},
     }
     c = await bundlebase.create(random_bundle(), config=config)
     assert c is not None
@@ -37,8 +37,8 @@ async def test_save_config_operation():
 async def test_config_with_scope_overrides():
     """Test config with scope-specific overrides."""
     config = {
-        "region": "us-west-2",  # Default for all S3
-        "/s3/test-bucket": {
+        "s3://": {"region": "us-west-2"},
+        "s3://test-bucket/": {
             "endpoint": "http://localhost:9000",
             "allow_http": "true"
         }
@@ -58,7 +58,7 @@ async def test_open_with_config():
     await c.commit("Initial commit")
 
     # Open with config
-    config = {"region": "us-west-2"}
+    config = {"s3://": {"region": "us-west-2"}}
     c2 = await bundlebase.open(path, config=config)
     assert c2 is not None
 
@@ -101,15 +101,23 @@ async def test_save_config_with_scope():
 
 
 @pytest.mark.asyncio
-async def test_config_flat_keys_override_env():
-    """Test that passed config overrides environment variables."""
+async def test_config_flat_keys_rejected():
+    """Test that flat config keys are rejected — must be nested under URL scope."""
+    with pytest.raises(ValueError, match="must be nested under a URL scope"):
+        config = {"region": "us-west-2"}
+        await bundlebase.create(random_bundle(), config=config)
+
+
+@pytest.mark.asyncio
+async def test_config_scoped_keys_override_env():
+    """Test that passed scoped config overrides environment variables."""
     import os
 
-    env_key = "BB_TESTOVERRIDE1"
+    env_key = "BB_S3__REGION"
     os.environ[env_key] = "env_value"
     try:
         # Passed config should override the env var
-        config = {"testoverride1": "passed_value"}
+        config = {"s3://": {"region": "passed_value"}}
         c = await bundlebase.create(random_bundle(), config=config)
         assert c is not None
     finally:

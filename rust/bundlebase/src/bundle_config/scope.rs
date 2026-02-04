@@ -1,12 +1,13 @@
+use crate::BundlebaseError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A normalized, boundary-aware configuration scope.
 ///
-/// Scopes identify which URL prefix a config value applies to. They are always
+/// Scopes identify which path prefix a config value applies to. They are always
 /// stored in a canonical form:
 /// - Always start with `/`
-/// - No `://` sequences (URLs are normalized: `s3://bucket` → `/s3/bucket`)
+/// - No `://` sequences (paths are normalized: `s3://bucket` → `/s3/bucket`)
 /// - No trailing `/` (except the global scope `/`)
 /// - The global scope `/` matches everything
 ///
@@ -21,7 +22,8 @@ use std::fmt;
 /// # Constructors
 ///
 /// - [`Scope::new`] — requires pre-normalized input (must start with `/`, no `://`)
-/// - [`Scope::from_url`] — normalizes a URL or raw string into scope form
+/// - [`Scope::from_path`] — validates against registered scopes and normalizes
+/// - [`Scope::normalize`] — normalizes a path or raw string into scope form
 /// - [`Scope::global`] — returns the global scope `/`
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -52,7 +54,37 @@ impl Scope {
         Self(s.to_string())
     }
 
-    /// Normalize a URL or raw string into a scope.
+    /// Resolve a path string to a Scope by trying all registered config scopes.
+    ///
+    /// Each registered `ConfigScope` gets a chance to claim the path. If a scope
+    /// matches, its normalized `Scope` is returned. If no scope matches, an error
+    /// is returned.
+    ///
+    /// # Examples
+    /// ```
+    /// use bundlebase::bundle_config::Scope;
+    /// let scope = Scope::from_path("s3://bucket/path").unwrap();
+    /// assert_eq!(scope.as_str(), "/s3/bucket/path");
+    /// ```
+    pub fn from_path(path: &str) -> Result<Self, BundlebaseError> {
+        use super::BundleConfig;
+
+        for config_scope in BundleConfig::all_scopes() {
+            if let Some(s) = config_scope.from_path(path) {
+                return Ok(s);
+            }
+        }
+        Err(BundlebaseError::from(format!(
+            "Unknown scope for path '{}'",
+            path
+        )))
+    }
+
+    /// Normalize a path or raw string into a scope.
+    ///
+    /// This is the basic normalizer that converts `://` sequences into `/`
+    /// path separators. Unlike [`from_path`], it does not validate against
+    /// registered scopes.
     ///
     /// Transformation rules:
     /// - `"s3://abc/def"` → `/s3/abc/def`
@@ -64,24 +96,24 @@ impl Scope {
     /// # Examples
     /// ```
     /// use bundlebase::bundle_config::Scope;
-    /// assert_eq!(Scope::from_url("s3://abc/def").as_str(), "/s3/abc/def");
-    /// assert_eq!(Scope::from_url("s3://bucket/").as_str(), "/s3/bucket");
-    /// assert_eq!(Scope::from_url("").as_str(), "/");
-    /// assert_eq!(Scope::from_url("/").as_str(), "/");
-    /// assert_eq!(Scope::from_url("xyz").as_str(), "/xyz");
+    /// assert_eq!(Scope::normalize("s3://abc/def").as_str(), "/s3/abc/def");
+    /// assert_eq!(Scope::normalize("s3://bucket/").as_str(), "/s3/bucket");
+    /// assert_eq!(Scope::normalize("").as_str(), "/");
+    /// assert_eq!(Scope::normalize("/").as_str(), "/");
+    /// assert_eq!(Scope::normalize("xyz").as_str(), "/xyz");
     /// ```
-    pub fn from_url(url: &str) -> Self {
-        if url.is_empty() {
+    pub fn normalize(path: &str) -> Self {
+        if path.is_empty() {
             return Self::global();
         }
 
         // Replace "://" with "/"
-        let normalized = if let Some(idx) = url.find("://") {
-            format!("/{}{}", &url[..idx], &url[idx + 2..])
-        } else if url.starts_with('/') {
-            url.to_string()
+        let normalized = if let Some(idx) = path.find("://") {
+            format!("/{}{}", &path[..idx], &path[idx + 2..])
+        } else if path.starts_with('/') {
+            path.to_string()
         } else {
-            format!("/{}", url)
+            format!("/{}", path)
         };
 
         // Strip trailing slash (unless it's just "/")
@@ -163,14 +195,14 @@ impl From<String> for Scope {
 }
 
 impl From<&str> for Scope {
-    /// Normalize a raw string (URL or scope path) into a Scope.
+    /// Normalize a raw string (path or scope path) into a Scope.
     ///
-    /// This uses the same normalization as `from_url`:
+    /// This uses the same normalization as `normalize`:
     /// - `"s3://bucket/"` → `/s3/bucket`
     /// - `""` → `/` (global)
     /// - `"/s3/bucket"` → `/s3/bucket` (already normalized)
     fn from(s: &str) -> Self {
-        Self::from_url(s)
+        Self::normalize(s)
     }
 }
 
@@ -206,53 +238,53 @@ mod tests {
         Scope::new("/s3://abc");
     }
 
-    // ==================== from_url() tests ====================
+    // ==================== normalize() tests ====================
 
     #[test]
-    fn test_from_url_s3() {
-        assert_eq!(Scope::from_url("s3://abc/def").as_str(), "/s3/abc/def");
+    fn test_normalize_s3() {
+        assert_eq!(Scope::normalize("s3://abc/def").as_str(), "/s3/abc/def");
     }
 
     #[test]
-    fn test_from_url_trailing_slash() {
-        assert_eq!(Scope::from_url("s3://bucket/").as_str(), "/s3/bucket");
+    fn test_normalize_trailing_slash() {
+        assert_eq!(Scope::normalize("s3://bucket/").as_str(), "/s3/bucket");
     }
 
     #[test]
-    fn test_from_url_bare_name() {
-        assert_eq!(Scope::from_url("xyz").as_str(), "/xyz");
+    fn test_normalize_bare_name() {
+        assert_eq!(Scope::normalize("xyz").as_str(), "/xyz");
     }
 
     #[test]
-    fn test_from_url_empty() {
-        assert_eq!(Scope::from_url("").as_str(), "/");
-        assert!(Scope::from_url("").is_global());
+    fn test_normalize_empty() {
+        assert_eq!(Scope::normalize("").as_str(), "/");
+        assert!(Scope::normalize("").is_global());
     }
 
     #[test]
-    fn test_from_url_slash() {
-        assert_eq!(Scope::from_url("/").as_str(), "/");
-        assert!(Scope::from_url("/").is_global());
+    fn test_normalize_slash() {
+        assert_eq!(Scope::normalize("/").as_str(), "/");
+        assert!(Scope::normalize("/").is_global());
     }
 
     #[test]
-    fn test_from_url_already_normalized() {
-        assert_eq!(Scope::from_url("/s3/bucket").as_str(), "/s3/bucket");
+    fn test_normalize_already_normalized() {
+        assert_eq!(Scope::normalize("/s3/bucket").as_str(), "/s3/bucket");
     }
 
     #[test]
-    fn test_from_url_gs() {
-        assert_eq!(Scope::from_url("gs://my-bucket/data/").as_str(), "/gs/my-bucket/data");
+    fn test_normalize_gs() {
+        assert_eq!(Scope::normalize("gs://my-bucket/data/").as_str(), "/gs/my-bucket/data");
     }
 
     #[test]
-    fn test_from_url_scheme_only() {
-        assert_eq!(Scope::from_url("s3://").as_str(), "/s3");
+    fn test_normalize_scheme_only() {
+        assert_eq!(Scope::normalize("s3://").as_str(), "/s3");
     }
 
     #[test]
-    fn test_from_url_kaggle() {
-        assert_eq!(Scope::from_url("kaggle://").as_str(), "/kaggle");
+    fn test_normalize_kaggle() {
+        assert_eq!(Scope::normalize("kaggle://").as_str(), "/kaggle");
     }
 
     // ==================== global() / is_global() tests ====================

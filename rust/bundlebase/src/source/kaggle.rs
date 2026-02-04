@@ -8,23 +8,72 @@ use super::source_function::{
     SyncMode,
 };
 use super::source_utils::{self, MaterializeResult};
-use crate::bundle_config::ConfigKey;
+use crate::bundle_config::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::io::IOReadWriteDir;
-use crate::{BundleConfig, BundlebaseError};
+use crate::{BundleConfig, BundlebaseError, Scope};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
 
-/// Configuration keys for the Kaggle service.
-pub static KAGGLE_CONFIG_SPECS: &[ConfigKey] = &[
-    ConfigKey { key: "base_url", secure: false },
-    ConfigKey { key: "username", secure: false },
-    ConfigKey { key: "key", secure: true },
-];
+mod client;
+use client::KaggleClient;
 
-const DEFAULT_KAGGLE_BASE_URL: &str = "https://www.kaggle.com";
-const KAGGLE_CONFIG_URL: &str = "kaggle://config";
+config_scopes!(scopes, {
+    pub const KAGGLE_SCOPE: ConfigScope = {
+        /// Custom path→Scope for Kaggle: extracts owner/dataset from the URL path.
+        /// Strips a leading `/datasets/` prefix if present.
+        /// e.g., "https://www.kaggle.com/datasets/zillow/zecon" → Some(Scope("/kaggle/zillow/zecon"))
+        /// e.g., "https://www.kaggle.com/zillow/zecon/extra"    → Some(Scope("/kaggle/zillow/zecon"))
+        fn from_path(scope: &ConfigScope, path: &str) -> Option<Scope> {
+            if let Ok(url) = Url::parse(path) {
+                let mut segments = url.path()
+                    .split('/')
+                    .filter(|s| !s.is_empty())
+                    .peekable();
+                // Skip leading "datasets" path prefix used in browser URLs
+                if segments.peek() == Some(&"datasets") {
+                    segments.next();
+                }
+                let owner_dataset: Vec<&str> = segments.take(2).collect();
+                if owner_dataset.is_empty() {
+                    Some(crate::bundle_config::Scope::new(&format!("/{}", scope.name)))
+                } else {
+                    Some(crate::bundle_config::Scope::new(&format!(
+                        "/{}/{}",
+                        scope.name, owner_dataset.join("/")
+                    )))
+                }
+            } else {
+                None
+            }
+        }
+        BundleConfig::register_scope("kaggle").with_from_path(from_path)
+    };
+});
+
+config_keys!(configs, {
+    pub const URL_CFG: ConfigKey = KAGGLE_SCOPE
+        .define("url")
+        .with_default("https://www.kaggle.com");
+    pub const USERNAME_CFG: ConfigKey = KAGGLE_SCOPE
+        .define("username")
+        .with_default_fn("username in ~/.kaggle/kaggle.json", || read_kaggle_json_field("username"));
+    pub const API_KEY_CFG: ConfigKey = KAGGLE_SCOPE
+        .define_secure("key")
+        .with_default_fn("key in ~/.kaggle/kaggle.json", || read_kaggle_json_field("key"));
+});
+
+pub(super) fn dataset_scope(dataset: &str) -> Scope {
+    Scope::new(&format!("/{}/{}", KAGGLE_SCOPE.name, dataset))
+}
+
+fn read_kaggle_json_field(field: &str) -> Option<String> {
+    let path = shellexpand::tilde("~/.kaggle/kaggle.json").to_string();
+    let content = std::fs::read_to_string(&path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    json.get(field).and_then(|v| v.as_str()).map(|s| s.to_string())
+}
 
 /// Built-in "kaggle" source function.
 ///
@@ -40,109 +89,10 @@ const KAGGLE_CONFIG_URL: &str = "kaggle://config";
 ///   - "update": Add new files and replace changed files
 ///   - "sync": Add new, replace changed, and remove files no longer at source
 /// - `version` (optional): Dataset version number to download (default: latest)
-pub struct KaggleFunction;
-
-/// Resolve the Kaggle API base URL from config.
-/// Falls back to https://www.kaggle.com.
-fn kaggle_base_url(config: &BundleConfig) -> String {
-    let scope = crate::bundle_config::Scope::from_url(KAGGLE_CONFIG_URL);
-    config
-        .get("base_url", &scope)
-        .unwrap_or_else(|| DEFAULT_KAGGLE_BASE_URL.to_string())
-}
-
-/// Read Kaggle API credentials.
-///
-/// Resolution order:
-/// 1. BundleConfig `kaggle://` prefix (`username` + `key`)
-/// 2. ~/.kaggle/kaggle.json file
-fn read_kaggle_credentials(config: &BundleConfig) -> Result<(String, String), BundlebaseError> {
-    let scope = crate::bundle_config::Scope::from_url(KAGGLE_CONFIG_URL);
-    if let (Some(u), Some(k)) = (
-        config.get("username", &scope),
-        config.get("key", &scope),
-    ) {
-        return Ok((u, k));
-    }
-    // Fall back to file-based credentials
-    read_kaggle_credentials_from_file()
-}
-
-/// Read Kaggle API credentials from `~/.kaggle/kaggle.json`.
-///
-/// Returns `(username, key)` tuple.
-fn read_kaggle_credentials_from_file() -> Result<(String, String), BundlebaseError> {
-    let path = shellexpand::tilde("~/.kaggle/kaggle.json").to_string();
-    let content = std::fs::read_to_string(&path).map_err(|e| {
-        BundlebaseError::from(format!(
-            "Failed to read Kaggle credentials from '{}': {}. \
-             Create this file with {{\"username\": \"YOUR_USERNAME\", \"key\": \"YOUR_API_KEY\"}} \
-             or run 'kaggle' CLI setup.",
-            path, e
-        ))
-    })?;
-
-    let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
-        BundlebaseError::from(format!(
-            "Failed to parse Kaggle credentials from '{}': {}",
-            path, e
-        ))
-    })?;
-
-    let username = json
-        .get("username")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            BundlebaseError::from(format!(
-                "Kaggle credentials file '{}' missing 'username' field",
-                path
-            ))
-        })?
-        .to_string();
-
-    let key = json
-        .get("key")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            BundlebaseError::from(format!(
-                "Kaggle credentials file '{}' missing 'key' field",
-                path
-            ))
-        })?
-        .to_string();
-
-    Ok((username, key))
-}
-
-/// Create an HTTP client for the Kaggle API with a bundlebase User-Agent.
-///
-/// Basic Auth is applied per-request via `.basic_auth()` rather than in default headers.
-fn kaggle_client() -> Result<reqwest::Client, BundlebaseError> {
-    use reqwest::header;
-
-    let mut headers = header::HeaderMap::new();
-    headers.insert(header::USER_AGENT, header::HeaderValue::from_static("bundlebase"));
-
-    reqwest::Client::builder()
-        .default_headers(headers)
-        .build()
-        .map_err(|e| BundlebaseError::from(format!("Failed to create Kaggle HTTP client: {}", e)))
-}
-
-/// Parse the `dataset` argument into `(owner, dataset_name)`.
-fn parse_dataset_arg(dataset: &str) -> Result<(&str, &str), BundlebaseError> {
-    let parts: Vec<&str> = dataset.splitn(3, '/').collect();
-    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
-        return Err(BundlebaseError::from(format!(
-            "Invalid dataset format '{}'. Expected 'owner/dataset-name' (e.g., 'zillow/zecon')",
-            dataset
-        )));
-    }
-    Ok((parts[0], parts[1]))
-}
+pub struct KaggleSource;
 
 #[async_trait]
-impl SourceFunction for KaggleFunction {
+impl SourceFunction for KaggleSource {
     fn name(&self) -> &str {
         "kaggle"
     }
@@ -151,8 +101,7 @@ impl SourceFunction for KaggleFunction {
         vec![
             ArgSpec {
                 name: "dataset",
-                description:
-                    "Dataset identifier in owner/dataset-name format (e.g., zillow/zecon)",
+                description: "Dataset identifier in owner/dataset-name format (e.g., zillow/zecon)",
                 required: true,
                 default: None,
             },
@@ -218,18 +167,12 @@ impl SourceFunction for KaggleFunction {
         config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
         let dataset = source_utils::require_arg(args, "dataset", self.name())?;
-        let (owner, dataset_name) = parse_dataset_arg(dataset)?;
         let patterns = source_utils::get_patterns(args)?;
         let version = args.get("version").map(|s| s.as_str());
-        let base_url = kaggle_base_url(config);
-        let (username, key) = read_kaggle_credentials(config)?;
+        let client = KaggleClient::from_config(config, dataset)?;
 
         let (all_files, _dataset_version) = Self::list_kaggle_files(
-            &base_url,
-            &username,
-            &key,
-            owner,
-            dataset_name,
+            &client,
             dataset,
             &patterns,
             version,
@@ -248,23 +191,21 @@ impl SourceFunction for KaggleFunction {
     async fn materialize(
         &self,
         location: &DiscoveredLocation,
-        _args: &HashMap<String, String>,
+        args: &HashMap<String, String>,
         data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
     ) -> Result<MaterializeResult, BundlebaseError> {
-        let (username, key) = read_kaggle_credentials(config)?;
+        let dataset = source_utils::require_arg(args, "dataset", self.name())?;
+        let client = KaggleClient::from_config(config, dataset)?;
         Self::download_kaggle_file(
+            &client,
             &location.url,
             &location.source_location,
             data_dir,
-            &username,
-            &key,
         )
         .await
     }
 
-    /// Override fetch to use the Kaggle dataset version number instead of
-    /// the local file's metadata for `source_info.version`.
     async fn fetch(
         &self,
         args: &HashMap<String, String>,
@@ -273,18 +214,12 @@ impl SourceFunction for KaggleFunction {
         config: Arc<BundleConfig>,
     ) -> Result<Vec<MaterializedData>, BundlebaseError> {
         let dataset = source_utils::require_arg(args, "dataset", self.name())?;
-        let (owner, dataset_name) = parse_dataset_arg(dataset)?;
         let patterns = source_utils::get_patterns(args)?;
         let version = args.get("version").map(|s| s.as_str());
-        let base_url = kaggle_base_url(&config);
-        let (username, key) = read_kaggle_credentials(&config)?;
+        let client = KaggleClient::from_config(&config, dataset)?;
 
         let (all_files, dataset_version) = Self::list_kaggle_files(
-            &base_url,
-            &username,
-            &key,
-            owner,
-            dataset_name,
+            &client,
             dataset,
             &patterns,
             version,
@@ -301,11 +236,10 @@ impl SourceFunction for KaggleFunction {
         for location in new_files {
             let source_url = location.url.to_string();
             let result = Self::download_kaggle_file(
+                &client,
                 &location.url,
                 &location.source_location,
                 data_dir,
-                &username,
-                &key,
             )
             .await?;
             let attach_location = data_dir
@@ -323,8 +257,6 @@ impl SourceFunction for KaggleFunction {
         Ok(results)
     }
 
-    /// Override fetch_with_mode to use the Kaggle dataset version number
-    /// for change detection instead of per-file HTTP headers.
     async fn fetch_with_mode(
         &self,
         args: &HashMap<String, String>,
@@ -335,26 +267,20 @@ impl SourceFunction for KaggleFunction {
     ) -> Result<Vec<FetchAction>, BundlebaseError> {
         match mode {
             SyncMode::Add => {
-                let attached_locations: HashSet<String> =
-                    attached_files.keys().cloned().collect();
-                let materialized =
-                    self.fetch(args, attached_locations, data_dir, config).await?;
+                let attached_locations: HashSet<String> = attached_files.keys().cloned().collect();
+                let materialized = self
+                    .fetch(args, attached_locations, data_dir, config)
+                    .await?;
                 Ok(materialized.into_iter().map(FetchAction::Add).collect())
             }
             SyncMode::Update | SyncMode::Sync => {
                 let dataset = source_utils::require_arg(args, "dataset", self.name())?;
-                let (owner, dataset_name) = parse_dataset_arg(dataset)?;
                 let patterns = source_utils::get_patterns(args)?;
                 let version = args.get("version").map(|s| s.as_str());
-                let base_url = kaggle_base_url(&config);
-                let (username, key) = read_kaggle_credentials(&config)?;
+                let client = KaggleClient::from_config(&config, dataset)?;
 
                 let (discovered, dataset_version) = Self::list_kaggle_files(
-                    &base_url,
-                    &username,
-                    &key,
-                    owner,
-                    dataset_name,
+                    &client,
                     dataset,
                     &patterns,
                     version,
@@ -383,11 +309,10 @@ impl SourceFunction for KaggleFunction {
                                 dataset_version
                             );
                             let result = Self::download_kaggle_file(
+                                &client,
                                 &location.url,
                                 &source_location,
                                 data_dir,
-                                &username,
-                                &key,
                             )
                             .await?;
                             let attach_location = data_dir
@@ -407,11 +332,10 @@ impl SourceFunction for KaggleFunction {
                     } else {
                         // New file — add it
                         let result = Self::download_kaggle_file(
+                            &client,
                             &location.url,
                             &source_location,
                             data_dir,
-                            &username,
-                            &key,
                         )
                         .await?;
                         let attach_location = data_dir
@@ -431,10 +355,7 @@ impl SourceFunction for KaggleFunction {
                 if mode == SyncMode::Sync {
                     for source_location in attached_files.keys() {
                         if !discovered_locations.contains(source_location) {
-                            log::debug!(
-                                "File {} no longer exists at remote",
-                                source_location
-                            );
+                            log::debug!("File {} no longer exists at remote", source_location);
                             actions.push(FetchAction::Remove {
                                 source_location: source_location.clone(),
                             });
@@ -448,19 +369,14 @@ impl SourceFunction for KaggleFunction {
     }
 }
 
-impl KaggleFunction {
+impl KaggleSource {
     /// Read the current version number for a Kaggle dataset.
     ///
     /// Searches the datasets list endpoint (`/api/v1/datasets/list`) for the
     /// specific dataset and extracts `currentVersionNumber` from the result.
     /// If a specific version is requested, that version string is returned directly.
     async fn read_kaggle_version(
-        base_url: &str,
-        client: &reqwest::Client,
-        username: &str,
-        key: &str,
-        owner: &str,
-        dataset_name: &str,
+        client: &KaggleClient,
         dataset: &str,
         version: Option<&str>,
     ) -> Result<String, BundlebaseError> {
@@ -469,13 +385,12 @@ impl KaggleFunction {
             return Ok(v.to_string());
         }
 
-        let search_url = format!(
-            "{}/api/v1/datasets/list?search={}/{}",
-            base_url, owner, dataset_name
+        let path = format!(
+            "/api/v1/datasets/list?search={}",
+            dataset
         );
         let response = client
-            .get(&search_url)
-            .basic_auth(username, Some(key))
+            .get(&path)
             .send()
             .await
             .map_err(|e| {
@@ -508,11 +423,10 @@ impl KaggleFunction {
         })?;
 
         // Response is an array of dataset objects; find the matching one
-        let dataset_ref = format!("{}/{}", owner, dataset_name);
         if let Some(datasets) = body.as_array() {
             for ds in datasets {
                 let ds_ref = ds.get("ref").and_then(|v| v.as_str()).unwrap_or("");
-                if ds_ref == dataset_ref {
+                if ds_ref == dataset {
                     if let Some(ver) = ds
                         .get("currentVersionNumber")
                         .and_then(|v| v.as_u64().map(|n| n.to_string()))
@@ -536,27 +450,20 @@ impl KaggleFunction {
     /// number is fetched from the dataset view endpoint and applies to all
     /// files in the dataset.
     async fn list_kaggle_files(
-        base_url: &str,
-        username: &str,
-        key: &str,
-        owner: &str,
-        dataset_name: &str,
+        client: &KaggleClient,
         dataset: &str,
         patterns: &[glob::Pattern],
         version: Option<&str>,
     ) -> Result<(Vec<DiscoveredLocation>, String), BundlebaseError> {
-        let client = kaggle_client()?;
-
-        let mut list_url = format!(
-            "{}/api/v1/datasets/list/{}/{}",
-            base_url, owner, dataset_name
+        let mut list_path = format!(
+            "/api/v1/datasets/list/{}",
+            dataset
         );
         if let Some(v) = version {
-            list_url.push_str(&format!("?datasetVersionNumber={}", v));
+            list_path.push_str(&format!("?datasetVersionNumber={}", v));
         }
         let response = client
-            .get(&list_url)
-            .basic_auth(username, Some(key))
+            .get(&list_path)
             .send()
             .await
             .map_err(|e| {
@@ -589,12 +496,7 @@ impl KaggleFunction {
 
         // Fetch dataset version from the dataset view endpoint
         let dataset_version = Self::read_kaggle_version(
-            base_url,
-            &client,
-            username,
-            key,
-            owner,
-            dataset_name,
+            client,
             dataset,
             version,
         )
@@ -622,8 +524,8 @@ impl KaggleFunction {
             }
 
             let mut download_url = format!(
-                "{}/api/v1/datasets/download/{}/{}/{}",
-                base_url, owner, dataset_name, file_name
+                "{}/api/v1/datasets/download/{}/{}",
+                client.base_url, dataset, file_name
             );
             if let Some(v) = version {
                 download_url.push_str(&format!("?datasetVersionNumber={}", v));
@@ -646,20 +548,16 @@ impl KaggleFunction {
     /// then reads it back for extraction. This avoids holding both the ZIP and
     /// extracted content in memory simultaneously.
     async fn download_kaggle_file(
+        client: &KaggleClient,
         url: &Url,
         source_location: &str,
         data_dir: &dyn IOReadWriteDir,
-        username: &str,
-        key: &str,
     ) -> Result<MaterializeResult, BundlebaseError> {
         use futures::StreamExt;
         use tokio::io::AsyncWriteExt;
 
-        let client = kaggle_client()?;
-
         let response = client
-            .get(url.as_str())
-            .basic_auth(username, Some(key))
+            .get_url(url.as_str())
             .send()
             .await
             .map_err(|e| {
@@ -780,19 +678,31 @@ impl KaggleFunction {
     }
 }
 
+/// Parse the `dataset` argument into `(owner, dataset_name)`.
+fn parse_dataset_arg(dataset: &str) -> Result<(&str, &str), BundlebaseError> {
+    let parts: Vec<&str> = dataset.splitn(3, '/').collect();
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+        return Err(BundlebaseError::from(format!(
+            "Invalid dataset format '{}'. Expected 'owner/dataset-name' (e.g., 'zillow/zecon')",
+            dataset
+        )));
+    }
+    Ok((parts[0], parts[1]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_name() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         assert_eq!(func.name(), "kaggle");
     }
 
     #[test]
     fn test_arg_specs() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let specs = func.arg_specs();
         assert_eq!(specs.len(), 4);
         assert!(specs.iter().any(|s| s.name == "dataset" && s.required));
@@ -803,7 +713,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_valid() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         assert!(func.validate_args(&args).is_ok());
@@ -811,7 +721,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_missing_dataset() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let args = HashMap::new();
 
         let result = func.validate_args(&args);
@@ -822,7 +732,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_invalid_dataset_format_no_slash() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "just-a-name".to_string());
 
@@ -835,7 +745,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_invalid_dataset_format_too_many_slashes() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "a/b/c".to_string());
 
@@ -847,7 +757,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_invalid_dataset_format_empty_parts() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "/dataset".to_string());
 
@@ -862,7 +772,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_invalid_mode() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("mode".to_string(), "invalid".to_string());
@@ -875,7 +785,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_with_patterns() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("patterns".to_string(), "*.csv".to_string());
@@ -884,7 +794,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_with_mode() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("mode".to_string(), "sync".to_string());
@@ -893,7 +803,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_with_valid_version() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "3".to_string());
@@ -902,7 +812,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_version_zero() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "0".to_string());
@@ -916,7 +826,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_version_negative() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "-1".to_string());
@@ -929,7 +839,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_version_non_numeric() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "abc".to_string());
@@ -943,7 +853,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_unknown_arg() {
-        let func = KaggleFunction;
+        let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("unknown".to_string(), "value".to_string());
@@ -986,59 +896,66 @@ mod tests {
     }
 
     #[test]
-    fn test_read_credentials_missing_file() {
+    fn test_kaggle_client_from_config_missing_credentials() {
         // This test verifies that a clear error message is returned
-        // when credentials file doesn't exist (which is likely in CI)
+        // when credentials aren't configured (which is likely in CI)
         let config = BundleConfig::new();
-        let result = read_kaggle_credentials(&config);
+        let result = KaggleClient::from_config(&config, "zillow/zecon");
         // In CI or when credentials aren't configured, this should fail gracefully
         if result.is_err() {
             let err = result.unwrap_err().to_string();
-            assert!(err.contains("kaggle.json"));
-            assert!(err.contains("username"));
+            assert!(err.contains("Kaggle username not found") || err.contains("Kaggle API key not found"));
         }
         // If credentials exist, that's fine too - the function works
     }
 
     #[test]
-    fn test_read_credentials_from_config() {
+    fn test_kaggle_client_from_config() {
         let config = BundleConfig::new();
-        let scope = crate::bundle_config::Scope::from_url("kaggle://");
-        config.set("username", "config_user", &scope, crate::bundle_config::ConfigSource::Passed);
-        config.set("key", "config_key", &scope, crate::bundle_config::ConfigSource::Passed);
+        let scope = Scope::new("/kaggle");
+        config.set(
+            "url",
+            "https://test.kaggle.com",
+            &scope,
+            crate::bundle_config::ConfigSource::Passed,
+        );
+        config.set(
+            "username",
+            "config_user",
+            &scope,
+            crate::bundle_config::ConfigSource::Passed,
+        );
+        config.set(
+            "key",
+            "config_key",
+            &scope,
+            crate::bundle_config::ConfigSource::Passed,
+        );
 
-        let (username, key) = read_kaggle_credentials(&config).unwrap();
-        assert_eq!(username, "config_user");
-        assert_eq!(key, "config_key");
+        let client = KaggleClient::from_config(&config, "zillow/zecon").unwrap();
+        assert_eq!(client.base_url, "https://test.kaggle.com");
+        assert_eq!(client.username, "config_user");
+        assert_eq!(client.key, "config_key");
     }
 
     #[test]
-    fn test_read_credentials_partial_config_falls_back_to_file() {
-        // If only username is set in config (no key), should fall back to file
+    fn test_kaggle_client_from_config_partial_falls_back_to_default_fn() {
+        // If only username is set in config (no key), key falls back to default_fn
         let config = BundleConfig::new();
-        let scope = crate::bundle_config::Scope::from_url("kaggle://");
-        config.set("username", "config_user", &scope, crate::bundle_config::ConfigSource::Passed);
+        let scope = Scope::new("/kaggle");
+        config.set(
+            "username",
+            "config_user",
+            &scope,
+            crate::bundle_config::ConfigSource::Passed,
+        );
 
-        let result = read_kaggle_credentials(&config);
-        // Will either succeed (if ~/.kaggle/kaggle.json exists) or fail with file error
+        let result = KaggleClient::from_config(&config, "zillow/zecon");
+        // Will either succeed (if ~/.kaggle/kaggle.json exists) or fail with missing key error
         if result.is_err() {
             let err = result.unwrap_err().to_string();
-            assert!(err.contains("kaggle.json"));
+            assert!(err.contains("Kaggle API key not found"));
         }
-    }
-
-    #[test]
-    fn test_kaggle_base_url_default() {
-        let config = BundleConfig::new();
-        assert_eq!(kaggle_base_url(&config), "https://www.kaggle.com");
-    }
-
-    #[test]
-    fn test_kaggle_base_url_from_config() {
-        let config = BundleConfig::new();
-        let scope = crate::bundle_config::Scope::from_url("kaggle://");
-        config.set("base_url", "https://custom.kaggle.com", &scope, crate::bundle_config::ConfigSource::Passed);
-        assert_eq!(kaggle_base_url(&config), "https://custom.kaggle.com");
     }
 
     // ── extract_from_zip tests ──────────────────────────────────────
@@ -1059,7 +976,7 @@ mod tests {
         }
 
         let zip_bytes = bytes::Bytes::from(buf);
-        let result = KaggleFunction::extract_from_zip(&zip_bytes, "hello.txt").unwrap();
+        let result = KaggleSource::extract_from_zip(&zip_bytes, "hello.txt").unwrap();
         assert_eq!(result.as_ref(), b"hello world");
     }
 
@@ -1073,7 +990,7 @@ mod tests {
         }
 
         let zip_bytes = bytes::Bytes::from(buf);
-        let result = KaggleFunction::extract_from_zip(&zip_bytes, "test.csv");
+        let result = KaggleSource::extract_from_zip(&zip_bytes, "test.csv");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("empty"), "Expected 'empty' in: {}", err);
@@ -1082,7 +999,7 @@ mod tests {
     #[test]
     fn test_extract_from_zip_invalid_data() {
         let garbage = bytes::Bytes::from(vec![0u8, 1, 2, 3, 4, 5]);
-        let result = KaggleFunction::extract_from_zip(&garbage, "test.csv");
+        let result = KaggleSource::extract_from_zip(&garbage, "test.csv");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -1096,14 +1013,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_kaggle_version_with_explicit_version() {
-        let client = reqwest::Client::new();
-        let result = KaggleFunction::read_kaggle_version(
-            "http://unused",
+        let client = KaggleClient::new("http://unused", "user", "key").unwrap();
+        let result = KaggleSource::read_kaggle_version(
             &client,
-            "user",
-            "key",
-            "owner",
-            "ds",
             "owner/ds",
             Some("5"),
         )
@@ -1127,14 +1039,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = reqwest::Client::new();
-        let result = KaggleFunction::read_kaggle_version(
-            &server.uri(),
+        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let result = KaggleSource::read_kaggle_version(
             &client,
-            "user",
-            "key",
-            "zillow",
-            "zecon",
             "zillow/zecon",
             None,
         )
@@ -1157,14 +1064,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = reqwest::Client::new();
-        let result = KaggleFunction::read_kaggle_version(
-            &server.uri(),
+        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let result = KaggleSource::read_kaggle_version(
             &client,
-            "user",
-            "key",
-            "zillow",
-            "zecon",
             "zillow/zecon",
             None,
         )
@@ -1183,14 +1085,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = reqwest::Client::new();
-        let result = KaggleFunction::read_kaggle_version(
-            &server.uri(),
+        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let result = KaggleSource::read_kaggle_version(
             &client,
-            "user",
-            "key",
-            "zillow",
-            "zecon",
             "zillow/zecon",
             None,
         )
@@ -1205,21 +1102,13 @@ mod tests {
 
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path("/api/v1/datasets/list"))
-            .respond_with(
-                wiremock::ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!([])),
-            )
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
             .mount(&server)
             .await;
 
-        let client = reqwest::Client::new();
-        let result = KaggleFunction::read_kaggle_version(
-            &server.uri(),
+        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let result = KaggleSource::read_kaggle_version(
             &client,
-            "user",
-            "key",
-            "zillow",
-            "zecon",
             "zillow/zecon",
             None,
         )
@@ -1243,14 +1132,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = reqwest::Client::new();
-        let result = KaggleFunction::read_kaggle_version(
-            &server.uri(),
+        let client = KaggleClient::new(&server.uri(), "myuser", "mykey").unwrap();
+        let result = KaggleSource::read_kaggle_version(
             &client,
-            "myuser",
-            "mykey",
-            "zillow",
-            "zecon",
             "zillow/zecon",
             None,
         )
@@ -1269,7 +1153,9 @@ mod tests {
 
         // Mock the file list endpoint
         wiremock::Mock::given(wiremock::matchers::method("GET"))
-            .and(wiremock::matchers::path("/api/v1/datasets/list/zillow/zecon"))
+            .and(wiremock::matchers::path(
+                "/api/v1/datasets/list/zillow/zecon",
+            ))
             .respond_with(
                 wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
                     "datasetFiles": [
@@ -1293,13 +1179,10 @@ mod tests {
             .mount(&server)
             .await;
 
+        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
         let patterns = vec![glob::Pattern::new("**/*").unwrap()];
-        let (files, version) = KaggleFunction::list_kaggle_files(
-            &server.uri(),
-            "user",
-            "key",
-            "zillow",
-            "zecon",
+        let (files, version) = KaggleSource::list_kaggle_files(
+            &client,
             "zillow/zecon",
             &patterns,
             None,
@@ -1310,8 +1193,14 @@ mod tests {
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].source_location, "data.csv");
         assert_eq!(files[1].source_location, "readme.md");
-        assert!(files[0].url.as_str().contains("/api/v1/datasets/download/zillow/zecon/data.csv"));
-        assert!(files[1].url.as_str().contains("/api/v1/datasets/download/zillow/zecon/readme.md"));
+        assert!(files[0]
+            .url
+            .as_str()
+            .contains("/api/v1/datasets/download/zillow/zecon/data.csv"));
+        assert!(files[1]
+            .url
+            .as_str()
+            .contains("/api/v1/datasets/download/zillow/zecon/readme.md"));
         assert_eq!(version, "7");
     }
 
@@ -1320,7 +1209,9 @@ mod tests {
         let server = wiremock::MockServer::start().await;
 
         wiremock::Mock::given(wiremock::matchers::method("GET"))
-            .and(wiremock::matchers::path("/api/v1/datasets/list/zillow/zecon"))
+            .and(wiremock::matchers::path(
+                "/api/v1/datasets/list/zillow/zecon",
+            ))
             .respond_with(
                 wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
                     "datasetFiles": [
@@ -1343,13 +1234,10 @@ mod tests {
             .mount(&server)
             .await;
 
+        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
         let patterns = vec![glob::Pattern::new("*.csv").unwrap()];
-        let (files, _) = KaggleFunction::list_kaggle_files(
-            &server.uri(),
-            "user",
-            "key",
-            "zillow",
-            "zecon",
+        let (files, _) = KaggleSource::list_kaggle_files(
+            &client,
             "zillow/zecon",
             &patterns,
             None,
@@ -1367,7 +1255,9 @@ mod tests {
 
         // File list endpoint should receive the version query param
         wiremock::Mock::given(wiremock::matchers::method("GET"))
-            .and(wiremock::matchers::path("/api/v1/datasets/list/zillow/zecon"))
+            .and(wiremock::matchers::path(
+                "/api/v1/datasets/list/zillow/zecon",
+            ))
             .and(wiremock::matchers::query_param("datasetVersionNumber", "2"))
             .respond_with(
                 wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -1381,13 +1271,10 @@ mod tests {
 
         // No version search mock needed — explicit version skips the API call
 
+        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
         let patterns = vec![glob::Pattern::new("**/*").unwrap()];
-        let (files, version) = KaggleFunction::list_kaggle_files(
-            &server.uri(),
-            "user",
-            "key",
-            "zillow",
-            "zecon",
+        let (files, version) = KaggleSource::list_kaggle_files(
+            &client,
             "zillow/zecon",
             &patterns,
             Some("2"),
@@ -1410,18 +1297,17 @@ mod tests {
         let server = wiremock::MockServer::start().await;
 
         wiremock::Mock::given(wiremock::matchers::method("GET"))
-            .and(wiremock::matchers::path("/api/v1/datasets/list/zillow/zecon"))
+            .and(wiremock::matchers::path(
+                "/api/v1/datasets/list/zillow/zecon",
+            ))
             .respond_with(wiremock::ResponseTemplate::new(404))
             .mount(&server)
             .await;
 
+        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
         let patterns = vec![glob::Pattern::new("**/*").unwrap()];
-        let result = KaggleFunction::list_kaggle_files(
-            &server.uri(),
-            "user",
-            "key",
-            "zillow",
-            "zecon",
+        let result = KaggleSource::list_kaggle_files(
+            &client,
             "zillow/zecon",
             &patterns,
             None,
@@ -1442,31 +1328,24 @@ mod tests {
         let server = wiremock::MockServer::start().await;
 
         wiremock::Mock::given(wiremock::matchers::method("GET"))
-            .and(wiremock::matchers::path("/api/v1/datasets/list/zillow/zecon"))
-            .respond_with(
-                wiremock::ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({})),
-            )
+            .and(wiremock::matchers::path(
+                "/api/v1/datasets/list/zillow/zecon",
+            ))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
             .mount(&server)
             .await;
 
         // Version search mock (called before datasetFiles is checked)
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path("/api/v1/datasets/list"))
-            .respond_with(
-                wiremock::ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!([])),
-            )
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
             .mount(&server)
             .await;
 
+        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
         let patterns = vec![glob::Pattern::new("**/*").unwrap()];
-        let result = KaggleFunction::list_kaggle_files(
-            &server.uri(),
-            "user",
-            "key",
-            "zillow",
-            "zecon",
+        let result = KaggleSource::list_kaggle_files(
+            &client,
             "zillow/zecon",
             &patterns,
             None,
@@ -1479,6 +1358,66 @@ mod tests {
             err.contains("missing 'datasetFiles'"),
             "Expected \"missing 'datasetFiles'\" in: {}",
             err
+        );
+    }
+
+    // ── kaggle scope from_path tests ───────────────────────────────────
+
+    #[test]
+    fn test_kaggle_scope_from_path_https() {
+        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/a/b/c");
+        assert_eq!(
+            result,
+            Some(Scope::new("/kaggle/a/b"))
+        );
+    }
+
+    #[test]
+    fn test_kaggle_scope_from_path_root_trailing_slash() {
+        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/");
+        assert_eq!(result, Some(Scope::new("/kaggle")));
+    }
+
+    #[test]
+    fn test_kaggle_scope_from_path_root_no_slash() {
+        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com");
+        assert_eq!(result, Some(Scope::new("/kaggle")));
+    }
+
+    #[test]
+    fn test_kaggle_scope_from_path_scheme() {
+        // In kaggle://config, "config" is the host (not the path), so url.path() is empty
+        let result = KAGGLE_SCOPE.from_path("kaggle://config");
+        assert_eq!(
+            result,
+            Some(Scope::new("/kaggle"))
+        );
+    }
+
+    #[test]
+    fn test_kaggle_scope_from_path_strips_trailing_slash() {
+        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/a/b/");
+        assert_eq!(
+            result,
+            Some(Scope::new("/kaggle/a/b"))
+        );
+    }
+
+    #[test]
+    fn test_kaggle_scope_from_path_datasets_prefix() {
+        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/datasets/zillow/zecon");
+        assert_eq!(
+            result,
+            Some(Scope::new("/kaggle/zillow/zecon"))
+        );
+    }
+
+    #[test]
+    fn test_kaggle_scope_from_path_datasets_prefix_with_extra() {
+        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/datasets/zillow/zecon/data");
+        assert_eq!(
+            result,
+            Some(Scope::new("/kaggle/zillow/zecon"))
         );
     }
 }

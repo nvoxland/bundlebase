@@ -94,7 +94,10 @@ impl CommandParsing for SetConfigCommand {
             key.ok_or_else(|| BundlebaseError::from("SET CONFIG statement missing key"))?;
         let value =
             value.ok_or_else(|| BundlebaseError::from("SET CONFIG statement missing value"))?;
-        let scope = scope.map(|s| Scope::from_url(&s)).unwrap_or_else(Scope::global);
+        let scope = match scope {
+            Some(s) => Scope::from_path(&s)?,
+            None => Scope::global(),
+        };
 
         Ok(SetConfigCommand {
             key,

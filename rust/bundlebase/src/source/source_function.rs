@@ -14,7 +14,7 @@
 //! Most implementations only need to implement `discover()`. The default `materialize()`
 //! and `fetch()` implementations handle the common case.
 
-use super::kaggle::KaggleFunction;
+use super::kaggle::KaggleSource;
 use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
 use super::source_utils;
@@ -518,7 +518,7 @@ impl SourceFunctionRegistry {
         };
 
         // Register built-in functions
-        registry.register(Arc::new(KaggleFunction));
+        registry.register(Arc::new(KaggleSource));
         registry.register(Arc::new(PostgresFunction));
         registry.register(Arc::new(RemoteDirFunction));
         registry.register(Arc::new(WebScrapeFunction));

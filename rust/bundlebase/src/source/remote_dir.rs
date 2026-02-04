@@ -255,7 +255,7 @@ impl RemoteDirFunction {
         // Handle special protocols that need custom download logic
         match scheme {
             "sftp" => Self::download_sftp_static(url, key_path, data_dir).await,
-            "ftp" => Self::download_ftp_static(url, data_dir).await,
+            "ftp" => Self::download_ftp_static(url, data_dir, config).await,
             _ => {
                 // Use standard materialization for other schemes
                 source_utils::materialize_url(url, true, data_dir, config).await
@@ -316,8 +316,8 @@ impl RemoteDirFunction {
 
     /// Download a file via FTP.
     /// Returns MaterializeResult containing the file and its SHA256 hash.
-    async fn download_ftp_static(url: &Url, data_dir: &dyn IOReadWriteDir) -> Result<MaterializeResult, BundlebaseError> {
-        let ftp_file = FtpFile::from_url(url)?;
+    async fn download_ftp_static(url: &Url, data_dir: &dyn IOReadWriteDir, config: &Arc<BundleConfig>) -> Result<MaterializeResult, BundlebaseError> {
+        let ftp_file = FtpFile::from_url(url, config.clone())?;
         let data = ftp_file.read_bytes().await?.ok_or_else(|| {
             BundlebaseError::from(format!("FTP file not found: {}", url))
         })?;

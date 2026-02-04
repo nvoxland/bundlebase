@@ -103,10 +103,10 @@ mod tests {
 
     #[test]
     fn test_setup_url_specific_config() {
-        let op = SaveConfigOp::setup("endpoint", "http://localhost:9000", &Scope::from_url("s3://test/"));
+        let op = SaveConfigOp::setup("endpoint", "http://localhost:9000", &Scope::normalize("s3://test/"));
         assert_eq!(op.key, "endpoint");
         assert_eq!(op.value, "http://localhost:9000");
-        assert_eq!(op.scope, Scope::from_url("s3://test/"));
+        assert_eq!(op.scope, Scope::normalize("s3://test/"));
     }
 
     #[test]
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn test_describe_url_specific() {
-        let op = SaveConfigOp::setup("endpoint", "http://localhost:9000", &Scope::from_url("s3://test/"));
+        let op = SaveConfigOp::setup("endpoint", "http://localhost:9000", &Scope::normalize("s3://test/"));
         assert_eq!(
             op.describe(),
             "SAVE CONFIG [/s3/test]: endpoint = http://localhost:9000"
@@ -127,7 +127,7 @@ mod tests {
     #[test]
     fn test_describe_masks_secure_key() {
         let op =
-            SaveConfigOp::setup("secret_access_key", "SUPERSECRET", &Scope::from_url("s3://bucket/"));
+            SaveConfigOp::setup("secret_access_key", "SUPERSECRET", &Scope::normalize("s3://bucket/"));
         assert_eq!(
             op.describe(),
             "SAVE CONFIG [/s3/bucket]: secret_access_key = *****"
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_serialization_url_specific() {
-        let op = SaveConfigOp::setup("endpoint", "http://localhost:9000", &Scope::from_url("s3://test/"));
+        let op = SaveConfigOp::setup("endpoint", "http://localhost:9000", &Scope::normalize("s3://test/"));
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
 
         // Deserialize to verify round-trip
@@ -165,7 +165,7 @@ mod tests {
             .await
             .expect("Failed to create test bundle");
 
-        let op = SaveConfigOp::setup("secret_access_key", "SECRETVALUE", &Scope::from_url("s3://bucket/"));
+        let op = SaveConfigOp::setup("secret_access_key", "SECRETVALUE", &Scope::normalize("s3://bucket/"));
         let result = op.check(bundle.bundle()).await;
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -176,7 +176,7 @@ mod tests {
         );
 
         // Non-secure key should pass check
-        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::from_url("s3://bucket/"));
+        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::normalize("s3://bucket/"));
         let result = op.check(bundle.bundle()).await;
         assert!(result.is_ok());
     }
@@ -219,7 +219,7 @@ mod tests {
             .await
             .expect("Failed to create test bundle");
 
-        let scope = Scope::from_url("s3://bucket/");
+        let scope = Scope::normalize("s3://bucket/");
         let op1 = SaveConfigOp::setup("endpoint", "http://old:9000", &scope);
         op1.apply(builder.bundle()).await.expect("apply op1");
 
