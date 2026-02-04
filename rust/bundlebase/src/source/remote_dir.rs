@@ -30,10 +30,6 @@ use url::Url;
 /// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
 ///   "false" to reference files at their original URL
 /// - `key_path` (optional): SSH key path for SFTP sources
-/// - `mode` (optional): Sync mode for fetch:
-///   - "add" (default): Only attach new files
-///   - "update": Add new files and replace changed files
-///   - "sync": Add new, replace changed, and remove files no longer at source
 pub struct RemoteDirFunction;
 
 #[async_trait]
@@ -68,12 +64,6 @@ impl SourceFunction for RemoteDirFunction {
                 required: false,
                 default: None,
             },
-            ArgSpec {
-                name: "mode",
-                description: "Sync mode: 'add' (default), 'update', or 'sync'",
-                required: false,
-                default: Some("add"),
-            },
         ]
     }
 
@@ -81,10 +71,6 @@ impl SourceFunction for RemoteDirFunction {
         self.default_validate_args(args)?;
         // Validate URL is parseable
         source_utils::require_url(args, self.name())?;
-        // Validate mode if provided
-        if let Some(mode) = args.get("mode") {
-            SyncMode::from_arg(mode)?;
-        }
         Ok(())
     }
 
@@ -345,12 +331,11 @@ mod tests {
     fn test_arg_specs() {
         let func = RemoteDirFunction;
         let specs = func.arg_specs();
-        assert_eq!(specs.len(), 5);
+        assert_eq!(specs.len(), 4);
         assert!(specs.iter().any(|s| s.name == "url" && s.required));
         assert!(specs.iter().any(|s| s.name == "patterns" && !s.required));
         assert!(specs.iter().any(|s| s.name == "copy" && !s.required));
         assert!(specs.iter().any(|s| s.name == "key_path" && !s.required));
-        assert!(specs.iter().any(|s| s.name == "mode" && !s.required));
     }
 
     #[test]

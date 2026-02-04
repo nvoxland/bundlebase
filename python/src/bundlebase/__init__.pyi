@@ -918,7 +918,7 @@ class PyBundleBuilder:
         """
         ...
 
-    async def fetch(self, pack: str = "base") -> List[FetchResults]:
+    async def fetch(self, pack: str = "base", mode: Optional[str] = None) -> List[FetchResults]:
         """
         Fetch data from sources for a pack.
 
@@ -929,6 +929,10 @@ class PyBundleBuilder:
             pack: Which pack to fetch sources for:
                 - "base" (default): The base pack
                 - A join name: A joined pack by its join name
+            mode: Sync mode (default: "add"):
+                - "add": Only attach new files
+                - "update": Add new files and replace changed files
+                - "sync": Add new, replace changed, and remove deleted files
 
         Returns:
             List of FetchResults, one for each source in the pack.
@@ -941,12 +945,18 @@ class PyBundleBuilder:
         """
         ...
 
-    async def fetch_all(self) -> List[FetchResults]:
+    async def fetch_all(self, mode: Optional[str] = None) -> List[FetchResults]:
         """
         Fetch data from all defined sources.
 
         Compares files in each source with already-attached files and
         auto-attaches any new files found.
+
+        Args:
+            mode: Sync mode (default: "add"):
+                - "add": Only attach new files
+                - "update": Add new files and replace changed files
+                - "sync": Add new, replace changed, and remove deleted files
 
         Returns:
             List of FetchResults, one for each source across all packs.

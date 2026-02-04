@@ -746,7 +746,7 @@ impl BundleBuilder {
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
     /// builder.create_source("remote_dir", args, None).await?;
-    /// builder.fetch(None).await?;  // Fetch from base pack sources
+    /// builder.fetch(None, None).await?;  // Fetch from base pack sources
     /// builder.commit("Initial data from source").await?;
     /// ```
     pub async fn create_source(
@@ -769,6 +769,7 @@ impl BundleBuilder {
     /// * `pack` - Which pack to fetch sources for:
     ///   - `None` or `Some("base")`: The base pack (default)
     ///   - `Some(join_name)`: A joined pack by its join name
+    /// * `mode` - Sync mode: `None` defaults to "add". Valid values: "add", "update", "sync".
     ///
     /// # Returns
     /// A list of `FetchResults`, one for each source in the pack.
@@ -781,19 +782,22 @@ impl BundleBuilder {
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
     /// builder.create_source("remote_dir", args, None).await?;
-    /// let results = builder.fetch(None).await?;  // Fetch from base pack sources
+    /// let results = builder.fetch(None, None).await?;  // Fetch from base pack sources
     /// for result in &results {
     ///     println!("Source {}: {} added", result.source_function, result.added.len());
     /// }
     /// ```
-    pub async fn fetch(&self, pack: Option<&str>) -> Result<Vec<FetchResults>, BundlebaseError> {
-        self.execute_command(FetchCommand::new(pack.map(|s| s.to_string()))).await
+    pub async fn fetch(&self, pack: Option<&str>, mode: Option<&str>) -> Result<Vec<FetchResults>, BundlebaseError> {
+        self.execute_command(FetchCommand::new(pack.map(|s| s.to_string()), mode.map(|s| s.to_string()))).await
     }
 
     /// Fetch from all defined sources - discover and attach new files.
     ///
     /// Lists files from each source URL, compares with already-attached files,
     /// and auto-attaches any new files.
+    ///
+    /// # Arguments
+    /// * `mode` - Sync mode: `None` defaults to "add". Valid values: "add", "update", "sync".
     ///
     /// # Returns
     /// A list of `FetchResults`, one for each source across all packs.
@@ -803,7 +807,7 @@ impl BundleBuilder {
     /// ```ignore
     /// let builder = BundleBuilder::create("memory:///work", None).await?;
     /// // Create multiple sources...
-    /// let results = builder.fetch_all().await?;
+    /// let results = builder.fetch_all(None).await?;
     /// for result in &results {
     ///     println!("Source {}: {} added, {} replaced, {} removed",
     ///         result.source_function,
@@ -812,8 +816,8 @@ impl BundleBuilder {
     ///         result.removed.len());
     /// }
     /// ```
-    pub async fn fetch_all(&self) -> Result<Vec<FetchResults>, BundlebaseError> {
-        self.execute_command(FetchAllCommand::new()).await
+    pub async fn fetch_all(&self, mode: Option<&str>) -> Result<Vec<FetchResults>, BundlebaseError> {
+        self.execute_command(FetchAllCommand::new(mode.map(|s| s.to_string()))).await
     }
 
     /// Create a view from a SQL statement

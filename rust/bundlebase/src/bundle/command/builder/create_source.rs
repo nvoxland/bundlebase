@@ -4,7 +4,7 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::operation::{AttachBlockOp, CreateSourceOp, SourceInfo};
 use crate::data::ObjectId;
-use crate::source::FetchAction;
+use crate::source::{FetchAction, SyncMode};
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -133,7 +133,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
             .get_source(&source_id)
             .ok_or_else(|| format!("Source '{}' not found after creation", source_id))?;
 
-        let actions = source.fetch(builder).await?;
+        let actions = source.fetch(builder, SyncMode::Add).await?;
 
         // Process fetch actions
         for action in actions {
