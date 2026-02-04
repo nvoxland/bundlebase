@@ -107,7 +107,7 @@ async def test_fetch_returns_results():
             shutil.copy(src_path, os.path.join(source_dir, "userdata.parquet"))
 
             # fetch should return a list of FetchResults
-            results = await c.fetch()
+            results = await c.fetch("base", "add")
             assert len(results) == 1  # One source
             result = results[0]
             assert result.source_function == "remote_dir"

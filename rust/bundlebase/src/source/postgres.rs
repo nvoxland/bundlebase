@@ -11,8 +11,9 @@
 
 use super::source_function::{
     ArgSpec, AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction,
-    MaterializeResult, SourceFunction, SyncMode,
+    MaterializeResult, SourceFunction,
 };
+use super::SyncMode;
 use crate::io::{IOReadWriteDir, WriteResult};
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::{

@@ -19,6 +19,7 @@ use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
 use super::source_utils;
 use super::web_scrape::WebScrapeFunction;
+use super::SyncMode;
 
 // Re-export MaterializeResult for use by source function implementations
 pub use super::source_utils::MaterializeResult;
@@ -73,38 +74,15 @@ pub struct MaterializedData {
     pub source_url: String,
     /// SHA256 hash of the content (full 64-character hex string)
     pub hash: String,
-    /// Version string for change detection (e.g., ETag, Last-Modified, S3 version)
+    /// Source-specific version string used for change detection in Update/Sync modes.
+    ///
+    /// The meaning varies by source function:
+    /// - **remote_dir / web_scrape:** file metadata such as ETag or Last-Modified
+    /// - **kaggle:** dataset version number (e.g., "42")
+    /// - **postgres:** content hash
+    ///
+    /// Compared against stored versions to decide whether a file should be replaced.
     pub version: String,
-}
-
-/// Sync mode for source fetch operations.
-///
-/// Controls how fetch handles existing files when checking for updates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SyncMode {
-    /// Only add new files (default behavior)
-    #[default]
-    Add,
-    /// Add new files and replace changed files
-    Update,
-    /// Add new files, replace changed files, and remove missing files
-    Sync,
-}
-
-impl SyncMode {
-    /// Parse sync mode from string argument.
-    pub fn from_arg(value: &str) -> Result<Self, BundlebaseError> {
-        match value.to_lowercase().as_str() {
-            "add" => Ok(SyncMode::Add),
-            "update" => Ok(SyncMode::Update),
-            "sync" => Ok(SyncMode::Sync),
-            _ => Err(format!(
-                "Invalid mode '{}'. Must be 'add', 'update', or 'sync'",
-                value
-            )
-            .into()),
-        }
-    }
 }
 
 /// Metadata about an attached file from a source.

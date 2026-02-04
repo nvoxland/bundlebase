@@ -77,15 +77,15 @@ impl CommandResponse for Vec<FetchResults> {
 /// Command to fetch from sources for a specific pack.
 #[derive(Debug, Clone)]
 pub struct FetchCommand {
-    /// The pack to fetch sources for (None or "base" for base pack)
-    pub pack: Option<String>,
-    /// Sync mode override (None defaults to "add")
-    pub mode: Option<String>,
+    /// The pack to fetch sources for (e.g. "base", or a join name)
+    pub pack: String,
+    /// Sync mode for the fetch operation
+    pub mode: SyncMode,
 }
 
 impl FetchCommand {
     /// Create a new FetchCommand.
-    pub fn new(pack: Option<String>, mode: Option<String>) -> Self {
+    pub fn new(pack: String, mode: SyncMode) -> Self {
         Self { pack, mode }
     }
 }
@@ -102,31 +102,23 @@ impl CommandParsing for FetchCommand {
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
                 Rule::identifier => {
-                    let ident = inner_pair.as_str();
-                    // If it's "all", this should be FetchAllCommand
-                    if !ident.eq_ignore_ascii_case("all") {
-                        pack = Some(ident.to_string());
-                    }
+                    pack = Some(inner_pair.as_str().to_string());
                 }
                 Rule::fetch_mode => {
-                    mode = Some(inner_pair.as_str().to_lowercase());
+                    mode = Some(SyncMode::from_arg(inner_pair.as_str())?);
                 }
                 _ => {}
             }
         }
 
+        let pack = pack.ok_or_else(|| BundlebaseError::from("FETCH statement missing pack name"))?;
+        let mode = mode.ok_or_else(|| BundlebaseError::from("FETCH statement missing mode"))?;
+
         Ok(FetchCommand::new(pack, mode))
     }
 
     fn to_statement(&self) -> String {
-        let mut stmt = match &self.pack {
-            Some(pack) if pack != "base" => format!("FETCH {}", pack),
-            _ => "FETCH".to_string(),
-        };
-        if let Some(mode) = &self.mode {
-            stmt.push_str(&format!(" {}", mode.to_uppercase()));
-        }
-        stmt
+        format!("FETCH {} {}", self.pack, self.mode)
     }
 }
 
@@ -135,13 +127,10 @@ impl BundleBuilderCommand for FetchCommand {
     type Output = Vec<FetchResults>;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<Vec<FetchResults>, BundlebaseError> {
-        let pack_name = self.pack.as_deref().unwrap_or("base").to_string();
-        let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
+        let pack_name = self.pack.clone();
+        let pack_id = builder.resolve_pack_id(Some(&self.pack))?;
 
-        let mode = self.mode.as_deref()
-            .map(SyncMode::from_arg)
-            .transpose()?
-            .unwrap_or_default();
+        let mode = self.mode;
 
         let sources = builder.bundle().get_sources_for_pack(&pack_id);
         if sources.is_empty() {
@@ -161,19 +150,19 @@ impl BundleBuilderCommand for FetchCommand {
 /// Command to fetch from all defined sources.
 #[derive(Debug, Clone)]
 pub struct FetchAllCommand {
-    /// Sync mode override (None defaults to "add")
-    pub mode: Option<String>,
+    /// Sync mode for the fetch operation
+    pub mode: SyncMode,
 }
 
 impl Default for FetchAllCommand {
     fn default() -> Self {
-        Self { mode: None }
+        Self { mode: SyncMode::default() }
     }
 }
 
 impl FetchAllCommand {
     /// Create a new FetchAllCommand.
-    pub fn new(mode: Option<String>) -> Self {
+    pub fn new(mode: SyncMode) -> Self {
         Self { mode }
     }
 }
@@ -184,33 +173,20 @@ impl CommandParsing for FetchAllCommand {
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        let raw = pair.as_str().to_uppercase();
-        if !raw.contains("ALL") {
-            // Also check for identifier "all"
-            let has_all = pair.clone().into_inner().any(|p| {
-                p.as_rule() == Rule::identifier && p.as_str().eq_ignore_ascii_case("all")
-            });
-            if !has_all {
-                return Err("Expected FETCH ALL".into());
-            }
-        }
-
         let mut mode = None;
         for inner_pair in pair.into_inner() {
             if inner_pair.as_rule() == Rule::fetch_mode {
-                mode = Some(inner_pair.as_str().to_lowercase());
+                mode = Some(SyncMode::from_arg(inner_pair.as_str())?);
             }
         }
+
+        let mode = mode.ok_or_else(|| BundlebaseError::from("FETCH ALL statement missing mode"))?;
 
         Ok(FetchAllCommand::new(mode))
     }
 
     fn to_statement(&self) -> String {
-        let mut stmt = "FETCH ALL".to_string();
-        if let Some(mode) = &self.mode {
-            stmt.push_str(&format!(" {}", mode.to_uppercase()));
-        }
-        stmt
+        format!("FETCH ALL {}", self.mode)
     }
 }
 
@@ -219,10 +195,7 @@ impl BundleBuilderCommand for FetchAllCommand {
     type Output = Vec<FetchResults>;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<Vec<FetchResults>, BundlebaseError> {
-        let mode = self.mode.as_deref()
-            .map(SyncMode::from_arg)
-            .transpose()?
-            .unwrap_or_default();
+        let mode = self.mode;
 
         // Collect sources with their pack info to avoid borrow issues
         let sources_with_packs: Vec<_> = builder
@@ -381,12 +354,12 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_fetch_base() {
-        let input = "FETCH";
+        let input = "FETCH base ADD";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::Fetch(c) => {
-                assert_eq!(c.pack, None);
-                assert_eq!(c.mode, None);
+                assert_eq!(c.pack, "base");
+                assert_eq!(c.mode, SyncMode::Add);
             }
             _ => panic!("Expected Fetch variant"),
         }
@@ -394,12 +367,12 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_fetch_pack() {
-        let input = "FETCH users";
+        let input = "FETCH users ADD";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::Fetch(c) => {
-                assert_eq!(c.pack, Some("users".to_string()));
-                assert_eq!(c.mode, None);
+                assert_eq!(c.pack, "users");
+                assert_eq!(c.mode, SyncMode::Add);
             }
             _ => panic!("Expected Fetch variant"),
         }
@@ -407,12 +380,12 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_fetch_with_mode() {
-        let input = "FETCH UPDATE";
+        let input = "FETCH base UPDATE";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::Fetch(c) => {
-                assert_eq!(c.pack, None);
-                assert_eq!(c.mode, Some("update".to_string()));
+                assert_eq!(c.pack, "base");
+                assert_eq!(c.mode, SyncMode::Update);
             }
             _ => panic!("Expected Fetch variant"),
         }
@@ -420,12 +393,12 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_fetch_sync_mode() {
-        let input = "FETCH SYNC";
+        let input = "FETCH base SYNC";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::Fetch(c) => {
-                assert_eq!(c.pack, None);
-                assert_eq!(c.mode, Some("sync".to_string()));
+                assert_eq!(c.pack, "base");
+                assert_eq!(c.mode, SyncMode::Sync);
             }
             _ => panic!("Expected Fetch variant"),
         }
@@ -437,8 +410,8 @@ mod parsing_tests {
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::Fetch(c) => {
-                assert_eq!(c.pack, Some("users".to_string()));
-                assert_eq!(c.mode, Some("sync".to_string()));
+                assert_eq!(c.pack, "users");
+                assert_eq!(c.mode, SyncMode::Sync);
             }
             _ => panic!("Expected Fetch variant"),
         }
@@ -446,11 +419,11 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_fetch_all() {
-        let input = "FETCH ALL";
+        let input = "FETCH ALL ADD";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::FetchAll(c) => {
-                assert_eq!(c.mode, None);
+                assert_eq!(c.mode, SyncMode::Add);
             }
             _ => panic!("Expected FetchAll variant"),
         }
@@ -462,7 +435,7 @@ mod parsing_tests {
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::FetchAll(c) => {
-                assert_eq!(c.mode, Some("update".to_string()));
+                assert_eq!(c.mode, SyncMode::Update);
             }
             _ => panic!("Expected FetchAll variant"),
         }
@@ -474,23 +447,23 @@ mod parsing_tests {
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::FetchAll(c) => {
-                assert_eq!(c.mode, Some("sync".to_string()));
+                assert_eq!(c.mode, SyncMode::Sync);
             }
             _ => panic!("Expected FetchAll variant"),
         }
     }
 
     #[test]
-    fn test_round_trip_fetch() {
-        let cmd = FetchCommand::new(None, None);
+    fn test_round_trip_fetch_base() {
+        let cmd = FetchCommand::new("base".to_string(), SyncMode::Add);
         let statement = cmd.to_statement();
-        assert_eq!(statement, "FETCH");
+        assert_eq!(statement, "FETCH base ADD");
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::Fetch(c) => {
-                assert_eq!(c.pack, None);
-                assert_eq!(c.mode, None);
+                assert_eq!(c.pack, "base");
+                assert_eq!(c.mode, SyncMode::Add);
             }
             _ => panic!("Expected Fetch variant"),
         }
@@ -498,15 +471,31 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip_fetch_with_mode() {
-        let cmd = FetchCommand::new(None, Some("update".to_string()));
+        let cmd = FetchCommand::new("base".to_string(), SyncMode::Update);
         let statement = cmd.to_statement();
-        assert_eq!(statement, "FETCH UPDATE");
+        assert_eq!(statement, "FETCH base UPDATE");
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::Fetch(c) => {
-                assert_eq!(c.pack, None);
-                assert_eq!(c.mode, Some("update".to_string()));
+                assert_eq!(c.pack, "base");
+                assert_eq!(c.mode, SyncMode::Update);
+            }
+            _ => panic!("Expected Fetch variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip_fetch_pack() {
+        let cmd = FetchCommand::new("users".to_string(), SyncMode::Sync);
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "FETCH users SYNC");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::Fetch(c) => {
+                assert_eq!(c.pack, "users");
+                assert_eq!(c.mode, SyncMode::Sync);
             }
             _ => panic!("Expected Fetch variant"),
         }
@@ -514,14 +503,14 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip_fetch_all() {
-        let cmd = FetchAllCommand::new(None);
+        let cmd = FetchAllCommand::new(SyncMode::Add);
         let statement = cmd.to_statement();
-        assert_eq!(statement, "FETCH ALL");
+        assert_eq!(statement, "FETCH ALL ADD");
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::FetchAll(c) => {
-                assert_eq!(c.mode, None);
+                assert_eq!(c.mode, SyncMode::Add);
             }
             _ => panic!("Expected FetchAll variant"),
         }
@@ -529,14 +518,14 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip_fetch_all_with_mode() {
-        let cmd = FetchAllCommand::new(Some("sync".to_string()));
+        let cmd = FetchAllCommand::new(SyncMode::Sync);
         let statement = cmd.to_statement();
         assert_eq!(statement, "FETCH ALL SYNC");
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::FetchAll(c) => {
-                assert_eq!(c.mode, Some("sync".to_string()));
+                assert_eq!(c.mode, SyncMode::Sync);
             }
             _ => panic!("Expected FetchAll variant"),
         }

@@ -528,8 +528,8 @@ mod tests {
         let scope = Scope::from(
             "ftp://ftp.example.com:2121/data/file.txt",
         );
-        config.set("username", "testuser", &scope, ConfigSource::Passed);
-        config.set("password", "testpass", &scope, ConfigSource::Passed);
+        config.set(FTP_USERNAME_CFG.key, "testuser", &scope, ConfigSource::Passed);
+        config.set(FTP_PASSWORD_CFG.key, "testpass", &scope, ConfigSource::Passed);
 
         let url = Url::parse("ftp://ftp.example.com:2121/data/file.txt").unwrap();
         let ftp_file = FtpFile::from_url(&url, config).unwrap();
@@ -553,8 +553,8 @@ mod tests {
     fn test_ftp_dir_from_url_with_config() {
         let config = Arc::new(BundleConfig::new());
         let scope = Scope::new("/ftp");
-        config.set("username", "myuser", &scope, ConfigSource::Passed);
-        config.set("password", "mypass", &scope, ConfigSource::Passed);
+        config.set(FTP_USERNAME_CFG.key, "myuser", &scope, ConfigSource::Passed);
+        config.set(FTP_PASSWORD_CFG.key, "mypass", &scope, ConfigSource::Passed);
 
         let url = Url::parse("ftp://ftp.example.com/pub/data/").unwrap();
         let ftp_dir = FtpDir::from_url(&url, config).unwrap();

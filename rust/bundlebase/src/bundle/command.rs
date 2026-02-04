@@ -478,6 +478,7 @@ register_commands! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::SyncMode;
     use std::collections::HashMap;
 
     #[test]
@@ -544,11 +545,11 @@ mod tests {
 
     #[test]
     fn test_fetch_command() {
-        let cmd = BundleCommand::Fetch(FetchCommand::new(Some("users".to_string()), None));
+        let cmd = BundleCommand::Fetch(FetchCommand::new("users".to_string(), SyncMode::Add));
 
         match cmd {
             BundleCommand::Fetch(cmd) => {
-                assert_eq!(cmd.pack, Some("users".to_string()));
+                assert_eq!(cmd.pack, "users");
             }
             _ => panic!("Expected Fetch variant"),
         }
@@ -556,7 +557,7 @@ mod tests {
 
     #[test]
     fn test_fetch_all_command() {
-        let cmd = BundleCommand::FetchAll(FetchAllCommand::new(None));
+        let cmd = BundleCommand::FetchAll(FetchAllCommand::new(SyncMode::Add));
 
         match cmd {
             BundleCommand::FetchAll(_) => {}

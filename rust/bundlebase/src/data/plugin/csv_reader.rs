@@ -175,6 +175,10 @@ impl std::fmt::Debug for CsvReader {
 /// This relies on string-matching the error message, which is fragile if
 /// upstream error wording changes. The `test_is_line_delimiter_error_detection`
 /// test verifies the expected format still matches.
+///
+/// Verified against: DataFusion 52 / object_store crate.
+/// If upgrading DataFusion, run the `test_is_line_delimiter_error_detection` test
+/// to confirm the error message format has not changed.
 fn is_line_delimiter_error(err: &BundlebaseError) -> bool {
     let msg = err.to_string();
     msg.contains("LineDelimiter") && msg.contains("unterminated string")

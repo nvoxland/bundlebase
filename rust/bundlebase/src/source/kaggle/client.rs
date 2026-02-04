@@ -11,8 +11,8 @@ use crate::{BundleConfig, BundlebaseError};
 pub(super) struct KaggleClient {
     client: reqwest::Client,
     pub(super) base_url: String,
-    pub(super) username: String,
-    pub(super) key: String,
+    pub(super) username: Option<String>,
+    pub(super) key: Option<String>,
 }
 
 impl KaggleClient {
@@ -20,25 +20,15 @@ impl KaggleClient {
     pub(super) fn from_config(config: &BundleConfig, dataset: &str) -> Result<Self, BundlebaseError> {
         let scope = dataset_scope(dataset);
 
-        let base_url = config.get(&scope, &URL_CFG).ok_or_else(|| {
-            BundlebaseError::from("Kaggle URL not configured")
-        })?;
-        let username = config.get(&scope, &USERNAME_CFG).ok_or_else(|| {
-            BundlebaseError::from(
-                "Kaggle username not found. Set via bundlebase config '/kaggle username'  or ~/.kaggle/kaggle.json",
-            )
-        })?;
-        let key = config.get(&scope, &API_KEY_CFG).ok_or_else(|| {
-            BundlebaseError::from(
-                "Kaggle API key not found. Set via bundlebase config '/kaggle key', or ~/.kaggle/kaggle.json",
-            )
-        })?;
+        let base_url = config.get_required(&scope, &URL_CFG, "Cannot configure Kaggle client")?;
+        let username = config.get(&scope, &USERNAME_CFG);
+        let key = config.get(&scope, &API_KEY_CFG);
 
-        Self::new(&base_url, &username, &key)
+        Self::new(&base_url, username, key)
     }
 
     /// Explicit constructor (primarily for tests).
-    pub(super) fn new(base_url: &str, username: &str, key: &str) -> Result<Self, BundlebaseError> {
+    pub(super) fn new(base_url: &str, username: Option<String>, key: Option<String>) -> Result<Self, BundlebaseError> {
         use reqwest::header;
 
         let mut headers = header::HeaderMap::new();
@@ -57,23 +47,27 @@ impl KaggleClient {
         Ok(Self {
             client,
             base_url: base_url.to_string(),
-            username: username.to_string(),
-            key: key.to_string(),
+            username,
+            key,
         })
     }
 
     /// Start a GET request for a relative API path (e.g. `/api/v1/datasets/list`).
     pub(super) fn get(&self, path: &str) -> reqwest::RequestBuilder {
-        self.client
-            .get(format!("{}{}", self.base_url, path))
-            .basic_auth(&self.username, Some(&self.key))
+        let builder = self.client.get(format!("{}{}", self.base_url, path));
+        match (&self.username, &self.key) {
+            (Some(u), Some(k)) => builder.basic_auth(u, Some(k)),
+            _ => builder,
+        }
     }
 
     /// Start a GET request for an absolute URL (used when the full URL comes
     /// from a `DiscoveredLocation`).
     pub(super) fn get_url(&self, url: &str) -> reqwest::RequestBuilder {
-        self.client
-            .get(url)
-            .basic_auth(&self.username, Some(&self.key))
+        let builder = self.client.get(url);
+        match (&self.username, &self.key) {
+            (Some(u), Some(k)) => builder.basic_auth(u, Some(k)),
+            _ => builder,
+        }
     }
 }

@@ -918,7 +918,7 @@ class PyBundleBuilder:
         """
         ...
 
-    async def fetch(self, pack: str = "base", mode: Optional[str] = None) -> List[FetchResults]:
+    async def fetch(self, pack: str, mode: str) -> List[FetchResults]:
         """
         Fetch data from sources for a pack.
 
@@ -926,10 +926,8 @@ class PyBundleBuilder:
         auto-attaches any new files found.
 
         Args:
-            pack: Which pack to fetch sources for:
-                - "base" (default): The base pack
-                - A join name: A joined pack by its join name
-            mode: Sync mode (default: "add"):
+            pack: Which pack to fetch sources for (e.g. "base" or a join name)
+            mode: Sync mode: "add", "update", or "sync".
                 - "add": Only attach new files
                 - "update": Add new files and replace changed files
                 - "sync": Add new, replace changed, and remove deleted files
@@ -939,13 +937,13 @@ class PyBundleBuilder:
             Each result contains details about blocks added, replaced, and removed.
 
         Example:
-            results = await c.fetch()  # Fetch from base pack sources
+            results = await c.fetch("base", "add")
             for result in results:
                 print(f"{result.source_function}: {len(result.added)} added")
         """
         ...
 
-    async def fetch_all(self, mode: Optional[str] = None) -> List[FetchResults]:
+    async def fetch_all(self, mode: str) -> List[FetchResults]:
         """
         Fetch data from all defined sources.
 
@@ -953,7 +951,7 @@ class PyBundleBuilder:
         auto-attaches any new files found.
 
         Args:
-            mode: Sync mode (default: "add"):
+            mode: Sync mode: "add", "update", or "sync".
                 - "add": Only attach new files
                 - "update": Add new files and replace changed files
                 - "sync": Add new, replace changed, and remove deleted files
@@ -963,7 +961,7 @@ class PyBundleBuilder:
             Includes results for sources with no changes (empty results).
 
         Example:
-            results = await c.fetch_all()
+            results = await c.fetch_all("add")
             for result in results:
                 print(f"{result.source_function}: {result.total_count()} changes")
         """
