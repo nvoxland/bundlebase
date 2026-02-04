@@ -67,7 +67,7 @@ pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<PassedBundleConfig> {
             // Check if value is a nested dict (scope-specific config)
             if let Ok(nested_dict) = value.downcast::<PyDict>() {
                 // Scope-specific override
-                let scope = Scope::from_path(&key_str)
+                let scope = Scope::from_name(&key_str)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
                 for (nested_key, nested_value) in nested_dict.iter() {
                     let nested_key_str: String = nested_key.extract()?;

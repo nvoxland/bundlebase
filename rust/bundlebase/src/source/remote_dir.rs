@@ -4,8 +4,9 @@
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction, SyncMode,
+    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction,
 };
+use super::SyncMode;
 use super::source_utils::{self, MaterializeResult};
 use crate::io::plugin::ftp::FtpFile;
 use crate::io::plugin::object_store::ObjectStoreFile;

@@ -4,8 +4,9 @@
 //! and downloads files that match specified glob patterns.
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction, SyncMode,
+    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction,
 };
+use super::SyncMode;
 use super::source_utils;
 use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError};

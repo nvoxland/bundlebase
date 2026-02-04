@@ -1,6 +1,7 @@
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::io::{readable_file_from_url, IOReadWriteDir};
+use bundlebase::source::SyncMode;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::{Bundle, BundlebaseError, BundleConfig};
 use std::collections::HashMap;
@@ -136,7 +137,7 @@ async fn test_create_source_auto_attaches_files() -> Result<(), BundlebaseError>
     assert_eq!(bundle.num_rows().await?, 1000);
 
     // Verify subsequent fetch finds nothing new
-    let results = bundle.fetch_all(None).await?;
+    let results = bundle.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results), 0);
 
     Ok(())
@@ -157,7 +158,7 @@ async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
         .await?;
 
     // Verify no data yet by fetching (should attach nothing)
-    let results = bundle.fetch_all(None).await?;
+    let results = bundle.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results), 0);
 
     // Now add a file to the source directory
@@ -169,7 +170,7 @@ async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
     .await?;
 
     // Fetch should find and attach the new file
-    let results = bundle.fetch_all(None).await?;
+    let results = bundle.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results), 1);
 
     // Verify data is now available
@@ -200,11 +201,11 @@ async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
         .await?;
 
     // First explicit fetch should find nothing (already attached by create_source)
-    let results1 = bundle.fetch_all(None).await?;
+    let results1 = bundle.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results1), 0);
 
     // Second fetch should also find nothing
-    let results2 = bundle.fetch_all(None).await?;
+    let results2 = bundle.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results2), 0);
 
     // Data should still be there
@@ -246,7 +247,7 @@ async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
     .await?;
 
     // Fetch should only attach the new file
-    let results = bundle.fetch_all(None).await?;
+    let results = bundle.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results), 1);
 
     Ok(())
@@ -285,7 +286,7 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
     assert_eq!(bundle.num_rows().await?, 1000);
 
     // Fetch should not find CSV (doesn't match pattern)
-    let results = bundle.fetch_all(None).await?;
+    let results = bundle.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results), 0);
 
     Ok(())
@@ -416,7 +417,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
     // Extended bundle should be able to fetch from the source
     // But only CSV matches since we defined pattern as **/*
     // Actually, the pattern is **/*.parquet, so CSV won't match
-    let results = extended.fetch_all(None).await?;
+    let results = extended.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results), 0); // CSV doesn't match parquet pattern
 
     extended.commit("Extended").await?;
@@ -774,7 +775,7 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     assert_eq!(bundle.num_rows().await?, 1000);
 
     // Subsequent fetch should not re-copy the file
-    let results = bundle.fetch_all(None).await?;
+    let results = bundle.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results), 0, "Should not re-attach already copied file");
 
     // Add a second parquet file (same data, different name)
@@ -786,15 +787,178 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     .await?;
 
     // Fetch should only find the new file
-    let results = bundle.fetch_all(None).await?;
+    let results = bundle.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results), 1, "Should attach only the new file");
 
     // Now we should have 2000 rows (1000 from each file)
     assert_eq!(bundle.num_rows().await?, 2000);
 
     // Another fetch should find nothing
-    let results = bundle.fetch_all(None).await?;
+    let results = bundle.fetch_all(SyncMode::Add).await?;
     assert_eq!(total_changes(&results), 0, "Should not re-attach already copied files");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_fetch_update_replaces_changed_files() -> Result<(), BundlebaseError> {
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Copy initial file
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "userdata.parquet",
+    )
+    .await?;
+
+    // Create bundle and define source (auto-attaches the file)
+    let bundle =
+        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    bundle
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
+        .await?;
+
+    assert_eq!(bundle.num_rows().await?, 1000);
+
+    // Default (add) fetch should find nothing new
+    let results = bundle.fetch_all(SyncMode::Add).await?;
+    assert_eq!(total_changes(&results), 0, "Add mode should find nothing new");
+
+    // Overwrite the source file with different content to simulate a change
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "userdata.parquet",
+    )
+    .await?;
+
+    // Add-mode fetch should still find nothing (file already tracked)
+    let results = bundle.fetch_all(SyncMode::Add).await?;
+    assert_eq!(total_changes(&results), 0, "Add mode should ignore changed files");
+
+    // Update-mode fetch should detect the changed file and replace it
+    let results = bundle.fetch_all(SyncMode::Update).await?;
+    assert_eq!(results.len(), 1, "Should have results for one source");
+    assert_eq!(results[0].replaced.len(), 1, "Update mode should replace the changed file");
+    assert_eq!(results[0].added.len(), 0, "No new files to add");
+    assert_eq!(results[0].removed.len(), 0, "Update mode should not remove files");
+
+    // Data should still be queryable
+    assert_eq!(bundle.num_rows().await?, 1000);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_fetch_sync_adds_and_replaces() -> Result<(), BundlebaseError> {
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Copy initial file
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "existing.parquet",
+    )
+    .await?;
+
+    // Create bundle and define source
+    let bundle =
+        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    bundle
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
+        .await?;
+
+    assert_eq!(bundle.num_rows().await?, 1000);
+
+    // Overwrite existing file and add a new one
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "existing.parquet",
+    )
+    .await?;
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "new_file.parquet",
+    )
+    .await?;
+
+    // Sync-mode fetch should add new files and replace changed ones
+    let results = bundle.fetch_all(SyncMode::Sync).await?;
+    assert_eq!(results.len(), 1, "Should have results for one source");
+    assert_eq!(results[0].added.len(), 1, "Sync mode should add the new file");
+    assert_eq!(results[0].replaced.len(), 1, "Sync mode should replace the changed file");
+
+    // Should now have 2000 rows
+    assert_eq!(bundle.num_rows().await?, 2000);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_fetch_update_adds_new_and_replaces_changed() -> Result<(), BundlebaseError> {
+    let source_dir = random_memory_dir();
+    let bundle_dir = random_memory_dir();
+
+    // Copy initial file
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "existing.parquet",
+    )
+    .await?;
+
+    // Create bundle and define source
+    let bundle =
+        bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
+
+    bundle
+        .create_source(
+            "remote_dir",
+            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
+            None,
+        )
+        .await?;
+
+    assert_eq!(bundle.num_rows().await?, 1000);
+
+    // Add a new file AND overwrite the existing one
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "new_file.parquet",
+    )
+    .await?;
+    copy_test_file(
+        test_datafile("userdata.parquet"),
+        source_dir.as_ref(),
+        "existing.parquet",
+    )
+    .await?;
+
+    // Update-mode should add the new file and replace the changed one
+    let results = bundle.fetch_all(SyncMode::Update).await?;
+    assert_eq!(results.len(), 1, "Should have results for one source");
+    assert_eq!(results[0].added.len(), 1, "Should add the new file");
+    assert_eq!(results[0].replaced.len(), 1, "Should replace the changed file");
+    assert_eq!(results[0].removed.len(), 0, "Update mode should not remove files");
+
+    // Should now have 2000 rows
+    assert_eq!(bundle.num_rows().await?, 2000);
 
     Ok(())
 }

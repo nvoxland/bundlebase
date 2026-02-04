@@ -20,7 +20,7 @@ Up until now, you had to attach local files to a bundle. That's fine for a demo,
 await c.create_source("inventory",
     location="sftp://warehouse.example.com/exports/",
     pattern="*.parquet")
-await c.fetch("inventory")
+await c.fetch("inventory", "add")
 ```
 
 There are three built-in source functions so far:

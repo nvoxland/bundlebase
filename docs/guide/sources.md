@@ -24,10 +24,10 @@ The source workflow has two steps:
         }))
 
     # Fetch discovers and attaches all matching files
-    await bundle.fetch()
+    await bundle.fetch("base", "add")
 
     # Later, fetch again to get any new files
-    await bundle.fetch()
+    await bundle.fetch("base", "add")
     ```
 
 === "Sync API"
@@ -43,10 +43,10 @@ The source workflow has two steps:
         }))
 
     # Fetch discovers and attaches all matching files
-    bundle.fetch()
+    bundle.fetch("base", "add")
 
     # Later, fetch again to get any new files
-    bundle.fetch()
+    bundle.fetch("base", "add")
     ```
 
 === "SQL"
@@ -313,24 +313,24 @@ Discovers and attaches new files from a specific pack's sources. Returns a list 
 
     ```python
     # Fetch from base pack (default)
-    results = await bundle.fetch()
+    results = await bundle.fetch("base", "add")
     for result in results:
         print(f"{result.source_function}: {len(result.added)} added")
 
     # Fetch from a joined pack
-    results = await bundle.fetch("customers")
+    results = await bundle.fetch("customers", "add")
     ```
 
 === "Sync API"
 
     ```python
     # Fetch from base pack (default)
-    results = bundle.fetch()
+    results = bundle.fetch("base", "add")
     for result in results:
         print(f"{result.source_function}: {len(result.added)} added")
 
     # Fetch from a joined pack
-    results = bundle.fetch("customers")
+    results = bundle.fetch("customers", "add")
     ```
 
 === "SQL"
@@ -348,7 +348,7 @@ Discovers and attaches new files from all defined sources across all packs. Retu
 === "Async API"
 
     ```python
-    results = await bundle.fetch_all()
+    results = await bundle.fetch_all("add")
     for result in results:
         print(f"{result.pack}/{result.source_function}: {result.total_count()} changes")
     ```
@@ -356,7 +356,7 @@ Discovers and attaches new files from all defined sources across all packs. Retu
 === "Sync API"
 
     ```python
-    results = bundle.fetch_all()
+    results = bundle.fetch_all("add")
     for result in results:
         print(f"{result.pack}/{result.source_function}: {result.total_count()} changes")
     ```
@@ -407,7 +407,7 @@ You can define sources for joined packs by specifying the `pack` parameter.
     }, pack="customers")
 
     # Fetch will attach files to the customers join
-    results = await bundle.fetch("customers")
+    results = await bundle.fetch("customers", "add")
     print(f"Added {len(results[0].added)} customer files")
     ```
 
@@ -429,7 +429,7 @@ You can define sources for joined packs by specifying the `pack` parameter.
     }, pack="customers")
 
     # Fetch will attach files to the customers join
-    results = bundle.fetch("customers")
+    results = bundle.fetch("customers", "add")
     print(f"Added {len(results[0].added)} customer files")
     ```
 
@@ -468,7 +468,7 @@ A typical workflow for incrementally loading data:
         }))
 
     # Initial load
-    results = await bundle.fetch()
+    results = await bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     print(f"Initial load: {total_added} files")
     await bundle.commit("Initial data load")
@@ -477,7 +477,7 @@ A typical workflow for incrementally loading data:
 
     # Incremental load (only attaches new files)
     bundle = await bb.open("sales/data")
-    results = await bundle.fetch()
+    results = await bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     if total_added > 0:
         print(f"Loaded {total_added} new files")
@@ -497,7 +497,7 @@ A typical workflow for incrementally loading data:
         }))
 
     # Initial load
-    results = bundle.fetch()
+    results = bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     print(f"Initial load: {total_added} files")
     bundle.commit("Initial data load")
@@ -506,7 +506,7 @@ A typical workflow for incrementally loading data:
 
     # Incremental load (only attaches new files)
     bundle = bb.open("sales/data")
-    results = bundle.fetch()
+    results = bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     if total_added > 0:
         print(f"Loaded {total_added} new files")

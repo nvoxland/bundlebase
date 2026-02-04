@@ -446,7 +446,7 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def fetch(self, pack: str = "base", mode: Optional[str] = None) -> List["FetchResults"]:
+    def fetch(self, pack: str = "base", mode: str = "add") -> List["FetchResults"]:
         """Fetch data from sources for a pack.
 
         Checks the pack's sources for new files and attaches them to the bundle.
@@ -467,7 +467,7 @@ class SyncBundleBuilder(SyncBundle):
         coro = _call_original_method(self._async, "fetch", pack, mode)
         return _loop_manager.run_sync(coro)
 
-    def fetch_all(self, mode: Optional[str] = None) -> List["FetchResults"]:
+    def fetch_all(self, mode: str = "add") -> List["FetchResults"]:
         """Fetch data from all defined sources.
 
         Checks all defined sources for new files and attaches them to the bundle.

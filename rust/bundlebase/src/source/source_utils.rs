@@ -3,8 +3,9 @@
 //! Provides common functionality used by multiple source function implementations.
 
 use super::source_function::{
-    AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction, SyncMode,
+    AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction,
 };
+use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};
 use futures::stream;

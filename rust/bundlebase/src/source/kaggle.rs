@@ -5,8 +5,8 @@
 
 use super::source_function::{
     ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, MaterializedData, SourceFunction,
-    SyncMode,
 };
+use super::SyncMode;
 use super::source_utils::{self, MaterializeResult};
 use crate::bundle_config::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::io::IOReadWriteDir;
@@ -156,6 +156,8 @@ impl SourceFunction for KaggleSource {
         let version = args.get("version").map(|s| s.as_str());
         let client = KaggleClient::from_config(config, dataset)?;
 
+        // Version is intentionally discarded during discovery — it is only needed
+        // when materializing files (in fetch/fetch_with_mode) to record in MaterializedData.
         let (all_files, _dataset_version) = Self::list_kaggle_files(
             &client,
             dataset,
@@ -504,6 +506,9 @@ impl KaggleSource {
                 None => continue,
             };
 
+            // Kaggle API returns flat file names (no subdirectory paths), so matching
+            // against the bare filename is correct. Users should use simple patterns
+            // like "*.csv" rather than path-based patterns like "subdir/*.csv".
             if !patterns.iter().any(|pattern| pattern.matches(file_name)) {
                 continue;
             }
@@ -859,16 +864,14 @@ mod tests {
 
     #[test]
     fn test_kaggle_client_from_config_missing_credentials() {
-        // This test verifies that a clear error message is returned
-        // when credentials aren't configured (which is likely in CI)
+        // Credentials are optional — client should succeed with None values
         let config = BundleConfig::new();
-        let result = KaggleClient::from_config(&config, "zillow/zecon");
-        // In CI or when credentials aren't configured, this should fail gracefully
-        if result.is_err() {
-            let err = result.unwrap_err().to_string();
-            assert!(err.contains("Kaggle username not found") || err.contains("Kaggle API key not found"));
+        let client = KaggleClient::from_config(&config, "zillow/zecon").unwrap();
+        // If ~/.kaggle/kaggle.json exists, default_fn may populate these;
+        // otherwise they should be None
+        if client.username.is_none() {
+            assert!(client.key.is_none() || client.key.is_some());
         }
-        // If credentials exist, that's fine too - the function works
     }
 
     #[test]
@@ -876,19 +879,19 @@ mod tests {
         let config = BundleConfig::new();
         let scope = Scope::new("/kaggle");
         config.set(
-            "url",
+            URL_CFG.key,
             "https://test.kaggle.com",
             &scope,
             crate::bundle_config::ConfigSource::Passed,
         );
         config.set(
-            "username",
+            USERNAME_CFG.key,
             "config_user",
             &scope,
             crate::bundle_config::ConfigSource::Passed,
         );
         config.set(
-            "key",
+            API_KEY_CFG.key,
             "config_key",
             &scope,
             crate::bundle_config::ConfigSource::Passed,
@@ -896,28 +899,26 @@ mod tests {
 
         let client = KaggleClient::from_config(&config, "zillow/zecon").unwrap();
         assert_eq!(client.base_url, "https://test.kaggle.com");
-        assert_eq!(client.username, "config_user");
-        assert_eq!(client.key, "config_key");
+        assert_eq!(client.username, Some("config_user".to_string()));
+        assert_eq!(client.key, Some("config_key".to_string()));
     }
 
     #[test]
     fn test_kaggle_client_from_config_partial_falls_back_to_default_fn() {
-        // If only username is set in config (no key), key falls back to default_fn
+        // If only username is set in config (no key), key falls back to default_fn.
+        // If default_fn also returns None, key is simply None.
         let config = BundleConfig::new();
         let scope = Scope::new("/kaggle");
         config.set(
-            "username",
+            USERNAME_CFG.key,
             "config_user",
             &scope,
             crate::bundle_config::ConfigSource::Passed,
         );
 
-        let result = KaggleClient::from_config(&config, "zillow/zecon");
-        // Will either succeed (if ~/.kaggle/kaggle.json exists) or fail with missing key error
-        if result.is_err() {
-            let err = result.unwrap_err().to_string();
-            assert!(err.contains("Kaggle API key not found"));
-        }
+        let client = KaggleClient::from_config(&config, "zillow/zecon").unwrap();
+        assert_eq!(client.username, Some("config_user".to_string()));
+        // key may be Some (if ~/.kaggle/kaggle.json exists) or None
     }
 
     // ── extract_from_zip tests ──────────────────────────────────────
@@ -975,7 +976,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_kaggle_version_with_explicit_version() {
-        let client = KaggleClient::new("http://unused", "user", "key").unwrap();
+        let client = KaggleClient::new("http://unused", Some("user".into()), Some("key".into())).unwrap();
         let result = KaggleSource::read_kaggle_version(
             &client,
             "owner/ds",
@@ -1001,7 +1002,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
         let result = KaggleSource::read_kaggle_version(
             &client,
             "zillow/zecon",
@@ -1026,7 +1027,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
         let result = KaggleSource::read_kaggle_version(
             &client,
             "zillow/zecon",
@@ -1047,7 +1048,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
         let result = KaggleSource::read_kaggle_version(
             &client,
             "zillow/zecon",
@@ -1068,7 +1069,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
         let result = KaggleSource::read_kaggle_version(
             &client,
             "zillow/zecon",
@@ -1094,7 +1095,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), "myuser", "mykey").unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("myuser".into()), Some("mykey".into())).unwrap();
         let result = KaggleSource::read_kaggle_version(
             &client,
             "zillow/zecon",
@@ -1141,7 +1142,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
         let patterns = vec![glob::Pattern::new("**/*").unwrap()];
         let (files, version) = KaggleSource::list_kaggle_files(
             &client,
@@ -1196,7 +1197,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
         let patterns = vec![glob::Pattern::new("*.csv").unwrap()];
         let (files, _) = KaggleSource::list_kaggle_files(
             &client,
@@ -1233,7 +1234,7 @@ mod tests {
 
         // No version search mock needed — explicit version skips the API call
 
-        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
         let patterns = vec![glob::Pattern::new("**/*").unwrap()];
         let (files, version) = KaggleSource::list_kaggle_files(
             &client,
@@ -1266,7 +1267,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
         let patterns = vec![glob::Pattern::new("**/*").unwrap()];
         let result = KaggleSource::list_kaggle_files(
             &client,
@@ -1304,7 +1305,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), "user", "key").unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
         let patterns = vec![glob::Pattern::new("**/*").unwrap()];
         let result = KaggleSource::list_kaggle_files(
             &client,

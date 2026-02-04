@@ -182,20 +182,18 @@ source_arg_pair = {
 // ============================================================================
 // FETCH Statement
 // ============================================================================
-// Syntax: FETCH [<pack>] [UPDATE|SYNC] | FETCH ALL [UPDATE|SYNC]
+// Syntax: FETCH ALL <mode> | FETCH <pack> <mode>
 // Examples:
-//   FETCH                     -- fetch from base pack sources (add mode)
-//   FETCH users               -- fetch from 'users' pack sources
-//   FETCH ALL                 -- fetch from all sources
-//   FETCH UPDATE              -- fetch with update mode
-//   FETCH users SYNC          -- fetch from 'users' with sync mode
+//   FETCH base ADD            -- fetch from base pack sources (add mode)
+//   FETCH users ADD           -- fetch from 'users' pack sources
+//   FETCH ALL ADD             -- fetch from all sources
 //   FETCH ALL UPDATE          -- fetch all with update mode
-
+//   FETCH users SYNC          -- fetch from 'users' with sync mode
 fetch_stmt = {
-    ^"fetch" ~ (^"all" | (!(^"update" | ^"sync") ~ identifier))? ~ fetch_mode?
+    ^"fetch" ~ (^"all" ~ fetch_mode | identifier ~ fetch_mode)
 }
 
-fetch_mode = { ^"update" | ^"sync" }
+fetch_mode = { ^"add" | ^"update" | ^"sync" }
 
 // ============================================================================
 // DROP JOIN Statement

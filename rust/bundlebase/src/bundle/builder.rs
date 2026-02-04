@@ -9,7 +9,7 @@ use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle};
 use super::DataBlock;
 use crate::data::{ObjectId, VersionedBlockId};
-use crate::source::FetchResults;
+use crate::source::{FetchResults, SyncMode};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::{IndexDefinition, IndexType};
@@ -746,7 +746,7 @@ impl BundleBuilder {
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
     /// builder.create_source("remote_dir", args, None).await?;
-    /// builder.fetch(None, None).await?;  // Fetch from base pack sources
+    /// builder.fetch("base", SyncMode::Add).await?;
     /// builder.commit("Initial data from source").await?;
     /// ```
     pub async fn create_source(
@@ -766,10 +766,8 @@ impl BundleBuilder {
     /// and auto-attaches any new files.
     ///
     /// # Arguments
-    /// * `pack` - Which pack to fetch sources for:
-    ///   - `None` or `Some("base")`: The base pack (default)
-    ///   - `Some(join_name)`: A joined pack by its join name
-    /// * `mode` - Sync mode: `None` defaults to "add". Valid values: "add", "update", "sync".
+    /// * `pack` - Which pack to fetch sources for (e.g. "base", or a join name)
+    /// * `mode` - Sync mode controlling how fetch handles existing files.
     ///
     /// # Returns
     /// A list of `FetchResults`, one for each source in the pack.
@@ -782,13 +780,13 @@ impl BundleBuilder {
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
     /// builder.create_source("remote_dir", args, None).await?;
-    /// let results = builder.fetch(None, None).await?;  // Fetch from base pack sources
+    /// let results = builder.fetch("base", SyncMode::Add).await?;
     /// for result in &results {
     ///     println!("Source {}: {} added", result.source_function, result.added.len());
     /// }
     /// ```
-    pub async fn fetch(&self, pack: Option<&str>, mode: Option<&str>) -> Result<Vec<FetchResults>, BundlebaseError> {
-        self.execute_command(FetchCommand::new(pack.map(|s| s.to_string()), mode.map(|s| s.to_string()))).await
+    pub async fn fetch(&self, pack: &str, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
+        self.execute_command(FetchCommand::new(pack.to_string(), mode)).await
     }
 
     /// Fetch from all defined sources - discover and attach new files.
@@ -797,7 +795,7 @@ impl BundleBuilder {
     /// and auto-attaches any new files.
     ///
     /// # Arguments
-    /// * `mode` - Sync mode: `None` defaults to "add". Valid values: "add", "update", "sync".
+    /// * `mode` - Sync mode controlling how fetch handles existing files.
     ///
     /// # Returns
     /// A list of `FetchResults`, one for each source across all packs.
@@ -807,7 +805,7 @@ impl BundleBuilder {
     /// ```ignore
     /// let builder = BundleBuilder::create("memory:///work", None).await?;
     /// // Create multiple sources...
-    /// let results = builder.fetch_all(None).await?;
+    /// let results = builder.fetch_all(SyncMode::Add).await?;
     /// for result in &results {
     ///     println!("Source {}: {} added, {} replaced, {} removed",
     ///         result.source_function,
@@ -816,8 +814,8 @@ impl BundleBuilder {
     ///         result.removed.len());
     /// }
     /// ```
-    pub async fn fetch_all(&self, mode: Option<&str>) -> Result<Vec<FetchResults>, BundlebaseError> {
-        self.execute_command(FetchAllCommand::new(mode.map(|s| s.to_string()))).await
+    pub async fn fetch_all(&self, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
+        self.execute_command(FetchAllCommand::new(mode)).await
     }
 
     /// Create a view from a SQL statement

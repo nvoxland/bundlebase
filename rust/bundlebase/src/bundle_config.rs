@@ -567,6 +567,18 @@ impl BundleConfig {
         }
     }
 
+    /// Like [`get`], but returns an error if the key is not set.
+    ///
+    /// `context` is prepended to the error message (e.g. `"Cannot configure Kaggle client: No configuration set for /kaggle:username"`).
+    pub fn get_required(&self, scope: &Scope, key: &ConfigKey, context: &str) -> Result<String, BundlebaseError> {
+        self.get(scope, key).ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "{}: No configuration set for /{}:{}",
+                context, key.scope.name, key.key
+            ))
+        })
+    }
+
     /// Compute the winning value for each (key, scope) pair across all sources.
     ///
     /// Returns a map of (key, scope) -> (winning_priority, winning_value).

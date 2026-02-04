@@ -80,6 +80,33 @@ impl Scope {
         )))
     }
 
+    /// Look up a scope by registered name. Accepts `/kaggle` or `kaggle`.
+    ///
+    /// Unlike [`from_path`], this does not run URL-based matching logic.
+    /// It simply matches against the `name` field of each registered
+    /// [`ConfigScope`](super::ConfigScope).
+    ///
+    /// # Examples
+    /// ```
+    /// use bundlebase::bundle_config::Scope;
+    /// let scope = Scope::from_name("kaggle").unwrap();
+    /// assert_eq!(scope.as_str(), "/kaggle");
+    ///
+    /// let scope = Scope::from_name("/s3").unwrap();
+    /// assert_eq!(scope.as_str(), "/s3");
+    /// ```
+    pub fn from_name(name: &str) -> Result<Self, BundlebaseError> {
+        use super::BundleConfig;
+
+        let trimmed = name.trim_start_matches('/');
+        for config_scope in BundleConfig::all_scopes() {
+            if config_scope.name == trimmed {
+                return Ok(Scope::new(&format!("/{}", config_scope.name)));
+            }
+        }
+        Err(BundlebaseError::from(format!("Unknown scope: {}", name)))
+    }
+
     /// Normalize a path or raw string into a scope.
     ///
     /// This is the basic normalizer that converts `://` sequences into `/`
