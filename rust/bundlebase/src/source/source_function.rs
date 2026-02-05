@@ -24,6 +24,7 @@ use super::SyncMode;
 // Re-export MaterializeResult for use by source function implementations
 pub use super::source_utils::MaterializeResult;
 use crate::io::IOReadWriteDir;
+use crate::progress::ProgressScope;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
@@ -408,8 +409,14 @@ pub trait SourceFunction: Send + Sync {
     ) -> Result<Vec<MaterializedData>, BundlebaseError> {
         let discovered = self.discover(args, &attached_locations, &config).await?;
 
+        let _progress = ProgressScope::new(
+            &format!("Fetching {} files from {}", discovered.len(), self.name()),
+            Some(discovered.len() as u64),
+        );
+
         let mut results = Vec::with_capacity(discovered.len());
-        for location in discovered {
+        for (idx, location) in discovered.into_iter().enumerate() {
+            _progress.update(idx as u64, Some(&location.source_location));
             let source_url = location.url.to_string();
             let result = self.materialize(&location, args, data_dir, &config).await?;
             // Read version from the local file's metadata (e.g., ETag, Last-Modified).

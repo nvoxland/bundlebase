@@ -4,6 +4,7 @@ use crate::bundle::command::{CommandParsing, Rule, CommandResponse};
 use crate::impl_dyn_command_response;
 use crate::bundle::operation::{AttachBlockOp, DetachBlockOp, SourceInfo};
 use crate::data::ObjectId;
+use crate::progress::ProgressScope;
 use crate::source::{FetchAction, FetchResults, SyncMode};
 use crate::BundlebaseError;
 use arrow::array::{ArrayRef, RecordBatch, StringArray, UInt64Array};
@@ -237,9 +238,13 @@ async fn fetch_from_source(
     let actions = source.fetch(builder, mode).await?;
 
     // Process actions and collect them for the result
+    let _progress = ProgressScope::new(
+        &format!("Applying {} fetch actions for '{}'", actions.len(), pack_name),
+        Some(actions.len() as u64),
+    );
     let mut processed_actions = Vec::new();
 
-    for action in actions {
+    for (idx, action) in actions.into_iter().enumerate() {
         match &action {
             FetchAction::Add(data) => {
                 let op = AttachBlockOp::setup(
@@ -294,6 +299,7 @@ async fn fetch_from_source(
             }
         }
         processed_actions.push(action);
+        _progress.update((idx + 1) as u64, None);
     }
 
     Ok(FetchResults::from_actions(
