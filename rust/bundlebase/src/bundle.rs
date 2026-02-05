@@ -43,7 +43,6 @@ use crate::io::{read_yaml, readable_file_from_url, writable_dir_from_str, writab
 use crate::bundle_config::Scope;
 use crate::bundle_config::PassedBundleConfig;
 use crate::{BundleConfig, BundlebaseError};
-use arrow::array::Array;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::MemorySchemaProvider;

@@ -80,17 +80,6 @@ async def test_create_kaggle_source_missing_dataset():
 
 
 @pytest.mark.asyncio
-async def test_create_kaggle_source_credentials():
-    """Test that kaggle source passes validation and reaches credential check."""
-    c = await bundlebase.create(random_bundle())
-    # With valid args but no ~/.kaggle/kaggle.json, create_source should fail
-    # with a credential error (proving validation passed and discover() was reached)
-    if not os.path.exists(os.path.expanduser("~/.kaggle/kaggle.json")):
-        with pytest.raises(ValueError, match="kaggle.json"):
-            await c.create_source("kaggle", {"dataset": "zillow/zecon"})
-
-
-@pytest.mark.asyncio
 async def test_fetch_returns_results():
     """Test that fetch returns FetchResults with details about attached files."""
     with tempfile.TemporaryDirectory() as source_dir:

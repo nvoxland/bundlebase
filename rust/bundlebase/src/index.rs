@@ -1,13 +1,19 @@
+#[allow(dead_code)]
 pub mod column_index;
+#[allow(dead_code)]
 mod external_sort;
 mod filter_analyzer;
 mod index_definition;
+#[allow(dead_code)]
 mod index_trait;
+#[allow(dead_code)]
 pub mod index_scan_exec;
 mod index_selector;
+#[allow(dead_code)]
 mod rowid_cache;
 mod rowid_index;
 mod temp_dir;
+#[allow(dead_code)]
 pub mod text_column_index;
 
 pub use column_index::{ColumnIndex, IndexedValue};

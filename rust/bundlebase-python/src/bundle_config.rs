@@ -1,5 +1,4 @@
 use ::bundlebase::bundle_config::{ConfigKey, PassedBundleConfig, Scope};
-use ::bundlebase::BundleConfig;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -67,8 +66,12 @@ pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<PassedBundleConfig> {
             // Check if value is a nested dict (scope-specific config)
             if let Ok(nested_dict) = value.downcast::<PyDict>() {
                 // Scope-specific override
-                let scope = Scope::from_name(&key_str)
-                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+                let scope = if key_str.contains("://") {
+                    Scope::from_path(&key_str)
+                } else {
+                    Scope::from_name(&key_str)
+                }
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
                 for (nested_key, nested_value) in nested_dict.iter() {
                     let nested_key_str: String = nested_key.extract()?;
                     let nested_value_str: String = nested_value.extract()?;
