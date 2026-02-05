@@ -18,7 +18,7 @@ use crate::bundle_config::Scope;
 use crate::bundle_config::PassedBundleConfig;
 use crate::BundleConfig;
 use crate::BundlebaseError;
-use arrow::array::{ArrayRef, Int32Array, RecordBatch, StringArray};
+use arrow::array::{Int32Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use chrono::DateTime;

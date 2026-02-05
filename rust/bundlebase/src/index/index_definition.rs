@@ -255,13 +255,8 @@ pub struct IndexDefinition {
 }
 
 impl IndexDefinition {
-    /// Create a new column index definition (default type)
-    pub(crate) fn new(id: &ObjectId, column: &String) -> IndexDefinition {
-        Self::with_type(id, column, IndexType::Column)
-    }
-
     /// Create a new index definition with a specific type
-    pub(crate) fn with_type(id: &ObjectId, column: &String, index_type: IndexType) -> IndexDefinition {
+    pub(crate) fn new(id: &ObjectId, column: &String, index_type: IndexType) -> IndexDefinition {
         Self {
             id: *id,
             column: column.clone(),
@@ -330,6 +325,7 @@ impl IndexDefinition {
     ///
     /// # Returns
     /// Number of stale IndexedBlocks removed
+    #[allow(dead_code)]
     pub(crate) fn prune_stale_blocks(&self, current_versions: &HashMap<ObjectId, String>) -> usize {
         let mut blocks = self.blocks.write();
         let mut lookup = self.block_lookup.write();

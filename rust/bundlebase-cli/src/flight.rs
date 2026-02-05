@@ -10,7 +10,6 @@ mod service;
 
 // Re-export public API
 pub use server::start;
-pub use service::BundlebaseFlightSqlService;
 
 #[cfg(test)]
 mod tests {

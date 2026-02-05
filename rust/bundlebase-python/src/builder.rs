@@ -320,7 +320,7 @@ impl PyBundleBuilder {
         let value = value.to_string();
         let scope = scope.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let scope = ::bundlebase::bundle_config::Scope::from_path(&scope)
+            let scope = ::bundlebase::bundle_config::Scope::from_name(&scope)
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
             inner
                 .set_config(&key, &value, &scope)
