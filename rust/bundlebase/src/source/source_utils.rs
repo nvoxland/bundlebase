@@ -8,6 +8,7 @@ use super::source_function::{
 use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};
+use crate::progress::ProgressScope;
 use futures::stream;
 use crate::{BundleConfig, BundlebaseError};
 use bytes::Bytes;
@@ -272,9 +273,15 @@ where
         .map(|d| d.source_location.clone())
         .collect();
 
+    let _progress = ProgressScope::new(
+        &format!("Processing {} discovered files", discovered.len()),
+        Some(discovered.len() as u64),
+    );
+
     let mut actions = Vec::new();
 
-    for location in discovered {
+    for (idx, location) in discovered.into_iter().enumerate() {
+        _progress.update(idx as u64, Some(&location.source_location));
         let source_location = location.source_location.clone();
         let source_url = location.url.to_string();
 
