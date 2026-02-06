@@ -64,7 +64,7 @@ pub struct ConfigValueDetails {
     pub key: String,
     /// Configuration value
     pub value: String,
-    /// Resolved scope, or global for defaults
+    /// Named scope this entry belongs to
     pub scope: Scope,
     /// Which layer this value came from
     pub source: ConfigSource,
@@ -356,7 +356,7 @@ pub(crate) use config_scopes;
 struct ConfigValue {
     key: String,
     value: String,
-    /// Empty = global default, non-empty = scope-specific
+    /// Named scope (e.g., "s3", "s3/bucket")
     scope: String,
 }
 
@@ -478,12 +478,11 @@ impl BundleConfig {
     /// Set a config value.
     ///
     /// # Arguments
+    /// * `scope` - Named scope. Use `Scope::from_path()` to convert raw paths at the call site.
     /// * `key` - Configuration key (e.g., "region", "access_key_id").
     /// * `value` - Configuration value
-    /// * `scope` - from_pathd scope, or global for default.
-    ///             Use `Scope::from_path()` to convert raw paths at the call site.
     /// * `source` - Which config layer this entry belongs to
-    pub fn set(&self, key: &str, value: &str, scope: &Scope, source: ConfigSource) {
+    pub fn set(&self, scope: &Scope, key: &str, value: &str, source: ConfigSource) {
         let mut inner = self.inner.write();
         let scope_str = scope.as_str().to_string();
 
@@ -782,7 +781,7 @@ impl BundleConfig {
                                 inner_key, scope
                             ))
                         })?;
-                    config.set(inner_key, inner_str, &scope, ConfigSource::Passed);
+                    config.set(&scope, inner_key, inner_str, ConfigSource::Passed);
                 }
             } else {
                 return Err(format!(
@@ -803,7 +802,7 @@ impl BundleConfig {
     /// Ensure env vars are loaded into entries[Env]. Reads BB_* env vars on first call.
     ///
     /// Env var patterns (suffix after `BB_` is split on `__`):
-    /// - `BB_KEY` -> global scope, key = `key`
+    /// - `BB_KEY` -> skipped (single-segment, no scope)
     /// - `BB_S3__REGION` -> scope `s3`, key = `region`
     /// - `BB_S3__MY_BUCKET__KEY` -> scope `s3/my_bucket`, key = `key`
     fn ensure_env_cache(&self) {
@@ -831,12 +830,13 @@ impl BundleConfig {
 
             let parts: Vec<&str> = suffix.split("__").collect();
             if parts.len() == 1 {
-                // BB_KEY -> global scope "/"
-                env_entries.push(ConfigValue {
-                    key: suffix.to_lowercase(),
-                    value,
-                    scope: "/".to_string(),
-                });
+                // BB_KEY (single segment, no __) — no scope, skip with warning
+                log::warn!(
+                    "Ignoring env var '{}': single-segment BB_ vars (no scope) are not supported. \
+                     Use BB_SCOPE__KEY format (e.g., BB_S3__REGION).",
+                    raw_key
+                );
+                continue;
             } else {
                 // BB_A__B__...__KEY -> last = key, rest joined with "/" = scope
                 let key = parts.last().expect("split always returns at least one element").to_lowercase();
@@ -882,12 +882,9 @@ impl BundleConfig {
     /// Absorb all entries from a `PassedBundleConfig` as `ConfigSource::Passed`
     /// entries into this config's internal storage.
     pub fn merge_passed(&self, passed: &PassedBundleConfig) {
-        for (key, value) in &passed.defaults {
-            self.set(key, value, &Scope::global(), ConfigSource::Passed);
-        }
         for (scope, entries) in &passed.scoped {
             for (key, value) in entries {
-                self.set(key, value, scope, ConfigSource::Passed);
+                self.set(scope, key, value, ConfigSource::Passed);
             }
         }
     }
@@ -900,7 +897,7 @@ impl BundleConfig {
         if let Some(entries) = inner.entries.get(&ConfigSource::Passed) {
             for entry in entries {
                 let scope = Scope::new(&entry.scope);
-                passed.set(&entry.key, &entry.value, &scope);
+                passed.set(&scope, &entry.key, &entry.value);
             }
         }
         passed
@@ -943,38 +940,36 @@ impl SerializedConfig {
     /// Convert from a BundleConfig, extracting only Stored entries.
     pub fn from_bundle_config(config: &BundleConfig) -> Self {
         let inner = config.inner.read();
-        let mut defaults = HashMap::new();
         let mut scope_overrides: HashMap<String, HashMap<String, String>> = HashMap::new();
 
         if let Some(entries) = inner.entries.get(&ConfigSource::Stored) {
             for entry in entries {
-                let scope = Scope::new(&entry.scope);
-                if scope.is_global() {
-                    defaults.insert(entry.key.clone(), entry.value.clone());
-                } else {
-                    scope_overrides
-                        .entry(scope.as_str().to_string())
-                        .or_default()
-                        .insert(entry.key.clone(), entry.value.clone());
-                }
+                scope_overrides
+                    .entry(entry.scope.clone())
+                    .or_default()
+                    .insert(entry.key.clone(), entry.value.clone());
             }
         }
 
         Self {
-            defaults,
+            defaults: HashMap::new(),
             scope_overrides,
         }
     }
 
     /// Load into a BundleConfig as Stored entries.
     pub fn into_bundle_config(&self, config: &BundleConfig) {
-        for (key, value) in &self.defaults {
-            config.set(key, value, &Scope::global(), ConfigSource::Stored);
+        for (key, _value) in &self.defaults {
+            log::warn!(
+                "Ignoring legacy global-scope config key '{}' from stored defaults. \
+                 Re-save with a named scope (e.g., 's3').",
+                key
+            );
         }
         for (scope_str, overrides) in &self.scope_overrides {
             let scope = Scope::new(scope_str);
             for (key, value) in overrides {
-                config.set(key, value, &scope, ConfigSource::Stored);
+                config.set(&scope, key, value, ConfigSource::Stored);
             }
         }
     }
@@ -1126,14 +1121,14 @@ mod tests {
     #[test]
     fn test_set_scoped_default() {
         let config = BundleConfig::new();
-        config.set("region", "us-west-2", &Scope::new("s3"), ConfigSource::Stored);
+        config.set(&Scope::new("s3"), "region", "us-west-2", ConfigSource::Stored);
         assert_eq!(config.get(&Scope::from_path("s3://bucket/file").unwrap(), &S3_REGION_CFG), Some("us-west-2".to_string()));
     }
 
     #[test]
     fn test_set_scoped_override() {
         let config = BundleConfig::new();
-        config.set("endpoint", "http://localhost:9000", &Scope::from_path("s3://test/").unwrap(), ConfigSource::Stored);
+        config.set(&Scope::from_path("s3://test/").unwrap(), "endpoint", "http://localhost:9000", ConfigSource::Stored);
 
         assert_eq!(
             config.get(&Scope::from_path("s3://test/file").unwrap(), &S3_ENDPOINT_CFG),
@@ -1144,7 +1139,7 @@ mod tests {
     #[test]
     fn test_get_defaults_with_path() {
         let config = BundleConfig::new();
-        config.set("region", "us-west-2", &Scope::new("s3"), ConfigSource::Stored);
+        config.set(&Scope::new("s3"), "region", "us-west-2", ConfigSource::Stored);
 
         assert_eq!(config.get(&Scope::from_path("s3://my-bucket/path/to/file").unwrap(), &S3_REGION_CFG), Some("us-west-2".to_string()));
     }
@@ -1152,26 +1147,18 @@ mod tests {
     #[test]
     fn test_get_with_scoped_override() {
         let config = BundleConfig::new();
-        config.set("region", "us-west-2", &Scope::new("s3"), ConfigSource::Stored);
-        config.set("region", "us-east-1", &Scope::from_path("s3://special-bucket/").unwrap(), ConfigSource::Stored);
+        config.set(&Scope::new("s3"), "region", "us-west-2", ConfigSource::Stored);
+        config.set(&Scope::from_path("s3://special-bucket/").unwrap(), "region", "us-east-1", ConfigSource::Stored);
 
         assert_eq!(config.get(&Scope::from_path("s3://my-bucket/file").unwrap(), &S3_REGION_CFG), Some("us-west-2".to_string()));
         assert_eq!(config.get(&Scope::from_path("s3://special-bucket/file").unwrap(), &S3_REGION_CFG), Some("us-east-1".to_string()));
     }
 
     #[test]
-    fn test_global_scope_filtered_out() {
-        // A key with scope=s3 should NOT match entries stored at global scope
-        let config = BundleConfig::new();
-        config.set("region", "global-value", &Scope::global(), ConfigSource::Stored);
-        assert_eq!(config.get(&Scope::from_path("s3://bucket/file").unwrap(), &S3_REGION_CFG), None);
-    }
-
-    #[test]
     fn test_longest_prefix_matching() {
         let config = BundleConfig::new();
-        config.set("endpoint", "default", &Scope::from_path("s3://bucket/").unwrap(), ConfigSource::Stored);
-        config.set("endpoint", "specific", &Scope::from_path("s3://bucket/subfolder/").unwrap(), ConfigSource::Stored);
+        config.set(&Scope::from_path("s3://bucket/").unwrap(), "endpoint", "default", ConfigSource::Stored);
+        config.set(&Scope::from_path("s3://bucket/subfolder/").unwrap(), "endpoint", "specific", ConfigSource::Stored);
 
         // Should match the longer prefix
         assert_eq!(config.get(&Scope::from_path("s3://bucket/subfolder/file").unwrap(), &S3_ENDPOINT_CFG), Some("specific".to_string()));
@@ -1261,12 +1248,12 @@ mod tests {
     #[test]
     fn test_merge() {
         let config1 = BundleConfig::new();
-        config1.set("region", "us-west-2", &Scope::new("s3"), ConfigSource::Stored);
-        config1.set("endpoint", "old", &Scope::from_path("s3://bucket/").unwrap(), ConfigSource::Stored);
+        config1.set(&Scope::new("s3"), "region", "us-west-2", ConfigSource::Stored);
+        config1.set(&Scope::from_path("s3://bucket/").unwrap(), "endpoint", "old", ConfigSource::Stored);
 
         let config2 = BundleConfig::new();
-        config2.set("region", "us-east-1", &Scope::new("s3"), ConfigSource::Stored);
-        config2.set("access_key_id", "KEY123", &Scope::new("s3"), ConfigSource::Stored);
+        config2.set(&Scope::new("s3"), "region", "us-east-1", ConfigSource::Stored);
+        config2.set(&Scope::new("s3"), "access_key_id", "KEY123", ConfigSource::Stored);
 
         config1.merge(&config2);
 
@@ -1281,7 +1268,7 @@ mod tests {
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn test_from_env_global_default_filtered_by_scope() {
+    fn test_from_env_single_segment_skipped() {
         let _lock = ENV_MUTEX.lock();
         std::env::set_var("BB_TESTREGION1", "us-west-2");
 
@@ -1289,13 +1276,8 @@ mod tests {
         // Force env cache load
         config.ensure_env_cache();
 
-        // BB_TESTREGION1 stores at global scope (/), but TEST_TESTREGION1
-        // requires s3 scope, so it should NOT match
-        assert_eq!(
-            config.get(&Scope::global(), &TEST_TESTREGION1),
-            None
-        );
-        // Also not visible for s3 lookups since entry is at /
+        // BB_TESTREGION1 is a single-segment env var (no __), so it should
+        // be skipped entirely — not stored at any scope
         assert_eq!(
             config.get(&Scope::from_path("s3://bucket/").unwrap(), &TEST_TESTREGION1),
             None
@@ -1356,8 +1338,8 @@ mod tests {
     #[test]
     fn test_values_single_layer() {
         let config = BundleConfig::new();
-        config.set("region", "us-west-2", &Scope::new("s3"), ConfigSource::Stored);
-        config.set("endpoint", "http://minio", &Scope::from_path("s3://bucket/").unwrap(), ConfigSource::Stored);
+        config.set(&Scope::new("s3"), "region", "us-west-2", ConfigSource::Stored);
+        config.set(&Scope::from_path("s3://bucket/").unwrap(), "endpoint", "http://minio", ConfigSource::Stored);
 
         let values = config.values(&[]);
         assert_eq!(values.len(), 2);
@@ -1377,8 +1359,8 @@ mod tests {
     #[test]
     fn test_all_values_multiple_layers() {
         let config = BundleConfig::new();
-        config.set("region", "us-west-2", &Scope::new("s3"), ConfigSource::Stored);
-        config.set("region", "us-east-1", &Scope::new("s3"), ConfigSource::Runtime);
+        config.set(&Scope::new("s3"), "region", "us-west-2", ConfigSource::Stored);
+        config.set(&Scope::new("s3"), "region", "us-east-1", ConfigSource::Runtime);
 
         let all = config.all_values(&[]);
         assert_eq!(all.len(), 2);
@@ -1401,9 +1383,9 @@ mod tests {
     #[test]
     fn test_all_values_scoped() {
         let config = BundleConfig::new();
-        config.set("region", "us-west-2", &Scope::from_path("s3://bucket/").unwrap(), ConfigSource::Stored);
-        config.set("region", "eu-west-1", &Scope::from_path("s3://bucket/").unwrap(), ConfigSource::Passed);
-        config.set("endpoint", "http://localhost", &Scope::new("s3"), ConfigSource::Passed);
+        config.set(&Scope::from_path("s3://bucket/").unwrap(), "region", "us-west-2", ConfigSource::Stored);
+        config.set(&Scope::from_path("s3://bucket/").unwrap(), "region", "eu-west-1", ConfigSource::Passed);
+        config.set(&Scope::new("s3"), "endpoint", "http://localhost", ConfigSource::Passed);
 
         let all = config.all_values(&[]);
         assert_eq!(all.len(), 3);
@@ -1431,9 +1413,9 @@ mod tests {
         let specs = test_specs();
 
         let config = BundleConfig::new();
-        config.set("region", "us-west-2", &Scope::from_path("s3://bucket/").unwrap(), ConfigSource::Stored);
-        config.set("secret_access_key", "SECRETKEY", &Scope::from_path("s3://bucket/").unwrap(), ConfigSource::Stored);
-        config.set("endpoint", "http://localhost", &Scope::new("s3"), ConfigSource::Stored);
+        config.set(&Scope::from_path("s3://bucket/").unwrap(), "region", "us-west-2", ConfigSource::Stored);
+        config.set(&Scope::from_path("s3://bucket/").unwrap(), "secret_access_key", "SECRETKEY", ConfigSource::Stored);
+        config.set(&Scope::new("s3"), "endpoint", "http://localhost", ConfigSource::Stored);
 
         let all = config.all_values(&specs);
         assert_eq!(all.len(), 3);
@@ -1471,9 +1453,9 @@ mod tests {
     #[test]
     fn test_passed_entries() {
         let config = BundleConfig::new();
-        config.set("region", "us-west-2", &Scope::new("s3"), ConfigSource::Passed);
-        config.set("endpoint", "http://minio", &Scope::from_path("s3://bucket/").unwrap(), ConfigSource::Passed);
-        config.set("stored_key", "stored_value", &Scope::new("s3"), ConfigSource::Stored);
+        config.set(&Scope::new("s3"), "region", "us-west-2", ConfigSource::Passed);
+        config.set(&Scope::from_path("s3://bucket/").unwrap(), "endpoint", "http://minio", ConfigSource::Passed);
+        config.set(&Scope::new("s3"), "stored_key", "stored_value", ConfigSource::Stored);
 
         let passed = config.passed_entries();
         assert_eq!(passed.len(), 2);
@@ -1490,12 +1472,12 @@ mod tests {
     #[test]
     fn test_reload_non_runtime() {
         let config1 = BundleConfig::new();
-        config1.set("region", "us-west-2", &Scope::new("s3"), ConfigSource::Stored);
-        config1.set("test_runtime_key", "runtime_value", &Scope::new("s3"), ConfigSource::Runtime);
+        config1.set(&Scope::new("s3"), "region", "us-west-2", ConfigSource::Stored);
+        config1.set(&Scope::new("s3"), "test_runtime_key", "runtime_value", ConfigSource::Runtime);
 
         let config2 = BundleConfig::new();
-        config2.set("region", "eu-west-1", &Scope::new("s3"), ConfigSource::Stored);
-        config2.set("test_new_key", "new_value", &Scope::new("s3"), ConfigSource::Passed);
+        config2.set(&Scope::new("s3"), "region", "eu-west-1", ConfigSource::Stored);
+        config2.set(&Scope::new("s3"), "test_new_key", "new_value", ConfigSource::Passed);
 
         config1.reload_non_runtime(&config2);
 
@@ -1510,22 +1492,22 @@ mod tests {
     #[test]
     fn test_priority_ordering() {
         let config = BundleConfig::new();
-        config.set("region", "stored", &Scope::new("s3"), ConfigSource::Stored);
-        config.set("region", "passed", &Scope::new("s3"), ConfigSource::Passed);
+        config.set(&Scope::new("s3"), "region", "stored", ConfigSource::Stored);
+        config.set(&Scope::new("s3"), "region", "passed", ConfigSource::Passed);
 
         // Passed should win over Stored
         assert_eq!(config.get(&Scope::from_path("s3://bucket/").unwrap(), &S3_REGION_CFG), Some("passed".to_string()));
 
         // Runtime should win over everything
-        config.set("region", "runtime", &Scope::new("s3"), ConfigSource::Runtime);
+        config.set(&Scope::new("s3"), "region", "runtime", ConfigSource::Runtime);
         assert_eq!(config.get(&Scope::from_path("s3://bucket/").unwrap(), &S3_REGION_CFG), Some("runtime".to_string()));
     }
 
     #[test]
     fn test_serialized_config_roundtrip() {
         let config = BundleConfig::new();
-        config.set("region", "us-west-2", &Scope::new("s3"), ConfigSource::Stored);
-        config.set("endpoint", "http://localhost", &Scope::from_path("s3://test/").unwrap(), ConfigSource::Stored);
+        config.set(&Scope::new("s3"), "region", "us-west-2", ConfigSource::Stored);
+        config.set(&Scope::from_path("s3://test/").unwrap(), "endpoint", "http://localhost", ConfigSource::Stored);
 
         let serialized = SerializedConfig::from_bundle_config(&config);
         assert_eq!(
@@ -1552,8 +1534,8 @@ mod tests {
     #[test]
     fn test_longest_prefix_wins_over_source_priority() {
         let config = BundleConfig::new();
-        config.set("region", "runtime-short", &Scope::from_path("s3://").unwrap(), ConfigSource::Runtime);
-        config.set("region", "stored-long", &Scope::from_path("s3://bucket/").unwrap(), ConfigSource::Stored);
+        config.set(&Scope::from_path("s3://").unwrap(), "region", "runtime-short", ConfigSource::Runtime);
+        config.set(&Scope::from_path("s3://bucket/").unwrap(), "region", "stored-long", ConfigSource::Stored);
 
         // Longer prefix in Stored beats shorter prefix in Runtime
         assert_eq!(
@@ -1583,9 +1565,9 @@ mod tests {
     }
 
     #[test]
-    fn test_config_scope_rejects_global() {
+    fn test_config_scope_rejects_different_prefix() {
         let scope = get_scope("s3");
-        assert!(!scope.matches(&Scope::global()));
+        assert!(!scope.matches(&Scope::new("kaggle")));
     }
 
     #[test]
@@ -1626,7 +1608,6 @@ mod tests {
         use crate::bundle_config::SYSTEM_SCOPE;
         assert!(SYSTEM_SCOPE.matches(&Scope::new("system")));
         assert!(SYSTEM_SCOPE.matches(&Scope::new("system/sub")));
-        assert!(!SYSTEM_SCOPE.matches(&Scope::global()));
         assert!(!SYSTEM_SCOPE.matches(&Scope::new("s3")));
         assert!(!SYSTEM_SCOPE.matches(&Scope::new("s3/bucket")));
     }
@@ -1750,16 +1731,12 @@ mod tests {
             config.get(&Scope::from_name("gs").unwrap(), &TEST_KEY_WITH_DEFAULT),
             None
         );
-        assert_eq!(
-            config.get(&Scope::global(), &TEST_KEY_WITH_DEFAULT),
-            None
-        );
     }
 
     #[test]
     fn test_get_returns_explicit_value_over_default() {
         let config = BundleConfig::new();
-        config.set("test_base_url", "https://custom.example.com", &Scope::from_name("s3").unwrap(), ConfigSource::Stored);
+        config.set(&Scope::from_name("s3").unwrap(), "test_base_url", "https://custom.example.com", ConfigSource::Stored);
         assert_eq!(
             config.get(&Scope::from_name("s3").unwrap(), &TEST_KEY_WITH_DEFAULT),
             Some("https://custom.example.com".to_string())
@@ -1788,7 +1765,7 @@ mod tests {
     #[test]
     fn test_all_values_marks_default_inactive_when_overridden() {
         let config = BundleConfig::new();
-        config.set("test_base_url", "https://override.example.com", &Scope::from_name("s3").unwrap(), ConfigSource::Stored);
+        config.set(&Scope::from_name("s3").unwrap(), "test_base_url", "https://override.example.com", ConfigSource::Stored);
 
         let specs = &[TEST_KEY_WITH_DEFAULT];
         let all = config.all_values(specs);
@@ -1855,10 +1832,6 @@ mod tests {
             config.get(&Scope::from_name("s3").unwrap(), &TEST_KEY_WITH_DEFAULT_FN),
             None
         );
-        assert_eq!(
-            config.get(&Scope::global(), &TEST_KEY_WITH_DEFAULT_FN),
-            None
-        );
     }
 
     #[test]
@@ -1892,7 +1865,7 @@ mod tests {
     #[test]
     fn test_get_returns_explicit_value_over_default_fn() {
         let config = BundleConfig::new();
-        config.set("test_dynamic_key", "explicit", &Scope::from_name("gs").unwrap(), ConfigSource::Stored);
+        config.set(&Scope::from_name("gs").unwrap(), "test_dynamic_key", "explicit", ConfigSource::Stored);
         assert_eq!(
             config.get(&Scope::from_name("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN),
             Some("explicit".to_string())
@@ -1932,7 +1905,7 @@ mod tests {
     #[test]
     fn test_all_values_default_fn_inactive_when_overridden() {
         let config = BundleConfig::new();
-        config.set("test_dynamic_key", "override", &Scope::from_name("gs").unwrap(), ConfigSource::Stored);
+        config.set(&Scope::from_name("gs").unwrap(), "test_dynamic_key", "override", ConfigSource::Stored);
 
         let specs = &[TEST_KEY_WITH_DEFAULT_FN];
         let all = config.all_values(specs);

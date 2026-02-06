@@ -324,20 +324,20 @@ rebuild_index_stmt = {
 // ============================================================================
 // SET CONFIG Statement (runtime-only)
 // ============================================================================
-// Syntax: SET CONFIG <key> = '<value>' [FOR '<scope>']
+// Syntax: SET CONFIG <key> = '<value>' FOR '<scope>'
 // Sets a config value for the current session only (not persisted).
 
 set_config_stmt = {
-    ^"set" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ (^"for" ~ quoted_string)?
+    ^"set" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ ^"for" ~ quoted_string
 }
 
 // ============================================================================
 // SAVE CONFIG Statement
 // ============================================================================
-// Syntax: SAVE CONFIG <key> = '<value>' [FOR '<scope>']
+// Syntax: SAVE CONFIG <key> = '<value>' FOR '<scope>'
 
 save_config_stmt = {
-    ^"save" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ (^"for" ~ quoted_string)?
+    ^"save" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ ^"for" ~ quoted_string
 }
 
 // ============================================================================

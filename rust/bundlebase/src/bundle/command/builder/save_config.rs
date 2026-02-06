@@ -19,7 +19,7 @@ pub struct SaveConfigCommand {
     pub key: String,
     /// Configuration value
     pub value: String,
-    /// Scope for config ("" for global, or path like "s3/bucket" or "prod")
+    /// Named scope (e.g., "s3", "s3/bucket")
     pub scope: Scope,
 }
 
@@ -71,7 +71,9 @@ impl CommandParsing for SaveConfigCommand {
         let value = value.ok_or_else(|| -> BundlebaseError { "SAVE CONFIG missing value".into() })?;
         let scope = match scope {
             Some(s) => Scope::from_path(&s)?,
-            None => Scope::global(),
+            None => {
+                return Err("SAVE CONFIG requires a FOR clause with a named scope".into());
+            }
         };
 
         Ok(SaveConfigCommand {
@@ -82,16 +84,12 @@ impl CommandParsing for SaveConfigCommand {
     }
 
     fn to_statement(&self) -> String {
-        if self.scope.is_global() {
-            format!("SAVE CONFIG {} = {}", self.key, escape_string(&self.value))
-        } else {
-            format!(
-                "SAVE CONFIG {} = {} FOR {}",
-                self.key,
-                escape_string(&self.value),
-                escape_string(self.scope.as_str())
-            )
-        }
+        format!(
+            "SAVE CONFIG {} = {} FOR {}",
+            self.key,
+            escape_string(&self.value),
+            escape_string(self.scope.as_str())
+        )
     }
 }
 
@@ -120,17 +118,9 @@ mod parsing_tests {
     use crate::bundle::command::BundleCommand;
 
     #[test]
-    fn test_parse_save_config() {
+    fn test_parse_save_config_without_for_fails() {
         let input = "SAVE CONFIG timeout = '30'";
-        let cmd = parse_command(input).unwrap();
-        match cmd {
-            BundleCommand::SaveConfig(c) => {
-                assert_eq!(c.key, "timeout");
-                assert_eq!(c.value, "30");
-                assert!(c.scope.is_global());
-            }
-            _ => panic!("Expected SaveConfig variant"),
-        }
+        assert!(parse_command(input).is_err(), "SAVE CONFIG without FOR should fail");
     }
 
     #[test]
@@ -149,16 +139,16 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip() {
-        let cmd = SaveConfigCommand::new("region", "us-east-1", Scope::global());
+        let cmd = SaveConfigCommand::new("region", "us-east-1", Scope::new("s3"));
         let statement = cmd.to_statement();
-        assert_eq!(statement, "SAVE CONFIG region = 'us-east-1'");
+        assert_eq!(statement, "SAVE CONFIG region = 'us-east-1' FOR 's3'");
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::SaveConfig(c) => {
                 assert_eq!(c.key, "region");
                 assert_eq!(c.value, "us-east-1");
-                assert!(c.scope.is_global());
+                assert_eq!(c.scope, Scope::new("s3"));
             }
             _ => panic!("Expected SaveConfig variant"),
         }

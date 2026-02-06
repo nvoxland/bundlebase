@@ -25,7 +25,7 @@ pub struct SetConfigCommand {
     pub key: String,
     /// Configuration value
     pub value: String,
-    /// Scope for config ("" for global, or path like "s3/bucket" or "prod")
+    /// Named scope (e.g., "s3", "s3/bucket")
     pub scope: Scope,
 }
 
@@ -96,7 +96,11 @@ impl CommandParsing for SetConfigCommand {
             value.ok_or_else(|| BundlebaseError::from("SET CONFIG statement missing value"))?;
         let scope = match scope {
             Some(s) => Scope::from_path(&s)?,
-            None => Scope::global(),
+            None => {
+                return Err(BundlebaseError::from(
+                    "SET CONFIG requires a FOR clause with a named scope",
+                ));
+            }
         };
 
         Ok(SetConfigCommand {
@@ -107,20 +111,12 @@ impl CommandParsing for SetConfigCommand {
     }
 
     fn to_statement(&self) -> String {
-        let base = format!(
-            "SET CONFIG {} = {}",
+        format!(
+            "SET CONFIG {} = {} FOR {}",
             self.key,
-            crate::bundle::command::parser::escape_string(&self.value)
-        );
-        if self.scope.is_global() {
-            base
-        } else {
-            format!(
-                "{} FOR {}",
-                base,
-                crate::bundle::command::parser::escape_string(self.scope.as_str())
-            )
-        }
+            crate::bundle::command::parser::escape_string(&self.value),
+            crate::bundle::command::parser::escape_string(self.scope.as_str())
+        )
     }
 }
 
@@ -159,17 +155,9 @@ mod parsing_tests {
     use crate::bundle::command::BundleCommand;
 
     #[test]
-    fn test_parse_set_config_basic() {
+    fn test_parse_set_config_without_for_fails() {
         let input = "SET CONFIG region = 'us-west-2'";
-        let cmd = parse_command(input).unwrap();
-        match cmd {
-            BundleCommand::SetConfig(ref c) => {
-                assert_eq!(c.key, "region");
-                assert_eq!(c.value, "us-west-2");
-                assert!(c.scope.is_global());
-            }
-            _ => panic!("Expected SetConfig variant, got {:?}", cmd),
-        }
+        assert!(parse_command(input).is_err(), "SET CONFIG without FOR should fail");
     }
 
     #[test]
@@ -187,23 +175,6 @@ mod parsing_tests {
     }
 
     #[test]
-    fn test_round_trip_basic() {
-        let cmd = SetConfigCommand::new("region", "us-west-2", Scope::global());
-        let statement = cmd.to_statement();
-        assert_eq!(statement, "SET CONFIG region = 'us-west-2'");
-
-        let parsed = parse_command(&statement).unwrap();
-        match parsed {
-            BundleCommand::SetConfig(ref c) => {
-                assert_eq!(c.key, "region");
-                assert_eq!(c.value, "us-west-2");
-                assert!(c.scope.is_global());
-            }
-            _ => panic!("Expected SetConfig variant"),
-        }
-    }
-
-    #[test]
     fn test_round_trip_with_scope() {
         let cmd = SetConfigCommand::new(
             "endpoint",
@@ -211,12 +182,29 @@ mod parsing_tests {
             Scope::new("s3/test"),
         );
         let statement = cmd.to_statement();
+        assert_eq!(statement, "SET CONFIG endpoint = 'http://localhost:9000' FOR 's3/test'");
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::SetConfig(ref c) => {
                 assert_eq!(c.key, "endpoint");
                 assert_eq!(c.value, "http://localhost:9000");
                 assert_eq!(c.scope, Scope::new("s3/test"));
+            }
+            _ => panic!("Expected SetConfig variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip_named_scope() {
+        let cmd = SetConfigCommand::new("region", "us-west-2", Scope::new("s3"));
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "SET CONFIG region = 'us-west-2' FOR 's3'");
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::SetConfig(ref c) => {
+                assert_eq!(c.key, "region");
+                assert_eq!(c.value, "us-west-2");
+                assert_eq!(c.scope, Scope::new("s3"));
             }
             _ => panic!("Expected SetConfig variant"),
         }
