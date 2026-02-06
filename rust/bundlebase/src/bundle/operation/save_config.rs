@@ -5,9 +5,9 @@ use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use serde::{Deserialize, Serialize};
 
-/// Operation to save a configuration key-value pair in the container
+/// Operation to save a configuration key-value pair in the container.
 ///
-/// Config can be set for specific scopes (e.g., "s3", "s3/bucket", "system").
+/// Config must be set for a named scope (e.g., "s3", "s3/bucket", "system").
 /// Config stored via this operation has the lowest priority in the config resolution:
 /// 1. Explicit config passed to create()/open() (highest)
 /// 2. Environment variables
@@ -18,8 +18,7 @@ pub struct SaveConfigOp {
     /// Configuration key (e.g., "region", "access_key_id")
     pub key: String,
 
-    /// Normalized scope (e.g., "/s3/bucket") or "/" for global default.
-    /// Serialized as the normalized string.
+    /// Named scope (e.g., "s3", "s3/bucket", "system").
     pub scope: Scope,
 
     /// Configuration value
@@ -60,9 +59,9 @@ impl Operation for SaveConfigOp {
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         bundle.config().set(
+            &self.scope,
             &self.key,
             &self.value,
-            &self.scope,
             crate::bundle_config::ConfigSource::Stored,
         );
 
@@ -81,11 +80,7 @@ impl Operation for SaveConfigOp {
         } else {
             &self.value
         };
-        if self.scope.is_global() {
-            format!("SAVE CONFIG: {} = {}", self.key, display_value)
-        } else {
-            format!("SAVE CONFIG [{}]: {} = {}", self.scope, self.key, display_value)
-        }
+        format!("SAVE CONFIG [{}]: {} = {}", self.scope, self.key, display_value)
     }
 }
 
@@ -94,11 +89,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_setup_default_config() {
-        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::global());
+    fn test_setup_named_scope_config() {
+        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::new("s3"));
         assert_eq!(op.key, "region");
         assert_eq!(op.value, "us-west-2");
-        assert!(op.scope.is_global());
+        assert_eq!(op.scope, Scope::new("s3"));
     }
 
     #[test]
@@ -110,9 +105,9 @@ mod tests {
     }
 
     #[test]
-    fn test_describe_default() {
-        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::global());
-        assert_eq!(op.describe(), "SAVE CONFIG: region = us-west-2");
+    fn test_describe_named_scope() {
+        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::new("s3"));
+        assert_eq!(op.describe(), "SAVE CONFIG [s3]: region = us-west-2");
     }
 
     #[test]
@@ -135,16 +130,16 @@ mod tests {
     }
 
     #[test]
-    fn test_describe_masks_secure_key_global() {
-        let op = SaveConfigOp::setup("secret_access_key", "SUPERSECRET", &Scope::global());
-        assert_eq!(op.describe(), "SAVE CONFIG: secret_access_key = *****");
+    fn test_describe_masks_secure_key_named_scope() {
+        let op = SaveConfigOp::setup("secret_access_key", "SUPERSECRET", &Scope::new("s3"));
+        assert_eq!(op.describe(), "SAVE CONFIG [s3]: secret_access_key = *****");
     }
 
     #[test]
-    fn test_serialization_default() {
-        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::global());
+    fn test_serialization_named_scope() {
+        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::new("s3"));
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        let expected = "key: region\nscope: /\nvalue: us-west-2\n";
+        let expected = "key: region\nscope: s3\nvalue: us-west-2\n";
         assert_eq!(serialized, expected);
     }
 
@@ -182,12 +177,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_rejects_globally_secure_key() {
-        let bundle = crate::BundleBuilder::create("memory:///test_secure_global", None)
+    async fn test_check_rejects_secure_key_named_scope() {
+        let bundle = crate::BundleBuilder::create("memory:///test_secure_named", None)
             .await
             .expect("Failed to create test bundle");
 
-        let op = SaveConfigOp::setup("secret_access_key", "SECRETVALUE", &Scope::global());
+        let op = SaveConfigOp::setup("secret_access_key", "SECRETVALUE", &Scope::new("s3"));
         let result = op.check(bundle.bundle()).await;
         assert!(result.is_err());
     }
@@ -198,10 +193,11 @@ mod tests {
             .await
             .expect("Failed to create test bundle");
 
-        let op1 = SaveConfigOp::setup("region", "us-west-1", &Scope::global());
+        let scope = Scope::new("s3");
+        let op1 = SaveConfigOp::setup("region", "us-west-1", &scope);
         op1.apply(builder.bundle()).await.expect("apply op1");
 
-        let op2 = SaveConfigOp::setup("region", "us-east-1", &Scope::global());
+        let op2 = SaveConfigOp::setup("region", "us-east-1", &scope);
         op2.apply(builder.bundle()).await.expect("apply op2");
 
         let config = builder.bundle().config();

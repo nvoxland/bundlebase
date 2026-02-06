@@ -1217,7 +1217,7 @@ impl BundleFacade for Bundle {
         value: &str,
         scope: &Scope,
     ) -> Result<(), BundlebaseError> {
-        self.config.set(key, value, scope, crate::bundle_config::ConfigSource::Runtime);
+        self.config.set(scope, key, value, crate::bundle_config::ConfigSource::Runtime);
         self.refresh_data_dir()?;
         Ok(())
     }

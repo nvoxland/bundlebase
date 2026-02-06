@@ -879,21 +879,21 @@ mod tests {
         let config = BundleConfig::new();
         let scope = Scope::new("kaggle");
         config.set(
+            &scope,
             URL_CFG.key,
             "https://test.kaggle.com",
-            &scope,
             crate::bundle_config::ConfigSource::Passed,
         );
         config.set(
+            &scope,
             USERNAME_CFG.key,
             "config_user",
-            &scope,
             crate::bundle_config::ConfigSource::Passed,
         );
         config.set(
+            &scope,
             API_KEY_CFG.key,
             "config_key",
-            &scope,
             crate::bundle_config::ConfigSource::Passed,
         );
 
@@ -910,9 +910,9 @@ mod tests {
         let config = BundleConfig::new();
         let scope = Scope::new("kaggle");
         config.set(
+            &scope,
             USERNAME_CFG.key,
             "config_user",
-            &scope,
             crate::bundle_config::ConfigSource::Passed,
         );
 

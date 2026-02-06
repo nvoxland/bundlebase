@@ -32,21 +32,22 @@ pub(crate) fn validate_config_key_scoped(key: &str, scope: &Scope) -> PyResult<(
 /// Parse a scope string from Python into a Scope.
 ///
 /// Handles:
-/// - "/" → internal global scope (not a registered ConfigScope)
 /// - URLs like "s3://bucket" → from_path
 /// - Path-like scopes like "s3/bucket" → validates prefix, creates directly
 /// - Simple names like "s3" → from_name
 ///
-/// Empty string is rejected as invalid.
+/// Empty string and "/" are rejected as invalid.
 pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
     if scope.is_empty() {
         return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-            "Scope cannot be empty. Use \"/\" for global scope.",
+            "Scope cannot be empty. Use a named scope like 's3' or 'kaggle'.",
         ));
     }
 
     if scope == "/" {
-        return Ok(Scope::global());
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Global scope '/' is not supported. Use a named scope like 's3' or 'kaggle'.",
+        ));
     }
 
     if scope.contains("://") {
@@ -73,7 +74,7 @@ impl PyBundleConfig {
         validate_config_key(&key)?;
         let scope = Scope::from_path(scope)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
-        self.inner.set(&key, &value, &scope);
+        self.inner.set(&scope, &key, &value);
         Ok(())
     }
 
@@ -108,7 +109,7 @@ pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<PassedBundleConfig> {
                     let nested_key_str: String = nested_key.extract()?;
                     let nested_value_str: String = nested_value.extract()?;
                     validate_config_key_scoped(&nested_key_str, &scope)?;
-                    config.set(&nested_key_str, &nested_value_str, &scope);
+                    config.set(&scope, &nested_key_str, &nested_value_str);
                 }
             } else {
                 return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
