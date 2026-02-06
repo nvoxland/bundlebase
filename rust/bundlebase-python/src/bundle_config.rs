@@ -32,12 +32,20 @@ pub(crate) fn validate_config_key_scoped(key: &str, scope: &Scope) -> PyResult<(
 /// Parse a scope string from Python into a Scope.
 ///
 /// Handles:
-/// - Empty string or "/" → global scope
+/// - "/" → internal global scope (not a registered ConfigScope)
 /// - URLs like "s3://bucket" → from_path
 /// - Path-like scopes like "s3/bucket" → validates prefix, creates directly
 /// - Simple names like "s3" → from_name
+///
+/// Empty string is rejected as invalid.
 pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
-    if scope.is_empty() || scope == "/" {
+    if scope.is_empty() {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Scope cannot be empty. Use \"/\" for global scope.",
+        ));
+    }
+
+    if scope == "/" {
         return Ok(Scope::global());
     }
 
@@ -61,8 +69,7 @@ pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
 
 #[pymethods]
 impl PyBundleConfig {
-    #[pyo3(signature = (key, value, scope=""))]
-    fn set(&mut self, key: String, value: String, scope: &str) -> PyResult<()> {
+    fn set(&mut self, scope: &str, key: String, value: String) -> PyResult<()> {
         validate_config_key(&key)?;
         let scope = Scope::from_path(scope)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
