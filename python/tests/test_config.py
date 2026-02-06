@@ -26,7 +26,7 @@ async def test_save_config_operation():
 
     # Set some config values
     c = await c.save_config("region", "us-east-1")
-    c = await c.save_config("endpoint", "http://localhost:9000", scope="/s3/test-bucket")
+    c = await c.save_config("endpoint", "http://localhost:9000", scope="s3/test-bucket")
 
     # Commit to persist
     commit = await c.commit("Add config settings")
@@ -94,7 +94,7 @@ async def test_save_config_with_scope():
     """Test setting config using a direct scope path."""
     c = await bundlebase.create(random_bundle())
 
-    c = await c.save_config("region", "us-west-2", scope="/s3/my-bucket")
+    c = await c.save_config("region", "us-west-2", scope="s3/my-bucket")
 
     commit = await c.commit("Config with scope")
     assert commit is not None
@@ -136,16 +136,16 @@ async def test_set_config_basic():
 async def test_set_config_with_scope():
     """Test set_config with scope."""
     c = await bundlebase.create(random_bundle())
-    c = await c.set_config("region", "us-west-2", scope="/s3/my-bucket")
+    c = await c.set_config("region", "us-west-2", scope="s3/my-bucket")
     assert c is not None
 
 
 @pytest.mark.asyncio
-async def test_set_config_unknown_scope_falls_back_to_global():
-    """Test set_config with an unknown scope falls back to global default (like get)."""
+async def test_set_config_unknown_scope_raises_error():
+    """Test set_config with an unknown scope raises an error."""
     c = await bundlebase.create(random_bundle())
-    c = await c.set_config("region", "us-west-2", scope="/nonexistent")
-    assert c is not None
+    with pytest.raises(ValueError, match="Unknown scope"):
+        await c.set_config("region", "us-west-2", scope="nonexistent")
 
 
 @pytest.mark.asyncio
@@ -211,8 +211,8 @@ async def test_save_config_last_wins_scoped():
         path = os.path.join(tmpdir, "bundle")
 
         c = await bundlebase.create(path)
-        c = await c.save_config("endpoint", "http://old:9000", scope="/s3/bucket")
-        c = await c.save_config("endpoint", "http://new:9000", scope="/s3/bucket")
+        c = await c.save_config("endpoint", "http://old:9000", scope="s3/bucket")
+        c = await c.save_config("endpoint", "http://new:9000", scope="s3/bucket")
         await c.commit("Override scoped config")
 
         reopened = await bundlebase.open(path)

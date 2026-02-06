@@ -23,8 +23,8 @@ config_scopes!(scopes, {
     pub const KAGGLE_SCOPE: ConfigScope = {
         /// Custom path→Scope for Kaggle: extracts owner/dataset from the URL path.
         /// Strips a leading `/datasets/` prefix if present.
-        /// e.g., "https://www.kaggle.com/datasets/zillow/zecon" → Some(Scope("/kaggle/zillow/zecon"))
-        /// e.g., "https://www.kaggle.com/zillow/zecon/extra"    → Some(Scope("/kaggle/zillow/zecon"))
+        /// e.g., "https://www.kaggle.com/datasets/zillow/zecon" → Some(Scope("kaggle/zillow/zecon"))
+        /// e.g., "https://www.kaggle.com/zillow/zecon/extra"    → Some(Scope("kaggle/zillow/zecon"))
         fn from_path(scope: &ConfigScope, path: &str) -> Option<Scope> {
             if let Ok(url) = Url::parse(path) {
                 let mut segments = url.path()
@@ -37,10 +37,10 @@ config_scopes!(scopes, {
                 }
                 let owner_dataset: Vec<&str> = segments.take(2).collect();
                 if owner_dataset.is_empty() {
-                    Some(crate::bundle_config::Scope::new(&format!("/{}", scope.name)))
+                    Some(crate::bundle_config::Scope::new(scope.name))
                 } else {
                     Some(crate::bundle_config::Scope::new(&format!(
-                        "/{}/{}",
+                        "{}/{}",
                         scope.name, owner_dataset.join("/")
                     )))
                 }
@@ -65,7 +65,7 @@ config_keys!(configs, {
 });
 
 pub(super) fn dataset_scope(dataset: &str) -> Scope {
-    Scope::new(&format!("/{}/{}", KAGGLE_SCOPE.name, dataset))
+    Scope::new(&format!("{}/{}", KAGGLE_SCOPE.name, dataset))
 }
 
 fn read_kaggle_json_field(field: &str) -> Option<String> {
@@ -877,7 +877,7 @@ mod tests {
     #[test]
     fn test_kaggle_client_from_config() {
         let config = BundleConfig::new();
-        let scope = Scope::new("/kaggle");
+        let scope = Scope::new("kaggle");
         config.set(
             URL_CFG.key,
             "https://test.kaggle.com",
@@ -908,7 +908,7 @@ mod tests {
         // If only username is set in config (no key), key falls back to default_fn.
         // If default_fn also returns None, key is simply None.
         let config = BundleConfig::new();
-        let scope = Scope::new("/kaggle");
+        let scope = Scope::new("kaggle");
         config.set(
             USERNAME_CFG.key,
             "config_user",
@@ -1331,20 +1331,20 @@ mod tests {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/a/b/c");
         assert_eq!(
             result,
-            Some(Scope::new("/kaggle/a/b"))
+            Some(Scope::new("kaggle/a/b"))
         );
     }
 
     #[test]
     fn test_kaggle_scope_from_path_root_trailing_slash() {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/");
-        assert_eq!(result, Some(Scope::new("/kaggle")));
+        assert_eq!(result, Some(Scope::new("kaggle")));
     }
 
     #[test]
     fn test_kaggle_scope_from_path_root_no_slash() {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com");
-        assert_eq!(result, Some(Scope::new("/kaggle")));
+        assert_eq!(result, Some(Scope::new("kaggle")));
     }
 
     #[test]
@@ -1353,7 +1353,7 @@ mod tests {
         let result = KAGGLE_SCOPE.from_path("kaggle://config");
         assert_eq!(
             result,
-            Some(Scope::new("/kaggle"))
+            Some(Scope::new("kaggle"))
         );
     }
 
@@ -1362,7 +1362,7 @@ mod tests {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/a/b/");
         assert_eq!(
             result,
-            Some(Scope::new("/kaggle/a/b"))
+            Some(Scope::new("kaggle/a/b"))
         );
     }
 
@@ -1371,7 +1371,7 @@ mod tests {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/datasets/zillow/zecon");
         assert_eq!(
             result,
-            Some(Scope::new("/kaggle/zillow/zecon"))
+            Some(Scope::new("kaggle/zillow/zecon"))
         );
     }
 
@@ -1380,7 +1380,7 @@ mod tests {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/datasets/zillow/zecon/data");
         assert_eq!(
             result,
-            Some(Scope::new("/kaggle/zillow/zecon"))
+            Some(Scope::new("kaggle/zillow/zecon"))
         );
     }
 }

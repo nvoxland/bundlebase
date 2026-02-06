@@ -29,9 +29,39 @@ pub(crate) fn validate_config_key_scoped(key: &str, scope: &Scope) -> PyResult<(
     })
 }
 
+/// Parse a scope string from Python into a Scope.
+///
+/// Handles:
+/// - Empty string or "/" → global scope
+/// - URLs like "s3://bucket" → from_path
+/// - Path-like scopes like "s3/bucket" → validates prefix, creates directly
+/// - Simple names like "s3" → from_name
+pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
+    if scope.is_empty() || scope == "/" {
+        return Ok(Scope::global());
+    }
+
+    if scope.contains("://") {
+        return Scope::from_path(scope)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()));
+    }
+
+    if scope.contains('/') {
+        // Path-like scope without "://" (e.g., "s3/bucket")
+        // Validate that the first component is a known scope
+        let first_part = scope.split('/').next().unwrap_or(scope);
+        Scope::from_name(first_part)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        return Ok(Scope::new(scope));
+    }
+
+    Scope::from_name(scope)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
+}
+
 #[pymethods]
 impl PyBundleConfig {
-    #[pyo3(signature = (key, value, scope="/"))]
+    #[pyo3(signature = (key, value, scope=""))]
     fn set(&mut self, key: String, value: String, scope: &str) -> PyResult<()> {
         validate_config_key(&key)?;
         let scope = Scope::from_path(scope)
@@ -66,12 +96,7 @@ pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<PassedBundleConfig> {
             // Check if value is a nested dict (scope-specific config)
             if let Ok(nested_dict) = value.downcast::<PyDict>() {
                 // Scope-specific override
-                let scope = if key_str.contains("://") {
-                    Scope::from_path(&key_str)
-                } else {
-                    Scope::from_name(&key_str)
-                }
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+                let scope = parse_scope(&key_str)?;
                 for (nested_key, nested_value) in nested_dict.iter() {
                     let nested_key_str: String = nested_key.extract()?;
                     let nested_value_str: String = nested_value.extract()?;

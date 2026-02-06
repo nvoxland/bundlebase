@@ -103,10 +103,10 @@ mod tests {
 
     #[test]
     fn test_setup_url_specific_config() {
-        let op = SaveConfigOp::setup("endpoint", "http://localhost:9000", &Scope::from_name("/s3/test").unwrap());
+        let op = SaveConfigOp::setup("endpoint", "http://localhost:9000", &Scope::from_path("s3://test").unwrap());
         assert_eq!(op.key, "endpoint");
         assert_eq!(op.value, "http://localhost:9000");
-        assert_eq!(op.scope, Scope::from_name("/s3/test").unwrap());
+        assert_eq!(op.scope, Scope::from_path("s3://test").unwrap());
     }
 
     #[test]
@@ -120,7 +120,7 @@ mod tests {
         let op = SaveConfigOp::setup("endpoint", "http://localhost:9000", &Scope::from_path("s3://test/").unwrap());
         assert_eq!(
             op.describe(),
-            "SAVE CONFIG [/s3/test]: endpoint = http://localhost:9000"
+            "SAVE CONFIG [s3/test]: endpoint = http://localhost:9000"
         );
     }
 
@@ -130,7 +130,7 @@ mod tests {
             SaveConfigOp::setup("secret_access_key", "SUPERSECRET", &Scope::from_path("s3://bucket/").unwrap());
         assert_eq!(
             op.describe(),
-            "SAVE CONFIG [/s3/bucket]: secret_access_key = *****"
+            "SAVE CONFIG [s3/bucket]: secret_access_key = *****"
         );
     }
 
@@ -144,7 +144,7 @@ mod tests {
     fn test_serialization_default() {
         let op = SaveConfigOp::setup("region", "us-west-2", &Scope::global());
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        let expected = "key: region\nscope: /\nvalue: us-west-2\n";
+        let expected = "key: region\nscope: ''\nvalue: us-west-2\n";
         assert_eq!(serialized, expected);
     }
 
@@ -243,11 +243,11 @@ mod tests {
         let yaml = r#"
 key: region
 value: us-east-1
-scope: /s3/my-bucket
+scope: s3/my-bucket
 "#;
         let op: SaveConfigOp = serde_yaml_ng::from_str(yaml).expect("Failed to deserialize");
         assert_eq!(op.key, "region");
         assert_eq!(op.value, "us-east-1");
-        assert_eq!(op.scope, Scope::new("/s3/my-bucket"));
+        assert_eq!(op.scope, Scope::new("s3/my-bucket"));
     }
 }

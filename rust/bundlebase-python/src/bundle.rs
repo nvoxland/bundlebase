@@ -380,7 +380,7 @@ impl PyBundle {
     ///
     /// Unlike save_config, this does not persist the value to the bundle manifest.
     /// It only affects the current session.
-    #[pyo3(signature = (key, value, scope="/"))]
+    #[pyo3(signature = (key, value, scope=""))]
     fn set_config<'py>(
         &self,
         key: &str,
@@ -389,13 +389,11 @@ impl PyBundle {
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         super::bundle_config::validate_config_key(key)?;
+        let scope = super::bundle_config::parse_scope(scope)?;
         let inner = self.inner.clone();
         let key = key.to_string();
         let value = value.to_string();
-        let scope = scope.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let scope = ::bundlebase::bundle_config::Scope::from_name(&scope)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
             inner
                 .set_config(&key, &value, &scope)
                 .map_err(|e| {

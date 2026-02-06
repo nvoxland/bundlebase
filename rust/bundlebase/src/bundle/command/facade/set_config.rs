@@ -25,7 +25,7 @@ pub struct SetConfigCommand {
     pub key: String,
     /// Configuration value
     pub value: String,
-    /// Scope for config ("/" for global, or "/"-prefixed path like "/s3/bucket" or "/prod")
+    /// Scope for config ("" for global, or path like "s3/bucket" or "prod")
     pub scope: Scope,
 }
 
@@ -174,13 +174,13 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_set_config_with_scope() {
-        let input = "SET CONFIG region = 'us-west-2' FOR '/s3/my-bucket'";
+        let input = "SET CONFIG region = 'us-west-2' FOR 's3/my-bucket'";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::SetConfig(ref c) => {
                 assert_eq!(c.key, "region");
                 assert_eq!(c.value, "us-west-2");
-                assert_eq!(c.scope, Scope::new("/s3/my-bucket"));
+                assert_eq!(c.scope, Scope::new("s3/my-bucket"));
             }
             _ => panic!("Expected SetConfig variant, got {:?}", cmd),
         }
@@ -208,7 +208,7 @@ mod parsing_tests {
         let cmd = SetConfigCommand::new(
             "endpoint",
             "http://localhost:9000",
-            Scope::new("/s3/test"),
+            Scope::new("s3/test"),
         );
         let statement = cmd.to_statement();
         let parsed = parse_command(&statement).unwrap();
@@ -216,7 +216,7 @@ mod parsing_tests {
             BundleCommand::SetConfig(ref c) => {
                 assert_eq!(c.key, "endpoint");
                 assert_eq!(c.value, "http://localhost:9000");
-                assert_eq!(c.scope, Scope::new("/s3/test"));
+                assert_eq!(c.scope, Scope::new("s3/test"));
             }
             _ => panic!("Expected SetConfig variant"),
         }

@@ -12,14 +12,14 @@ use crate::bundle::BundleBuilder;
 /// Command to save a configuration value to the bundle manifest.
 ///
 /// Supports scoped config:
-/// - `SAVE CONFIG key = 'value' FOR '/scope'` -- scope path (e.g., '/s3/bucket')
+/// - `SAVE CONFIG key = 'value' FOR 'scope'` -- scope path (e.g., 's3/bucket')
 #[derive(Debug, Clone)]
 pub struct SaveConfigCommand {
     /// Configuration key
     pub key: String,
     /// Configuration value
     pub value: String,
-    /// Scope for config ("/" for global, or "/"-prefixed path like "/s3/bucket" or "/prod")
+    /// Scope for config ("" for global, or path like "s3/bucket" or "prod")
     pub scope: Scope,
 }
 
@@ -135,13 +135,13 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_save_config_with_scope() {
-        let input = "SAVE CONFIG access_key = 'secret123' FOR '/s3'";
+        let input = "SAVE CONFIG access_key = 'secret123' FOR 's3'";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::SaveConfig(c) => {
                 assert_eq!(c.key, "access_key");
                 assert_eq!(c.value, "secret123");
-                assert_eq!(c.scope, Scope::new("/s3"));
+                assert_eq!(c.scope, Scope::new("s3"));
             }
             _ => panic!("Expected SaveConfig variant"),
         }
@@ -166,16 +166,16 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip_with_scope() {
-        let cmd = SaveConfigCommand::new("bucket", "my-bucket", Scope::new("/s3"));
+        let cmd = SaveConfigCommand::new("bucket", "my-bucket", Scope::new("s3"));
         let statement = cmd.to_statement();
-        assert_eq!(statement, "SAVE CONFIG bucket = 'my-bucket' FOR '/s3'");
+        assert_eq!(statement, "SAVE CONFIG bucket = 'my-bucket' FOR 's3'");
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::SaveConfig(c) => {
                 assert_eq!(c.key, "bucket");
                 assert_eq!(c.value, "my-bucket");
-                assert_eq!(c.scope, Scope::new("/s3"));
+                assert_eq!(c.scope, Scope::new("s3"));
             }
             _ => panic!("Expected SaveConfig variant"),
         }
