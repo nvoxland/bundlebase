@@ -269,8 +269,8 @@ impl PyBundleBuilder {
     /// # Arguments
     /// * `key` - Configuration key
     /// * `value` - Configuration value
-    /// * `scope` - Scope ("/" for global default, or "/"-prefixed path like "/s3/bucket" or "/prod")
-    #[pyo3(signature = (key, value, scope="/"))]
+    /// * `scope` - Scope ("" for global default, or path like "s3/bucket" or "prod")
+    #[pyo3(signature = (key, value, scope=""))]
     fn save_config<'py>(
         slf: PyRef<'_, Self>,
         key: &str,
@@ -279,11 +279,10 @@ impl PyBundleBuilder {
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         super::bundle_config::validate_config_key(key)?;
+        let scope = super::bundle_config::parse_scope(scope)?;
         let inner = slf.inner.clone();
         let key = key.to_string();
         let value = value.to_string();
-        let scope = ::bundlebase::bundle_config::Scope::from_path(scope)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
                 .save_config(
@@ -306,7 +305,7 @@ impl PyBundleBuilder {
     ///
     /// Unlike save_config, this does not persist the value to the bundle manifest.
     /// It only affects the current session.
-    #[pyo3(signature = (key, value, scope="/"))]
+    #[pyo3(signature = (key, value, scope=""))]
     fn set_config<'py>(
         slf: PyRef<'_, Self>,
         key: &str,
@@ -315,13 +314,11 @@ impl PyBundleBuilder {
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         super::bundle_config::validate_config_key(key)?;
+        let scope = super::bundle_config::parse_scope(scope)?;
         let inner = slf.inner.clone();
         let key = key.to_string();
         let value = value.to_string();
-        let scope = scope.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let scope = ::bundlebase::bundle_config::Scope::from_name(&scope)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
             inner
                 .set_config(&key, &value, &scope)
                 .map_err(|e| {

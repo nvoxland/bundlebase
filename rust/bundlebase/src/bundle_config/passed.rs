@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn test_set_scoped() {
         let mut cfg = PassedBundleConfig::new();
-        let scope = Scope::from_name("/s3/bucket").unwrap();
+        let scope = Scope::from_path("s3://bucket").unwrap();
         cfg.set("endpoint", "http://localhost:9000", &scope);
         assert!(!cfg.is_empty());
         assert!(cfg.defaults.is_empty());
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn test_merge_scoped() {
-        let scope = Scope::from_name("/s3/bucket").unwrap();
+        let scope = Scope::from_path("s3://bucket").unwrap();
 
         let mut cfg1 = PassedBundleConfig::new();
         cfg1.set("region", "us-west-2", &scope);
@@ -146,7 +146,7 @@ mod tests {
         cfg.set(
             "endpoint",
             "http://localhost",
-            &Scope::from_name("/s3/test").unwrap(),
+            &Scope::from_path("s3://test").unwrap(),
         );
 
         let json = serde_json::to_string(&cfg).expect("serialize");

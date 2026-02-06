@@ -10,13 +10,13 @@ class BundleConfig:
     Not directly constructible — returned by the ``config()`` method on bundles and builders.
     """
 
-    def set(self, key: str, value: str, scope: str = "/") -> None:
+    def set(self, key: str, value: str, scope: str = "") -> None:
         """Set a configuration value.
 
         Args:
             key: Configuration key. Supports compound "scope__key" format.
             value: Configuration value
-            scope: Scope ("/" for global default, or "/"-prefixed path like "/s3/bucket" or "/prod").
+            scope: Scope ("" for global default, or path like "s3/bucket" or "prod").
         """
         ...
 
@@ -612,26 +612,26 @@ class PyBundleBuilder:
         """
         ...
 
-    def save_config(self, key: str, value: str, scope: str = "/") -> "OperationChain":
+    def save_config(self, key: str, value: str, scope: str = "") -> "OperationChain":
         """
         Queue a save_config operation.
 
         Args:
             key: Configuration key
             value: Configuration value
-            scope: Scope ("/" for global default, or "/"-prefixed path like "/s3/bucket" or "/prod")
+            scope: Scope ("" for global default, or path like "s3/bucket" or "prod")
 
         Returns:
             OperationChain for fluent chaining
 
         Example:
             c = await c.save_config("region", "us-west-2")
-            c = await c.save_config("endpoint", "http://localhost:9000", scope="/s3/test-bucket")
-            c = await c.save_config("region", "us-east-1", scope="/prod")
+            c = await c.save_config("endpoint", "http://localhost:9000", scope="s3/test-bucket")
+            c = await c.save_config("region", "us-east-1", scope="prod")
         """
         ...
 
-    def set_config(self, key: str, value: str, scope: str = "/") -> "OperationChain":
+    def set_config(self, key: str, value: str, scope: str = "") -> "OperationChain":
         """
         Queue a set_config operation (runtime-only, highest priority).
 
@@ -641,7 +641,7 @@ class PyBundleBuilder:
         Args:
             key: Configuration key. Supports compound "scope__key" format.
             value: Configuration value
-            scope: Scope ("/" for global default, or "/"-prefixed path like "/s3/bucket" or "/prod").
+            scope: Scope ("" for global default, or path like "s3/bucket" or "prod").
 
         Returns:
             OperationChain for fluent chaining
@@ -1189,11 +1189,11 @@ class OperationChain:
         """Queue a set_description operation."""
         ...
 
-    def save_config(self, key: str, value: str, scope: str = "/") -> "OperationChain":
+    def save_config(self, key: str, value: str, scope: str = "") -> "OperationChain":
         """Queue a save_config operation."""
         ...
 
-    def set_config(self, key: str, value: str, scope: str = "/") -> "OperationChain":
+    def set_config(self, key: str, value: str, scope: str = "") -> "OperationChain":
         """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 
@@ -1310,11 +1310,11 @@ class CreateChain:
         """Queue a set_description operation."""
         ...
 
-    def save_config(self, key: str, value: str, scope: str = "/") -> "CreateChain":
+    def save_config(self, key: str, value: str, scope: str = "") -> "CreateChain":
         """Queue a save_config operation."""
         ...
 
-    def set_config(self, key: str, value: str, scope: str = "/") -> "CreateChain":
+    def set_config(self, key: str, value: str, scope: str = "") -> "CreateChain":
         """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 
@@ -1431,11 +1431,11 @@ class ExtendChain:
         """Queue a set_description operation."""
         ...
 
-    def save_config(self, key: str, value: str, scope: str = "/") -> "ExtendChain":
+    def save_config(self, key: str, value: str, scope: str = "") -> "ExtendChain":
         """Queue a save_config operation."""
         ...
 
-    def set_config(self, key: str, value: str, scope: str = "/") -> "ExtendChain":
+    def set_config(self, key: str, value: str, scope: str = "") -> "ExtendChain":
         """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 

@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn test_ftp_dir_from_url_with_config() {
         let config = Arc::new(BundleConfig::new());
-        let scope = Scope::new("/ftp");
+        let scope = Scope::new("ftp");
         config.set(FTP_USERNAME_CFG.key, "myuser", &scope, ConfigSource::Passed);
         config.set(FTP_PASSWORD_CFG.key, "mypass", &scope, ConfigSource::Passed);
 
