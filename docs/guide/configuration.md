@@ -28,24 +28,22 @@ Use `SET CONFIG` or `set_config()` to set a configuration value for the current 
 === "Async API"
 
     ```python
-    await bundle.set_config("region", "us-west-2")
-    await bundle.set_config("endpoint", "http://localhost:9000", scope="/s3/data")
-    await bundle.set_config("region", "eu-west-1", scope="/prod")
+    await bundle.set_config("s3", "region", "us-west-2")
+    await bundle.set_config("s3/data", "endpoint", "http://localhost:9000")
     ```
 
 === "Sync API"
 
     ```python
-    bundle.set_config("region", "us-west-2")
-    bundle.set_config("endpoint", "http://localhost:9000", scope="/s3/data")
+    bundle.set_config("s3", "region", "us-west-2")
+    bundle.set_config("s3/data", "endpoint", "http://localhost:9000")
     ```
 
 === "SQL"
 
     ```sql
-    SET CONFIG region = 'us-west-2'
-    SET CONFIG endpoint = 'http://localhost:9000' FOR '/s3/data'
-    SET CONFIG region = 'eu-west-1' FOR '/prod'
+    SET CONFIG region = 'us-west-2' FOR 's3'
+    SET CONFIG endpoint = 'http://localhost:9000' FOR 's3/data'
     ```
 
 ### Passed Config (High Priority)
@@ -57,17 +55,19 @@ Pass a config dict to `create()` or `open()`. These values take effect for the c
     ```python
     import bundlebase as bb
 
-    # Simple dict
+    # Scoped to specific provider
     bundle = await bb.create("my/data", config={
-        "region": "us-west-2",
-        "access_key_id": "AKIA...",
-        "secret_access_key": "secret...",
+        "s3": {
+            "region": "us-west-2",
+            "access_key_id": "AKIA...",
+            "secret_access_key": "secret...",
+        }
     })
 
-    # Scoped (nested dict)
+    # Multiple scopes with override
     bundle = await bb.create("my/data", config={
-        "region": "us-west-2",                    # default for all providers
-        "/s3/prod-bucket": {                       # override for specific bucket
+        "s3": {"region": "us-west-2"},            # default for S3
+        "s3/prod-bucket": {                        # override for specific bucket
             "endpoint": "http://localhost:9000",
         }
     })
@@ -79,8 +79,10 @@ Pass a config dict to `create()` or `open()`. These values take effect for the c
     import bundlebase.sync as bb
 
     bundle = bb.create("my/data", config={
-        "region": "us-west-2",
-        "access_key_id": "AKIA...",
+        "s3": {
+            "region": "us-west-2",
+            "access_key_id": "AKIA...",
+        }
     })
     ```
 
@@ -104,65 +106,64 @@ Use `SAVE CONFIG` to persist configuration in the bundle manifest. These values 
 === "Async API"
 
     ```python
-    await bundle.save_config("region", value="us-west-2")
-    await bundle.save_config("endpoint", value="http://minio:9000", scope="/s3/data")
-    await bundle.save_config("region", value="eu-west-1", scope="/prod")
+    await bundle.save_config("s3", "region", "us-west-2")
+    await bundle.save_config("s3/data", "endpoint", "http://minio:9000")
     await bundle.commit("Add storage config")
     ```
 
 === "Sync API"
 
     ```python
-    bundle.save_config("region", value="us-west-2")
-    bundle.save_config("endpoint", value="http://minio:9000", scope="/s3/data")
+    bundle.save_config("s3", "region", "us-west-2")
+    bundle.save_config("s3/data", "endpoint", "http://minio:9000")
     bundle.commit("Add storage config")
     ```
 
 === "SQL"
 
     ```sql
-    SAVE CONFIG region = 'us-west-2'
-    SAVE CONFIG endpoint = 'http://minio:9000' FOR '/s3/data'
-    SAVE CONFIG region = 'eu-west-1' FOR '/prod'
+    SAVE CONFIG region = 'us-west-2' FOR 's3'
+    SAVE CONFIG endpoint = 'http://minio:9000' FOR 's3/data'
     COMMIT 'Add storage config'
     ```
 
 ## Scope Format
 
-Scopes are `/`-separated paths that identify which config values apply to which storage locations. The global scope `/` matches everything. Scopes always start with `/` and never contain `://`.
+Scopes are `/`-separated paths that identify which config values apply to which storage locations. Each scope matches its own name and any child paths.
 
 | Scope | Meaning |
 |-------|---------|
-| `/` | Global default (matches everything) |
-| `/s3/my-bucket` | Matches `s3://my-bucket` and anything under it |
-| `/s3/my-bucket/subfolder` | Matches `s3://my-bucket/subfolder` and below |
+| `system` | Bundlebase-level settings (e.g., `max_memory`, `catalog_name`) |
+| `s3` | Matches all S3 URLs |
+| `s3/my-bucket` | Matches `s3://my-bucket` and anything under it |
+| `s3/my-bucket/subfolder` | Matches `s3://my-bucket/subfolder` and below |
 ## Config Key Patterns
 
 All config sources support scoping keys to specific scopes. The syntax varies by source:
 
 | Pattern | Runtime Config | Passed Config | Environment Variable | Stored Config |
 |---------|---------------|--------------|---------------------|---------------|
-| **Global default** | `SET CONFIG key = 'val'` | `{"key": "val"}` | `BB_KEY=val` | `SAVE CONFIG key = 'val'` |
-| **URL-scoped** | `SET CONFIG key = 'val' FOR '/s3/bucket'` | `{"/s3/bucket": {"key": "val"}}` | `BB_S3__BUCKET__KEY=val` | `SAVE CONFIG key = 'val' FOR '/s3/bucket'` |
+| **Provider default** | `SET CONFIG key = 'val' FOR 's3'` | `{"s3": {"key": "val"}}` | `BB_S3__KEY=val` | `SAVE CONFIG key = 'val' FOR 's3'` |
+| **URL-scoped** | `SET CONFIG key = 'val' FOR 's3/bucket'` | `{"s3/bucket": {"key": "val"}}` | `BB_S3__BUCKET__KEY=val` | `SAVE CONFIG key = 'val' FOR 's3/bucket'` |
 
 ### Environment Variable Scoping
 
-Environment variables use double-underscore (`__`) to separate scope segments from the config key. The suffix after `BB_` is split on `__`: the last segment becomes the config key, and any preceding segments form the scope path (joined with `/`, prefixed with `/`).
+Environment variables use double-underscore (`__`) to separate scope segments from the config key. The suffix after `BB_` is split on `__`: the last segment becomes the config key, and any preceding segments form the scope path (joined with `/`).
 
 | Environment Variable | Scope | Key |
 |---------------------|-------|-----|
-| `BB_REGION=us-west-2` | `/` (global) | `region` |
-| `BB_S3__REGION=us-west-2` | `/s3` | `region` |
-| `BB_S3__MY_BUCKET__KEY=val` | `/s3/my_bucket` | `key` |
+| `BB_REGION=us-west-2` | global | `region` |
+| `BB_S3__REGION=us-west-2` | `s3` | `region` |
+| `BB_S3__MY_BUCKET__KEY=val` | `s3/my_bucket` | `key` |
 
 ### Scope Resolution
 
 When a URL is accessed, config is resolved using longest-prefix matching:
 
-1. Start with global defaults (scope `/`)
+1. Start with the provider's default scope (e.g., `s3`)
 2. Apply the longest matching scope-prefix override
 
-For example, if you have config for both `/s3` and `/s3/my-bucket/subfolder`, a request for `/s3/my-bucket/subfolder/data.csv` uses the more specific config.
+For example, if you have config for both `s3` and `s3/my-bucket/subfolder`, a request for `s3://my-bucket/subfolder/data.csv` uses the more specific config.
 
 ## Provider-Specific Keys
 
@@ -234,3 +235,10 @@ Each storage provider accepts specific configuration keys. Global defaults are n
 | `base_url` | Kaggle API base URL (default: `https://www.kaggle.com`) |
 | `username` | Kaggle username |
 | `key` | Kaggle API key |
+
+### System (`system`)
+
+| Key | Description |
+|-----|-------------|
+| `max_memory` | Maximum memory for query execution |
+| `catalog_name` | Name of the DataFusion catalog |

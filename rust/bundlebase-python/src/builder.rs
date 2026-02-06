@@ -267,15 +267,14 @@ impl PyBundleBuilder {
     /// Save a configuration value to the bundle manifest. Mutates the bundle in place and returns it for chaining.
     ///
     /// # Arguments
+    /// * `scope` - Scope ("" for global default, or path like "s3/bucket" or "prod")
     /// * `key` - Configuration key
     /// * `value` - Configuration value
-    /// * `scope` - Scope ("" for global default, or path like "s3/bucket" or "prod")
-    #[pyo3(signature = (key, value, scope=""))]
     fn save_config<'py>(
         slf: PyRef<'_, Self>,
+        scope: &str,
         key: &str,
         value: &str,
-        scope: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         super::bundle_config::validate_config_key(key)?;
@@ -305,12 +304,11 @@ impl PyBundleBuilder {
     ///
     /// Unlike save_config, this does not persist the value to the bundle manifest.
     /// It only affects the current session.
-    #[pyo3(signature = (key, value, scope=""))]
     fn set_config<'py>(
         slf: PyRef<'_, Self>,
+        scope: &str,
         key: &str,
         value: &str,
-        scope: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         super::bundle_config::validate_config_key(key)?;

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// Operation to save a configuration key-value pair in the container
 ///
-/// Config can be set either as defaults (scope = global "/") or for specific scopes.
+/// Config can be set for specific scopes (e.g., "s3", "s3/bucket", "system").
 /// Config stored via this operation has the lowest priority in the config resolution:
 /// 1. Explicit config passed to create()/open() (highest)
 /// 2. Environment variables
@@ -144,7 +144,7 @@ mod tests {
     fn test_serialization_default() {
         let op = SaveConfigOp::setup("region", "us-west-2", &Scope::global());
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        let expected = "key: region\nscope: ''\nvalue: us-west-2\n";
+        let expected = "key: region\nscope: /\nvalue: us-west-2\n";
         assert_eq!(serialized, expected);
     }
 

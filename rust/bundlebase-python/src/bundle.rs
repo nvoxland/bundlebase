@@ -380,12 +380,11 @@ impl PyBundle {
     ///
     /// Unlike save_config, this does not persist the value to the bundle manifest.
     /// It only affects the current session.
-    #[pyo3(signature = (key, value, scope=""))]
     fn set_config<'py>(
         &self,
+        scope: &str,
         key: &str,
         value: &str,
-        scope: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         super::bundle_config::validate_config_key(key)?;

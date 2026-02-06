@@ -9,7 +9,7 @@ use std::fmt;
 /// - No leading `/` (paths are normalized: `s3://bucket` → `s3/bucket`)
 /// - No `://` sequences
 /// - No trailing `/`
-/// - The global scope is an empty string `""` and matches everything
+/// - The global scope is `"/"` and matches everything
 ///
 /// # Matching
 ///
@@ -17,7 +17,7 @@ use std::fmt;
 /// - `s3/abc` matches `s3/abc` (exact)
 /// - `s3/abc` matches `s3/abc/def` (boundary prefix: next char is `/`)
 /// - `s3/abc` does NOT match `s3/abcd` (next char is `d`, not `/`)
-/// - `""` (global) matches everything
+/// - `"/"` (global) matches everything
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Scope(String);
@@ -28,7 +28,7 @@ impl Scope {
     /// The input must already be in canonical scope form:
     /// - Must not start with `/`
     /// - Must not contain `://`
-    /// - Empty string `""` represents the global scope
+    /// - `"/"` represents the global scope (empty string is invalid)
     ///
     /// # Panics
     /// Panics if the input is not in valid scope form.
@@ -39,11 +39,17 @@ impl Scope {
     /// let s = Scope::new("s3/bucket/path");
     /// assert_eq!(s.as_str(), "s3/bucket/path");
     ///
-    /// let global = Scope::new("");
+    /// let global = Scope::new("/");
     /// assert!(global.is_global());
     /// ```
     pub fn new(s: &str) -> Self {
-        assert!(!s.starts_with('/'), "Scope must not start with '/': got '{}'", s);
+        if s.is_empty() {
+            panic!("Scope cannot be empty. Use \"/\" for global scope.");
+        }
+        // "/" is the global scope - allowed
+        if s != "/" {
+            assert!(!s.starts_with('/'), "Scope must not start with '/': got '{}'", s);
+        }
         assert!(!s.contains("://"), "Scope must not contain '://': got '{}'", s);
         Self(s.to_string())
     }
@@ -111,20 +117,20 @@ impl Scope {
         Err(BundlebaseError::from(format!("Unknown scope: {}", name)))
     }
 
-    /// Returns the global scope `""`, which matches everything.
+    /// Returns the global scope `"/"`, which matches everything.
     pub fn global() -> Self {
-        Self(String::new())
+        Self("/".to_string())
     }
 
-    /// Returns `true` if this is the global scope (empty string).
+    /// Returns `true` if this is the global scope (`"/"`).
     pub fn is_global(&self) -> bool {
-        self.0.is_empty()
+        self.0 == "/"
     }
 
     /// Check whether this scope matches a query scope.
     ///
     /// A scope matches a query if:
-    /// - This scope is global (`""`) — matches everything
+    /// - This scope is global (`"/"`) — matches everything
     /// - Exact match: this scope equals the query
     /// - Boundary prefix: the query starts with this scope AND the next
     ///   character in the query is `/`
@@ -196,9 +202,15 @@ mod tests {
 
     #[test]
     fn test_new_global() {
-        let s = Scope::new("");
-        assert_eq!(s.as_str(), "");
+        let s = Scope::new("/");
+        assert_eq!(s.as_str(), "/");
         assert!(s.is_global());
+    }
+
+    #[test]
+    #[should_panic(expected = "Scope cannot be empty")]
+    fn test_new_rejects_empty() {
+        Scope::new("");
     }
 
     #[test]
@@ -252,13 +264,13 @@ mod tests {
 
     #[test]
     fn test_normalize_empty() {
-        assert_eq!(Scope::from_path("").unwrap().as_str(), "");
+        assert_eq!(Scope::from_path("").unwrap().as_str(), "/");
         assert!(Scope::from_path("").unwrap().is_global());
     }
 
     #[test]
     fn test_normalize_slash() {
-        assert_eq!(Scope::from_path("/").unwrap().as_str(), "");
+        assert_eq!(Scope::from_path("/").unwrap().as_str(), "/");
         assert!(Scope::from_path("/").unwrap().is_global());
     }
 
@@ -287,7 +299,7 @@ mod tests {
     #[test]
     fn test_global() {
         let g = Scope::global();
-        assert_eq!(g.as_str(), "");
+        assert_eq!(g.as_str(), "/");
         assert!(g.is_global());
     }
 
@@ -351,7 +363,7 @@ mod tests {
     #[test]
     fn test_display() {
         assert_eq!(format!("{}", Scope::new("s3/abc")), "s3/abc");
-        assert_eq!(format!("{}", Scope::global()), "");
+        assert_eq!(format!("{}", Scope::global()), "/");
     }
 
     // ==================== Serde ====================
@@ -369,7 +381,7 @@ mod tests {
     fn test_serde_global() {
         let s = Scope::global();
         let json = serde_json::to_string(&s).expect("serialize");
-        assert_eq!(json, r#""""#);
+        assert_eq!(json, r#""/""#);
         let deserialized: Scope = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(deserialized, s);
     }
