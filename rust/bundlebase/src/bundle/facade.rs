@@ -288,15 +288,14 @@ pub trait BundleFacade: Send + Sync {
     /// persisted — it only lasts for the current session.
     ///
     /// # Arguments
+    /// * `scope` - Normalized scope for this config value.
     /// * `key` - Configuration key. Supports compound `"scope__key"` format.
     /// * `value` - Configuration value
-    /// * `scope` - Normalized scope for this config value.
-    /// todo: change order of args
     fn set_config(
         &self,
+        scope: &Scope,
         key: &str,
         value: &str,
-        scope: &Scope,
     ) -> Result<(), BundlebaseError>;
 
     /// Returns the DataFusion session context

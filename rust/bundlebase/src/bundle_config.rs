@@ -282,8 +282,7 @@ impl ConfigKey {
     /// Validate that a config key is recognized for a specific scope.
     ///
     /// Returns an error if the key is not found in any spec matching the scope.
-    /// TODO: change arg order
-    pub fn validate_key_scoped(key: &str, scope: &Scope, specs: &[ConfigKey]) -> Result<(), BundlebaseError> {
+    pub fn validate_key_scoped(scope: &Scope, key: &str, specs: &[ConfigKey]) -> Result<(), BundlebaseError> {
         if specs.iter().any(|s| s.key == key && s.scope.matches(scope)) {
             Ok(())
         } else {
@@ -484,7 +483,7 @@ impl BundleConfig {
     /// * `source` - Which config layer this entry belongs to
     pub fn set(&self, scope: &Scope, key: &str, value: &str, source: ConfigSource) -> Result<(), BundlebaseError> {
         let specs = crate::all_config_specs();
-        ConfigKey::validate_key_scoped(key, scope, &specs)?;
+        ConfigKey::validate_key_scoped(scope, key, &specs)?;
 
         let mut inner = self.inner.write();
         let scope_str = scope.as_str().to_string();
@@ -891,7 +890,7 @@ impl BundleConfig {
                 };
 
                 // Validate key against scope
-                if let Err(_) = ConfigKey::validate_key_scoped(&key, &scope, &specs) {
+                if let Err(_) = ConfigKey::validate_key_scoped(&scope, &key, &specs) {
                     log::warn!(
                         "Ignoring env var '{}': unknown key '{}' for scope '{}'.",
                         raw_key, key, scope_str
@@ -931,7 +930,7 @@ impl BundleConfig {
                 };
 
                 // Validate key against scope
-                if let Err(_) = ConfigKey::validate_key_scoped(&key, &scope, &specs) {
+                if let Err(_) = ConfigKey::validate_key_scoped(&scope, &key, &specs) {
                     log::warn!(
                         "Ignoring env var '{}': unknown key '{}' for scope '{}'.",
                         raw_key, key, scope_str
@@ -1823,13 +1822,13 @@ mod tests {
     fn test_validate_key_scoped() {
         let specs = test_specs();
         // "region" is in S3 scope
-        assert!(ConfigKey::validate_key_scoped("region", &Scope::try_from("s3").unwrap(), &specs).is_ok());
-        assert!(ConfigKey::validate_key_scoped("region", &Scope::try_from("s3/bucket").unwrap(), &specs).is_ok());
+        assert!(ConfigKey::validate_key_scoped(&Scope::try_from("s3").unwrap(), "region", &specs).is_ok());
+        assert!(ConfigKey::validate_key_scoped(&Scope::try_from("s3/bucket").unwrap(), "region", &specs).is_ok());
         // "region" is NOT in GCS scope
-        assert!(ConfigKey::validate_key_scoped("region", &Scope::try_from("gs").unwrap(), &specs).is_err());
+        assert!(ConfigKey::validate_key_scoped(&Scope::try_from("gs").unwrap(), "region", &specs).is_err());
         // "account" is in Azure scope
-        assert!(ConfigKey::validate_key_scoped("account", &Scope::try_from("azure").unwrap(), &specs).is_ok());
-        assert!(ConfigKey::validate_key_scoped("account", &Scope::try_from("s3").unwrap(), &specs).is_err());
+        assert!(ConfigKey::validate_key_scoped(&Scope::try_from("azure").unwrap(), "account", &specs).is_ok());
+        assert!(ConfigKey::validate_key_scoped(&Scope::try_from("s3").unwrap(), "account", &specs).is_err());
     }
 
     // ── URL-to-name conversion tests ─────────────────────────────────

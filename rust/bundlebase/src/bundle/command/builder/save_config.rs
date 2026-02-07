@@ -26,9 +26,9 @@ pub struct SaveConfigCommand {
 impl SaveConfigCommand {
     /// Create a new SaveConfigCommand.
     pub fn new(
+        scope: Scope,
         key: impl Into<String>,
         value: impl Into<String>,
-        scope: Scope,
     ) -> Self {
         Self {
             key: key.into(),
@@ -139,7 +139,7 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip() {
-        let cmd = SaveConfigCommand::new("region", "us-east-1", Scope::try_from("s3").unwrap());
+        let cmd = SaveConfigCommand::new(Scope::try_from("s3").unwrap(), "region", "us-east-1");
         let statement = cmd.to_statement();
         assert_eq!(statement, "SAVE CONFIG region = 'us-east-1' FOR 's3'");
 
@@ -156,7 +156,7 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip_with_scope() {
-        let cmd = SaveConfigCommand::new("bucket", "my-bucket", Scope::try_from("s3").unwrap());
+        let cmd = SaveConfigCommand::new(Scope::try_from("s3").unwrap(), "bucket", "my-bucket");
         let statement = cmd.to_statement();
         assert_eq!(statement, "SAVE CONFIG bucket = 'my-bucket' FOR 's3'");
 

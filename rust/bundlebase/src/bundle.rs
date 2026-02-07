@@ -1211,12 +1211,11 @@ impl BundleFacade for Bundle {
         Bundle::config(self)
     }
 
-    //todo: fix param ordering
     fn set_config(
         &self,
+        scope: &Scope,
         key: &str,
         value: &str,
-        scope: &Scope,
     ) -> Result<(), BundlebaseError> {
         self.config.set(scope, key, value, crate::bundle_config::ConfigSource::Runtime)?;
         self.refresh_data_dir()?;

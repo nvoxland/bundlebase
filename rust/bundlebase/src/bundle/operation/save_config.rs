@@ -45,7 +45,7 @@ impl SaveConfigOp {
 impl Operation for SaveConfigOp {
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
         let specs = crate::all_config_specs();
-        ConfigKey::validate_key_scoped(&self.key, &self.scope, &specs)?;
+        ConfigKey::validate_key_scoped(&self.scope, &self.key, &specs)?;
         if ConfigKey::is_key_secure(&self.key, &specs) {
             return Err(format!(
                 "Cannot save secure config key '{}'. Use environment variables or pass config at runtime instead.",
