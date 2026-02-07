@@ -155,12 +155,6 @@ pub struct FetchAllCommand {
     pub mode: SyncMode,
 }
 
-impl Default for FetchAllCommand {
-    fn default() -> Self {
-        Self { mode: SyncMode::default() }
-    }
-}
-
 impl FetchAllCommand {
     /// Create a new FetchAllCommand.
     pub fn new(mode: SyncMode) -> Self {
@@ -238,7 +232,7 @@ async fn fetch_from_source(
     let actions = source.fetch(builder, mode).await?;
 
     // Process actions and collect them for the result
-    let _progress = ProgressScope::new(
+    let progress = ProgressScope::new(
         &format!("Applying {} fetch actions for '{}'", actions.len(), pack_name),
         Some(actions.len() as u64),
     );
@@ -299,7 +293,7 @@ async fn fetch_from_source(
             }
         }
         processed_actions.push(action);
-        _progress.update((idx + 1) as u64, None);
+        progress.update((idx + 1) as u64, None);
     }
 
     Ok(FetchResults::from_actions(

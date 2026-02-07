@@ -12,10 +12,9 @@ use crate::BundlebaseError;
 /// Sync mode for source fetch operations.
 ///
 /// Controls how fetch handles existing files when checking for updates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncMode {
-    /// Only add new files (default behavior)
-    #[default]
+    /// Only add new files
     Add,
     /// Add new files and replace changed files
     Update,

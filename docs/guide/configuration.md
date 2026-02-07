@@ -105,7 +105,6 @@ Use `SAVE CONFIG` to persist configuration in the bundle manifest. These values 
     ```python
     await bundle.save_config("s3", "region", "us-west-2")
     await bundle.save_config("s3/data", "endpoint", "http://minio:9000")
-    await bundle.commit("Add storage config")
     ```
 
 === "Sync API"
@@ -113,7 +112,6 @@ Use `SAVE CONFIG` to persist configuration in the bundle manifest. These values 
     ```python
     bundle.save_config("s3", "region", "us-west-2")
     bundle.save_config("s3/data", "endpoint", "http://minio:9000")
-    bundle.commit("Add storage config")
     ```
 
 === "SQL"
@@ -121,7 +119,6 @@ Use `SAVE CONFIG` to persist configuration in the bundle manifest. These values 
     ```sql
     SAVE CONFIG region = 'us-west-2' FOR 's3'
     SAVE CONFIG endpoint = 'http://minio:9000' FOR 's3/data'
-    COMMIT 'Add storage config'
     ```
 
 ## Scope Format
