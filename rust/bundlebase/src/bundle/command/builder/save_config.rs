@@ -131,7 +131,7 @@ mod parsing_tests {
             BundleCommand::SaveConfig(c) => {
                 assert_eq!(c.key, "access_key");
                 assert_eq!(c.value, "secret123");
-                assert_eq!(c.scope, Scope::new("s3"));
+                assert_eq!(c.scope, Scope::from_name("s3").unwrap());
             }
             _ => panic!("Expected SaveConfig variant"),
         }
@@ -139,7 +139,7 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip() {
-        let cmd = SaveConfigCommand::new("region", "us-east-1", Scope::new("s3"));
+        let cmd = SaveConfigCommand::new("region", "us-east-1", Scope::from_name("s3").unwrap());
         let statement = cmd.to_statement();
         assert_eq!(statement, "SAVE CONFIG region = 'us-east-1' FOR 's3'");
 
@@ -148,7 +148,7 @@ mod parsing_tests {
             BundleCommand::SaveConfig(c) => {
                 assert_eq!(c.key, "region");
                 assert_eq!(c.value, "us-east-1");
-                assert_eq!(c.scope, Scope::new("s3"));
+                assert_eq!(c.scope, Scope::from_name("s3").unwrap());
             }
             _ => panic!("Expected SaveConfig variant"),
         }
@@ -156,7 +156,7 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip_with_scope() {
-        let cmd = SaveConfigCommand::new("bucket", "my-bucket", Scope::new("s3"));
+        let cmd = SaveConfigCommand::new("bucket", "my-bucket", Scope::from_name("s3").unwrap());
         let statement = cmd.to_statement();
         assert_eq!(statement, "SAVE CONFIG bucket = 'my-bucket' FOR 's3'");
 
@@ -165,7 +165,7 @@ mod parsing_tests {
             BundleCommand::SaveConfig(c) => {
                 assert_eq!(c.key, "bucket");
                 assert_eq!(c.value, "my-bucket");
-                assert_eq!(c.scope, Scope::new("s3"));
+                assert_eq!(c.scope, Scope::from_name("s3").unwrap());
             }
             _ => panic!("Expected SaveConfig variant"),
         }

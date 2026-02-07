@@ -168,7 +168,7 @@ mod parsing_tests {
             BundleCommand::SetConfig(ref c) => {
                 assert_eq!(c.key, "region");
                 assert_eq!(c.value, "us-west-2");
-                assert_eq!(c.scope, Scope::new("s3/my-bucket"));
+                assert_eq!(c.scope, Scope::from_name("s3/my-bucket").unwrap());
             }
             _ => panic!("Expected SetConfig variant, got {:?}", cmd),
         }
@@ -179,7 +179,7 @@ mod parsing_tests {
         let cmd = SetConfigCommand::new(
             "endpoint",
             "http://localhost:9000",
-            Scope::new("s3/test"),
+            Scope::from_name("s3/test").unwrap(),
         );
         let statement = cmd.to_statement();
         assert_eq!(statement, "SET CONFIG endpoint = 'http://localhost:9000' FOR 's3/test'");
@@ -188,7 +188,7 @@ mod parsing_tests {
             BundleCommand::SetConfig(ref c) => {
                 assert_eq!(c.key, "endpoint");
                 assert_eq!(c.value, "http://localhost:9000");
-                assert_eq!(c.scope, Scope::new("s3/test"));
+                assert_eq!(c.scope, Scope::from_name("s3/test").unwrap());
             }
             _ => panic!("Expected SetConfig variant"),
         }
@@ -196,7 +196,7 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip_named_scope() {
-        let cmd = SetConfigCommand::new("region", "us-west-2", Scope::new("s3"));
+        let cmd = SetConfigCommand::new("region", "us-west-2", Scope::from_name("s3").unwrap());
         let statement = cmd.to_statement();
         assert_eq!(statement, "SET CONFIG region = 'us-west-2' FOR 's3'");
         let parsed = parse_command(&statement).unwrap();
@@ -204,7 +204,7 @@ mod parsing_tests {
             BundleCommand::SetConfig(ref c) => {
                 assert_eq!(c.key, "region");
                 assert_eq!(c.value, "us-west-2");
-                assert_eq!(c.scope, Scope::new("s3"));
+                assert_eq!(c.scope, Scope::from_name("s3").unwrap());
             }
             _ => panic!("Expected SetConfig variant"),
         }

@@ -90,10 +90,10 @@ mod tests {
 
     #[test]
     fn test_setup_named_scope_config() {
-        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::new("s3"));
+        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::from_name("s3").unwrap());
         assert_eq!(op.key, "region");
         assert_eq!(op.value, "us-west-2");
-        assert_eq!(op.scope, Scope::new("s3"));
+        assert_eq!(op.scope, Scope::from_name("s3").unwrap());
     }
 
     #[test]
@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn test_describe_named_scope() {
-        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::new("s3"));
+        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::from_name("s3").unwrap());
         assert_eq!(op.describe(), "SAVE CONFIG [s3]: region = us-west-2");
     }
 
@@ -131,13 +131,13 @@ mod tests {
 
     #[test]
     fn test_describe_masks_secure_key_named_scope() {
-        let op = SaveConfigOp::setup("secret_access_key", "SUPERSECRET", &Scope::new("s3"));
+        let op = SaveConfigOp::setup("secret_access_key", "SUPERSECRET", &Scope::from_name("s3").unwrap());
         assert_eq!(op.describe(), "SAVE CONFIG [s3]: secret_access_key = *****");
     }
 
     #[test]
     fn test_serialization_named_scope() {
-        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::new("s3"));
+        let op = SaveConfigOp::setup("region", "us-west-2", &Scope::from_name("s3").unwrap());
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let expected = "key: region\nscope: s3\nvalue: us-west-2\n";
         assert_eq!(serialized, expected);
@@ -182,7 +182,7 @@ mod tests {
             .await
             .expect("Failed to create test bundle");
 
-        let op = SaveConfigOp::setup("secret_access_key", "SECRETVALUE", &Scope::new("s3"));
+        let op = SaveConfigOp::setup("secret_access_key", "SECRETVALUE", &Scope::from_name("s3").unwrap());
         let result = op.check(bundle.bundle()).await;
         assert!(result.is_err());
     }
@@ -193,7 +193,7 @@ mod tests {
             .await
             .expect("Failed to create test bundle");
 
-        let scope = Scope::new("s3");
+        let scope = Scope::from_name("s3").unwrap();
         let op1 = SaveConfigOp::setup("region", "us-west-1", &scope);
         op1.apply(builder.bundle()).await.expect("apply op1");
 
@@ -244,6 +244,6 @@ scope: s3/my-bucket
         let op: SaveConfigOp = serde_yaml_ng::from_str(yaml).expect("Failed to deserialize");
         assert_eq!(op.key, "region");
         assert_eq!(op.value, "us-east-1");
-        assert_eq!(op.scope, Scope::new("s3/my-bucket"));
+        assert_eq!(op.scope, Scope::from_name("s3/my-bucket").unwrap());
     }
 }

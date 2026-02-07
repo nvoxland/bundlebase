@@ -877,7 +877,7 @@ mod tests {
     #[test]
     fn test_kaggle_client_from_config() {
         let config = BundleConfig::new();
-        let scope = Scope::new("kaggle");
+        let scope = Scope::from_name("kaggle").unwrap();
         config.set(
             &scope,
             URL_CFG.key,
@@ -908,7 +908,7 @@ mod tests {
         // If only username is set in config (no key), key falls back to default_fn.
         // If default_fn also returns None, key is simply None.
         let config = BundleConfig::new();
-        let scope = Scope::new("kaggle");
+        let scope = Scope::from_name("kaggle").unwrap();
         config.set(
             &scope,
             USERNAME_CFG.key,
@@ -1331,20 +1331,20 @@ mod tests {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/a/b/c");
         assert_eq!(
             result,
-            Some(Scope::new("kaggle/a/b"))
+            Some(Scope::from_name("kaggle/a/b").unwrap())
         );
     }
 
     #[test]
     fn test_kaggle_scope_from_path_root_trailing_slash() {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/");
-        assert_eq!(result, Some(Scope::new("kaggle")));
+        assert_eq!(result, Some(Scope::from_name("kaggle").unwrap()));
     }
 
     #[test]
     fn test_kaggle_scope_from_path_root_no_slash() {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com");
-        assert_eq!(result, Some(Scope::new("kaggle")));
+        assert_eq!(result, Some(Scope::from_name("kaggle").unwrap()));
     }
 
     #[test]
@@ -1353,7 +1353,7 @@ mod tests {
         let result = KAGGLE_SCOPE.from_path("kaggle://config");
         assert_eq!(
             result,
-            Some(Scope::new("kaggle"))
+            Some(Scope::from_name("kaggle").unwrap())
         );
     }
 
@@ -1362,7 +1362,7 @@ mod tests {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/a/b/");
         assert_eq!(
             result,
-            Some(Scope::new("kaggle/a/b"))
+            Some(Scope::from_name("kaggle/a/b").unwrap())
         );
     }
 
@@ -1371,7 +1371,7 @@ mod tests {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/datasets/zillow/zecon");
         assert_eq!(
             result,
-            Some(Scope::new("kaggle/zillow/zecon"))
+            Some(Scope::from_name("kaggle/zillow/zecon").unwrap())
         );
     }
 
@@ -1380,7 +1380,7 @@ mod tests {
         let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/datasets/zillow/zecon/data");
         assert_eq!(
             result,
-            Some(Scope::new("kaggle/zillow/zecon"))
+            Some(Scope::from_name("kaggle/zillow/zecon").unwrap())
         );
     }
 }
