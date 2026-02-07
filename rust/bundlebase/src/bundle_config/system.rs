@@ -13,6 +13,7 @@ config_scopes!(system_scopes, {
 });
 
 config_keys!(system_keys, {
+    //todo: use these
     pub const MAX_MEMORY_CFG: ConfigKey = SYSTEM_SCOPE.define("max_memory");
     pub const CATALOG_NAME_CFG: ConfigKey = SYSTEM_SCOPE.define("catalog_name");
 });

@@ -251,7 +251,7 @@ impl BundleBuilder {
 
         // Load passed config entries into the bundle's config under ConfigSource::Passed
         if let Some(passed) = config {
-            bundle.config.merge_passed(&passed);
+            bundle.config.merge_passed(&passed)?; //todo: save passed on bundle so we can use it later, maybe construct config here with it?
         }
         bundle.refresh_data_dir()?;
         *bundle.data_dir.write() = writable_dir_from_str(path, bundle.config())?;
@@ -503,7 +503,7 @@ impl BundleBuilder {
             // empty() returns Arc<Bundle>, clone inner Bundle for reload_from
             let arc = Bundle::empty().await?;
             let bundle = (*arc).clone();
-            bundle.config.merge_passed(&passed_config);
+            bundle.config.merge_passed(&passed_config)?;
             bundle.refresh_data_dir()?;
             *bundle.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, bundle.config())?;
             bundle
@@ -1073,6 +1073,7 @@ impl BundleBuilder {
     /// * `key` - Configuration key (e.g., "region", "access_key_id")
     /// * `value` - Configuration value
     /// * `scope` - Scope to save config under (e.g., `Scope::try_from("s3")` or `Scope::try_from("s3://bucket")`)
+    /// TODO: change order of args
     pub async fn save_config(
         &self,
         key: &str,
@@ -1456,6 +1457,7 @@ impl BundleFacade for BundleBuilder {
         self.bundle.config()
     }
 
+    // todo: change order of args
     fn set_config(
         &self,
         key: &str,

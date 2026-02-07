@@ -26,7 +26,7 @@ config_scopes!(sftp_scopes, {
 });
 
 config_keys!(sftp_keys, {
-    pub const SFTP_KEY_PATH_CFG: ConfigKey = SFTP_SCOPE.define("ssh_key_path");
+    pub const KEY_PATH_CFG: ConfigKey = SFTP_SCOPE.define("key_path");
 });
 
 /// SSH client handler for russh.
@@ -265,7 +265,7 @@ impl SftpFile {
 
         // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
-            .get(&crate::bundle_config::Scope::try_from(url)?, &SFTP_KEY_PATH_CFG)
+            .get(&crate::bundle_config::Scope::try_from(url)?, &KEY_PATH_CFG)?
             .unwrap_or_else(|| "~/.ssh/id_rsa".to_string());
 
         Ok(Self {
@@ -394,8 +394,9 @@ impl SftpDir {
         let (user, host, port, path) = parse_sftp_url(url)?;
 
         // Get key_path from config, env var, or default to ~/.ssh/id_rsa
+        // TODO: move reading from SSH_KEY_PATH (if it's a standard) to config default logic
         let key_path = config
-            .get(&crate::bundle_config::Scope::try_from(url)?, &SFTP_KEY_PATH_CFG)
+            .get(&crate::bundle_config::Scope::try_from(url)?, &KEY_PATH_CFG)?
             .or_else(|| std::env::var("SSH_KEY_PATH").ok())
             .unwrap_or_else(|| "~/.ssh/id_rsa".to_string());
 

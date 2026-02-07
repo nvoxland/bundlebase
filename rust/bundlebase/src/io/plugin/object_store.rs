@@ -156,6 +156,7 @@ pub(crate) fn parse_url(
 ///
 /// Starts with Builder::from_env() to pick up environment variables,
 /// then applies config values on top via `config.get(key, &scope)`.
+/// TODO: use config first, then fallback to defaults
 fn build_object_store(
     url: &Url,
     url_str: &str,
@@ -173,7 +174,7 @@ fn build_object_store(
             let mut builder = AmazonS3Builder::from_env().with_url(url.as_str());
 
             for spec in s3_keys() {
-                if let Some(value) = config.get(&scope, spec) {
+                if let Some(value) = config.get(&scope, spec)? {
                     builder = builder.with_config(spec.key.parse()?, value);
                 }
             }
@@ -184,7 +185,7 @@ fn build_object_store(
             let mut builder = GoogleCloudStorageBuilder::from_env().with_url(url.as_str());
 
             for spec in gcs_keys() {
-                if let Some(value) = config.get(&scope, spec) {
+                if let Some(value) = config.get(&scope, spec)? {
                     builder = builder.with_config(spec.key.parse()?, value);
                 }
             }
@@ -195,7 +196,7 @@ fn build_object_store(
             let mut builder = MicrosoftAzureBuilder::from_env().with_url(url.as_str());
 
             for spec in azure_keys() {
-                if let Some(value) = config.get(&scope, spec) {
+                if let Some(value) = config.get(&scope, spec)? {
                     builder = builder.with_config(spec.key.parse()?, value);
                 }
             }

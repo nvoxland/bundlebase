@@ -291,6 +291,7 @@ pub trait BundleFacade: Send + Sync {
     /// * `key` - Configuration key. Supports compound `"scope__key"` format.
     /// * `value` - Configuration value
     /// * `scope` - Normalized scope for this config value.
+    /// todo: change order of args
     fn set_config(
         &self,
         key: &str,

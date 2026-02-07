@@ -8,6 +8,7 @@ pub struct PyBundleConfig {
     pub(crate) inner: PassedBundleConfig,
 }
 
+//todo: don't expose
 pub(crate) fn validate_config_key(key: &str) -> PyResult<()> {
     let specs = ::bundlebase::all_config_specs();
     if !ConfigKey::is_key_valid(key, &specs) {
@@ -22,6 +23,7 @@ pub(crate) fn validate_config_key(key: &str) -> PyResult<()> {
     Ok(())
 }
 
+//todo: don't expose
 pub(crate) fn validate_config_key_scoped(key: &str, scope: &Scope) -> PyResult<()> {
     let specs = ::bundlebase::all_config_specs();
     ConfigKey::validate_key_scoped(key, scope, &specs).map_err(|e| {
@@ -41,7 +43,7 @@ pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
 #[pymethods]
 impl PyBundleConfig {
     fn set(&mut self, scope: &str, key: String, value: String) -> PyResult<()> {
-        validate_config_key(&key)?;
+        validate_config_key(&key)?; //todo: rely on inner set
         let scope = Scope::try_from(scope)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         self.inner.set(&scope, &key, &value);

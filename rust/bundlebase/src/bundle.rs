@@ -284,7 +284,7 @@ impl Bundle {
 
         // Load passed config entries into the bundle's config under ConfigSource::Passed
         if let Some(passed) = config {
-            arc_bundle.config.merge_passed(&passed);
+            arc_bundle.config.merge_passed(&passed)?;
         }
 
         // Refresh data_dir with the config
@@ -1211,13 +1211,14 @@ impl BundleFacade for Bundle {
         Bundle::config(self)
     }
 
+    //todo: fix param ordering
     fn set_config(
         &self,
         key: &str,
         value: &str,
         scope: &Scope,
     ) -> Result<(), BundlebaseError> {
-        self.config.set(scope, key, value, crate::bundle_config::ConfigSource::Runtime);
+        self.config.set(scope, key, value, crate::bundle_config::ConfigSource::Runtime)?;
         self.refresh_data_dir()?;
         Ok(())
     }

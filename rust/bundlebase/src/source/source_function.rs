@@ -409,6 +409,7 @@ pub trait SourceFunction: Send + Sync {
     ) -> Result<Vec<MaterializedData>, BundlebaseError> {
         let discovered = self.discover(args, &attached_locations, &config).await?;
 
+        //todo: why _progress everywhere?
         let _progress = ProgressScope::new(
             &format!("Fetching {} files from {}", discovered.len(), self.name()),
             Some(discovered.len() as u64),

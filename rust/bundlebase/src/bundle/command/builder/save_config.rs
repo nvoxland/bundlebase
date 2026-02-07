@@ -98,7 +98,7 @@ impl BundleBuilderCommand for SaveConfigCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let op = SaveConfigOp::setup(&self.key, &self.value, &self.scope);
+        let op = SaveConfigOp::setup(&self.scope, &self.key, &self.value);
         builder.apply_operation(op.into()).await?;
 
         let specs = crate::all_config_specs();

@@ -121,6 +121,7 @@ impl SourceFunction for KaggleSource {
 
         // Validate dataset format
         let dataset = source_utils::require_arg(args, "dataset", self.name())?;
+        //todo: just check the format, don't need parse_dataset_arg function anymore
         parse_dataset_arg(dataset)?;
 
         // Validate version if provided — must be a positive integer
@@ -377,7 +378,7 @@ impl KaggleSource {
             dataset
         );
         let response = client
-            .get(&path)
+            .get_path(&path)
             .send()
             .await
             .map_err(|e| {
@@ -450,7 +451,7 @@ impl KaggleSource {
             list_path.push_str(&format!("?datasetVersionNumber={}", v));
         }
         let response = client
-            .get(&list_path)
+            .get_path(&list_path)
             .send()
             .await
             .map_err(|e| {
@@ -883,19 +884,19 @@ mod tests {
             URL_CFG.key,
             "https://test.kaggle.com",
             crate::bundle_config::ConfigSource::Passed,
-        );
+        ).unwrap();
         config.set(
             &scope,
             USERNAME_CFG.key,
             "config_user",
             crate::bundle_config::ConfigSource::Passed,
-        );
+        ).unwrap();
         config.set(
             &scope,
             API_KEY_CFG.key,
             "config_key",
             crate::bundle_config::ConfigSource::Passed,
-        );
+        ).unwrap();
 
         let client = KaggleClient::from_config(&config, "zillow/zecon").unwrap();
         assert_eq!(client.base_url, "https://test.kaggle.com");
@@ -914,7 +915,7 @@ mod tests {
             USERNAME_CFG.key,
             "config_user",
             crate::bundle_config::ConfigSource::Passed,
-        );
+        ).unwrap();
 
         let client = KaggleClient::from_config(&config, "zillow/zecon").unwrap();
         assert_eq!(client.username, Some("config_user".to_string()));

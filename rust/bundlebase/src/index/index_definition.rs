@@ -325,7 +325,6 @@ impl IndexDefinition {
     ///
     /// # Returns
     /// Number of stale IndexedBlocks removed
-    #[allow(dead_code)]
     pub(crate) fn prune_stale_blocks(&self, current_versions: &HashMap<ObjectId, String>) -> usize {
         let mut blocks = self.blocks.write();
         let mut lookup = self.block_lookup.write();

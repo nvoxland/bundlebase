@@ -5,7 +5,7 @@ use crate::{BundleConfig, BundlebaseError};
 
 /// HTTP client for the Kaggle API that bundles credentials and base URL.
 ///
-/// Every request goes through [`get`](KaggleClient::get) or
+/// Every request goes through [`get`](KaggleClient::get_path) or
 /// [`get_url`](KaggleClient::get_url), which apply Basic Auth automatically.
 #[derive(Debug)]
 pub(super) struct KaggleClient {
@@ -21,8 +21,8 @@ impl KaggleClient {
         let scope = dataset_scope(dataset)?;
 
         let base_url = config.get_required(&scope, &URL_CFG, "Cannot configure Kaggle client")?;
-        let username = config.get(&scope, &USERNAME_CFG);
-        let key = config.get(&scope, &API_KEY_CFG);
+        let username = config.get(&scope, &USERNAME_CFG)?;
+        let key = config.get(&scope, &API_KEY_CFG)?;
 
         Self::new(&base_url, username, key)
     }
@@ -53,7 +53,7 @@ impl KaggleClient {
     }
 
     /// Start a GET request for a relative API path (e.g. `/api/v1/datasets/list`).
-    pub(super) fn get(&self, path: &str) -> reqwest::RequestBuilder {
+    pub(super) fn get_path(&self, path: &str) -> reqwest::RequestBuilder {
         let builder = self.client.get(format!("{}{}", self.base_url, path));
         match (&self.username, &self.key) {
             (Some(u), Some(k)) => builder.basic_auth(u, Some(k)),
