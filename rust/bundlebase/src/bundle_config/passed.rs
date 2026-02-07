@@ -13,12 +13,8 @@ use std::collections::HashMap;
 /// (Python bindings, env loading) before constructing this type.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct PassedBundleConfig {
-    /// Legacy field kept for backwards-compatible deserialization only.
-    /// New code never writes to this. Entries here are ignored.
-    #[serde(default, skip_serializing)]
-    pub defaults: HashMap<String, String>,
-
     /// Scope-specific config: scope -> (key -> value)
+    /// todo: just wrap a map?
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub scoped: HashMap<Scope, HashMap<String, String>>,
 }
@@ -43,6 +39,7 @@ impl PassedBundleConfig {
     }
 
     /// Merge another `PassedBundleConfig` into this one. `other` wins on conflict.
+    /// todo: don't need?
     pub fn merge(&mut self, other: &PassedBundleConfig) {
         for (scope, entries) in &other.scoped {
             let target = self.scoped.entry(scope.clone()).or_default();

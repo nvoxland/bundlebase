@@ -20,13 +20,11 @@ pub struct BundlebaseAuthenticator {
 
 impl BundlebaseAuthenticator {
     /// Create a new authenticator with default credentials.
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Create a new authenticator with custom credentials.
-    #[allow(dead_code)]
     pub fn with_credentials(username: impl Into<String>, password: impl Into<String>) -> Self {
         Self {
             username: Some(username.into()),

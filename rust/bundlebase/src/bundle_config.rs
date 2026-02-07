@@ -282,6 +282,7 @@ impl ConfigKey {
     /// Validate that a config key is recognized for a specific scope.
     ///
     /// Returns an error if the key is not found in any spec matching the scope.
+    /// TODO: change arg order
     pub fn validate_key_scoped(key: &str, scope: &Scope, specs: &[ConfigKey]) -> Result<(), BundlebaseError> {
         if specs.iter().any(|s| s.key == key && s.scope.matches(scope)) {
             Ok(())
@@ -427,6 +428,7 @@ impl BundleConfig {
     }
 
     /// Returns all known configuration scopes.
+    /// todo: can this be computed?
     pub fn all_scopes() -> Vec<ConfigScope> {
         use crate::io::plugin::ftp;
         use crate::io::plugin::object_store;
@@ -446,6 +448,7 @@ impl BundleConfig {
     ///
     /// Each provider defines its keys alongside its implementation.
     /// This collects them all for use by `BundleConfig::from_map()`.
+    /// TODO: can this be computed?
     pub fn all_keys() -> Vec<ConfigKey> {
         use crate::io::plugin::ftp;
         use crate::io::plugin::object_store;
@@ -472,12 +475,17 @@ impl BundleConfig {
 
     /// Set a config value.
     ///
+    /// Validates that the key is recognized for the given scope before storing.
+    ///
     /// # Arguments
     /// * `scope` - Named scope. Use `Scope::try_from()` to convert raw paths at the call site.
     /// * `key` - Configuration key (e.g., "region", "access_key_id").
     /// * `value` - Configuration value
     /// * `source` - Which config layer this entry belongs to
-    pub fn set(&self, scope: &Scope, key: &str, value: &str, source: ConfigSource) {
+    pub fn set(&self, scope: &Scope, key: &str, value: &str, source: ConfigSource) -> Result<(), BundlebaseError> {
+        let specs = crate::all_config_specs();
+        ConfigKey::validate_key_scoped(key, scope, &specs)?;
+
         let mut inner = self.inner.write();
         let scope_str = scope.as_str().to_string();
 
@@ -493,9 +501,11 @@ impl BundleConfig {
         });
         inner.active_cache = None;
         inner.winners_cache = None;
+        Ok(())
     }
 
     /// Replace all inner state except Runtime entries (for `reload_from`).
+    /// todo: this should be cleaned up
     pub fn reload_non_runtime(&self, other: &BundleConfig) {
         let other_inner = other.inner.read();
         let mut self_inner = self.inner.write();
@@ -522,23 +532,23 @@ impl BundleConfig {
     /// across all sources. Among entries sharing the longest prefix, the
     /// highest-priority source wins. Only entries whose scope is compatible
     /// with the key's required `ConfigScope` are considered.
-    pub fn get(&self, scope: &Scope, key: &ConfigKey) -> Option<String> {
-        self.ensure_env_cache();
+    pub fn get(&self, scope: &Scope, key: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
+        self.ensure_env_cache()?;
 
         // Fast path: check active cache with read lock
         {
             let inner = self.inner.read();
             if let Some(cache) = &inner.active_cache {
                 if let Some(value) = Self::lookup_active(cache, key, scope) {
-                    return Some(value);
+                    return Ok(Some(value));
                 }
                 // Fall back to default if scope is compatible
                 if key.scope.matches(scope) {
                     if let Some(value) = key.resolve_default() {
-                        return Some(value);
+                        return Ok(Some(value));
                     }
                 }
-                return None;
+                return Ok(None);
             }
         }
 
@@ -553,17 +563,17 @@ impl BundleConfig {
         match &inner.active_cache {
             Some(cache) => {
                 if let Some(value) = Self::lookup_active(cache, key, scope) {
-                    return Some(value);
+                    return Ok(Some(value));
                 }
                 // Fall back to default if scope is compatible
                 if key.scope.matches(scope) {
                     if let Some(value) = key.resolve_default() {
-                        return Some(value);
+                        return Ok(Some(value));
                     }
                 }
-                None
+                Ok(None)
             }
-            None => None, // should not happen after populate_active_cache
+            None => Ok(None), // should not happen after populate_active_cache
         }
     }
 
@@ -571,7 +581,7 @@ impl BundleConfig {
     ///
     /// `context` is prepended to the error message (e.g. `"Cannot configure Kaggle client: No configuration set for /kaggle:username"`).
     pub fn get_required(&self, scope: &Scope, key: &ConfigKey, context: &str) -> Result<String, BundlebaseError> {
-        self.get(scope, key).ok_or_else(|| {
+        self.get(scope, key)?.ok_or_else(|| {
             BundlebaseError::from(format!(
                 "{}: No configuration set for /{}:{}",
                 context, key.scope.name, key.key
@@ -659,14 +669,14 @@ impl BundleConfig {
     /// marking which entry wins for each (key, scope) pair.
     ///
     /// `specs` is used to determine which keys are secure.
-    pub fn all_values(&self, specs: &[ConfigKey]) -> Vec<ConfigValueDetails> {
-        self.ensure_env_cache();
+    pub fn all_values(&self, specs: &[ConfigKey]) -> Result<Vec<ConfigValueDetails>, BundlebaseError> {
+        self.ensure_env_cache()?;
 
         // Fast path: check if caches are populated with read lock
         {
             let inner = self.inner.read();
             if let Some(winners) = &inner.winners_cache {
-                return Self::build_all_values(&inner, winners, specs);
+                return Ok(Self::build_all_values(&inner, winners, specs));
             }
         }
 
@@ -677,7 +687,7 @@ impl BundleConfig {
         }
 
         let winners = inner.winners_cache.as_ref().expect("just populated");
-        Self::build_all_values(&inner, winners, specs)
+        Ok(Self::build_all_values(&inner, winners, specs))
     }
 
     /// Build the full list of ConfigValueDetails from entries and pre-computed winners.
@@ -739,11 +749,11 @@ impl BundleConfig {
     }
 
     /// Returns only the winning (active) config entries.
-    pub fn values(&self, specs: &[ConfigKey]) -> Vec<ConfigValueDetails> {
-        self.all_values(specs)
+    pub fn values(&self, specs: &[ConfigKey]) -> Result<Vec<ConfigValueDetails>, BundlebaseError> {
+        Ok(self.all_values(specs)?
             .into_iter()
             .filter(|e| e.active)
-            .collect()
+            .collect())
     }
 
     /// Extract Passed-source entries for transfer to a new BundleConfig (e.g., for views).
@@ -774,6 +784,7 @@ impl BundleConfig {
     ///
     /// All values must be nested under a scope path (e.g., `{"s3://": {"region": "us-west-2"}}`).
     /// Flat top-level keys are rejected.
+    /// todo: remove
     pub fn from_map(
         map: HashMap<String, Value>,
         specs: &[ConfigKey],
@@ -801,7 +812,7 @@ impl BundleConfig {
                                 inner_key, scope
                             ))
                         })?;
-                    config.set(&scope, inner_key, inner_str, ConfigSource::Passed);
+                    config.set(&scope, inner_key, inner_str, ConfigSource::Passed)?;
                 }
             } else {
                 return Err(format!(
@@ -815,23 +826,24 @@ impl BundleConfig {
     }
 
     /// Check if a key looks like a scope path (contains "://")
+    /// remove
     fn is_scope_key(key: &str) -> bool {
         key.contains("://")
     }
 
     /// Ensure env vars are loaded into entries[Env]. Reads BB_* env vars on first call.
-    ///
+    /// todo: remove?
     /// Env var patterns (suffix after `BB_`):
     /// - `BB_S3_REGION` -> scope `s3`, key = `region` (single `_` separates scope from key)
     /// - `BB_S3__DATA__REGION` -> scope `s3/data`, key = `region` (`__` encodes sub-path separators)
     /// - `BB_KEY` -> skipped (no `_`, no scope)
     /// - `BB__S3__REGION` -> skipped (scope name is empty/starts with `_`)
-    fn ensure_env_cache(&self) {
+    fn ensure_env_cache(&self) -> Result<(), BundlebaseError> {
         // Fast path: check with read lock
         {
             let inner = self.inner.read();
             if inner.env_loaded {
-                return;
+                return Ok(());
             }
         }
 
@@ -839,9 +851,10 @@ impl BundleConfig {
         let mut inner = self.inner.write();
         // Double-check after acquiring write lock
         if inner.env_loaded {
-            return;
+            return Ok(());
         }
 
+        let specs = crate::all_config_specs();
         let mut env_entries = Vec::new();
 
         for (raw_key, value) in std::env::vars() {
@@ -862,9 +875,31 @@ impl BundleConfig {
                     );
                     continue;
                 };
-                let scope = suffix[..underscore_pos].to_lowercase();
+                let scope_str = suffix[..underscore_pos].to_lowercase();
                 let key = suffix[underscore_pos + 1..].to_lowercase();
-                env_entries.push(ConfigValue { key, value, scope });
+
+                // Validate scope
+                let scope = match Scope::new(&scope_str) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        log::warn!(
+                            "Ignoring env var '{}': unknown scope '{}'.",
+                            raw_key, scope_str
+                        );
+                        continue;
+                    }
+                };
+
+                // Validate key against scope
+                if let Err(_) = ConfigKey::validate_key_scoped(&key, &scope, &specs) {
+                    log::warn!(
+                        "Ignoring env var '{}': unknown key '{}' for scope '{}'.",
+                        raw_key, key, scope_str
+                    );
+                    continue;
+                }
+
+                env_entries.push(ConfigValue { key, value, scope: scope_str });
             } else {
                 // __ separators: BB_SCOPE__SUB__...__KEY pattern
                 let scope_name = parts[0];
@@ -881,8 +916,30 @@ impl BundleConfig {
                 for part in &parts[1..parts.len() - 1] {
                     scope_parts.push(part.to_lowercase());
                 }
-                let scope = scope_parts.join("/");
-                env_entries.push(ConfigValue { key, value, scope });
+                let scope_str = scope_parts.join("/");
+
+                // Validate scope
+                let scope = match Scope::new(&scope_str) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        log::warn!(
+                            "Ignoring env var '{}': unknown scope '{}'.",
+                            raw_key, scope_str
+                        );
+                        continue;
+                    }
+                };
+
+                // Validate key against scope
+                if let Err(_) = ConfigKey::validate_key_scoped(&key, &scope, &specs) {
+                    log::warn!(
+                        "Ignoring env var '{}': unknown key '{}' for scope '{}'.",
+                        raw_key, key, scope_str
+                    );
+                    continue;
+                }
+
+                env_entries.push(ConfigValue { key, value, scope: scope_str });
             }
         }
 
@@ -890,11 +947,13 @@ impl BundleConfig {
         inner.env_loaded = true;
         inner.active_cache = None;
         inner.winners_cache = None;
+        Ok(())
     }
 
     /// Merge another config's entries into this one. The other config's entries
     /// are added with their original sources. Entries from `other` take priority
     /// over entries in `self` with the same key+scope+source.
+    /// todo: remove?
     pub fn merge(&self, other: &BundleConfig) {
         let other_inner = other.inner.read();
         let mut self_inner = self.inner.write();
@@ -914,16 +973,18 @@ impl BundleConfig {
 
     /// Absorb all entries from a `PassedBundleConfig` as `ConfigSource::Passed`
     /// entries into this config's internal storage.
-    pub fn merge_passed(&self, passed: &PassedBundleConfig) {
+    pub fn merge_passed(&self, passed: &PassedBundleConfig) -> Result<(), BundlebaseError> {
         for (scope, entries) in &passed.scoped {
             for (key, value) in entries {
-                self.set(scope, key, value, ConfigSource::Passed);
+                self.set(scope, key, value, ConfigSource::Passed)?;
             }
         }
+        Ok(())
     }
 
     /// Extract all `ConfigSource::Passed` entries back out into a
     /// `PassedBundleConfig`.
+    /// todo: remove?
     pub fn extract_passed(&self) -> PassedBundleConfig {
         let inner = self.inner.read();
         let mut passed = PassedBundleConfig::new();
@@ -945,6 +1006,7 @@ impl Default for BundleConfig {
     }
 }
 
+//todo: should we have clone?
 impl Clone for BundleConfig {
     fn clone(&self) -> Self {
         let inner = self.inner.read();
@@ -960,6 +1022,7 @@ impl Clone for BundleConfig {
     }
 }
 
+/// todo: move and clean up. Maybe just make PassedConfig serializable?
 /// Wire format for reading/writing config from manifests.
 ///
 /// Used only for serialization — not used at runtime.
@@ -993,7 +1056,7 @@ impl SerializedConfig {
     }
 
     /// Load into a BundleConfig as Stored entries.
-    pub fn into_bundle_config(&self, config: &BundleConfig) {
+    pub fn into_bundle_config(&self, config: &BundleConfig) -> Result<(), BundlebaseError> {
         for (key, _value) in &self.defaults {
             log::warn!(
                 "Ignoring legacy global-scope config key '{}' from stored defaults. \
@@ -1005,7 +1068,7 @@ impl SerializedConfig {
             match Scope::new(scope_str) {
                 Ok(scope) => {
                     for (key, value) in overrides {
-                        config.set(&scope, key, value, ConfigSource::Stored);
+                        config.set(&scope, key, value, ConfigSource::Stored)?;
                     }
                 }
                 Err(e) => {
@@ -1013,6 +1076,7 @@ impl SerializedConfig {
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -1022,7 +1086,7 @@ impl CommandResponse for Vec<ConfigValueDetails> {
         Arc::new(Schema::new(vec![
             Field::new("key", DataType::Utf8, false),
             Field::new("value", DataType::Utf8, false),
-            Field::new("scope", DataType::Utf8, false),
+            Field::new("scope", DataType::Utf8, false), //todo move to 1st
             Field::new("source", DataType::Utf8, false),
             Field::new("active", DataType::Boolean, false),
             Field::new("secure", DataType::Boolean, false),
@@ -1107,14 +1171,6 @@ mod tests {
         AZURE_CLIENT_SECRET_CFG,
     };
 
-    // Test-only config key constants for keys that don't exist in real config
-    const TEST_KEY: ConfigKey = S3_SCOPE.define("test_key");
-    const TEST_RUNTIME_KEY: ConfigKey = S3_SCOPE.define("test_runtime_key");
-    const TEST_NEW_KEY: ConfigKey = S3_SCOPE.define("test_new_key");
-    const TEST_TESTREGION1: ConfigKey = S3_SCOPE.define("testregion1");
-    const TEST_TESTREGION2: ConfigKey = S3_SCOPE.define("testregion2");
-    const TEST_TESTKEY3: ConfigKey = S3_SCOPE.define("testkey3");
-
     /// Get a ConfigScope by name from the pre-registered scopes.
     fn get_scope(name: &str) -> ConfigScope {
         BundleConfig::all_scopes()
@@ -1161,51 +1217,56 @@ mod tests {
 
     #[test]
     fn test_set_scoped_default() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored);
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_REGION_CFG), Some("us-west-2".to_string()));
+        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
+        assert_eq!(config.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-west-2".to_string()));
     }
 
     #[test]
     fn test_set_scoped_override() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3://test/").unwrap(), "endpoint", "http://localhost:9000", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3://test/").unwrap(), "endpoint", "http://localhost:9000", ConfigSource::Stored).unwrap();
 
         assert_eq!(
-            config.get(&Scope::try_from("s3://test/file").unwrap(), &S3_ENDPOINT_CFG),
+            config.get(&Scope::try_from("s3://test/file").unwrap(), &S3_ENDPOINT_CFG).unwrap(),
             Some("http://localhost:9000".to_string())
         );
     }
 
     #[test]
     fn test_get_defaults_with_path() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
 
-        assert_eq!(config.get(&Scope::try_from("s3://my-bucket/path/to/file").unwrap(), &S3_REGION_CFG), Some("us-west-2".to_string()));
+        assert_eq!(config.get(&Scope::try_from("s3://my-bucket/path/to/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-west-2".to_string()));
     }
 
     #[test]
     fn test_get_with_scoped_override() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored);
-        config.set(&Scope::try_from("s3://special-bucket/").unwrap(), "region", "us-east-1", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
+        config.set(&Scope::try_from("s3://special-bucket/").unwrap(), "region", "us-east-1", ConfigSource::Stored).unwrap();
 
-        assert_eq!(config.get(&Scope::try_from("s3://my-bucket/file").unwrap(), &S3_REGION_CFG), Some("us-west-2".to_string()));
-        assert_eq!(config.get(&Scope::try_from("s3://special-bucket/file").unwrap(), &S3_REGION_CFG), Some("us-east-1".to_string()));
+        assert_eq!(config.get(&Scope::try_from("s3://my-bucket/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-west-2".to_string()));
+        assert_eq!(config.get(&Scope::try_from("s3://special-bucket/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-east-1".to_string()));
     }
 
     #[test]
     fn test_longest_prefix_matching() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "default", ConfigSource::Stored);
-        config.set(&Scope::try_from("s3://bucket/subfolder/").unwrap(), "endpoint", "specific", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "default", ConfigSource::Stored).unwrap();
+        config.set(&Scope::try_from("s3://bucket/subfolder/").unwrap(), "endpoint", "specific", ConfigSource::Stored).unwrap();
 
         // Should match the longer prefix
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/subfolder/file").unwrap(), &S3_ENDPOINT_CFG), Some("specific".to_string()));
+        assert_eq!(config.get(&Scope::try_from("s3://bucket/subfolder/file").unwrap(), &S3_ENDPOINT_CFG).unwrap(), Some("specific".to_string()));
 
         // Should match the shorter prefix
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/otherpath/file").unwrap(), &S3_ENDPOINT_CFG), Some("default".to_string()));
+        assert_eq!(config.get(&Scope::try_from("s3://bucket/otherpath/file").unwrap(), &S3_ENDPOINT_CFG).unwrap(), Some("default".to_string()));
     }
 
     #[test]
@@ -1245,6 +1306,7 @@ mod tests {
 
     #[test]
     fn test_from_map_validates_scope_keyed() {
+        let _lock = ENV_MUTEX.lock();
         let specs = test_specs();
         // Scope-keyed entry should succeed
         let mut map = HashMap::new();
@@ -1254,7 +1316,7 @@ mod tests {
         let result = BundleConfig::from_map(map, &specs);
         assert!(result.is_ok());
         let config = result.expect("from_map should succeed");
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_REGION_CFG), Some("us-west-2".to_string()));
+        assert_eq!(config.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-west-2".to_string()));
     }
 
     #[test]
@@ -1288,20 +1350,21 @@ mod tests {
 
     #[test]
     fn test_merge() {
+        let _lock = ENV_MUTEX.lock();
         let config1 = BundleConfig::new();
-        config1.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored);
-        config1.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "old", ConfigSource::Stored);
+        config1.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
+        config1.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "old", ConfigSource::Stored).unwrap();
 
         let config2 = BundleConfig::new();
-        config2.set(&Scope::try_from("s3").unwrap(), "region", "us-east-1", ConfigSource::Stored);
-        config2.set(&Scope::try_from("s3").unwrap(), "access_key_id", "KEY123", ConfigSource::Stored);
+        config2.set(&Scope::try_from("s3").unwrap(), "region", "us-east-1", ConfigSource::Stored).unwrap();
+        config2.set(&Scope::try_from("s3").unwrap(), "access_key_id", "KEY123", ConfigSource::Stored).unwrap();
 
         config1.merge(&config2);
 
         // config2 should override config1 for same key+scope+source
-        assert_eq!(config1.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_REGION_CFG), Some("us-east-1".to_string()));
-        assert_eq!(config1.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_ACCESS_KEY_ID_CFG), Some("KEY123".to_string()));
-        assert_eq!(config1.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_ENDPOINT_CFG), Some("old".to_string()));
+        assert_eq!(config1.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-east-1".to_string()));
+        assert_eq!(config1.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_ACCESS_KEY_ID_CFG).unwrap(), Some("KEY123".to_string()));
+        assert_eq!(config1.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_ENDPOINT_CFG).unwrap(), Some("old".to_string()));
     }
 
     // from_env tests use unique env var names to avoid conflicts between parallel tests
@@ -1315,12 +1378,12 @@ mod tests {
 
         let config = BundleConfig::new();
         // Force env cache load
-        config.ensure_env_cache();
+        config.ensure_env_cache().unwrap();
 
         // BB_TESTREGION1 is a single-segment env var (no __), so it should
         // be skipped entirely — not stored at any scope
         assert_eq!(
-            config.get(&Scope::try_from("s3://bucket/").unwrap(), &TEST_TESTREGION1),
+            config.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_IMDSV1_FALLBACK_CFG).unwrap(),
             None
         );
         std::env::remove_var("BB_TESTREGION1");
@@ -1329,136 +1392,138 @@ mod tests {
     #[test]
     fn test_from_env_scoped() {
         let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB_S3_TESTREGION2", "us-west-2");
+        std::env::set_var("BB_S3_CHECKSUM_ALGORITHM", "sha256");
 
         let config = BundleConfig::new();
-        config.ensure_env_cache();
-        // BB_S3_TESTREGION2 -> scope "s3", key "testregion2"
+        config.ensure_env_cache().unwrap();
+        // BB_S3_CHECKSUM_ALGORITHM -> scope "s3", key "checksum_algorithm"
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &TEST_TESTREGION2),
-            Some("us-west-2".to_string())
+            config.get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG).unwrap(),
+            Some("sha256".to_string())
         );
         // Should also match via prefix matching on child paths
         assert_eq!(
-            config.get(&Scope::try_from("s3/bucket").unwrap(), &TEST_TESTREGION2),
-            Some("us-west-2".to_string())
+            config.get(&Scope::try_from("s3/bucket").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG).unwrap(),
+            Some("sha256".to_string())
         );
-        std::env::remove_var("BB_S3_TESTREGION2");
+        std::env::remove_var("BB_S3_CHECKSUM_ALGORITHM");
     }
 
     #[test]
     fn test_from_env_multi_segment_scope() {
         let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB_S3__MY_BUCKET__TESTKEY3", "value");
+        std::env::set_var("BB_S3__MY_BUCKET__CONDITIONAL_PUT", "etag");
 
         let config = BundleConfig::new();
-        config.ensure_env_cache();
-        // BB_S3__MY_BUCKET__TESTKEY3 -> scope "s3/my_bucket", key "testkey3"
+        config.ensure_env_cache().unwrap();
+        // BB_S3__MY_BUCKET__CONDITIONAL_PUT -> scope "s3/my_bucket", key "conditional_put"
         assert_eq!(
-            config.get(&Scope::try_from("s3/my_bucket").unwrap(), &TEST_TESTKEY3),
-            Some("value".to_string())
+            config.get(&Scope::try_from("s3/my_bucket").unwrap(), &S3_CONDITIONAL_PUT_CFG).unwrap(),
+            Some("etag".to_string())
         );
-        std::env::remove_var("BB_S3__MY_BUCKET__TESTKEY3");
+        std::env::remove_var("BB_S3__MY_BUCKET__CONDITIONAL_PUT");
     }
 
     #[test]
     fn test_from_env_empty() {
         // from_env with no BB_ vars should not crash
         let config = BundleConfig::new();
-        config.ensure_env_cache();
+        config.ensure_env_cache().unwrap();
         let _ = config;
     }
 
     #[test]
     fn test_from_env_scope_with_underscore_key() {
         let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB_S3_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE");
+        std::env::set_var("BB_S3_COPY_IF_NOT_EXISTS", "multipart");
 
         let config = BundleConfig::new();
-        config.ensure_env_cache();
-        // BB_S3_ACCESS_KEY_ID -> scope "s3", key "access_key_id"
+        config.ensure_env_cache().unwrap();
+        // BB_S3_COPY_IF_NOT_EXISTS -> scope "s3", key "copy_if_not_exists"
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &S3_ACCESS_KEY_ID_CFG),
-            Some("AKIAIOSFODNN7EXAMPLE".to_string())
+            config.get(&Scope::try_from("s3").unwrap(), &S3_COPY_IF_NOT_EXISTS_CFG).unwrap(),
+            Some("multipart".to_string())
         );
-        std::env::remove_var("BB_S3_ACCESS_KEY_ID");
+        std::env::remove_var("BB_S3_COPY_IF_NOT_EXISTS");
     }
 
     #[test]
     fn test_from_env_leading_double_underscore_rejected() {
         let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB__S3__TESTREGION2", "should-be-skipped");
+        std::env::set_var("BB__S3__CHECKSUM_ALGORITHM", "should-be-skipped");
 
         let config = BundleConfig::new();
-        config.ensure_env_cache();
-        // BB__S3__TESTREGION2 -> first part is "_S3" (starts with _), should be skipped
+        config.ensure_env_cache().unwrap();
+        // BB__S3__CHECKSUM_ALGORITHM -> first part is "_S3" (starts with _), should be skipped
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &TEST_TESTREGION2),
+            config.get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG).unwrap(),
             None
         );
-        std::env::remove_var("BB__S3__TESTREGION2");
+        std::env::remove_var("BB__S3__CHECKSUM_ALGORITHM");
     }
 
     #[test]
     fn test_from_env_deep_sub_path() {
         let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB_S3__A__B__TESTKEY3", "deep-value");
+        std::env::set_var("BB_S3__A__B__CONDITIONAL_PUT", "deep-value");
 
         let config = BundleConfig::new();
-        config.ensure_env_cache();
-        // BB_S3__A__B__TESTKEY3 -> scope "s3/a/b", key "testkey3"
+        config.ensure_env_cache().unwrap();
+        // BB_S3__A__B__CONDITIONAL_PUT -> scope "s3/a/b", key "conditional_put"
         assert_eq!(
-            config.get(&Scope::try_from("s3/a/b").unwrap(), &TEST_TESTKEY3),
+            config.get(&Scope::try_from("s3/a/b").unwrap(), &S3_CONDITIONAL_PUT_CFG).unwrap(),
             Some("deep-value".to_string())
         );
-        std::env::remove_var("BB_S3__A__B__TESTKEY3");
+        std::env::remove_var("BB_S3__A__B__CONDITIONAL_PUT");
     }
 
     #[test]
     fn test_from_env_two_segment_with_double_underscore() {
         let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB_S3__TESTREGION2", "double-us");
+        std::env::set_var("BB_S3__CHECKSUM_ALGORITHM", "double-us");
 
         let config = BundleConfig::new();
-        config.ensure_env_cache();
-        // BB_S3__TESTREGION2 -> split on __ -> ["S3", "TESTREGION2"]
-        // scope "s3", key "testregion2"
+        config.ensure_env_cache().unwrap();
+        // BB_S3__CHECKSUM_ALGORITHM -> split on __ -> ["S3", "CHECKSUM_ALGORITHM"]
+        // scope "s3", key "checksum_algorithm"
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &TEST_TESTREGION2),
+            config.get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG).unwrap(),
             Some("double-us".to_string())
         );
-        std::env::remove_var("BB_S3__TESTREGION2");
+        std::env::remove_var("BB_S3__CHECKSUM_ALGORITHM");
     }
 
     #[test]
     fn test_from_env_case_insensitive() {
         let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB_S3_TESTREGION2", "case-test");
+        std::env::set_var("BB_S3_CHECKSUM_ALGORITHM", "case-test");
 
         let config = BundleConfig::new();
-        config.ensure_env_cache();
-        // BB_S3_TESTREGION2 -> scope "s3", key "testregion2" (all lowercase)
+        config.ensure_env_cache().unwrap();
+        // BB_S3_CHECKSUM_ALGORITHM -> scope "s3", key "checksum_algorithm" (all lowercase)
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &TEST_TESTREGION2),
+            config.get(&Scope::try_from("s3").unwrap(), &S3_CHECKSUM_ALGORITHM_CFG).unwrap(),
             Some("case-test".to_string())
         );
-        std::env::remove_var("BB_S3_TESTREGION2");
+        std::env::remove_var("BB_S3_CHECKSUM_ALGORITHM");
     }
 
     #[test]
     fn test_values_empty() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        assert!(config.values(&[]).is_empty());
-        assert!(config.all_values(&[]).is_empty());
+        assert!(config.values(&[]).unwrap().is_empty());
+        assert!(config.all_values(&[]).unwrap().is_empty());
     }
 
     #[test]
     fn test_values_single_layer() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored);
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "http://minio", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
+        config.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "http://minio", ConfigSource::Stored).unwrap();
 
-        let values = config.values(&[]);
+        let values = config.values(&[]).unwrap();
         assert_eq!(values.len(), 2);
 
         let region = values.iter().find(|e| e.key == "region").expect("region entry");
@@ -1475,11 +1540,12 @@ mod tests {
 
     #[test]
     fn test_all_values_multiple_layers() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored);
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-east-1", ConfigSource::Runtime);
+        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
+        config.set(&Scope::try_from("s3").unwrap(), "region", "us-east-1", ConfigSource::Runtime).unwrap();
 
-        let all = config.all_values(&[]);
+        let all = config.all_values(&[]).unwrap();
         assert_eq!(all.len(), 2);
 
         let stored_entry = all.iter().find(|e| e.source == ConfigSource::Stored).expect("stored entry");
@@ -1491,7 +1557,7 @@ mod tests {
         assert!(runtime_entry.active, "runtime should win");
 
         // values() should only return the winner
-        let active = config.values(&[]);
+        let active = config.values(&[]).unwrap();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].value, "us-east-1");
         assert_eq!(active[0].source, ConfigSource::Runtime);
@@ -1499,12 +1565,13 @@ mod tests {
 
     #[test]
     fn test_all_values_scoped() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "us-west-2", ConfigSource::Stored);
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "eu-west-1", ConfigSource::Passed);
-        config.set(&Scope::try_from("s3").unwrap(), "endpoint", "http://localhost", ConfigSource::Passed);
+        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
+        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "eu-west-1", ConfigSource::Passed).unwrap();
+        config.set(&Scope::try_from("s3").unwrap(), "endpoint", "http://localhost", ConfigSource::Passed).unwrap();
 
-        let all = config.all_values(&[]);
+        let all = config.all_values(&[]).unwrap();
         assert_eq!(all.len(), 3);
 
         // Scoped "region": stored is overridden, passed wins
@@ -1527,14 +1594,15 @@ mod tests {
 
     #[test]
     fn test_secure_flag_on_entries() {
+        let _lock = ENV_MUTEX.lock();
         let specs = test_specs();
 
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "us-west-2", ConfigSource::Stored);
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "secret_access_key", "SECRETKEY", ConfigSource::Stored);
-        config.set(&Scope::try_from("s3").unwrap(), "endpoint", "http://localhost", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
+        config.set(&Scope::try_from("s3://bucket/").unwrap(), "secret_access_key", "SECRETKEY", ConfigSource::Stored).unwrap();
+        config.set(&Scope::try_from("s3").unwrap(), "endpoint", "http://localhost", ConfigSource::Stored).unwrap();
 
-        let all = config.all_values(&specs);
+        let all = config.all_values(&specs).unwrap();
         assert_eq!(all.len(), 3);
 
         let region = all.iter().find(|e| e.key == "region").expect("region");
@@ -1570,9 +1638,9 @@ mod tests {
     #[test]
     fn test_passed_entries() {
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Passed);
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "http://minio", ConfigSource::Passed);
-        config.set(&Scope::try_from("s3").unwrap(), "stored_key", "stored_value", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Passed).unwrap();
+        config.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "http://minio", ConfigSource::Passed).unwrap();
+        config.set(&Scope::try_from("s3").unwrap(), "allow_http", "stored_value", ConfigSource::Stored).unwrap();
 
         let passed = config.passed_entries();
         assert_eq!(passed.len(), 2);
@@ -1588,43 +1656,46 @@ mod tests {
 
     #[test]
     fn test_reload_non_runtime() {
+        let _lock = ENV_MUTEX.lock();
         let config1 = BundleConfig::new();
-        config1.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored);
-        config1.set(&Scope::try_from("s3").unwrap(), "test_runtime_key", "runtime_value", ConfigSource::Runtime);
+        config1.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
+        config1.set(&Scope::try_from("s3").unwrap(), "skip_signature", "runtime_value", ConfigSource::Runtime).unwrap();
 
         let config2 = BundleConfig::new();
-        config2.set(&Scope::try_from("s3").unwrap(), "region", "eu-west-1", ConfigSource::Stored);
-        config2.set(&Scope::try_from("s3").unwrap(), "test_new_key", "new_value", ConfigSource::Passed);
+        config2.set(&Scope::try_from("s3").unwrap(), "region", "eu-west-1", ConfigSource::Stored).unwrap();
+        config2.set(&Scope::try_from("s3").unwrap(), "bucket", "new_value", ConfigSource::Passed).unwrap();
 
         config1.reload_non_runtime(&config2);
 
         // Runtime should be preserved
-        assert_eq!(config1.get(&Scope::try_from("s3://bucket/").unwrap(), &TEST_RUNTIME_KEY), Some("runtime_value".to_string()));
+        assert_eq!(config1.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_SKIP_SIGNATURE_CFG).unwrap(), Some("runtime_value".to_string()));
         // Stored should come from config2
-        assert_eq!(config1.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG), Some("eu-west-1".to_string()));
+        assert_eq!(config1.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG).unwrap(), Some("eu-west-1".to_string()));
         // Passed from config2 should be present
-        assert_eq!(config1.get(&Scope::try_from("s3://bucket/").unwrap(), &TEST_NEW_KEY), Some("new_value".to_string()));
+        assert_eq!(config1.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_BUCKET_CFG).unwrap(), Some("new_value".to_string()));
     }
 
     #[test]
     fn test_priority_ordering() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "stored", ConfigSource::Stored);
-        config.set(&Scope::try_from("s3").unwrap(), "region", "passed", ConfigSource::Passed);
+        config.set(&Scope::try_from("s3").unwrap(), "region", "stored", ConfigSource::Stored).unwrap();
+        config.set(&Scope::try_from("s3").unwrap(), "region", "passed", ConfigSource::Passed).unwrap();
 
         // Passed should win over Stored
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG), Some("passed".to_string()));
+        assert_eq!(config.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG).unwrap(), Some("passed".to_string()));
 
         // Runtime should win over everything
-        config.set(&Scope::try_from("s3").unwrap(), "region", "runtime", ConfigSource::Runtime);
-        assert_eq!(config.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG), Some("runtime".to_string()));
+        config.set(&Scope::try_from("s3").unwrap(), "region", "runtime", ConfigSource::Runtime).unwrap();
+        assert_eq!(config.get(&Scope::try_from("s3://bucket/").unwrap(), &S3_REGION_CFG).unwrap(), Some("runtime".to_string()));
     }
 
     #[test]
     fn test_serialized_config_roundtrip() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored);
-        config.set(&Scope::try_from("s3://test/").unwrap(), "endpoint", "http://localhost", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Stored).unwrap();
+        config.set(&Scope::try_from("s3://test/").unwrap(), "endpoint", "http://localhost", ConfigSource::Stored).unwrap();
 
         let serialized = SerializedConfig::from_bundle_config(&config);
         assert_eq!(
@@ -1643,25 +1714,26 @@ mod tests {
 
         // Load back into a new BundleConfig
         let config2 = BundleConfig::new();
-        deserialized.into_bundle_config(&config2);
-        assert_eq!(config2.get(&Scope::try_from("s3://test/file").unwrap(), &S3_REGION_CFG), Some("us-west-2".to_string()));
-        assert_eq!(config2.get(&Scope::try_from("s3://test/file").unwrap(), &S3_ENDPOINT_CFG), Some("http://localhost".to_string()));
+        deserialized.into_bundle_config(&config2).unwrap();
+        assert_eq!(config2.get(&Scope::try_from("s3://test/file").unwrap(), &S3_REGION_CFG).unwrap(), Some("us-west-2".to_string()));
+        assert_eq!(config2.get(&Scope::try_from("s3://test/file").unwrap(), &S3_ENDPOINT_CFG).unwrap(), Some("http://localhost".to_string()));
     }
 
     #[test]
     fn test_longest_prefix_wins_over_source_priority() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3://").unwrap(), "region", "runtime-short", ConfigSource::Runtime);
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "stored-long", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3://").unwrap(), "region", "runtime-short", ConfigSource::Runtime).unwrap();
+        config.set(&Scope::try_from("s3://bucket/").unwrap(), "region", "stored-long", ConfigSource::Stored).unwrap();
 
         // Longer prefix in Stored beats shorter prefix in Runtime
         assert_eq!(
-            config.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_REGION_CFG),
+            config.get(&Scope::try_from("s3://bucket/file").unwrap(), &S3_REGION_CFG).unwrap(),
             Some("stored-long".to_string())
         );
         // Path that only matches the short prefix → Runtime wins
         assert_eq!(
-            config.get(&Scope::try_from("s3://other/file").unwrap(), &S3_REGION_CFG),
+            config.get(&Scope::try_from("s3://other/file").unwrap(), &S3_REGION_CFG).unwrap(),
             Some("runtime-short".to_string())
         );
     }
@@ -1825,7 +1897,7 @@ mod tests {
 
     // Test keys with defaults - use S3_SCOPE as the real scope
     const TEST_KEY_WITH_DEFAULT: ConfigKey = S3_SCOPE
-        .define("test_base_url")
+        .define("allow_http")
         .with_default("https://default.example.com");
     const TEST_KEY_NO_DEFAULT: ConfigKey = S3_SCOPE.define("test_no_default");
 
@@ -1840,48 +1912,52 @@ mod tests {
 
     #[test]
     fn test_get_returns_static_default_when_no_value_set() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT),
+            config.get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT).unwrap(),
             Some("https://default.example.com".to_string())
         );
         // Also matches child scopes
         assert_eq!(
-            config.get(&Scope::try_from("s3://bucket").unwrap(), &TEST_KEY_WITH_DEFAULT),
+            config.get(&Scope::try_from("s3://bucket").unwrap(), &TEST_KEY_WITH_DEFAULT).unwrap(),
             Some("https://default.example.com".to_string())
         );
     }
 
     #[test]
     fn test_get_returns_none_for_incompatible_scope_even_with_default() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
         // A different scope should not return the default
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT),
+            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT).unwrap(),
             None
         );
     }
 
     #[test]
     fn test_get_returns_explicit_value_over_default() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3").unwrap(), "test_base_url", "https://custom.example.com", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3").unwrap(), "allow_http", "https://custom.example.com", ConfigSource::Stored).unwrap();
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT),
+            config.get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT).unwrap(),
             Some("https://custom.example.com".to_string())
         );
     }
 
     #[test]
     fn test_all_values_includes_default_entry() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
         let specs = &[TEST_KEY_WITH_DEFAULT, TEST_KEY_NO_DEFAULT];
-        let all = config.all_values(specs);
+        let all = config.all_values(specs).unwrap();
 
         let default_entry = all.iter().find(|e| {
-            e.key == "test_base_url" && e.source == ConfigSource::Default
+            e.key == "allow_http" && e.source == ConfigSource::Default
         });
-        assert!(default_entry.is_some(), "Expected a default entry for test_base_url");
+        assert!(default_entry.is_some(), "Expected a default entry for allow_http");
         let entry = default_entry.expect("just checked");
         assert_eq!(entry.value, "https://default.example.com");
         assert_eq!(entry.scope, Scope::try_from("s3").unwrap());
@@ -1893,11 +1969,12 @@ mod tests {
 
     #[test]
     fn test_all_values_marks_default_inactive_when_overridden() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("s3").unwrap(), "test_base_url", "https://override.example.com", ConfigSource::Stored);
+        config.set(&Scope::try_from("s3").unwrap(), "allow_http", "https://override.example.com", ConfigSource::Stored).unwrap();
 
         let specs = &[TEST_KEY_WITH_DEFAULT];
-        let all = config.all_values(specs);
+        let all = config.all_values(specs).unwrap();
 
         let default_entry = all.iter().find(|e| e.source == ConfigSource::Default).expect("default entry");
         assert!(!default_entry.active, "Default should be inactive when overridden");
@@ -1919,7 +1996,7 @@ mod tests {
 
     // Test keys with default functions - use GCS_SCOPE to avoid conflicts
     const TEST_KEY_WITH_DEFAULT_FN: ConfigKey = GCS_SCOPE
-        .define("test_dynamic_key")
+        .define("service_account_path")
         .with_default_fn("test source", test_default_fn_value);
     const TEST_KEY_WITH_DEFAULT_FN_NONE: ConfigKey = GCS_SCOPE
         .define("test_none_key")
@@ -1934,37 +2011,41 @@ mod tests {
 
     #[test]
     fn test_get_returns_default_fn_value() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN),
+            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN).unwrap(),
             Some("dynamic_value".to_string())
         );
         assert_eq!(
-            config.get(&Scope::try_from("gs://bucket").unwrap(), &TEST_KEY_WITH_DEFAULT_FN),
+            config.get(&Scope::try_from("gs://bucket").unwrap(), &TEST_KEY_WITH_DEFAULT_FN).unwrap(),
             Some("dynamic_value".to_string())
         );
     }
 
     #[test]
     fn test_get_returns_none_when_default_fn_returns_none() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN_NONE),
+            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN_NONE).unwrap(),
             None
         );
     }
 
     #[test]
     fn test_get_returns_none_for_incompatible_scope_with_default_fn() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
         assert_eq!(
-            config.get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT_FN),
+            config.get(&Scope::try_from("s3").unwrap(), &TEST_KEY_WITH_DEFAULT_FN).unwrap(),
             None
         );
     }
 
     #[test]
     fn test_default_fn_takes_priority_over_default_value() {
+        let _lock = ENV_MUTEX.lock();
         // When both default_value and default_fn are set, default_fn wins
         const KEY_BOTH: ConfigKey = GCS_SCOPE
             .define("test_both_key")
@@ -1973,44 +2054,47 @@ mod tests {
 
         let config = BundleConfig::new();
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &KEY_BOTH),
+            config.get(&Scope::try_from("gs").unwrap(), &KEY_BOTH).unwrap(),
             Some("dynamic_value".to_string())
         );
     }
 
     #[test]
     fn test_default_value_used_when_no_default_fn() {
+        let _lock = ENV_MUTEX.lock();
         const KEY_STATIC_ONLY: ConfigKey = GCS_SCOPE
             .define("test_static_only")
             .with_default("static_value");
 
         let config = BundleConfig::new();
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &KEY_STATIC_ONLY),
+            config.get(&Scope::try_from("gs").unwrap(), &KEY_STATIC_ONLY).unwrap(),
             Some("static_value".to_string())
         );
     }
 
     #[test]
     fn test_get_returns_explicit_value_over_default_fn() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("gs").unwrap(), "test_dynamic_key", "explicit", ConfigSource::Stored);
+        config.set(&Scope::try_from("gs").unwrap(), "service_account_path", "explicit", ConfigSource::Stored).unwrap();
         assert_eq!(
-            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN),
+            config.get(&Scope::try_from("gs").unwrap(), &TEST_KEY_WITH_DEFAULT_FN).unwrap(),
             Some("explicit".to_string())
         );
     }
 
     #[test]
     fn test_all_values_includes_default_fn_entry() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
         let specs = &[TEST_KEY_WITH_DEFAULT_FN];
-        let all = config.all_values(specs);
+        let all = config.all_values(specs).unwrap();
 
         let fn_default_entry = all.iter().find(|e| {
-            e.key == "test_dynamic_key" && e.source == ConfigSource::Default
+            e.key == "service_account_path" && e.source == ConfigSource::Default
         });
-        assert!(fn_default_entry.is_some(), "Expected a default entry for test_dynamic_key");
+        assert!(fn_default_entry.is_some(), "Expected a default entry for service_account_path");
         let entry = fn_default_entry.expect("just checked");
         assert_eq!(entry.value, "test source");
         assert_eq!(entry.scope, Scope::try_from("gs").unwrap());
@@ -2019,9 +2103,10 @@ mod tests {
 
     #[test]
     fn test_all_values_default_fn_inactive_when_fn_returns_none() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
         let specs = &[TEST_KEY_WITH_DEFAULT_FN_NONE];
-        let all = config.all_values(specs);
+        let all = config.all_values(specs).unwrap();
 
         let fn_default_entry = all.iter().find(|e| {
             e.key == "test_none_key" && e.source == ConfigSource::Default
@@ -2033,14 +2118,15 @@ mod tests {
 
     #[test]
     fn test_all_values_default_fn_inactive_when_overridden() {
+        let _lock = ENV_MUTEX.lock();
         let config = BundleConfig::new();
-        config.set(&Scope::try_from("gs").unwrap(), "test_dynamic_key", "override", ConfigSource::Stored);
+        config.set(&Scope::try_from("gs").unwrap(), "service_account_path", "override", ConfigSource::Stored).unwrap();
 
         let specs = &[TEST_KEY_WITH_DEFAULT_FN];
-        let all = config.all_values(specs);
+        let all = config.all_values(specs).unwrap();
 
         let fn_default_entry = all.iter().find(|e| {
-            e.key == "test_dynamic_key" && e.source == ConfigSource::Default
+            e.key == "service_account_path" && e.source == ConfigSource::Default
         }).expect("default entry");
         assert!(!fn_default_entry.active, "Dynamic default should be inactive when overridden");
 

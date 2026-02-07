@@ -32,6 +32,7 @@ pub struct Scope(String);
 
 /// Custom deserializer that validates scope strings, with backwards compatibility
 /// for the legacy `"/"` global scope.
+/// todo: remove legacy global scope
 impl<'de> serde::Deserialize<'de> for Scope {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

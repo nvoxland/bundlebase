@@ -37,6 +37,7 @@ pub type BundlebaseError = Box<dyn Error + Send + Sync>;
 /// All known configuration key specs for validation.
 ///
 /// Thin wrapper around `BundleConfig::all_keys()` for backward compatibility.
+/// TODO: remove
 pub fn all_config_specs() -> Vec<bundle_config::ConfigKey> {
     BundleConfig::all_keys()
 }
@@ -44,6 +45,7 @@ pub fn all_config_specs() -> Vec<bundle_config::ConfigKey> {
 /// All known configuration scopes.
 ///
 /// Thin wrapper around `BundleConfig::all_scopes()`.
+/// TODO: remove
 pub fn all_config_scopes() -> Vec<bundle_config::ConfigScope> {
     BundleConfig::all_scopes()
 }

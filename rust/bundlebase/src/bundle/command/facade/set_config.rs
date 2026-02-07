@@ -21,20 +21,20 @@ use std::sync::Arc;
 /// on both read-only `Bundle` and `BundleBuilder` via the `BundleFacade` trait.
 #[derive(Debug, Clone)]
 pub struct SetConfigCommand {
+    /// Named scope (e.g., "s3", "s3/bucket")
+    pub scope: Scope,
     /// Configuration key
     pub key: String,
     /// Configuration value
     pub value: String,
-    /// Named scope (e.g., "s3", "s3/bucket")
-    pub scope: Scope,
 }
 
 impl SetConfigCommand {
     /// Create a new SetConfigCommand.
     pub fn new(
+        scope: Scope,
         key: impl Into<String>,
         value: impl Into<String>,
-        scope: Scope,
     ) -> Self {
         Self {
             key: key.into(),
@@ -177,9 +177,9 @@ mod parsing_tests {
     #[test]
     fn test_round_trip_with_scope() {
         let cmd = SetConfigCommand::new(
+            Scope::try_from("s3/test").unwrap(),
             "endpoint",
             "http://localhost:9000",
-            Scope::try_from("s3/test").unwrap(),
         );
         let statement = cmd.to_statement();
         assert_eq!(statement, "SET CONFIG endpoint = 'http://localhost:9000' FOR 's3/test'");
@@ -196,7 +196,7 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip_named_scope() {
-        let cmd = SetConfigCommand::new("region", "us-west-2", Scope::try_from("s3").unwrap());
+        let cmd = SetConfigCommand::new(Scope::try_from("s3").unwrap(), "region", "us-west-2");
         let statement = cmd.to_statement();
         assert_eq!(statement, "SET CONFIG region = 'us-west-2' FOR 's3'");
         let parsed = parse_command(&statement).unwrap();

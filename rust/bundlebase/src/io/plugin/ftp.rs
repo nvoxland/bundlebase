@@ -60,7 +60,7 @@ pub fn parse_ftp_url(url: &Url) -> Result<(String, u16, String), BundlebaseError
     Ok((host.to_string(), port, path))
 }
 
-/// Build an FTP URL from components (without credentials).
+/// Build an FTP URL from components
 ///
 /// Constructs a URL in the format: `ftp://host:port/path`
 fn build_ftp_url(host: &str, port: u16, path: &str) -> Result<Url, BundlebaseError> {
@@ -95,9 +95,9 @@ impl FtpFile {
     pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<Self, BundlebaseError> {
         let (host, port, path) = parse_ftp_url(url)?;
         let scope = crate::bundle_config::Scope::try_from(url)?;
-        let user = config.get(&scope, &FTP_USERNAME_CFG)
+        let user = config.get(&scope, &FTP_USERNAME_CFG)?
             .unwrap_or_else(|| "anonymous".to_string());
-        let password = config.get(&scope, &FTP_PASSWORD_CFG)
+        let password = config.get(&scope, &FTP_PASSWORD_CFG)?
             .unwrap_or_default();
         Ok(Self {
             url: url.clone(),
@@ -264,9 +264,9 @@ impl FtpDir {
     pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<Self, BundlebaseError> {
         let (host, port, path) = parse_ftp_url(url)?;
         let scope = crate::bundle_config::Scope::try_from(url)?;
-        let user = config.get(&scope, &FTP_USERNAME_CFG)
+        let user = config.get(&scope, &FTP_USERNAME_CFG)?
             .unwrap_or_else(|| "anonymous".to_string());
-        let password = config.get(&scope, &FTP_PASSWORD_CFG)
+        let password = config.get(&scope, &FTP_PASSWORD_CFG)?
             .unwrap_or_default();
         Ok(Self {
             url: url.clone(),
@@ -528,8 +528,8 @@ mod tests {
         let scope = Scope::try_from(
             "ftp://ftp.example.com:2121/data/file.txt",
         ).unwrap();
-        config.set(&scope, FTP_USERNAME_CFG.key, "testuser", ConfigSource::Passed);
-        config.set(&scope, FTP_PASSWORD_CFG.key, "testpass", ConfigSource::Passed);
+        config.set(&scope, FTP_USERNAME_CFG.key, "testuser", ConfigSource::Passed).unwrap();
+        config.set(&scope, FTP_PASSWORD_CFG.key, "testpass", ConfigSource::Passed).unwrap();
 
         let url = Url::parse("ftp://ftp.example.com:2121/data/file.txt").unwrap();
         let ftp_file = FtpFile::from_url(&url, config).unwrap();
@@ -553,8 +553,8 @@ mod tests {
     fn test_ftp_dir_from_url_with_config() {
         let config = Arc::new(BundleConfig::new());
         let scope = Scope::try_from("ftp").unwrap();
-        config.set(&scope, FTP_USERNAME_CFG.key, "myuser", ConfigSource::Passed);
-        config.set(&scope, FTP_PASSWORD_CFG.key, "mypass", ConfigSource::Passed);
+        config.set(&scope, FTP_USERNAME_CFG.key, "myuser", ConfigSource::Passed).unwrap();
+        config.set(&scope, FTP_PASSWORD_CFG.key, "mypass", ConfigSource::Passed).unwrap();
 
         let url = Url::parse("ftp://ftp.example.com/pub/data/").unwrap();
         let ftp_dir = FtpDir::from_url(&url, config).unwrap();
