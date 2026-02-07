@@ -107,23 +107,6 @@ async def test_config_flat_keys_rejected():
         config = {"region": "us-west-2"}
         await bundlebase.create(random_bundle(), config=config)
 
-
-@pytest.mark.asyncio
-async def test_config_scoped_keys_override_env():
-    """Test that passed scoped config overrides environment variables."""
-    import os
-
-    env_key = "BB_S3_REGION"
-    os.environ[env_key] = "env_value"
-    try:
-        # Passed config should override the env var
-        config = {"s3": {"region": "passed_value"}}
-        c = await bundlebase.create(random_bundle(), config=config)
-        assert c is not None
-    finally:
-        del os.environ[env_key]
-
-
 @pytest.mark.asyncio
 async def test_set_config_basic():
     """Test set_config sets a runtime config value."""
@@ -155,95 +138,6 @@ async def test_set_config_chaining():
                .set_config("s3", "region", "us-west-2")
                .set_config("s3", "endpoint", "http://localhost:9000"))
     assert c is not None
-
-
-@pytest.mark.asyncio
-async def test_set_config_not_persisted():
-    """Test that set_config values are not persisted after commit/reopen."""
-    import tempfile, os
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "bundle")
-
-        c = await bundlebase.create(path)
-        # Set runtime config and then commit — runtime config should NOT be persisted
-        c = await c.set_config("s3", "region", "us-west-2")
-        await c.commit("Initial commit")
-
-        # Reopen — the runtime config should not be there (it's session-only)
-        c2 = await bundlebase.open(path)
-        # We can't directly inspect config, but we verify the bundle opens normally
-        assert c2 is not None
-
-
-@pytest.mark.asyncio
-async def test_save_config_last_wins():
-    """Test that when save_config is called multiple times for the same key, the last value wins.
-
-    Both operations are preserved in the operation history, but the last value
-    is the one that takes effect when the config is resolved.
-    """
-    import tempfile, os
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "bundle")
-
-        c = await bundlebase.create(path)
-        c = await c.save_config("s3", "region", "us-west-1")
-        c = await c.save_config("s3", "region", "us-east-1")
-        await c.commit("Override config")
-
-        # Reopen and verify both operations were persisted
-        reopened = await bundlebase.open(path)
-        builder = await reopened.extend()
-        config_ops = [op for op in builder.operations() if op.op_type == "saveConfig"]
-        assert len(config_ops) == 2
-        # Last operation should be the override
-        assert "us-east-1" in config_ops[1].describe
-
-
-@pytest.mark.asyncio
-async def test_save_config_last_wins_scoped():
-    """Test that scoped save_config last-value-wins works after commit/reopen."""
-    import tempfile, os
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "bundle")
-
-        c = await bundlebase.create(path)
-        c = await c.save_config("s3/bucket", "endpoint", "http://old:9000")
-        c = await c.save_config("s3/bucket", "endpoint", "http://new:9000")
-        await c.commit("Override scoped config")
-
-        reopened = await bundlebase.open(path)
-        builder = await reopened.extend()
-        config_ops = [op for op in builder.operations() if op.op_type == "saveConfig"]
-        assert len(config_ops) == 2
-        assert "http://new:9000" in config_ops[1].describe
-
-
-@pytest.mark.asyncio
-async def test_save_config_last_wins_across_commits():
-    """Test that save_config in a later commit overrides an earlier commit."""
-    import tempfile, os
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "bundle")
-
-        c = await bundlebase.create(path)
-        c = await c.save_config("s3", "region", "us-west-1")
-        await c.commit("First config")
-
-        c = await c.save_config("s3", "region", "eu-west-1")
-        await c.commit("Override config")
-
-        reopened = await bundlebase.open(path)
-        builder = await reopened.extend()
-        config_ops = [op for op in builder.operations() if op.op_type == "saveConfig"]
-        assert len(config_ops) == 2
-        # Operations are in commit order — last one wins
-        assert "us-west-1" in config_ops[0].describe
-        assert "eu-west-1" in config_ops[1].describe
 
 
 

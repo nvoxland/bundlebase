@@ -224,33 +224,15 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
 | `version` | No | Dataset version number to download (default: latest) |
 
 !!! note "Authentication"
-    Kaggle credentials can be configured three ways (highest priority first):
+    Kaggle credentials are configured via [bundlebase configuration](configuration.md). Available config keys for the `kaggle` scope:
 
-    **Via environment variables** (highest priority):
-    ```bash
-    export BB_KAGGLE__USERNAME=YOUR_USERNAME
-    export BB_KAGGLE__KEY=YOUR_API_KEY
-    ```
+    | Key | Description | Default |
+    |-----|-------------|---------|
+    | `username` | Kaggle username | from `~/.kaggle/kaggle.json` |
+    | `key` | Kaggle API key | from `~/.kaggle/kaggle.json` |
+    | `url` | Kaggle API base URL | `https://www.kaggle.com` |
 
-    **Via BundleConfig** (recommended for programmatic use):
-    ```python
-    config = bb.BundleConfig()
-    config.set("username", "YOUR_USERNAME", url_prefix="kaggle://")
-    config.set("key", "YOUR_API_KEY", url_prefix="kaggle://")
-    bundle = await bb.create("my/data", config=config)
-    ```
-
-    **Via credentials file** (fallback):
-    If not set in config, credentials are read from `~/.kaggle/kaggle.json`:
-    ```json
-    {"username": "YOUR_USERNAME", "key": "YOUR_API_KEY"}
-    ```
-    You can create this file by running `kaggle` CLI setup or by generating an API token from your [Kaggle account settings](https://www.kaggle.com/settings).
-
-    The API base URL can also be overridden:
-    ```python
-    config.set("base_url", "https://custom-endpoint.example.com", url_prefix="kaggle://")
-    ```
+    If `username` and `key` are not set via bundlebase config, they fall back to the standard Kaggle credentials file at `~/.kaggle/kaggle.json`. You can create this file by running `kaggle` CLI setup or by generating an API token from your [Kaggle account settings](https://www.kaggle.com/settings).
 
 !!! note
     Files are always copied into the bundle since Kaggle files are downloaded from a remote API.
