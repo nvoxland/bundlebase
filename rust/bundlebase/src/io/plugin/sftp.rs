@@ -265,7 +265,7 @@ impl SftpFile {
 
         // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
-            .get(&crate::bundle_config::Scope::from(url.as_str()), &SFTP_KEY_PATH_CFG)
+            .get(&crate::bundle_config::Scope::try_from(url)?, &SFTP_KEY_PATH_CFG)
             .unwrap_or_else(|| "~/.ssh/id_rsa".to_string());
 
         Ok(Self {
@@ -395,7 +395,7 @@ impl SftpDir {
 
         // Get key_path from config, env var, or default to ~/.ssh/id_rsa
         let key_path = config
-            .get(&crate::bundle_config::Scope::from(url.as_str()), &SFTP_KEY_PATH_CFG)
+            .get(&crate::bundle_config::Scope::try_from(url)?, &SFTP_KEY_PATH_CFG)
             .or_else(|| std::env::var("SSH_KEY_PATH").ok())
             .unwrap_or_else(|| "~/.ssh/id_rsa".to_string());
 

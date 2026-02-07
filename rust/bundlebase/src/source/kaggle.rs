@@ -21,12 +21,12 @@ use client::KaggleClient;
 
 config_scopes!(scopes, {
     pub const KAGGLE_SCOPE: ConfigScope = {
-        /// Custom path→Scope for Kaggle: extracts owner/dataset from the URL path.
+        /// Custom URL→name for Kaggle: extracts owner/dataset from the URL path.
         /// Strips a leading `/datasets/` prefix if present.
-        /// e.g., "https://www.kaggle.com/datasets/zillow/zecon" → Some(Scope("kaggle/zillow/zecon"))
-        /// e.g., "https://www.kaggle.com/zillow/zecon/extra"    → Some(Scope("kaggle/zillow/zecon"))
-        fn from_path(scope: &ConfigScope, path: &str) -> Option<Scope> {
-            if let Ok(url) = Url::parse(path) {
+        /// e.g., "https://www.kaggle.com/datasets/zillow/zecon" → Some("kaggle/zillow/zecon")
+        /// e.g., "https://www.kaggle.com/zillow/zecon/extra"    → Some("kaggle/zillow/zecon")
+        fn url_to_name(scope: &ConfigScope, input: &str) -> Option<String> {
+            if let Ok(url) = Url::parse(input) {
                 let mut segments = url.path()
                     .split('/')
                     .filter(|s| !s.is_empty())
@@ -37,18 +37,18 @@ config_scopes!(scopes, {
                 }
                 let owner_dataset: Vec<&str> = segments.take(2).collect();
                 if owner_dataset.is_empty() {
-                    Some(crate::bundle_config::Scope::new(scope.name))
+                    Some(scope.name.to_string())
                 } else {
-                    Some(crate::bundle_config::Scope::new(&format!(
+                    Some(format!(
                         "{}/{}",
                         scope.name, owner_dataset.join("/")
-                    )))
+                    ))
                 }
             } else {
                 None
             }
         }
-        BundleConfig::register_scope("kaggle").with_from_path(from_path)
+        BundleConfig::register_scope("kaggle").with_url_to_name(url_to_name)
     };
 });
 
@@ -877,7 +877,7 @@ mod tests {
     #[test]
     fn test_kaggle_client_from_config() {
         let config = BundleConfig::new();
-        let scope = Scope::from_name("kaggle").unwrap();
+        let scope = Scope::parse("kaggle").unwrap();
         config.set(
             &scope,
             URL_CFG.key,
@@ -908,7 +908,7 @@ mod tests {
         // If only username is set in config (no key), key falls back to default_fn.
         // If default_fn also returns None, key is simply None.
         let config = BundleConfig::new();
-        let scope = Scope::from_name("kaggle").unwrap();
+        let scope = Scope::parse("kaggle").unwrap();
         config.set(
             &scope,
             USERNAME_CFG.key,
@@ -1324,63 +1324,48 @@ mod tests {
         );
     }
 
-    // ── kaggle scope from_path tests ───────────────────────────────────
+    // ── kaggle scope url_to_name tests ───────────────────────────────────
 
     #[test]
-    fn test_kaggle_scope_from_path_https() {
-        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/a/b/c");
-        assert_eq!(
-            result,
-            Some(Scope::from_name("kaggle/a/b").unwrap())
-        );
+    fn test_kaggle_scope_url_to_name_https() {
+        let result = KAGGLE_SCOPE.url_to_name("https://www.kaggle.com/a/b/c");
+        assert_eq!(result, Some("kaggle/a/b".to_string()));
     }
 
     #[test]
-    fn test_kaggle_scope_from_path_root_trailing_slash() {
-        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/");
-        assert_eq!(result, Some(Scope::from_name("kaggle").unwrap()));
+    fn test_kaggle_scope_url_to_name_root_trailing_slash() {
+        let result = KAGGLE_SCOPE.url_to_name("https://www.kaggle.com/");
+        assert_eq!(result, Some("kaggle".to_string()));
     }
 
     #[test]
-    fn test_kaggle_scope_from_path_root_no_slash() {
-        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com");
-        assert_eq!(result, Some(Scope::from_name("kaggle").unwrap()));
+    fn test_kaggle_scope_url_to_name_root_no_slash() {
+        let result = KAGGLE_SCOPE.url_to_name("https://www.kaggle.com");
+        assert_eq!(result, Some("kaggle".to_string()));
     }
 
     #[test]
-    fn test_kaggle_scope_from_path_scheme() {
+    fn test_kaggle_scope_url_to_name_scheme() {
         // In kaggle://config, "config" is the host (not the path), so url.path() is empty
-        let result = KAGGLE_SCOPE.from_path("kaggle://config");
-        assert_eq!(
-            result,
-            Some(Scope::from_name("kaggle").unwrap())
-        );
+        let result = KAGGLE_SCOPE.url_to_name("kaggle://config");
+        assert_eq!(result, Some("kaggle".to_string()));
     }
 
     #[test]
-    fn test_kaggle_scope_from_path_strips_trailing_slash() {
-        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/a/b/");
-        assert_eq!(
-            result,
-            Some(Scope::from_name("kaggle/a/b").unwrap())
-        );
+    fn test_kaggle_scope_url_to_name_strips_trailing_slash() {
+        let result = KAGGLE_SCOPE.url_to_name("https://www.kaggle.com/a/b/");
+        assert_eq!(result, Some("kaggle/a/b".to_string()));
     }
 
     #[test]
-    fn test_kaggle_scope_from_path_datasets_prefix() {
-        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/datasets/zillow/zecon");
-        assert_eq!(
-            result,
-            Some(Scope::from_name("kaggle/zillow/zecon").unwrap())
-        );
+    fn test_kaggle_scope_url_to_name_datasets_prefix() {
+        let result = KAGGLE_SCOPE.url_to_name("https://www.kaggle.com/datasets/zillow/zecon");
+        assert_eq!(result, Some("kaggle/zillow/zecon".to_string()));
     }
 
     #[test]
-    fn test_kaggle_scope_from_path_datasets_prefix_with_extra() {
-        let result = KAGGLE_SCOPE.from_path("https://www.kaggle.com/datasets/zillow/zecon/data");
-        assert_eq!(
-            result,
-            Some(Scope::from_name("kaggle/zillow/zecon").unwrap())
-        );
+    fn test_kaggle_scope_url_to_name_datasets_prefix_with_extra() {
+        let result = KAGGLE_SCOPE.url_to_name("https://www.kaggle.com/datasets/zillow/zecon/data");
+        assert_eq!(result, Some("kaggle/zillow/zecon".to_string()));
     }
 }
