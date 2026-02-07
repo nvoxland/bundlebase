@@ -70,7 +70,7 @@ impl CommandParsing for SaveConfigCommand {
         let key = key.ok_or_else(|| -> BundlebaseError { "SAVE CONFIG missing key".into() })?;
         let value = value.ok_or_else(|| -> BundlebaseError { "SAVE CONFIG missing value".into() })?;
         let scope = match scope {
-            Some(s) => Scope::parse(&s)?,
+            Some(s) => Scope::try_from(s.as_str())?,
             None => {
                 return Err("SAVE CONFIG requires a FOR clause with a named scope".into());
             }
@@ -131,7 +131,7 @@ mod parsing_tests {
             BundleCommand::SaveConfig(c) => {
                 assert_eq!(c.key, "access_key");
                 assert_eq!(c.value, "secret123");
-                assert_eq!(c.scope, Scope::parse("s3").unwrap());
+                assert_eq!(c.scope, Scope::try_from("s3").unwrap());
             }
             _ => panic!("Expected SaveConfig variant"),
         }
@@ -139,7 +139,7 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip() {
-        let cmd = SaveConfigCommand::new("region", "us-east-1", Scope::parse("s3").unwrap());
+        let cmd = SaveConfigCommand::new("region", "us-east-1", Scope::try_from("s3").unwrap());
         let statement = cmd.to_statement();
         assert_eq!(statement, "SAVE CONFIG region = 'us-east-1' FOR 's3'");
 
@@ -148,7 +148,7 @@ mod parsing_tests {
             BundleCommand::SaveConfig(c) => {
                 assert_eq!(c.key, "region");
                 assert_eq!(c.value, "us-east-1");
-                assert_eq!(c.scope, Scope::parse("s3").unwrap());
+                assert_eq!(c.scope, Scope::try_from("s3").unwrap());
             }
             _ => panic!("Expected SaveConfig variant"),
         }
@@ -156,7 +156,7 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip_with_scope() {
-        let cmd = SaveConfigCommand::new("bucket", "my-bucket", Scope::parse("s3").unwrap());
+        let cmd = SaveConfigCommand::new("bucket", "my-bucket", Scope::try_from("s3").unwrap());
         let statement = cmd.to_statement();
         assert_eq!(statement, "SAVE CONFIG bucket = 'my-bucket' FOR 's3'");
 
@@ -165,7 +165,7 @@ mod parsing_tests {
             BundleCommand::SaveConfig(c) => {
                 assert_eq!(c.key, "bucket");
                 assert_eq!(c.value, "my-bucket");
-                assert_eq!(c.scope, Scope::parse("s3").unwrap());
+                assert_eq!(c.scope, Scope::try_from("s3").unwrap());
             }
             _ => panic!("Expected SaveConfig variant"),
         }

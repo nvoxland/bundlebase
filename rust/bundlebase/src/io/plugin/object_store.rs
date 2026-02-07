@@ -166,7 +166,7 @@ fn build_object_store(
     use object_store::azure::MicrosoftAzureBuilder;
     use object_store::gcp::GoogleCloudStorageBuilder;
 
-    let scope = Scope::parse(url_str)?;
+    let scope = Scope::try_from(url_str)?;
 
     match url.scheme() {
         "s3" => {

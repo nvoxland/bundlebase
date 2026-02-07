@@ -64,7 +64,7 @@ config_keys!(configs, {
         .with_default_fn("key in ~/.kaggle/kaggle.json", || read_kaggle_json_field("key"));
 });
 
-pub(super) fn dataset_scope(dataset: &str) -> Scope {
+pub(super) fn dataset_scope(dataset: &str) -> Result<Scope, crate::BundlebaseError> {
     Scope::new(&format!("{}/{}", KAGGLE_SCOPE.name, dataset))
 }
 
@@ -877,7 +877,7 @@ mod tests {
     #[test]
     fn test_kaggle_client_from_config() {
         let config = BundleConfig::new();
-        let scope = Scope::parse("kaggle").unwrap();
+        let scope = Scope::try_from("kaggle").unwrap();
         config.set(
             &scope,
             URL_CFG.key,
@@ -908,7 +908,7 @@ mod tests {
         // If only username is set in config (no key), key falls back to default_fn.
         // If default_fn also returns None, key is simply None.
         let config = BundleConfig::new();
-        let scope = Scope::parse("kaggle").unwrap();
+        let scope = Scope::try_from("kaggle").unwrap();
         config.set(
             &scope,
             USERNAME_CFG.key,

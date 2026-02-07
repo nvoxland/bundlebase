@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn test_ftp_file_from_url_with_config() {
         let config = Arc::new(BundleConfig::new());
-        let scope = Scope::parse(
+        let scope = Scope::try_from(
             "ftp://ftp.example.com:2121/data/file.txt",
         ).unwrap();
         config.set(&scope, FTP_USERNAME_CFG.key, "testuser", ConfigSource::Passed);
@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn test_ftp_dir_from_url_with_config() {
         let config = Arc::new(BundleConfig::new());
-        let scope = Scope::parse("ftp").unwrap();
+        let scope = Scope::try_from("ftp").unwrap();
         config.set(&scope, FTP_USERNAME_CFG.key, "myuser", ConfigSource::Passed);
         config.set(&scope, FTP_PASSWORD_CFG.key, "mypass", ConfigSource::Passed);
 

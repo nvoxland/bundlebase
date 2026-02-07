@@ -32,9 +32,9 @@ pub(crate) fn validate_config_key_scoped(key: &str, scope: &Scope) -> PyResult<(
 /// Parse a scope string from Python into a Scope.
 ///
 /// Handles URLs like "s3://bucket", names like "s3/bucket", and simple names like "s3".
-/// All parsing is delegated to `Scope::parse`.
+/// All parsing is delegated to `Scope::try_from`.
 pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
-    Scope::parse(scope)
+    Scope::try_from(scope)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
 }
 
@@ -42,7 +42,7 @@ pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
 impl PyBundleConfig {
     fn set(&mut self, scope: &str, key: String, value: String) -> PyResult<()> {
         validate_config_key(&key)?;
-        let scope = Scope::parse(scope)
+        let scope = Scope::try_from(scope)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         self.inner.set(&scope, &key, &value);
         Ok(())

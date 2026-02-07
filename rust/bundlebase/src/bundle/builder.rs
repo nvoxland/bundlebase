@@ -1072,7 +1072,7 @@ impl BundleBuilder {
     /// # Arguments
     /// * `key` - Configuration key (e.g., "region", "access_key_id")
     /// * `value` - Configuration value
-    /// * `scope` - Scope to save config under (e.g., `Scope::parse("s3")` or `Scope::parse("s3://bucket")`)
+    /// * `scope` - Scope to save config under (e.g., `Scope::try_from("s3")` or `Scope::try_from("s3://bucket")`)
     pub async fn save_config(
         &self,
         key: &str,
