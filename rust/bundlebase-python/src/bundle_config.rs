@@ -31,31 +31,10 @@ pub(crate) fn validate_config_key_scoped(key: &str, scope: &Scope) -> PyResult<(
 
 /// Parse a scope string from Python into a Scope.
 ///
-/// Handles:
-/// - URLs like "s3://bucket" → from_path
-/// - Path-like scopes like "s3/bucket" → validates prefix, creates directly
-/// - Simple names like "s3" → from_name
-///
-/// Empty string and "/" are rejected as invalid.
+/// Handles URLs like "s3://bucket", names like "s3/bucket", and simple names like "s3".
+/// All parsing is delegated to `Scope::parse`.
 pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
-    if scope.is_empty() {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-            "Scope cannot be empty. Use a named scope like 's3' or 'kaggle'.",
-        ));
-    }
-
-    if scope == "/" {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-            "Global scope '/' is not supported. Use a named scope like 's3' or 'kaggle'.",
-        ));
-    }
-
-    if scope.contains("://") {
-        return Scope::from_path(scope)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()));
-    }
-
-    Scope::from_name(scope)
+    Scope::parse(scope)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
 }
 
@@ -63,7 +42,7 @@ pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
 impl PyBundleConfig {
     fn set(&mut self, scope: &str, key: String, value: String) -> PyResult<()> {
         validate_config_key(&key)?;
-        let scope = Scope::from_path(scope)
+        let scope = Scope::parse(scope)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         self.inner.set(&scope, &key, &value);
         Ok(())

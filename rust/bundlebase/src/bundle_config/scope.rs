@@ -1,6 +1,7 @@
 use crate::BundlebaseError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use url::Url;
 
 /// A normalized, boundary-aware configuration scope.
 ///
@@ -39,63 +40,28 @@ impl Scope {
         Self(s.to_string())
     }
 
-    /// Resolve a path string to a Scope by trying all registered config scopes.
+    /// Parse any string — URL or name — into a Scope.
     ///
-    /// Each registered `ConfigScope` gets a chance to claim the path. If a scope
-    /// matches, its normalized `Scope` is returned. If no scope matches, an error
-    /// is returned.
+    /// Handles:
+    /// - URLs like `"s3://bucket/path"` → iterates registered scopes, calls `url_to_name`
+    /// - Names like `"s3"`, `"s3/bucket"`, `"/s3"` → validates first component against registered scopes
     ///
     /// # Examples
     /// ```
     /// use bundlebase::bundle_config::Scope;
-    /// let scope = Scope::from_path("s3://bucket/path").unwrap();
+    /// let scope = Scope::parse("s3://bucket/path").unwrap();
     /// assert_eq!(scope.as_str(), "s3/bucket/path");
-    /// ```
-    pub fn from_path(path: &str) -> Result<Self, BundlebaseError> {
-        use super::BundleConfig;
-
-        if path.is_empty() || path == "/" {
-            return Err(BundlebaseError::from(
-                "Global scope '/' is not supported. Use a named scope like 's3' or 'kaggle'.",
-            ));
-        }
-
-        for config_scope in BundleConfig::all_scopes() {
-            if let Some(s) = config_scope.from_path(path) {
-                return Ok(s);
-            }
-        }
-        Err(BundlebaseError::from(format!(
-            "Unknown scope for path '{}'",
-            path
-        )))
-    }
-
-    /// Look up a scope by registered name. Accepts simple names like `"s3"`,
-    /// compound paths like `"s3/bucket"`, and legacy `/`-prefixed forms like `"/s3"`.
     ///
-    /// The first `/`-delimited component is matched against registered
-    /// [`ConfigScope`](super::ConfigScope) names. If it matches, the full
-    /// (trimmed) path is returned as a `Scope`.
-    ///
-    /// Unlike [`from_path`], this does not run URL-based matching logic.
-    ///
-    /// # Examples
-    /// ```
-    /// use bundlebase::bundle_config::Scope;
-    /// let scope = Scope::from_name("kaggle").unwrap();
-    /// assert_eq!(scope.as_str(), "kaggle");
-    ///
-    /// let scope = Scope::from_name("s3").unwrap();
+    /// let scope = Scope::parse("s3").unwrap();
     /// assert_eq!(scope.as_str(), "s3");
     ///
-    /// let scope = Scope::from_name("s3/bucket").unwrap();
+    /// let scope = Scope::parse("s3/bucket").unwrap();
     /// assert_eq!(scope.as_str(), "s3/bucket");
     /// ```
-    pub fn from_name(name: &str) -> Result<Self, BundlebaseError> {
+    pub fn parse(input: &str) -> Result<Self, BundlebaseError> {
         use super::BundleConfig;
 
-        let trimmed = name.trim_start_matches('/');
+        let trimmed = input.trim_start_matches('/');
 
         if trimmed.is_empty() {
             return Err(BundlebaseError::from(
@@ -103,7 +69,20 @@ impl Scope {
             ));
         }
 
-        // Extract first path component for prefix matching
+        if trimmed.contains("://") {
+            // URL: iterate scopes, call url_to_name on each
+            for config_scope in BundleConfig::all_scopes() {
+                if let Some(name) = config_scope.url_to_name(trimmed) {
+                    return Ok(Scope::new(&name));
+                }
+            }
+            return Err(BundlebaseError::from(format!(
+                "Unknown scope for URL '{}'",
+                input
+            )));
+        }
+
+        // Name: validate first path component against registered scopes
         let first = trimmed.split('/').next().unwrap_or(trimmed);
 
         for config_scope in BundleConfig::all_scopes() {
@@ -111,7 +90,7 @@ impl Scope {
                 return Ok(Scope::new(trimmed));
             }
         }
-        Err(BundlebaseError::from(format!("Unknown scope: {}", name)))
+        Err(BundlebaseError::from(format!("Unknown scope: {}", input)))
     }
 
     /// Check whether this scope matches a query scope.
@@ -124,11 +103,11 @@ impl Scope {
     /// # Examples
     /// ```
     /// use bundlebase::bundle_config::Scope;
-    /// let s = Scope::from_name("s3/abc").unwrap();
-    /// assert!(s.matches(&Scope::from_name("s3/abc").unwrap()));       // exact
-    /// assert!(s.matches(&Scope::from_name("s3/abc/def").unwrap()));   // boundary prefix
-    /// assert!(!s.matches(&Scope::from_name("s3/abcd").unwrap()));     // NOT boundary
-    /// assert!(!s.matches(&Scope::from_name("s3/ab").unwrap()));       // too short
+    /// let s = Scope::parse("s3/abc").unwrap();
+    /// assert!(s.matches(&Scope::parse("s3/abc").unwrap()));       // exact
+    /// assert!(s.matches(&Scope::parse("s3/abc/def").unwrap()));   // boundary prefix
+    /// assert!(!s.matches(&Scope::parse("s3/abcd").unwrap()));     // NOT boundary
+    /// assert!(!s.matches(&Scope::parse("s3/ab").unwrap()));       // too short
     /// ```
     pub fn matches(&self, query: &Scope) -> bool {
         if self.0 == query.0 {
@@ -171,12 +150,17 @@ impl From<String> for Scope {
     }
 }
 
-impl From<&str> for Scope {
-    /// Normalize a scope name into a Scope.
-    ///
-    /// This uses the same normalization as `from_path`:
-    fn from(s: &str) -> Self {
-        Self::from_path(s).expect("Invalid scope string")
+impl TryFrom<&str> for Scope {
+    type Error = BundlebaseError;
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        Self::parse(s)
+    }
+}
+
+impl TryFrom<&Url> for Scope {
+    type Error = BundlebaseError;
+    fn try_from(url: &Url) -> Result<Self, Self::Error> {
+        Self::parse(url.as_str())
     }
 }
 
@@ -220,79 +204,79 @@ mod tests {
 
     #[test]
     fn test_normalize_s3() {
-        assert_eq!(Scope::from_path("s3://abc/def").unwrap().as_str(), "s3/abc/def");
+        assert_eq!(Scope::parse("s3://abc/def").unwrap().as_str(), "s3/abc/def");
     }
 
     #[test]
-    fn test_normalize_from_name() {
-        assert_eq!(Scope::from_name("s3").unwrap().as_str(), "s3");
+    fn test_parse_name() {
+        assert_eq!(Scope::parse("s3").unwrap().as_str(), "s3");
     }
 
     #[test]
-    fn test_normalize_from_name_with_slash() {
+    fn test_parse_name_with_leading_slash() {
         // Legacy format with leading slash should still work
-        assert_eq!(Scope::from_name("/s3").unwrap().as_str(), "s3");
+        assert_eq!(Scope::parse("/s3").unwrap().as_str(), "s3");
     }
 
     #[test]
-    fn test_normalize_bare_name() {
-        // from_name only works for registered scopes like "s3"
-        assert_eq!(Scope::from_name("s3").unwrap().as_str(), "s3");
+    fn test_parse_bare_name() {
+        // parse only works for registered scopes like "s3"
+        assert_eq!(Scope::parse("s3").unwrap().as_str(), "s3");
     }
 
     #[test]
-    fn test_from_name_compound_path() {
+    fn test_parse_compound_path() {
         // Compound paths like "s3/bucket" should work
-        assert_eq!(Scope::from_name("s3/bucket").unwrap().as_str(), "s3/bucket");
-        assert_eq!(Scope::from_name("s3/bucket/path").unwrap().as_str(), "s3/bucket/path");
-        assert_eq!(Scope::from_name("kaggle/user/dataset").unwrap().as_str(), "kaggle/user/dataset");
+        assert_eq!(Scope::parse("s3/bucket").unwrap().as_str(), "s3/bucket");
+        assert_eq!(Scope::parse("s3/bucket/path").unwrap().as_str(), "s3/bucket/path");
+        assert_eq!(Scope::parse("kaggle/user/dataset").unwrap().as_str(), "kaggle/user/dataset");
     }
 
     #[test]
-    fn test_from_name_compound_path_with_leading_slash() {
-        assert_eq!(Scope::from_name("/s3/bucket").unwrap().as_str(), "s3/bucket");
+    fn test_parse_compound_path_with_leading_slash() {
+        assert_eq!(Scope::parse("/s3/bucket").unwrap().as_str(), "s3/bucket");
     }
 
     #[test]
-    fn test_from_name_unknown_scope() {
+    fn test_parse_unknown_scope() {
         // Unknown scope names should return an error
-        assert!(Scope::from_name("xyz").is_err());
+        assert!(Scope::parse("xyz").is_err());
     }
 
     #[test]
-    fn test_from_name_unknown_compound() {
+    fn test_parse_unknown_compound() {
         // Compound path with unknown prefix should error
-        assert!(Scope::from_name("xyz/bucket").is_err());
+        assert!(Scope::parse("xyz/bucket").is_err());
     }
 
     #[test]
     fn test_normalize_empty_errors() {
-        assert!(Scope::from_path("").is_err());
+        assert!(Scope::parse("").is_err());
     }
 
     #[test]
     fn test_normalize_slash_errors() {
-        assert!(Scope::from_path("/").is_err());
+        assert!(Scope::parse("/").is_err());
     }
 
     #[test]
     fn test_normalize_already_normalized() {
-        assert_eq!(Scope::from_path("s3://bucket").unwrap().as_str(), "s3/bucket");
+        assert_eq!(Scope::parse("s3://bucket").unwrap().as_str(), "s3/bucket");
     }
 
     #[test]
     fn test_normalize_gs() {
-        assert_eq!(Scope::from_path("gs://my-bucket/data/").unwrap().as_str(), "gs/my-bucket/data");
+        assert_eq!(Scope::parse("gs://my-bucket/data/").unwrap().as_str(), "gs/my-bucket/data");
     }
 
     #[test]
     fn test_normalize_scheme_only() {
-        assert_eq!(Scope::from_path("s3://").unwrap().as_str(), "s3");
+        assert_eq!(Scope::parse("s3://").unwrap().as_str(), "s3");
     }
 
     #[test]
     fn test_normalize_kaggle() {
-        assert_eq!(Scope::from_path("kaggle://").unwrap().as_str(), "kaggle");
+        assert_eq!(Scope::parse("kaggle://").unwrap().as_str(), "kaggle");
     }
 
     // ==================== matches() tests ====================

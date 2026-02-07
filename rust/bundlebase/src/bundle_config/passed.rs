@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn test_set_scoped() {
         let mut cfg = PassedBundleConfig::new();
-        let scope = Scope::from_path("s3://bucket").unwrap();
+        let scope = Scope::parse("s3://bucket").unwrap();
         cfg.set(&scope, "endpoint", "http://localhost:9000");
         assert!(!cfg.is_empty());
         assert_eq!(
@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn test_set_overwrites() {
         let mut cfg = PassedBundleConfig::new();
-        let scope = Scope::from_name("s3").unwrap();
+        let scope = Scope::parse("s3").unwrap();
         cfg.set(&scope, "region", "us-west-2");
         cfg.set(&scope, "region", "us-east-1");
         assert_eq!(
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn test_merge_scoped() {
-        let scope = Scope::from_path("s3://bucket").unwrap();
+        let scope = Scope::parse("s3://bucket").unwrap();
 
         let mut cfg1 = PassedBundleConfig::new();
         cfg1.set(&scope, "region", "us-west-2");
@@ -111,9 +111,9 @@ mod tests {
     #[test]
     fn test_serde_roundtrip() {
         let mut cfg = PassedBundleConfig::new();
-        cfg.set(&Scope::from_name("s3").unwrap(), "region", "us-west-2");
+        cfg.set(&Scope::parse("s3").unwrap(), "region", "us-west-2");
         cfg.set(
-            &Scope::from_path("s3://test").unwrap(),
+            &Scope::parse("s3://test").unwrap(),
             "endpoint",
             "http://localhost",
         );

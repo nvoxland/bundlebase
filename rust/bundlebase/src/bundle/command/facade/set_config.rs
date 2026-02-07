@@ -95,7 +95,7 @@ impl CommandParsing for SetConfigCommand {
         let value =
             value.ok_or_else(|| BundlebaseError::from("SET CONFIG statement missing value"))?;
         let scope = match scope {
-            Some(s) => Scope::from_path(&s)?,
+            Some(s) => Scope::parse(&s)?,
             None => {
                 return Err(BundlebaseError::from(
                     "SET CONFIG requires a FOR clause with a named scope",
@@ -168,7 +168,7 @@ mod parsing_tests {
             BundleCommand::SetConfig(ref c) => {
                 assert_eq!(c.key, "region");
                 assert_eq!(c.value, "us-west-2");
-                assert_eq!(c.scope, Scope::from_name("s3/my-bucket").unwrap());
+                assert_eq!(c.scope, Scope::parse("s3/my-bucket").unwrap());
             }
             _ => panic!("Expected SetConfig variant, got {:?}", cmd),
         }
@@ -179,7 +179,7 @@ mod parsing_tests {
         let cmd = SetConfigCommand::new(
             "endpoint",
             "http://localhost:9000",
-            Scope::from_name("s3/test").unwrap(),
+            Scope::parse("s3/test").unwrap(),
         );
         let statement = cmd.to_statement();
         assert_eq!(statement, "SET CONFIG endpoint = 'http://localhost:9000' FOR 's3/test'");
@@ -188,7 +188,7 @@ mod parsing_tests {
             BundleCommand::SetConfig(ref c) => {
                 assert_eq!(c.key, "endpoint");
                 assert_eq!(c.value, "http://localhost:9000");
-                assert_eq!(c.scope, Scope::from_name("s3/test").unwrap());
+                assert_eq!(c.scope, Scope::parse("s3/test").unwrap());
             }
             _ => panic!("Expected SetConfig variant"),
         }
@@ -196,7 +196,7 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip_named_scope() {
-        let cmd = SetConfigCommand::new("region", "us-west-2", Scope::from_name("s3").unwrap());
+        let cmd = SetConfigCommand::new("region", "us-west-2", Scope::parse("s3").unwrap());
         let statement = cmd.to_statement();
         assert_eq!(statement, "SET CONFIG region = 'us-west-2' FOR 's3'");
         let parsed = parse_command(&statement).unwrap();
@@ -204,7 +204,7 @@ mod parsing_tests {
             BundleCommand::SetConfig(ref c) => {
                 assert_eq!(c.key, "region");
                 assert_eq!(c.value, "us-west-2");
-                assert_eq!(c.scope, Scope::from_name("s3").unwrap());
+                assert_eq!(c.scope, Scope::parse("s3").unwrap());
             }
             _ => panic!("Expected SetConfig variant"),
         }
