@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn test_set_overwrites() {
         let mut cfg = PassedBundleConfig::new();
-        let scope = Scope::new("s3");
+        let scope = Scope::from_name("s3").unwrap();
         cfg.set(&scope, "region", "us-west-2");
         cfg.set(&scope, "region", "us-east-1");
         assert_eq!(
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn test_serde_roundtrip() {
         let mut cfg = PassedBundleConfig::new();
-        cfg.set(&Scope::new("s3"), "region", "us-west-2");
+        cfg.set(&Scope::from_name("s3").unwrap(), "region", "us-west-2");
         cfg.set(
             &Scope::from_path("s3://test").unwrap(),
             "endpoint",

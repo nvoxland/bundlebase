@@ -55,15 +55,6 @@ pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()));
     }
 
-    if scope.contains('/') {
-        // Path-like scope without "://" (e.g., "s3/bucket")
-        // Validate that the first component is a known scope
-        let first_part = scope.split('/').next().unwrap_or(scope);
-        Scope::from_name(first_part)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
-        return Ok(Scope::new(scope));
-    }
-
     Scope::from_name(scope)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
 }

@@ -30,14 +30,7 @@ impl Scope {
     ///
     /// # Panics
     /// Panics if the input is not in valid scope form.
-    ///
-    /// # Examples
-    /// ```
-    /// use bundlebase::bundle_config::Scope;
-    /// let s = Scope::new("s3/bucket/path");
-    /// assert_eq!(s.as_str(), "s3/bucket/path");
-    /// ```
-    pub fn new(s: &str) -> Self {
+    pub(crate) fn new(s: &str) -> Self {
         if s.is_empty() {
             panic!("Scope cannot be empty");
         }
@@ -78,11 +71,14 @@ impl Scope {
         )))
     }
 
-    /// Look up a scope by registered name. Accepts `kaggle` or `/kaggle` (legacy).
+    /// Look up a scope by registered name. Accepts simple names like `"s3"`,
+    /// compound paths like `"s3/bucket"`, and legacy `/`-prefixed forms like `"/s3"`.
+    ///
+    /// The first `/`-delimited component is matched against registered
+    /// [`ConfigScope`](super::ConfigScope) names. If it matches, the full
+    /// (trimmed) path is returned as a `Scope`.
     ///
     /// Unlike [`from_path`], this does not run URL-based matching logic.
-    /// It simply matches against the `name` field of each registered
-    /// [`ConfigScope`](super::ConfigScope).
     ///
     /// # Examples
     /// ```
@@ -92,6 +88,9 @@ impl Scope {
     ///
     /// let scope = Scope::from_name("s3").unwrap();
     /// assert_eq!(scope.as_str(), "s3");
+    ///
+    /// let scope = Scope::from_name("s3/bucket").unwrap();
+    /// assert_eq!(scope.as_str(), "s3/bucket");
     /// ```
     pub fn from_name(name: &str) -> Result<Self, BundlebaseError> {
         use super::BundleConfig;
@@ -104,9 +103,12 @@ impl Scope {
             ));
         }
 
+        // Extract first path component for prefix matching
+        let first = trimmed.split('/').next().unwrap_or(trimmed);
+
         for config_scope in BundleConfig::all_scopes() {
-            if config_scope.name == trimmed {
-                return Ok(Scope::new(config_scope.name));
+            if config_scope.name == first {
+                return Ok(Scope::new(trimmed));
             }
         }
         Err(BundlebaseError::from(format!("Unknown scope: {}", name)))
@@ -122,11 +124,11 @@ impl Scope {
     /// # Examples
     /// ```
     /// use bundlebase::bundle_config::Scope;
-    /// let s = Scope::new("s3/abc");
-    /// assert!(s.matches(&Scope::new("s3/abc")));       // exact
-    /// assert!(s.matches(&Scope::new("s3/abc/def")));    // boundary prefix
-    /// assert!(!s.matches(&Scope::new("s3/abcd")));      // NOT boundary
-    /// assert!(!s.matches(&Scope::new("s3/ab")));        // too short
+    /// let s = Scope::from_name("s3/abc").unwrap();
+    /// assert!(s.matches(&Scope::from_name("s3/abc").unwrap()));       // exact
+    /// assert!(s.matches(&Scope::from_name("s3/abc/def").unwrap()));   // boundary prefix
+    /// assert!(!s.matches(&Scope::from_name("s3/abcd").unwrap()));     // NOT boundary
+    /// assert!(!s.matches(&Scope::from_name("s3/ab").unwrap()));       // too short
     /// ```
     pub fn matches(&self, query: &Scope) -> bool {
         if self.0 == query.0 {
@@ -239,9 +241,28 @@ mod tests {
     }
 
     #[test]
+    fn test_from_name_compound_path() {
+        // Compound paths like "s3/bucket" should work
+        assert_eq!(Scope::from_name("s3/bucket").unwrap().as_str(), "s3/bucket");
+        assert_eq!(Scope::from_name("s3/bucket/path").unwrap().as_str(), "s3/bucket/path");
+        assert_eq!(Scope::from_name("kaggle/user/dataset").unwrap().as_str(), "kaggle/user/dataset");
+    }
+
+    #[test]
+    fn test_from_name_compound_path_with_leading_slash() {
+        assert_eq!(Scope::from_name("/s3/bucket").unwrap().as_str(), "s3/bucket");
+    }
+
+    #[test]
     fn test_from_name_unknown_scope() {
         // Unknown scope names should return an error
         assert!(Scope::from_name("xyz").is_err());
+    }
+
+    #[test]
+    fn test_from_name_unknown_compound() {
+        // Compound path with unknown prefix should error
+        assert!(Scope::from_name("xyz/bucket").is_err());
     }
 
     #[test]
