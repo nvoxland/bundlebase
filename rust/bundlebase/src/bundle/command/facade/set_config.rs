@@ -129,9 +129,9 @@ impl BundleFacadeCommand for SetConfigCommand {
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
         facade.set_config(
+            &self.scope,
             &self.key,
             &self.value,
-            &self.scope,
         )?;
 
         let specs = crate::all_config_specs();

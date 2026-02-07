@@ -1070,18 +1070,17 @@ impl BundleBuilder {
     /// 3. Config from save_config operations (lowest)
     ///
     /// # Arguments
+    /// * `scope` - Scope to save config under (e.g., `Scope::try_from("s3")` or `Scope::try_from("s3://bucket")`)
     /// * `key` - Configuration key (e.g., "region", "access_key_id")
     /// * `value` - Configuration value
-    /// * `scope` - Scope to save config under (e.g., `Scope::try_from("s3")` or `Scope::try_from("s3://bucket")`)
-    /// TODO: change order of args
     pub async fn save_config(
         &self,
+        scope: &Scope,
         key: &str,
         value: &str,
-        scope: &Scope,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::SaveConfigCommand;
-        self.execute_command(SaveConfigCommand::new(key, value, scope.clone())).await?;
+        self.execute_command(SaveConfigCommand::new(scope.clone(), key, value)).await?;
         Ok(self)
     }
 
@@ -1457,14 +1456,13 @@ impl BundleFacade for BundleBuilder {
         self.bundle.config()
     }
 
-    // todo: change order of args
     fn set_config(
         &self,
+        scope: &Scope,
         key: &str,
         value: &str,
-        scope: &Scope,
     ) -> Result<(), BundlebaseError> {
-        self.bundle.set_config(key, value, scope)
+        self.bundle.set_config(scope, key, value)
     }
 
     fn ctx(&self) -> Arc<SessionContext> {

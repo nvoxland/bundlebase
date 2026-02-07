@@ -394,7 +394,7 @@ impl PyBundle {
         let value = value.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .set_config(&key, &value, &scope)
+                .set_config(&scope, &key, &value)
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                         "Failed to set config '{}': {}",

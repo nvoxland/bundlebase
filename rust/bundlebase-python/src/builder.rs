@@ -290,9 +290,9 @@ impl PyBundleBuilder {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
                 .save_config(
+                    &scope,
                     key.as_str(),
                     value.as_str(),
-                    &scope,
                 )
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to save config", e))?;
@@ -321,7 +321,7 @@ impl PyBundleBuilder {
         let value = value.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .set_config(&key, &value, &scope)
+                .set_config(&scope, &key, &value)
                 .map_err(|e| to_py_error_ctx("Failed to set config", e))?;
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })

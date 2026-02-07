@@ -24,9 +24,9 @@ pub(crate) fn validate_config_key(key: &str) -> PyResult<()> {
 }
 
 //todo: don't expose
-pub(crate) fn validate_config_key_scoped(key: &str, scope: &Scope) -> PyResult<()> {
+pub(crate) fn validate_config_key_scoped(scope: &Scope, key: &str) -> PyResult<()> {
     let specs = ::bundlebase::all_config_specs();
-    ConfigKey::validate_key_scoped(key, scope, &specs).map_err(|e| {
+    ConfigKey::validate_key_scoped(scope, key, &specs).map_err(|e| {
         PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
     })
 }
@@ -80,7 +80,7 @@ pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<PassedBundleConfig> {
                 for (nested_key, nested_value) in nested_dict.iter() {
                     let nested_key_str: String = nested_key.extract()?;
                     let nested_value_str: String = nested_value.extract()?;
-                    validate_config_key_scoped(&nested_key_str, &scope)?;
+                    validate_config_key_scoped(&scope, &nested_key_str)?;
                     config.set(&scope, &nested_key_str, &nested_value_str);
                 }
             } else {
