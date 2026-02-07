@@ -91,11 +91,8 @@ Pass a config dict to `create()` or `open()`. These values take effect for the c
 Set `BB_*` environment variables. These apply to all bundles in the process.
 
 ```bash
-# Global default
-export BB_REGION=us-west-2
-
 # Scoped (applies to a specific config scope)
-export BB_S3__REGION=us-east-1
+export BB_S3_REGION=us-east-1
 export BB_S3__MY_BUCKET__ENDPOINT=http://localhost:9000
 ```
 
@@ -143,17 +140,22 @@ All config sources support scoping keys to specific scopes. The syntax varies by
 
 | Pattern | Runtime Config | Passed Config | Environment Variable | Stored Config |
 |---------|---------------|--------------|---------------------|---------------|
-| **Provider default** | `SET CONFIG key = 'val' FOR 's3'` | `{"s3": {"key": "val"}}` | `BB_S3__KEY=val` | `SAVE CONFIG key = 'val' FOR 's3'` |
+| **Provider default** | `SET CONFIG key = 'val' FOR 's3'` | `{"s3": {"key": "val"}}` | `BB_S3_KEY=val` | `SAVE CONFIG key = 'val' FOR 's3'` |
 | **URL-scoped** | `SET CONFIG key = 'val' FOR 's3/bucket'` | `{"s3/bucket": {"key": "val"}}` | `BB_S3__BUCKET__KEY=val` | `SAVE CONFIG key = 'val' FOR 's3/bucket'` |
 
 ### Environment Variable Scoping
 
-Environment variables use double-underscore (`__`) to separate scope segments from the config key. The suffix after `BB_` is split on `__`: the last segment becomes the config key, and any preceding segments form the scope path (joined with `/`).
+Environment variables use a single underscore (`_`) to separate the scope name from the config key. Double-underscore (`__`) is reserved for encoding sub-path separators within the scope.
+
+After stripping the `BB_` prefix:
+
+- **No `__`**: the first `_` separates scope name from key (e.g., `BB_S3_REGION` → scope `s3`, key `region`)
+- **With `__`**: split on `__` — first part = scope name, last part = key, middle parts = scope sub-path segments (e.g., `BB_S3__MY_BUCKET__KEY` → scope `s3/my_bucket`, key `key`)
 
 | Environment Variable | Scope | Key |
 |---------------------|-------|-----|
-| `BB_REGION=us-west-2` | global | `region` |
-| `BB_S3__REGION=us-west-2` | `s3` | `region` |
+| `BB_S3_REGION=us-west-2` | `s3` | `region` |
+| `BB_S3_ACCESS_KEY_ID=AKIA...` | `s3` | `access_key_id` |
 | `BB_S3__MY_BUCKET__KEY=val` | `s3/my_bucket` | `key` |
 
 ### Scope Resolution
