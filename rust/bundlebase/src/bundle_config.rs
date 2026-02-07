@@ -821,10 +821,11 @@ impl BundleConfig {
 
     /// Ensure env vars are loaded into entries[Env]. Reads BB_* env vars on first call.
     ///
-    /// Env var patterns (suffix after `BB_` is split on `__`):
-    /// - `BB_KEY` -> skipped (single-segment, no scope)
-    /// - `BB_S3__REGION` -> scope `s3`, key = `region`
-    /// - `BB_S3__MY_BUCKET__KEY` -> scope `s3/my_bucket`, key = `key`
+    /// Env var patterns (suffix after `BB_`):
+    /// - `BB_S3_REGION` -> scope `s3`, key = `region` (single `_` separates scope from key)
+    /// - `BB_S3__DATA__REGION` -> scope `s3/data`, key = `region` (`__` encodes sub-path separators)
+    /// - `BB_KEY` -> skipped (no `_`, no scope)
+    /// - `BB__S3__REGION` -> skipped (scope name is empty/starts with `_`)
     fn ensure_env_cache(&self) {
         // Fast path: check with read lock
         {
@@ -849,27 +850,39 @@ impl BundleConfig {
             };
 
             let parts: Vec<&str> = suffix.split("__").collect();
+
             if parts.len() == 1 {
-                // BB_KEY (single segment, no __) — no scope, skip with warning
-                log::warn!(
-                    "Ignoring env var '{}': single-segment BB_ vars (no scope) are not supported. \
-                     Use BB_SCOPE__KEY format (e.g., BB_S3__REGION).",
-                    raw_key
-                );
-                continue;
+                // No __ separator: BB_SCOPE_KEY pattern
+                // Find first _ to split scope name from key
+                let Some(underscore_pos) = suffix.find('_') else {
+                    log::warn!(
+                        "Ignoring env var '{}': no scope found. \
+                         Use BB_SCOPE_KEY format (e.g., BB_S3_REGION).",
+                        raw_key
+                    );
+                    continue;
+                };
+                let scope = suffix[..underscore_pos].to_lowercase();
+                let key = suffix[underscore_pos + 1..].to_lowercase();
+                env_entries.push(ConfigValue { key, value, scope });
             } else {
-                // BB_A__B__...__KEY -> last = key, rest joined with "/" = scope
+                // __ separators: BB_SCOPE__SUB__...__KEY pattern
+                let scope_name = parts[0];
+                if scope_name.is_empty() || scope_name.starts_with('_') {
+                    log::warn!(
+                        "Ignoring env var '{}': scope name must not be empty or start with '_'.",
+                        raw_key
+                    );
+                    continue;
+                }
                 let key = parts.last().expect("split always returns at least one element").to_lowercase();
-                let scope_parts: Vec<String> = parts[..parts.len() - 1]
-                    .iter()
-                    .map(|p| p.to_lowercase())
-                    .collect();
+                let mut scope_parts: Vec<String> = Vec::with_capacity(parts.len() - 1);
+                scope_parts.push(scope_name.to_lowercase());
+                for part in &parts[1..parts.len() - 1] {
+                    scope_parts.push(part.to_lowercase());
+                }
                 let scope = scope_parts.join("/");
-                env_entries.push(ConfigValue {
-                    key,
-                    value,
-                    scope,
-                });
+                env_entries.push(ConfigValue { key, value, scope });
             }
         }
 
@@ -1316,11 +1329,11 @@ mod tests {
     #[test]
     fn test_from_env_scoped() {
         let _lock = ENV_MUTEX.lock();
-        std::env::set_var("BB_S3__TESTREGION2", "us-west-2");
+        std::env::set_var("BB_S3_TESTREGION2", "us-west-2");
 
         let config = BundleConfig::new();
         config.ensure_env_cache();
-        // BB_S3__TESTREGION2 -> scope "s3", key "testregion2"
+        // BB_S3_TESTREGION2 -> scope "s3", key "testregion2"
         assert_eq!(
             config.get(&Scope::try_from("s3").unwrap(), &TEST_TESTREGION2),
             Some("us-west-2".to_string())
@@ -1330,7 +1343,7 @@ mod tests {
             config.get(&Scope::try_from("s3/bucket").unwrap(), &TEST_TESTREGION2),
             Some("us-west-2".to_string())
         );
-        std::env::remove_var("BB_S3__TESTREGION2");
+        std::env::remove_var("BB_S3_TESTREGION2");
     }
 
     #[test]
@@ -1354,6 +1367,82 @@ mod tests {
         let config = BundleConfig::new();
         config.ensure_env_cache();
         let _ = config;
+    }
+
+    #[test]
+    fn test_from_env_scope_with_underscore_key() {
+        let _lock = ENV_MUTEX.lock();
+        std::env::set_var("BB_S3_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE");
+
+        let config = BundleConfig::new();
+        config.ensure_env_cache();
+        // BB_S3_ACCESS_KEY_ID -> scope "s3", key "access_key_id"
+        assert_eq!(
+            config.get(&Scope::try_from("s3").unwrap(), &S3_ACCESS_KEY_ID_CFG),
+            Some("AKIAIOSFODNN7EXAMPLE".to_string())
+        );
+        std::env::remove_var("BB_S3_ACCESS_KEY_ID");
+    }
+
+    #[test]
+    fn test_from_env_leading_double_underscore_rejected() {
+        let _lock = ENV_MUTEX.lock();
+        std::env::set_var("BB__S3__TESTREGION2", "should-be-skipped");
+
+        let config = BundleConfig::new();
+        config.ensure_env_cache();
+        // BB__S3__TESTREGION2 -> first part is "_S3" (starts with _), should be skipped
+        assert_eq!(
+            config.get(&Scope::try_from("s3").unwrap(), &TEST_TESTREGION2),
+            None
+        );
+        std::env::remove_var("BB__S3__TESTREGION2");
+    }
+
+    #[test]
+    fn test_from_env_deep_sub_path() {
+        let _lock = ENV_MUTEX.lock();
+        std::env::set_var("BB_S3__A__B__TESTKEY3", "deep-value");
+
+        let config = BundleConfig::new();
+        config.ensure_env_cache();
+        // BB_S3__A__B__TESTKEY3 -> scope "s3/a/b", key "testkey3"
+        assert_eq!(
+            config.get(&Scope::try_from("s3/a/b").unwrap(), &TEST_TESTKEY3),
+            Some("deep-value".to_string())
+        );
+        std::env::remove_var("BB_S3__A__B__TESTKEY3");
+    }
+
+    #[test]
+    fn test_from_env_two_segment_with_double_underscore() {
+        let _lock = ENV_MUTEX.lock();
+        std::env::set_var("BB_S3__TESTREGION2", "double-us");
+
+        let config = BundleConfig::new();
+        config.ensure_env_cache();
+        // BB_S3__TESTREGION2 -> split on __ -> ["S3", "TESTREGION2"]
+        // scope "s3", key "testregion2"
+        assert_eq!(
+            config.get(&Scope::try_from("s3").unwrap(), &TEST_TESTREGION2),
+            Some("double-us".to_string())
+        );
+        std::env::remove_var("BB_S3__TESTREGION2");
+    }
+
+    #[test]
+    fn test_from_env_case_insensitive() {
+        let _lock = ENV_MUTEX.lock();
+        std::env::set_var("BB_S3_TESTREGION2", "case-test");
+
+        let config = BundleConfig::new();
+        config.ensure_env_cache();
+        // BB_S3_TESTREGION2 -> scope "s3", key "testregion2" (all lowercase)
+        assert_eq!(
+            config.get(&Scope::try_from("s3").unwrap(), &TEST_TESTREGION2),
+            Some("case-test".to_string())
+        );
+        std::env::remove_var("BB_S3_TESTREGION2");
     }
 
     #[test]

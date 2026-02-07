@@ -113,7 +113,7 @@ async def test_config_scoped_keys_override_env():
     """Test that passed scoped config overrides environment variables."""
     import os
 
-    env_key = "BB_S3__REGION"
+    env_key = "BB_S3_REGION"
     os.environ[env_key] = "env_value"
     try:
         # Passed config should override the env var
