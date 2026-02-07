@@ -18,7 +18,7 @@ pub(super) struct KaggleClient {
 impl KaggleClient {
     /// Build a `KaggleClient` from bundle config values.
     pub(super) fn from_config(config: &BundleConfig, dataset: &str) -> Result<Self, BundlebaseError> {
-        let scope = dataset_scope(dataset);
+        let scope = dataset_scope(dataset)?;
 
         let base_url = config.get_required(&scope, &URL_CFG, "Cannot configure Kaggle client")?;
         let username = config.get(&scope, &USERNAME_CFG);
