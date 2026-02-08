@@ -446,7 +446,7 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def fetch(self, pack: str = "base") -> List["FetchResults"]:
+    def fetch(self, pack: str = "base", mode: str = "add") -> List["FetchResults"]:
         """Fetch data from sources for a pack.
 
         Checks the pack's sources for new files and attaches them to the bundle.
@@ -455,24 +455,34 @@ class SyncBundleBuilder(SyncBundle):
             pack: Which pack to fetch sources for:
                 - "base" (default): The base pack
                 - A join name: A joined pack by its join name
+            mode: Sync mode (default: "add"):
+                - "add": Only attach new files
+                - "update": Add new files and replace changed files
+                - "sync": Add new, replace changed, and remove deleted files
 
         Returns:
             List of FetchResults, one for each source in the pack.
             Each result contains details about blocks added, replaced, and removed.
         """
-        coro = _call_original_method(self._async, "fetch", pack)
+        coro = _call_original_method(self._async, "fetch", pack, mode)
         return _loop_manager.run_sync(coro)
 
-    def fetch_all(self) -> List["FetchResults"]:
+    def fetch_all(self, mode: str = "add") -> List["FetchResults"]:
         """Fetch data from all defined sources.
 
         Checks all defined sources for new files and attaches them to the bundle.
+
+        Args:
+            mode: Sync mode (default: "add"):
+                - "add": Only attach new files
+                - "update": Add new files and replace changed files
+                - "sync": Add new, replace changed, and remove deleted files
 
         Returns:
             List of FetchResults, one for each source across all packs.
             Includes results for sources with no changes (empty results).
         """
-        coro = _call_original_method(self._async, "fetch_all")
+        coro = _call_original_method(self._async, "fetch_all", mode)
         return _loop_manager.run_sync(coro)
 
     def extend(
@@ -610,7 +620,7 @@ def create(path: str = "", config: Optional[Any] = None) -> SyncBundleBuilder:
 
     Args:
         path: Optional path for bundle storage (default: random memory location)
-        config: Optional configuration (BundleConfig or dict) for cloud storage settings
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         SyncBundleBuilder ready for immediate use
@@ -645,7 +655,7 @@ def open(path: str, config: Optional[Any] = None) -> SyncBundle:
 
     Args:
         path: Path to the saved bundle
-        config: Optional configuration (BundleConfig or dict) for cloud storage settings
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         SyncBundle (read-only) with the loaded operations

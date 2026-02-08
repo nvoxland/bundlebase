@@ -24,6 +24,8 @@ use crate::bundle::BundleFacade;
 use crate::object_id::ObjectId;
 use crate::BundlebaseError;
 
+use std::collections::HashMap;
+
 #[async_trait]
 pub trait ReaderPlugin: Send + Sync {
     /// Create a reader for the given source.
@@ -35,6 +37,7 @@ pub trait ReaderPlugin: Send + Sync {
     /// * `schema` - Optional schema (if already known)
     /// * `layout` - Optional layout file path
     /// * `expected_version` - If provided, validates version on first data access
+    /// * `read_options` - Format-specific options detected at attach time (e.g., CSV newlines_in_values)
     async fn reader(
         &self,
         source: &str,
@@ -43,5 +46,6 @@ pub trait ReaderPlugin: Send + Sync {
         schema: Option<SchemaRef>,
         layout: Option<String>,
         expected_version: Option<String>,
+        read_options: Option<&HashMap<String, String>>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError>;
 }

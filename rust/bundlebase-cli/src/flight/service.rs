@@ -26,7 +26,7 @@ use arrow_flight::{
     FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, Ticket,
 };
 use base64::prelude::*;
-use bundlebase::{Bundle, BundleBuilder, BundleConfig, BundleFacade};
+use bundlebase::{Bundle, BundleBuilder, BundleFacade, PassedBundleConfig};
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::RwLock;
@@ -88,7 +88,7 @@ pub struct BundlebaseFlightSqlService {
     /// Bundle path for creating new session states
     bundle_path: String,
     /// Bundle config for creating new session states
-    bundle_config: Option<BundleConfig>,
+    bundle_config: Option<PassedBundleConfig>,
     /// Whether to create bundles (vs open existing)
     create_bundle: bool,
     /// Whether to open bundles in read-only mode
@@ -112,7 +112,7 @@ impl BundlebaseFlightSqlService {
     /// * `authenticator` - Authenticator for validating credentials
     pub fn new(
         bundle_path: String,
-        bundle_config: Option<BundleConfig>,
+        bundle_config: Option<PassedBundleConfig>,
         create_bundle: bool,
         read_only: bool,
         authenticator: BundlebaseAuthenticator,

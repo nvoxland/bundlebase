@@ -66,10 +66,10 @@ The Flight SQL server supports the full set of Bundlebase SQL commands:
 - **Data modification**: `ATTACH`, `DETACH`, `REPLACE`, `FILTER`
 - **Schema changes**: `JOIN`, `DROP JOIN`, `DROP COLUMN`, `RENAME COLUMN`, `CREATE VIEW`, etc.
 - **Version control**: `COMMIT`, `RESET`, `UNDO`, `VERIFY DATA`
-- **Metadata**: `SET NAME`, `SET DESCRIPTION`, `SET CONFIG`
+- **Metadata**: `SET NAME`, `SET DESCRIPTION`, `SAVE CONFIG`, `SET CONFIG`
 - **Prepared statements**: Create, execute, and close prepared statements
 
-In read-only mode (`--read-only`), only `SELECT` and `EXPLAIN` are allowed.
+In read-only mode (`--read-only`), only `SELECT`, `EXPLAIN`, and `SET CONFIG` are allowed.
 
 See the [SQL Reference](../sql-reference/index.md) for the full command syntax.
 

@@ -17,7 +17,7 @@ mod rename_column;
 mod rename_join;
 mod rename_view;
 mod serde_util;
-mod set_config;
+mod save_config;
 mod set_description;
 mod set_name;
 mod update_version;
@@ -39,7 +39,7 @@ pub use crate::bundle::operation::drop_column::DropColumnOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
 pub use crate::bundle::operation::rename_join::RenameJoinOp;
 pub use crate::bundle::operation::rename_view::RenameViewOp;
-pub use crate::bundle::operation::set_config::SetConfigOp;
+pub use crate::bundle::operation::save_config::SaveConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
 pub use crate::bundle::operation::update_version::UpdateVersionOp;
@@ -211,7 +211,7 @@ define_any_operation! {
     RenameJoin(RenameJoinOp),
     RenameView(RenameViewOp),
     ReplaceBlock(ReplaceBlockOp),
-    SetConfig(SetConfigOp),
+    SaveConfig(SaveConfigOp),
     SetDescription(SetDescriptionOp),
     SetName(SetNameOp),
     UpdateVersion(UpdateVersionOp),

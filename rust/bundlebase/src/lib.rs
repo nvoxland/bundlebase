@@ -22,7 +22,7 @@ pub use crate::bundle::{
     AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade,
     FileVerificationResult, Operation, VerificationResults,
 };
-pub use crate::bundle_config::BundleConfig;
+pub use crate::bundle_config::{BundleConfig, ConfigScope, ConfigValueDetails, ConfigSource, PassedBundleConfig, Scope};
 pub use crate::data::DataGenerator;
 pub use crate::progress::{get_tracker, set_tracker, with_tracker, ProgressId, ProgressTracker};
 pub use functions::{FunctionImpl, FunctionSignature};

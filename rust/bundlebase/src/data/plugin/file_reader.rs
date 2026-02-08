@@ -196,6 +196,11 @@ impl<C: FileFormatConfig> FileReader<C> {
         self.file.url()
     }
 
+    /// Get the format configuration
+    pub fn config(&self) -> &C {
+        &self.config
+    }
+
     /// Get the object store
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         self.file.store()

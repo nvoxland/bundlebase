@@ -4,7 +4,7 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::operation::{AttachBlockOp, CreateSourceOp, SourceInfo};
 use crate::data::ObjectId;
-use crate::source::FetchAction;
+use crate::source::{FetchAction, SyncMode};
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -133,25 +133,24 @@ impl BundleBuilderCommand for CreateSourceCommand {
             .get_source(&source_id)
             .ok_or_else(|| format!("Source '{}' not found after creation", source_id))?;
 
-        let actions = source.fetch(builder).await?;
+        let actions = source.fetch(builder, SyncMode::Add).await?;
 
         // Process fetch actions
         for action in actions {
             match action {
                 FetchAction::Add(data) => {
-                    let mut op = AttachBlockOp::setup_for_source(
+                    let op = AttachBlockOp::setup(
                         &pack_id,
                         &data.attach_location,
-                        &data.source_url,
-                        &data.hash,
+                        Some(&data.hash),
+                        Some(SourceInfo {
+                            id: source_id,
+                            location: data.source_location,
+                            version: data.version,
+                        }),
                         builder,
                     )
                     .await?;
-                    op.source_info = Some(SourceInfo {
-                        id: source_id,
-                        location: data.source_location,
-                        version: op.version.clone(),
-                    });
                     builder.apply_operation(op.into()).await?;
                 }
                 FetchAction::Replace { .. } | FetchAction::Remove { .. } => {

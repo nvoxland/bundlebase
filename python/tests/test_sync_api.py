@@ -629,6 +629,6 @@ class TestSyncSource:
         c.create_source("remote_dir", {"url": "file:///nonexistent/path/"})
 
         # fetch should return FetchResults with no changes
-        results = c.fetch()
+        results = c.fetch("base", "add")
         assert len(results) == 1
         assert results[0].total_count() == 0

@@ -14,14 +14,17 @@
 //! Most implementations only need to implement `discover()`. The default `materialize()`
 //! and `fetch()` implementations handle the common case.
 
+use super::kaggle::KaggleSource;
 use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
 use super::source_utils;
 use super::web_scrape::WebScrapeFunction;
+use super::SyncMode;
 
 // Re-export MaterializeResult for use by source function implementations
 pub use super::source_utils::MaterializeResult;
 use crate::io::IOReadWriteDir;
+use crate::progress::ProgressScope;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
@@ -68,40 +71,19 @@ pub struct MaterializedData {
     pub attach_location: String,
     /// Original source location identifier (relative path or row range for storage)
     pub source_location: String,
-    /// Full URL to the source file for version reading (may differ from source_location)
+    /// Full URL to the source file (may differ from source_location)
     pub source_url: String,
     /// SHA256 hash of the content (full 64-character hex string)
     pub hash: String,
-}
-
-/// Sync mode for source fetch operations.
-///
-/// Controls how fetch handles existing files when checking for updates.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SyncMode {
-    /// Only add new files (default behavior)
-    #[default]
-    Add,
-    /// Add new files and replace changed files
-    Update,
-    /// Add new files, replace changed files, and remove missing files
-    Sync,
-}
-
-impl SyncMode {
-    /// Parse sync mode from string argument.
-    pub fn from_arg(value: &str) -> Result<Self, BundlebaseError> {
-        match value.to_lowercase().as_str() {
-            "add" => Ok(SyncMode::Add),
-            "update" => Ok(SyncMode::Update),
-            "sync" => Ok(SyncMode::Sync),
-            _ => Err(format!(
-                "Invalid mode '{}'. Must be 'add', 'update', or 'sync'",
-                value
-            )
-            .into()),
-        }
-    }
+    /// Source-specific version string used for change detection in Update/Sync modes.
+    ///
+    /// The meaning varies by source function:
+    /// - **remote_dir / web_scrape:** file metadata such as ETag or Last-Modified
+    /// - **kaggle:** dataset version number (e.g., "42")
+    /// - **postgres:** content hash
+    ///
+    /// Compared against stored versions to decide whether a file should be replaced.
+    pub version: String,
 }
 
 /// Metadata about an attached file from a source.
@@ -427,10 +409,20 @@ pub trait SourceFunction: Send + Sync {
     ) -> Result<Vec<MaterializedData>, BundlebaseError> {
         let discovered = self.discover(args, &attached_locations, &config).await?;
 
+        let progress = ProgressScope::new(
+            &format!("Fetching {} files from {}", discovered.len(), self.name()),
+            Some(discovered.len() as u64),
+        );
+
         let mut results = Vec::with_capacity(discovered.len());
-        for location in discovered {
+        for (idx, location) in discovered.into_iter().enumerate() {
+            progress.update(idx as u64, Some(&location.source_location));
             let source_url = location.url.to_string();
             let result = self.materialize(&location, args, data_dir, &config).await?;
+            // Read version from the local file's metadata (e.g., ETag, Last-Modified).
+            // Sources that need remote version tracking (e.g., Kaggle dataset version
+            // numbers) should override fetch() to supply their own version string.
+            let version = result.file.version().await.unwrap_or_else(|_| result.hash.clone());
             // Use relative path if file is in data_dir, otherwise full URL
             let attach_location = data_dir
                 .relative_path(result.file.as_ref())
@@ -440,6 +432,7 @@ pub trait SourceFunction: Send + Sync {
                 source_location: location.source_location,
                 source_url,
                 hash: result.hash,
+                version,
             });
         }
 
@@ -510,6 +503,7 @@ impl SourceFunctionRegistry {
         };
 
         // Register built-in functions
+        registry.register(Arc::new(KaggleSource));
         registry.register(Arc::new(PostgresFunction));
         registry.register(Arc::new(RemoteDirFunction));
         registry.register(Arc::new(WebScrapeFunction));

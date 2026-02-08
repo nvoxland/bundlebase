@@ -147,46 +147,13 @@ pub fn available_commands() -> std::collections::HashMap<&'static str, &'static 
     map.insert("COMMIT", "COMMIT '<message>'");
     map.insert("RESET", "RESET");
     map.insert("UNDO", "UNDO");
-    map.insert("SET CONFIG", "SET CONFIG <key> = '<value>' [FOR '<url_prefix>']");
+    map.insert("SET CONFIG", "SET CONFIG <key> = '<value>' [FOR '<scope>']");
+    map.insert("SAVE CONFIG", "SAVE CONFIG <key> = '<value>' [FOR '<scope>']");
     map.insert("SET NAME", "SET NAME '<name>'");
     map.insert("SET DESCRIPTION", "SET DESCRIPTION '<description>'");
     map.insert("VERIFY DATA", "VERIFY DATA [UPDATE]");
     map.insert("EXPLAIN", "EXPLAIN [ANALYZE] [VERBOSE] [FORMAT <format>] [<sql>]");
     map
-}
-
-/// Convert a Rule to its syntax description if available.
-pub fn rule_to_syntax(rule: Rule) -> Option<&'static str> {
-    let map = available_commands();
-    match rule {
-        Rule::filter_stmt => map.get("FILTER").copied(),
-        Rule::attach_stmt => map.get("ATTACH").copied(),
-        Rule::detach_stmt => map.get("DETACH").copied(),
-        Rule::replace_stmt => map.get("REPLACE").copied(),
-        Rule::join_stmt => map.get("JOIN").copied(),
-        Rule::drop_column_stmt => map.get("DROP COLUMN").copied(),
-        Rule::drop_index_stmt => map.get("DROP INDEX").copied(),
-        Rule::drop_view_stmt => map.get("DROP VIEW").copied(),
-        Rule::drop_join_stmt => map.get("DROP JOIN").copied(),
-        Rule::rename_column_stmt => map.get("RENAME COLUMN").copied(),
-        Rule::rename_view_stmt => map.get("RENAME VIEW").copied(),
-        Rule::rename_join_stmt => map.get("RENAME JOIN").copied(),
-        Rule::create_source_stmt => map.get("CREATE SOURCE").copied(),
-        Rule::create_index_stmt => map.get("CREATE INDEX").copied(),
-        Rule::create_view_stmt => map.get("CREATE VIEW").copied(),
-        Rule::fetch_stmt => map.get("FETCH").copied(),
-        Rule::reindex_stmt => map.get("REINDEX").copied(),
-        Rule::rebuild_index_stmt => map.get("REBUILD INDEX").copied(),
-        Rule::commit_stmt => map.get("COMMIT").copied(),
-        Rule::reset_stmt => map.get("RESET").copied(),
-        Rule::undo_stmt => map.get("UNDO").copied(),
-        Rule::set_config_stmt => map.get("SET CONFIG").copied(),
-        Rule::set_name_stmt => map.get("SET NAME").copied(),
-        Rule::set_description_stmt => map.get("SET DESCRIPTION").copied(),
-        Rule::verify_data_stmt => map.get("VERIFY DATA").copied(),
-        Rule::explain_stmt => map.get("EXPLAIN").copied(),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
@@ -219,17 +186,5 @@ mod tests {
         assert!(map.len() > 20);
         assert!(map.contains_key("FILTER"));
         assert!(map.contains_key("ATTACH"));
-    }
-
-    #[test]
-    fn test_rule_to_syntax() {
-        assert_eq!(
-            rule_to_syntax(Rule::filter_stmt),
-            Some("FILTER WHERE <condition>")
-        );
-        assert_eq!(
-            rule_to_syntax(Rule::attach_stmt),
-            Some("ATTACH '<path>' [TO <pack>] [WITH (<options>)]")
-        );
     }
 }

@@ -3,10 +3,12 @@
 //! Provides common functionality used by multiple source function implementations.
 
 use super::source_function::{
-    AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction, SyncMode,
+    AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction,
 };
+use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};
+use crate::progress::ProgressScope;
 use futures::stream;
 use crate::{BundleConfig, BundlebaseError};
 use bytes::Bytes;
@@ -271,9 +273,15 @@ where
         .map(|d| d.source_location.clone())
         .collect();
 
+    let progress = ProgressScope::new(
+        &format!("Processing {} discovered files", discovered.len()),
+        Some(discovered.len() as u64),
+    );
+
     let mut actions = Vec::new();
 
-    for location in discovered {
+    for (idx, location) in discovered.into_iter().enumerate() {
+        progress.update(idx as u64, Some(&location.source_location));
         let source_location = location.source_location.clone();
         let source_url = location.url.to_string();
 
@@ -298,6 +306,7 @@ where
                             source_location,
                             source_url,
                             hash: result.hash,
+                            version: current_version,
                         },
                     });
                 }
@@ -306,6 +315,7 @@ where
         } else {
             // New file - add it
             let result = materialize(location).await?;
+            let version = result.file.version().await.unwrap_or_else(|_| result.hash.clone());
             // Use relative path if file is in data_dir, otherwise full URL
             let attach_location = data_dir
                 .relative_path(result.file.as_ref())
@@ -315,6 +325,7 @@ where
                 source_location,
                 source_url,
                 hash: result.hash,
+                version,
             }));
         }
     }

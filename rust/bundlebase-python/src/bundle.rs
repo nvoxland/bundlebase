@@ -376,6 +376,34 @@ impl PyBundle {
         })
     }
 
+    /// Set a runtime config value (session-only, highest priority).
+    ///
+    /// Unlike save_config, this does not persist the value to the bundle manifest.
+    /// It only affects the current session.
+    fn set_config<'py>(
+        &self,
+        scope: &str,
+        key: &str,
+        value: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let scope = super::bundle_config::parse_scope(scope)?;
+        let inner = self.inner.clone();
+        let key = key.to_string();
+        let value = value.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .set_config(&scope, &key, &value)
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to set config '{}': {}",
+                        key, e
+                    ))
+                })?;
+            Ok(format!("OK: SET CONFIG {}", key))
+        })
+    }
+
     fn operations(&self) -> Vec<super::operation::PyOperation> {
         self.inner
             .operations()
