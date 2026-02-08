@@ -49,7 +49,7 @@ impl TableProvider for BundleConfigTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let entries = self.facade.config().all_values(&crate::all_config_specs())
+        let entries = self.facade.config().all_values()
             .map_err(|e| datafusion::error::DataFusionError::External(e))?;
         let stream = Box::new(entries)
             .into_stream()

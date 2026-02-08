@@ -363,7 +363,7 @@ mod tests {
     async fn test_wrong_file_extension() -> Result<(), BundlebaseError> {
         let plugin = CsvPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let result = plugin
             .reader("file:///test.parquet", &1.into(), &*binding, None, None, None, None)
             .await?;
@@ -377,7 +377,7 @@ mod tests {
     async fn test_invalid_csv_file() -> Result<(), BundlebaseError> {
         let plugin = CsvPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let invalid_reader = plugin
             .reader("file:///invalid.csv", &1.into(), &*binding, None, None, None, None)
             .await?;
@@ -399,7 +399,7 @@ mod tests {
         // Test complete CSV file read and data validation
         let plugin = CsvPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("customers-0-100.csv"),
@@ -456,7 +456,7 @@ mod tests {
             .await?
             .unwrap();
 
-        let binding2 = Bundle::empty().await?;
+        let binding2 = Bundle::empty(None).await?;
         let ctx = binding2.ctx();
         let ds = reader.data_source(None, &[], None, None).await?;
         let results = ds.open(0, ctx.task_ctx())?;
@@ -503,7 +503,7 @@ mod tests {
     async fn test_schema() -> Result<(), BundlebaseError> {
         // Test that CSV schema correctly infers data types
         let plugin = CsvPlugin::default();
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("customers-0-100.csv"),
@@ -550,7 +550,7 @@ mod tests {
     async fn test_statistics() -> Result<(), BundlebaseError> {
         let plugin = CsvPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("customers-0-100.csv"),
@@ -786,7 +786,7 @@ mod tests {
     async fn test_newlines_in_values_schema() -> Result<(), BundlebaseError> {
         let plugin = CsvPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("newlines-in-values.csv"),
@@ -821,7 +821,7 @@ mod tests {
     async fn test_regular_csv_read_options_empty() -> Result<(), BundlebaseError> {
         let plugin = CsvPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("customers-0-100.csv"),
@@ -858,7 +858,7 @@ mod tests {
         let mut options = HashMap::new();
         options.insert("newlines_in_values".to_string(), "true".to_string());
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("newlines-in-values.csv"),
@@ -893,7 +893,7 @@ mod tests {
     async fn test_newlines_in_values_data() -> Result<(), BundlebaseError> {
         let plugin = CsvPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         // First read schema (triggers auto-detection)
         let reader = plugin
             .reader(
@@ -925,7 +925,7 @@ mod tests {
             .await?
             .unwrap();
 
-        let binding2 = Bundle::empty().await?;
+        let binding2 = Bundle::empty(None).await?;
         let ctx = binding2.ctx();
         let ds = reader.data_source(None, &[], None, None).await?;
         let results = ds.open(0, ctx.task_ctx())?;
@@ -953,7 +953,7 @@ mod tests {
     #[tokio::test]
     async fn test_backslash_in_values_schema() -> Result<(), BundlebaseError> {
         let plugin = CsvPlugin::default();
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("backslash-in-values.csv"),
@@ -1011,7 +1011,7 @@ mod tests {
 
         let csv_url = format!("file://{}", csv_path.to_str().expect("valid path"));
         let plugin = CsvPlugin::default();
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(&csv_url, &1.into(), &*binding, None, None, None, None)
             .await?
@@ -1072,11 +1072,11 @@ mod tests {
         }
 
         let url = Url::parse("memory:///test_dblquote_csv/data.csv")?;
-        let file = ObjectStoreFile::from_url(&url, crate::BundleConfig::default().into())?;
+        let file = ObjectStoreFile::from_url(&url, crate::BundleConfig::new(None)?.into())?;
         file.write(bytes::Bytes::from(csv.into_bytes())).await?;
 
         let plugin = CsvPlugin::default();
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(url.as_str(), &1.into(), &*binding, None, None, None, None)
             .await?
@@ -1117,7 +1117,7 @@ mod tests {
         let csv_url_str = format!("file://{}", csv_path);
         let csv_url = Url::parse(&csv_url_str)?;
         let config = CsvFormatConfig::default();
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let file = crate::data::plugin::file_reader::FilePlugin::new(config.clone())
             .reader(&csv_url_str, &*binding, None, None)
             .await?;

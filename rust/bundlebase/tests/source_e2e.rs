@@ -31,7 +31,7 @@ async fn copy_test_file(
     target_name: &str,
 ) -> Result<(), BundlebaseError> {
     let source_obj =
-        readable_file_from_url(&Url::parse(test_file)?, BundleConfig::default().into())?;
+        readable_file_from_url(&Url::parse(test_file)?, BundleConfig::new(None)?.into())?;
     let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?

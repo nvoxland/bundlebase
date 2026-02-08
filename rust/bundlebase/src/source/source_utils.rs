@@ -273,7 +273,7 @@ where
         .map(|d| d.source_location.clone())
         .collect();
 
-    let _progress = ProgressScope::new(
+    let progress = ProgressScope::new(
         &format!("Processing {} discovered files", discovered.len()),
         Some(discovered.len() as u64),
     );
@@ -281,7 +281,7 @@ where
     let mut actions = Vec::new();
 
     for (idx, location) in discovered.into_iter().enumerate() {
-        _progress.update(idx as u64, Some(&location.source_location));
+        progress.update(idx as u64, Some(&location.source_location));
         let source_location = location.source_location.clone();
         let source_url = location.url.to_string();
 

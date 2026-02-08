@@ -282,7 +282,6 @@ impl PyBundleBuilder {
         value: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        super::bundle_config::validate_config_key(key)?;
         let scope = super::bundle_config::parse_scope(scope)?;
         let inner = slf.inner.clone();
         let key = key.to_string();
@@ -314,7 +313,6 @@ impl PyBundleBuilder {
         value: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        super::bundle_config::validate_config_key(key)?;
         let scope = super::bundle_config::parse_scope(scope)?;
         let inner = slf.inner.clone();
         let key = key.to_string();

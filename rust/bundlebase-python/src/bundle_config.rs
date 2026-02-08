@@ -1,4 +1,4 @@
-use ::bundlebase::bundle_config::{ConfigKey, PassedBundleConfig, Scope};
+use ::bundlebase::bundle_config::{PassedBundleConfig, Scope};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -6,29 +6,6 @@ use pyo3::types::PyDict;
 #[derive(Clone)]
 pub struct PyBundleConfig {
     pub(crate) inner: PassedBundleConfig,
-}
-
-//todo: don't expose
-pub(crate) fn validate_config_key(key: &str) -> PyResult<()> {
-    let specs = ::bundlebase::all_config_specs();
-    if !ConfigKey::is_key_valid(key, &specs) {
-        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-            format!(
-                "Unknown config key '{}'. Valid keys: {}",
-                key,
-                specs.iter().map(|s| s.key).collect::<Vec<_>>().join(", ")
-            ),
-        ));
-    }
-    Ok(())
-}
-
-//todo: don't expose
-pub(crate) fn validate_config_key_scoped(scope: &Scope, key: &str) -> PyResult<()> {
-    let specs = ::bundlebase::all_config_specs();
-    ConfigKey::validate_key_scoped(scope, key, &specs).map_err(|e| {
-        PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
-    })
 }
 
 /// Parse a scope string from Python into a Scope.
@@ -43,9 +20,7 @@ pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
 #[pymethods]
 impl PyBundleConfig {
     fn set(&mut self, scope: &str, key: String, value: String) -> PyResult<()> {
-        validate_config_key(&key)?; //todo: rely on inner set
-        let scope = Scope::try_from(scope)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        let scope = parse_scope(scope)?;
         self.inner.set(&scope, &key, &value);
         Ok(())
     }
@@ -80,7 +55,6 @@ pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<PassedBundleConfig> {
                 for (nested_key, nested_value) in nested_dict.iter() {
                     let nested_key_str: String = nested_key.extract()?;
                     let nested_value_str: String = nested_value.extract()?;
-                    validate_config_key_scoped(&scope, &nested_key_str)?;
                     config.set(&scope, &nested_key_str, &nested_value_str);
                 }
             } else {

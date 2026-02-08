@@ -30,69 +30,23 @@ use url::Url;
 #[serde(transparent)]
 pub struct Scope(String);
 
-/// Custom deserializer that validates scope strings, with backwards compatibility
-/// for the legacy `"/"` global scope.
-/// todo: remove legacy global scope
+/// Custom deserializer that validates scope strings via `Scope::new()`.
 impl<'de> serde::Deserialize<'de> for Scope {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        if s == "/" {
-            log::warn!("Deserialized legacy global scope '/'. This entry will be ignored.");
-            Ok(Scope(s))
-        } else if s.is_empty() {
-            Err(serde::de::Error::custom("Scope cannot be empty"))
-        } else if s.starts_with('/') {
-            Err(serde::de::Error::custom(format!(
-                "Scope must not start with '/': got '{}'",
-                s
-            )))
-        } else if s.contains("://") {
-            Err(serde::de::Error::custom(format!(
-                "Scope must not contain '://': got '{}'",
-                s
-            )))
-        } else {
-            Ok(Scope(s))
-        }
+        Scope::new(&s).map_err(|e| serde::de::Error::custom(e.to_string()))
     }
 }
 
 impl Scope {
-    /// Create a scope from a correctly formatted string.
-    ///
-    /// The input must already be in canonical scope form:
-    /// - Must not be empty
-    /// - Must not start with `/`
-    /// - Must not contain `://`
-    ///
-    /// Returns an error if the input is not in valid scope form.
-    pub(crate) fn new(s: &str) -> Result<Self, BundlebaseError> {
-        if s.is_empty() {
-            return Err(BundlebaseError::from("Scope cannot be empty"));
-        }
-        if s.starts_with('/') {
-            return Err(BundlebaseError::from(format!(
-                "Scope must not start with '/': got '{}'",
-                s
-            )));
-        }
-        if s.contains("://") {
-            return Err(BundlebaseError::from(format!(
-                "Scope must not contain '://': got '{}'",
-                s
-            )));
-        }
-        Ok(Self(s.to_string()))
-    }
-
-    /// Parse any string — URL or name — into a Scope.
+    /// Create a validated Scope from any string — URL or name.
     ///
     /// Handles:
-    /// - URLs like `"s3://bucket/path"` → iterates registered scopes, calls `url_to_name`
-    /// - Names like `"s3"`, `"s3/bucket"`, `"/s3"` → validates first component against registered scopes
+    /// - URLs like `"s3://bucket/path"` → resolves via registered scopes' `url_to_name`
+    /// - Names like `"s3"`, `"s3/bucket"` → validates first component against registered scopes
     ///
     /// # Examples
     /// ```
@@ -106,22 +60,27 @@ impl Scope {
     /// let scope = Scope::try_from("s3/bucket").unwrap();
     /// assert_eq!(scope.as_str(), "s3/bucket");
     /// ```
-    pub(crate) fn parse(input: &str) -> Result<Self, BundlebaseError> {
+    pub(crate) fn new(input: &str) -> Result<Self, BundlebaseError> {
         use super::BundleConfig;
 
-        let trimmed = input.trim_start_matches('/');
-
-        if trimmed.is_empty() {
+        if input.is_empty() {
             return Err(BundlebaseError::from(
-                "Global scope '/' is not supported. Use a named scope like 's3' or 'kaggle'.",
+                "Scope cannot be empty. Use a named scope like 's3' or 'kaggle'.",
             ));
         }
 
-        if trimmed.contains("://") {
+        if input.starts_with('/') {
+            return Err(BundlebaseError::from(format!(
+                "Scope must not start with '/': got '{}'",
+                input
+            )));
+        }
+
+        if input.contains("://") {
             // URL: iterate scopes, call url_to_name on each
             for config_scope in BundleConfig::all_scopes() {
-                if let Some(name) = config_scope.url_to_name(trimmed) {
-                    return Scope::new(&name);
+                if let Some(name) = config_scope.url_to_name(input) {
+                    return Ok(Self::new(&name)?);
                 }
             }
             return Err(BundlebaseError::from(format!(
@@ -131,11 +90,11 @@ impl Scope {
         }
 
         // Name: validate first path component against registered scopes
-        let first = trimmed.split('/').next().unwrap_or(trimmed);
+        let first = input.split('/').next().unwrap_or(input);
 
         for config_scope in BundleConfig::all_scopes() {
             if config_scope.name == first {
-                return Scope::new(trimmed);
+                return Ok(Self(input.to_string()));
             }
         }
         Err(BundlebaseError::from(format!("Unknown scope: {}", input)))
@@ -186,14 +145,14 @@ impl fmt::Display for Scope {
 impl TryFrom<&str> for Scope {
     type Error = BundlebaseError;
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        Self::parse(s)
+        Self::new(s)
     }
 }
 
 impl TryFrom<&Url> for Scope {
     type Error = BundlebaseError;
     fn try_from(url: &Url) -> Result<Self, Self::Error> {
-        Self::parse(url.as_str())
+        Self::new(url.as_str())
     }
 }
 
@@ -201,115 +160,57 @@ impl TryFrom<&Url> for Scope {
 mod tests {
     use super::*;
 
-    // ==================== new() tests ====================
+    // ==================== new() basic tests ====================
 
     #[test]
     fn test_new_rejects_empty() {
-        let err = Scope::new("").unwrap_err().to_string();
-        assert!(err.contains("Scope cannot be empty"));
-    }
-
-    #[test]
-    fn test_new_simple_path() {
-        let s = Scope::new("s3/abc/def").expect("valid scope");
-        assert_eq!(s.as_str(), "s3/abc/def");
+        assert!(Scope::new("").is_err());
     }
 
     #[test]
     fn test_new_rejects_leading_slash() {
-        let err = Scope::new("/s3/abc").unwrap_err().to_string();
-        assert!(err.contains("Scope must not start with '/'"));
+        assert!(Scope::new("/").is_err());
+        assert!(Scope::new("/s3").is_err());
+        assert!(Scope::new("/s3/bucket").is_err())
     }
 
     #[test]
-    fn test_new_rejects_global_slash() {
-        let err = Scope::new("/").unwrap_err().to_string();
-        assert!(err.contains("Scope must not start with '/'"));
+    fn test_new_rejects_unknown_scope() {
+        assert!(Scope::new("xyz").is_err());
+        assert!(Scope::new("xyz/bucket").is_err());
     }
 
     #[test]
-    fn test_new_rejects_url_scheme() {
-        let err = Scope::new("s3://abc").unwrap_err().to_string();
-        assert!(err.contains("Scope must not contain '://'"));
-    }
-
-    // ==================== normalize() tests ====================
-
-    #[test]
-    fn test_normalize_s3() {
-        assert_eq!(Scope::try_from("s3://abc/def").unwrap().as_str(), "s3/abc/def");
+    fn test_new_simple_name() {
+        assert_eq!(Scope::new("s3").unwrap().as_str(), "s3");
     }
 
     #[test]
-    fn test_parse_name() {
-        assert_eq!(Scope::try_from("s3").unwrap().as_str(), "s3");
+    fn test_new_compound_path() {
+        assert_eq!(Scope::new("s3/bucket").unwrap().as_str(), "s3/bucket");
+        assert_eq!(Scope::new("s3/bucket/path").unwrap().as_str(), "s3/bucket/path");
+        assert_eq!(Scope::new("kaggle/user/dataset").unwrap().as_str(), "kaggle/user/dataset");
+    }
+
+    // ==================== new() URL handling ====================
+
+    #[test]
+    fn test_new_normalizes_url() {
+        assert_eq!(Scope::new("s3://bucket/path").unwrap().as_str(), "s3/bucket/path");
+        assert_eq!(Scope::new("s3://bucket").unwrap().as_str(), "s3/bucket");
+        assert_eq!(Scope::new("gs://my-bucket/data/").unwrap().as_str(), "gs/my-bucket/data");
     }
 
     #[test]
-    fn test_parse_name_with_leading_slash() {
-        // Legacy format with leading slash should still work
-        assert_eq!(Scope::try_from("/s3").unwrap().as_str(), "s3");
+    fn test_new_scheme_only_url() {
+        assert_eq!(Scope::new("s3://").unwrap().as_str(), "s3");
+        assert_eq!(Scope::new("kaggle://").unwrap().as_str(), "kaggle");
     }
 
     #[test]
-    fn test_parse_bare_name() {
-        // parse only works for registered scopes like "s3"
-        assert_eq!(Scope::try_from("s3").unwrap().as_str(), "s3");
-    }
-
-    #[test]
-    fn test_parse_compound_path() {
-        // Compound paths like "s3/bucket" should work
-        assert_eq!(Scope::try_from("s3/bucket").unwrap().as_str(), "s3/bucket");
-        assert_eq!(Scope::try_from("s3/bucket/path").unwrap().as_str(), "s3/bucket/path");
-        assert_eq!(Scope::try_from("kaggle/user/dataset").unwrap().as_str(), "kaggle/user/dataset");
-    }
-
-    #[test]
-    fn test_parse_compound_path_with_leading_slash() {
-        assert_eq!(Scope::try_from("/s3/bucket").unwrap().as_str(), "s3/bucket");
-    }
-
-    #[test]
-    fn test_parse_unknown_scope() {
-        // Unknown scope names should return an error
-        assert!(Scope::try_from("xyz").is_err());
-    }
-
-    #[test]
-    fn test_parse_unknown_compound() {
-        // Compound path with unknown prefix should error
-        assert!(Scope::try_from("xyz/bucket").is_err());
-    }
-
-    #[test]
-    fn test_normalize_empty_errors() {
-        assert!(Scope::try_from("").is_err());
-    }
-
-    #[test]
-    fn test_normalize_slash_errors() {
-        assert!(Scope::try_from("/").is_err());
-    }
-
-    #[test]
-    fn test_normalize_already_normalized() {
-        assert_eq!(Scope::try_from("s3://bucket").unwrap().as_str(), "s3/bucket");
-    }
-
-    #[test]
-    fn test_normalize_gs() {
-        assert_eq!(Scope::try_from("gs://my-bucket/data/").unwrap().as_str(), "gs/my-bucket/data");
-    }
-
-    #[test]
-    fn test_normalize_scheme_only() {
-        assert_eq!(Scope::try_from("s3://").unwrap().as_str(), "s3");
-    }
-
-    #[test]
-    fn test_normalize_kaggle() {
-        assert_eq!(Scope::try_from("kaggle://").unwrap().as_str(), "kaggle");
+    fn test_new_rejects_bare_scheme() {
+        // "://" without a valid parseable URL should error
+        assert!(Scope::new("://").is_err());
     }
 
     // ==================== matches() tests ====================
@@ -369,33 +270,29 @@ mod tests {
     fn test_deserialize_rejects_invalid() {
         // Empty string
         assert!(serde_json::from_str::<Scope>(r#""""#).is_err());
-        // Leading slash
-        assert!(serde_json::from_str::<Scope>(r#""/s3""#).is_err());
-        // URL scheme
-        assert!(serde_json::from_str::<Scope>(r#""s3://bucket""#).is_err());
+        // Unknown scope
+        assert!(serde_json::from_str::<Scope>(r#""xyz/bucket""#).is_err());
     }
 
     #[test]
-    fn test_deserialize_legacy_global_scope() {
-        // "/" is accepted for backwards compat but logged as warning
-        let s: Scope = serde_json::from_str(r#""/""#).expect("legacy scope");
-        assert_eq!(s.as_str(), "/");
+    fn test_deserialize_rejects_global_scope() {
+        assert!(serde_json::from_str::<Scope>(r#""/""#).is_err());
     }
 
     // ==================== Eq / Hash ====================
 
     #[test]
     fn test_equality() {
-        assert_eq!(Scope::new("a/b").expect("valid scope"), Scope::new("a/b").expect("valid scope"));
-        assert_ne!(Scope::new("a/b").expect("valid scope"), Scope::new("a/c").expect("valid scope"));
+        assert_eq!(Scope::new("s3/b").expect("valid scope"), Scope::new("s3/b").expect("valid scope"));
+        assert_ne!(Scope::new("s3/b").expect("valid scope"), Scope::new("s3/c").expect("valid scope"));
     }
 
     #[test]
     fn test_hash_consistency() {
         use std::collections::HashSet;
         let mut set = HashSet::new();
-        set.insert(Scope::new("a/b").expect("valid scope"));
-        assert!(set.contains(&Scope::new("a/b").expect("valid scope")));
-        assert!(!set.contains(&Scope::new("a/c").expect("valid scope")));
+        set.insert(Scope::new("s3/b").expect("valid scope"));
+        assert!(set.contains(&Scope::new("s3/b").expect("valid scope")));
+        assert!(!set.contains(&Scope::new("s3/c").expect("valid scope")));
     }
 }

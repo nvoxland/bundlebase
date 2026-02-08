@@ -97,6 +97,9 @@ pub struct Bundle {
     /// All config sources (stored, env, passed, runtime) live inside BundleConfig.
     config: Arc<BundleConfig>,
 
+    /// The original passed config, preserved for reuse when reopening the bundle.
+    passed_config: Arc<PassedBundleConfig>,
+
     /// True if this bundle is a view (has a view field in init commit)
     is_view: Arc<RwLock<bool>>,
 }
@@ -137,6 +140,7 @@ impl Clone for Bundle {
             function_registry: Arc::clone(&self.function_registry),
             source_function_registry: Arc::clone(&self.source_function_registry),
             config: Arc::clone(&self.config),
+            passed_config: Arc::clone(&self.passed_config),
             is_view: Arc::clone(&self.is_view),
         }
     }
@@ -147,7 +151,7 @@ impl Bundle {
     ///
     /// Returns `Arc<Self>` ready for use. Schema providers are registered with the
     /// Bundle as the facade. BundleBuilder will re-register with itself as facade.
-    pub async fn empty() -> Result<Arc<Self>, BundlebaseError> {
+    pub async fn empty(passed_config: Option<PassedBundleConfig>) -> Result<Arc<Self>, BundlebaseError> {
         let url = Url::parse(EMPTY_URL)?;
 
         let storage = Arc::new(DataStorage::new());
@@ -188,7 +192,8 @@ impl Bundle {
             crate::io::get_null_store(),
         );
 
-        let bundle_config = Arc::new(BundleConfig::new());
+        let bundle_config = Arc::new(BundleConfig::new(passed_config.as_ref())?);
+        let stored_passed_config = passed_config.unwrap_or_default();
         let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, Arc::clone(&bundle_config))?));
 
         let bundle = Arc::new(Self {
@@ -215,6 +220,7 @@ impl Bundle {
             commits,
             dataframe,
             config: bundle_config,
+            passed_config: Arc::new(stored_passed_config),
             is_view: Arc::new(RwLock::new(false)),
         });
 
@@ -278,14 +284,9 @@ impl Bundle {
     /// ```
     pub async fn open(path: &str, config: Option<PassedBundleConfig>) -> Result<Arc<Self>, BundlebaseError> {
         let mut visited = HashSet::new();
-        let arc_bundle = Self::empty().await?;
+        let arc_bundle = Self::empty(config).await?;
 
         arc_bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
-
-        // Load passed config entries into the bundle's config under ConfigSource::Passed
-        if let Some(passed) = config {
-            arc_bundle.config.merge_passed(&passed)?;
-        }
 
         // Refresh data_dir with the config
         arc_bundle.refresh_data_dir()?;
@@ -534,6 +535,10 @@ impl Bundle {
         Arc::clone(&self.config)
     }
 
+    pub(crate) fn passed_config(&self) -> Arc<PassedBundleConfig> {
+        Arc::clone(&self.passed_config)
+    }
+
     /// Recreate data_dir from the current URL + config.
     /// Called after SaveConfigOp changes config.
     pub(crate) fn refresh_data_dir(&self) -> Result<(), BundlebaseError> {
@@ -561,8 +566,8 @@ impl Bundle {
         *self.packs.write() = other.packs.read().clone();
         *self.indexes.write() = other.indexes.read().clone();
         *self.views.write() = other.views.read().clone();
-        // Reload config: replace everything except Runtime entries
-        self.config.reload_non_runtime(&other.config);
+        // Reload config: replace Stored entries from the new manifest
+        self.config.reload_stored(&other.config);
         *self.data_dir.write() = Arc::clone(&*other.data_dir.read());
         *self.is_view.write() = *other.is_view.read();
         self.dataframe.clear();
@@ -1091,8 +1096,7 @@ impl BundleFacade for Bundle {
             .to_string();
 
         // Open view as Bundle (automatically loads parent via FROM)
-        // Extract passed config entries from current bundle to pass to view
-        let passed_config = self.config.extract_passed();
+        let passed_config = (*self.passed_config()).clone();
         Bundle::open(&view_path, Some(passed_config)).await
     }
 
@@ -1306,7 +1310,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_version() -> Result<(), BundlebaseError> {
-        let c = Bundle::empty().await?;
+        let c = Bundle::empty(None).await?;
         assert_eq!(c.version(), "empty".to_string());
 
         c.apply_operation(AnyOperation::SetName(SetNameOp {
@@ -1330,7 +1334,7 @@ mod tests {
     async fn test_version_udf_sql() -> Result<(), BundlebaseError> {
         use arrow::array::StringArray;
 
-        let c = Bundle::empty().await?;
+        let c = Bundle::empty(None).await?;
 
         // Execute SQL query using version() UDF
         let df = c.ctx().sql("SELECT version() AS ver").await?;
@@ -1352,7 +1356,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_bundle_schema() -> Result<(), BundlebaseError> {
-        let bundle = Bundle::empty().await?;
+        let bundle = Bundle::empty(None).await?;
 
         let schema = bundle.schema().await?;
         assert_eq!(schema.fields().len(), 1, "Empty bundle should have 1 field");
@@ -1369,7 +1373,7 @@ mod tests {
     async fn test_empty_bundle_query() -> Result<(), BundlebaseError> {
         use futures::TryStreamExt;
 
-        let bundle = Bundle::empty().await?;
+        let bundle = Bundle::empty(None).await?;
 
         let stream = bundle.query("SELECT * FROM bundle", vec![]).await?;
         let result_schema = stream.schema().clone();
@@ -1389,7 +1393,7 @@ mod tests {
     async fn test_empty_bundle_query_with_alias() -> Result<(), BundlebaseError> {
         use futures::TryStreamExt;
 
-        let bundle = Bundle::empty().await?;
+        let bundle = Bundle::empty(None).await?;
 
         // This previously failed with "Invalid qualifier t" when the bundle had 0 columns
         let stream = bundle.query("SELECT t.* FROM bundle t", vec![]).await?;

@@ -163,7 +163,7 @@ mod tests {
     async fn memory_file() {
         // Verify file doesn't exist initially
         let url = &Url::parse("memory:///test_key").unwrap();
-        let file = ObjectStoreFile::from_url(url, BundleConfig::default().into()).unwrap();
+        let file = ObjectStoreFile::from_url(url, BundleConfig::new(None).unwrap().into()).unwrap();
         assert!(!file.exists().await.unwrap());
         assert_eq!(true, file.version().await.is_err());
 
@@ -184,7 +184,7 @@ mod tests {
     async fn memory_file_multiple_writes() {
         // Test that multiple writes overwrite previous data
         let url = &Url::parse("memory:///multi_write_test").unwrap();
-        let file = ObjectStoreFile::from_url(url, BundleConfig::default().into()).unwrap();
+        let file = ObjectStoreFile::from_url(url, BundleConfig::new(None).unwrap().into()).unwrap();
 
         // First write
         file.write(bytes::Bytes::from("first")).await.unwrap();
@@ -207,7 +207,7 @@ mod tests {
     async fn file_file() {
         // Absolute file path
         let url = &Url::parse("file:///absolute/path/file.txt").unwrap();
-        let file = ObjectStoreFile::from_url(url, BundleConfig::default().into()).unwrap();
+        let file = ObjectStoreFile::from_url(url, BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(
             "file:///absolute/path/file.txt",
             file.url().to_string(),
@@ -222,7 +222,7 @@ mod tests {
                     .join("relative_path/file.txt"),
             )
             .unwrap(),
-            BundleConfig::default().into(),
+            BundleConfig::new(None).unwrap().into(),
         )
         .unwrap();
         assert!(
@@ -233,7 +233,7 @@ mod tests {
         // File URL from absolute path
         let file = ObjectStoreFile::from_url(
             &Url::from_file_path("/absolute/path/to/file.txt").unwrap(),
-            BundleConfig::default().into(),
+            BundleConfig::new(None).unwrap().into(),
         )
         .unwrap();
         assert_eq!(
@@ -247,7 +247,7 @@ mod tests {
     async fn test_factory_rejects_unknown_scheme() {
         // Test that unknown URL schemes are rejected
         let url = &Url::parse("unknown://test").unwrap();
-        let result = ObjectStoreFile::from_url(url, BundleConfig::default().into());
+        let result = ObjectStoreFile::from_url(url, BundleConfig::new(None).unwrap().into());
         assert!(result.is_err(), "Unknown scheme should be rejected");
         assert_eq!(
             result.err().unwrap().to_string(),
@@ -259,7 +259,7 @@ mod tests {
     async fn s3_file() {
         // Test S3 file URL handling
         let url = &Url::parse("s3://bucket/key").unwrap();
-        let file = ObjectStoreFile::from_url(url, BundleConfig::default().into());
+        let file = ObjectStoreFile::from_url(url, BundleConfig::new(None).unwrap().into());
         assert!(file.is_ok(), "S3 URL should be supported");
         assert_eq!(
             "s3://bucket/key",
@@ -285,7 +285,7 @@ mod tests {
 
         for (url_str, expected) in cases {
             let url = Url::parse(url_str).unwrap();
-            let file = ObjectStoreFile::from_url(&url, BundleConfig::default().into()).unwrap();
+            let file = ObjectStoreFile::from_url(&url, BundleConfig::new(None).unwrap().into()).unwrap();
             assert_eq!(expected, file.url().to_string());
         }
     }
@@ -303,7 +303,7 @@ mod tests {
                 expected,
                 ObjectStoreFile::from_url(
                     &Url::parse(url).unwrap(),
-                    BundleConfig::default().into()
+                    BundleConfig::new(None).unwrap().into()
                 )
                 .unwrap()
                 .url()
@@ -325,7 +325,7 @@ mod tests {
                 expected,
                 ObjectStoreFile::from_url(
                     &Url::parse(url).unwrap(),
-                    BundleConfig::default().into()
+                    BundleConfig::new(None).unwrap().into()
                 )
                 .unwrap()
                 .url()

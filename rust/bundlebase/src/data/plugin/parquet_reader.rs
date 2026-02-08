@@ -235,7 +235,7 @@ mod tests {
         // Parquet plugin should only adapt .parquet files
         let plugin = ParquetPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let result = plugin
             .reader("file:///test.csv", &1.into(), &*binding, None, None, None, None)
             .await?;
@@ -249,7 +249,7 @@ mod tests {
     async fn test_invalid_parquet_file() -> Result<(), BundlebaseError> {
         let plugin = ParquetPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let invalid_reader = plugin
             .reader("file:///invalid.parquet", &1.into(), &*binding, None, None, None, None)
             .await?;
@@ -271,7 +271,7 @@ mod tests {
         // Test complete Parquet file read and data validation
         let plugin = ParquetPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
@@ -329,7 +329,7 @@ mod tests {
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
-        let binding2 = Bundle::empty().await?;
+        let binding2 = Bundle::empty(None).await?;
         let ctx = binding2.ctx();
         let ds = reader.data_source(None, &[], None, None).await?;
         let results = ds.open(0, ctx.task_ctx())?;
@@ -369,7 +369,7 @@ mod tests {
     #[tokio::test]
     async fn test_schema() -> Result<(), BundlebaseError> {
         let plugin = ParquetPlugin::default();
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
@@ -417,7 +417,7 @@ mod tests {
     async fn test_statistics() -> Result<(), BundlebaseError> {
         let plugin = ParquetPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),

@@ -8,8 +8,9 @@ mod auth;
 mod flight;
 mod repl;
 
-use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade};
+use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade, PassedBundleConfig};
 use clap::{Parser, ValueEnum};
+use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 use tracing_log::LogTracer;
@@ -62,6 +63,10 @@ struct Args {
     #[arg(long)]
     port: Option<u16>,
 
+    /// Path to a YAML or JSON config file
+    #[arg(long)]
+    config: Option<String>,
+
     /// Logging level (ui, trace, debug, info, warn, error)
     /// ui: Minimal format (message only), INFO level - good for interactive use
     #[arg(long, default_value = "ui")]
@@ -112,6 +117,35 @@ fn parse_log_level(level_str: &str) -> Result<LogConfig, String> {
     }
 }
 
+/// Load a `PassedBundleConfig` from a YAML or JSON file, if a path is provided.
+fn load_config(path: Option<&str>) -> Result<Option<PassedBundleConfig>, BundlebaseError> {
+    let path = match path {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| BundlebaseError::from(format!("Failed to read config file '{}': {}", path, e)))?;
+
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    let config: PassedBundleConfig = match ext {
+        "json" => serde_json::from_str(&contents)
+            .map_err(|e| BundlebaseError::from(format!("Failed to parse JSON config '{}': {}", path, e)))?,
+        "yaml" | "yml" => serde_yaml_ng::from_str(&contents)
+            .map_err(|e| BundlebaseError::from(format!("Failed to parse YAML config '{}': {}", path, e)))?,
+        _ => return Err(BundlebaseError::from(format!(
+            "Unrecognized config file extension '{}'. Use .json, .yaml, or .yml",
+            ext
+        ))),
+    };
+
+    Ok(Some(config))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), BundlebaseError> {
     let args = Args::parse();
@@ -125,6 +159,8 @@ async fn main() -> Result<(), BundlebaseError> {
         std::process::exit(1);
     }
 
+    let config = load_config(args.config.as_deref())?;
+
     match args.mode {
         Mode::Repl => {
             repl::print_header();
@@ -132,15 +168,15 @@ async fn main() -> Result<(), BundlebaseError> {
             let state: Arc<dyn BundleFacade> = if args.create {
                 // Creating a new bundle - always read-write
                 info!("Creating bundle at: {}", args.bundle);
-                BundleBuilder::create(&args.bundle, None).await?
+                BundleBuilder::create(&args.bundle, config.clone()).await?
             } else if args.read_only {
                 // Read-only mode - open as Bundle
                 info!("Opening bundle in read-only mode: {}", args.bundle);
-                Bundle::open(&args.bundle, None).await?
+                Bundle::open(&args.bundle, config.clone()).await?
             } else {
                 // Read-write mode - open and extend
                 info!("Opening bundle in read-write mode: {}", args.bundle);
-                Bundle::open(&args.bundle, None).await?.extend(None)?
+                Bundle::open(&args.bundle, config.clone()).await?.extend(None)?
             };
 
             repl::start(state).await?;
@@ -156,7 +192,7 @@ async fn main() -> Result<(), BundlebaseError> {
             let addr = format!("{}:{}", args.host, port)
                 .parse()
                 .map_err(|e| BundlebaseError::from(format!("Invalid address: {}", e)))?;
-            flight::start(&args.bundle, args.create, args.read_only, addr).await?;
+            flight::start(&args.bundle, config, args.create, args.read_only, addr).await?;
         }
     }
 

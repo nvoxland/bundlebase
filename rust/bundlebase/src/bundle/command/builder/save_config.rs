@@ -101,8 +101,7 @@ impl BundleBuilderCommand for SaveConfigCommand {
         let op = SaveConfigOp::setup(&self.scope, &self.key, &self.value);
         builder.apply_operation(op.into()).await?;
 
-        let specs = crate::all_config_specs();
-        let display_value = if ConfigKey::is_key_secure(&self.key, &specs) {
+        let display_value = if ConfigKey::is_key_secure(&self.scope, &self.key) {
             "*****".to_string()
         } else {
             self.value.clone()

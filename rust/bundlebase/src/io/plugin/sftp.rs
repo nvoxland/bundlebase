@@ -29,6 +29,7 @@ config_keys!(sftp_keys, {
     pub const KEY_PATH_CFG: ConfigKey = SFTP_SCOPE.define("key_path");
 });
 
+
 /// SSH client handler for russh.
 struct SshHandler;
 
@@ -611,7 +612,7 @@ mod tests {
     #[test]
     fn test_sftp_file_from_url() {
         let url = Url::parse("sftp://testuser@example.com:2222/home/data/file.txt").unwrap();
-        let sftp_file = SftpFile::from_url(&url, BundleConfig::default().into()).unwrap();
+        let sftp_file = SftpFile::from_url(&url, BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(sftp_file.host, "example.com");
         assert_eq!(sftp_file.port, 2222);
         assert_eq!(sftp_file.user, "testuser");
@@ -621,7 +622,7 @@ mod tests {
     #[test]
     fn test_sftp_dir_from_url() {
         let url = Url::parse("sftp://testuser@example.com/data/").unwrap();
-        let sftp_dir = SftpDir::from_url(&url, BundleConfig::default().into()).unwrap();
+        let sftp_dir = SftpDir::from_url(&url, BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(sftp_dir.host, "example.com");
         assert_eq!(sftp_dir.port, 22);
         assert_eq!(sftp_dir.user, "testuser");

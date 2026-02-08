@@ -64,6 +64,7 @@ config_keys!(configs, {
         .with_default_fn("key in ~/.kaggle/kaggle.json", || read_kaggle_json_field("key"));
 });
 
+
 pub(super) fn dataset_scope(dataset: &str) -> Result<Scope, crate::BundlebaseError> {
     Scope::new(&format!("{}/{}", KAGGLE_SCOPE.name, dataset))
 }
@@ -119,10 +120,15 @@ impl SourceFunction for KaggleSource {
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
         self.default_validate_args(args)?;
 
-        // Validate dataset format
+        // Validate dataset format: must be exactly "owner/dataset-name"
         let dataset = source_utils::require_arg(args, "dataset", self.name())?;
-        //todo: just check the format, don't need parse_dataset_arg function anymore
-        parse_dataset_arg(dataset)?;
+        let parts: Vec<&str> = dataset.splitn(3, '/').collect();
+        if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+            return Err(BundlebaseError::from(format!(
+                "Invalid dataset format '{}'. Expected 'owner/dataset-name' (e.g., 'zillow/zecon')",
+                dataset
+            )));
+        }
 
         // Validate version if provided — must be a positive integer
         if let Some(version) = args.get("version") {
@@ -669,18 +675,6 @@ impl KaggleSource {
     }
 }
 
-/// Parse the `dataset` argument into `(owner, dataset_name)`.
-fn parse_dataset_arg(dataset: &str) -> Result<(&str, &str), BundlebaseError> {
-    let parts: Vec<&str> = dataset.splitn(3, '/').collect();
-    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
-        return Err(BundlebaseError::from(format!(
-            "Invalid dataset format '{}'. Expected 'owner/dataset-name' (e.g., 'zillow/zecon')",
-            dataset
-        )));
-    }
-    Ok((parts[0], parts[1]))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -832,41 +826,10 @@ mod tests {
         assert!(err.contains("does not accept argument 'unknown'"));
     }
 
-    #[test]
-    fn test_parse_dataset_arg_valid() {
-        let (owner, name) = parse_dataset_arg("zillow/zecon").unwrap();
-        assert_eq!(owner, "zillow");
-        assert_eq!(name, "zecon");
-    }
-
-    #[test]
-    fn test_parse_dataset_arg_no_slash() {
-        let result = parse_dataset_arg("invalid");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_dataset_arg_too_many_slashes() {
-        let result = parse_dataset_arg("a/b/c");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_dataset_arg_empty_owner() {
-        let result = parse_dataset_arg("/dataset");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_dataset_arg_empty_name() {
-        let result = parse_dataset_arg("owner/");
-        assert!(result.is_err());
-    }
-
-    #[test]
+#[test]
     fn test_kaggle_client_from_config_missing_credentials() {
         // Credentials are optional — client should succeed with None values
-        let config = BundleConfig::new();
+        let config = BundleConfig::new(None).unwrap();
         let client = KaggleClient::from_config(&config, "zillow/zecon").unwrap();
         // If ~/.kaggle/kaggle.json exists, default_fn may populate these;
         // otherwise they should be None
@@ -877,7 +840,7 @@ mod tests {
 
     #[test]
     fn test_kaggle_client_from_config() {
-        let config = BundleConfig::new();
+        let config = BundleConfig::new(None).unwrap();
         let scope = Scope::try_from("kaggle").unwrap();
         config.set(
             &scope,
@@ -908,7 +871,7 @@ mod tests {
     fn test_kaggle_client_from_config_partial_falls_back_to_default_fn() {
         // If only username is set in config (no key), key falls back to default_fn.
         // If default_fn also returns None, key is simply None.
-        let config = BundleConfig::new();
+        let config = BundleConfig::new(None).unwrap();
         let scope = Scope::try_from("kaggle").unwrap();
         config.set(
             &scope,
