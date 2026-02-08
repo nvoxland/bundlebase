@@ -78,6 +78,7 @@ config_keys!(azure_keys, {
     pub const AZURE_CLIENT_SECRET_CFG: ConfigKey = AZURE_SCOPE.define_secure("client_secret");
 });
 
+
 // ============================================================================
 // URL and ObjectStore utilities
 // ============================================================================
@@ -712,7 +713,7 @@ mod tests {
     async fn test_read_write() {
         let file = random_memory_file("test.json");
         // Convert to IOFile
-        let io_file = ObjectStoreFile::from_url(file.url(), BundleConfig::default().into()).unwrap();
+        let io_file = ObjectStoreFile::from_url(file.url(), BundleConfig::new(None).unwrap().into()).unwrap();
 
         assert!(!io_file.exists().await.unwrap());
 
@@ -727,7 +728,7 @@ mod tests {
     async fn test_null() {
         let file = ObjectStoreFile::from_url(
             &Url::parse("empty:///test.json").unwrap(),
-            BundleConfig::default().into(),
+            BundleConfig::new(None).unwrap().into(),
         )
         .unwrap();
         assert!(!file.exists().await.unwrap());
@@ -746,7 +747,7 @@ mod tests {
     #[case("s3://test", "")]
     #[case("s3://test/path/here", "path/here")]
     fn test_from_str(#[case] input: &str, #[case] expected_path: &str) {
-        let dir = ObjectStoreDir::from_str(input, BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_str(input, BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(dir.url.to_string(), input);
         assert_eq!(dir.path.to_string(), expected_path);
     }
@@ -754,16 +755,16 @@ mod tests {
     #[test]
     fn test_from_string_complex() {
         assert!(
-            ObjectStoreDir::from_str("memory://bucket/test", BundleConfig::default().into()).is_err(),
+            ObjectStoreDir::from_str("memory://bucket/test", BundleConfig::new(None).unwrap().into()).is_err(),
             "Memory must start with :///"
         );
 
         let dir =
-            ObjectStoreDir::from_str("memory:///test/../test2", BundleConfig::default().into()).unwrap();
+            ObjectStoreDir::from_str("memory:///test/../test2", BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(dir.path.to_string(), "test2");
         assert_eq!(dir.url.to_string(), "memory:///test2");
 
-        let dir = ObjectStoreDir::from_str("relative/path", BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_str("relative/path", BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(dir.url.to_string(), file_url("relative/path").unwrap().to_string());
     }
 
@@ -784,7 +785,7 @@ mod tests {
         #[case] expected_url: Url,
         #[case] expected_path: &str,
     ) {
-        let dir = ObjectStoreDir::from_url(&base, BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_url(&base, BundleConfig::new(None).unwrap().into()).unwrap();
         let subdir = dir.io_subdir(subdir).unwrap();
         assert_eq!(subdir.url, expected_url);
         assert_eq!(subdir.path.to_string(), expected_path);
@@ -792,7 +793,7 @@ mod tests {
 
     #[test]
     fn test_file() {
-        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::new(None).unwrap().into()).unwrap();
         let file = dir.io_file("other").unwrap();
         assert_eq!(file.url().to_string(), "memory:///test/other");
 
@@ -802,13 +803,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_files() {
-        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(0, dir.list_files().await.unwrap().len())
     }
 
     #[tokio::test]
     async fn test_null_url() {
-        let dir = ObjectStoreDir::from_str(EMPTY_URL, BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_str(EMPTY_URL, BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(0, dir.list_files().await.unwrap().len());
     }
 

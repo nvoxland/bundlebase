@@ -134,8 +134,7 @@ impl BundleFacadeCommand for SetConfigCommand {
             &self.value,
         )?;
 
-        let specs = crate::all_config_specs();
-        let is_secure = ConfigKey::is_key_secure(&self.key, &specs);
+        let is_secure = ConfigKey::is_key_secure(&self.scope, &self.key);
         let display_value = if is_secure {
             "'*****'".to_string()
         } else {

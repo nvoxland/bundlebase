@@ -74,7 +74,7 @@ impl AttachBlockOp {
         source_info: Option<SourceInfo>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
-        let _progress = ProgressScope::new(
+        let progress = ProgressScope::new(
             &format!("Attaching '{}'", location),
             None,
         );
@@ -82,7 +82,7 @@ impl AttachBlockOp {
         let hash = match hash {
             Some(h) => h.to_string(),
             None => {
-                _progress.update(1, Some("Computing hash"));
+                progress.update(1, Some("Computing hash"));
 
                 // Check if this is a function:// URL - these don't support file-based hash
                 //todo: do this right
@@ -107,16 +107,16 @@ impl AttachBlockOp {
 
         let block_id = ObjectId::generate();
 
-        _progress.update(2, Some("Creating adapter"));
+        progress.update(2, Some("Creating adapter"));
         let adapter_factory = builder.bundle().reader_factory.clone();
         let adapter = adapter_factory
             .reader(location, &block_id, builder, None, None, None, None)
             .await?;
 
-        _progress.update(3, Some("Reading version"));
+        progress.update(3, Some("Reading version"));
         let version = adapter.read_version().await?;
 
-        _progress.update(4, Some("Reading schema"));
+        progress.update(4, Some("Reading schema"));
         let schema = adapter.read_schema().await?;
 
         // Capture any format-specific options detected during schema inference
@@ -141,7 +141,7 @@ impl AttachBlockOp {
             read_options,
         };
 
-        _progress.update(5, Some("Reading statistics"));
+        progress.update(5, Some("Reading statistics"));
         match adapter.read_statistics().await? {
             Some(stats) => {
                 op.num_rows = stats.num_rows.get_value().copied();
@@ -152,7 +152,7 @@ impl AttachBlockOp {
             }
         }
 
-        _progress.update(6, Some("Building layout"));
+        progress.update(6, Some("Building layout"));
         let data_dir = builder.bundle().data_dir();
         op.layout = match adapter.build_layout(data_dir.as_ref()).await? {
             Some(file) => Some(data_dir.relative_path(file.as_ref())?),
@@ -272,7 +272,7 @@ mod tests {
         let pack = String::from(op.pack);
         let version = ObjectStoreFile::from_url(
             &Url::parse(datafile).unwrap(),
-            BundleConfig::default().into(),
+            BundleConfig::new(None)?.into(),
         )?
         .version()
         .await?;

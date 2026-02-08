@@ -247,12 +247,7 @@ impl BundleBuilder {
         path: &str,
         config: Option<PassedBundleConfig>,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
-        let bundle = Bundle::empty().await?;
-
-        // Load passed config entries into the bundle's config under ConfigSource::Passed
-        if let Some(passed) = config {
-            bundle.config.merge_passed(&passed)?; //todo: save passed on bundle so we can use it later, maybe construct config here with it?
-        }
+        let bundle = Bundle::empty(config).await?;
         bundle.refresh_data_dir()?;
         *bundle.data_dir.write() = writable_dir_from_str(path, bundle.config())?;
 
@@ -355,8 +350,7 @@ impl BundleBuilder {
         let last_manifest_version = *self.bundle.last_manifest_version.read();
         let from = self.bundle.from();
         let changes = self.status.read().changes().clone();
-        // Extract passed config entries for reopening
-        let passed_config = Some(self.bundle.config.extract_passed());
+        let passed_config = Some((*self.bundle.passed_config()).clone());
         let url = self.bundle.url().to_string();
         let bundle_id = self.bundle.id();
 
@@ -493,17 +487,15 @@ impl BundleBuilder {
     pub(in crate::bundle) async fn reload_bundle(&self) -> Result<(), BundlebaseError> {
         // Reload the bundle from the last committed state
         let empty = self.bundle.commits.read().is_empty();
-        // Extract passed config entries for reopening
-        let passed_config = self.bundle.config.extract_passed();
+        let passed_config = (*self.bundle.passed_config()).clone();
         let url = self.bundle.url().to_string();
 
         // Note: reload_from preserves the original ctx and its schema providers
         // which already have the correct facade set
         let new_bundle: Bundle = if empty {
             // empty() returns Arc<Bundle>, clone inner Bundle for reload_from
-            let arc = Bundle::empty().await?;
+            let arc = Bundle::empty(Some(passed_config)).await?;
             let bundle = (*arc).clone();
-            bundle.config.merge_passed(&passed_config)?;
             bundle.refresh_data_dir()?;
             *bundle.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, bundle.config())?;
             bundle

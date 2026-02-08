@@ -174,7 +174,7 @@ mod tests {
         // Function plugin should only adapt function:// URLs
         let plugin = FunctionPlugin::new(Arc::new(RwLock::new(FunctionRegistry::new())));
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let result = plugin
             .reader("file:///test.csv", &1.into(), &*binding, None, None, None, None)
             .await?;
@@ -189,7 +189,7 @@ mod tests {
         // function:// without a function name should error
         let plugin = FunctionPlugin::new(Arc::new(RwLock::new(FunctionRegistry::new())));
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let error = plugin
             .reader(
                 "function://",
@@ -215,7 +215,7 @@ mod tests {
     async fn test_unknown_function() -> Result<(), BundlebaseError> {
         let plugin = FunctionPlugin::new(Arc::new(RwLock::new(FunctionRegistry::new())));
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let error = plugin
             .reader(
                 "function://invalid",
@@ -264,7 +264,7 @@ mod tests {
 
         let plugin = FunctionPlugin::new(function_registry.clone());
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader("function://mock", &1.into(), &*binding, None, None, None, None)
             .await?
@@ -287,7 +287,7 @@ mod tests {
         );
 
         // Validate data reading
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let ctx = binding.ctx();
         let ds = reader.data_source(None, &[], None, None).await?;
         let results = ds.open(0, ctx.task_ctx())?;

@@ -28,6 +28,7 @@ config_keys!(ftp_keys, {
     pub const FTP_PASSWORD_CFG: ConfigKey = FTP_SCOPE.define_secure("password");
 });
 
+
 /// Parse an FTP URL into its components.
 ///
 /// # URL Format
@@ -524,7 +525,7 @@ mod tests {
 
     #[test]
     fn test_ftp_file_from_url_with_config() {
-        let config = Arc::new(BundleConfig::new());
+        let config = Arc::new(BundleConfig::new(None).unwrap());
         let scope = Scope::try_from(
             "ftp://ftp.example.com:2121/data/file.txt",
         ).unwrap();
@@ -542,7 +543,7 @@ mod tests {
 
     #[test]
     fn test_ftp_file_from_url_anonymous_default() {
-        let config = Arc::new(BundleConfig::new());
+        let config = Arc::new(BundleConfig::new(None).unwrap());
         let url = Url::parse("ftp://ftp.example.com/pub/data/file.txt").unwrap();
         let ftp_file = FtpFile::from_url(&url, config).unwrap();
         assert_eq!(ftp_file.user, "anonymous");
@@ -551,7 +552,7 @@ mod tests {
 
     #[test]
     fn test_ftp_dir_from_url_with_config() {
-        let config = Arc::new(BundleConfig::new());
+        let config = Arc::new(BundleConfig::new(None).unwrap());
         let scope = Scope::try_from("ftp").unwrap();
         config.set(&scope, FTP_USERNAME_CFG.key, "myuser", ConfigSource::Passed).unwrap();
         config.set(&scope, FTP_PASSWORD_CFG.key, "mypass", ConfigSource::Passed).unwrap();
@@ -567,7 +568,7 @@ mod tests {
 
     #[test]
     fn test_ftp_dir_from_url_anonymous_default() {
-        let config = Arc::new(BundleConfig::new());
+        let config = Arc::new(BundleConfig::new(None).unwrap());
         let url = Url::parse("ftp://ftp.example.com/pub/data/").unwrap();
         let ftp_dir = FtpDir::from_url(&url, config).unwrap();
         assert_eq!(ftp_dir.user, "anonymous");

@@ -44,9 +44,8 @@ impl SaveConfigOp {
 #[async_trait]
 impl Operation for SaveConfigOp {
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
-        let specs = crate::all_config_specs();
-        ConfigKey::validate_key_scoped(&self.scope, &self.key, &specs)?;
-        if ConfigKey::is_key_secure(&self.key, &specs) {
+        ConfigKey::validate_key_exists(&self.scope, &self.key)?;
+        if ConfigKey::is_key_secure(&self.scope, &self.key) {
             return Err(format!(
                 "Cannot save secure config key '{}'. Use environment variables or pass config at runtime instead.",
                 self.key
@@ -73,8 +72,7 @@ impl Operation for SaveConfigOp {
     }
 
     fn describe(&self) -> String {
-        let specs = crate::all_config_specs();
-        let display_value = if ConfigKey::is_key_secure(&self.key, &specs) {
+        let display_value = if ConfigKey::is_key_secure(&self.scope, &self.key) {
             "*****"
         } else {
             &self.value
@@ -200,7 +198,7 @@ mod tests {
         op2.apply(builder.bundle()).await.expect("apply op2");
 
         let config = builder.bundle().config();
-        let active = config.values(&[]).unwrap();
+        let active = config.values().unwrap();
         let region = active
             .iter()
             .find(|e| e.key == "region")
@@ -222,7 +220,7 @@ mod tests {
         op2.apply(builder.bundle()).await.expect("apply op2");
 
         let config = builder.bundle().config();
-        let active = config.values(&[]).unwrap();
+        let active = config.values().unwrap();
         let endpoint = active
             .iter()
             .find(|e| e.key == "endpoint" && e.scope == scope)

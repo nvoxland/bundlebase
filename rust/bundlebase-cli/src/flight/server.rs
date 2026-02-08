@@ -3,6 +3,7 @@
 use super::service::BundlebaseFlightSqlService;
 use crate::auth::BundlebaseAuthenticator;
 use arrow_flight::flight_service_server::FlightServiceServer;
+use bundlebase::PassedBundleConfig;
 use std::net::SocketAddr;
 use tonic::transport::Server;
 use tracing::{info, warn};
@@ -25,6 +26,7 @@ use tracing::{info, warn};
 /// * `Err(BundlebaseError)` - Server failed to start or encountered an error
 pub async fn start(
     bundle_path: &str,
+    config: Option<PassedBundleConfig>,
     create: bool,
     read_only: bool,
     addr: SocketAddr,
@@ -42,7 +44,7 @@ pub async fn start(
 
     let flight_service = BundlebaseFlightSqlService::new(
         bundle_path.to_string(),
-        None,
+        config,
         create,
         read_only,
         authenticator,

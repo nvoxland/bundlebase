@@ -34,22 +34,6 @@ pub use catalog::{CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA, tables as ca
 /// Standard error type used throughout the Bundlebase codebase
 pub type BundlebaseError = Box<dyn Error + Send + Sync>;
 
-/// All known configuration key specs for validation.
-///
-/// Thin wrapper around `BundleConfig::all_keys()` for backward compatibility.
-/// TODO: remove
-pub fn all_config_specs() -> Vec<bundle_config::ConfigKey> {
-    BundleConfig::all_keys()
-}
-
-/// All known configuration scopes.
-///
-/// Thin wrapper around `BundleConfig::all_scopes()`.
-/// TODO: remove
-pub fn all_config_scopes() -> Vec<bundle_config::ConfigScope> {
-    BundleConfig::all_scopes()
-}
-
 #[cfg(test)]
 mod tests {
     // #[tokio::test]

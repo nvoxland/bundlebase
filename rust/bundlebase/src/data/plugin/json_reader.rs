@@ -197,7 +197,7 @@ mod tests {
         // JSON plugin should only adapt .json files
         let plugin = JsonPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let result = plugin
             .reader("file:///test.csv", &1.into(), &*binding, None, None, None, None)
             .await?;
@@ -211,7 +211,7 @@ mod tests {
     async fn test_invalid_json_file() -> Result<(), BundlebaseError> {
         let plugin = JsonPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let invalid_reader = plugin
             .reader("file:///invalid.json", &1.into(), &*binding, None, None, None, None)
             .await?;
@@ -236,7 +236,7 @@ mod tests {
         // Test complete JSON file read and data validation
         let plugin = JsonPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("objects.json"),
@@ -280,7 +280,7 @@ mod tests {
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
-        let binding2 = Bundle::empty().await?;
+        let binding2 = Bundle::empty(None).await?;
         let ctx = &binding2.ctx();
         let ds = reader.data_source(None, &[], None, None).await?;
         let results = ds.open(0, ctx.task_ctx())?;
@@ -327,7 +327,7 @@ mod tests {
     async fn test_statistics() -> Result<(), BundlebaseError> {
         let plugin = JsonPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("objects.json"),
