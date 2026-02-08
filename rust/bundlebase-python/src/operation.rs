@@ -21,7 +21,7 @@ impl PyOperation {
             AnyOperation::RenameView(_) => "renameView".to_string(),
             AnyOperation::Filter(_) => "filter".to_string(),
             AnyOperation::CreateFunction(_) => "createFunction".to_string(),
-            AnyOperation::SetConfig(_) => "setConfig".to_string(),
+            AnyOperation::SaveConfig(_) => "saveConfig".to_string(),
             AnyOperation::SetName(_) => "setName".to_string(),
             AnyOperation::SetDescription(_) => "setDescription".to_string(),
             AnyOperation::IndexBlocks(_) => "indexBlocks".to_string(),

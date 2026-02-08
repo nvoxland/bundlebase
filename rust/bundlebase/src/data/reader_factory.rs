@@ -7,6 +7,7 @@ use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
 use datafusion::common::DataFusionError;
 use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct DataReaderFactory {
@@ -52,6 +53,7 @@ impl DataReaderFactory {
         schema: Option<SchemaRef>,
         layout: Option<String>,
         expected_version: Option<String>,
+        read_options: Option<&HashMap<String, String>>,
     ) -> Result<Arc<dyn DataReader>, BundlebaseError> {
         for plugin in &self.plugins {
             if let Some(reader) = plugin
@@ -62,6 +64,7 @@ impl DataReaderFactory {
                     schema.clone(),
                     layout.clone(),
                     expected_version.clone(),
+                    read_options,
                 )
                 .await?
             {

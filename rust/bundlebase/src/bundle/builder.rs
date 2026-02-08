@@ -9,14 +9,16 @@ use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle};
 use super::DataBlock;
 use crate::data::{ObjectId, VersionedBlockId};
-use crate::source::FetchResults;
+use crate::source::{FetchResults, SyncMode};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
 use crate::index::{IndexDefinition, IndexType};
 use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
+use crate::bundle_config::Scope;
+use crate::bundle_config::PassedBundleConfig;
 use crate::BundleConfig;
 use crate::BundlebaseError;
-use arrow::array::{ArrayRef, Int32Array, RecordBatch, StringArray};
+use arrow::array::{Int32Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use chrono::DateTime;
@@ -243,13 +245,10 @@ impl BundleBuilder {
     /// ```
     pub async fn create(
         path: &str,
-        config: Option<BundleConfig>,
+        config: Option<PassedBundleConfig>,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
-        let bundle = Bundle::empty().await?;
-
-        // Modify the bundle via interior mutability
-        *bundle.passed_config.write() = config;
-        bundle.recompute_config()?;
+        let bundle = Bundle::empty(config).await?;
+        bundle.refresh_data_dir()?;
         *bundle.data_dir.write() = writable_dir_from_str(path, bundle.config())?;
 
         // Check if a bundle already exists at this location
@@ -351,7 +350,7 @@ impl BundleBuilder {
         let last_manifest_version = *self.bundle.last_manifest_version.read();
         let from = self.bundle.from();
         let changes = self.status.read().changes().clone();
-        let config = self.bundle.passed_config.read().clone();
+        let passed_config = Some((*self.bundle.passed_config()).clone());
         let url = self.bundle.url().to_string();
         let bundle_id = self.bundle.id();
 
@@ -407,7 +406,7 @@ impl BundleBuilder {
 
         // Update base to reflect the committed version
         // Preserve explicit_config from current bundle
-        let new_bundle = Bundle::open(&url, config).await?;
+        let new_bundle = Bundle::open(&url, passed_config).await?;
 
         // Replace the bundle contents using reload_from to preserve Arc references
         // open_to_bundle returns Arc<Bundle> so we dereference to get the Bundle
@@ -488,23 +487,22 @@ impl BundleBuilder {
     pub(in crate::bundle) async fn reload_bundle(&self) -> Result<(), BundlebaseError> {
         // Reload the bundle from the last committed state
         let empty = self.bundle.commits.read().is_empty();
-        let passed_config = self.bundle.passed_config.read().clone();
+        let passed_config = (*self.bundle.passed_config()).clone();
         let url = self.bundle.url().to_string();
 
         // Note: reload_from preserves the original ctx and its schema providers
         // which already have the correct facade set
         let new_bundle: Bundle = if empty {
             // empty() returns Arc<Bundle>, clone inner Bundle for reload_from
-            let arc = Bundle::empty().await?;
+            let arc = Bundle::empty(Some(passed_config)).await?;
             let bundle = (*arc).clone();
-            *bundle.passed_config.write() = passed_config;
-            bundle.recompute_config()?;
+            bundle.refresh_data_dir()?;
             *bundle.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, bundle.config())?;
             bundle
         } else {
             // Preserve explicit_config when reopening
             // open returns Arc<Bundle>, so we clone the inner Bundle
-            let arc_bundle = Bundle::open(&url, passed_config).await?;
+            let arc_bundle = Bundle::open(&url, Some(passed_config)).await?;
             (*arc_bundle).clone()
         };
 
@@ -740,7 +738,7 @@ impl BundleBuilder {
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
     /// builder.create_source("remote_dir", args, None).await?;
-    /// builder.fetch(None).await?;  // Fetch from base pack sources
+    /// builder.fetch("base", SyncMode::Add).await?;
     /// builder.commit("Initial data from source").await?;
     /// ```
     pub async fn create_source(
@@ -760,9 +758,8 @@ impl BundleBuilder {
     /// and auto-attaches any new files.
     ///
     /// # Arguments
-    /// * `pack` - Which pack to fetch sources for:
-    ///   - `None` or `Some("base")`: The base pack (default)
-    ///   - `Some(join_name)`: A joined pack by its join name
+    /// * `pack` - Which pack to fetch sources for (e.g. "base", or a join name)
+    /// * `mode` - Sync mode controlling how fetch handles existing files.
     ///
     /// # Returns
     /// A list of `FetchResults`, one for each source in the pack.
@@ -775,19 +772,22 @@ impl BundleBuilder {
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
     /// builder.create_source("remote_dir", args, None).await?;
-    /// let results = builder.fetch(None).await?;  // Fetch from base pack sources
+    /// let results = builder.fetch("base", SyncMode::Add).await?;
     /// for result in &results {
     ///     println!("Source {}: {} added", result.source_function, result.added.len());
     /// }
     /// ```
-    pub async fn fetch(&self, pack: Option<&str>) -> Result<Vec<FetchResults>, BundlebaseError> {
-        self.execute_command(FetchCommand::new(pack.map(|s| s.to_string()))).await
+    pub async fn fetch(&self, pack: &str, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
+        self.execute_command(FetchCommand::new(pack.to_string(), mode)).await
     }
 
     /// Fetch from all defined sources - discover and attach new files.
     ///
     /// Lists files from each source URL, compares with already-attached files,
     /// and auto-attaches any new files.
+    ///
+    /// # Arguments
+    /// * `mode` - Sync mode controlling how fetch handles existing files.
     ///
     /// # Returns
     /// A list of `FetchResults`, one for each source across all packs.
@@ -797,7 +797,7 @@ impl BundleBuilder {
     /// ```ignore
     /// let builder = BundleBuilder::create("memory:///work", None).await?;
     /// // Create multiple sources...
-    /// let results = builder.fetch_all().await?;
+    /// let results = builder.fetch_all(SyncMode::Add).await?;
     /// for result in &results {
     ///     println!("Source {}: {} added, {} replaced, {} removed",
     ///         result.source_function,
@@ -806,8 +806,8 @@ impl BundleBuilder {
     ///         result.removed.len());
     /// }
     /// ```
-    pub async fn fetch_all(&self) -> Result<Vec<FetchResults>, BundlebaseError> {
-        self.execute_command(FetchAllCommand::new()).await
+    pub async fn fetch_all(&self, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
+        self.execute_command(FetchAllCommand::new(mode)).await
     }
 
     /// Create a view from a SQL statement
@@ -1054,25 +1054,25 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Set a configuration value
+    /// Save a configuration value to the bundle manifest
     ///
     /// Config stored via this operation has the lowest priority:
     /// 1. Explicit config passed to create()/open() (highest)
-    /// 2. Environment variables
-    /// 3. Config from set_config operations (lowest)
+    /// 2. Environment variables (BB_*)
+    /// 3. Config from save_config operations (lowest)
     ///
     /// # Arguments
+    /// * `scope` - Scope to save config under (e.g., `Scope::try_from("s3")` or `Scope::try_from("s3://bucket")`)
     /// * `key` - Configuration key (e.g., "region", "access_key_id")
     /// * `value` - Configuration value
-    /// * `url_prefix` - Optional URL prefix for URL-specific config (e.g., "s3://bucket/")
-    pub async fn set_config(
+    pub async fn save_config(
         &self,
+        scope: &Scope,
         key: &str,
         value: &str,
-        url_prefix: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::SetConfigCommand;
-        self.execute_command(SetConfigCommand::new(key, value, url_prefix.map(|s| s.to_string()))).await?;
+        use crate::bundle::command::SaveConfigCommand;
+        self.execute_command(SaveConfigCommand::new(scope.clone(), key, value)).await?;
         Ok(self)
     }
 
@@ -1446,6 +1446,15 @@ impl BundleFacade for BundleBuilder {
 
     fn config(&self) -> Arc<BundleConfig> {
         self.bundle.config()
+    }
+
+    fn set_config(
+        &self,
+        scope: &Scope,
+        key: &str,
+        value: &str,
+    ) -> Result<(), BundlebaseError> {
+        self.bundle.set_config(scope, key, value)
     }
 
     fn ctx(&self) -> Arc<SessionContext> {

@@ -6,6 +6,7 @@ use crate::bundle::BundleStatus;
 use crate::bundle::Pack;
 use crate::index::IndexDefinition;
 use crate::io::{IOReadWriteDir, ObjectId};
+use crate::bundle_config::Scope;
 use crate::{AnyOperation, Bundle, BundleBuilder, BundleConfig, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -279,6 +280,23 @@ pub trait BundleFacade: Send + Sync {
 
     /// Returns the bundle configuration
     fn config(&self) -> Arc<BundleConfig>;
+
+    /// Set a runtime config value (session-only, highest priority).
+    ///
+    /// This modifies the runtime config layer which takes precedence over
+    /// all other config sources (stored, env, passed). The change is not
+    /// persisted — it only lasts for the current session.
+    ///
+    /// # Arguments
+    /// * `scope` - Normalized scope for this config value.
+    /// * `key` - Configuration key. Supports compound `"scope__key"` format.
+    /// * `value` - Configuration value
+    fn set_config(
+        &self,
+        scope: &Scope,
+        key: &str,
+        value: &str,
+    ) -> Result<(), BundlebaseError>;
 
     /// Returns the DataFusion session context
     fn ctx(&self) -> Arc<SessionContext>;

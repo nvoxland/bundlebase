@@ -5,23 +5,22 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 __version__: str
 
 class BundleConfig:
-    """Configuration for container storage and cloud providers."""
+    """Configuration for container storage and cloud providers.
 
-    def __init__(self) -> None: ...
+    Not directly constructible — returned by the ``config()`` method on bundles and builders.
+    """
 
-    def set(self, key: str, value: str, url_prefix: Optional[str] = None) -> None:
+    def set(self, scope: str, key: str, value: str) -> None:
         """Set a configuration value.
 
         Args:
-            key: Configuration key
+            scope: Scope (e.g., "s3", "s3/bucket", "system").
+            key: Configuration key.
             value: Configuration value
-            url_prefix: Optional URL prefix for URL-specific config
         """
         ...
 
-ConfigType = Union[BundleConfig, Dict[str, Any]]
-
-def create(path: str = ..., config: Optional[ConfigType] = None) -> "CreateChain":
+def create(path: str = ..., config: Optional[Dict[str, Any]] = None) -> "CreateChain":
     """
     Create a new Bundle with fluent chaining support.
 
@@ -29,6 +28,7 @@ def create(path: str = ..., config: Optional[ConfigType] = None) -> "CreateChain
 
     Args:
         path: Optional path for bundle storage
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         CreateChain that can be chained with operations
@@ -40,13 +40,13 @@ def create(path: str = ..., config: Optional[ConfigType] = None) -> "CreateChain
     """
     ...
 
-async def open(path: str, config: Optional[ConfigType] = None) -> PyBundle:
+async def open(path: str, config: Optional[Dict[str, Any]] = None) -> PyBundle:
     """
     Load a bundle definition from a saved file.
 
     Args:
         path: Path to the saved bundle file (YAML format)
-        config: Optional configuration (BundleConfig or dict) for cloud storage settings
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         A PyBundle with the loaded operations (read-only)
@@ -612,21 +612,42 @@ class PyBundleBuilder:
         """
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "OperationChain":
+    def save_config(self, scope: str, key: str, value: str) -> "OperationChain":
         """
-        Queue a set_config operation.
+        Queue a save_config operation.
 
         Args:
+            scope: Scope (e.g., "s3", "s3/bucket", "system")
             key: Configuration key
             value: Configuration value
-            url_prefix: Optional URL prefix for URL-specific config
 
         Returns:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.set_config("region", "us-west-2")
-            c = await c.set_config("endpoint", "http://localhost:9000", url_prefix="s3://test-bucket/")
+            c = await c.save_config("s3", "region", "us-west-2")
+            c = await c.save_config("s3/test-bucket", "endpoint", "http://localhost:9000")
+        """
+        ...
+
+    def set_config(self, scope: str, key: str, value: str) -> "OperationChain":
+        """
+        Queue a set_config operation (runtime-only, highest priority).
+
+        Unlike save_config, this does not persist the value to the bundle manifest.
+        It only affects the current session. Takes precedence over all other config sources.
+
+        Args:
+            scope: Scope (e.g., "s3", "s3/bucket", "system").
+            key: Configuration key.
+            value: Configuration value
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.set_config("s3", "region", "us-west-2")
+            c = await c.set_config("s3/test-bucket", "endpoint", "http://localhost:9000")
         """
         ...
 
@@ -896,7 +917,7 @@ class PyBundleBuilder:
         """
         ...
 
-    async def fetch(self, pack: str = "base") -> List[FetchResults]:
+    async def fetch(self, pack: str, mode: str) -> List[FetchResults]:
         """
         Fetch data from sources for a pack.
 
@@ -904,34 +925,42 @@ class PyBundleBuilder:
         auto-attaches any new files found.
 
         Args:
-            pack: Which pack to fetch sources for:
-                - "base" (default): The base pack
-                - A join name: A joined pack by its join name
+            pack: Which pack to fetch sources for (e.g. "base" or a join name)
+            mode: Sync mode: "add", "update", or "sync".
+                - "add": Only attach new files
+                - "update": Add new files and replace changed files
+                - "sync": Add new, replace changed, and remove deleted files
 
         Returns:
             List of FetchResults, one for each source in the pack.
             Each result contains details about blocks added, replaced, and removed.
 
         Example:
-            results = await c.fetch()  # Fetch from base pack sources
+            results = await c.fetch("base", "add")
             for result in results:
                 print(f"{result.source_function}: {len(result.added)} added")
         """
         ...
 
-    async def fetch_all(self) -> List[FetchResults]:
+    async def fetch_all(self, mode: str) -> List[FetchResults]:
         """
         Fetch data from all defined sources.
 
         Compares files in each source with already-attached files and
         auto-attaches any new files found.
 
+        Args:
+            mode: Sync mode: "add", "update", or "sync".
+                - "add": Only attach new files
+                - "update": Add new files and replace changed files
+                - "sync": Add new, replace changed, and remove deleted files
+
         Returns:
             List of FetchResults, one for each source across all packs.
             Includes results for sources with no changes (empty results).
 
         Example:
-            results = await c.fetch_all()
+            results = await c.fetch_all("add")
             for result in results:
                 print(f"{result.source_function}: {result.total_count()} changes")
         """
@@ -1159,8 +1188,12 @@ class OperationChain:
         """Queue a set_description operation."""
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "OperationChain":
-        """Queue a set_config operation."""
+    def save_config(self, scope: str, key: str, value: str) -> "OperationChain":
+        """Queue a save_config operation."""
+        ...
+
+    def set_config(self, scope: str, key: str, value: str) -> "OperationChain":
+        """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 
     def create_function(
@@ -1276,8 +1309,12 @@ class CreateChain:
         """Queue a set_description operation."""
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "CreateChain":
-        """Queue a set_config operation."""
+    def save_config(self, scope: str, key: str, value: str) -> "CreateChain":
+        """Queue a save_config operation."""
+        ...
+
+    def set_config(self, scope: str, key: str, value: str) -> "CreateChain":
+        """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 
     def create_function(
@@ -1393,8 +1430,12 @@ class ExtendChain:
         """Queue a set_description operation."""
         ...
 
-    def set_config(self, key: str, value: str, url_prefix: Optional[str] = None) -> "ExtendChain":
-        """Queue a set_config operation."""
+    def save_config(self, scope: str, key: str, value: str) -> "ExtendChain":
+        """Queue a save_config operation."""
+        ...
+
+    def set_config(self, scope: str, key: str, value: str) -> "ExtendChain":
+        """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 
     def create_function(

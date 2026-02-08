@@ -77,7 +77,7 @@ impl Operation for CreateIndexOp {
         bundle
             .indexes
             .write()
-            .push(Arc::new(IndexDefinition::with_type(
+            .push(Arc::new(IndexDefinition::new(
                 &self.id,
                 &self.column,
                 self.index_type.clone(),

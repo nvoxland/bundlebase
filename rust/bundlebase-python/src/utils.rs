@@ -16,7 +16,7 @@ use pyo3::prelude::*;
 /// Returns a descriptive error if an unsupported type is provided,
 /// including the parameter index and the actual type name.
 pub fn convert_py_params_sync(params: Vec<Py<PyAny>>) -> PyResult<Vec<ScalarValue>> {
-    Python::with_gil(|py| convert_py_params_with_py(py, params))
+    Python::attach(|py| convert_py_params_with_py(py, params))
 }
 
 /// Convert Python objects to DataFusion ScalarValue with an explicit Python context

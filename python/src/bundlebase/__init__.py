@@ -90,6 +90,7 @@ _original_methods = {
     # Metadata operations
     "set_name": _PyBundleBuilder.set_name,
     "set_description": _PyBundleBuilder.set_description,
+    "save_config": _PyBundleBuilder.save_config,
     "set_config": _PyBundleBuilder.set_config,
 
     # Custom function operations
@@ -153,7 +154,7 @@ mutation_methods = [
     "attach", "detach_block", "replace_block", "create_source",
     "drop_column", "rename_column", "filter", "join",
     "create_view", "rename_view", "drop_view", "drop_join", "rename_join",
-    "set_name", "set_description", "set_config", "create_function",
+    "set_name", "set_description", "save_config", "set_config", "create_function",
     "create_index", "drop_index", "rebuild_index", "reindex",
     "reset", "undo"
 ]
@@ -166,7 +167,7 @@ for method_name in mutation_methods:
 PyBundleBuilder = _PyBundleBuilder
 
 
-ConfigType = Union[BundleConfig, Dict[str, Any]]
+ConfigType = Dict[str, Any]
 
 def create(path: str = "", config: Optional[ConfigType] = None) -> CreateChain:
     """
@@ -176,7 +177,7 @@ def create(path: str = "", config: Optional[ConfigType] = None) -> CreateChain:
 
     Args:
         path: Optional path for bundle storage
-        config: Optional configuration (BundleConfig or dict) for cloud storage settings
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         CreateChain that can be chained with operations
@@ -201,7 +202,7 @@ async def open(path: str, config: Optional[ConfigType] = None) -> PyBundle:
 
     Args:
         path: Path to the saved bundle file (YAML format)
-        config: Optional configuration (BundleConfig or dict) for cloud storage settings
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         A PyBundle with the loaded operations (read-only)

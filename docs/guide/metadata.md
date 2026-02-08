@@ -44,35 +44,6 @@ Set the bundle's description.
     SET DESCRIPTION 'Contains all customer records from 2024'
     ```
 
-## Set Config
-
-Set a configuration value for the bundle. Use the optional `url_prefix` to scope the config to a specific URL pattern.
-
-=== "Async API"
-
-    ```python
-    # Global config
-    await bundle.set_config("region", value="us-east-1")
-
-    # Config scoped to a URL prefix
-    await bundle.set_config("region", value="eu-west-1", url_prefix="s3://eu-bucket/")
-    ```
-
-=== "Sync API"
-
-    ```python
-    bundle.set_config("region", value="us-east-1")
-    bundle.set_config("region", value="eu-west-1", url_prefix="s3://eu-bucket/")
-    ```
-
-=== "SQL"
-
-    ```sql
-    SET CONFIG region = 'us-east-1'
-
-    SET CONFIG region = 'eu-west-1' FOR 's3://eu-bucket/'
-    ```
-
 ## Accessing Properties
 
 Bundle metadata is available as properties:

@@ -133,7 +133,7 @@ impl BundleBuilderCommand for JoinCommand {
 
         // Step 2: Attach the location data to the join pack (if provided)
         if let Some(ref loc) = self.location {
-            let op = AttachBlockOp::setup(&join_pack_id, loc, builder).await?;
+            let op = AttachBlockOp::setup(&join_pack_id, loc, None, None, builder).await?;
             builder.apply_operation(op.into()).await?;
         }
 

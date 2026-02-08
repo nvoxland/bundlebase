@@ -50,6 +50,7 @@ russh-keys = "0.46"
 suppaftp = { version = "7.1", features = ["tokio"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
 scraper = "0.22"
+zip = { version = "7.2", default-features = false, features = ["deflate"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
 postgres-types = { version = "0.2", features = ["derive"] }
 tantivy = "0.25"
@@ -59,3 +60,4 @@ tempfile = "3.24"
 rstest = { workspace = true }
 env_logger = "0.11"
 serial_test = "3.3"
+wiremock = "0.6"

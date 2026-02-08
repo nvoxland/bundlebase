@@ -47,6 +47,7 @@ numpy = ">=1.20.0"
 nest-asyncio = "^1.6.0"
 maturin = "^1.10.2"
 pyyaml = "^6.0.3"
+tqdm = "^4.67"
 
 [tool.poetry.group.docs]
 optional = true

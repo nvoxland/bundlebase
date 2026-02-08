@@ -60,11 +60,11 @@ pub use parser::Rule;
 
 // Re-export builder command structs
 pub use builder::{
-    AttachCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand, CreateViewCommand,
-    DetachBlockCommand, DropColumnCommand, DropIndexCommand, DropJoinCommand,
+    AttachCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
+    CreateViewCommand, DetachBlockCommand, DropColumnCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand,
     ReindexCommand, RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand,
-    ResetCommand, SetConfigCommand, SetDescriptionCommand, SetNameCommand, UndoCommand,
+    ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand, UndoCommand,
     VerifyDataCommand,
 };
 
@@ -73,6 +73,7 @@ pub use builder::{FileVerificationResult, VerificationResults};
 
 // Re-export facade command structs
 pub use facade::ExplainPlanCommand;
+pub use facade::SetConfigCommand;
 
 /// Commands that can be executed on a BundleFacade (read-only).
 ///
@@ -82,6 +83,8 @@ pub use facade::ExplainPlanCommand;
 pub enum FacadeCommand {
     /// Show query execution plan
     ExplainPlan(ExplainPlanCommand),
+    /// Set runtime config value (session-only)
+    SetConfig(SetConfigCommand),
 }
 
 impl FacadeCommand {
@@ -95,6 +98,10 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::SetConfig(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
         }
     }
 
@@ -102,6 +109,7 @@ impl FacadeCommand {
     pub fn output_schema(&self) -> SchemaRef {
         match self {
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
+            FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
         }
     }
 
@@ -109,6 +117,7 @@ impl FacadeCommand {
     pub fn output_shape(&self) -> OutputShape {
         match self {
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
+            FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
         }
     }
 }
@@ -121,6 +130,7 @@ impl BundleCommand {
     pub fn into_facade_command(self) -> Result<FacadeCommand, BundlebaseError> {
         match self {
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
+            BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
             _ => {
                 // Get the command name for the error message
                 let cmd_name = match &self {
@@ -142,7 +152,7 @@ impl BundleCommand {
                     BundleCommand::RenameJoin(_) => "RENAME JOIN",
                     BundleCommand::SetName(_) => "SET NAME",
                     BundleCommand::SetDescription(_) => "SET DESCRIPTION",
-                    BundleCommand::SetConfig(_) => "SET CONFIG",
+                    BundleCommand::SaveConfig(_) => "SAVE CONFIG",
                     BundleCommand::CreateSource(_) => "CREATE SOURCE",
                     BundleCommand::Reset(_) => "RESET",
                     BundleCommand::Undo(_) => "UNDO",
@@ -150,7 +160,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::ExplainPlan(_) => {
+                    BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -164,7 +174,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::ExplainPlan(_))
+        matches!(self, BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
     }
 }
 
@@ -441,7 +451,7 @@ register_commands! {
         // Metadata commands
         SetName(SetNameCommand) => Rule::set_name_stmt,
         SetDescription(SetDescriptionCommand) => Rule::set_description_stmt,
-        SetConfig(SetConfigCommand) => Rule::set_config_stmt,
+        SaveConfig(SaveConfigCommand) => Rule::save_config_stmt,
 
         // Source commands
         CreateSource(CreateSourceCommand) => Rule::create_source_stmt,
@@ -461,12 +471,14 @@ register_commands! {
     }
     facade {
         ExplainPlan(ExplainPlanCommand) => Rule::explain_stmt,
+        SetConfig(SetConfigCommand) => Rule::set_config_stmt,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::SyncMode;
     use std::collections::HashMap;
 
     #[test]
@@ -533,11 +545,11 @@ mod tests {
 
     #[test]
     fn test_fetch_command() {
-        let cmd = BundleCommand::Fetch(FetchCommand::new(Some("users".to_string())));
+        let cmd = BundleCommand::Fetch(FetchCommand::new("users".to_string(), SyncMode::Add));
 
         match cmd {
             BundleCommand::Fetch(cmd) => {
-                assert_eq!(cmd.pack, Some("users".to_string()));
+                assert_eq!(cmd.pack, "users");
             }
             _ => panic!("Expected Fetch variant"),
         }
@@ -545,7 +557,7 @@ mod tests {
 
     #[test]
     fn test_fetch_all_command() {
-        let cmd = BundleCommand::FetchAll(FetchAllCommand::new());
+        let cmd = BundleCommand::FetchAll(FetchAllCommand::new(SyncMode::Add));
 
         match cmd {
             BundleCommand::FetchAll(_) => {}

@@ -79,6 +79,7 @@ metadata_stmt = {
     set_name_stmt
     | set_description_stmt
     | set_config_stmt
+    | save_config_stmt
 }
 
 // ============================================================================
@@ -181,15 +182,18 @@ source_arg_pair = {
 // ============================================================================
 // FETCH Statement
 // ============================================================================
-// Syntax: FETCH [<pack>] | FETCH ALL
+// Syntax: FETCH ALL <mode> | FETCH <pack> <mode>
 // Examples:
-//   FETCH              -- fetch from base pack sources
-//   FETCH users        -- fetch from 'users' pack sources
-//   FETCH ALL          -- fetch from all sources
-
+//   FETCH base ADD            -- fetch from base pack sources (add mode)
+//   FETCH users ADD           -- fetch from 'users' pack sources
+//   FETCH ALL ADD             -- fetch from all sources
+//   FETCH ALL UPDATE          -- fetch all with update mode
+//   FETCH users SYNC          -- fetch from 'users' with sync mode
 fetch_stmt = {
-    ^"fetch" ~ (^"all" | identifier)?
+    ^"fetch" ~ (^"all" ~ fetch_mode | identifier ~ fetch_mode)
 }
+
+fetch_mode = { ^"add" | ^"update" | ^"sync" }
 
 // ============================================================================
 // DROP JOIN Statement
@@ -318,12 +322,22 @@ rebuild_index_stmt = {
 }
 
 // ============================================================================
-// SET CONFIG Statement
+// SET CONFIG Statement (runtime-only)
 // ============================================================================
-// Syntax: SET CONFIG <key> = '<value>' [FOR '<url_prefix>']
+// Syntax: SET CONFIG <key> = '<value>' FOR '<scope>'
+// Sets a config value for the current session only (not persisted).
 
 set_config_stmt = {
-    ^"set" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ (^"for" ~ quoted_string)?
+    ^"set" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ ^"for" ~ quoted_string
+}
+
+// ============================================================================
+// SAVE CONFIG Statement
+// ============================================================================
+// Syntax: SAVE CONFIG <key> = '<value>' FOR '<scope>'
+
+save_config_stmt = {
+    ^"save" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ ^"for" ~ quoted_string
 }
 
 // ============================================================================

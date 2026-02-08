@@ -5,5 +5,7 @@
 
 // Facade command implementations
 mod explain;
+mod set_config;
 
 pub use explain::ExplainPlanCommand;
+pub use set_config::SetConfigCommand;

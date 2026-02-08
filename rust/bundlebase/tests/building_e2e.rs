@@ -166,7 +166,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
     // Read source data and write to local location
     let source_obj =
-        readable_file_from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
+        readable_file_from_url(&Url::parse(source_file)?, BundleConfig::new(None)?.into())?;
     let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?

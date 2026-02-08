@@ -255,13 +255,8 @@ pub struct IndexDefinition {
 }
 
 impl IndexDefinition {
-    /// Create a new column index definition (default type)
-    pub(crate) fn new(id: &ObjectId, column: &String) -> IndexDefinition {
-        Self::with_type(id, column, IndexType::Column)
-    }
-
     /// Create a new index definition with a specific type
-    pub(crate) fn with_type(id: &ObjectId, column: &String, index_type: IndexType) -> IndexDefinition {
+    pub(crate) fn new(id: &ObjectId, column: &String, index_type: IndexType) -> IndexDefinition {
         Self {
             id: *id,
             column: column.clone(),

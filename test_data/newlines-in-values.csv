@@ -1,0 +1,7 @@
+id,name,description,value
+1,Alice,"This is a
+multi-line description",100
+2,Bob,"Simple description",200
+3,Carol,"Another
+multi-line
+entry here",300

@@ -4,8 +4,9 @@
 //! and downloads files that match specified glob patterns.
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction, SyncMode,
+    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction,
 };
+use super::SyncMode;
 use super::source_utils;
 use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError};
@@ -25,10 +26,6 @@ use url::Url;
 ///   (e.g., "*.parquet,*.csv"). Defaults to "**/*" (all links)
 /// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
 ///   "false" to reference files at their original URL
-/// - `mode` (optional): Sync mode for fetch:
-///   - "add" (default): Only attach new files
-///   - "update": Add new files and replace changed files
-///   - "sync": Add new, replace changed, and remove files no longer at source
 pub struct WebScrapeFunction;
 
 #[async_trait]
@@ -57,12 +54,6 @@ impl SourceFunction for WebScrapeFunction {
                 required: false,
                 default: Some("true"),
             },
-            ArgSpec {
-                name: "mode",
-                description: "Sync mode: 'add' (default), 'update', or 'sync'",
-                required: false,
-                default: Some("add"),
-            },
         ]
     }
 
@@ -79,11 +70,6 @@ impl SourceFunction for WebScrapeFunction {
                 url.scheme()
             )
             .into());
-        }
-
-        // Validate mode if provided
-        if let Some(mode) = args.get("mode") {
-            SyncMode::from_arg(mode)?;
         }
 
         Ok(())
@@ -236,11 +222,10 @@ mod tests {
     fn test_arg_specs() {
         let func = WebScrapeFunction;
         let specs = func.arg_specs();
-        assert_eq!(specs.len(), 4);
+        assert_eq!(specs.len(), 3);
         assert!(specs.iter().any(|s| s.name == "url" && s.required));
         assert!(specs.iter().any(|s| s.name == "patterns" && !s.required));
         assert!(specs.iter().any(|s| s.name == "copy" && !s.required));
-        assert!(specs.iter().any(|s| s.name == "mode" && !s.required));
     }
 
     #[test]
