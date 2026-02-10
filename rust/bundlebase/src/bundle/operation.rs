@@ -13,13 +13,11 @@ mod filter;
 mod index_blocks;
 mod drop_column;
 mod parameter_value;
-mod rebuild_index;
 mod rename_column;
 mod rename_join;
 mod rename_view;
-mod select;
 mod serde_util;
-mod set_config;
+mod save_config;
 mod set_description;
 mod set_name;
 mod update_version;
@@ -38,12 +36,10 @@ pub use crate::bundle::operation::filter::FilterOp;
 pub use crate::bundle::operation::replace_block::ReplaceBlockOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
 pub use crate::bundle::operation::drop_column::DropColumnOp;
-pub use crate::bundle::operation::rebuild_index::RebuildIndexOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
 pub use crate::bundle::operation::rename_join::RenameJoinOp;
 pub use crate::bundle::operation::rename_view::RenameViewOp;
-pub use crate::bundle::operation::select::SelectOp;
-pub use crate::bundle::operation::set_config::SetConfigOp;
+pub use crate::bundle::operation::save_config::SaveConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
 pub use crate::bundle::operation::update_version::UpdateVersionOp;
@@ -92,10 +88,11 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
     /// For example, this can be used to check that a block is attached before applying a filter operation.
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError>;
 
-    /// Apply this operation to the bundle.
+    /// Apply this operation to the bundle using interior mutability.
     /// For example, this can be used to set the bundle name.
     /// The default implementation does nothing.
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError>;
+    /// TODO: should return the result object, even if it's just a message
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError>;
 
     async fn apply_dataframe(
         &self,
@@ -154,7 +151,7 @@ macro_rules! define_any_operation {
                 }
             }
 
-            async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+            async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
                 match self {
                     $( AnyOperation::$variant(op) => op.apply(bundle).await, )*
                 }
@@ -210,13 +207,11 @@ define_any_operation! {
     DropView(DropViewOp),
     Filter(FilterOp),
     IndexBlocks(IndexBlocksOp),
-    RebuildIndex(RebuildIndexOp),
     RenameColumn(RenameColumnOp),
     RenameJoin(RenameJoinOp),
     RenameView(RenameViewOp),
     ReplaceBlock(ReplaceBlockOp),
-    Select(SelectOp),
-    SetConfig(SetConfigOp),
+    SaveConfig(SaveConfigOp),
     SetDescription(SetDescriptionOp),
     SetName(SetNameOp),
     UpdateVersion(UpdateVersionOp),

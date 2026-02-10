@@ -4,10 +4,10 @@
 //! but use different underlying libraries (suppaftp vs russh_sftp) with incompatible
 //! types. Extracting a common abstraction would add complexity without clear benefit.
 
+use crate::bundle_config::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::io::registry::IOFactory;
 use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteFile};
-use crate::BundleConfig;
-use crate::BundlebaseError;
+use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
@@ -19,19 +19,30 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use url::Url;
 
+config_scopes!(ftp_scopes, {
+    pub const FTP_SCOPE: ConfigScope = BundleConfig::register_scope("ftp");
+});
+
+config_keys!(ftp_keys, {
+    pub const FTP_USERNAME_CFG: ConfigKey = FTP_SCOPE.define("username");
+    pub const FTP_PASSWORD_CFG: ConfigKey = FTP_SCOPE.define_secure("password");
+});
+
+
 /// Parse an FTP URL into its components.
 ///
 /// # URL Format
-/// `ftp://[user[:password]@]host[:port]/path`
+/// `ftp://host[:port]/path`
+///
+/// Credentials are resolved from `BundleConfig`, not from the URL.
 ///
 /// Examples:
 /// - `ftp://ftp.example.com/pub/data`
-/// - `ftp://user:pass@ftp.example.com/data`
 /// - `ftp://ftp.example.com:2121/data`
 ///
 /// # Returns
-/// Tuple of (user, password, host, port, path)
-pub fn parse_ftp_url(url: &Url) -> Result<(String, String, String, u16, String), BundlebaseError> {
+/// Tuple of (host, port, path)
+pub fn parse_ftp_url(url: &Url) -> Result<(String, u16, String), BundlebaseError> {
     if url.scheme() != "ftp" {
         return Err(format!("Expected 'ftp' URL scheme, got '{}'", url.scheme()).into());
     }
@@ -42,31 +53,21 @@ pub fn parse_ftp_url(url: &Url) -> Result<(String, String, String, u16, String),
 
     let port = url.port().unwrap_or(21);
 
-    // Default to anonymous if no user specified
-    let user = if url.username().is_empty() {
-        "anonymous".to_string()
-    } else {
-        url.username().to_string()
-    };
-
-    // Default password for anonymous is empty
-    let password = url.password().unwrap_or("").to_string();
-
     let path = url.path().to_string();
     if path.is_empty() || path == "/" {
         return Err("FTP URL must include a path".into());
     }
 
-    Ok((user, password, host.to_string(), port, path))
+    Ok((host.to_string(), port, path))
 }
 
-/// Build an FTP URL from components.
+/// Build an FTP URL from components
 ///
-/// Constructs a URL in the format: `ftp://user:password@host:port/path`
-fn build_ftp_url(user: &str, password: &str, host: &str, port: u16, path: &str) -> Result<Url, BundlebaseError> {
+/// Constructs a URL in the format: `ftp://host:port/path`
+fn build_ftp_url(host: &str, port: u16, path: &str) -> Result<Url, BundlebaseError> {
     Url::parse(&format!(
-        "ftp://{}:{}@{}:{}{}",
-        user, password, host, port, path
+        "ftp://{}:{}{}",
+        host, port, path
     )).map_err(|e| format!("Failed to build FTP URL: {}", e).into())
 }
 
@@ -91,9 +92,14 @@ impl Debug for FtpFile {
 }
 
 impl FtpFile {
-    /// Create an FtpFile from a URL.
-    pub fn from_url(url: &Url) -> Result<Self, BundlebaseError> {
-        let (user, password, host, port, path) = parse_ftp_url(url)?;
+    /// Create an FtpFile from a URL, resolving credentials from config.
+    pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<Self, BundlebaseError> {
+        let (host, port, path) = parse_ftp_url(url)?;
+        let scope = crate::bundle_config::Scope::try_from(url)?;
+        let user = config.get(&scope, &FTP_USERNAME_CFG)?
+            .unwrap_or_else(|| "anonymous".to_string());
+        let password = config.get(&scope, &FTP_PASSWORD_CFG)?
+            .unwrap_or_default();
         Ok(Self {
             url: url.clone(),
             host,
@@ -255,9 +261,14 @@ impl Debug for FtpDir {
 }
 
 impl FtpDir {
-    /// Create an FtpDir from a URL.
-    pub fn from_url(url: &Url) -> Result<Self, BundlebaseError> {
-        let (user, password, host, port, path) = parse_ftp_url(url)?;
+    /// Create an FtpDir from a URL, resolving credentials from config.
+    pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<Self, BundlebaseError> {
+        let (host, port, path) = parse_ftp_url(url)?;
+        let scope = crate::bundle_config::Scope::try_from(url)?;
+        let user = config.get(&scope, &FTP_USERNAME_CFG)?
+            .unwrap_or_else(|| "anonymous".to_string());
+        let password = config.get(&scope, &FTP_PASSWORD_CFG)?
+            .unwrap_or_default();
         Ok(Self {
             url: url.clone(),
             host,
@@ -317,7 +328,7 @@ impl FtpDir {
             // Try to get the size to determine if it's a file
             match stream.size(&full_path).await {
                 Ok(size) => {
-                    let url = build_ftp_url(&self.user, &self.password, &self.host, self.port, &full_path)?;
+                    let url = build_ftp_url(&self.host, self.port, &full_path)?;
                     files.push(FileInfo::new(url).with_size(size as u64));
                 }
                 Err(_) => {
@@ -361,7 +372,7 @@ impl IOReadDir for FtpDir {
             format!("{}/{}", self.path, name.trim_start_matches('/'))
         };
 
-        let new_url = build_ftp_url(&self.user, &self.password, &self.host, self.port, &new_path)?;
+        let new_url = build_ftp_url(&self.host, self.port, &new_path)?;
 
         Ok(Box::new(FtpDir {
             url: new_url,
@@ -380,7 +391,7 @@ impl IOReadDir for FtpDir {
             format!("{}/{}", self.path, name.trim_start_matches('/'))
         };
 
-        let new_url = build_ftp_url(&self.user, &self.password, &self.host, self.port, &new_path)?;
+        let new_url = build_ftp_url(&self.host, self.port, &new_path)?;
 
         Ok(Box::new(FtpFile {
             url: new_url,
@@ -419,17 +430,17 @@ impl IOFactory for FtpIOFactory {
     async fn create_reader(
         &self,
         url: &Url,
-        _config: Arc<BundleConfig>,
+        config: Arc<BundleConfig>,
     ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
-        Ok(Box::new(FtpFile::from_url(url)?))
+        Ok(Box::new(FtpFile::from_url(url, config)?))
     }
 
     async fn create_lister(
         &self,
         url: &Url,
-        _config: Arc<BundleConfig>,
+        config: Arc<BundleConfig>,
     ) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
-        Ok(Box::new(FtpDir::from_url(url)?))
+        Ok(Box::new(FtpDir::from_url(url, config)?))
     }
 
     async fn create_writer(
@@ -444,24 +455,21 @@ impl IOFactory for FtpIOFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bundle_config::{ConfigSource, Scope};
 
     #[test]
-    fn test_parse_ftp_url_full() {
-        let url = Url::parse("ftp://testuser:testpass@ftp.example.com:2121/data/files").unwrap();
-        let (user, password, host, port, path) = parse_ftp_url(&url).unwrap();
-        assert_eq!(user, "testuser");
-        assert_eq!(password, "testpass");
+    fn test_parse_ftp_url_basic() {
+        let url = Url::parse("ftp://ftp.example.com:2121/data/files").unwrap();
+        let (host, port, path) = parse_ftp_url(&url).unwrap();
         assert_eq!(host, "ftp.example.com");
         assert_eq!(port, 2121);
         assert_eq!(path, "/data/files");
     }
 
     #[test]
-    fn test_parse_ftp_url_anonymous() {
+    fn test_parse_ftp_url_default_port() {
         let url = Url::parse("ftp://ftp.example.com/pub/data").unwrap();
-        let (user, password, host, port, path) = parse_ftp_url(&url).unwrap();
-        assert_eq!(user, "anonymous");
-        assert_eq!(password, "");
+        let (host, port, path) = parse_ftp_url(&url).unwrap();
         assert_eq!(host, "ftp.example.com");
         assert_eq!(port, 21);
         assert_eq!(path, "/pub/data");
@@ -485,19 +493,19 @@ mod tests {
 
     #[test]
     fn test_build_ftp_url() {
-        let url = build_ftp_url("user", "pass", "example.com", 21, "/data").unwrap();
+        let url = build_ftp_url("example.com", 21, "/data").unwrap();
         assert_eq!(url.scheme(), "ftp");
-        assert_eq!(url.username(), "user");
-        assert_eq!(url.password(), Some("pass"));
         assert_eq!(url.host_str(), Some("example.com"));
-        // Note: port() returns None for default ports (21 for FTP)
         assert_eq!(url.port_or_known_default(), Some(21));
         assert_eq!(url.path(), "/data");
+        // Credentials should not be in the URL
+        assert!(url.username().is_empty());
+        assert_eq!(url.password(), None);
     }
 
     #[test]
     fn test_build_ftp_url_custom_port() {
-        let url = build_ftp_url("user", "pass", "example.com", 2121, "/data").unwrap();
+        let url = build_ftp_url("example.com", 2121, "/data").unwrap();
         assert_eq!(url.port(), Some(2121));
     }
 
@@ -516,24 +524,54 @@ mod tests {
     }
 
     #[test]
-    fn test_ftp_file_from_url() {
-        let url = Url::parse("ftp://user:pass@ftp.example.com:2121/data/file.txt").unwrap();
-        let ftp_file = FtpFile::from_url(&url).unwrap();
+    fn test_ftp_file_from_url_with_config() {
+        let config = Arc::new(BundleConfig::new(None).unwrap());
+        let scope = Scope::try_from(
+            "ftp://ftp.example.com:2121/data/file.txt",
+        ).unwrap();
+        config.set(&scope, FTP_USERNAME_CFG.key, "testuser", ConfigSource::Passed).unwrap();
+        config.set(&scope, FTP_PASSWORD_CFG.key, "testpass", ConfigSource::Passed).unwrap();
+
+        let url = Url::parse("ftp://ftp.example.com:2121/data/file.txt").unwrap();
+        let ftp_file = FtpFile::from_url(&url, config).unwrap();
         assert_eq!(ftp_file.host, "ftp.example.com");
         assert_eq!(ftp_file.port, 2121);
-        assert_eq!(ftp_file.user, "user");
-        assert_eq!(ftp_file.password, "pass");
+        assert_eq!(ftp_file.user, "testuser");
+        assert_eq!(ftp_file.password, "testpass");
         assert_eq!(ftp_file.path, "/data/file.txt");
     }
 
     #[test]
-    fn test_ftp_dir_from_url() {
-        let url = Url::parse("ftp://anonymous@ftp.example.com/pub/data/").unwrap();
-        let ftp_dir = FtpDir::from_url(&url).unwrap();
+    fn test_ftp_file_from_url_anonymous_default() {
+        let config = Arc::new(BundleConfig::new(None).unwrap());
+        let url = Url::parse("ftp://ftp.example.com/pub/data/file.txt").unwrap();
+        let ftp_file = FtpFile::from_url(&url, config).unwrap();
+        assert_eq!(ftp_file.user, "anonymous");
+        assert_eq!(ftp_file.password, "");
+    }
+
+    #[test]
+    fn test_ftp_dir_from_url_with_config() {
+        let config = Arc::new(BundleConfig::new(None).unwrap());
+        let scope = Scope::try_from("ftp").unwrap();
+        config.set(&scope, FTP_USERNAME_CFG.key, "myuser", ConfigSource::Passed).unwrap();
+        config.set(&scope, FTP_PASSWORD_CFG.key, "mypass", ConfigSource::Passed).unwrap();
+
+        let url = Url::parse("ftp://ftp.example.com/pub/data/").unwrap();
+        let ftp_dir = FtpDir::from_url(&url, config).unwrap();
         assert_eq!(ftp_dir.host, "ftp.example.com");
         assert_eq!(ftp_dir.port, 21);
+        assert_eq!(ftp_dir.user, "myuser");
+        assert_eq!(ftp_dir.password, "mypass");
+        assert_eq!(ftp_dir.path, "/pub/data/");
+    }
+
+    #[test]
+    fn test_ftp_dir_from_url_anonymous_default() {
+        let config = Arc::new(BundleConfig::new(None).unwrap());
+        let url = Url::parse("ftp://ftp.example.com/pub/data/").unwrap();
+        let ftp_dir = FtpDir::from_url(&url, config).unwrap();
         assert_eq!(ftp_dir.user, "anonymous");
         assert_eq!(ftp_dir.password, "");
-        assert_eq!(ftp_dir.path, "/pub/data/");
     }
 }

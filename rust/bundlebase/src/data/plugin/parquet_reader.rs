@@ -1,8 +1,8 @@
-use crate::object_id::ObjectId;
+use crate::bundle::BundleFacade;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
-use crate::data::{DataReader, RowId, RowIdBatch, SendableRowIdBatchStream};
-use crate::{Bundle, BundlebaseError};
+use crate::data::{DataReader, ObjectId, RowId, RowIdBatch, SendableRowIdBatchStream};
+use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
 use datafusion::common::stats::Precision;
@@ -50,10 +50,11 @@ impl ReaderPlugin for ParquetPlugin {
         &self,
         source: &str,
         block_id: &ObjectId,
-        bundle: &Bundle,
+        bundle: &dyn BundleFacade,
         schema: Option<SchemaRef>,
         _layout: Option<String>,
         expected_version: Option<String>,
+        _read_options: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
         if !self.inner.handles(source) {
             return Ok(None);
@@ -234,9 +235,9 @@ mod tests {
         // Parquet plugin should only adapt .parquet files
         let plugin = ParquetPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let result = plugin
-            .reader("file:///test.csv", &1.into(), &binding, None, None, None)
+            .reader("file:///test.csv", &1.into(), &*binding, None, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -248,9 +249,9 @@ mod tests {
     async fn test_invalid_parquet_file() -> Result<(), BundlebaseError> {
         let plugin = ParquetPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let invalid_reader = plugin
-            .reader("file:///invalid.parquet", &1.into(), &binding, None, None, None)
+            .reader("file:///invalid.parquet", &1.into(), &*binding, None, None, None, None)
             .await?;
 
         assert!(invalid_reader.is_some());
@@ -270,12 +271,13 @@ mod tests {
         // Test complete Parquet file read and data validation
         let plugin = ParquetPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
                 &1.into(),
-                &binding,
+                &*binding,
+                None,
                 None,
                 None,
                 None,
@@ -318,16 +320,17 @@ mod tests {
             .reader(
                 test_datafile("userdata.parquet"),
                 &1.into(),
-                &binding,
+                &*binding,
                 Some(schema),
+                None,
                 None,
                 None,
             )
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
-        let binding = Bundle::empty().await?;
-        let ctx = binding.ctx();
+        let binding2 = Bundle::empty(None).await?;
+        let ctx = binding2.ctx();
         let ds = reader.data_source(None, &[], None, None).await?;
         let results = ds.open(0, ctx.task_ctx())?;
 
@@ -366,12 +369,13 @@ mod tests {
     #[tokio::test]
     async fn test_schema() -> Result<(), BundlebaseError> {
         let plugin = ParquetPlugin::default();
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
                 &1.into(),
-                &binding,
+                &*binding,
+                None,
                 None,
                 None,
                 None,
@@ -413,12 +417,13 @@ mod tests {
     async fn test_statistics() -> Result<(), BundlebaseError> {
         let plugin = ParquetPlugin::default();
 
-        let binding = Bundle::empty().await?;
+        let binding = Bundle::empty(None).await?;
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
                 &1.into(),
-                &binding,
+                &*binding,
+                None,
                 None,
                 None,
                 None,

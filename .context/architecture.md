@@ -55,6 +55,7 @@ Plugin architecture for data sources (`src/data_adapter/`):
 - **JsonPlugin**: Line-delimited JSON support
 - **ParquetPlugin**: Apache Parquet support
 - **FunctionPlugin**: Custom function data sources via `function://` URLs
+- **BundlebasePlugin**: References other committed bundles via `bundle://` (filesystem) or `bundle+<scheme>://` (remote) URLs
 
 ## Function System
 

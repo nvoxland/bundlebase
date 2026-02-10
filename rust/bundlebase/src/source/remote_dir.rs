@@ -4,8 +4,9 @@
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction, SyncMode,
+    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction,
 };
+use super::SyncMode;
 use super::source_utils::{self, MaterializeResult};
 use crate::io::plugin::ftp::FtpFile;
 use crate::io::plugin::object_store::ObjectStoreFile;
@@ -30,10 +31,6 @@ use url::Url;
 /// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
 ///   "false" to reference files at their original URL
 /// - `key_path` (optional): SSH key path for SFTP sources
-/// - `mode` (optional): Sync mode for fetch:
-///   - "add" (default): Only attach new files
-///   - "update": Add new files and replace changed files
-///   - "sync": Add new, replace changed, and remove files no longer at source
 pub struct RemoteDirFunction;
 
 #[async_trait]
@@ -68,12 +65,6 @@ impl SourceFunction for RemoteDirFunction {
                 required: false,
                 default: None,
             },
-            ArgSpec {
-                name: "mode",
-                description: "Sync mode: 'add' (default), 'update', or 'sync'",
-                required: false,
-                default: Some("add"),
-            },
         ]
     }
 
@@ -81,10 +72,6 @@ impl SourceFunction for RemoteDirFunction {
         self.default_validate_args(args)?;
         // Validate URL is parseable
         source_utils::require_url(args, self.name())?;
-        // Validate mode if provided
-        if let Some(mode) = args.get("mode") {
-            SyncMode::from_arg(mode)?;
-        }
         Ok(())
     }
 
@@ -255,7 +242,7 @@ impl RemoteDirFunction {
         // Handle special protocols that need custom download logic
         match scheme {
             "sftp" => Self::download_sftp_static(url, key_path, data_dir).await,
-            "ftp" => Self::download_ftp_static(url, data_dir).await,
+            "ftp" => Self::download_ftp_static(url, data_dir, config).await,
             _ => {
                 // Use standard materialization for other schemes
                 source_utils::materialize_url(url, true, data_dir, config).await
@@ -316,8 +303,8 @@ impl RemoteDirFunction {
 
     /// Download a file via FTP.
     /// Returns MaterializeResult containing the file and its SHA256 hash.
-    async fn download_ftp_static(url: &Url, data_dir: &dyn IOReadWriteDir) -> Result<MaterializeResult, BundlebaseError> {
-        let ftp_file = FtpFile::from_url(url)?;
+    async fn download_ftp_static(url: &Url, data_dir: &dyn IOReadWriteDir, config: &Arc<BundleConfig>) -> Result<MaterializeResult, BundlebaseError> {
+        let ftp_file = FtpFile::from_url(url, config.clone())?;
         let data = ftp_file.read_bytes().await?.ok_or_else(|| {
             BundlebaseError::from(format!("FTP file not found: {}", url))
         })?;
@@ -345,12 +332,11 @@ mod tests {
     fn test_arg_specs() {
         let func = RemoteDirFunction;
         let specs = func.arg_specs();
-        assert_eq!(specs.len(), 5);
+        assert_eq!(specs.len(), 4);
         assert!(specs.iter().any(|s| s.name == "url" && s.required));
         assert!(specs.iter().any(|s| s.name == "patterns" && !s.required));
         assert!(specs.iter().any(|s| s.name == "copy" && !s.required));
         assert!(specs.iter().any(|s| s.name == "key_path" && !s.required));
-        assert!(specs.iter().any(|s| s.name == "mode" && !s.required));
     }
 
     #[test]

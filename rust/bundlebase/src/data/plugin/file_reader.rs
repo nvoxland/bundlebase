@@ -1,8 +1,9 @@
+use crate::bundle::BundleFacade;
 use crate::data::{LineOrientedFormat, RowId, RowIdOffsetDataSource};
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::plugin::versioned_object_store::VersionedObjectStoreFile;
 use crate::io::IOReadFile;
-use crate::{Bundle, BundlebaseError};
+use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use datafusion::common::DataFusionError;
 use datafusion::datasource::file_format::FileFormat;
@@ -128,18 +129,18 @@ impl<C: FileFormatConfig> FilePlugin<C> {
     ///
     /// # Arguments
     /// * `source` - URL or path to the file
-    /// * `bundle` - Bundle context
+    /// * `bundle` - Bundle context (as trait object for flexibility)
     /// * `schema` - Optional schema (if already known)
     /// * `expected_version` - If provided, validates version on first data access
     pub async fn reader(
         &self,
         source: &str,
-        bundle: &Bundle,
+        bundle: &dyn BundleFacade,
         schema: Option<SchemaRef>,
         expected_version: Option<String>,
     ) -> Result<FileReader<C>, BundlebaseError> {
         let object_file =
-            ObjectStoreFile::from_str(source, bundle.data_dir(), bundle.config())?;
+            ObjectStoreFile::from_str(source, bundle.data_dir().as_ref(), bundle.config())?;
 
         let file = match expected_version {
             Some(v) => MaybeVersionedFile::Versioned(VersionedObjectStoreFile::new(object_file, v)),
@@ -193,6 +194,11 @@ impl<C: FileFormatConfig> FileReader<C> {
     /// Get the URL of the file
     pub fn url(&self) -> &Url {
         self.file.url()
+    }
+
+    /// Get the format configuration
+    pub fn config(&self) -> &C {
+        &self.config
     }
 
     /// Get the object store

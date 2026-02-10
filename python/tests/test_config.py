@@ -13,31 +13,20 @@ from conftest import random_bundle
 async def test_config_with_dict():
     """Test creating a container with config dict."""
     config = {
-        "region": "us-west-2",
+        "s3": {"region": "us-west-2"},
     }
     c = await bundlebase.create(random_bundle(), config=config)
     assert c is not None
 
 
 @pytest.mark.asyncio
-async def test_config_with_bundle_config():
-    """Test creating a container with BundleConfig object."""
-    config = bundlebase.BundleConfig()
-    config.set("region", "us-west-2")
-    config.set("endpoint", "http://localhost:9000", url_prefix="s3://test-bucket/")
-
-    c = await bundlebase.create(random_bundle(), config=config)
-    assert c is not None
-
-
-@pytest.mark.asyncio
-async def test_set_config_operation():
-    """Test set_config operation for storing config in manifest."""
+async def test_save_config_operation():
+    """Test save_config operation for storing config in manifest."""
     c = await bundlebase.create(random_bundle())
 
     # Set some config values
-    c = await c.set_config("region", "us-east-1")
-    c = await c.set_config("endpoint", "http://localhost:9000", url_prefix="s3://test-bucket/")
+    c = await c.save_config("s3", "region", "us-east-1")
+    c = await c.save_config("s3/test-bucket", "endpoint", "http://localhost:9000")
 
     # Commit to persist
     commit = await c.commit("Add config settings")
@@ -45,11 +34,11 @@ async def test_set_config_operation():
 
 
 @pytest.mark.asyncio
-async def test_config_with_url_overrides():
-    """Test config with URL-specific overrides."""
+async def test_config_with_scope_overrides():
+    """Test config with scope-specific overrides."""
     config = {
-        "region": "us-west-2",  # Default for all S3
-        "s3://test-bucket/": {
+        "s3": {"region": "us-west-2"},
+        "s3/test-bucket": {
             "endpoint": "http://localhost:9000",
             "allow_http": "true"
         }
@@ -69,17 +58,17 @@ async def test_open_with_config():
     await c.commit("Initial commit")
 
     # Open with config
-    config = {"region": "us-west-2"}
+    config = {"s3": {"region": "us-west-2"}}
     c2 = await bundlebase.open(path, config=config)
     assert c2 is not None
 
 
 @pytest.mark.asyncio
-async def test_set_config_chaining():
-    """Test that set_config supports fluent chaining."""
+async def test_save_config_chaining():
+    """Test that save_config supports fluent chaining."""
     c = await (bundlebase.create(random_bundle())
-               .set_config("region", "us-west-2")
-               .set_config("access_key_id", "TESTKEY"))
+               .save_config("s3", "region", "us-west-2")
+               .save_config("s3", "access_key_id", "TESTKEY"))
 
     assert c is not None
 
@@ -98,3 +87,58 @@ async def test_config_none_is_valid():
 
     c2 = await bundlebase.open(path, config=None)
     assert c2 is not None
+
+
+@pytest.mark.asyncio
+async def test_save_config_with_scope():
+    """Test setting config using a direct scope path."""
+    c = await bundlebase.create(random_bundle())
+
+    c = await c.save_config("s3/my-bucket", "region", "us-west-2")
+
+    commit = await c.commit("Config with scope")
+    assert commit is not None
+
+
+@pytest.mark.asyncio
+async def test_config_flat_keys_rejected():
+    """Test that flat config keys are rejected — must be nested under URL scope."""
+    with pytest.raises(ValueError, match="must be nested under a scope path"):
+        config = {"region": "us-west-2"}
+        await bundlebase.create(random_bundle(), config=config)
+
+@pytest.mark.asyncio
+async def test_set_config_basic():
+    """Test set_config sets a runtime config value."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.set_config("s3", "region", "us-west-2")
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_set_config_with_scope():
+    """Test set_config with scope."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.set_config("s3/my-bucket", "region", "us-west-2")
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_set_config_unknown_scope_raises_error():
+    """Test set_config with an unknown scope raises an error."""
+    c = await bundlebase.create(random_bundle())
+    with pytest.raises(ValueError, match="Unknown scope"):
+        await c.set_config("nonexistent", "region", "us-west-2")
+
+
+@pytest.mark.asyncio
+async def test_set_config_chaining():
+    """Test that set_config supports fluent chaining."""
+    c = await (bundlebase.create(random_bundle())
+               .set_config("s3", "region", "us-west-2")
+               .set_config("s3", "endpoint", "http://localhost:9000"))
+    assert c is not None
+
+
+
+

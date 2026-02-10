@@ -1,14 +1,11 @@
 //! Source struct representing a data source definition for a pack.
 
-use crate::bundle::CreateSourceOp;
+use crate::bundle::{BundleBuilder, CreateSourceOp};
 use crate::data::ObjectId;
-use crate::io::IOReadWriteDir;
 use crate::source::{AttachedFileInfo, FetchAction, SourceFunctionRegistry, SyncMode};
 use crate::BundlebaseError;
-use crate::BundleConfig;
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Represents a data source definition for a pack.
 ///
@@ -81,28 +78,23 @@ impl Source {
     /// Returns a list of fetch actions (Add, Replace, Remove) based on the sync mode.
     pub async fn fetch(
         &self,
-        data_dir: &dyn IOReadWriteDir,
-        config: Arc<BundleConfig>,
-        registry: &Arc<RwLock<SourceFunctionRegistry>>,
+        builder: &BundleBuilder,
+        mode: SyncMode,
     ) -> Result<Vec<FetchAction>, BundlebaseError> {
-        let func = {
+        let (func, data_dir, config) = {
+            let bundle = builder.bundle();
+            let registry = bundle.source_function_registry();
             let reg = registry.read();
-            reg.get(&self.function)
-                .ok_or_else(|| format!("Unknown source function '{}'", self.function))?
+            let func = reg
+                .get(&self.function)
+                .ok_or_else(|| format!("Unknown source function '{}'", self.function))?;
+            (func, bundle.data_dir(), bundle.config())
         };
-
-        // Parse sync mode from args (defaults to "add")
-        let mode = self
-            .args
-            .get("mode")
-            .map(|s| SyncMode::from_arg(s))
-            .transpose()?
-            .unwrap_or_default();
 
         // Get attached files directly from self
         let attached_files = self.attached_files();
 
-        func.fetch_with_mode(&self.args, &attached_files, data_dir, config, mode)
+        func.fetch_with_mode(&self.args, &attached_files, data_dir.as_ref(), config, mode)
             .await
     }
 

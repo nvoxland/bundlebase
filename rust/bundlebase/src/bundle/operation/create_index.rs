@@ -1,6 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::{Bundle, BundleFacade};
-use crate::index::{IndexDefinition, IndexType, TokenizerConfig};
+use crate::index::{IndexDefinition, IndexType};
 use crate::io::ObjectId;
 use crate::BundlebaseError;
 use arrow_schema::DataType;
@@ -14,28 +14,16 @@ use std::sync::Arc;
 pub struct CreateIndexOp {
     pub column: String,
     pub id: ObjectId,
-    #[serde(default)]
     pub index_type: IndexType,
 }
 
 impl CreateIndexOp {
-    /// Create a column index (default type for equality/range queries)
-    pub async fn setup(column: &str) -> Result<Self, BundlebaseError> {
-        Self::setup_with_type(column, IndexType::Column).await
-    }
-
-    /// Create an index with a specific type
-    pub async fn setup_with_type(column: &str, index_type: IndexType) -> Result<Self, BundlebaseError> {
+    pub async fn setup(column: &str, index_type: IndexType) -> Result<Self, BundlebaseError> {
         Ok(Self {
             id: ObjectId::generate(),
             column: column.to_string(),
             index_type,
         })
-    }
-
-    /// Create a text/BM25 full-text search index
-    pub async fn setup_text(column: &str, tokenizer: TokenizerConfig) -> Result<Self, BundlebaseError> {
-        Self::setup_with_type(column, IndexType::text(tokenizer)).await
     }
 }
 
@@ -85,11 +73,11 @@ impl Operation for CreateIndexOp {
         Ok(())
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         bundle
             .indexes
             .write()
-            .push(Arc::new(IndexDefinition::with_type(
+            .push(Arc::new(IndexDefinition::new(
                 &self.id,
                 &self.column,
                 self.index_type.clone(),

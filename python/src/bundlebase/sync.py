@@ -17,16 +17,64 @@ For Jupyter notebooks, install with:
     poetry install -E jupyter
 """
 
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Iterator
 
 from bundlebase._loop_manager import EventLoopManager
 from bundlebase.chain import _ORIGINAL_METHODS
 
 if TYPE_CHECKING:
     from bundlebase import FetchResults
+    import pyarrow as pa
 
 # Global event loop manager (singleton)
 _loop_manager = EventLoopManager()
+
+
+class SyncQueryResult:
+    """Synchronous wrapper for QueryResult.
+
+    Wraps the async QueryResult to provide synchronous conversion methods.
+
+    Example:
+        >>> result = c.query("SELECT * FROM bundle LIMIT 10")
+        >>> df = result.to_pandas()
+    """
+
+    def __init__(self, async_result: Any) -> None:
+        """Initialize with an async QueryResult.
+
+        Args:
+            async_result: The underlying async QueryResult
+        """
+        self._async = async_result
+
+    def to_pandas(self) -> Any:
+        """Convert query results to pandas DataFrame."""
+        return _loop_manager.run_sync(self._async.to_pandas())
+
+    def to_polars(self) -> Any:
+        """Convert query results to Polars DataFrame."""
+        return _loop_manager.run_sync(self._async.to_polars())
+
+    def to_dict(self) -> Dict[str, List[Any]]:
+        """Convert query results to dict of lists."""
+        return _loop_manager.run_sync(self._async.to_dict())
+
+    def stream_batches(self) -> Iterator["pa.RecordBatch"]:
+        """Stream batches synchronously.
+
+        WARNING: This materializes ALL batches first, then yields.
+        For true streaming, use the async API.
+        """
+        async def _collect():
+            batches = []
+            async for batch in self._async.stream_batches():
+                batches.append(batch)
+            return batches
+
+        batches = _loop_manager.run_sync(_collect())
+        for batch in batches:
+            yield batch
 
 
 def _call_original_method(async_bundle: Any, method_name: str, *args: Any, **kwargs: Any) -> Any:
@@ -148,9 +196,27 @@ class SyncBundle:
         coro = _call_original_method(self._async, "num_rows")
         return _loop_manager.run_sync(coro)
 
-    def explain(self) -> str:
-        """Get the query execution plan."""
-        coro = _call_original_method(self._async, "explain")
+    def explain(
+        self,
+        verbose: bool = False,
+        analyze: bool = False,
+        format: str = None,
+        sql: str = None,
+    ):
+        """Get the query execution plan as a RecordBatchStream.
+
+        Args:
+            verbose: If True, show more detailed plan information
+            analyze: If True, run the plan and show actual execution statistics
+            format: Output format - "indent" (default), "tree", or "graphviz"
+            sql: Optional SQL statement to explain instead of the bundle's dataframe
+
+        Returns:
+            RecordBatchStream with plan_type and plan columns
+        """
+        coro = _call_original_method(
+            self._async, "explain", verbose, analyze, format, sql
+        )
         return _loop_manager.run_sync(coro)
 
     def to_pandas(self) -> Any:
@@ -178,29 +244,45 @@ class SyncBundle:
         coro = _call_original_method(self._async, "as_pyarrow")
         return _loop_manager.run_sync(coro)
 
-    def extend(self, data_dir: str) -> "SyncBundleBuilder":
-        """Extend this bundle to a new directory.
+    def extend(
+        self,
+        data_dir: Optional[str] = None,
+    ) -> "SyncBundleBuilder":
+        """Extend this bundle to create a new BundleBuilder.
 
-        Creates a new bundle at data_dir with the same operations and data,
-        allowing further modifications without affecting the original.
+        This is the primary way to create a new BundleBuilder from an existing bundle.
+        The new builder can optionally have a different data directory.
 
         Args:
-            data_dir: Path where the extended bundle will be stored
+            data_dir: Optional new data directory. If None, uses the current bundle's data_dir.
 
         Returns:
             New SyncBundleBuilder
 
+        Example:
+            # Extend with just a new data directory
+            builder = bundle.extend(data_dir="s3://bucket/new")
+
+            # Extend and then filter
+            builder = bundle.extend()
+            builder.filter("active = true", [])
+
         Raises:
             ValueError: If data_dir is invalid
         """
-        coro = _call_original_method(self._async, "extend", data_dir)
-        async_extended = _loop_manager.run_sync(coro)
+        # extend() is synchronous in Rust, so we call the original method directly
+        original_extend = _ORIGINAL_METHODS.get("extend")
+        if original_extend:
+            async_extended = original_extend(self._async, data_dir)
+        else:
+            async_extended = self._async.extend(data_dir)
         return SyncBundleBuilder(async_extended)
 
-    def select(self, sql: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
-        """Execute a SQL query on the data.
+    def query(self, sql: str, params: Optional[List[Any]] = None) -> SyncQueryResult:
+        """Execute a SQL query and return streaming results.
 
-        Creates a new forked bundle with the query applied, leaving the original unchanged.
+        Unlike extend() with SQL, this does NOT create a new BundleBuilder.
+        It directly executes the query and returns the results.
 
         Args:
             sql: SQL query string
@@ -208,17 +290,15 @@ class SyncBundle:
                     If None, defaults to empty list.
 
         Returns:
-            New SyncBundleBuilder with query applied
+            SyncQueryResult that can be converted to pandas/polars.
         """
-        # Call the method directly on PyBundle (not via _ORIGINAL_METHODS which has PyBundleBuilder.select)
-        async def _select_async():
-            result = self._async.select(sql, params)
-            if hasattr(result, '__await__'):
-                return await result
-            return result
+        # Call the wrapped query method which returns QueryResult
+        async def _query_async():
+            # self._async.query is the wrapped method that returns QueryResult
+            return await self._async.query(sql, params)
 
-        async_result = _loop_manager.run_sync(_select_async())
-        return SyncBundleBuilder(async_result)
+        async_result = _loop_manager.run_sync(_query_async())
+        return SyncQueryResult(async_result)
 
 
 class SyncBundleBuilder(SyncBundle):
@@ -301,20 +381,24 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def filter(self, where_clause: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
-        """Filter rows based on a SQL WHERE clause.
+    def filter(self, query: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
+        """Filter rows based on a SQL SELECT query.
 
         Args:
-            where_clause: SQL WHERE condition (e.g., "salary > $1")
-            params: Optional list of parameters for parameterized queries.
+            query: SQL SELECT query (e.g., "SELECT * FROM bundle WHERE salary > $1")
+            params: Optional list of parameters for parameterized queries ($1, $2, etc.).
                     If None, defaults to empty list.
 
         Returns:
             Self for fluent chaining
+
+        Example:
+            >>> c.filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
+            >>> c.filter("SELECT * FROM bundle WHERE active = true")
         """
         if params is None:
             params = []
-        coro = _call_original_method(self._async, "filter", where_clause, params)
+        coro = _call_original_method(self._async, "filter", query, params)
         self._async = _loop_manager.run_sync(coro)
         return self
 
@@ -362,7 +446,7 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def fetch(self, pack: str = "base") -> List["FetchResults"]:
+    def fetch(self, pack: str = "base", mode: str = "add") -> List["FetchResults"]:
         """Fetch data from sources for a pack.
 
         Checks the pack's sources for new files and attaches them to the bundle.
@@ -371,30 +455,62 @@ class SyncBundleBuilder(SyncBundle):
             pack: Which pack to fetch sources for:
                 - "base" (default): The base pack
                 - A join name: A joined pack by its join name
+            mode: Sync mode (default: "add"):
+                - "add": Only attach new files
+                - "update": Add new files and replace changed files
+                - "sync": Add new, replace changed, and remove deleted files
 
         Returns:
             List of FetchResults, one for each source in the pack.
             Each result contains details about blocks added, replaced, and removed.
         """
-        coro = _call_original_method(self._async, "fetch", pack)
+        coro = _call_original_method(self._async, "fetch", pack, mode)
         return _loop_manager.run_sync(coro)
 
-    def fetch_all(self) -> List["FetchResults"]:
+    def fetch_all(self, mode: str = "add") -> List["FetchResults"]:
         """Fetch data from all defined sources.
 
         Checks all defined sources for new files and attaches them to the bundle.
+
+        Args:
+            mode: Sync mode (default: "add"):
+                - "add": Only attach new files
+                - "update": Add new files and replace changed files
+                - "sync": Add new, replace changed, and remove deleted files
 
         Returns:
             List of FetchResults, one for each source across all packs.
             Includes results for sources with no changes (empty results).
         """
-        coro = _call_original_method(self._async, "fetch_all")
+        coro = _call_original_method(self._async, "fetch_all", mode)
         return _loop_manager.run_sync(coro)
 
-    def select(self, sql: str, params: Optional[List[Any]] = None) -> "SyncBundleBuilder":
-        """Execute a SQL query on the data.
+    def extend(
+        self,
+        data_dir: Optional[str] = None,
+    ) -> "SyncBundleBuilder":
+        """Extend this bundle to create a new BundleBuilder.
 
-        Creates a new forked bundle with the query applied, leaving the original unchanged.
+        Args:
+            data_dir: Optional new data directory. If None, uses the current bundle's data_dir.
+
+        Returns:
+            New SyncBundleBuilder
+
+        Example:
+            # Extend and then filter
+            extended = c.extend()
+            extended.filter("active = true", [])
+        """
+        # extend() is synchronous in Rust on PyBundleBuilder, call it directly
+        async_extended = self._async.extend(data_dir)
+        return SyncBundleBuilder(async_extended)
+
+    def query(self, sql: str, params: Optional[List[Any]] = None) -> SyncQueryResult:
+        """Execute a SQL query and return streaming results.
+
+        Unlike extend() with SQL, this does NOT create a new BundleBuilder.
+        It directly executes the query and returns the results.
 
         Args:
             sql: SQL query string
@@ -402,27 +518,28 @@ class SyncBundleBuilder(SyncBundle):
                     If None, defaults to empty list.
 
         Returns:
-            New SyncBundleBuilder with the query applied
+            SyncQueryResult that can be converted to pandas/polars.
         """
-        if params is None:
-            params = []
-        coro = _call_original_method(self._async, "select", sql, params)
-        async_forked = _loop_manager.run_sync(coro)
-        return SyncBundleBuilder(async_forked)
+        # Call the wrapped query method which returns QueryResult
+        async def _query_async():
+            return await self._async.query(sql, params)
 
-    def create_view(self, name: str, source: "SyncBundleBuilder") -> "SyncBundleBuilder":
-        """Create a view from another bundle.
+        async_result = _loop_manager.run_sync(_query_async())
+        return SyncQueryResult(async_result)
+
+    def create_view(self, name: str, sql: str) -> "SyncBundleBuilder":
+        """Create a view from a SQL query.
 
         Args:
             name: Name for the new view
-            source: SyncBundleBuilder to use as the view source
+            sql: SQL query defining the view contents
 
         Returns:
-            Self for fluent chaining
+            SyncBundleBuilder for the new view
         """
-        coro = _call_original_method(self._async, "create_view", name, source._async)
-        self._async = _loop_manager.run_sync(coro)
-        return self
+        coro = _call_original_method(self._async, "create_view", name, sql)
+        view_async = _loop_manager.run_sync(coro)
+        return SyncBundleBuilder(view_async)
 
     def set_name(self, name: str) -> "SyncBundleBuilder":
         """Set the bundle name."""
@@ -444,9 +561,20 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def create_index(self, column: str) -> "SyncBundleBuilder":
-        """Create an index on a column for faster lookups."""
-        coro = _call_original_method(self._async, "create_index", column)
+    def create_index(
+        self,
+        column: str,
+        index_type: str,
+        args: Optional[Dict[str, str]] = None
+    ) -> "SyncBundleBuilder":
+        """Create an index on a column for faster lookups.
+
+        Args:
+            column: The column name to index
+            index_type: Index type - "column" or "text"
+            args: Optional index-specific arguments (e.g., {"tokenizer": "en_stem"} for text indexes)
+        """
+        coro = _call_original_method(self._async, "create_index", column, index_type, args)
         self._async = _loop_manager.run_sync(coro)
         return self
 
@@ -492,7 +620,7 @@ def create(path: str = "", config: Optional[Any] = None) -> SyncBundleBuilder:
 
     Args:
         path: Optional path for bundle storage (default: random memory location)
-        config: Optional configuration (BundleConfig or dict) for cloud storage settings
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         SyncBundleBuilder ready for immediate use
@@ -527,7 +655,7 @@ def open(path: str, config: Optional[Any] = None) -> SyncBundle:
 
     Args:
         path: Path to the saved bundle
-        config: Optional configuration (BundleConfig or dict) for cloud storage settings
+        config: Optional configuration dict for cloud storage settings
 
     Returns:
         SyncBundle (read-only) with the loaded operations

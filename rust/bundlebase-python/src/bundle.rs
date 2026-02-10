@@ -4,6 +4,7 @@ use ::bundlebase::bundle::BundleFacade;
 use ::bundlebase::{Bundle, FileVerificationResult, VerificationResults};
 use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Result of verifying a single file
 #[pyclass]
@@ -128,7 +129,7 @@ impl PyVerificationResults {
 #[pyclass]
 #[derive(Clone)]
 pub struct PyBundle {
-    inner: Bundle,
+    inner: Arc<Bundle>,
 }
 
 #[pymethods]
@@ -218,13 +219,43 @@ impl PyBundle {
         })
     }
 
-    fn explain<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    #[pyo3(signature = (verbose=false, analyze=false, format=None, sql=None))]
+    fn explain<'py>(
+        &self,
+        verbose: bool,
+        analyze: bool,
+        format: Option<&str>,
+        sql: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
+        let format_str = format.map(|s| s.to_string());
+        let sql_str = sql.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            inner
-                .explain()
+            let explain_format = match format_str.as_deref() {
+                Some("tree") | Some("TREE") => datafusion::logical_expr::ExplainFormat::Tree,
+                Some("graphviz") | Some("GRAPHVIZ") => {
+                    datafusion::logical_expr::ExplainFormat::Graphviz
+                }
+                _ => datafusion::logical_expr::ExplainFormat::Indent,
+            };
+            let stream = inner
+                .explain(verbose, analyze, explain_format, sql_str.as_deref())
                 .await
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+            let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    super::record_batch_stream::PyRecordBatchStream::new(stream, schema),
+                )
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Failed to create stream: {}",
+                        e
+                    ))
+                })
+            })
         })
     }
 
@@ -247,7 +278,10 @@ impl PyBundle {
     }
 
     #[pyo3(signature = (data_dir=None))]
-    fn extend(&self, data_dir: Option<&str>) -> PyResult<super::builder::PyBundleBuilder> {
+    fn extend(
+        &self,
+        data_dir: Option<&str>,
+    ) -> PyResult<super::builder::PyBundleBuilder> {
         let builder = self.inner.extend(data_dir).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Failed to extend bundle: {}",
@@ -258,7 +292,7 @@ impl PyBundle {
     }
 
     #[pyo3(signature = (sql, params=None))]
-    fn select<'py>(
+    fn query<'py>(
         &self,
         sql: &str,
         params: Option<Vec<Py<PyAny>>>,
@@ -273,8 +307,8 @@ impl PyBundle {
                 vec![]
             };
 
-            let builder = inner
-                .select(&sql, params_vec)
+            let stream = inner
+                .query(&sql, params_vec)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -283,11 +317,12 @@ impl PyBundle {
                     ))
                 })?;
 
+            let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
             Python::attach(|py| {
-                Py::new(py, super::builder::PyBundleBuilder::new(builder))
+                Py::new(py, super::record_batch_stream::PyRecordBatchStream::new(stream, schema))
                     .map_err(|e| {
                         PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                            "Failed to create bundle: {}",
+                            "Failed to create stream: {}",
                             e
                         ))
                     })
@@ -338,6 +373,34 @@ impl PyBundle {
                         ))
                     })
             })
+        })
+    }
+
+    /// Set a runtime config value (session-only, highest priority).
+    ///
+    /// Unlike save_config, this does not persist the value to the bundle manifest.
+    /// It only affects the current session.
+    fn set_config<'py>(
+        &self,
+        scope: &str,
+        key: &str,
+        value: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let scope = super::bundle_config::parse_scope(scope)?;
+        let inner = self.inner.clone();
+        let key = key.to_string();
+        let value = value.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .set_config(&scope, &key, &value)
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to set config '{}': {}",
+                        key, e
+                    ))
+                })?;
+            Ok(format!("OK: SET CONFIG {}", key))
         })
     }
 
@@ -398,7 +461,7 @@ impl PyBundle {
 }
 
 impl PyBundle {
-    pub fn new(inner: Bundle) -> Self {
+    pub fn new(inner: Arc<Bundle>) -> Self {
         PyBundle { inner }
     }
 }

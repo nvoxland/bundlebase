@@ -90,7 +90,7 @@ class TestSyncOperations:
         """Test filtering rows synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.filter("salary > $1", [50000.0])
+        c.filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
         results = c.to_dict()
         assert len(results["id"]) == 798  # 798 rows with salary > 50000
@@ -128,7 +128,7 @@ class TestSyncChaining:
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet")).drop_column("country").rename_column(
             "first_name", "fname"
-        ).filter("salary > $1", [50000.0])
+        ).filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
         results = c.to_dict()
         assert "fname" in results
@@ -141,7 +141,7 @@ class TestSyncChaining:
         df = (
             bb.create(random_bundle())
             .attach(datafile("userdata.parquet"))
-            .filter("salary > $1", [50000.0])
+            .filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
             .to_pandas()
         )
 
@@ -218,7 +218,7 @@ class TestSyncStreaming:
     def test_stream_filtered_data(self):
         """Test streaming filtered data."""
         c = bb.create(random_bundle())
-        c.attach(datafile("userdata.parquet")).filter("salary > $1", [50000.0])
+        c.attach(datafile("userdata.parquet")).filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
         total_rows = 0
         for batch in bb.stream_batches(c):
@@ -263,7 +263,7 @@ class TestSyncIndex:
         """Test creating an index synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.create_index("id")
+        c.create_index("id", "column")
 
         # Verify bundle still works
         assert c.num_rows() == 1000
@@ -272,7 +272,7 @@ class TestSyncIndex:
         """Test rebuilding an index synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.create_index("id")
+        c.create_index("id", "column")
         c.rebuild_index("id")
 
         assert c.num_rows() == 1000
@@ -281,7 +281,7 @@ class TestSyncIndex:
         """Test creating multiple indexes."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.create_index("id").create_index("salary")
+        c.create_index("id", "column").create_index("salary", "column")
 
         assert c.num_rows() == 1000
 
@@ -289,14 +289,14 @@ class TestSyncIndex:
         """Test dropping an index synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.create_index("id")
+        c.create_index("id", "column")
         c.drop_index("id")
 
         # Verify bundle still works
         assert c.num_rows() == 1000
 
         # Should be able to recreate the index after dropping
-        c.create_index("id")
+        c.create_index("id", "column")
         assert c.num_rows() == 1000
 
 
@@ -314,7 +314,7 @@ class TestSyncExtend:
 
                 # Open and extend
                 c_opened = bb.open(temp1)
-                c_extended = c_opened.extend(temp2)
+                c_extended = c_opened.extend(data_dir=temp2)
 
                 # Verify extended bundle
                 assert c_extended.num_rows() == 1000
@@ -331,7 +331,7 @@ class TestSyncExtend:
 
                 # Extend and transform
                 c_opened = bb.open(temp1)
-                c_extended = c_opened.extend(temp2).filter("salary > $1", [50000.0])
+                c_extended = c_opened.extend(data_dir=temp2).filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
                 results = c_extended.to_dict()
                 assert len(results["id"]) == 798
@@ -382,34 +382,43 @@ class TestSyncJoin:
         assert "Country" in results
 
 
-class TestSyncSelect:
-    """Test synchronous selecct operations."""
+class TestSyncQuery:
+    """Test synchronous query operations."""
 
-    def test_sync_select(self):
+    def test_sync_query(self):
         """Test SQL query execution synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
 
-        # select() returns a new forked bundle
-        c2 = c.select("SELECT * FROM bundle LIMIT 10")
+        # query() returns query results directly
+        result = c.query("SELECT * FROM bundle LIMIT 10")
 
         # Original bundle should be unchanged
         results_original = c.to_dict()
         assert len(results_original["id"]) == 1000
 
-        # Forked bundle should have the query applied
-        results_selected = c2.to_dict()
-        assert len(results_selected["id"]) == 10
+        # Query result should have limited rows
+        results_queried = result.to_dict()
+        assert len(results_queried["id"]) == 10
 
     def test_sync_explain(self):
-        """Test query explanation synchronously."""
+        """Test query explanation synchronously returns a stream."""
+        from bundlebase.sync import _loop_manager
+
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.filter("salary > $1", [50000.0])
+        c.filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
-        plan = c.explain()
-        assert isinstance(plan, str)
-        assert len(plan) > 0
+        stream = c.explain()
+        # Stream should be a RecordBatchStream; consume via collect_all
+        async def _collect():
+            return await stream.collect_all()
+
+        batches = _loop_manager.run_sync(_collect())
+        assert batches is not None
+        assert len(batches) > 0
+        # Each batch should have plan_type and plan columns
+        assert batches[0].num_columns == 2
 
 
 class TestSyncCreateView:
@@ -420,10 +429,9 @@ class TestSyncCreateView:
         c = bb.create(random_bundle())
         c.attach(datafile("customers-0-100.csv"))
 
-        # select() returns a new forked bundle (not the same object as c)
+        # create_view(name, sql) creates a view and returns its builder
         # This used to cause a deadlock in the Python bindings
-        filtered = c.select("select * from data limit 10")
-        c.create_view("limited", filtered)
+        c.create_view("limited", "select * from bundle limit 10")
 
         # If we get here, create_view completed successfully (no deadlock)
         assert True
@@ -433,9 +441,8 @@ class TestSyncCreateView:
         c = bb.create(random_bundle())
         c.attach(datafile("customers-0-100.csv"))
 
-        # Create view from select
-        filtered = c.select("select * from data limit 10")
-        c.create_view("limited", filtered)
+        # Create view from SQL
+        c.create_view("limited", "select * from bundle limit 10")
         c.commit("Added limited view")
 
         # If we get here without deadlock, test passes
@@ -446,13 +453,14 @@ class TestSyncCreateView:
         c = bb.create(random_bundle())
         c.attach(datafile("customers-0-100.csv"))
 
-        filtered = c.select("select * from data limit 10")
-        c.create_view("limited", filtered).set_name("Customer Data")
+        # create_view returns the view's builder, set_name on that
+        view = c.create_view("limited", "select * from bundle limit 10")
+        view.set_name("Limited View")
 
-        assert c.name == "Customer Data"
+        assert view.name == "Limited View"
 
     def test_sync_create_view_no_double_commit(self):
-        """Verify select operation is not committed to main container."""
+        """Verify create_view SQL is stored in the view, not in main container."""
         with tempfile.TemporaryDirectory() as tmpdir:
             c = bb.create(tmpdir)
             c.attach(datafile("customers-0-100.csv"))
@@ -461,17 +469,8 @@ class TestSyncCreateView:
             # Check status after first commit
             assert c.status().is_empty(), "Should have no uncommitted changes after commit"
 
-            # select returns a new forked bundle
-            rs = c.select("select * from data limit 10")
-
-            # c should still have no uncommitted changes (select created a fork)
-            assert c.status().is_empty()
-
-            # rs should have uncommitted select operation
-            assert not rs.status().is_empty()
-
-            # Create view from the forked bundle
-            c.create_view("limited", rs)
+            # Create view with SQL - SQL is stored in the view, not as a separate operation
+            c.create_view("limited", "select * from bundle limit 10")
 
             # Now c should have uncommitted create_view operation
             assert len(c.status().changes) == 1
@@ -482,7 +481,7 @@ class TestSyncCreateView:
             c2 = bb.open(tmpdir)
             history = c2.history()
 
-            # Most recent commit should only have CreateViewOp, not SelectOp
+            # Most recent commit should only have CreateViewOp
             assert len(history) == 2
             assert history[-1].message == "Added view"
             assert "Create view 'limited'" in history[-1].changes[0].description
@@ -515,7 +514,7 @@ class TestSyncStatus:
         change = status.changes[0]
         assert isinstance(change.id, str)
         assert len(change.id) > 0
-        assert change.description == "Set name to Test Bundle"
+        assert change.description == "SET NAME 'Test Bundle'"
         assert change.operation_count == 1
 
     def test_sync_status_multiple_operations(self):
@@ -527,15 +526,15 @@ class TestSyncStatus:
         # Should have 2 changes: set_name + set_description
         status = c.status()
         assert len(status.changes) == 2
-        assert status.changes[0].description == "Set name to Test Bundle"
-        assert status.changes[1].description == "Set description to A test description"
+        assert status.changes[0].description == "SET NAME 'Test Bundle'"
+        assert status.changes[1].description == "SET DESCRIPTION 'A test description'"
 
     def test_sync_status_chained_operations(self):
         """Test status() with chained operations."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
         c.set_name("User Data")
-        c.filter("salary > $1", [50000.0])
+        c.filter("SELECT * FROM bundle WHERE salary > $1", [50000.0])
 
         status = c.status()
         assert len(status.changes) >= 2
@@ -630,6 +629,6 @@ class TestSyncSource:
         c.create_source("remote_dir", {"url": "file:///nonexistent/path/"})
 
         # fetch should return FetchResults with no changes
-        results = c.fetch()
+        results = c.fetch("base", "add")
         assert len(results) == 1
         assert results[0].total_count() == 0

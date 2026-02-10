@@ -31,7 +31,7 @@ impl Operation for DropColumnOp {
         Ok(())
     }
 
-    async fn apply(&self, _bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, _bundle: &Bundle) -> Result<(), DataFusionError> {
         Ok(())
     }
 

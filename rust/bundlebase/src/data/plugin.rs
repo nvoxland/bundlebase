@@ -1,3 +1,4 @@
+mod bundlebase_reader;
 mod csv_reader;
 mod file_reader;
 mod function_reader;
@@ -10,6 +11,7 @@ mod mock;
 use crate::data::DataReader;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
+pub use bundlebase_reader::BundlebasePlugin;
 pub use csv_reader::CsvPlugin;
 pub use function_reader::DataGenerator;
 pub use function_reader::FunctionPlugin;
@@ -20,8 +22,11 @@ use std::sync::Arc;
 #[cfg(test)]
 pub use mock::MockReader;
 
+use crate::bundle::BundleFacade;
 use crate::object_id::ObjectId;
-use crate::{Bundle, BundlebaseError};
+use crate::BundlebaseError;
+
+use std::collections::HashMap;
 
 #[async_trait]
 pub trait ReaderPlugin: Send + Sync {
@@ -30,17 +35,19 @@ pub trait ReaderPlugin: Send + Sync {
     /// # Arguments
     /// * `source` - URL or path to the data source
     /// * `block_id` - ID of the block being read
-    /// * `bundle` - Bundle context
+    /// * `bundle` - Bundle context (as trait object for flexibility)
     /// * `schema` - Optional schema (if already known)
     /// * `layout` - Optional layout file path
     /// * `expected_version` - If provided, validates version on first data access
+    /// * `read_options` - Format-specific options detected at attach time (e.g., CSV newlines_in_values)
     async fn reader(
         &self,
         source: &str,
         block_id: &ObjectId,
-        bundle: &Bundle,
+        bundle: &dyn BundleFacade,
         schema: Option<SchemaRef>,
         layout: Option<String>,
         expected_version: Option<String>,
+        read_options: Option<&HashMap<String, String>>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError>;
 }

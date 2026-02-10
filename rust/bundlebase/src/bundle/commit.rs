@@ -1,4 +1,12 @@
+use arrow::array::{Int32Array, RecordBatch, StringArray};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use std::sync::Arc;
+
+use crate::bundle::command::response::{single_batch_stream, CommandResponse, OutputShape};
+use crate::impl_dyn_command_response;
+use datafusion::execution::SendableRecordBatchStream;
 use crate::bundle::operation::{AnyOperation, BundleChange};
+use crate::BundlebaseError;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -23,6 +31,52 @@ impl BundleCommit {
             .flat_map(|change| change.operations.clone())
             .collect()
     }
+}
+
+/// CommandResponse implementation for displaying commit history.
+impl CommandResponse for Vec<BundleCommit> {
+    fn schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("url", DataType::Utf8, true),
+            Field::new("author", DataType::Utf8, false),
+            Field::new("message", DataType::Utf8, false),
+            Field::new("timestamp", DataType::Utf8, false),
+            Field::new("change_count", DataType::Int32, false),
+        ]))
+    }
+
+    fn output_shape() -> OutputShape {
+        OutputShape::Table
+    }
+
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        let ids: Vec<i32> = (0..self.len() as i32).collect();
+        let urls: Vec<Option<String>> = self
+            .iter()
+            .map(|c| c.url.as_ref().map(|u| u.to_string()))
+            .collect();
+        let authors: Vec<&str> = self.iter().map(|c| c.author.as_str()).collect();
+        let messages: Vec<&str> = self.iter().map(|c| c.message.as_str()).collect();
+        let timestamps: Vec<&str> = self.iter().map(|c| c.timestamp.as_str()).collect();
+        let change_counts: Vec<i32> = self.iter().map(|c| c.changes.len() as i32).collect();
+
+        let batch = RecordBatch::try_new(
+            Self::schema(),
+            vec![
+                Arc::new(Int32Array::from(ids)),
+                Arc::new(StringArray::from(urls)),
+                Arc::new(StringArray::from(authors)),
+                Arc::new(StringArray::from(messages)),
+                Arc::new(StringArray::from(timestamps)),
+                Arc::new(Int32Array::from(change_counts)),
+            ],
+        )
+        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
+        single_batch_stream(Self::schema(), batch)
+    }
+
+    impl_dyn_command_response!(Vec<BundleCommit>);
 }
 
 /// Extracts the version number from a manifest filename.
@@ -558,6 +612,7 @@ changes:
             bytes: Some(1000),
             schema: Some(schema),
             source_info: None,
+            read_options: None,
         };
 
         let remove_config = DropColumnOp {

@@ -36,6 +36,7 @@ For detailed documentation, see the modular guides in the `.context/` directory:
 - **[anti-patterns.md](.context/anti-patterns.md)** - What NOT to do with concrete examples
 - **[glossary.md](.context/glossary.md)** - Domain terminology and definitions
 - **[workflows.md](.context/workflows.md)** - Step-by-step procedures for common development tasks
+- **[blog-style.md](.context/blog-style.md)** - Blog writing style guide (voice, structure, do/don't)
 
 **Architecture Decisions:**
 - **[decisions/](.context/decisions/)** - Architecture Decision Records (ADRs)

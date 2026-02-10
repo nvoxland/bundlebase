@@ -13,8 +13,9 @@ mod common;
 async fn test_schema_tracking_through_operations() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
-    // Initially empty
-    assert_eq!(0, bundle.schema().await?.fields().len());
+    // Initially has only the sentinel no_data column
+    assert_eq!(1, bundle.schema().await?.fields().len());
+    assert_eq!(bundle.schema().await?.field(0).name(), "no_data");
 
     // After attach
     bundle.attach(test_datafile("userdata.parquet"), None).await?;

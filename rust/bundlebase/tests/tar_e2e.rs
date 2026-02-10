@@ -1,6 +1,6 @@
 use bundlebase::bundle::{BundleBuilder, BundleFacade};
 use bundlebase::test_utils::{random_memory_url, test_datafile};
-use bundlebase::Bundle;
+use bundlebase::{Bundle, IndexType};
 use tempfile::TempDir;
 
 /// Tests exporting a bundle to tar and reopening it
@@ -139,8 +139,8 @@ async fn test_tar_preserves_metadata() {
     let tar_bundle = Bundle::open(tar_path.to_str().unwrap(), None)
         .await
         .unwrap();
-    assert_eq!(tar_bundle.name(), Some("Test Bundle"));
-    assert_eq!(tar_bundle.description(), Some("A test bundle for tar export"));
+    assert_eq!(tar_bundle.name(), Some("Test Bundle".to_string()));
+    assert_eq!(tar_bundle.description(), Some("A test bundle for tar export".to_string()));
 }
 
 /// Tests creating an index in a tar bundle
@@ -166,7 +166,7 @@ async fn test_create_index_in_tar() {
         .await
         .unwrap();
     let mut builder = BundleBuilder::extend(opened.into(), None).unwrap();
-    builder.index("id").await.unwrap();
+    builder.create_index("id", IndexType::Column).await.unwrap();
     builder.commit("v2 - added index").await.unwrap();
 
     // Reopen and verify index exists
@@ -193,10 +193,10 @@ async fn test_tar_query_equivalence() {
         .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
-    mem_bundle.filter("id > 100", vec![]).await.unwrap();
+    mem_bundle.filter("SELECT * FROM bundle WHERE id > 100", vec![]).await.unwrap();
     mem_bundle.commit("filtered").await.unwrap();
 
-    let mem_count = mem_bundle.bundle.num_rows().await.unwrap();
+    let mem_count = mem_bundle.bundle().num_rows().await.unwrap();
 
     // Export to tar and query
     mem_bundle
