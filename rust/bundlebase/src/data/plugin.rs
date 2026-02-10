@@ -1,3 +1,4 @@
+mod bundlebase_reader;
 mod csv_reader;
 mod file_reader;
 mod function_reader;
@@ -10,6 +11,7 @@ mod mock;
 use crate::data::DataReader;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
+pub use bundlebase_reader::BundlebasePlugin;
 pub use csv_reader::CsvPlugin;
 pub use function_reader::DataGenerator;
 pub use function_reader::FunctionPlugin;

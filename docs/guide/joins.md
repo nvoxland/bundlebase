@@ -43,6 +43,45 @@ You can optionally specify a `location` for the initial data and a `how` for the
     JOIN 'orders.parquet' AS orders ON customer_id = orders.id
     ```
 
+## Joining With Another Bundle
+
+You can join with the query output of another committed bundle using a `bundle://` URL. This reads the target bundle's full query output — including any filters, column operations, and joins that have been applied.
+
+**For filesystem bundles**, use `bundle://` followed by the path:
+
+=== "Async API"
+
+    ```python
+    await bundle.join("other", on="id = other.id",
+                 location="bundle:///path/to/other/bundle")
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle.join("other", on="id = other.id",
+           location="bundle:///path/to/other/bundle")
+    ```
+
+**For remote bundles** (S3, etc.), use the compound scheme `bundle+<scheme>://`:
+
+=== "Async API"
+
+    ```python
+    await bundle.join("other", on="id = other.id",
+                 location="bundle+s3://bucket/path/to/bundle")
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle.join("other", on="id = other.id",
+           location="bundle+s3://bucket/path/to/bundle")
+    ```
+
+!!! note
+    The target bundle must be committed. The joined data reflects the target's full query output at read time, not just its raw files.
+
 ## Join Without Initial Data
 
 Create a join point without initial data. Data can be attached later using `attach()` with the `pack` parameter or via [sources](sources.md).
