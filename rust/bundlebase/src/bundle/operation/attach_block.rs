@@ -86,7 +86,7 @@ impl AttachBlockOp {
 
                 // Check if this is a function:// URL - these don't support file-based hash
                 //todo: do this right
-                if location.starts_with("function://") {
+                if location.starts_with("function://") || location.starts_with("bundle://") || location.starts_with("bundle+") || location.starts_with("bundlebase://") || location.starts_with("bundlebase+") {
                     let temp_id = ObjectId::generate();
                     let adapter_factory = builder.bundle().reader_factory.clone();
                     let adapter = adapter_factory

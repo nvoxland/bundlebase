@@ -386,6 +386,8 @@ impl ConfigInner {
 /// ```
 pub struct BundleConfig {
     inner: RwLock<ConfigInner>,
+    /// The original passed config, preserved for reuse when opening related bundles.
+    passed_config: Arc<PassedBundleConfig>,
 }
 
 impl std::fmt::Debug for BundleConfig {
@@ -428,8 +430,10 @@ impl BundleConfig {
 
     /// Create a new configuration, optionally pre-populated with passed entries.
     pub fn new(passed: Option<&PassedBundleConfig>) -> Result<Self, BundlebaseError> {
+        let stored = passed.cloned().unwrap_or_default();
         let cfg = Self {
             inner: RwLock::new(ConfigInner::new()),
+            passed_config: Arc::new(stored),
         };
         if let Some(passed) = passed {
             for (scope, entries) in passed.iter() {
@@ -439,6 +443,11 @@ impl BundleConfig {
             }
         }
         Ok(cfg)
+    }
+
+    /// Returns the original passed config for reuse when opening related bundles.
+    pub fn passed_config(&self) -> Arc<PassedBundleConfig> {
+        Arc::clone(&self.passed_config)
     }
 
     /// Set a config value.
@@ -725,30 +734,6 @@ impl BundleConfig {
             .collect())
     }
 
-    /// Extract Passed-source entries for transfer to a new BundleConfig (e.g., for views).
-    /// Returns (key, value, scope) tuples where scope is the raw stored string.
-    pub fn passed_entries(&self) -> Vec<(String, String, Scope)> {
-        let inner = self.inner.read();
-        let mut result = Vec::new();
-        if let Some(entries) = inner.entries.get(&ConfigSource::Passed) {
-            for entry in entries {
-                match Scope::new(&entry.scope) {
-                    Ok(scope) => {
-                        result.push((
-                            entry.key.clone(),
-                            entry.value.clone(),
-                            scope,
-                        ));
-                    }
-                    Err(e) => {
-                        log::warn!("Skipping invalid scope '{}' in passed config: {}", entry.scope, e);
-                    }
-                }
-            }
-        }
-        result
-    }
-
     /// Ensure env vars are loaded into entries[Env]. Reads BB_* env vars on first call.
     /// Env var patterns (suffix after `BB_`):
     /// - `BB_S3_REGION` -> scope `s3`, key = `region` (single `_` separates scope from key)
@@ -844,6 +829,7 @@ impl Clone for BundleConfig {
         };
         Self {
             inner: RwLock::new(new_inner),
+            passed_config: Arc::clone(&self.passed_config),
         }
     }
 }
@@ -1270,25 +1256,6 @@ mod tests {
 
         // Unknown key — not secure
         assert!(!ConfigKey::is_key_secure(&s3, "nonexistent_key"));
-    }
-
-    #[test]
-    fn test_passed_entries() {
-        let config = BundleConfig::new(None).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "region", "us-west-2", ConfigSource::Passed).unwrap();
-        config.set(&Scope::try_from("s3://bucket/").unwrap(), "endpoint", "http://minio", ConfigSource::Passed).unwrap();
-        config.set(&Scope::try_from("s3").unwrap(), "allow_http", "stored_value", ConfigSource::Stored).unwrap();
-
-        let passed = config.passed_entries();
-        assert_eq!(passed.len(), 2);
-
-        let region = passed.iter().find(|e| e.0 == "region").expect("region");
-        assert_eq!(region.1, "us-west-2");
-        assert_eq!(region.2, Scope::try_from("s3").unwrap());
-
-        let endpoint = passed.iter().find(|e| e.0 == "endpoint").expect("endpoint");
-        assert_eq!(endpoint.1, "http://minio");
-        assert_eq!(endpoint.2, Scope::try_from("s3://bucket/").unwrap());
     }
 
     #[test]

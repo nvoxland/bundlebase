@@ -1,5 +1,5 @@
 use crate::bundle::BundleFacade;
-use crate::data::plugin::{CsvPlugin, FunctionPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin};
+use crate::data::plugin::{BundlebasePlugin, CsvPlugin, FunctionPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin};
 use crate::data::{DataReader, ObjectId};
 use crate::functions::FunctionRegistry;
 use crate::io::DataStorage;
@@ -25,6 +25,7 @@ impl DataReaderFactory {
             plugins: vec![
                 Arc::new(CsvPlugin::default()),
                 Arc::new(FunctionPlugin::new(function_registry.clone())),
+                Arc::new(BundlebasePlugin),
                 Arc::new(JsonPlugin::default()),
                 Arc::new(ParquetPlugin::default()),
             ],

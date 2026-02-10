@@ -97,9 +97,6 @@ pub struct Bundle {
     /// All config sources (stored, env, passed, runtime) live inside BundleConfig.
     config: Arc<BundleConfig>,
 
-    /// The original passed config, preserved for reuse when reopening the bundle.
-    passed_config: Arc<PassedBundleConfig>,
-
     /// True if this bundle is a view (has a view field in init commit)
     is_view: Arc<RwLock<bool>>,
 }
@@ -140,7 +137,6 @@ impl Clone for Bundle {
             function_registry: Arc::clone(&self.function_registry),
             source_function_registry: Arc::clone(&self.source_function_registry),
             config: Arc::clone(&self.config),
-            passed_config: Arc::clone(&self.passed_config),
             is_view: Arc::clone(&self.is_view),
         }
     }
@@ -193,7 +189,6 @@ impl Bundle {
         );
 
         let bundle_config = Arc::new(BundleConfig::new(passed_config.as_ref())?);
-        let stored_passed_config = passed_config.unwrap_or_default();
         let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, Arc::clone(&bundle_config))?));
 
         let bundle = Arc::new(Self {
@@ -220,7 +215,6 @@ impl Bundle {
             commits,
             dataframe,
             config: bundle_config,
-            passed_config: Arc::new(stored_passed_config),
             is_view: Arc::new(RwLock::new(false)),
         });
 
@@ -533,10 +527,6 @@ impl Bundle {
 
     pub fn config(&self) -> Arc<BundleConfig> {
         Arc::clone(&self.config)
-    }
-
-    pub(crate) fn passed_config(&self) -> Arc<PassedBundleConfig> {
-        Arc::clone(&self.passed_config)
     }
 
     /// Recreate data_dir from the current URL + config.
@@ -1096,8 +1086,8 @@ impl BundleFacade for Bundle {
             .to_string();
 
         // Open view as Bundle (automatically loads parent via FROM)
-        let passed_config = (*self.passed_config()).clone();
-        Bundle::open(&view_path, Some(passed_config)).await
+        let passed = (*self.config.passed_config()).clone();
+        Bundle::open(&view_path, Some(passed)).await
     }
 
     fn views(&self) -> HashMap<ObjectId, String> {

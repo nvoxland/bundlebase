@@ -350,7 +350,7 @@ impl BundleBuilder {
         let last_manifest_version = *self.bundle.last_manifest_version.read();
         let from = self.bundle.from();
         let changes = self.status.read().changes().clone();
-        let passed_config = Some((*self.bundle.passed_config()).clone());
+        let passed_config = Some((*self.bundle.config.passed_config()).clone());
         let url = self.bundle.url().to_string();
         let bundle_id = self.bundle.id();
 
@@ -487,7 +487,7 @@ impl BundleBuilder {
     pub(in crate::bundle) async fn reload_bundle(&self) -> Result<(), BundlebaseError> {
         // Reload the bundle from the last committed state
         let empty = self.bundle.commits.read().is_empty();
-        let passed_config = (*self.bundle.passed_config()).clone();
+        let passed_config = (*self.bundle.config.passed_config()).clone();
         let url = self.bundle.url().to_string();
 
         // Note: reload_from preserves the original ctx and its schema providers

@@ -1698,6 +1698,66 @@ async def test_verify_data_update_versions():
 
 
 @pytest.mark.asyncio
+async def test_bundlebase_url_attach():
+    """Test that a bundle:// URL can be used to attach another bundle's data."""
+    with tempfile.TemporaryDirectory() as source_dir:
+        # Create and commit a source bundle
+        source = await bundlebase.create(source_dir)
+        source = await source.attach(datafile("userdata.parquet"))
+        await source.commit("initial data")
+
+        # Create a new bundle and attach the source via bundle:// URL
+        c = await bundlebase.create(random_bundle())
+        c = await c.attach(f"bundle://{source_dir}")
+
+        # Verify schema and row count match the source
+        schema = await c.schema()
+        assert len(schema) == 13
+        assert await c.num_rows() == 1000
+
+
+@pytest.mark.asyncio
+async def test_bundlebase_url_join():
+    """Test that a bundle:// URL can be used in a join."""
+    with tempfile.TemporaryDirectory() as regions_dir:
+        # Create and commit a regions bundle
+        regions = await bundlebase.create(regions_dir)
+        regions = await regions.attach(datafile("sales-regions.csv"))
+        await regions.commit("regions data")
+
+        # Create a customers bundle and join with the regions bundle via bundle://
+        c = await bundlebase.create(random_bundle())
+        c = await c.attach(datafile("customers-0-100.csv"))
+        c = await c.join("regions", 'base."Country" = regions."Country"', f"bundle://{regions_dir}")
+
+        # The join should produce results (same as joining with a raw file)
+        assert await c.num_rows() == 99
+
+
+@pytest.mark.asyncio
+async def test_bundlebase_url_with_operations():
+    """Test that a bundle:// URL exposes the target's query output (with operations applied)."""
+    with tempfile.TemporaryDirectory() as source_dir:
+        # Create a source bundle with a filter applied
+        source = await bundlebase.create(source_dir)
+        source = await source.attach(datafile("userdata.parquet"))
+        source = await source.filter("SELECT * FROM bundle WHERE id < 100")
+        source = await source.drop_column("country")
+        await source.commit("filtered data")
+
+        # Attach the source via bundle:// URL
+        c = await bundlebase.create(random_bundle())
+        c = await c.attach(f"bundle://{source_dir}")
+
+        # Should see the filtered output with column dropped, not the raw data
+        schema = await c.schema()
+        field_names = [f.name for f in schema.fields]
+        assert "country" not in field_names
+        assert len(field_names) == 12  # 13 - 1 dropped column
+        assert await c.num_rows() == 99
+
+
+@pytest.mark.asyncio
 async def test_version_udf():
     """Test that the version() SQL UDF returns the bundle version."""
     c = await bundlebase.create(random_bundle())
