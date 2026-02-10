@@ -618,7 +618,12 @@ impl KaggleSource {
                 source_location, e
             ))
         })?);
-        let data = Self::extract_from_zip(&zip_data, source_location)?;
+        let data = if zip_data.starts_with(b"PK") {
+            Self::extract_from_zip(&zip_data, source_location)?
+        } else {
+            // Some Kaggle files are served uncompressed
+            zip_data
+        };
         drop(temp); // Clean up temp file
 
         let filename = source_location

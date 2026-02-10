@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "bundlebase"
-version = "0.5.0"
+version = "0.6.0"
 description = "Like Docker, but for data"
 authors = ["Nathan Voxland <nathan@voxland.net>"]
 readme = "README.md"
