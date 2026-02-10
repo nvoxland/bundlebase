@@ -6,14 +6,11 @@ use datafusion::logical_expr::{Expr, LogicalPlan, Operator};
 use datafusion::prelude::Expr::BinaryExpr;
 use datafusion::prelude::SessionContext;
 use datafusion::sql::TableReference;
-use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use crate::bundle::pack::JoinTypeOption;
 
 /// The name used to reference the base pack in join expressions
 pub const BASE_PACK_NAME: &str = "base";
-
-static TEMP_COUNTER: OnceLock<AtomicU64> = OnceLock::new();
 
 /// Finds the original source (table and column name) for a logical column.
 ///
@@ -201,7 +198,7 @@ fn find_orig(plan: &LogicalPlan, target: &str, sources: &mut Vec<(String, String
                     }
                     None => {
                         // No relation specified - use the dataframe alias as source
-                        sources.push((catalog::DATAFRAME_ALIAS.to_string(), col.name.clone()));
+                        sources.push((catalog::BUNDLE_TABLE.to_string(), col.name.clone()));
                         return;
                     }
                 }
@@ -277,75 +274,6 @@ fn collect_join_exprs(plan: &LogicalPlan, out: &mut Vec<Expr>) {
             }
         }
     }
-}
-
-/// Execute a closure with a temporary table registered in the temp schema.
-///
-/// This helper handles the common pattern of:
-/// 1. Registering a DataFrame as a temp table
-/// 2. Executing a closure that can use the temporary table
-/// 3. Cleaning up the temporary table registration
-///
-/// # Arguments
-/// * `ctx` - The SessionContext to use
-/// * `df` - The DataFrame to register as the temporary table
-/// * `f` - A closure that receives the SessionContext and executes while the temp table is registered
-///
-pub async fn with_temp_table<F, Fut>(
-    ctx: &Arc<SessionContext>,
-    df: DataFrame,
-    f: F,
-) -> Result<DataFrame, BundlebaseError>
-where
-    F: FnOnce(String) -> Fut,
-    Fut: std::future::Future<Output = Result<DataFrame, BundlebaseError>>,
-{
-    // Check if this is a simple TableScan that we can use directly to enable filter pushdown
-    let plan = df.logical_plan();
-    if let LogicalPlan::TableScan(table_scan) = plan {
-        // Extract the table name
-        let table_name = match &table_scan.table_name {
-            TableReference::Bare { table } => table.to_string(),
-            TableReference::Partial { schema, table } => format!("{}.{}", schema, table),
-            TableReference::Full {
-                catalog,
-                schema,
-                table,
-            } => format!("{}.{}.{}", catalog, schema, table),
-        };
-
-        // If this is a pack table with no transformations, use it directly
-        // This enables DataFusion's optimizer to push filters down to DataBlock.scan()
-        if table_name.starts_with("packs.")
-            && table_scan.projection.is_none()
-            && table_scan.filters.is_empty()
-        {
-            log::debug!(
-                "Using pack table directly for filter pushdown: {}",
-                table_name
-            );
-            return f(table_name).await;
-        }
-    }
-
-    // Fall back to creating a temp table for complex cases
-    let unique_int = {
-        TEMP_COUNTER
-            .get_or_init(|| AtomicU64::new(1))
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-    };
-    let temp_tablename = format!("temp.temp_{}", unique_int);
-
-    // Register the DataFrame as "data" in the temp schema
-    ctx.register_table(temp_tablename.as_str(), df.into_view())?;
-
-    // Execute the provided function with access to the context
-    let result = f(temp_tablename.clone()).await;
-
-    // Cleanup: deregister the temporary table
-    ctx.deregister_table(temp_tablename.as_str())?;
-
-    result
 }
 
 #[cfg(test)]
@@ -426,13 +354,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_column_source_from_dataframe() -> Result<(), BundlebaseError> {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None).await?;
+        let bundle = BundleBuilder::create("memory:///test_bundle", None).await?;
         bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
         let df = bundle.dataframe().await?;
 
         // Test with pack expansion - should return only blocks that have the column
-        let sources = column_sources_from_df("first_name", &df, Some(&bundle.bundle().packs))
+        let binding = bundle.bundle();
+        let sources = column_sources_from_df("first_name", &df, Some(&binding.packs))
             .await?
             .ok_or("Could not find columns")?;
 

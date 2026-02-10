@@ -21,7 +21,7 @@ Example:
     >>>     process(batch)
 """
 
-from typing import TYPE_CHECKING, Dict, AsyncIterator
+from typing import TYPE_CHECKING, Dict, AsyncIterator, List
 
 import pyarrow as pa
 
@@ -31,6 +31,153 @@ if TYPE_CHECKING:
     import numpy as np
     # Avoid circular import for type checking
     from . import PyBundle, PyBundleBuilder
+
+
+class QueryResult:
+    """Wrapper for query results with streaming conversion methods.
+
+    This class wraps a PyRecordBatchStream and provides convenient methods
+    to convert the streaming results to common Python formats.
+
+    The stream can only be consumed once - after calling any conversion method
+    (to_pandas, to_polars, to_dict, stream_batches), the stream is exhausted.
+
+    Example:
+        >>> c = await bundlebase.create()
+        >>> c = await c.attach("data.parquet")
+        >>> result = await c.query("SELECT * FROM bundle LIMIT 10")
+        >>> df = await result.to_pandas()
+    """
+
+    def __init__(self, stream):
+        """Initialize with a PyRecordBatchStream.
+
+        Args:
+            stream: The PyRecordBatchStream from query()
+        """
+        self._stream = stream
+        self._consumed = False
+
+    def _check_consumed(self):
+        """Raise error if stream has already been consumed."""
+        if self._consumed:
+            raise RuntimeError(
+                "Query result has already been consumed. "
+                "Streams can only be read once. Execute the query again if needed."
+            )
+        self._consumed = True
+
+    async def _collect_batches(self) -> List[pa.RecordBatch]:
+        """Collect all batches from the stream."""
+        self._check_consumed()
+        batches = []
+        while True:
+            batch = await self._stream.next_batch()
+            if batch is None:
+                break
+            batches.append(batch)
+        return batches
+
+    async def to_pandas(self) -> "pd.DataFrame":
+        """Convert query results to pandas DataFrame.
+
+        Returns:
+            pd.DataFrame: The query results as a pandas DataFrame
+
+        Raises:
+            ImportError: If pandas is not installed
+            RuntimeError: If the stream has already been consumed
+
+        Example:
+            >>> result = await c.query("SELECT * FROM bundle LIMIT 10")
+            >>> df = await result.to_pandas()
+        """
+        try:
+            import pandas as pd
+        except ImportError as e:
+            raise ImportError(
+                "pandas is required for to_pandas(). "
+                "Install it with: pip install pandas"
+            ) from e
+
+        batches = await self._collect_batches()
+        if not batches:
+            # Return empty DataFrame with correct schema if possible
+            return pd.DataFrame()
+
+        chunks = [batch.to_pandas() for batch in batches]
+        return pd.concat(chunks, ignore_index=True)
+
+    async def to_polars(self) -> "pl.DataFrame":
+        """Convert query results to Polars DataFrame.
+
+        Returns:
+            pl.DataFrame: The query results as a Polars DataFrame
+
+        Raises:
+            ImportError: If polars is not installed
+            RuntimeError: If the stream has already been consumed
+
+        Example:
+            >>> result = await c.query("SELECT * FROM bundle LIMIT 10")
+            >>> df = await result.to_polars()
+        """
+        try:
+            import polars as pl
+        except ImportError as e:
+            raise ImportError(
+                "polars is required for to_polars(). "
+                "Install it with: pip install polars"
+            ) from e
+
+        batches = await self._collect_batches()
+        if not batches:
+            return pl.DataFrame()
+
+        arrow_table = pa.Table.from_batches(batches)
+        return pl.from_arrow(arrow_table)
+
+    async def to_dict(self) -> Dict[str, list]:
+        """Convert query results to a dictionary of lists.
+
+        Returns:
+            dict: Dictionary mapping column names to lists of values
+
+        Raises:
+            RuntimeError: If the stream has already been consumed
+
+        Example:
+            >>> result = await c.query("SELECT * FROM bundle LIMIT 10")
+            >>> data = await result.to_dict()
+        """
+        batches = await self._collect_batches()
+        if not batches:
+            return {}
+
+        arrow_table = pa.Table.from_batches(batches)
+        return arrow_table.to_pydict()
+
+    async def stream_batches(self) -> AsyncIterator[pa.RecordBatch]:
+        """Stream batches one at a time for memory-efficient processing.
+
+        Yields:
+            pa.RecordBatch: PyArrow RecordBatch objects
+
+        Raises:
+            RuntimeError: If the stream has already been consumed
+
+        Example:
+            >>> result = await c.query("SELECT * FROM bundle")
+            >>> async for batch in result.stream_batches():
+            >>>     # Process each batch independently
+            >>>     process(batch.to_pandas())
+        """
+        self._check_consumed()
+        while True:
+            batch = await self._stream.next_batch()
+            if batch is None:
+                break
+            yield batch
 
 
 async def stream_batches(bundle: "PyBundle | PyBundleBuilder") -> AsyncIterator[pa.RecordBatch]:

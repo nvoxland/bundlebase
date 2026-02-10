@@ -47,7 +47,7 @@ impl Operation for CreateJoinOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         let pack = Arc::new(Pack::new(
             self.id,
             &self.name,

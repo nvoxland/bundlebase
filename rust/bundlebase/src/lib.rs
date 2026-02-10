@@ -19,15 +19,17 @@ pub mod udf;
 mod versioning;
 
 pub use crate::bundle::{
-    AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade, BundleStatus,
+    AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade,
     FileVerificationResult, Operation, VerificationResults,
 };
-pub use crate::bundle_config::BundleConfig;
+pub use crate::bundle_config::{BundleConfig, ConfigScope, ConfigValueDetails, ConfigSource, PassedBundleConfig, Scope};
 pub use crate::data::DataGenerator;
 pub use crate::progress::{get_tracker, set_tracker, with_tracker, ProgressId, ProgressTracker};
 pub use functions::{FunctionImpl, FunctionSignature};
+pub use crate::index::{IndexType, IndexTypeConfigError, ParseIndexTypeError, TokenizerConfig};
 use std::error::Error;
 pub use bundle::JoinTypeOption;
+pub use catalog::{CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA, tables as catalog_tables};
 
 /// Standard error type used throughout the Bundlebase codebase
 pub type BundlebaseError = Box<dyn Error + Send + Sync>;

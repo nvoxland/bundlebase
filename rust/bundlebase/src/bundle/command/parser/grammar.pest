@@ -1,0 +1,449 @@
+// ============================================================================
+// Bundlebase Custom SQL Grammar
+// ============================================================================
+// This grammar covers bundlebase-specific SQL extensions that aren't
+// recognized by sqlparser-rs. Standard SQL continues to use sqlparser-rs.
+//
+// Operations covered:
+// - FILTER WHERE <condition>
+// - ATTACH '<path>' [AS <name>] [WITH (...)]
+// - [join_type] JOIN AS <name> ON <expression>
+// - REINDEX [ON data(<column>)]
+// - CREATE SOURCE <function> WITH (...) [ON <pack>]
+// - FETCH
+// ============================================================================
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT = _{ "--" ~ (!"\n" ~ ANY)* ~ "\n" }
+
+// ============================================================================
+// Entry Point - Statement Types by Category
+// ============================================================================
+// Statements are organized into semantic groups for easier navigation.
+// When adding a new statement, add it to the appropriate category below.
+
+statement = { SOI ~ (
+    data_modification_stmt
+    | schema_stmt
+    | source_stmt
+    | index_stmt
+    | transaction_stmt
+    | metadata_stmt
+) ~ EOI }
+
+// Data modification statements - operations that change bundle data content
+data_modification_stmt = {
+    filter_stmt
+    | attach_stmt
+    | detach_stmt
+    | replace_stmt
+}
+
+// Schema modification statements - operations that change bundle structure
+schema_stmt = {
+    join_stmt
+    | drop_join_stmt
+    | rename_join_stmt
+    | drop_column_stmt
+    | rename_column_stmt
+    | create_view_stmt
+    | drop_view_stmt
+    | rename_view_stmt
+}
+
+// Source management statements - operations for data sources
+source_stmt = {
+    create_source_stmt
+    | fetch_stmt
+}
+
+// Index management statements - operations for search indexes
+index_stmt = {
+    create_index_stmt
+    | drop_index_stmt
+    | rebuild_index_stmt
+    | reindex_stmt
+}
+
+// Transaction control statements - operations for version control
+transaction_stmt = {
+    commit_stmt
+    | reset_stmt
+    | undo_stmt
+    | verify_data_stmt
+    | explain_stmt
+}
+
+// Metadata statements - operations for bundle metadata
+metadata_stmt = {
+    set_name_stmt
+    | set_description_stmt
+    | set_config_stmt
+    | save_config_stmt
+}
+
+// ============================================================================
+// FILTER Statement
+// ============================================================================
+// Syntax: FILTER WITH <query>
+// Example: FILTER WITH SELECT * FROM bundle WHERE country = 'USA' AND age > 21
+
+filter_stmt = {
+    ^"filter" ~ ^"with" ~ filter_query
+}
+
+filter_query = @{
+    // Capture everything from WITH to end as raw text
+    // This allows DataFusion to parse the query later
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// ATTACH Statement
+// ============================================================================
+// Syntax: ATTACH '<path>' [TO <pack_name>] [WITH (<options>)]
+// Examples:
+//   ATTACH 'data.parquet'                    -- attaches to base pack
+//   ATTACH 'data.parquet' TO users           -- attaches to 'users' join pack
+//   ATTACH 'data.csv' WITH (delimiter = ',', header = true)
+
+attach_stmt = {
+    ^"attach" ~ quoted_string ~ (^"to" ~ identifier)? ~ (^"with" ~ with_options)?
+}
+
+with_options = {
+    "(" ~ option_pair ~ ("," ~ option_pair)* ~ ")"
+}
+
+option_pair = {
+    identifier ~ "=" ~ option_value
+}
+
+option_value = {
+    quoted_string | number | boolean | identifier
+}
+
+boolean = { ^"true" | ^"false" }
+
+// ============================================================================
+// JOIN Statement
+// ============================================================================
+// Syntax: [join_type] JOIN '<source>' AS <name> ON <expression>
+// Examples:
+//   JOIN 'other.csv' AS other ON id = other.id
+//   LEFT JOIN 'users.parquet' AS users ON user_id = users.id
+//   FULL OUTER JOIN 'data.json' AS data ON key = data.key
+
+join_stmt = {
+    join_type? ~ ^"join" ~ quoted_string ~ ^"as" ~ identifier ~ ^"on" ~ join_condition
+}
+
+join_type = {
+    (^"full" ~ ^"outer") | ^"full" | ^"left" | ^"right" | ^"inner" | ^"outer"
+}
+
+join_condition = @{
+    // Capture everything from ON to end as raw text
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// REINDEX Statement
+// ============================================================================
+// Syntax: REINDEX [ON data(<column>)]
+// Examples:
+//   REINDEX
+//   REINDEX ON data(id)
+
+reindex_stmt = {
+    ^"reindex" ~ (^"on" ~ ^"data" ~ "(" ~ identifier ~ ")")?
+}
+
+// ============================================================================
+// CREATE SOURCE Statement
+// ============================================================================
+// Syntax: CREATE SOURCE <function> WITH (<args>) [ON <pack>]
+// Examples:
+//   CREATE SOURCE remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')
+//   CREATE SOURCE remote_dir WITH (url = 'file:///data/') ON users
+
+create_source_stmt = {
+    ^"create" ~ ^"source" ~ identifier ~ ^"with" ~ source_args ~ (^"on" ~ identifier)?
+}
+
+source_args = {
+    "(" ~ source_arg_pair ~ ("," ~ source_arg_pair)* ~ ")"
+}
+
+source_arg_pair = {
+    identifier ~ "=" ~ quoted_string
+}
+
+// ============================================================================
+// FETCH Statement
+// ============================================================================
+// Syntax: FETCH ALL <mode> | FETCH <pack> <mode>
+// Examples:
+//   FETCH base ADD            -- fetch from base pack sources (add mode)
+//   FETCH users ADD           -- fetch from 'users' pack sources
+//   FETCH ALL ADD             -- fetch from all sources
+//   FETCH ALL UPDATE          -- fetch all with update mode
+//   FETCH users SYNC          -- fetch from 'users' with sync mode
+fetch_stmt = {
+    ^"fetch" ~ (^"all" ~ fetch_mode | identifier ~ fetch_mode)
+}
+
+fetch_mode = { ^"add" | ^"update" | ^"sync" }
+
+// ============================================================================
+// DROP JOIN Statement
+// ============================================================================
+// Syntax: DROP JOIN <name>
+// Examples:
+//   DROP JOIN customers
+
+drop_join_stmt = {
+    ^"drop" ~ ^"join" ~ identifier
+}
+
+// ============================================================================
+// RENAME JOIN Statement
+// ============================================================================
+// Syntax: RENAME JOIN <old_name> TO <new_name>
+// Examples:
+//   RENAME JOIN customers TO clients
+
+rename_join_stmt = {
+    ^"rename" ~ ^"join" ~ identifier ~ ^"to" ~ identifier
+}
+
+// ============================================================================
+// DROP INDEX Statement
+// ============================================================================
+// Syntax: DROP INDEX <column>
+// Examples:
+//   DROP INDEX user_id
+
+drop_index_stmt = {
+    ^"drop" ~ ^"index" ~ identifier
+}
+
+// ============================================================================
+// RENAME VIEW Statement
+// ============================================================================
+// Syntax: RENAME VIEW <old_name> TO <new_name>
+// Examples:
+//   RENAME VIEW old_view TO new_view
+
+rename_view_stmt = {
+    ^"rename" ~ ^"view" ~ identifier ~ ^"to" ~ identifier
+}
+
+// ============================================================================
+// Lexical Elements
+// ============================================================================
+
+identifier = @{
+    // SQL identifier: starts with letter/underscore, contains alphanumeric/underscore
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+}
+
+quoted_string = @{
+    single_quoted | double_quoted
+}
+
+single_quoted = @{
+    "'" ~ single_quoted_content ~ "'"
+}
+
+single_quoted_content = @{
+    (escape_sequence | (!"'" ~ !"\\" ~ ANY))*
+}
+
+double_quoted = @{
+    "\"" ~ double_quoted_content ~ "\""
+}
+
+double_quoted_content = @{
+    (escape_sequence | !"\"" ~ !"\\" ~ ANY)*
+}
+
+escape_sequence = @{
+    "\\\\" | "\\'" | "\\\"" | "\\n" | "\\r" | "\\t"
+}
+
+number = @{
+    "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ~ (^"e" ~ ("+" | "-")? ~ ASCII_DIGIT+)?
+}
+
+// ============================================================================
+// RESET Statement
+// ============================================================================
+// Syntax: RESET
+
+reset_stmt = {
+    ^"reset"
+}
+
+// ============================================================================
+// UNDO Statement
+// ============================================================================
+// Syntax: UNDO
+
+undo_stmt = {
+    ^"undo"
+}
+
+// ============================================================================
+// COMMIT Statement
+// ============================================================================
+// Syntax: COMMIT 'message'
+
+commit_stmt = {
+    ^"commit" ~ quoted_string
+}
+
+// ============================================================================
+// DETACH Statement
+// ============================================================================
+// Syntax: DETACH 'location'
+
+detach_stmt = {
+    ^"detach" ~ quoted_string
+}
+
+// ============================================================================
+// REBUILD INDEX Statement
+// ============================================================================
+// Syntax: REBUILD INDEX ON <column>
+
+rebuild_index_stmt = {
+    ^"rebuild" ~ ^"index" ~ ^"on" ~ identifier
+}
+
+// ============================================================================
+// SET CONFIG Statement (runtime-only)
+// ============================================================================
+// Syntax: SET CONFIG <key> = '<value>' FOR '<scope>'
+// Sets a config value for the current session only (not persisted).
+
+set_config_stmt = {
+    ^"set" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ ^"for" ~ quoted_string
+}
+
+// ============================================================================
+// SAVE CONFIG Statement
+// ============================================================================
+// Syntax: SAVE CONFIG <key> = '<value>' FOR '<scope>'
+
+save_config_stmt = {
+    ^"save" ~ ^"config" ~ identifier ~ "=" ~ quoted_string ~ ^"for" ~ quoted_string
+}
+
+// ============================================================================
+// REPLACE Statement
+// ============================================================================
+// Syntax: REPLACE '<old_location>' WITH '<new_location>'
+
+replace_stmt = {
+    ^"replace" ~ quoted_string ~ ^"with" ~ quoted_string
+}
+
+// ============================================================================
+// SET NAME Statement
+// ============================================================================
+// Syntax: SET NAME '<name>'
+
+set_name_stmt = {
+    ^"set" ~ ^"name" ~ quoted_string
+}
+
+// ============================================================================
+// SET DESCRIPTION Statement
+// ============================================================================
+// Syntax: SET DESCRIPTION '<description>'
+
+set_description_stmt = {
+    ^"set" ~ ^"description" ~ quoted_string
+}
+
+// ============================================================================
+// DROP VIEW Statement
+// ============================================================================
+// Syntax: DROP VIEW <name>
+
+drop_view_stmt = {
+    ^"drop" ~ ^"view" ~ identifier
+}
+
+// ============================================================================
+// CREATE VIEW Statement
+// ============================================================================
+// Syntax: CREATE VIEW <name> AS <sql>
+
+create_view_stmt = {
+    ^"create" ~ ^"view" ~ identifier ~ ^"as" ~ view_sql
+}
+
+view_sql = @{
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// CREATE INDEX Statement
+// ============================================================================
+// Syntax: CREATE INDEX ON <column>
+
+create_index_stmt = {
+    ^"create" ~ ^"index" ~ ^"on" ~ identifier
+}
+
+// ============================================================================
+// DROP COLUMN Statement
+// ============================================================================
+// Syntax: DROP COLUMN <name>
+
+drop_column_stmt = {
+    ^"drop" ~ ^"column" ~ identifier
+}
+
+// ============================================================================
+// RENAME COLUMN Statement
+// ============================================================================
+// Syntax: RENAME COLUMN <old_name> TO <new_name>
+
+rename_column_stmt = {
+    ^"rename" ~ ^"column" ~ identifier ~ ^"to" ~ identifier
+}
+
+// ============================================================================
+// VERIFY DATA Statement
+// ============================================================================
+// Syntax: VERIFY DATA [UPDATE]
+
+verify_data_stmt = {
+    ^"verify" ~ ^"data" ~ (^"update")?
+}
+
+// ============================================================================
+// EXPLAIN Statement
+// ============================================================================
+// Syntax: EXPLAIN [ANALYZE] [VERBOSE] [FORMAT format] [sql]
+// Examples:
+//   EXPLAIN
+//   EXPLAIN ANALYZE
+//   EXPLAIN VERBOSE
+//   EXPLAIN ANALYZE VERBOSE FORMAT TREE
+//   EXPLAIN SELECT * FROM bundle WHERE id > 10
+
+explain_stmt = {
+    ^"explain" ~ explain_analyze? ~ explain_verbose? ~ (^"format" ~ explain_format)? ~ explain_sql?
+}
+
+explain_analyze = { ^"analyze" }
+explain_verbose = { ^"verbose" }
+explain_format = { ^"indent" | ^"tree" | ^"graphviz" }
+
+explain_sql = @{
+    (!EOI ~ ANY)+
+}

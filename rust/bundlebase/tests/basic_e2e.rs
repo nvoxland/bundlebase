@@ -25,7 +25,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
         .await?;
     let version = readable_file_from_url(
         &Url::parse(test_datafile("userdata.parquet"))?,
-        BundleConfig::default().into(),
+        BundleConfig::new(None)?.into(),
     )?
     .version()
     .await?;
@@ -40,11 +40,11 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
         .expect("init commit doesn't exist");
     assert_eq!(
         init_content.trim(),
-        format!("id: {}", bundle.bundle.id()).trim()
+        format!("id: {}", bundle.bundle().id()).trim()
     );
 
     // Find and read the versioned manifest file
-    let (contents, commit, url) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, commit, url) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     let expected = format!(
         r#"author: {}
@@ -147,13 +147,13 @@ changes:
         metadata: {{}}
       metadata: {{}}
 - id: {}
-  description: Drop column title
+  description: DROP COLUMN title
   operations:
   - type: dropColumn
     names:
     - title
 - id: {}
-  description: Rename column 'first_name' to 'name'
+  description: RENAME COLUMN first_name TO name
   operations:
   - type: renameColumn
     oldName: first_name
@@ -335,25 +335,25 @@ changes:
         metadata: {{}}
       metadata: {{}}
 - id: {}
-  description: Drop column title
+  description: DROP COLUMN title
   operations:
   - type: dropColumn
     names:
     - title
 - id: {}
-  description: Drop column comments
+  description: DROP COLUMN comments
   operations:
   - type: dropColumn
     names:
     - comments
 - id: {}
-  description: Rename column 'first_name' to 'fname'
+  description: RENAME COLUMN first_name TO fname
   operations:
   - type: renameColumn
     oldName: first_name
     newName: fname
 - id: {}
-  description: Rename column 'last_name' to 'lname'
+  description: RENAME COLUMN last_name TO lname
   operations:
   - type: renameColumn
     oldName: last_name
@@ -416,25 +416,25 @@ async fn test_name_and_description() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Default should be None
-    assert!(bundle.bundle.name().is_none());
-    assert!(bundle.bundle.description().is_none());
+    assert!(bundle.bundle().name().is_none());
+    assert!(bundle.bundle().description().is_none());
 
     // Set name and verify getter
     bundle.set_name("My Bundle").await?;
     bundle.set_description("My Bundle Desc").await?;
 
-    assert_eq!(bundle.bundle.name(), Some("My Bundle"));
-    assert_eq!(bundle.bundle.description(), Some("My Bundle Desc"));
+    assert_eq!(bundle.bundle().name(), Some("My Bundle".to_string()));
+    assert_eq!(bundle.bundle().description(), Some("My Bundle Desc".to_string()));
 
     bundle.commit("Commit changes").await?;
 
-    assert_eq!(bundle.bundle.name(), Some("My Bundle"));
-    assert_eq!(bundle.bundle.description(), Some("My Bundle Desc"));
+    assert_eq!(bundle.bundle().name(), Some("My Bundle".to_string()));
+    assert_eq!(bundle.bundle().description(), Some("My Bundle Desc".to_string()));
 
     // Open and verify
     let loaded = Bundle::open(data_dir.as_str(), None).await?;
-    assert_eq!(loaded.name(), Some("My Bundle"));
-    assert_eq!(loaded.description(), Some("My Bundle Desc"));
+    assert_eq!(loaded.name(), Some("My Bundle".to_string()));
+    assert_eq!(loaded.description(), Some("My Bundle Desc".to_string()));
 
     Ok(())
 }
@@ -449,7 +449,7 @@ async fn test_attach_csv() -> Result<(), BundlebaseError> {
     bundle.commit("CSV commit").await?;
 
     // Find and read the versioned manifest file
-    let (contents, commit, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, commit, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     assert_eq!(
         format!(
@@ -582,7 +582,7 @@ changes:
     let layout_file = readable_file_from_path(
         &layout,
         loaded_bundle.data_dir(),
-        BundleConfig::default().into(),
+        BundleConfig::new(None)?.into(),
     )?;
     assert!(
         layout_file.exists().await?,
@@ -607,7 +607,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     bundle.commit("JSON commit").await?;
 
     // Find and read the versioned manifest file
-    let (contents, commit, _) = common::latest_commit(bundle.data_dir()).await?.unwrap();
+    let (contents, commit, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
     // Verify it contains the expected operations
     assert!(contents.contains("author: "));

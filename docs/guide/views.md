@@ -1,250 +1,136 @@
 # Views
 
-Views are named snapshots of container transformations that are stored within the bundle's manifest structure. They allow you to create reusable, versioned query patterns that automatically inherit changes from their parent container.
+Views are named, reusable query patterns stored within the bundle. They automatically inherit changes from their parent container -- when you add new data to the parent, views see it on next open.
 
-## Overview
+## Creating a View
 
-A view captures uncommitted operations (like `select()`, `filter()`, etc.) from a BundleBuilder and stores them as a named, independent bundle that references its parent container. When you open a view, it automatically loads all parent operations plus its own captured operations.
+Create a view by providing a name and a SQL query.
 
-## Key Concepts
+=== "Async API"
 
-### What is a View?
+    ```python
+    import bundlebase as bb
 
-- A **named fork** of a container that captures a specific transformation pipeline
-- Stored in `view_{id}/_bundlebase/` subdirectory within the parent container
-- Has its own commit history starting with an init commit that references the parent via `from` field
-- **Read-only** when opened - returns a `Bundle` not a `BundleBuilder`
-- **Dynamic inheritance** - automatically sees new commits from parent container
+    bundle = await bb.create("my/data")
+    await bundle.attach("customers.csv")
 
-### View Storage Structure
+    await bundle.create_view("adults", sql="SELECT * FROM bundle WHERE age > 21")
+    ```
 
-```
-container/
-├── _bundlebase/
-│   ├── 00000000000000000.yaml      # Parent init commit
-│   ├── 00001abc123.yaml            # Parent commit 1
-│   ├── 00002def456.yaml            # Parent commit 2 (contains CreateView op)
-├── view_{uuid}/                    # View subdirectory
-│   └── _bundlebase/
-│       ├── 00000000000000000.yaml  # View init: from="../"
-│       └── 00001xyz789.yaml        # View commit with captured operations
-└── data/
-```
+=== "Sync API"
 
-### How Views Inherit from Parents
+    ```python
+    import bundlebase.sync as bb
 
-1. View's init commit contains `from: <parent_url>` field
-2. When opening a view, `Bundle::open()` follows the `from` reference
-3. Parent bundle is recursively loaded first
-4. View's operations are applied on top of parent's operations
-5. If parent has new commits, view automatically sees them on next open
+    bundle = bb.create("my/data")
+    bundle.attach("customers.csv")
 
-## Python API
+    bundle.create_view("adults", sql="SELECT * FROM bundle WHERE age > 21")
+    ```
 
-### Creating a View
+=== "SQL"
 
-```python
-import bundlebase
+    ```sql
+    CREATE VIEW adults AS SELECT * FROM bundle WHERE age > 21
+    ```
 
-# Create container and add data
-c = await bundlebase.create("/path/to/container")
-await c.attach("customers.csv")
-await c.commit("Initial data")
+## Opening a View
 
-# Create a filtered view
-adults = await c.select("select * where age > 21")
-await c.create_view("adults", adults)
-await c.commit("Add adults view")
+=== "Async API"
 
-# Create a view with multiple operations
-working_age = await c.select("select * where age > 21")
-await working_age.filter("age < 65")
-await c.create_view("working_age", working_age)
-await c.commit("Add working age view")
-```
+    ```python
+    view = await bundle.view("adults")
+    ```
 
-### Opening a View
+=== "Sync API"
 
-```python
-# Open view - returns read-only Bundle
-view = await c.view("adults")
+    ```python
+    view = bundle.view("adults")
+    ```
 
-# Access view properties
-print(f"View has {len(view.operations())} operations")
-for op in view.operations():
-    print(f"  - {op.describe()}")
+!!! note
+    Views are read-only. You cannot call transformation methods like `filter()` or `attach()` on a view.
 
-# Views are read-only Bundles
-# view.filter(...)  # ERROR: Bundle doesn't have filter()
-# view.attach(...)  # ERROR: Bundle doesn't have attach()
-```
+## Drop View
 
-### View Inheritance Example
+Remove a view from the bundle.
 
-```python
-# Create container with initial data
-c = await bundlebase.create("container")
-await c.attach("customers-1-100.csv")
-await c.commit("v1")
+=== "Async API"
 
-# Create view
-active = await c.select("select * where status = 'active'")
-await c.create_view("active", active)
-await c.commit("v2")
+    ```python
+    await bundle.drop_view("adults")
+    ```
 
-# Open view - sees data from customers-1-100.csv
-view1 = await c.view("active")
-print(f"Operations: {len(view1.operations())}")  # 3: CREATE PACK, ATTACH, SELECT
+=== "Sync API"
 
-# Add more data to parent
-c_bundle = await bundlebase.open("container")
-c_reopened = c_bundle.extend("container")
-await c_reopened.attach("customers-101-200.csv")
-await c_reopened.commit("v3")
+    ```python
+    bundle.drop_view("adults")
+    ```
 
-# Open view again - now sees both data files!
-view2 = await c_reopened.view("active")
-print(f"Operations: {len(view2.operations())}")  # 4: CREATE PACK, ATTACH, ATTACH, SELECT
-```
+=== "SQL"
 
-## Rust API
+    ```sql
+    DROP VIEW adults
+    ```
 
-### Creating a View
+## Rename View
 
-```rust
-use bundlebase::{BundleBuilder, BundleFacade};
+Rename an existing view.
 
-let mut c = BundleBuilder::create("memory:///container").await?;
-c.attach("data.csv").await?;
-c.commit("Initial").await?;
+=== "Async API"
 
-// Create view from select
-let adults = c.select("select * where age > 21", vec![]).await?;
-c.create_view("adults", &adults).await?;
-c.commit("Add adults view").await?;
-```
+    ```python
+    await bundle.rename_view("adults", new_name="adult_customers")
+    ```
 
-### Opening a View
+=== "Sync API"
 
-```rust
-// Open view - returns Bundle
-let view = c.view("adults").await?;
+    ```python
+    bundle.rename_view("adults", new_name="adult_customers")
+    ```
 
-// Access operations
-for op in view.operations() {
-    println!("{}", op.describe());
-}
-```
+=== "SQL"
 
-## Operation Details
+    ```sql
+    RENAME VIEW adults TO adult_customers
+    ```
 
-### CreateViewOp
+## Dynamic Inheritance
 
-The `CreateViewOp` operation is created when you call `create_view()`. It:
+Views automatically see new data added to the parent container:
 
-1. **Captures operations** - Extracts all uncommitted operations from the source BundleBuilder
-2. **Generates view ID** - Creates unique ObjectId for the view directory
-3. **Creates view directory** - `view_{id}/_bundlebase/`
-4. **Writes init commit** - With `from` field pointing to parent container URL
-5. **Writes first commit** - Contains the captured operations
-6. **Registers view** - Stores name→ID mapping in parent Bundle's `views` HashMap
+=== "Async API"
 
-When applied to a Bundle:
-- Adds the view name→ID mapping to `bundle.views`
-- Does NOT modify the dataframe (views are metadata only)
+    ```python
+    bundle = await bb.create("my/data")
+    await bundle.attach("customers-1.csv")
+    await bundle.commit("v1")
 
-### View Resolution
+    await bundle.create_view("active", sql="SELECT * FROM bundle WHERE status = 'active'")
+    await bundle.commit("v2")
 
-When you call `view(name)`:
+    # Later, add more data
+    await bundle.attach("customers-2.csv")
+    await bundle.commit("v3")
 
-1. Looks up view ID from `bundle.views` HashMap
-2. Constructs view path: `<parent>/view_{id}/`
-3. Calls `Bundle::open()` on view path
-4. Bundle loading process:
-   - Reads view's init commit
-   - Sees `from` field pointing to parent
-   - Recursively loads parent bundle first
-   - Applies parent's operations
-   - Then applies view's operations on top
+    # View now sees both data files
+    view = await bundle.view("active")
+    ```
 
-## Use Cases
+=== "Sync API"
 
-### 1. Reusable Query Patterns
+    ```python
+    bundle = bb.create("my/data")
+    bundle.attach("customers-1.csv")
+    bundle.commit("v1")
 
-```python
-# Define common filters as views
-await c.create_view("high_value", await c.select("select * where value > 1000"))
-await c.create_view("recent", await c.select("select * where date > today() - 30"))
-await c.commit("Add standard views")
+    bundle.create_view("active", sql="SELECT * FROM bundle WHERE status = 'active'")
+    bundle.commit("v2")
 
-# Reuse later
-high_value = await c.view("high_value")
-```
+    # Later, add more data
+    bundle.attach("customers-2.csv")
+    bundle.commit("v3")
 
-### 2. Multi-Tenant Data Access
-
-```python
-# Create tenant-specific views
-tenant_a = await c.select("select * where tenant_id = 'A'")
-await c.create_view("tenant_a", tenant_a)
-
-tenant_b = await c.select("select * where tenant_id = 'B'")
-await c.create_view("tenant_b", tenant_b)
-
-await c.commit("Add tenant views")
-```
-
-### 3. Versioned Analytics
-
-```python
-# Create analysis-specific views
-await c.create_view("sales_analysis",
-    await c.select("""
-        select product, sum(revenue) as total
-        group by product
-    """))
-await c.commit("Q4 2024 analysis")
-
-# View automatically updates when parent data changes
-```
-
-## Best Practices
-
-### Do:
-- ✅ Use views for reusable query patterns
-- ✅ Create views from clean, focused transformations
-- ✅ Commit after creating views
-- ✅ Use descriptive view names
-
-### Don't:
-- ❌ Try to modify a view (they're read-only)
-- ❌ Create views with uncommitted operations in parent
-- ❌ Create circular view references
-- ❌ Use views as primary data storage (they reference parent)
-
-## Limitations
-
-1. **Read-only** - Views return `Bundle` not `BundleBuilder`, so you can't call transformation methods
-2. **Query execution** - Currently views can access operations metadata but executing queries (`.to_pandas()`, `.dataframe()`) may have schema resolution issues
-3. **No nested views** - You cannot create a view of a view
-4. **Parent dependency** - View requires parent container to be accessible
-
-## Implementation Notes
-
-### Key Files
-- `rust/bundlebase/src/bundle/operation/create_view.rs` - CreateViewOp implementation
-- `rust/bundlebase/src/bundle/builder.rs` - create_view() and view() methods
-- `rust/bundlebase/src/bundle.rs` - views HashMap and view resolution
-- `rust/bundlebase-python/src/builder.rs` - Python bindings
-
-### Critical Bug Fix
-The implementation required fixing `list_files()` in `object_store_dir.rs` to exclude subdirectory files. Previously, when loading a container's manifest, it would recursively find view manifest files and incorrectly load them, causing duplicate operations.
-
-## Future Enhancements
-
-Potential improvements:
-- Support for materialized views (pre-computed results)
-- View-specific permissions and access control
-- View dependencies and composition
-- Better dataframe execution support for views
-- View usage statistics and monitoring
+    # View now sees both data files
+    view = bundle.view("active")
+    ```

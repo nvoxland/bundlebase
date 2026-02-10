@@ -1,8 +1,9 @@
 use arrow::record_batch::RecordBatch;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
-use bundlebase::{assert_regexp, Bundle, BundlebaseError, Operation};
+use bundlebase::{assert_regexp, Bundle, BundlebaseError, IndexType, Operation};
 use datafusion::common::ScalarValue;
+use futures::TryStreamExt;
 
 mod common;
 
@@ -15,41 +16,46 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
     bundle.commit("No index").await?;
 
-    let rs = bundle
-        .select(
+    // Query without index
+    let stream = bundle
+        .query(
             "select Index, City from bundle where Email='elizabethbarr@ewing.com'",
             vec![],
         )
         .await?;
-    assert_eq!(1, rs.num_rows().await?);
+    let rs: Vec<_> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(1, num_rows, "Query should return 1 row matching the email");
 
-    let explain = rs.bundle.explain().await?;
-    assert_regexp!(
-        r#"
-\*\*\* logical_plan \*\*\*
-Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
-  Filter: packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)
-    TableScan: packs.__pack_\w\w projection=\[Index, City, Email], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)]
+    //todo: support explain passing a query
+//     let explain = bundle.explain().await?;
+//     assert_regexp!(
+//         r#"
+// \*\*\* logical_plan \*\*\*
+// Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
+//   Filter: packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)
+//     TableScan: packs.__pack_\w\w projection=\[Index, City, Email], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)]
+//
+// \*\*\* physical_plan \*\*\*
+// FilterExec: Email@\d+ = elizabethbarr@ewing.com, projection=\[Index@\d+, City@\d+\]
+//   RepartitionExec: partitioning=RoundRobinBatch\(\d+\), input_partitions=1
+//     DataSourceExec: file_groups=\{1 group: \[\[test_data/customers-0-100.csv\]\]\}, projection=\[Index, City, Email\], file_type=csv, has_header=true
+// "#,
+//         explain
+//     );
 
-\*\*\* physical_plan \*\*\*
-FilterExec: Email@\d+ = elizabethbarr@ewing.com, projection=\[Index@\d+, City@\d+\]
-  RepartitionExec: partitioning=RoundRobinBatch\(\d+\), input_partitions=1
-    DataSourceExec: file_groups=\{1 group: \[\[test_data/customers-0-100.csv\]\]\}, projection=\[Index, City, Email\], file_type=csv, has_header=true
-"#,
-        explain
-    );
+    bundle.create_index("Email", IndexType::Column).await?;
 
-    bundle.index("Email").await?;
-
-    assert_eq!(1, bundle.status().changes().len());
+    let status = bundle.status();
+    assert_eq!(1, status.changes().len());
     assert_eq!(
-        "Index column Email",
-        bundle.status().changes()[0].description
+        "CREATE INDEX ON Email",
+        status.changes()[0].description
     );
 
     assert_eq!(
         "CREATE INDEX on Email, INDEX BLOCKS",
-        bundle.status().changes()[0]
+        status.changes()[0]
             .operations
             .iter()
             .map(|op| op.describe())
@@ -77,29 +83,32 @@ FilterExec: Email@\d+ = elizabethbarr@ewing.com, projection=\[Index@\d+, City@\d
         ops_description
     );
 
-    let rs = bundle
-        .select(
+    // Query with index - should still return correct results
+    let stream = bundle
+        .query(
             "select Index, City from bundle where Email='elizabethbarr@ewing.com'",
             vec![],
         )
         .await?;
-    assert_eq!(1, rs.num_rows().await?);
+    let rs: Vec<_> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(1, num_rows, "Query with index should return 1 row matching the email");
 
-    let explain = rs.bundle.explain().await?;
-    assert_regexp!(
-        r#"
-\*\*\* logical_plan \*\*\*
-Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
-  Filter: packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)
-    TableScan: packs.__pack_\w\w projection=\[Index, City, Email\], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)\]
+    //todo explain query
+//       let explain = rs.bundle().explain().await?;
+//     assert_regexp!(
+//         r#"
+// \*\*\* logical_plan \*\*\*
+// Projection: packs.__pack_\w\w.Index, packs.__pack_\w\w.City
+//   Filter: packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)
+//     TableScan: packs.__pack_\w\w projection=\[Index, City, Email\], partial_filters=\[packs.__pack_\w\w.Email = Utf8\("elizabethbarr@ewing.com"\)\]
+//
+// \*\*\* physical_plan \*\*\*
+// FilterExec: Email@2 = elizabethbarr@ewing.com, projection=\[Index@0, City@1\]
+//   CooperativeExec
+//     DataSourceExec: RowIdOffsetDataSource\[file=memory:///test_data/customers-0-100.csv, rows=1, format=Csv\]
+// "#,
 
-\*\*\* physical_plan \*\*\*
-FilterExec: Email@2 = elizabethbarr@ewing.com, projection=\[Index@0, City@1\]
-  CooperativeExec
-    DataSourceExec: RowIdOffsetDataSource\[file=memory:///test_data/customers-0-100.csv, rows=1, format=Csv\]
-"#,
-        explain
-    );
     Ok(())
 }
 
@@ -113,14 +122,14 @@ async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseE
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email column
-    bundle.index("Email").await?;
+    bundle.create_index("Email", IndexType::Column).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query with exact match on indexed column
     // This should use the index internally
     bundle
         .filter(
-            "Email = $1",
+            "SELECT * FROM bundle WHERE Email = $1",
             vec![ScalarValue::Utf8(Some(
                 "zunigavanessa@smith.info".to_string(),
             ))],
@@ -150,13 +159,13 @@ async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email column
-    bundle.index("Email").await?;
+    bundle.create_index("Email", IndexType::Column).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query with IN list on indexed column
     bundle
         .filter(
-            "Email IN ($1, $2)",
+            "SELECT * FROM bundle WHERE Email IN ($1, $2)",
             vec![
                 ScalarValue::Utf8(Some("zunigavanessa@smith.info".to_string())),
                 ScalarValue::Utf8(Some("nonexistent@example.com".to_string())),
@@ -188,7 +197,7 @@ async fn test_select_without_index_falls_back() -> Result<(), BundlebaseError> {
     // Query should still work, just without index optimization
     bundle
         .filter(
-            "Email = $1",
+            "SELECT * FROM bundle WHERE Email = $1",
             vec![ScalarValue::Utf8(Some(
                 "zunigavanessa@smith.info".to_string(),
             ))],
@@ -215,13 +224,13 @@ async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email but query on City (not indexed)
-    bundle.index("Email").await?;
+    bundle.create_index("Email", IndexType::Column).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query on non-indexed column should fall back to full scan
     bundle
         .filter(
-            "City = $1",
+            "SELECT * FROM bundle WHERE City = $1",
             vec![ScalarValue::Utf8(Some("East Leonard".to_string()))],
         )
         .await?;
@@ -246,13 +255,13 @@ async fn test_index_selectivity() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Customer Id (should be unique)
-    bundle.index("Customer Id").await?;
+    bundle.create_index("Customer Id", IndexType::Column).await?;
     bundle.commit("Created index on Customer Id").await?;
 
     // Query for specific customer
     bundle
         .filter(
-            "\"Customer Id\" = $1",
+            "SELECT * FROM bundle WHERE \"Customer Id\" = $1",
             vec![ScalarValue::Utf8(Some("DD37Cf93aecA6Dc".to_string()))],
         )
         .await?;

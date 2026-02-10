@@ -2,4 +2,6 @@ nav:
 - Installation: install.md
 - Quick Start: quick-start.md
 - Basic Concepts: basic-concepts.md
+- CLI Installation: cli-install.md
+- CLI Quick Start: cli-quick-start.md
 - ...

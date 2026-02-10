@@ -6,7 +6,7 @@ use crate::index::{
     TextColumnIndex, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
 };
 use crate::progress::ProgressScope;
-use crate::{Bundle, BundlebaseError};
+use crate::{Bundle, BundleBuilder, BundlebaseError};
 use arrow::record_batch::RecordBatch;
 use arrow_schema::DataType;
 use async_trait::async_trait;
@@ -182,8 +182,10 @@ impl IndexBlocksOp {
         index: &ObjectId,
         column: &str,
         blocks: Vec<(ObjectId, String)>,
-        bundle: &Bundle,
+        builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
+        let bundle = builder.bundle();
+
         // Validate blocks is non-empty early
         if blocks.is_empty() {
             return Err(BundlebaseError::from("Cannot create index with no blocks"));
@@ -261,7 +263,7 @@ impl IndexBlocksOp {
         );
 
         // Create temp directory for external sort
-        let temp_manager = TempDirManager::new(&bundle.data_dir, "column_index")?;
+        let temp_manager = TempDirManager::new(&bundle.data_dir(), "column_index")?;
 
         let sort_config = ExternalSortConfig::new(
             DEFAULT_MEMORY_LIMIT_BYTES,
@@ -337,8 +339,8 @@ impl IndexBlocksOp {
         let boxed_stream: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>> =
             Box::pin(stream);
 
-        let write_result = bundle
-            .data_dir
+        let data_dir = bundle.data_dir();
+        let write_result = data_dir
             .write_stream(boxed_stream, extension)
             .await
             .map_err(|e| {
@@ -348,7 +350,7 @@ impl IndexBlocksOp {
                 ))
             })?;
 
-        bundle.data_dir.relative_path(write_result.file.as_ref())
+        data_dir.relative_path(write_result.file.as_ref())
     }
 
     /// Build a text index (BM25 full-text search)
@@ -476,7 +478,7 @@ impl Operation for IndexBlocksOp {
         Ok(())
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Find the corresponding IndexDefinition by index
         let index_def = {
             let indexes = bundle.indexes.read();

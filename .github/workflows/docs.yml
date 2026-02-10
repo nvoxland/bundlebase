@@ -3,6 +3,11 @@ name: Documentation
 on:
   push:
     branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'scripts/build_docs.sh'
+      - '.github/workflows/docs.yml'
 
 jobs:
   build:

@@ -1,4 +1,5 @@
 use crate::bundle::operation::{AnyOperation, Operation, SourceInfo};
+use crate::bundle::BundleFacade;
 use crate::bundle::DataBlock;
 use crate::data::ObjectId;
 use crate::io::readable_file_from_path;
@@ -46,16 +47,15 @@ impl ReplaceBlockOp {
         // Find block ID by searching AttachBlockOp operations for matching location
         // Also check ReplaceBlockOp in case the block was already replaced
         let (block_id, old_source_info) =
-            Self::find_block_by_location(old_location, &builder.bundle.operations).ok_or_else(
+            Self::find_block_by_location(old_location, &builder.bundle().operations.read()).ok_or_else(
                 || BundlebaseError::from(format!("No block found at location '{}'", old_location)),
             )?;
 
         // Create adapter to read version from the new location
         let temp_id = ObjectId::generate();
-        let adapter = builder
-            .bundle
-            .adapter_factory
-            .reader(new_location, &temp_id, builder.bundle(), None, None, None)
+        let adapter_factory = builder.bundle().reader_factory.clone();
+        let adapter = adapter_factory
+            .reader(new_location, &temp_id, builder, None, None, None, None)
             .await?;
         let new_version = adapter.read_version().await?;
 
@@ -68,8 +68,7 @@ impl ReplaceBlockOp {
             hasher.update(new_version.as_bytes());
             hex::encode(hasher.finalize())
         } else {
-            let file =
-                readable_file_from_path(new_location, builder.data_dir(), builder.bundle.config())?;
+            let file = readable_file_from_path(new_location, builder.data_dir(), builder.config())?;
             file.compute_hash().await?
         };
 
@@ -144,7 +143,7 @@ impl Operation for ReplaceBlockOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Find the block and its pack
         let (pack_id, old_block) = self
             .find_block_in_packs(bundle)
@@ -152,14 +151,15 @@ impl Operation for ReplaceBlockOp {
 
         // Create a new reader for the new location
         let reader = bundle
-            .adapter_factory
+            .reader_factory
             .reader(
                 &self.new_location,
                 &self.id,
-                bundle,
+                bundle as &dyn BundleFacade,
                 Some(old_block.schema()),
                 None, // Layout will be rebuilt if needed
                 Some(self.new_version.clone()), // Validate version during query execution
+                None,
             )
             .await?;
 
@@ -170,7 +170,7 @@ impl Operation for ReplaceBlockOp {
             &self.new_version,
             reader,
             bundle.indexes().clone(),
-            bundle.data_dir_arc(),
+            bundle.data_dir(),
             bundle.config(),
             self.source_info.clone(),
         ));

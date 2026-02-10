@@ -428,7 +428,7 @@ mod tests {
 
         let file = ObjectStoreFile::from_url(
             &Url::parse("memory:///test.csv").unwrap(),
-            BundleConfig::default().into(),
+            BundleConfig::new(None).unwrap().into(),
         )
         .unwrap();
         let schema = Arc::new(arrow::datatypes::Schema::empty());
@@ -450,7 +450,7 @@ mod tests {
 
         let file = ObjectStoreFile::from_url(
             &Url::parse("file:///test.csv").unwrap(),
-            BundleConfig::default().into(),
+            BundleConfig::new(None).unwrap().into(),
         )
         .unwrap();
         let schema = Arc::new(arrow::datatypes::Schema::empty());

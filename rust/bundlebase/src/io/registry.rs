@@ -253,7 +253,7 @@ mod tests {
     async fn test_create_reader() {
         let registry = io_registry();
         let url = Url::parse("memory:///test/file.txt").unwrap();
-        let config = BundleConfig::default().into();
+        let config = BundleConfig::new(None).unwrap().into();
 
         let reader = registry.create_reader(&url, config).await;
         assert!(reader.is_ok());
@@ -263,7 +263,7 @@ mod tests {
     async fn test_create_reader_unknown_scheme() {
         let registry = io_registry();
         let url = Url::parse("unknown:///test").unwrap();
-        let config = BundleConfig::default().into();
+        let config = BundleConfig::new(None).unwrap().into();
 
         let result = registry.create_reader(&url, config).await;
         assert!(result.is_err());

@@ -36,7 +36,7 @@ pub fn for_yaml(value: String) -> String {
     serde_yaml_ng::to_string(&value).unwrap().trim().to_string()
 }
 
-pub async fn empty_bundle() -> BundleBuilder {
+pub async fn empty_bundle() -> Arc<BundleBuilder> {
     BundleBuilder::create(random_memory_url().as_str(), None)
         .await
         .unwrap()
@@ -60,7 +60,7 @@ pub fn test_datafile(name: &str) -> &'static str {
                 let bytes = fs::read(os_path).unwrap();
 
                 let url = Url::parse(&format!("memory:///test_data/{}", filename)).unwrap();
-                let file = ObjectStoreFile::from_url(&url, BundleConfig::default().into()).unwrap();
+                let file = ObjectStoreFile::from_url(&url, BundleConfig::new(None).unwrap().into()).unwrap();
 
                 rt.block_on(file.write(bytes.into())).unwrap();
 
@@ -85,14 +85,14 @@ pub fn random_memory_url() -> Url {
 /// Create a random memory directory for testing.
 /// Returns an Arc<dyn IOReadWriteDir> that can be used in tests.
 pub fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
-    writable_dir_from_url(&random_memory_url(), BundleConfig::default().into()).unwrap()
+    writable_dir_from_url(&random_memory_url(), BundleConfig::new(None).unwrap().into()).unwrap()
 }
 
 /// Internal function for unit tests that need the concrete ObjectStoreDir type.
 /// This is pub(crate) so it's only available within the crate.
 #[cfg(test)]
 pub(crate) fn random_memory_dir_concrete() -> crate::io::plugin::object_store::ObjectStoreDir {
-    crate::io::plugin::object_store::ObjectStoreDir::from_url(&random_memory_url(), BundleConfig::default().into()).unwrap()
+    crate::io::plugin::object_store::ObjectStoreDir::from_url(&random_memory_url(), BundleConfig::new(None).unwrap().into()).unwrap()
 }
 
 /// Create a random memory file for testing.

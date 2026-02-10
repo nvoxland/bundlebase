@@ -1,20 +1,45 @@
+# Extending
+
+Bundles can extend other bundles to build on previous versions.
 
 ## From Chain
 
-Containers can extend other containers to build on previous versions:
+=== "Async API"
 
-```python
-# Load committed container
-base = await Bundlebase.open("/base/container")
+    ```python
+    import bundlebase as bb
 
-# Extend to new directory with new modifications
-extended = await base.extend("/extended/container")
-await extended.attach("new_data.parquet")
-await extended.commit("Added new data")
+    # Load committed bundle
+    base = await bb.open("/base/container")
 
-# Results in manifest:
-# {
-#   "from": "/base/container",
-#   "operations": [...]
-# }
-```
+    # Extend to new directory with new modifications
+    extended = await base.extend("/extended/container")
+    await extended.attach("new_data.parquet")
+    ```
+
+=== "Sync API"
+
+    ```python
+    import bundlebase.sync as bb
+
+    base = bb.open("/base/container")
+
+    extended = base.extend("/extended/container")
+    extended.attach("new_data.parquet")
+    ```
+
+## Exporting
+
+Export the entire bundle as a tar archive.
+
+=== "Async API"
+
+    ```python
+    await c.export_tar("/path/to/output.tar")
+    ```
+
+=== "Sync API"
+
+    ```python
+    c.export_tar("/path/to/output.tar")
+    ```

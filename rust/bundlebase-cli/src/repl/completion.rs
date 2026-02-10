@@ -1,44 +1,49 @@
-use crate::repl::commands;
-use crate::state::State;
-use bundlebase::bundle::BundleFacade;
+use crate::repl::commands::{self, ReplCommand};
+use bundlebase::bundle::available_commands;
+use bundlebase::BundleFacade;
 use reedline::{Completer, Span, Suggestion};
 use std::sync::Arc;
 
 pub struct BundleCompleter {
-    state: Arc<State>,
-    commands: Vec<String>,
+    state: Arc<dyn BundleFacade>,
+    commands: Vec<(String, Option<String>)>, // (command, description)
 }
 
 impl BundleCompleter {
-    pub fn new(state: Arc<State>) -> Self {
-        let commands = vec![
-            "attach".to_string(),
-            "show".to_string(),
-            "filter".to_string(),
-            "select".to_string(),
-            "remove".to_string(),
-            "rename".to_string(),
-            "join".to_string(),
-            "schema".to_string(),
-            "count".to_string(),
-            "explain".to_string(),
-            "history".to_string(),
-            "index".to_string(),
-            "drop-index".to_string(),
-            "reindex".to_string(),
-            "commit".to_string(),
-            "help".to_string(),
-            "exit".to_string(),
-            "quit".to_string(),
-            "clear".to_string(),
-        ];
+    pub fn new(state: Arc<dyn BundleFacade>) -> Self {
+        // SQL commands derived from available_commands() in bundlebase crate
+        let mut commands: Vec<(String, Option<String>)> = available_commands()
+            .into_iter()
+            .map(|(key, syntax)| (key.to_lowercase(), Some(syntax.to_string())))
+            .collect();
+
+        // SELECT is standard SQL, not a bundlebase command, but useful for completion
+        commands.push(("select".to_string(), Some("SELECT <columns> FROM <table>".to_string())));
+
+        // Sort for deterministic completion order
+        commands.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Meta commands (with / prefix) - generated from CommandInfo
+        for info in ReplCommand::all_commands() {
+            commands.push((
+                format!("/{}", info.name),
+                Some(info.description.to_string()),
+            ));
+            // Add aliases
+            for alias in info.aliases {
+                commands.push((
+                    format!("/{}", alias),
+                    Some(format!("{} (alias)", info.description)),
+                ));
+            }
+        }
 
         Self { state, commands }
     }
 
     /// Get column names from current schema
     async fn get_column_names(&self) -> Vec<String> {
-        if let Ok(schema) = self.state.bundle.read().schema().await {
+        if let Ok(schema) = self.state.schema().await {
             return schema
                 .fields()
                 .iter()
@@ -142,11 +147,11 @@ impl Completer for BundleCompleter {
             let start = before_cursor.len() - partial.len();
             let span = Span::new(start, pos);
 
-            for cmd in &self.commands {
+            for (cmd, desc) in &self.commands {
                 if cmd.starts_with(partial) {
                     suggestions.push(Suggestion {
                         value: cmd.clone(),
-                        description: None,
+                        description: desc.clone(),
                         style: None,
                         extra: None,
                         span,

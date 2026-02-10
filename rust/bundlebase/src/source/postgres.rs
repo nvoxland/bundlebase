@@ -8,12 +8,12 @@
 //! - `query` (required): SQL query to execute
 //! - `sort_column` (required): Column to ORDER BY and partition on
 //! - `batch_size` (optional): Rows per output file (default: 10000)
-//! - `mode` (optional): Sync mode: 'add' (default), 'update', or 'sync'
 
 use super::source_function::{
     ArgSpec, AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction,
-    MaterializeResult, SourceFunction, SyncMode,
+    MaterializeResult, SourceFunction,
 };
+use super::SyncMode;
 use crate::io::{IOReadWriteDir, WriteResult};
 use crate::{BundleConfig, BundlebaseError};
 use arrow::array::{
@@ -408,12 +408,6 @@ impl SourceFunction for PostgresFunction {
                 required: false,
                 default: Some("10000"),
             },
-            ArgSpec {
-                name: "mode",
-                description: "Sync mode: 'add' (default), 'update', or 'sync'",
-                required: false,
-                default: Some("add"),
-            },
         ]
     }
 
@@ -433,11 +427,6 @@ impl SourceFunction for PostgresFunction {
             batch_size.parse::<usize>().map_err(|_| {
                 BundlebaseError::from("batch_size must be a positive integer")
             })?;
-        }
-
-        // Validate mode if provided
-        if let Some(mode) = args.get("mode") {
-            SyncMode::from_arg(mode)?;
         }
 
         Ok(())
@@ -579,7 +568,10 @@ impl SourceFunction for PostgresFunction {
                                 attach_location: attach_location.clone(),
                                 source_location: source_location.clone(),
                                 source_url: attach_location,
-                                hash: result.hash,
+                                hash: result.hash.clone(),
+                                // Postgres has no native version identifier, so use the
+                                // content hash as a proxy for change detection.
+                                version: result.hash,
                             },
                         });
                     }
@@ -618,7 +610,10 @@ impl SourceFunction for PostgresFunction {
                 attach_location: attach_location.clone(),
                 source_location,
                 source_url: attach_location,
-                hash: result.hash,
+                hash: result.hash.clone(),
+                // Postgres has no native version identifier, so use the
+                // content hash as a proxy for change detection.
+                version: result.hash,
             }));
         }
 
@@ -640,12 +635,11 @@ mod tests {
     fn test_arg_specs() {
         let func = PostgresFunction;
         let specs = func.arg_specs();
-        assert_eq!(specs.len(), 5);
+        assert_eq!(specs.len(), 4);
         assert!(specs.iter().any(|s| s.name == "url" && s.required));
         assert!(specs.iter().any(|s| s.name == "query" && s.required));
         assert!(specs.iter().any(|s| s.name == "sort_column" && s.required));
         assert!(specs.iter().any(|s| s.name == "batch_size" && !s.required));
-        assert!(specs.iter().any(|s| s.name == "mode" && !s.required));
     }
 
     #[test]
@@ -705,16 +699,4 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_validate_args_invalid_mode() {
-        let func = PostgresFunction;
-        let mut args = HashMap::new();
-        args.insert("url".to_string(), "postgres://user:pass@localhost/db".to_string());
-        args.insert("query".to_string(), "SELECT * FROM users".to_string());
-        args.insert("sort_column".to_string(), "id".to_string());
-        args.insert("mode".to_string(), "invalid_mode".to_string());
-
-        let result = func.validate_args(&args);
-        assert!(result.is_err());
-    }
 }

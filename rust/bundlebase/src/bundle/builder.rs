@@ -1,32 +1,33 @@
+use crate::bundle::command::{BundleBuilderCommand, BundleCommand, CommandResponse, FacadeCommand, FetchAllCommand, FetchCommand};
+use crate::impl_dyn_command_response;
+use crate::bundle::command::response::{single_batch_stream, OutputShape};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
-use crate::bundle::operation::SetNameOp;
-use crate::bundle::operation::{AnyOperation, CreateSourceOp, SelectOp, SourceInfo};
-use crate::bundle::operation::{
-    AttachBlockOp, CreateFunctionOp, CreateJoinOp, CreateViewOp, DetachBlockOp, DropColumnOp,
-    DropJoinOp, DropViewOp, FilterOp, RebuildIndexOp, RenameColumnOp, RenameJoinOp,
-    RenameViewOp, ReplaceBlockOp, SetConfigOp, SetDescriptionOp,
-};
+use crate::bundle::operation::AnyOperation;
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
-use crate::bundle::operation::{CreateIndexOp, DropIndexOp};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
-use crate::bundle::{sql, Bundle, Source};
+use crate::bundle::{sql, Bundle};
 use super::DataBlock;
 use crate::data::{ObjectId, VersionedBlockId};
-use crate::source::{FetchAction, FetchResults};
+use crate::source::{FetchResults, SyncMode};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
-use crate::index::IndexDefinition;
+use crate::index::{IndexDefinition, IndexType};
 use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
+use crate::bundle_config::Scope;
+use crate::bundle_config::PassedBundleConfig;
 use crate::BundleConfig;
 use crate::BundlebaseError;
-use arrow_schema::SchemaRef;
+use arrow::array::{Int32Array, RecordBatch, StringArray};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use chrono::DateTime;
-use datafusion::prelude::DataFrame;
+use datafusion::execution::SendableRecordBatchStream;
+use datafusion::prelude::{DataFrame, SessionContext};
 use datafusion::scalar::ScalarValue;
-use log::{debug, info};
+use parking_lot::RwLock;
 use sha2::{Digest, Sha256};
+use tracing::{debug, info, warn};
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
@@ -62,12 +63,24 @@ impl BundleStatus {
         self.changes.is_empty()
     }
 
-    fn clear(&mut self) {
+    pub(in crate::bundle) fn clear(&mut self) {
         self.changes.clear();
     }
 
     pub fn pop(&mut self) {
         self.changes.pop();
+    }
+
+    pub fn pop_change(&mut self) -> Option<BundleChange> {
+        self.changes.pop()
+    }
+
+    pub fn push_change(&mut self, change: BundleChange) {
+        self.changes.push(change);
+    }
+
+    pub fn truncate(&mut self, len: usize) {
+        self.changes.truncate(len);
     }
 
     pub fn changes(&self) -> &Vec<BundleChange> {
@@ -120,35 +133,95 @@ impl std::fmt::Display for BundleStatus {
     }
 }
 
-/// A modifiable Bundle.
+impl CommandResponse for BundleStatus {
+    fn schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("change_id", DataType::Utf8, false),
+            Field::new("description", DataType::Utf8, false),
+            Field::new("operation_count", DataType::Int32, false),
+        ]))
+    }
+
+    fn output_shape() -> OutputShape {
+        OutputShape::Table
+    }
+
+    fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        let changes = self.changes();
+
+        let ids: Vec<i32> = (0..changes.len() as i32).collect();
+        let change_ids: Vec<String> = changes.iter().map(|c| c.id.to_string()).collect();
+        let descriptions: Vec<&str> = changes.iter().map(|c| c.description.as_str()).collect();
+        let operation_counts: Vec<i32> = changes
+            .iter()
+            .map(|c| c.operations.len() as i32)
+            .collect();
+
+        let batch = RecordBatch::try_new(
+            Self::schema(),
+            vec![
+                Arc::new(Int32Array::from(ids)),
+                Arc::new(StringArray::from(
+                    change_ids.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                )),
+                Arc::new(StringArray::from(descriptions)),
+                Arc::new(Int32Array::from(operation_counts)),
+            ],
+        )
+        .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
+        single_batch_stream(Self::schema(), batch)
+    }
+
+    impl_dyn_command_response!(BundleStatus);
+}
+
+/// A modifiable Bundle with interior mutability for thread-safe access.
 ///
 /// `BundleBuilder` represents a bundle during the development/transformation phase.
 /// It tracks both operations that have been previously committed (via the `existing` base) and
 /// new operations added since the working copy was created or extended.
 ///
 /// # Key Characteristics
-/// - **Mutation-in-Place**: Methods take `&mut self` and add operations to the chain
-/// - **Builder Pattern**: Methods return `&mut Self` for convenient chaining
+/// - **Interior Mutability**: Methods take `&self` and use internal locking
+/// - **Thread-Safe**: Can be shared via `Arc<BundleBuilder>` across threads
+/// - **Fluent API**: Methods return `Result<&Self, BundlebaseError>` enabling chaining with `?`
 /// - **Commit**: Call `commit()` to persist all operations to disk
 ///
+/// # Lock Acquisition Order
+///
+/// When acquiring multiple locks, always follow this order to prevent deadlocks:
+/// 1. `bundle` lock (read or write)
+/// 2. `in_progress_change` lock (read or write)
+///
+/// Never acquire `in_progress_change` first and then `bundle`. If you need both locks,
+/// acquire `bundle` first, release it if needed, then acquire `in_progress_change`.
+///
+/// **Note:** Due to async await points, locks should generally not be held across awaits.
+/// The pattern used is: acquire lock, extract/clone needed data, release lock, then await.
+///
 /// # Example
-/// let bundle = BundleBuilder::create("memory://work", None).await?;
-/// bundle.attach("data.parquet", None).await?
-///     .filter("amount > 100").await?
+/// ```ignore
+/// let builder = BundleBuilder::create("memory://work", None).await?;
+/// builder.attach("data.parquet", None).await?
+///     .filter("amount > 100", vec![]).await?
 ///     .commit("Filter high-value transactions").await?;
 /// ```
 pub struct BundleBuilder {
-    pub bundle: Bundle,
-    status: BundleStatus,
-    in_progress_change: Option<BundleChange>,
+    /// The underlying bundle data. Bundle is internally thread-safe via Arc<RwLock<T>> fields.
+    bundle: Arc<Bundle>,
+    /// Tracks the current in-progress change being built.
+    in_progress_change: RwLock<Option<BundleChange>>,
+    /// Tracks uncommitted changes for this builder.
+    status: RwLock<BundleStatus>,
 }
 
 impl Clone for BundleBuilder {
     fn clone(&self) -> Self {
         Self {
-            bundle: self.bundle.clone(),
-            status: self.status.clone(),
-            in_progress_change: self.in_progress_change.clone(),
+            bundle: Arc::clone(&self.bundle),
+            in_progress_change: RwLock::new(self.in_progress_change.read().clone()),
+            status: RwLock::new(self.status.read().clone()),
         }
     }
 }
@@ -166,20 +239,20 @@ impl BundleBuilder {
     /// An empty bundle ready for data attachment and transformations.
     ///
     /// # Example
-    /// let bundle = BundleBuilder::create("memory://work", None).await?;
-    /// bundle.attach("data.parquet", None).await?;
+    /// ```ignore
+    /// let builder = BundleBuilder::create("memory://work", None).await?;
+    /// builder.attach("data.parquet", None).await?;
     /// ```
     pub async fn create(
         path: &str,
-        config: Option<BundleConfig>,
-    ) -> Result<BundleBuilder, BundlebaseError> {
-        let mut existing = Bundle::empty().await?;
-        existing.passed_config = config;
-        existing.recompute_config()?;
-        existing.data_dir = writable_dir_from_str(path, existing.config.clone())?;
+        config: Option<PassedBundleConfig>,
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+        let bundle = Bundle::empty(config).await?;
+        bundle.refresh_data_dir()?;
+        *bundle.data_dir.write() = writable_dir_from_str(path, bundle.config())?;
 
         // Check if a bundle already exists at this location
-        let meta_dir = existing.data_dir.writable_subdir(META_DIR)?;
+        let meta_dir = bundle.data_dir().writable_subdir(META_DIR)?;
         let init_file = meta_dir.file(INIT_FILENAME)?;
         if init_file.exists().await? {
             return Err(format!(
@@ -189,46 +262,76 @@ impl BundleBuilder {
             .into());
         }
 
-        let builder = BundleBuilder {
-            status: BundleStatus::new(),
-            bundle: existing,
-            in_progress_change: None,
-        };
-
         // Automatically create the base pack with a well-known ID
-        builder.bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
+        bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
+
+        let builder = Arc::new(BundleBuilder {
+            bundle,
+            in_progress_change: RwLock::new(None),
+            status: RwLock::new(BundleStatus::new()),
+        });
+
+        // Re-register schema providers with BundleBuilder as facade.
+        // This overwrites the Bundle-facade providers registered by empty_internal(),
+        // so bundle_info tables show uncommitted changes from BundleBuilder.
+        Bundle::register_schema_providers(&builder.bundle.ctx, builder.clone())?;
 
         Ok(builder)
     }
 
-    pub fn extend(bundle: Arc<Bundle>, data_dir: Option<&str>) -> Result<BundleBuilder, BundlebaseError> {
+    /// Creates a new BundleBuilder extending from an existing Bundle.
+    ///
+    /// # Arguments
+    /// * `bundle` - The source bundle to extend from
+    /// * `data_dir` - Optional new data directory. If None, uses the current bundle's data_dir.
+    ///
+    /// # Status Independence
+    ///
+    /// The returned builder has **independent** status tracking from the source bundle.
+    /// Changes made to this builder will not appear in the original bundle's status,
+    /// and vice versa.
+    pub fn extend(
+        bundle: Arc<Bundle>,
+        data_dir: Option<&str>,
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         let mut new_bundle = bundle.deref().clone();
+
+        // Detach data_dir and last_manifest_version so modifications don't affect the original
+        new_bundle.detach_for_extend();
 
         // If data_dir is provided and not empty, use it; otherwise keep the current bundle's data_dir
         if let Some(dir) = data_dir {
             if !dir.is_empty() {
-                new_bundle.data_dir = writable_dir_from_str(dir, bundle.config())?;
-                if new_bundle.data_dir.url() != bundle.url() {
-                    new_bundle.last_manifest_version = 0;
+                let new_data_dir = writable_dir_from_str(dir, bundle.config())?;
+                if *new_data_dir.url() != bundle.url() {
+                    *new_bundle.last_manifest_version.write() = 0;
                 }
+                *new_bundle.data_dir.write() = new_data_dir;
             }
         }
 
-        Ok(BundleBuilder {
-            bundle: new_bundle,
-            status: BundleStatus::new(),
-            in_progress_change: None,
-        })
+        let builder = Arc::new(BundleBuilder {
+            bundle: Arc::new(new_bundle),
+            in_progress_change: RwLock::new(None),
+            status: RwLock::new(BundleStatus::new()),
+        });
+
+        // Re-register schema providers with BundleBuilder as facade.
+        // This overwrites the Bundle-facade providers registered by Bundle::open(),
+        // so bundle_info tables show uncommitted changes from BundleBuilder.
+        Bundle::register_schema_providers(&builder.bundle.ctx, builder.clone())?;
+
+        Ok(builder)
     }
 
-    /// The bundle being built
+    /// Read access to the inner bundle
     pub fn bundle(&self) -> &Bundle {
         &self.bundle
     }
 
     /// Returns the bundle status showing uncommitted changes.
-    pub fn status(&self) -> &BundleStatus {
-        &self.status
+    pub fn status(&self) -> BundleStatus {
+        self.status.read().clone()
     }
 
     /// Commits all operations in the bundle to persistent storage.
@@ -237,21 +340,33 @@ impl BundleBuilder {
     /// * `message` - Human-readable description of the changes (e.g., "Filter to Q4 data")
     ///
     /// # Example
-    /// bundle.attach("data.parquet", None).await?;
-    /// bundle.filter("amount > 100").await?;
-    /// bundle.commit("Filter high-value transactions").await?;
+    /// ```ignore
+    /// builder.attach("data.parquet", None).await?;
+    /// builder.filter("amount > 100", vec![]).await?;
+    /// builder.commit("Filter high-value transactions").await?;
     /// ```
-    pub async fn commit(&mut self, message: &str) -> Result<(), BundlebaseError> {
-        let manifest_dir = self.bundle.data_dir.writable_subdir(META_DIR)?;
+    pub async fn commit(&self, message: &str) -> Result<&Self, BundlebaseError> {
+        let manifest_dir = self.bundle.data_dir().writable_subdir(META_DIR)?;
+        let last_manifest_version = *self.bundle.last_manifest_version.read();
+        let from = self.bundle.from();
+        let changes = self.status.read().changes().clone();
+        let passed_config = Some((*self.bundle.config.passed_config()).clone());
+        let url = self.bundle.url().to_string();
+        let bundle_id = self.bundle.id();
 
-        if self.bundle.last_manifest_version == 0 {
-            let from = self.bundle.from();
+        if last_manifest_version == 0 {
             let init_file = manifest_dir.writable_file(INIT_FILENAME)?;
-            write_yaml(init_file.as_ref(), &InitCommit::new(from)).await?;
+            // Use the bundle's existing ID rather than generating a new one
+            let init_commit = InitCommit {
+                id: if from.is_none() { Some(bundle_id) } else { None },
+                from: from.clone(),
+                view: None,
+            };
+            write_yaml(init_file.as_ref(), &init_commit).await?;
         };
 
         // Calculate next version number
-        let next_version = self.bundle.last_manifest_version + 1;
+        let next_version = last_manifest_version + 1;
 
         // Get current timestamp in UTC ISO format
         let now = std::time::SystemTime::now();
@@ -260,8 +375,6 @@ impl BundleBuilder {
         // Get author from environment or use default
         let author = std::env::var("BUNDLEBASE_AUTHOR")
             .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
-
-        let changes = self.status.changes().clone();
 
         let commit_struct = commit::BundleCommit {
             url: None, //no need to set, we're just writing it and then will re-read it back
@@ -293,14 +406,18 @@ impl BundleBuilder {
 
         // Update base to reflect the committed version
         // Preserve explicit_config from current bundle
-        let config = self.bundle.passed_config.clone();
-        self.bundle = Bundle::open(self.url().as_str(), config).await?;
+        let new_bundle = Bundle::open(&url, passed_config).await?;
+
+        // Replace the bundle contents using reload_from to preserve Arc references
+        // open_to_bundle returns Arc<Bundle> so we dereference to get the Bundle
+        self.bundle.reload_from((*new_bundle).clone());
+
         // Clear status since the operations have been persisted
-        self.status.clear();
+        self.status.write().clear();
 
         info!("Committed version {}", self.bundle.version());
 
-        Ok(())
+        Ok(self)
     }
 
     /// Resets all uncommitted operations, reverting to the last committed state.
@@ -309,18 +426,20 @@ impl BundleBuilder {
     /// the last committed version. Any changes made since the last commit are discarded.
     ///
     /// # Example
-    /// bundle.attach("data.parquet", None).await?;
-    /// bundle.filter("amount > 100").await?;
-    /// bundle.reset().await?;  // Discards attach and filter operations
+    /// ```ignore
+    /// builder.attach("data.parquet", None).await?;
+    /// builder.filter("amount > 100", vec![]).await?;
+    /// builder.reset().await?;  // Discards attach and filter operations
     /// ```
-    pub async fn reset(&mut self) -> Result<&mut Self, BundlebaseError> {
-        if self.status.is_empty() {
+    pub async fn reset(&self) -> Result<&Self, BundlebaseError> {
+        if self.status().is_empty() {
             return Err("No uncommitted changes".into());
         }
 
         // Clear all uncommitted changes
-        self.status.clear();
+        self.status.write().clear();
 
+        // Reload the bundle from the last committed state
         self.reload_bundle().await?;
 
         info!("All uncommitted changes discarded");
@@ -335,23 +454,26 @@ impl BundleBuilder {
     /// Use this for incremental undo functionality.
     ///
     /// # Example
-    /// bundle.attach("data.parquet", None).await?;
-    /// bundle.filter("amount > 100").await?;
-    /// bundle.undo().await?; // Discards only the filter change
+    /// ```ignore
+    /// builder.attach("data.parquet", None).await?;
+    /// builder.filter("amount > 100", vec![]).await?;
+    /// builder.undo().await?; // Discards only the filter change
     /// // Bundle now has only the attach change pending
     /// ```
-    pub async fn undo(&mut self) -> Result<&mut Self, BundlebaseError> {
-        if self.status.is_empty() {
+    pub async fn undo(&self) -> Result<&Self, BundlebaseError> {
+        if self.status().is_empty() {
             return Err("No uncommitted changes to undo".into());
         }
 
         // Remove the last change
-        self.status.pop();
+        self.status.write().pop();
 
+        // Reload the bundle from the last committed state
         self.reload_bundle().await?;
 
         // Reapply all remaining operations
-        for change in &self.status.changes {
+        let changes = self.status.read().changes().clone();
+        for change in &changes {
             for op in &change.operations {
                 self.bundle.apply_operation(op.clone()).await?;
             }
@@ -362,24 +484,34 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    async fn reload_bundle(&mut self) -> Result<(), BundlebaseError> {
+    pub(in crate::bundle) async fn reload_bundle(&self) -> Result<(), BundlebaseError> {
         // Reload the bundle from the last committed state
-        let empty = self.bundle.commits.is_empty();
-        self.bundle = if empty {
-            let mut new = Bundle::empty().await?;
-            new.passed_config = self.bundle.passed_config.clone();
-            new.recompute_config()?;
-            new.data_dir = writable_dir_from_url(self.url(), new.config.clone())?;
-            new
+        let empty = self.bundle.commits.read().is_empty();
+        let passed_config = (*self.bundle.config.passed_config()).clone();
+        let url = self.bundle.url().to_string();
+
+        // Note: reload_from preserves the original ctx and its schema providers
+        // which already have the correct facade set
+        let new_bundle: Bundle = if empty {
+            // empty() returns Arc<Bundle>, clone inner Bundle for reload_from
+            let arc = Bundle::empty(Some(passed_config)).await?;
+            let bundle = (*arc).clone();
+            bundle.refresh_data_dir()?;
+            *bundle.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, bundle.config())?;
+            bundle
         } else {
             // Preserve explicit_config when reopening
-            let config = self.bundle.passed_config.clone();
-            Bundle::open(self.url().as_str(), config).await?
+            // open returns Arc<Bundle>, so we clone the inner Bundle
+            let arc_bundle = Bundle::open(&url, Some(passed_config)).await?;
+            (*arc_bundle).clone()
         };
+
+        // Update bundle contents using reload_from to preserve Arc references
+        self.bundle.reload_from(new_bundle);
         Ok(())
     }
 
-    async fn apply_operation(&mut self, op: AnyOperation) -> Result<(), BundlebaseError> {
+    pub(in crate::bundle) async fn apply_operation(&self, op: AnyOperation) -> Result<(), BundlebaseError> {
         if self.bundle.is_view() && !op.allowed_on_view() {
             return Err(format!(
                 "Operation '{}' is not allowed on a view",
@@ -391,6 +523,7 @@ impl BundleBuilder {
         self.bundle.apply_operation(op.clone()).await?;
 
         self.in_progress_change
+            .write()
             .as_mut()
             .expect("apply_operation called without an in-progress change")
             .operations
@@ -411,25 +544,29 @@ impl BundleBuilder {
     ///
     /// # Errors
     /// Returns any error from the closure. On error, the in-progress change is discarded.
-    async fn do_change<F>(&mut self, description: &str, f: F) -> Result<(), BundlebaseError>
+    pub(in crate::bundle) async fn do_change<F>(&self, description: &str, f: F) -> Result<(), BundlebaseError>
     where
-        F: for<'a> FnOnce(&'a mut Self) -> BoxFuture<'a, Result<(), BundlebaseError>>,
+        F: for<'a> FnOnce(&'a Self) -> BoxFuture<'a, Result<(), BundlebaseError>>,
     {
         // Check for nested changes - track whether we created this change
-        let is_nested = match &self.in_progress_change {
-            Some(in_progress) => {
-                debug!(
-                    "Change {} already in progress, not going to separately track {}",
-                    in_progress.description, description
-                );
-                true
-            }
-            None => {
-                let change = BundleChange::new(description);
-                self.in_progress_change = Some(change);
-                false
+        let is_nested = {
+            let in_progress = self.in_progress_change.read();
+            match &*in_progress {
+                Some(in_progress_change) => {
+                    debug!(
+                        "Change {} already in progress, not going to separately track {}",
+                        in_progress_change.description, description
+                    );
+                    true
+                }
+                None => false,
             }
         };
+
+        if !is_nested {
+            let change = BundleChange::new(description);
+            *self.in_progress_change.write() = Some(change);
+        }
 
         // Execute the closure
         let result = f(self).await;
@@ -438,19 +575,84 @@ impl BundleBuilder {
         match result {
             Ok(_) => {
                 if !is_nested {
-                    if let Some(change) = self.in_progress_change.take() {
-                        self.status.changes.push(change);
+                    if let Some(change) = self.in_progress_change.write().take() {
+                        self.status.write().push_change(change);
                     }
                 }
                 Ok(())
             }
             Err(e) => {
                 if !is_nested {
-                    self.in_progress_change = None;
+                    *self.in_progress_change.write() = None;
                 }
                 Err(e)
             }
         }
+    }
+
+    /// Execute a builder command on this BundleBuilder.
+    ///
+    /// This is the primary way to execute commands that implement the `BundleBuilderCommand` trait.
+    /// The command's description is used as the change description for tracking.
+    ///
+    /// # Arguments
+    /// * `cmd` - The command to execute
+    ///
+    /// # Returns
+    /// * `Ok(C::Output)` - Command's output on success
+    /// * `Err(BundlebaseError)` - Execution failed
+    pub async fn execute_command<C: BundleBuilderCommand + 'static>(
+        &self,
+        cmd: C,
+    ) -> Result<C::Output, BundlebaseError> {
+        use crate::bundle::operation::BundleChange;
+
+        let description = cmd.to_statement();
+
+        // Check for nested changes
+        let is_nested = {
+            let in_progress = self.in_progress_change.read();
+            match &*in_progress {
+                Some(in_progress_change) => {
+                    debug!(
+                        "Change {} already in progress, not going to separately track {}",
+                        in_progress_change.description, description
+                    );
+                    true
+                }
+                None => false,
+            }
+        };
+
+        if !is_nested {
+            let change = BundleChange::new(&description);
+            *self.in_progress_change.write() = Some(change);
+        }
+
+        // Execute the command
+        debug!("Executing command: {}", description);
+        let result = Box::new(cmd).execute(self).await;
+
+        // Only finalize the change if we created it (not nested)
+        match &result {
+            Ok(_) => {
+                debug!("Command succeeded: {}", description);
+                if !is_nested {
+                    if let Some(change) = self.in_progress_change.write().take() {
+                        self.status.write().push_change(change);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Command failed: {}: {}", description, e);
+                if !is_nested {
+                    // On failure, discard the in-progress change
+                    self.in_progress_change.write().take();
+                }
+            }
+        }
+
+        result
     }
 
     /// Attach a data block to the bundle.
@@ -460,37 +662,12 @@ impl BundleBuilder {
     /// * `pack` - The pack to attach to. Use `None` or `"base"` for the base pack,
     ///            or a join name to attach to that join's pack.
     pub async fn attach(
-        &mut self,
+        &self,
         path: &str,
         pack: Option<&str>,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let pack_id = match pack {
-            None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *self
-                .bundle
-                .pack_by_name(join_name)
-                .ok_or(format!("Unknown join '{}'", join_name))?
-                .id(),
-        };
-
-        let path = path.to_string();
-        let pack_name = pack.unwrap_or("base").to_string();
-
-        self.do_change(&format!("Attach {} to {}", path, pack_name), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(
-                        AttachBlockOp::setup(&pack_id, &path, builder).await?.into(),
-                    )
-                    .await?;
-
-                info!("Attached {} to {}", path, pack_name);
-
-                Ok(())
-            })
-        })
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::AttachCommand;
+        self.execute_command(AttachCommand::new(path, pack.map(|s| s.to_string()))).await?;
         Ok(self)
     }
 
@@ -505,23 +682,11 @@ impl BundleBuilder {
     ///
     /// # Example
     /// ```ignore
-    /// bundle.detach_block("s3://bucket/data.parquet").await?;
+    /// builder.detach_block("s3://bucket/data.parquet").await?;
     /// ```
-    pub async fn detach_block(&mut self, location: &str) -> Result<&mut Self, BundlebaseError> {
-        let location = location.to_string();
-
-        self.do_change(&format!("Detach block at {}", location), |builder| {
-            Box::pin(async move {
-                let op = DetachBlockOp::setup(&location, &builder.bundle).await?;
-                builder.apply_operation(op.into()).await?;
-
-                info!("Detached block from {}", location);
-
-                Ok(())
-            })
-        })
-        .await?;
-
+    pub async fn detach_block(&self, location: &str) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::DetachBlockCommand;
+        self.execute_command(DetachBlockCommand::new(location)).await?;
         Ok(self)
     }
 
@@ -536,35 +701,18 @@ impl BundleBuilder {
     ///
     /// # Example
     /// ```ignore
-    /// bundle.replace_block(
+    /// builder.replace_block(
     ///     "s3://old-bucket/data.parquet",
     ///     "s3://new-bucket/data.parquet"
     /// ).await?;
     /// ```
     pub async fn replace_block(
-        &mut self,
+        &self,
         old_location: &str,
         new_location: &str,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let old_location = old_location.to_string();
-        let new_location = new_location.to_string();
-
-        self.do_change(
-            &format!("Replace block {} -> {}", old_location, new_location),
-            |builder| {
-                Box::pin(async move {
-                    let op =
-                        ReplaceBlockOp::setup(&old_location, &new_location, builder).await?;
-                    builder.apply_operation(op.into()).await?;
-
-                    info!("Replaced block {} -> {}", old_location, new_location);
-
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::ReplaceBlockCommand;
+        self.execute_command(ReplaceBlockCommand::new(old_location, new_location)).await?;
         Ok(self)
     }
 
@@ -584,64 +732,23 @@ impl BundleBuilder {
     ///   - `Some(join_name)`: A joined pack by its join name
     ///
     /// # Example
-    /// ```no_run
-    /// # use bundlebase::{BundleBuilder, BundlebaseError};
-    /// # use std::collections::HashMap;
-    /// # async fn example() -> Result<(), BundlebaseError> {
-    /// let mut bundle = BundleBuilder::create("memory:///work", None).await?;
+    /// ```ignore
+    /// let builder = BundleBuilder::create("memory:///work", None).await?;
     /// let mut args = HashMap::new();
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
-    /// bundle.create_source("remote_dir", args, None).await?;
-    /// bundle.fetch(None).await?;  // Fetch from base pack sources
-    /// bundle.commit("Initial data from source").await?;
-    /// # Ok(())
-    /// # }
+    /// builder.create_source("remote_dir", args, None).await?;
+    /// builder.fetch("base", SyncMode::Add).await?;
+    /// builder.commit("Initial data from source").await?;
     /// ```
     pub async fn create_source(
-        &mut self,
+        &self,
         function: &str,
         args: HashMap<String, String>,
         pack: Option<&str>,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let pack = pack.map(|s| s.to_string());
-        let function = function.to_string();
-        let url = args.get("url").cloned().unwrap_or_else(|| "<no url>".to_string());
-        let pack_name = pack.clone().unwrap_or_else(|| "base".to_string());
-
-        self.do_change(
-            &format!("Create source for {} at {}", pack_name, url),
-            |builder| {
-                let pack_name = pack_name.clone();
-                Box::pin(async move {
-                    let pack_id = match pack.as_deref() {
-                        None | Some("base") => ObjectId::BASE_PACK,
-                        Some(join_name) => *builder
-                            .bundle
-                            .pack_by_name(join_name)
-                            .ok_or(format!("Unknown join '{}'", join_name))?
-                            .id(),
-                    };
-
-                    let source_id = ObjectId::generate();
-                    let op = CreateSourceOp::setup(source_id, pack_id, function, args);
-
-                    builder.apply_operation(op.into()).await?;
-
-                    // Automatically fetch from the newly created source
-                    // This runs inside the same change context
-                    let source = builder
-                        .bundle
-                        .get_source(&source_id)
-                        .ok_or_else(|| format!("Source '{}' not found after creation", source_id))?;
-                    let _ = builder.fetch_source(&source, &pack_name).await?;
-
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::CreateSourceCommand;
+        self.execute_command(CreateSourceCommand::new(function, args, pack.map(|s| s.to_string()))).await?;
         Ok(self)
     }
 
@@ -651,54 +758,27 @@ impl BundleBuilder {
     /// and auto-attaches any new files.
     ///
     /// # Arguments
-    /// * `pack` - Which pack to fetch sources for:
-    ///   - `None` or `Some("base")`: The base pack (default)
-    ///   - `Some(join_name)`: A joined pack by its join name
+    /// * `pack` - Which pack to fetch sources for (e.g. "base", or a join name)
+    /// * `mode` - Sync mode controlling how fetch handles existing files.
     ///
     /// # Returns
     /// A list of `FetchResults`, one for each source in the pack.
     /// Each result contains details about blocks added, replaced, and removed.
     ///
     /// # Example
-    /// ```no_run
-    /// # use bundlebase::{BundleBuilder, BundlebaseError};
-    /// # use std::collections::HashMap;
-    /// # async fn example() -> Result<(), BundlebaseError> {
-    /// let mut bundle = BundleBuilder::create("memory:///work", None).await?;
+    /// ```ignore
+    /// let builder = BundleBuilder::create("memory:///work", None).await?;
     /// let mut args = HashMap::new();
     /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
     /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
-    /// bundle.create_source("remote_dir", args, None).await?;
-    /// let results = bundle.fetch(None).await?;  // Fetch from base pack sources
+    /// builder.create_source("remote_dir", args, None).await?;
+    /// let results = builder.fetch("base", SyncMode::Add).await?;
     /// for result in &results {
     ///     println!("Source {}: {} added", result.source_function, result.added.len());
     /// }
-    /// # Ok(())
-    /// # }
     /// ```
-    pub async fn fetch(&mut self, pack: Option<&str>) -> Result<Vec<FetchResults>, BundlebaseError> {
-        let pack_name = pack.unwrap_or("base").to_string();
-        let pack_id = match pack {
-            None | Some("base") => ObjectId::BASE_PACK,
-            Some(join_name) => *self
-                .bundle
-                .pack_by_name(join_name)
-                .ok_or(format!("Unknown join '{}'", join_name))?
-                .id(),
-        };
-
-        let sources = self.bundle.get_sources_for_pack(&pack_id);
-        if sources.is_empty() {
-            return Err(format!("No sources defined for pack '{}'", pack.unwrap_or("base")).into());
-        }
-
-        let mut results = Vec::new();
-        for source in sources {
-            let result = self.fetch_source(&source, &pack_name).await?;
-            results.push(result);
-        }
-
-        Ok(results)
+    pub async fn fetch(&self, pack: &str, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
+        self.execute_command(FetchCommand::new(pack.to_string(), mode)).await
     }
 
     /// Fetch from all defined sources - discover and attach new files.
@@ -706,18 +786,18 @@ impl BundleBuilder {
     /// Lists files from each source URL, compares with already-attached files,
     /// and auto-attaches any new files.
     ///
+    /// # Arguments
+    /// * `mode` - Sync mode controlling how fetch handles existing files.
+    ///
     /// # Returns
     /// A list of `FetchResults`, one for each source across all packs.
     /// Includes results for sources with no changes (empty results).
     ///
     /// # Example
-    /// ```no_run
-    /// # use bundlebase::{BundleBuilder, BundlebaseError};
-    /// # use std::collections::HashMap;
-    /// # async fn example() -> Result<(), BundlebaseError> {
-    /// let mut bundle = BundleBuilder::create("memory:///work", None).await?;
+    /// ```ignore
+    /// let builder = BundleBuilder::create("memory:///work", None).await?;
     /// // Create multiple sources...
-    /// let results = bundle.fetch_all().await?;
+    /// let results = builder.fetch_all(SyncMode::Add).await?;
     /// for result in &results {
     ///     println!("Source {}: {} added, {} replaced, {} removed",
     ///         result.source_function,
@@ -725,274 +805,69 @@ impl BundleBuilder {
     ///         result.replaced.len(),
     ///         result.removed.len());
     /// }
-    /// # Ok(())
-    /// # }
     /// ```
-    pub async fn fetch_all(&mut self) -> Result<Vec<FetchResults>, BundlebaseError> {
-        let mut results = Vec::new();
-
-        // Collect sources with their pack names to avoid borrow issues
-        let sources_with_packs: Vec<_> = self
-            .bundle
-            .sources()
-            .values()
-            .map(|source| {
-                let pack_name = self.bundle.pack_name(source.pack()).unwrap_or("base".to_string());
-                (source.clone(), pack_name)
-            })
-            .collect();
-
-        for (source, pack_name) in sources_with_packs {
-            let result = self.fetch_source(&source, &pack_name).await?;
-            results.push(result);
-        }
-
-        Ok(results)
+    pub async fn fetch_all(&self, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
+        self.execute_command(FetchAllCommand::new(mode)).await
     }
 
-    /// Internal helper to fetch from a single source.
-    async fn fetch_source(
-        &mut self,
-        source: &Arc<Source>,
-        pack_name: &str,
-    ) -> Result<FetchResults, BundlebaseError> {
-        let registry = self.bundle.source_function_registry();
-        let pack_id = *source.pack();
-        let source_id = *source.id();
-        let source_function = source.function().to_string();
-        let source_url = source.args().get("url").cloned().unwrap_or_default();
-
-        // Get fetch actions from the source function
-        let actions = source
-            .fetch(
-                self.data_dir(),
-                self.bundle.config(),
-                &registry,
-            )
-            .await?;
-
-        // Process actions and collect them for the result
-        let mut processed_actions = Vec::new();
-
-        for action in actions {
-            match &action {
-                FetchAction::Add(data) => {
-                    let attach_location = data.attach_location.clone();
-                    let source_location = data.source_location.clone();
-                    let source_url_for_op = data.source_url.clone();
-                    let hash = data.hash.clone();
-
-                    self.do_change(
-                        &format!("Fetch: attach {}", source_location),
-                        |builder| {
-                            let attach_location = attach_location.clone();
-                            let source_location = source_location.clone();
-                            let source_url_for_op = source_url_for_op.clone();
-                            let hash = hash.clone();
-
-                            Box::pin(async move {
-                                // Use setup_for_source to read version from source_url
-                                let mut op = AttachBlockOp::setup_for_source(
-                                    &pack_id,
-                                    &attach_location,
-                                    &source_url_for_op,
-                                    &hash,
-                                    builder,
-                                )
-                                .await?;
-                                // Create SourceInfo with the source version from the operation
-                                op.source_info = Some(SourceInfo {
-                                    id: source_id,
-                                    location: source_location,
-                                    version: op.version.clone(),
-                                });
-                                builder.apply_operation(op.into()).await?;
-                                Ok(())
-                            })
-                        },
-                    )
-                    .await?;
-                }
-                FetchAction::Replace {
-                    old_source_location,
-                    data,
-                } => {
-                    // Find the old block's location and detach it
-                    let old_location = self.find_block_location_by_source(
-                        &source_id,
-                        old_source_location,
-                    )?;
-                    self.detach_block(&old_location).await?;
-
-                    // Attach the new block
-                    let attach_location = data.attach_location.clone();
-                    let source_location = data.source_location.clone();
-                    let source_url_for_op = data.source_url.clone();
-                    let hash = data.hash.clone();
-
-                    self.do_change(
-                        &format!("Fetch: replace {}", source_location),
-                        |builder| {
-                            let attach_location = attach_location.clone();
-                            let source_location = source_location.clone();
-                            let source_url_for_op = source_url_for_op.clone();
-                            let hash = hash.clone();
-
-                            Box::pin(async move {
-                                let mut op = AttachBlockOp::setup_for_source(
-                                    &pack_id,
-                                    &attach_location,
-                                    &source_url_for_op,
-                                    &hash,
-                                    builder,
-                                )
-                                .await?;
-                                // Create SourceInfo with the source version from the operation
-                                op.source_info = Some(SourceInfo {
-                                    id: source_id,
-                                    location: source_location,
-                                    version: op.version.clone(),
-                                });
-                                builder.apply_operation(op.into()).await?;
-                                Ok(())
-                            })
-                        },
-                    )
-                    .await?;
-                }
-                FetchAction::Remove { source_location } => {
-                    // Find the block's location and detach it
-                    let location =
-                        self.find_block_location_by_source(&source_id, source_location)?;
-                    self.detach_block(&location).await?;
-                }
-            }
-            processed_actions.push(action);
-        }
-
-        Ok(FetchResults::from_actions(
-            source_function,
-            source_url,
-            pack_name.to_string(),
-            processed_actions,
-        ))
-    }
-
-    /// Find the current location of a block that was attached from a source with the given source_location.
+    /// Create a view from a SQL statement
     ///
-    /// This searches through both AttachBlockOp and ReplaceBlockOp operations to find the
-    /// current location of a block. If the block was replaced, returns the new location.
-    fn find_block_location_by_source(
-        &self,
-        source_id: &ObjectId,
-        source_location: &str,
-    ) -> Result<String, BundlebaseError> {
-        // First, check ReplaceBlockOp operations (in reverse order to get most recent)
-        // to see if the block was replaced and has updated source_info
-        for op in self.bundle.operations.iter().rev() {
-            if let AnyOperation::ReplaceBlock(replace) = op {
-                if let Some(ref info) = replace.source_info {
-                    if &info.id == source_id && info.location == source_location {
-                        return Ok(replace.new_location.clone());
-                    }
-                }
-            }
-        }
-
-        // If not found in ReplaceBlockOp, check AttachBlockOp
-        self.bundle
-            .operations
-            .iter()
-            .find_map(|op| {
-                if let AnyOperation::AttachBlock(attach) = op {
-                    if let Some(ref info) = attach.source_info {
-                        if &info.id == source_id && info.location == source_location {
-                            return Some(attach.location.clone());
-                        }
-                    }
-                }
-                None
-            })
-            .ok_or_else(|| {
-                format!(
-                    "No block found for source_location '{}'",
-                    source_location
-                )
-                .into()
-            })
-    }
-
-    /// Attach a view from another BundleBuilder
-    ///
-    /// Creates a named view that captures all uncommitted operations from the source BundleBuilder.
-    /// The view is stored in a subdirectory under view_{id}/ and automatically inherits
-    /// changes from the parent bundle through the FROM mechanism.
+    /// Creates a named view defined by the SQL query. The view is stored in a subdirectory
+    /// under view_{id}/ and automatically inherits data from the parent bundle.
     ///
     /// # Arguments
     /// * `name` - Name of the view
-    /// * `source` - BundleBuilder containing the operations to capture (typically from a select())
+    /// * `sql` - SQL query that defines the view (e.g., "SELECT * FROM bundle WHERE age > 21")
+    ///
+    /// # Returns
+    /// The BundleBuilder for the created view
     ///
     /// # Example
-    /// ```no_run
-    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
-    /// # async fn example() -> Result<(), BundlebaseError> {
-    /// let mut c = BundleBuilder::create("memory:///container", None).await?;
+    /// ```ignore
+    /// let c = BundleBuilder::create("memory:///container", None).await?;
     /// c.attach("data.csv", None).await?;
     /// c.commit("Initial").await?;
     ///
-    /// let adults = c.select("select * where age > 21", vec![]).await?;
-    /// c.create_view("adults", &adults).await?;
+    /// let view = c.create_view("adults", "SELECT * FROM bundle WHERE age > 21").await?;
     /// c.commit("Add adults view").await?;
-    /// # Ok(())
-    /// # }
     /// ```
     pub async fn create_view(
-        &mut self,
+        &self,
         name: &str,
-        source: &BundleBuilder,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let name = name.to_string();
+        sql: &str,
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+        use crate::bundle::operation::CreateViewOp;
 
-        // Check if source has uncommitted operations that will be captured for the view
-        let source_ops_count = source.status().operations().len();
-        let changes_before = self.status.changes.len();
+        let name_clone = name.to_string();
+        let sql_clone = sql.to_string();
 
-        // Detect if source and self share the same underlying bundle by comparing bundle IDs
-        // This is important for the Python case where source and self share the same Arc<Mutex<BundleBuilder>>
-        let source_is_self = self.bundle.id() == source.bundle.id();
-
-        // Clone source to avoid lifetime issues in async move
-        let source_clone = source.clone();
+        // Use a cell to capture the view_builder from inside the closure.
+        // We use parking_lot::RwLock which doesn't poison on panic.
+        let view_builder_cell: Arc<parking_lot::RwLock<Option<Arc<BundleBuilder>>>> =
+            Arc::new(parking_lot::RwLock::new(None));
+        let view_builder_cell_clone = view_builder_cell.clone();
 
         self.do_change(&format!("Create view '{}'", name), |builder| {
+            let name = name_clone.clone();
+            let sql = sql_clone.clone();
+            let cell = view_builder_cell_clone.clone();
             Box::pin(async move {
-                let op = CreateViewOp::setup(&name, &source_clone, builder).await?;
+                let (op, view_builder) = CreateViewOp::setup(&name, &sql, builder).await?;
+                *cell.write() = Some(view_builder);
                 builder.apply_operation(op.into()).await?;
-                info!("Attached view '{}'", name);
+                info!("Created view '{}'", name);
                 Ok(())
             })
         })
         .await?;
 
-        // After creating view, if source had uncommitted operations and source is the same
-        // as self, we need to remove those operations to prevent double-commit.
-        if source_is_self && source_ops_count > 0 && changes_before >= source_ops_count {
-            // Source and self share the same bundle - the source operations are in self's status
-            // Remove the captured operations (keep only changes before source ops + CreateViewOp)
-            let create_view_change = self.status.changes.pop(); // Remove CreateViewOp
-            let keep_count = changes_before - source_ops_count; // Changes before source operations
-            self.status.changes.truncate(keep_count); // Remove source ops
-            if let Some(create_view_change) = create_view_change {
-                self.status.changes.push(create_view_change); // Add back CreateViewOp
-            }
+        // Extract the view builder from the cell
+        let view_builder = view_builder_cell
+            .read()
+            .clone()
+            .ok_or_else(|| BundlebaseError::from("View builder not created"))?;
 
-            debug!(
-                "Removed {} changes that were captured for view (prevents double-commit)",
-                source_ops_count
-            );
-        }
-
-        Ok(self)
+        Ok(view_builder)
     }
 
     /// Rename an existing view
@@ -1002,40 +877,20 @@ impl BundleBuilder {
     /// * `new_name` - The new name for the view
     ///
     /// # Example
-    /// ```no_run
-    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
-    /// # async fn example() -> Result<(), BundlebaseError> {
-    /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
-    /// # c.attach("data.csv", None).await?;
-    /// let adults = c.select("select * from bundle where age > 21", vec![]).await?;
-    /// c.create_view("adults", &adults).await?;
+    /// ```ignore
+    /// let c = BundleBuilder::create("memory:///example", None).await?;
+    /// c.attach("data.csv", None).await?;
+    /// c.create_view("adults", "SELECT * FROM bundle WHERE age > 21").await?;
     /// c.rename_view("adults", "adults_view").await?;
     /// c.commit("Renamed view").await?;
-    /// # Ok(())
-    /// # }
     /// ```
     pub async fn rename_view(
-        &mut self,
+        &self,
         old_name: &str,
         new_name: &str,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let old_name = old_name.to_string();
-        let new_name = new_name.to_string();
-
-        self.do_change(
-            &format!("Rename view '{}' to '{}'", old_name, new_name),
-            |builder| {
-                Box::pin(async move {
-                    // Call setup() with bundle reference to look up view_id
-                    let op =
-                        RenameViewOp::setup(&old_name, &new_name, &builder.bundle).await?;
-                    builder.apply_operation(op.into()).await?;
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::RenameViewCommand;
+        self.execute_command(RenameViewCommand::new(old_name, new_name)).await?;
         Ok(self)
     }
 
@@ -1045,37 +900,19 @@ impl BundleBuilder {
     /// * `view_name` - The name of the view to drop
     ///
     /// # Example
-    /// ```no_run
-    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade};
-    /// # async fn example() -> Result<(), BundlebaseError> {
-    /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
-    /// # c.attach("data.csv", None).await?;
-    /// let adults = c.select("select * from bundle where age > 21", vec![]).await?;
-    /// c.create_view("adults", &adults).await?;
+    /// ```ignore
+    /// let c = BundleBuilder::create("memory:///example", None).await?;
+    /// c.attach("data.csv", None).await?;
+    /// c.create_view("adults", "SELECT * FROM bundle WHERE age > 21").await?;
     /// c.drop_view("adults").await?;
     /// c.commit("Dropped view").await?;
-    /// # Ok(())
-    /// # }
     /// ```
     pub async fn drop_view(
-        &mut self,
+        &self,
         view_name: &str,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let view_name = view_name.to_string();
-
-        self.do_change(
-            &format!("Drop view '{}'", view_name),
-            |builder| {
-                Box::pin(async move {
-                    // Call setup() with bundle reference to look up view_id
-                    let op = DropViewOp::setup(&view_name, &builder.bundle).await?;
-                    builder.apply_operation(op.into()).await?;
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::DropViewCommand;
+        self.execute_command(DropViewCommand::new(view_name)).await?;
         Ok(self)
     }
 
@@ -1085,29 +922,16 @@ impl BundleBuilder {
     /// * `join_name` - The name of the join to drop
     ///
     /// # Example
-    /// ```no_run
-    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade, JoinTypeOption};
-    /// # async fn example() -> Result<(), BundlebaseError> {
-    /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
-    /// # c.attach("data.csv", None).await?;
+    /// ```ignore
+    /// let c = BundleBuilder::create("memory:///example", None).await?;
+    /// c.attach("data.csv", None).await?;
     /// c.join("customers", "base.customer_id = customers.id", Some("customers.parquet"), JoinTypeOption::Left).await?;
     /// c.drop_join("customers").await?;
     /// c.commit("Dropped join").await?;
-    /// # Ok(())
-    /// # }
     /// ```
-    pub async fn drop_join(&mut self, join_name: &str) -> Result<&mut Self, BundlebaseError> {
-        let join_name = join_name.to_string();
-
-        self.do_change(&format!("Drop join '{}'", join_name), |builder| {
-            Box::pin(async move {
-                let op = DropJoinOp::setup(&join_name, &builder.bundle).await?;
-                builder.apply_operation(op.into()).await?;
-                Ok(())
-            })
-        })
-        .await?;
-
+    pub async fn drop_join(&self, join_name: &str) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::DropJoinCommand;
+        self.execute_command(DropJoinCommand::new(join_name)).await?;
         Ok(self)
     }
 
@@ -1118,168 +942,76 @@ impl BundleBuilder {
     /// * `new_name` - The new name for the join
     ///
     /// # Example
-    /// ```no_run
-    /// # use bundlebase::{BundleBuilder, BundlebaseError, BundleFacade, JoinTypeOption};
-    /// # async fn example() -> Result<(), BundlebaseError> {
-    /// # let mut c = BundleBuilder::create("memory:///example", None).await?;
-    /// # c.attach("data.csv", None).await?;
+    /// ```ignore
+    /// let c = BundleBuilder::create("memory:///example", None).await?;
+    /// c.attach("data.csv", None).await?;
     /// c.join("customers", "base.customer_id = customers.id", Some("customers.parquet"), JoinTypeOption::Left).await?;
     /// c.rename_join("customers", "clients").await?;
     /// c.commit("Renamed join").await?;
-    /// # Ok(())
-    /// # }
     /// ```
     pub async fn rename_join(
-        &mut self,
+        &self,
         old_name: &str,
         new_name: &str,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let old_name = old_name.to_string();
-        let new_name = new_name.to_string();
-
-        self.do_change(
-            &format!("Rename join '{}' to '{}'", old_name, new_name),
-            |builder| {
-                Box::pin(async move {
-                    let op =
-                        RenameJoinOp::setup(&old_name, &new_name, &builder.bundle).await?;
-                    builder.apply_operation(op.into()).await?;
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::RenameJoinCommand;
+        self.execute_command(RenameJoinCommand::new(old_name, new_name)).await?;
         Ok(self)
     }
 
-    /// Drop a column (mutates self)
-    pub async fn drop_column(&mut self, name: &str) -> Result<&mut Self, BundlebaseError> {
-        let name = name.to_string();
-
-        self.do_change(&format!("Drop column {}", name), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(DropColumnOp::setup(vec![name.as_str()]).into())
-                    .await?;
-
-                info!("Dropped column \"{}\"", name);
-
-                Ok(())
-            })
-        })
-        .await?;
-
+    /// Drop a column
+    pub async fn drop_column(&self, name: &str) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::DropColumnCommand;
+        self.execute_command(DropColumnCommand::new(name)).await?;
         Ok(self)
     }
 
-    /// Rename a column (mutates self)
+    /// Rename a column
     pub async fn rename_column(
-        &mut self,
+        &self,
         old_name: &str,
         new_name: &str,
-    ) -> Result<&mut Self, BundlebaseError> {
-        debug!("Staring rename column {} to {}", old_name, new_name);
-
-        let old_name = old_name.to_string();
-        let new_name = new_name.to_string();
-
-        self.do_change(
-            &format!("Rename column '{}' to '{}'", old_name, new_name),
-            |builder| {
-                Box::pin(async move {
-                    builder
-                        .apply_operation(RenameColumnOp::setup(&old_name, &new_name).into())
-                        .await?;
-                    info!("Renamed \"{}\" to \"{}\"", old_name, new_name);
-                    Ok(())
-                })
-            },
-        )
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::RenameColumnCommand;
+        self.execute_command(RenameColumnCommand::new(old_name, new_name)).await?;
         Ok(self)
     }
 
-    /// Filter rows with a WHERE clause (mutates self)
-    /// Parameters can be referenced as $1, $2, etc. in the WHERE clause.
+    /// Filter rows with a SELECT query.
+    /// Parameters can be referenced as $1, $2, etc. in the query.
     pub async fn filter(
-        &mut self,
-        where_clause: &str,
+        &self,
+        query: &str,
         params: Vec<ScalarValue>,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let where_clause = where_clause.to_string();
-
-        self.do_change(&format!("Filter: {}", where_clause), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(FilterOp::setup(&where_clause, params).await?.into())
-                    .await?;
-                info!("Filtered by {}", where_clause);
-                Ok(())
-            })
-        })
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::FilterCommand;
+        self.execute_command(FilterCommand::new(query, params)).await?;
         Ok(self)
     }
 
-    /// Join with another data source (mutates self)
+    /// Join with another data source
     ///
     /// If `location` is None, the join point is created without any initial data.
     /// Data can be attached later using `attach()` or `create_source()` with the `pack` parameter.
     pub async fn join(
-        &mut self,
+        &self,
         name: &str,
         expression: &str,
         location: Option<&str>,
         join_type: JoinTypeOption,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let name = name.to_string();
-        let location = location.map(|s| s.to_string());
-        let expression = expression.to_string();
-
-        self.do_change(&format!("Join '{}' on {}", name, expression), |builder| {
-            Box::pin(async move {
-                // Step 1: Create a new pack with join metadata
-                let join_pack_id = ObjectId::generate();
-                builder
-                    .apply_operation(
-                        CreateJoinOp::setup(&join_pack_id, &name, &expression, join_type)
-                            .await?
-                            .into(),
-                    )
-                    .await?;
-
-                // Step 2: Attach the location data to the join pack (if provided)
-                if let Some(loc) = &location {
-                    builder
-                        .apply_operation(
-                            AttachBlockOp::setup(&join_pack_id, loc, builder)
-                                .await?
-                                .into(),
-                        )
-                        .await?;
-                }
-
-                match &location {
-                    Some(loc) => info!("Joined: {} as \"{}\"", loc, name),
-                    None => info!("Created join point \"{}\" (no initial data)", name),
-                }
-
-                Ok(())
-            })
-        })
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::JoinCommand;
+        self.execute_command(JoinCommand::new(name, expression, location.map(|s| s.to_string()), join_type)).await?;
         Ok(self)
     }
 
-    /// Create a custom function (mutates self)
+    /// Create a custom function
     pub async fn create_function(
-        &mut self,
+        &self,
         signature: FunctionSignature,
-    ) -> Result<&mut Self, BundlebaseError> {
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::operation::CreateFunctionOp;
+
         let name = signature.name().to_string();
 
         self.do_change(&format!("Create function {}", name), |builder| {
@@ -1295,199 +1027,87 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Set the implementation for a function (mutates self)
+    /// Set the implementation for a function
     pub async fn set_impl(
-        &mut self,
+        &self,
         name: &str,
         def: Arc<dyn FunctionImpl>,
-    ) -> Result<&mut Self, BundlebaseError> {
+    ) -> Result<&Self, BundlebaseError> {
         self.bundle.function_registry.write().set_impl(name, def)?;
         Ok(self)
     }
 
-    /// Set the bundle's name (mutates self)
-    pub async fn set_name(&mut self, name: &str) -> Result<&mut Self, BundlebaseError> {
-        let name = name.to_string();
-
-        self.do_change(&format!("Set name to {}", name), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(SetNameOp::setup(&name).into())
-                    .await?;
-                Ok(())
-            })
-        })
-        .await?;
-
+    /// Set the bundle's name
+    pub async fn set_name(&self, name: &str) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::SetNameCommand;
+        self.execute_command(SetNameCommand::new(name)).await?;
         Ok(self)
     }
 
-    /// Set the bundle's description (mutates self)
+    /// Set the bundle's description
     pub async fn set_description(
-        &mut self,
+        &self,
         description: &str,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let description = description.to_string();
-
-        self.do_change(&format!("Set description to {}", description), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(SetDescriptionOp::setup(&description).into())
-                    .await?;
-                Ok(())
-            })
-        })
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::SetDescriptionCommand;
+        self.execute_command(SetDescriptionCommand::new(description)).await?;
         Ok(self)
     }
 
-    /// Set a configuration value (mutates self)
+    /// Save a configuration value to the bundle manifest
     ///
     /// Config stored via this operation has the lowest priority:
     /// 1. Explicit config passed to create()/open() (highest)
-    /// 2. Environment variables
-    /// 3. Config from set_config operations (lowest)
+    /// 2. Environment variables (BB_*)
+    /// 3. Config from save_config operations (lowest)
     ///
     /// # Arguments
+    /// * `scope` - Scope to save config under (e.g., `Scope::try_from("s3")` or `Scope::try_from("s3://bucket")`)
     /// * `key` - Configuration key (e.g., "region", "access_key_id")
     /// * `value` - Configuration value
-    /// * `url_prefix` - Optional URL prefix for URL-specific config (e.g., "s3://bucket/")
-    pub async fn set_config(
-        &mut self,
+    pub async fn save_config(
+        &self,
+        scope: &Scope,
         key: &str,
         value: &str,
-        url_prefix: Option<&str>,
-    ) -> Result<&mut Self, BundlebaseError> {
-        let key = key.to_string();
-        let value = value.to_string();
-        let url_prefix_owned = url_prefix.map(|s| s.to_string());
-
-        let description = match &url_prefix_owned {
-            Some(prefix) => format!("Set config [{}]: {}", prefix, key),
-            None => format!("Set config: {}", key),
-        };
-
-        self.do_change(&description, |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(
-                        SetConfigOp::setup(&key, &value, url_prefix_owned.as_deref()).into(),
-                    )
-                    .await?;
-                Ok(())
-            })
-        })
-        .await?;
-
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::SaveConfigCommand;
+        self.execute_command(SaveConfigCommand::new(scope.clone(), key, value)).await?;
         Ok(self)
     }
 
     /// Create an index on a column
-    pub async fn index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
-        self.index_with_type(column, None, None).await
-    }
-
-    /// Create an index on a column with a specific type
     ///
     /// # Arguments
     /// * `column` - The column name to index
-    /// * `index_type` - Optional index type: "column" (default) or "text"
-    /// * `tokenizer` - Optional tokenizer for text indexes: "simple", "en_stem", etc.
+    /// * `index_type` - The type of index to create (Column or Text), already configured
     ///
     /// # Example
     /// ```ignore
-    /// // Column index (default)
-    /// builder.index_with_type("email", None, None).await?;
+    /// use bundlebase::IndexType;
+    ///
+    /// // Column index
+    /// builder.create_index("email", IndexType::Column).await?;
     ///
     /// // Text/BM25 index with English stemming
-    /// builder.index_with_type("content", Some("text"), Some("en_stem")).await?;
+    /// builder.create_index("content", IndexType::Text {
+    ///     tokenizer: TokenizerConfig::EnglishStem
+    /// }).await?;
     /// ```
-    pub async fn index_with_type(
-        &mut self,
+    pub async fn create_index(
+        &self,
         column: &str,
-        index_type: Option<&str>,
-        tokenizer: Option<&str>,
-    ) -> Result<&mut Self, BundlebaseError> {
-        use crate::index::{IndexType, TokenizerConfig};
-        use std::str::FromStr;
-
-        let column = column.to_string();
-        let index_type_str = index_type.unwrap_or("column");
-
-        // Parse index type using FromStr implementation
-        let mut idx_type = IndexType::from_str(index_type_str).map_err(|e| {
-            BundlebaseError::from(format!("{}", e))
-        })?;
-
-        // For text indexes, parse the tokenizer if provided
-        if idx_type.is_text() {
-            let tokenizer_config = match tokenizer {
-                Some(tok) => TokenizerConfig::from_str(tok).map_err(|e| {
-                    BundlebaseError::from(format!("Invalid tokenizer: {}", e))
-                })?,
-                None => TokenizerConfig::default(),
-            };
-            idx_type = idx_type.with_tokenizer(Some(tokenizer_config));
-        }
-
-        let desc = match &idx_type {
-            IndexType::Column => format!("Index column {}", column),
-            IndexType::Text { tokenizer } => {
-                format!("Text index column {} (tokenizer: {:?})", column, tokenizer)
-            }
-        };
-
-        self.do_change(&desc, |builder| {
-            let idx_type = idx_type.clone();
-            let column = column.clone();
-            Box::pin(async move {
-                builder
-                    .apply_operation(CreateIndexOp::setup_with_type(&column, idx_type).await?.into())
-                    .await?;
-
-                builder.reindex().await?;
-
-                info!("Created index on: \"{}\"", column);
-
-                Ok(())
-            })
-        })
-        .await?;
-
+        index_type: IndexType,
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::CreateIndexCommand;
+        self.execute_command(CreateIndexCommand::new(column, index_type)).await?;
         Ok(self)
     }
 
     /// Drop an index on a column
-    pub async fn drop_index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
-        let column = column.to_string();
-
-        self.do_change(&format!("Drop index on column {}", column), |builder| {
-            Box::pin(async move {
-                // Find the index ID for the given column
-                let index_id = {
-                    let indexes = builder.bundle.indexes().read();
-                    let index = indexes.iter().find(|idx| idx.column() == column.as_str());
-
-                    match index {
-                        Some(idx) => *idx.id(),
-                        None => {
-                            return Err(format!("No index found for column '{}'", column).into());
-                        }
-                    }
-                };
-
-                builder
-                    .apply_operation(DropIndexOp::setup(&index_id).await?.into())
-                    .await?;
-
-                info!("Dropped index on: \"{}\"", column);
-
-                Ok(())
-            })
-        })
-        .await?;
-
+    pub async fn drop_index(&self, column: &str) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::DropIndexCommand;
+        self.execute_command(DropIndexCommand::new(column)).await?;
         Ok(self)
     }
 
@@ -1505,118 +1125,116 @@ impl BundleBuilder {
     /// - Continues processing other columns if one fails (logs warning)
     ///
     /// # Returns
-    /// - `Ok(&mut Self)` - Successfully processed all indexes
+    /// - `Ok(&Self)` - Successfully processed all indexes
     /// - `Err(BundlebaseError)` - If a critical operation fails (e.g., block not found during setup)
     ///
     /// # Note
     /// This is typically called automatically by `index()` method after defining a new index.
     /// Manual calls are useful when recovering from partial index creation failures.
-    pub async fn reindex(&mut self) -> Result<&mut Self, BundlebaseError> {
-        debug!("Starting reindex");
-
-        self.do_change("Reindex", |builder| {
-            Box::pin(async move {
-                // Group blocks by (index_id, column_name) for batching
-                let mut blocks_to_index: HashMap<(ObjectId, String), Vec<(ObjectId, String)>> =
-                    HashMap::new();
-
-                // Ensure dataframe is set up for queries
-                let df = builder.dataframe().await?;
-
-                // Collect index definitions before the loop to avoid holding the lock across awaits
-                let index_defs: Vec<Arc<IndexDefinition>> =
-                    builder.bundle.indexes.read().iter().cloned().collect();
-
-                for index_def in &index_defs {
-                    let logical_col = index_def.column().to_string();
-                    let index_id = index_def.id();
-                    debug!("Checking index on {}", &logical_col);
-
-                    // Pass packs to expand pack tables into block tables
-                    let sources = match sql::column_sources_from_df(
-                        logical_col.as_str(),
-                        &df,
-                        Some(builder.bundle.packs()),
-                    )
-                    .await
-                    {
-                        Ok(Some(s)) => s,
-                        Ok(None) => {
-                            return Err(format!(
-                                "No physical sources found for column '{}'",
-                                logical_col
-                            )
-                            .into());
-                        }
-                        Err(e) => {
-                            return Err(format!(
-                                "Failed to find source for column '{}': {}",
-                                logical_col, e
-                            )
-                            .into());
-                        }
-                    };
-
-                    for (source_table, source_col) in sources {
-                        // Extract block ID from table name "blocks.__block_{hex_id}"
-                        let block_id = DataBlock::parse_id(&source_table).ok_or_else(|| {
-                            BundlebaseError::from(format!("Invalid table: {}", source_table))
-                        })?;
-
-                        // Find the block and get its version
-                        let block_version = builder
-                            .find_block_version(&block_id)
-                            .ok_or_else(|| format!("Block {} not found in packs", block_id))?;
-                        debug!(
-                            "Physical source: block {} version {}",
-                            &block_id, &block_version
-                        );
-
-                        // Check if index already exists at this version
-                        let versioned_block =
-                            VersionedBlockId::new(block_id, block_version.clone());
-                        let needs_index = builder
-                            .bundle()
-                            .get_index(&source_col, &versioned_block)
-                            .is_none();
-                        debug!("Needs index? {}", needs_index);
-
-                        if needs_index {
-                            blocks_to_index
-                                .entry((*index_id, source_col.clone()))
-                                .or_default()
-                                .push((block_id, block_version));
-                        }
-                    }
-                }
-
-                // Create IndexBlocksOp for each group of blocks
-                for ((index_id, column), blocks) in blocks_to_index {
-                    if !blocks.is_empty() {
-                        debug!(
-                            "Creating IndexBlocksOp for column {} with {} blocks",
-                            column,
-                            blocks.len()
-                        );
-
-                        builder
-                            .apply_operation(
-                                IndexBlocksOp::setup(&index_id, &column, blocks, &builder.bundle)
-                                    .await?
-                                    .into(),
-                            )
-                            .await?;
-                    }
-                }
-
-                info!("Reindexed all columns");
-
-                Ok(())
-            })
-        })
-        .await?;
-
+    pub async fn reindex(&self) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::ReindexCommand;
+        self.execute_command(ReindexCommand::new()).await?;
         Ok(self)
+    }
+
+    /// Internal reindex implementation that doesn't wrap in do_change.
+    ///
+    /// This is used by commands that need to reindex within their own change context.
+    pub(in crate::bundle) async fn reindex_internal(&self) -> Result<(), BundlebaseError> {
+        // Group blocks by (index_id, column_name) for batching
+        let mut blocks_to_index: HashMap<(ObjectId, String), Vec<(ObjectId, String)>> =
+            HashMap::new();
+
+        // Ensure dataframe is set up for queries
+        let df = self.dataframe().await?;
+
+        // Collect index definitions before the loop to avoid holding the lock across awaits
+        let index_defs: Vec<Arc<IndexDefinition>> =
+            self.bundle.indexes.read().iter().cloned().collect();
+
+        let packs = self.bundle.packs().clone();
+
+        for index_def in &index_defs {
+            let logical_col = index_def.column().to_string();
+            let index_id = index_def.id();
+            debug!("Checking index on {}", &logical_col);
+
+            // Pass packs to expand pack tables into block tables
+            let sources = match sql::column_sources_from_df(
+                logical_col.as_str(),
+                &df,
+                Some(&packs),
+            )
+            .await
+            {
+                Ok(Some(s)) => s,
+                Ok(None) => {
+                    return Err(format!(
+                        "No physical sources found for column '{}'",
+                        logical_col
+                    )
+                    .into());
+                }
+                Err(e) => {
+                    return Err(format!(
+                        "Failed to find source for column '{}': {}",
+                        logical_col, e
+                    )
+                    .into());
+                }
+            };
+
+            for (source_table, source_col) in sources {
+                // Extract block ID from table name "blocks.__block_{hex_id}"
+                let block_id = DataBlock::parse_id(&source_table).ok_or_else(|| {
+                    BundlebaseError::from(format!("Invalid table: {}", source_table))
+                })?;
+
+                // Find the block and get its version
+                let block_version = self
+                    .find_block_version(&block_id)
+                    .ok_or_else(|| format!("Block {} not found in packs", block_id))?;
+                debug!(
+                    "Physical source: block {} version {}",
+                    &block_id, &block_version
+                );
+
+                // Check if index already exists at this version
+                let versioned_block =
+                    VersionedBlockId::new(block_id, block_version.clone());
+                let needs_index = self
+                    .bundle()
+                    .get_index(&source_col, &versioned_block)
+                    .is_none();
+                debug!("Needs index? {}", needs_index);
+
+                if needs_index {
+                    blocks_to_index
+                        .entry((*index_id, source_col.clone()))
+                        .or_default()
+                        .push((block_id, block_version));
+                }
+            }
+        }
+
+        // Create IndexBlocksOp for each group of blocks
+        for ((index_id, column), blocks) in blocks_to_index {
+            if !blocks.is_empty() {
+                debug!(
+                    "Creating IndexBlocksOp for column {} with {} blocks",
+                    column,
+                    blocks.len()
+                );
+
+                // Bundle is internally thread-safe
+                let op = IndexBlocksOp::setup(&index_id, &column, blocks, self).await?;
+                self.apply_operation(op.into()).await?;
+            }
+        }
+
+        info!("Reindexed all columns");
+
+        Ok(())
     }
 
     /// Find the version of a block by its ID
@@ -1631,20 +1249,32 @@ impl BundleBuilder {
         None
     }
 
-    /// Rebuild an index on a column (mutates self)
-    pub async fn rebuild_index(&mut self, column: &str) -> Result<&mut Self, BundlebaseError> {
-        let column = column.to_string();
+    /// Resolve a pack name to its ObjectId.
+    ///
+    /// This is a helper method used by commands that operate on packs.
+    ///
+    /// # Arguments
+    /// * `pack` - The pack name: `None` or `"base"` for the base pack,
+    ///            otherwise a join name.
+    ///
+    /// # Returns
+    /// * `Ok(ObjectId)` - The resolved pack ID
+    /// * `Err(BundlebaseError)` - If the join name doesn't exist
+    pub fn resolve_pack_id(&self, pack: Option<&str>) -> Result<ObjectId, BundlebaseError> {
+        match pack {
+            None | Some("base") => Ok(ObjectId::BASE_PACK),
+            Some(join_name) => self
+                .bundle()
+                .pack_by_name(join_name)
+                .map(|p| *p.id())
+                .ok_or_else(|| format!("Unknown join '{}'", join_name).into()),
+        }
+    }
 
-        self.do_change(&format!("Rebuild index on column {}", column), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(RebuildIndexOp::setup(column).await?.into())
-                    .await?;
-                Ok(())
-            })
-        })
-        .await?;
-
+    /// Rebuild an index on a column
+    pub async fn rebuild_index(&self, column: &str) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::RebuildIndexCommand;
+        self.execute_command(RebuildIndexCommand::new(column)).await?;
         Ok(self)
     }
 
@@ -1684,10 +1314,6 @@ impl BundleBuilder {
         Ok(analyzer.get_source(logical_name))
     }
 
-    pub fn data_dir(&self) -> &dyn IOReadWriteDir {
-        self.bundle.data_dir()
-    }
-
     /// Verify the integrity of all files in the bundle by checking SHA256 hashes.
     ///
     /// This method checks:
@@ -1701,236 +1327,35 @@ impl BundleBuilder {
     /// # Returns
     /// `VerificationResults` with details for each file verified.
     pub async fn verify_data(
-        &mut self,
+        &self,
         update_versions: bool,
     ) -> Result<super::VerificationResults, BundlebaseError> {
-        use super::{FileVerificationResult, VerificationResults};
-        use crate::bundle::operation::UpdateVersionOp;
-        use crate::io::readable_file_from_path;
+        use crate::bundle::command::VerifyDataCommand;
 
-        let mut results = Vec::new();
-        let block_hashes = self.bundle.build_block_hash_map();
-        let block_locations = self.bundle.build_block_location_map();
-
-        // Collect block info first to avoid borrowing issues
-        let blocks_to_verify: Vec<(ObjectId, String, Option<String>, String)> = {
-            let packs = self.bundle.packs().read().clone();
-            let mut result = Vec::new();
-            for pack in packs.values() {
-                for block in pack.blocks() {
-                    let block_id = *block.id();
-                    let location = block_locations
-                        .get(&block_id)
-                        .cloned()
-                        .unwrap_or_else(|| block.reader().url().to_string());
-                    let expected_hash = block_hashes.get(&block_id).cloned();
-                    let current_version = block.version();
-                    result.push((block_id, location, expected_hash, current_version));
-                }
-            }
-            result
-        };
-
-        // Verify each block
-        for (block_id, location, expected_hash, current_version) in blocks_to_verify {
-            // Skip function:// URLs (generated data has no file to verify)
-            if location.starts_with("function://") {
-                results.push(FileVerificationResult {
-                    location,
-                    file_type: "data".to_string(),
-                    expected_hash: None,
-                    actual_hash: None,
-                    passed: true,
-                    error: None,
-                    version_updated: false,
-                });
-                continue;
-            }
-
-            // Compute the actual hash
-            let file = match readable_file_from_path(
-                &location,
-                self.bundle.data_dir(),
-                self.bundle.config(),
-            ) {
-                Ok(f) => f,
-                Err(e) => {
-                    results.push(FileVerificationResult {
-                        location,
-                        file_type: "data".to_string(),
-                        expected_hash,
-                        actual_hash: None,
-                        passed: false,
-                        error: Some(format!("Failed to open file: {}", e)),
-                        version_updated: false,
-                    });
-                    continue;
-                }
-            };
-
-            let actual_hash = match file.compute_hash().await {
-                Ok(h) => h,
-                Err(e) => {
-                    results.push(FileVerificationResult {
-                        location,
-                        file_type: "data".to_string(),
-                        expected_hash,
-                        actual_hash: None,
-                        passed: false,
-                        error: Some(format!("Failed to compute hash: {}", e)),
-                        version_updated: false,
-                    });
-                    continue;
-                }
-            };
-
-            let hash_matches = expected_hash
-                .as_ref()
-                .map(|expected| expected == &actual_hash)
-                .unwrap_or(true);
-
-            if hash_matches {
-                // Hash matches - check if version needs updating
-                let mut version_updated = false;
-
-                if update_versions {
-                    // Read the current version from the file
-                    let temp_id = ObjectId::generate();
-                    if let Ok(adapter) = self
-                        .bundle
-                        .adapter_factory
-                        .reader(&location, &temp_id, self.bundle(), None, None, None)
-                        .await
-                    {
-                        if let Ok(file_version) = adapter.read_version().await {
-                            if file_version != current_version {
-                                // Version changed but hash matches - update version
-                                let op = UpdateVersionOp::setup(block_id, file_version);
-                                if self
-                                    .do_change(
-                                        &format!("Update version for block {}", block_id),
-                                        |builder| {
-                                            let op = op.clone();
-                                            Box::pin(async move {
-                                                builder.apply_operation(op.into()).await?;
-                                                Ok(())
-                                            })
-                                        },
-                                    )
-                                    .await
-                                    .is_ok()
-                                {
-                                    version_updated = true;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                results.push(FileVerificationResult {
-                    location,
-                    file_type: "data".to_string(),
-                    expected_hash,
-                    actual_hash: Some(actual_hash),
-                    passed: true,
-                    error: None,
-                    version_updated,
-                });
-            } else {
-                // Hash mismatch - verification failed
-                results.push(FileVerificationResult {
-                    location,
-                    file_type: "data".to_string(),
-                    expected_hash,
-                    actual_hash: Some(actual_hash),
-                    passed: false,
-                    error: None,
-                    version_updated: false,
-                });
-            }
-        }
-
-        // Verify index files exist
-        let indexes = self.bundle.indexes().read().clone();
-        for index_def in indexes.iter() {
-            for indexed_blocks in index_def.all_indexed_blocks() {
-                let path = indexed_blocks.path();
-                let result = self.verify_index_exists(path).await;
-                results.push(result);
-            }
-        }
-
-        Ok(VerificationResults::from_files(results))
-    }
-
-    /// Verify an index file exists.
-    async fn verify_index_exists(&self, path: &str) -> super::FileVerificationResult {
-        use super::FileVerificationResult;
-        use crate::io::plugin::object_store::ObjectStoreFile;
-        use crate::io::IOReadFile;
-
-        match ObjectStoreFile::from_str(path, self.bundle.data_dir(), self.bundle.config()) {
-            Ok(file) => match file.exists().await {
-                Ok(true) => FileVerificationResult {
-                    location: path.to_string(),
-                    file_type: "index".to_string(),
-                    expected_hash: None,
-                    actual_hash: None,
-                    passed: true,
-                    error: None,
-                    version_updated: false,
-                },
-                Ok(false) => FileVerificationResult {
-                    location: path.to_string(),
-                    file_type: "index".to_string(),
-                    expected_hash: None,
-                    actual_hash: None,
-                    passed: false,
-                    error: Some("Index file not found".to_string()),
-                    version_updated: false,
-                },
-                Err(e) => FileVerificationResult {
-                    location: path.to_string(),
-                    file_type: "index".to_string(),
-                    expected_hash: None,
-                    actual_hash: None,
-                    passed: false,
-                    error: Some(format!("Failed to check index file: {}", e)),
-                    version_updated: false,
-                },
-            },
-            Err(e) => FileVerificationResult {
-                location: path.to_string(),
-                file_type: "index".to_string(),
-                expected_hash: None,
-                actual_hash: None,
-                passed: false,
-                error: Some(format!("Failed to create file handle: {}", e)),
-                version_updated: false,
-            },
-        }
+        let cmd = VerifyDataCommand::new(update_versions);
+        Box::new(cmd).execute(self).await
     }
 }
 
 #[async_trait]
 impl BundleFacade for BundleBuilder {
-    fn id(&self) -> &str {
+    fn id(&self) -> String {
         self.bundle.id()
     }
 
-    fn name(&self) -> Option<&str> {
+    fn name(&self) -> Option<String> {
         self.bundle.name()
     }
 
-    fn description(&self) -> Option<&str> {
+    fn description(&self) -> Option<String> {
         self.bundle.description()
     }
 
-    fn url(&self) -> &Url {
+    fn url(&self) -> Url {
         self.bundle.url()
     }
 
-    fn from(&self) -> Option<&Url> {
+    fn from(&self) -> Option<Url> {
         self.bundle.from()
     }
 
@@ -1943,9 +1368,8 @@ impl BundleFacade for BundleBuilder {
     }
 
     fn operations(&self) -> Vec<AnyOperation> {
-        let mut ops = self.bundle.operations.clone();
-        ops.append(&mut self.status.operations().clone());
-
+        let mut ops = self.bundle.operations.read().clone();
+        ops.append(&mut self.status().operations().clone());
         ops
     }
 
@@ -1962,35 +1386,28 @@ impl BundleFacade for BundleBuilder {
         self.bundle.dataframe().await
     }
 
-    async fn select(&self, sql: &str, params: Vec<ScalarValue>) -> Result<Self, BundlebaseError> {
-        let mut bundle = self.clone();
-        let sql = sql.to_string();
-        let sql = if !sql.to_lowercase().starts_with("select ") {
-            format!("SELECT {}", sql)
-        } else {
-            sql
-        };
+    fn extend(
+        &self,
+        data_dir: Option<&str>,
+    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+        // Create a new builder based on the current bundle state without modifying self
+        let current_bundle = Arc::new(self.bundle.deref().clone());
+        BundleBuilder::extend(current_bundle, data_dir)
+    }
 
-        bundle
-            .do_change(&format!("Query: {}", sql), |builder| {
-                Box::pin(async move {
-                    builder
-                        .apply_operation(SelectOp::setup(sql, params).await?.into())
-                        .await?;
-                    info!("Created query");
-                    Ok(())
-                })
-            })
-            .await?;
-
-        Ok(bundle)
+    async fn query(
+        &self,
+        sql: &str,
+        params: Vec<ScalarValue>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        Ok(self.bundle().query(sql, params).await?)
     }
 
     fn views(&self) -> HashMap<ObjectId, String> {
         self.bundle.views()
     }
 
-    async fn view(&self, identifier: &str) -> Result<Bundle, BundlebaseError> {
+    async fn view(&self, identifier: &str) -> Result<Arc<Bundle>, BundlebaseError> {
         self.bundle.view(identifier).await
     }
 
@@ -2000,8 +1417,63 @@ impl BundleFacade for BundleBuilder {
             return Err("Cannot export tar with uncommitted changes. Please commit first.".into());
         }
 
-        // Delegate to the Bundle's implementation via BundleFacade
         self.bundle.export_tar(tar_path).await
+    }
+
+    fn status_changes(&self) -> Vec<BundleChange> {
+        self.status.read().changes().clone()
+    }
+
+    fn status(&self) -> BundleStatus {
+        self.status.read().clone()
+    }
+
+    fn indexes(&self) -> Vec<Arc<IndexDefinition>> {
+        self.bundle.indexes.read().clone()
+    }
+
+    fn packs(&self) -> HashMap<ObjectId, Arc<Pack>> {
+        self.bundle.packs.read().clone()
+    }
+
+    fn views_by_name(&self) -> HashMap<String, ObjectId> {
+        self.bundle.views.read().clone()
+    }
+
+    fn data_dir(&self) -> Arc<dyn IOReadWriteDir> {
+        self.bundle.data_dir()
+    }
+
+    fn config(&self) -> Arc<BundleConfig> {
+        self.bundle.config()
+    }
+
+    fn set_config(
+        &self,
+        scope: &Scope,
+        key: &str,
+        value: &str,
+    ) -> Result<(), BundlebaseError> {
+        self.bundle.set_config(scope, key, value)
+    }
+
+    fn ctx(&self) -> Arc<SessionContext> {
+        self.bundle.ctx()
+    }
+
+    async fn execute_facade_command(
+        &self,
+        cmd: FacadeCommand,
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+        cmd.execute(self).await
+    }
+
+    async fn execute_command(
+        &self,
+        cmd: BundleCommand,
+    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
+        // BundleBuilder can execute all commands
+        cmd.execute(self).await
     }
 }
 
@@ -2024,15 +1496,17 @@ mod tests {
             .await
             .unwrap();
         let schema = bundle.bundle.schema().await.unwrap();
-        assert!(
-            schema.fields().is_empty(),
-            "Empty bundle should have empty schema"
+        assert_eq!(
+            schema.fields().len(),
+            1,
+            "Empty bundle should have sentinel no_data field"
         );
+        assert_eq!(schema.field(0).name(), "no_data");
     }
 
     #[tokio::test]
     async fn test_schema_after_attach() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
+        let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         bundle
@@ -2056,7 +1530,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_schema_after_drop_column() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
+        let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         bundle
@@ -2082,36 +1556,36 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_and_get_name() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
+        let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
-        assert_eq!(bundle.bundle.name, None, "Empty bundle should have no name");
+        assert_eq!(bundle.bundle.name.read().clone(), None, "Empty bundle should have no name");
 
-        let bundle = bundle.set_name("My Bundle").await.unwrap();
-        let name = bundle.bundle.name.as_ref().unwrap();
+        bundle.set_name("My Bundle").await.unwrap();
+        let name = bundle.bundle.name.read().as_ref().unwrap().clone();
         assert_eq!(name, "My Bundle");
     }
 
     #[tokio::test]
     async fn test_set_and_get_description() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
+        let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
-        assert_eq!(bundle.bundle.description, None);
+        assert_eq!(bundle.bundle.description.read().clone(), None);
 
         bundle
             .set_description("This is a test bundle")
             .await
             .unwrap();
         assert_eq!(
-            bundle.bundle.description.unwrap_or("NOT SET".to_string()),
+            bundle.bundle.description.read().clone().unwrap_or("NOT SET".to_string()),
             "This is a test bundle"
         );
     }
 
     #[tokio::test]
     async fn test_name_doesnt_affect_version() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
+        let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         bundle
@@ -2121,8 +1595,8 @@ mod tests {
 
         let v_no_name = bundle.bundle.version();
 
-        let bundle_with_name = bundle.set_name("Named Bundle").await.unwrap();
-        let v_with_name = bundle_with_name.bundle.version();
+        bundle.set_name("Named Bundle").await.unwrap();
+        let v_with_name = bundle.bundle.version();
 
         // Metadata operations now affect the version hash since they're proper operations
         assert_ne!(
@@ -2130,12 +1604,12 @@ mod tests {
             "Name should be tracked as an operation and change version"
         );
         // Verify the name was actually set
-        assert_eq!(bundle_with_name.bundle.name(), Some("Named Bundle"));
+        assert_eq!(bundle.bundle.name(), Some("Named Bundle".to_string()));
     }
 
     #[tokio::test]
     async fn test_operations_list() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
+        let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         assert_eq!(
@@ -2143,7 +1617,7 @@ mod tests {
             0,
         );
 
-        let bundle = bundle
+        bundle
             .attach(test_datafile("userdata.parquet"), None)
             .await
             .unwrap();
@@ -2155,7 +1629,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_version() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
+        let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
 
@@ -2169,57 +1643,13 @@ mod tests {
         assert_ne!(init_version, bundle.version());
     }
 
-    #[tokio::test]
-    async fn test_clone_independence() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        bundle
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-
-        let v1 = bundle.version();
-
-        // Clone and add operation to clone
-        let mut bundle_clone = bundle.clone();
-        bundle_clone.drop_column("title").await.unwrap();
-        let v2 = bundle_clone.version();
-
-        // Original should be unchanged
-        assert_eq!(bundle.bundle.operations().len(), 1);
-        assert_eq!(bundle_clone.bundle.operations().len(), 2);
-        assert_ne!(
-            v1, v2,
-            "Different operations should have different versions"
-        );
-
-        // Test that packs are independent
-        let orig_packs_count = bundle.bundle.packs().read().len();
-        let clone_packs_count = bundle_clone.bundle.packs().read().len();
-        assert_eq!(orig_packs_count, clone_packs_count);
-
-        // Test that indexes are independent
-        let orig_indexes_count = bundle.bundle.indexes.read().len();
-        let clone_indexes_count = bundle_clone.bundle.indexes.read().len();
-        assert_eq!(orig_indexes_count, clone_indexes_count);
-
-        // Now add an index to the clone
-        bundle_clone.index("id").await.unwrap();
-
-        // Original should still have 0 indexes, clone should have 1
-        let orig_indexes_after = bundle.bundle.indexes.read().len();
-        let clone_indexes_after = bundle_clone.bundle.indexes.read().len();
-        assert_eq!(
-            0, orig_indexes_after,
-            "Original should have 0 indexes after clone modifies"
-        );
-        assert_eq!(1, clone_indexes_after, "Clone should have 1 index");
-    }
+    // NOTE: test_clone_independence was removed because BundleBuilder now uses interior
+    // mutability (RwLock) and doesn't support cloning. The interior mutability design
+    // allows using &self methods instead of &mut self, eliminating the need for cloning.
 
     #[tokio::test]
     async fn test_multiple_operations_pipeline() {
-        let mut bundle = BundleBuilder::create("memory:///test_bundle", None)
+        let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
         bundle
@@ -2227,12 +1657,12 @@ mod tests {
             .await
             .unwrap();
         bundle.drop_column("title").await.unwrap();
-        let bundle = bundle
+        bundle
             .rename_column("first_name", "given_name")
             .await
             .unwrap();
 
-        assert_eq!(bundle.bundle.operations.len(), 3);
+        assert_eq!(bundle.bundle.operations.read().len(), 3);
     }
 
     #[tokio::test]
@@ -2241,7 +1671,7 @@ mod tests {
         let path = tmp_dir.path().to_str().unwrap();
 
         // Create and commit a bundle
-        let mut bundle = BundleBuilder::create(path, None).await.unwrap();
+        let bundle = BundleBuilder::create(path, None).await.unwrap();
         bundle.commit("Initial").await.unwrap();
 
         // Attempting to create at the same path should fail

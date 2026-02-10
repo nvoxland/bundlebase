@@ -1,6 +1,7 @@
 use crate::bundle::operation::{AnyOperation, Operation};
+use crate::bundle::BundleBuilder;
 use crate::data::ObjectId;
-use crate::{Bundle, BundlebaseError};
+use crate::{Bundle, BundleFacade, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -24,10 +25,10 @@ impl DetachBlockOp {
     ///
     /// Searches through AttachBlockOp operations to find a block with
     /// the matching location.
-    pub async fn setup(location: &str, bundle: &Bundle) -> Result<Self, BundlebaseError> {
+    pub async fn setup(location: &str, builder: &BundleBuilder) -> Result<Self, BundlebaseError> {
         // Find block ID by searching AttachBlockOp operations for matching location
-        let block_id = bundle
-            .operations
+        let block_id = builder
+            .operations()
             .iter()
             .find_map(|op| {
                 if let AnyOperation::AttachBlock(attach_op) = op {
@@ -71,7 +72,7 @@ impl Operation for DetachBlockOp {
         false
     }
 
-    async fn apply(&self, bundle: &mut Bundle) -> Result<(), DataFusionError> {
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Look up block's source info before removing
         if let Some(block) = bundle.find_block(&self.id) {
             if let Some(source_info) = block.source_info() {

@@ -64,6 +64,22 @@ async def test_create_source_auto_fetch():
 
 
 @pytest.mark.asyncio
+async def test_create_kaggle_source_invalid_dataset():
+    """Test that kaggle source function validates dataset format."""
+    c = await bundlebase.create(random_bundle())
+    with pytest.raises(ValueError, match="Invalid dataset format"):
+        await c.create_source("kaggle", {"dataset": "invalid-no-slash"})
+
+
+@pytest.mark.asyncio
+async def test_create_kaggle_source_missing_dataset():
+    """Test that kaggle source function requires dataset argument."""
+    c = await bundlebase.create(random_bundle())
+    with pytest.raises(ValueError, match="requires a 'dataset' argument"):
+        await c.create_source("kaggle", {})
+
+
+@pytest.mark.asyncio
 async def test_fetch_returns_results():
     """Test that fetch returns FetchResults with details about attached files."""
     with tempfile.TemporaryDirectory() as source_dir:
@@ -80,7 +96,7 @@ async def test_fetch_returns_results():
             shutil.copy(src_path, os.path.join(source_dir, "userdata.parquet"))
 
             # fetch should return a list of FetchResults
-            results = await c.fetch()
+            results = await c.fetch("base", "add")
             assert len(results) == 1  # One source
             result = results[0]
             assert result.source_function == "remote_dir"

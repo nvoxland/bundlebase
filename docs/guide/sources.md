@@ -17,19 +17,17 @@ The source workflow has two steps:
     import bundlebase as bb
 
     # Create a bundle with a source
-    c = await (bb.create("my/data")
+    bundle = await (bb.create("my/data")
         .create_source("remote_dir", {
             "url": "s3://my-bucket/data/",
             "patterns": "**/*.parquet"
         }))
 
     # Fetch discovers and attaches all matching files
-    await c.fetch()
+    await bundle.fetch("base", "add")
 
     # Later, fetch again to get any new files
-    await c.fetch()
-
-    await c.commit("Added data from S3")
+    await bundle.fetch("base", "add")
     ```
 
 === "Sync API"
@@ -38,19 +36,23 @@ The source workflow has two steps:
     import bundlebase.sync as bb
 
     # Create a bundle with a source
-    c = (bb.create("my/data")
+    bundle = (bb.create("my/data")
         .create_source("remote_dir", {
             "url": "s3://my-bucket/data/",
             "patterns": "**/*.parquet"
         }))
 
     # Fetch discovers and attaches all matching files
-    c.fetch()
+    bundle.fetch("base", "add")
 
     # Later, fetch again to get any new files
-    c.fetch()
+    bundle.fetch("base", "add")
+    ```
 
-    c.commit("Added data from S3")
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
     ```
 
 ## Source Functions
@@ -71,19 +73,19 @@ Lists files from a local or cloud directory. Supports any URL scheme supported b
 
     ```python
     # S3 bucket
-    c = await c.create_source("remote_dir", {
+    bundle = await bundle.create_source("remote_dir", {
         "url": "s3://my-bucket/data/",
         "patterns": "**/*.parquet"
     })
 
     # Local directory
-    c = await c.create_source("remote_dir", {
+    bundle = await bundle.create_source("remote_dir", {
         "url": "file:///data/exports/",
         "patterns": "**/*.csv,**/*.parquet"
     })
 
     # Reference files in place instead of copying
-    c = await c.create_source("remote_dir", {
+    bundle = await bundle.create_source("remote_dir", {
         "url": "s3://my-bucket/data/",
         "copy": "false"
     })
@@ -93,22 +95,28 @@ Lists files from a local or cloud directory. Supports any URL scheme supported b
 
     ```python
     # S3 bucket
-    c = c.create_source("remote_dir", {
+    bundle = bundle.create_source("remote_dir", {
         "url": "s3://my-bucket/data/",
         "patterns": "**/*.parquet"
     })
 
     # Local directory
-    c = c.create_source("remote_dir", {
+    bundle = bundle.create_source("remote_dir", {
         "url": "file:///data/exports/",
         "patterns": "**/*.csv,**/*.parquet"
     })
 
     # Reference files in place instead of copying
-    c = c.create_source("remote_dir", {
+    bundle = bundle.create_source("remote_dir", {
         "url": "s3://my-bucket/data/",
         "copy": "false"
     })
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
     ```
 
 ### ftp_directory
@@ -129,12 +137,12 @@ Lists files from an FTP server. Supports anonymous and authenticated access.
 
     ```python
     # Anonymous FTP
-    c = await c.create_source("ftp_directory", {
+    bundle = await bundle.create_source("ftp_directory", {
         "url": "ftp://ftp.example.com/pub/data/"
     })
 
     # Authenticated FTP
-    c = await c.create_source("ftp_directory", {
+    bundle = await bundle.create_source("ftp_directory", {
         "url": "ftp://user:pass@ftp.example.com/data/",
         "patterns": "**/*.csv"
     })
@@ -144,15 +152,21 @@ Lists files from an FTP server. Supports anonymous and authenticated access.
 
     ```python
     # Anonymous FTP
-    c = c.create_source("ftp_directory", {
+    bundle = bundle.create_source("ftp_directory", {
         "url": "ftp://ftp.example.com/pub/data/"
     })
 
     # Authenticated FTP
-    c = c.create_source("ftp_directory", {
+    bundle = bundle.create_source("ftp_directory", {
         "url": "ftp://user:pass@ftp.example.com/data/",
         "patterns": "**/*.csv"
     })
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE ftp_directory WITH (url = 'ftp://ftp.example.com/pub/data/')
     ```
 
 ### sftp_directory
@@ -173,7 +187,7 @@ Lists files from a remote directory via SFTP. Requires an SSH private key for au
 === "Async API"
 
     ```python
-    c = await c.create_source("sftp_directory", {
+    bundle = await bundle.create_source("sftp_directory", {
         "url": "sftp://user@host/data/",
         "key_path": "~/.ssh/id_rsa",
         "patterns": "**/*.parquet"
@@ -183,11 +197,92 @@ Lists files from a remote directory via SFTP. Requires an SSH private key for au
 === "Sync API"
 
     ```python
-    c = c.create_source("sftp_directory", {
+    bundle = bundle.create_source("sftp_directory", {
         "url": "sftp://user@host/data/",
         "key_path": "~/.ssh/id_rsa",
         "patterns": "**/*.parquet"
     })
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE sftp_directory WITH (url = 'sftp://user@host/data/', key_path = '~/.ssh/id_rsa', patterns = '**/*.parquet')
+    ```
+
+### kaggle
+
+Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle REST API. Discovers individual files within a dataset, downloads them as ZIP archives, and extracts the contents automatically.
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `dataset` | Yes | Dataset identifier in `owner/dataset-name` format (e.g., `zillow/zecon`) |
+| `patterns` | No | Comma-separated glob patterns (default: `**/*`) |
+| `mode` | No | Sync mode: `add` (default), `update`, or `sync` |
+| `version` | No | Dataset version number to download (default: latest) |
+
+!!! note "Authentication"
+    Kaggle credentials are configured via [bundlebase configuration](configuration.md). Available config keys for the `kaggle` scope:
+
+    | Key | Description | Default |
+    |-----|-------------|---------|
+    | `username` | Kaggle username | from `~/.kaggle/kaggle.json` |
+    | `key` | Kaggle API key | from `~/.kaggle/kaggle.json` |
+    | `url` | Kaggle API base URL | `https://www.kaggle.com` |
+
+    If `username` and `key` are not set via bundlebase config, they fall back to the standard Kaggle credentials file at `~/.kaggle/kaggle.json`. You can create this file by running `kaggle` CLI setup or by generating an API token from your [Kaggle account settings](https://www.kaggle.com/settings).
+
+!!! note
+    Files are always copied into the bundle since Kaggle files are downloaded from a remote API.
+
+=== "Async API"
+
+    ```python
+    # All files from a dataset
+    bundle = await bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon"
+    })
+
+    # Only CSV files
+    bundle = await bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon",
+        "patterns": "*.csv"
+    })
+
+    # With sync mode to detect updates
+    bundle = await bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon",
+        "mode": "update"
+    })
+    ```
+
+=== "Sync API"
+
+    ```python
+    # All files from a dataset
+    bundle = bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon"
+    })
+
+    # Only CSV files
+    bundle = bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon",
+        "patterns": "*.csv"
+    })
+
+    # With sync mode to detect updates
+    bundle = bundle.create_source("kaggle", {
+        "dataset": "zillow/zecon",
+        "mode": "update"
+    })
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')
     ```
 
 ## Fetching Data
@@ -200,24 +295,32 @@ Discovers and attaches new files from a specific pack's sources. Returns a list 
 
     ```python
     # Fetch from base pack (default)
-    results = await c.fetch()
+    results = await bundle.fetch("base", "add")
     for result in results:
         print(f"{result.source_function}: {len(result.added)} added")
 
     # Fetch from a joined pack
-    results = await c.fetch("customers")
+    results = await bundle.fetch("customers", "add")
     ```
 
 === "Sync API"
 
     ```python
     # Fetch from base pack (default)
-    results = c.fetch()
+    results = bundle.fetch("base", "add")
     for result in results:
         print(f"{result.source_function}: {len(result.added)} added")
 
     # Fetch from a joined pack
-    results = c.fetch("customers")
+    results = bundle.fetch("customers", "add")
+    ```
+
+=== "SQL"
+
+    ```sql
+    FETCH
+
+    FETCH customers
     ```
 
 ### fetch_all()
@@ -227,7 +330,7 @@ Discovers and attaches new files from all defined sources across all packs. Retu
 === "Async API"
 
     ```python
-    results = await c.fetch_all()
+    results = await bundle.fetch_all("add")
     for result in results:
         print(f"{result.pack}/{result.source_function}: {result.total_count()} changes")
     ```
@@ -235,9 +338,15 @@ Discovers and attaches new files from all defined sources across all packs. Retu
 === "Sync API"
 
     ```python
-    results = c.fetch_all()
+    results = bundle.fetch_all("add")
     for result in results:
         print(f"{result.pack}/{result.source_function}: {result.total_count()} changes")
+    ```
+
+=== "SQL"
+
+    ```sql
+    FETCH ALL
     ```
 
 ### FetchResults
@@ -268,22 +377,20 @@ You can define sources for joined packs by specifying the `pack` parameter.
     import bundlebase as bb
 
     # Create bundle with base data
-    c = await bb.create("my/data").attach("orders.parquet")
+    bundle = await bb.create("my/data").attach("orders.parquet")
 
     # Create a join for customer data
-    c = await c.join("customers", "base.customer_id = customers.id")
+    bundle = await bundle.join("customers", "base.customer_id = customers.id")
 
     # Define a source for the customers pack
-    c = await c.create_source("remote_dir", {
+    bundle = await bundle.create_source("remote_dir", {
         "url": "s3://bucket/customers/",
         "patterns": "**/*.parquet"
     }, pack="customers")
 
     # Fetch will attach files to the customers join
-    results = await c.fetch("customers")
+    results = await bundle.fetch("customers", "add")
     print(f"Added {len(results[0].added)} customer files")
-
-    await c.commit("Added customers from S3")
     ```
 
 === "Sync API"
@@ -292,22 +399,26 @@ You can define sources for joined packs by specifying the `pack` parameter.
     import bundlebase.sync as bb
 
     # Create bundle with base data
-    c = bb.create("my/data").attach("orders.parquet")
+    bundle = bb.create("my/data").attach("orders.parquet")
 
     # Create a join for customer data
-    c = c.join("customers", "base.customer_id = customers.id")
+    bundle = bundle.join("customers", "base.customer_id = customers.id")
 
     # Define a source for the customers pack
-    c = c.create_source("remote_dir", {
+    bundle = bundle.create_source("remote_dir", {
         "url": "s3://bucket/customers/",
         "patterns": "**/*.parquet"
     }, pack="customers")
 
     # Fetch will attach files to the customers join
-    results = c.fetch("customers")
+    results = bundle.fetch("customers", "add")
     print(f"Added {len(results[0].added)} customer files")
+    ```
 
-    c.commit("Added customers from S3")
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE remote_dir WITH (url = 's3://bucket/customers/', patterns = '**/*.parquet') ON customers
     ```
 
 ## Pattern Matching
@@ -332,27 +443,27 @@ A typical workflow for incrementally loading data:
     import bundlebase as bb
 
     # Initial setup
-    c = await (bb.create("sales/data")
+    bundle = await (bb.create("sales/data")
         .create_source("remote_dir", {
             "url": "s3://company/sales/",
             "patterns": "**/*.parquet"
         }))
 
     # Initial load
-    results = await c.fetch()
+    results = await bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     print(f"Initial load: {total_added} files")
-    await c.commit("Initial data load")
+    await bundle.commit("Initial data load")
 
     # ... time passes, new files appear in S3 ...
 
     # Incremental load (only attaches new files)
-    c = await bb.open("sales/data")
-    results = await c.fetch()
+    bundle = await bb.open("sales/data")
+    results = await bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     if total_added > 0:
         print(f"Loaded {total_added} new files")
-        await c.commit("Incremental data load")
+        await bundle.commit("Incremental data load")
     ```
 
 === "Sync API"
@@ -361,25 +472,25 @@ A typical workflow for incrementally loading data:
     import bundlebase.sync as bb
 
     # Initial setup
-    c = (bb.create("sales/data")
+    bundle = (bb.create("sales/data")
         .create_source("remote_dir", {
             "url": "s3://company/sales/",
             "patterns": "**/*.parquet"
         }))
 
     # Initial load
-    results = c.fetch()
+    results = bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     print(f"Initial load: {total_added} files")
-    c.commit("Initial data load")
+    bundle.commit("Initial data load")
 
     # ... time passes, new files appear in S3 ...
 
     # Incremental load (only attaches new files)
-    c = bb.open("sales/data")
-    results = c.fetch()
+    bundle = bb.open("sales/data")
+    results = bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     if total_added > 0:
         print(f"Loaded {total_added} new files")
-        c.commit("Incremental data load")
+        bundle.commit("Incremental data load")
     ```

@@ -2,6 +2,7 @@
 //!
 //! Supports: file://, s3://, gs://, azure://, az://, memory://, empty://
 
+use crate::bundle_config::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::io::registry::IOFactory;
 use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
 use crate::io::util::{join_path, join_url};
@@ -15,7 +16,6 @@ use futures::stream::{BoxStream, StreamExt, TryStreamExt};
 use object_store::path::Path as ObjectPath;
 use object_store::{ObjectMeta, ObjectStore};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::env::current_dir;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
@@ -23,6 +23,61 @@ use std::sync::Arc;
 use url::Url;
 
 use super::tar::TarObjectStore;
+
+// ── Scope constants ─────────────────────────────────────────────────
+
+config_scopes!(object_store_scopes, {
+    pub const S3_SCOPE: ConfigScope = BundleConfig::register_scope("s3");
+    pub const GCS_SCOPE: ConfigScope = BundleConfig::register_scope("gs");
+    pub const AZURE_SCOPE: ConfigScope = BundleConfig::register_scope("azure");
+});
+
+// ── S3 configuration keys ───────────────────────────────────────────
+
+config_keys!(s3_keys, {
+    pub const S3_REGION_CFG: ConfigKey = S3_SCOPE.define("region");
+    pub const S3_ACCESS_KEY_ID_CFG: ConfigKey = S3_SCOPE.define("access_key_id");
+    pub const S3_ENDPOINT_CFG: ConfigKey = S3_SCOPE.define("endpoint");
+    pub const S3_BUCKET_CFG: ConfigKey = S3_SCOPE.define("bucket");
+    pub const S3_ALLOW_HTTP_CFG: ConfigKey = S3_SCOPE.define("allow_http");
+    pub const S3_SKIP_SIGNATURE_CFG: ConfigKey = S3_SCOPE.define("skip_signature");
+    pub const S3_VIRTUAL_HOSTED_STYLE_REQUEST_CFG: ConfigKey = S3_SCOPE.define("virtual_hosted_style_request");
+    pub const S3_IMDSV1_FALLBACK_CFG: ConfigKey = S3_SCOPE.define("imdsv1_fallback");
+    pub const S3_METADATA_ENDPOINT_CFG: ConfigKey = S3_SCOPE.define("metadata_endpoint");
+    pub const S3_CONTAINER_CREDENTIALS_RELATIVE_URI_CFG: ConfigKey = S3_SCOPE.define("container_credentials_relative_uri");
+    pub const S3_UNSIGNED_PAYLOAD_CFG: ConfigKey = S3_SCOPE.define("unsigned_payload");
+    pub const S3_CHECKSUM_ALGORITHM_CFG: ConfigKey = S3_SCOPE.define("checksum_algorithm");
+    pub const S3_COPY_IF_NOT_EXISTS_CFG: ConfigKey = S3_SCOPE.define("copy_if_not_exists");
+    pub const S3_CONDITIONAL_PUT_CFG: ConfigKey = S3_SCOPE.define("conditional_put");
+    pub const S3_SECRET_ACCESS_KEY_CFG: ConfigKey = S3_SCOPE.define_secure("secret_access_key");
+    pub const S3_SESSION_TOKEN_CFG: ConfigKey = S3_SCOPE.define_secure("session_token");
+    pub const S3_TOKEN_CFG: ConfigKey = S3_SCOPE.define_secure("token");
+});
+
+// ── GCS configuration keys ──────────────────────────────────────────
+
+config_keys!(gcs_keys, {
+    pub const GCS_BUCKET_CFG: ConfigKey = GCS_SCOPE.define("bucket");
+    pub const GCS_SERVICE_ACCOUNT_PATH_CFG: ConfigKey = GCS_SCOPE.define("service_account_path");
+    pub const GCS_APPLICATION_CREDENTIALS_CFG: ConfigKey = GCS_SCOPE.define("application_credentials");
+    pub const GCS_SERVICE_ACCOUNT_KEY_CFG: ConfigKey = GCS_SCOPE.define_secure("service_account_key");
+});
+
+// ── Azure configuration keys ────────────────────────────────────────
+
+config_keys!(azure_keys, {
+    pub const AZURE_ACCOUNT_CFG: ConfigKey = AZURE_SCOPE.define("account");
+    pub const AZURE_CONTAINER_CFG: ConfigKey = AZURE_SCOPE.define("container");
+    pub const AZURE_CLIENT_ID_CFG: ConfigKey = AZURE_SCOPE.define("client_id");
+    pub const AZURE_TENANT_ID_CFG: ConfigKey = AZURE_SCOPE.define("tenant_id");
+    pub const AZURE_AUTHORITY_HOST_CFG: ConfigKey = AZURE_SCOPE.define("authority_host");
+    pub const AZURE_USE_EMULATOR_CFG: ConfigKey = AZURE_SCOPE.define("use_emulator");
+    pub const AZURE_ACCESS_KEY_CFG: ConfigKey = AZURE_SCOPE.define_secure("access_key");
+    pub const AZURE_SAS_TOKEN_CFG: ConfigKey = AZURE_SCOPE.define_secure("sas_token");
+    pub const AZURE_BEARER_TOKEN_CFG: ConfigKey = AZURE_SCOPE.define_secure("bearer_token");
+    pub const AZURE_CLIENT_SECRET_CFG: ConfigKey = AZURE_SCOPE.define_secure("client_secret");
+});
+
 
 // ============================================================================
 // URL and ObjectStore utilities
@@ -39,7 +94,7 @@ pub(crate) fn compute_store_url(url: &Url) -> ObjectStoreUrl {
 /// * `config` - Optional configuration to apply to the ObjectStore
 pub(crate) fn parse_url(
     url: &Url,
-    config: &HashMap<String, String>,
+    config: &BundleConfig,
 ) -> Result<(Arc<dyn ObjectStore>, ObjectPath), BundlebaseError> {
     // Handle tar:// scheme - format is tar:///path/to/archive.tar or tar:///path/to/archive.tar/internal/path
     if url.scheme() == "tar" {
@@ -89,37 +144,40 @@ pub(crate) fn parse_url(
             return Err("Memory URL must be memory:///<path>".into());
         }
         Ok((get_memory_store(), url.path().into()))
-    } else if !config.is_empty() {
-        // Use config to build ObjectStore
-        let store = build_object_store(url, config)?;
-        let path = ObjectPath::from(url.path());
-        Ok((Arc::new(store), path))
     } else {
-        // Fallback to object_store::parse_url when no config
-        let (store, path) = object_store::parse_url(url)?;
+        // Try building with config; the builder will use config.get() per key
+        let url_str = url.as_str();
+        let store = build_object_store(url, url_str, config)?;
+        let path = ObjectPath::from(url.path());
         Ok((Arc::new(store), path))
     }
 }
 
-/// Build an ObjectStore with configuration
+/// Build an ObjectStore with configuration.
 ///
 /// Starts with Builder::from_env() to pick up environment variables,
-/// then applies config values on top (config overrides env vars).
+/// then applies config values on top via `config.get(key, &scope)`.
+/// TODO: use config first, then fallback to defaults
 fn build_object_store(
     url: &Url,
-    config: &HashMap<String, String>,
+    url_str: &str,
+    config: &BundleConfig,
 ) -> Result<Box<dyn ObjectStore>, BundlebaseError> {
+    use crate::bundle_config::Scope;
     use object_store::aws::AmazonS3Builder;
     use object_store::azure::MicrosoftAzureBuilder;
     use object_store::gcp::GoogleCloudStorageBuilder;
+
+    let scope = Scope::try_from(url_str)?;
 
     match url.scheme() {
         "s3" => {
             let mut builder = AmazonS3Builder::from_env().with_url(url.as_str());
 
-            // Apply config values
-            for (key, value) in config {
-                builder = builder.with_config(key.parse()?, value);
+            for spec in s3_keys() {
+                if let Some(value) = config.get(&scope, spec)? {
+                    builder = builder.with_config(spec.key.parse()?, value);
+                }
             }
 
             Ok(Box::new(builder.build()?))
@@ -127,9 +185,10 @@ fn build_object_store(
         "gs" => {
             let mut builder = GoogleCloudStorageBuilder::from_env().with_url(url.as_str());
 
-            // Apply config values
-            for (key, value) in config {
-                builder = builder.with_config(key.parse()?, value);
+            for spec in gcs_keys() {
+                if let Some(value) = config.get(&scope, spec)? {
+                    builder = builder.with_config(spec.key.parse()?, value);
+                }
             }
 
             Ok(Box::new(builder.build()?))
@@ -137,9 +196,10 @@ fn build_object_store(
         "azure" | "az" => {
             let mut builder = MicrosoftAzureBuilder::from_env().with_url(url.as_str());
 
-            // Apply config values
-            for (key, value) in config {
-                builder = builder.with_config(key.parse()?, value);
+            for spec in azure_keys() {
+                if let Some(value) = config.get(&scope, spec)? {
+                    builder = builder.with_config(spec.key.parse()?, value);
+                }
             }
 
             Ok(Box::new(builder.build()?))
@@ -177,8 +237,7 @@ impl Debug for ObjectStoreFile {
 impl ObjectStoreFile {
     /// Create an IOFile from a URL.
     pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<ObjectStoreFile, BundlebaseError> {
-        let config_map = config.get_config_for_url(url);
-        let (store, path) = parse_url(url, &config_map)?;
+        let (store, path) = parse_url(url, &config)?;
         Self::new(url, store, &path)
     }
 
@@ -433,8 +492,7 @@ impl ObjectStoreDir {
             return Err(format!("Empty URL must be {}<path>", EMPTY_URL).into());
         }
 
-        let config_map = config.get_config_for_url(url);
-        let (store, path) = parse_url(url, &config_map)?;
+        let (store, path) = parse_url(url, &config)?;
 
         ObjectStoreDir::new(url, store, &path, config)
     }
@@ -655,7 +713,7 @@ mod tests {
     async fn test_read_write() {
         let file = random_memory_file("test.json");
         // Convert to IOFile
-        let io_file = ObjectStoreFile::from_url(file.url(), BundleConfig::default().into()).unwrap();
+        let io_file = ObjectStoreFile::from_url(file.url(), BundleConfig::new(None).unwrap().into()).unwrap();
 
         assert!(!io_file.exists().await.unwrap());
 
@@ -670,7 +728,7 @@ mod tests {
     async fn test_null() {
         let file = ObjectStoreFile::from_url(
             &Url::parse("empty:///test.json").unwrap(),
-            BundleConfig::default().into(),
+            BundleConfig::new(None).unwrap().into(),
         )
         .unwrap();
         assert!(!file.exists().await.unwrap());
@@ -689,7 +747,7 @@ mod tests {
     #[case("s3://test", "")]
     #[case("s3://test/path/here", "path/here")]
     fn test_from_str(#[case] input: &str, #[case] expected_path: &str) {
-        let dir = ObjectStoreDir::from_str(input, BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_str(input, BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(dir.url.to_string(), input);
         assert_eq!(dir.path.to_string(), expected_path);
     }
@@ -697,16 +755,16 @@ mod tests {
     #[test]
     fn test_from_string_complex() {
         assert!(
-            ObjectStoreDir::from_str("memory://bucket/test", BundleConfig::default().into()).is_err(),
+            ObjectStoreDir::from_str("memory://bucket/test", BundleConfig::new(None).unwrap().into()).is_err(),
             "Memory must start with :///"
         );
 
         let dir =
-            ObjectStoreDir::from_str("memory:///test/../test2", BundleConfig::default().into()).unwrap();
+            ObjectStoreDir::from_str("memory:///test/../test2", BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(dir.path.to_string(), "test2");
         assert_eq!(dir.url.to_string(), "memory:///test2");
 
-        let dir = ObjectStoreDir::from_str("relative/path", BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_str("relative/path", BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(dir.url.to_string(), file_url("relative/path").unwrap().to_string());
     }
 
@@ -727,7 +785,7 @@ mod tests {
         #[case] expected_url: Url,
         #[case] expected_path: &str,
     ) {
-        let dir = ObjectStoreDir::from_url(&base, BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_url(&base, BundleConfig::new(None).unwrap().into()).unwrap();
         let subdir = dir.io_subdir(subdir).unwrap();
         assert_eq!(subdir.url, expected_url);
         assert_eq!(subdir.path.to_string(), expected_path);
@@ -735,7 +793,7 @@ mod tests {
 
     #[test]
     fn test_file() {
-        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::new(None).unwrap().into()).unwrap();
         let file = dir.io_file("other").unwrap();
         assert_eq!(file.url().to_string(), "memory:///test/other");
 
@@ -745,13 +803,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_files() {
-        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_str("memory:///test", BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(0, dir.list_files().await.unwrap().len())
     }
 
     #[tokio::test]
     async fn test_null_url() {
-        let dir = ObjectStoreDir::from_str(EMPTY_URL, BundleConfig::default().into()).unwrap();
+        let dir = ObjectStoreDir::from_str(EMPTY_URL, BundleConfig::new(None).unwrap().into()).unwrap();
         assert_eq!(0, dir.list_files().await.unwrap().len());
     }
 

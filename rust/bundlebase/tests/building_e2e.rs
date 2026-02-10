@@ -16,8 +16,8 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
 
     // Create and commit first bundle
     let mut c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
-    assert_eq!(None, c1.bundle.from());
-    assert_eq!(temp1.url(), c1.url());
+    assert_eq!(None, c1.bundle().from());
+    assert_eq!(*temp1.url(), c1.url());
     c1.attach(test_datafile("customers-0-100.csv"), None).await?;
     c1.commit("Initial commit").await?;
 
@@ -25,22 +25,22 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     let init_commit: Option<InitCommit> = read_yaml(init_commit.as_ref()).await?;
     let init_commit = init_commit.expect("Failed to read init commit");
     assert_eq!(None, init_commit.from);
-    assert_eq!(None, c1.bundle.from());
+    assert_eq!(None, c1.bundle().from());
 
     // Open first bundle and extend to new directory
     let opened1 = Bundle::open(&temp1.url().to_string(), None).await?;
     assert_eq!(opened1.operations().len(), 1);
     assert_eq!(None, opened1.from());
-    assert_eq!(temp1.url(), opened1.url());
+    assert_eq!(*temp1.url(), opened1.url());
 
     let mut c2 = opened1.extend(Some(&temp2.url().to_string()))?;
-    assert_eq!(Some(temp1.url()), c2.bundle.from());
-    assert_eq!(temp2.url(), c2.url());
+    assert_eq!(Some(temp1.url()), c2.bundle().from().as_ref());
+    assert_eq!(*temp2.url(), c2.url());
 
     // Add operation to extended bundle
     c2.drop_column("country").await?;
     c2.commit("Remove country column").await?;
-    assert_eq!(Some(temp1.url()), c2.bundle.from());
+    assert_eq!(Some(temp1.url()), c2.bundle().from().as_ref());
 
     let init_commit = temp2.subdir(META_DIR)?.file(INIT_FILENAME)?;
     let init_commit: Option<InitCommit> = read_yaml(init_commit.as_ref()).await?;
@@ -49,7 +49,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
 
     // Open the extended bundle
     let reopened = Bundle::open(&temp2.url().to_string(), None).await?;
-    assert_eq!(Some(temp1.url()), c2.bundle.from());
+    assert_eq!(Some(temp1.url()), c2.bundle().from().as_ref());
     assert_eq!(reopened.url(), c2.url());
 
     // Verify the schema doesn't have country
@@ -138,8 +138,8 @@ async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
     bundle.drop_column("country").await?;
 
-    assert_eq!(bundle.bundle.operations().len(), 2);
-    assert_eq!(bundle.bundle.operations().len(), 2);
+    assert_eq!(bundle.bundle().operations().len(), 2);
+    assert_eq!(bundle.bundle().operations().len(), 2);
 
     bundle.commit("Test commit").await?;
 
@@ -166,7 +166,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
     // Read source data and write to local location
     let source_obj =
-        readable_file_from_url(&Url::parse(source_file)?, BundleConfig::default().into())?;
+        readable_file_from_url(&Url::parse(source_file)?, BundleConfig::new(None)?.into())?;
     let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?
