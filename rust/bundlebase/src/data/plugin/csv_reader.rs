@@ -289,11 +289,13 @@ impl DataReader for CsvReader {
         &self,
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn crate::io::IOReadFile>>, BundlebaseError> {
+        use crate::object_id::ObjectIdAlias;
+        // Use ObjectIdAlias(0) as placeholder; the actual ref is remapped by RowIdStreamAdapter
         let index_file = RowIdIndex::new()
             .build(
                 self.inner.file().as_object_store_file(),
                 data_dir,
-                &self.block_id(),
+                ObjectIdAlias::from(0u16),
                 true,
             )
             .await?;
@@ -365,7 +367,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let result = plugin
-            .reader("file:///test.parquet", &1.into(), &*binding, None, None, None, None)
+            .reader("file:///test.parquet", &ObjectId::generate(), &*binding, None, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -379,7 +381,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let invalid_reader = plugin
-            .reader("file:///invalid.csv", &1.into(), &*binding, None, None, None, None)
+            .reader("file:///invalid.csv", &ObjectId::generate(), &*binding, None, None, None, None)
             .await?;
 
         assert!(invalid_reader.is_some());
@@ -403,7 +405,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("customers-0-100.csv"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -446,7 +448,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("customers-0-100.csv"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 Some(schema),
                 None,
@@ -507,7 +509,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("customers-0-100.csv"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -554,7 +556,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("customers-0-100.csv"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -603,9 +605,11 @@ mod tests {
     #[tokio::test]
     async fn test_extract_rowids_stream() -> Result<(), BundlebaseError> {
         use crate::BundleBuilder;
+        use crate::object_id::ObjectIdAlias;
 
         let plugin = CsvPlugin::default();
-        let block_id = ObjectId::from(1);
+        let block_id = ObjectId::generate();
+        let block_ref = ObjectIdAlias::from(5u16);
 
         // Create a bundle with a writable memory-based data directory
         let builder = BundleBuilder::create("memory:///test_csv_extract", None).await?;
@@ -644,11 +648,10 @@ mod tests {
             .unwrap();
 
         // Extract rowids stream
-        let mut stream = reader.extract_rowids_stream(binding.ctx(), None).await?;
+        let mut stream = reader.extract_rowids_stream(block_ref, binding.ctx(), None).await?;
 
         let mut total_rows = 0;
         let mut last_offset = 0u64;
-        let block_id = reader.block_id();
 
         while let Some(result) = stream.next().await {
             let rowid_batch = result?;
@@ -662,12 +665,12 @@ mod tests {
                 "Row IDs count should match batch row count"
             );
 
-            // Verify each RowId has correct block_id and monotonically increasing offsets
+            // Verify each RowId has correct block_ref and monotonically increasing offsets
             for (i, row_id) in rowid_batch.row_ids.iter().enumerate() {
                 assert_eq!(
-                    row_id.block_id(),
-                    block_id,
-                    "Row {} should have correct block_id",
+                    row_id.block_ref(),
+                    block_ref,
+                    "Row {} should have correct block_ref",
                     i
                 );
 
@@ -698,9 +701,10 @@ mod tests {
     #[tokio::test]
     async fn test_extract_rowids_stream_with_projection() -> Result<(), BundlebaseError> {
         use crate::BundleBuilder;
+        use crate::object_id::ObjectIdAlias;
 
         let plugin = CsvPlugin::default();
-        let block_id = ObjectId::from(1);
+        let block_id = ObjectId::generate();
 
         // Create a bundle with a writable memory-based data directory
         let builder = BundleBuilder::create("memory:///test_csv_extract_proj", None).await?;
@@ -745,8 +749,9 @@ mod tests {
         let projection = vec![0, 1, 2];
 
         // Extract rowids stream with projection
+        let block_ref = ObjectIdAlias::from(5u16);
         let mut stream = reader
-            .extract_rowids_stream(binding.ctx(), Some(&projection))
+            .extract_rowids_stream(block_ref, binding.ctx(), Some(&projection))
             .await?;
 
         let mut total_rows = 0;
@@ -790,7 +795,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("newlines-in-values.csv"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -825,7 +830,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("customers-0-100.csv"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -862,7 +867,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("newlines-in-values.csv"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -898,7 +903,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("newlines-in-values.csv"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -915,7 +920,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("newlines-in-values.csv"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 Some(schema),
                 None,
@@ -957,7 +962,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("backslash-in-values.csv"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -1013,7 +1018,7 @@ mod tests {
         let plugin = CsvPlugin::default();
         let binding = Bundle::empty(None).await?;
         let reader = plugin
-            .reader(&csv_url, &1.into(), &*binding, None, None, None, None)
+            .reader(&csv_url, &ObjectId::generate(), &*binding, None, None, None, None)
             .await?
             .unwrap();
 
@@ -1078,7 +1083,7 @@ mod tests {
         let plugin = CsvPlugin::default();
         let binding = Bundle::empty(None).await?;
         let reader = plugin
-            .reader(url.as_str(), &1.into(), &*binding, None, None, None, None)
+            .reader(url.as_str(), &ObjectId::generate(), &*binding, None, None, None, None)
             .await?
             .unwrap();
 
@@ -1139,7 +1144,7 @@ mod tests {
         // Now test with CsvReader which has the retry logic
         let plugin = CsvPlugin::default();
         let reader = plugin
-            .reader(&csv_url_str, &1.into(), &*binding, None, None, None, None)
+            .reader(&csv_url_str, &ObjectId::generate(), &*binding, None, None, None, None)
             .await?
             .unwrap();
 

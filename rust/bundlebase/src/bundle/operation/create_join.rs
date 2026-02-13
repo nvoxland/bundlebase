@@ -64,7 +64,6 @@ impl Operation for CreateJoinOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_describe() {
         let op = CreateJoinOp {
@@ -78,7 +77,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let pack_id: ObjectId = "a5".try_into().unwrap();
+        let pack_id: ObjectId = "00000000000000a5".try_into().unwrap();
         let op = CreateJoinOp {
             id: pack_id,
             name: "customers".to_string(),
@@ -87,7 +86,7 @@ mod tests {
         };
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        assert!(serialized.contains("id: a5"));
+        assert!(serialized.contains("id: 00000000000000a5"));
         assert!(serialized.contains("name: customers"));
         assert!(serialized.contains("joinType: left"));
         assert!(serialized.contains("expression: base.id = customers.id"));

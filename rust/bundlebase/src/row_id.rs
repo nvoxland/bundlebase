@@ -1,6 +1,6 @@
 //! RowId module for row position encoding and batch handling.
 
-use crate::object_id::ObjectId;
+use crate::object_id::ObjectIdAlias;
 use crate::BundlebaseError;
 use arrow::record_batch::RecordBatch;
 use futures::stream::Stream;
@@ -9,24 +9,24 @@ use std::pin::Pin;
 
 /// RowId encodes row position and metadata as a u64:
 /// - Bits 63-60 (4 bits): Reserved (always 0)
-/// - Bits 59-52 (8 bits): BlockId (identifies data source)
-/// - Bits 51-37 (15 bits): Reserved (always 0)
+/// - Bits 59-44 (16 bits): ObjectIdAlias (compact reference to a block)
+/// - Bits 43-37 (7 bits): Reserved (always 0)
 /// - Bits 36-32 (5 bits): Row size in megabytes, rounded up (0-31 MB)
 /// - Bits 31-0 (32 bits): Byte offset in file (up to 4 GB)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RowId(u64);
 
 impl RowId {
-    /// Create a new RowId from a BlockId, byte offset, and row size
+    /// Create a new RowId from a block ref, byte offset, and row size
     ///
     /// # Arguments
-    /// * `block_id` - BlockId identifying the data source
+    /// * `block_ref` - Compact reference identifying the data source
     /// * `offset` - Byte offset where the row starts in the file
     /// * `size_bytes` - Size of the row in bytes
     ///
     /// # Returns
     /// A new RowId with size rounded up to the nearest MB and capped at 31 MB
-    pub fn new(block_id: &ObjectId, offset: u64, size_bytes: usize) -> Self {
+    pub fn new(block_ref: ObjectIdAlias, offset: u64, size_bytes: usize) -> Self {
         // Round up bytes to whole MB, cap at 31 MB for 5-bit field
         let size_mb = if size_bytes == 0 {
             0
@@ -37,11 +37,11 @@ impl RowId {
         // Mask offset to 32 bits (bits 0-31)
         let offset = offset & 0x0000_0000_FFFF_FFFF;
 
-        // Get block_id as u8
-        let block_id_val = u8::from(*block_id) as u64;
+        // Get block_ref as u16
+        let block_ref_val = block_ref.as_u16() as u64;
 
-        // Pack: [4 reserved (0)][8 block_id][15 reserved (0)][5 size][32 offset]
-        let packed = (block_id_val << 52) | (size_mb << 32) | offset;
+        // Pack: [4 reserved (0)][16 block_ref][7 reserved (0)][5 size][32 offset]
+        let packed = (block_ref_val << 44) | (size_mb << 32) | offset;
         RowId(packed)
     }
 
@@ -50,10 +50,18 @@ impl RowId {
         self.0 & 0x0000_0000_FFFF_FFFF
     }
 
-    /// Extract the BlockId from this RowId
-    pub fn block_id(&self) -> ObjectId {
-        let id = ((self.0 >> 52) & 0xFF) as u8;
-        ObjectId::from(id)
+    /// Extract the ObjectIdAlias from this RowId
+    pub fn block_ref(&self) -> ObjectIdAlias {
+        let id = ((self.0 >> 44) & 0xFFFF) as u16;
+        ObjectIdAlias::from(id)
+    }
+
+    /// Replace the block_ref bits with a new ObjectIdAlias, returning a new RowId
+    pub fn with_block_ref(self, new_ref: ObjectIdAlias) -> RowId {
+        // Clear the block_ref bits (59-44) and set the new value
+        let cleared = self.0 & !(0xFFFF_u64 << 44);
+        let new_val = (new_ref.as_u16() as u64) << 44;
+        RowId(cleared | new_val)
     }
 
     /// Extract the size in megabytes from this RowId
@@ -90,7 +98,7 @@ impl std::fmt::Display for RowId {
         write!(
             f,
             "RowId(source={}, offset={}, size={}MB)",
-            self.block_id().as_u8(),
+            self.block_ref().as_u16(),
             self.offset(),
             self.size_mb()
         )
@@ -139,9 +147,9 @@ mod tests {
 
     #[test]
     fn test_rowid_new_zero_size() {
-        let block_id = ObjectId::from(5u8);
-        let row_id = RowId::new(&block_id, 1000, 0);
-        assert_eq!(row_id.block_id(), block_id);
+        let block_ref = ObjectIdAlias::from(5u16);
+        let row_id = RowId::new(block_ref, 1000, 0);
+        assert_eq!(row_id.block_ref(), block_ref);
         assert_eq!(row_id.offset(), 1000);
         assert_eq!(row_id.size_mb(), 0);
     }
@@ -149,18 +157,18 @@ mod tests {
     #[test]
     fn test_rowid_new_small_row() {
         // 500 bytes should round up to 1 MB
-        let block_id = ObjectId::from(10u8);
-        let row_id = RowId::new(&block_id, 1000, 500);
-        assert_eq!(row_id.block_id(), block_id);
+        let block_ref = ObjectIdAlias::from(10u16);
+        let row_id = RowId::new(block_ref, 1000, 500);
+        assert_eq!(row_id.block_ref(), block_ref);
         assert_eq!(row_id.offset(), 1000);
         assert_eq!(row_id.size_mb(), 1);
     }
 
     #[test]
     fn test_rowid_new_exact_mb() {
-        let block_id = ObjectId::from(20u8);
-        let row_id = RowId::new(&block_id, 1000, 1_048_576);
-        assert_eq!(row_id.block_id(), block_id);
+        let block_ref = ObjectIdAlias::from(20u16);
+        let row_id = RowId::new(block_ref, 1000, 1_048_576);
+        assert_eq!(row_id.block_ref(), block_ref);
         assert_eq!(row_id.offset(), 1000);
         assert_eq!(row_id.size_mb(), 1);
     }
@@ -168,9 +176,9 @@ mod tests {
     #[test]
     fn test_rowid_new_large_row() {
         // 5.5 MB should round up to 6 MB
-        let block_id = ObjectId::from(30u8);
-        let row_id = RowId::new(&block_id, 2000, 5_767_168);
-        assert_eq!(row_id.block_id(), block_id);
+        let block_ref = ObjectIdAlias::from(30u16);
+        let row_id = RowId::new(block_ref, 2000, 5_767_168);
+        assert_eq!(row_id.block_ref(), block_ref);
         assert_eq!(row_id.offset(), 2000);
         assert_eq!(row_id.size_mb(), 6);
     }
@@ -178,28 +186,28 @@ mod tests {
     #[test]
     fn test_rowid_new_exceeds_max() {
         // 32 MB should cap at 31 MB
-        let block_id = ObjectId::from(40u8);
-        let row_id = RowId::new(&block_id, 3000, 33_554_432);
-        assert_eq!(row_id.block_id(), block_id);
+        let block_ref = ObjectIdAlias::from(40u16);
+        let row_id = RowId::new(block_ref, 3000, 33_554_432);
+        assert_eq!(row_id.block_ref(), block_ref);
         assert_eq!(row_id.offset(), 3000);
         assert_eq!(row_id.size_mb(), 31);
     }
 
     #[test]
     fn test_rowid_offset_extraction() {
-        let block_id = ObjectId::from(50u8);
+        let block_ref = ObjectIdAlias::from(50u16);
         // Max 32-bit offset (4 GB)
         let max_offset = 0x0000_0000_FFFF_FFFF;
-        let row_id = RowId::new(&block_id, max_offset, 1000);
+        let row_id = RowId::new(block_ref, max_offset, 1000);
         assert_eq!(row_id.offset(), max_offset);
     }
 
     #[test]
     fn test_rowid_size_mb_extraction() {
-        let block_id = ObjectId::from(60u8);
+        let block_ref = ObjectIdAlias::from(60u16);
         for size_mb in 0..=31 {
             let size_bytes = (size_mb as usize) * 1_048_576;
-            let row_id = RowId::new(&block_id, 1000, size_bytes);
+            let row_id = RowId::new(block_ref, 1000, size_bytes);
             assert_eq!(row_id.size_mb(), size_mb);
         }
     }
@@ -208,8 +216,8 @@ mod tests {
     fn test_rowid_reserved_bits_zero() {
         // Verify that bits 60-63 are always 0
         for offset in [0, 100, 1000] {
-            let block_id = ObjectId::from(70u8);
-            let row_id = RowId::new(&block_id, offset, 1_000_000);
+            let block_ref = ObjectIdAlias::from(70u16);
+            let row_id = RowId::new(block_ref, offset, 1_000_000);
             let high_bits = (row_id.as_u64() >> 60) & 0xF;
             assert_eq!(high_bits, 0, "Reserved bits should be 0");
         }
@@ -218,19 +226,22 @@ mod tests {
     #[test]
     fn test_rowid_max_offset() {
         // Test maximum 32-bit offset (4 GB)
-        let block_id = ObjectId::from(80u8);
+        let block_ref = ObjectIdAlias::from(80u16);
         let max_offset = 0x0000_0000_FFFF_FFFF;
-        let row_id = RowId::new(&block_id, max_offset, 1_048_576);
+        let row_id = RowId::new(block_ref, max_offset, 1_048_576);
         assert_eq!(row_id.offset(), max_offset);
     }
 
     #[test]
-    fn test_rowid_block_id_extraction() {
-        // Test all possible BlockId values
-        for id in 0..=255u8 {
-            let block_id = ObjectId::from(id);
-            let row_id = RowId::new(&block_id, 1000, 2_000_000);
-            assert_eq!(row_id.block_id(), block_id);
+    fn test_rowid_block_ref_extraction() {
+        // Test representative u16 ObjectIdAlias values
+        let test_ids: Vec<u16> = (0..=255)
+            .chain([256, 1000, 10000, 32768, 65535].iter().copied())
+            .collect();
+        for id in test_ids {
+            let block_ref = ObjectIdAlias::from(id);
+            let row_id = RowId::new(block_ref, 1000, 2_000_000);
+            assert_eq!(row_id.block_ref(), block_ref, "Failed for id={}", id);
         }
     }
 
@@ -243,8 +254,8 @@ mod tests {
 
     #[test]
     fn test_rowid_into_u64_conversion() {
-        let block_id = ObjectId::from(90u8);
-        let row_id = RowId::new(&block_id, 2000, 2_000_000);
+        let block_ref = ObjectIdAlias::from(90u16);
+        let row_id = RowId::new(block_ref, 2000, 2_000_000);
         let value: u64 = row_id.into();
         assert_eq!(value, row_id.as_u64());
     }
@@ -252,8 +263,8 @@ mod tests {
     #[test]
     fn test_rowid_size_bytes_estimate() {
         // 5_000_000 bytes = 4.768... MB, rounds up to 5 MB
-        let block_id = ObjectId::from(100u8);
-        let row_id = RowId::new(&block_id, 1000, 5_000_000);
+        let block_ref = ObjectIdAlias::from(100u16);
+        let row_id = RowId::new(block_ref, 1000, 5_000_000);
         let estimated = row_id.size_bytes();
         // Should be 5 MB * 1_048_576 bytes
         assert_eq!(estimated, 5 * 1_048_576);
@@ -261,8 +272,8 @@ mod tests {
 
     #[test]
     fn test_rowid_clone_and_copy() {
-        let block_id = ObjectId::from(110u8);
-        let original = RowId::new(&block_id, 2000, 2_000_000);
+        let block_ref = ObjectIdAlias::from(110u16);
+        let original = RowId::new(block_ref, 2000, 2_000_000);
         let cloned = original.clone();
         let copied = original;
 
@@ -272,12 +283,12 @@ mod tests {
 
     #[test]
     fn test_rowid_equality() {
-        let block_id1 = ObjectId::from(120u8);
-        let block_id2 = ObjectId::from(121u8);
+        let block_ref1 = ObjectIdAlias::from(120u16);
+        let block_ref2 = ObjectIdAlias::from(121u16);
 
-        let row_id1 = RowId::new(&block_id1, 2000, 2_000_000);
-        let row_id2 = RowId::new(&block_id1, 2000, 2_000_000);
-        let row_id3 = RowId::new(&block_id2, 2000, 2_000_000);
+        let row_id1 = RowId::new(block_ref1, 2000, 2_000_000);
+        let row_id2 = RowId::new(block_ref1, 2000, 2_000_000);
+        let row_id3 = RowId::new(block_ref2, 2000, 2_000_000);
 
         assert_eq!(row_id1, row_id2);
         assert_ne!(row_id1, row_id3);
@@ -287,13 +298,25 @@ mod tests {
     fn test_rowid_hash() {
         use std::collections::HashSet;
 
-        let block_id = ObjectId::from(130u8);
-        let row_id1 = RowId::new(&block_id, 2000, 2_000_000);
-        let row_id2 = RowId::new(&block_id, 2000, 2_000_000);
+        let block_ref = ObjectIdAlias::from(130u16);
+        let row_id1 = RowId::new(block_ref, 2000, 2_000_000);
+        let row_id2 = RowId::new(block_ref, 2000, 2_000_000);
 
         let mut set = HashSet::new();
         set.insert(row_id1);
         assert!(set.contains(&row_id2));
+    }
+
+    #[test]
+    fn test_rowid_with_block_ref() {
+        let ref1 = ObjectIdAlias::from(10u16);
+        let ref2 = ObjectIdAlias::from(99u16);
+        let row_id = RowId::new(ref1, 500, 1024);
+
+        let remapped = row_id.with_block_ref(ref2);
+        assert_eq!(remapped.block_ref(), ref2);
+        assert_eq!(remapped.offset(), 500);
+        assert_eq!(remapped.size_mb(), row_id.size_mb());
     }
 
     // ===== RowIdBatch Tests =====

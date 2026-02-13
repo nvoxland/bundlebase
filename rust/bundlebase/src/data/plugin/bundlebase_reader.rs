@@ -233,7 +233,7 @@ mod tests {
         let result = plugin
             .reader(
                 "file:///test.csv",
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -266,7 +266,7 @@ mod tests {
         let reader = plugin
             .reader(
                 &bundlebase_url,
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,

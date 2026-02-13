@@ -94,12 +94,12 @@ impl Operation for UpdateVersionOp {
     fn allowed_on_view(&self) -> bool {
         false
     }
+
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_describe() {
         let block_id = ObjectId::generate();
@@ -112,23 +112,23 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let block_id: ObjectId = "a5".try_into().expect("Failed to create ObjectId");
+        let block_id: ObjectId = "00000000000000a5".try_into().expect("Failed to create ObjectId");
         let op = UpdateVersionOp::setup(block_id, "etag:abc123".to_string());
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        assert!(serialized.contains("block: a5"));
+        assert!(serialized.contains("block: 00000000000000a5"));
         assert!(serialized.contains("newVersion: 'etag:abc123'") || serialized.contains("newVersion: etag:abc123"));
     }
 
     #[test]
     fn test_deserialization() {
-        let yaml = r#"block: a5
+        let yaml = r#"block: 00000000000000a5
 newVersion: 'etag:abc123'
 "#;
 
         let op: UpdateVersionOp = serde_yaml_ng::from_str(yaml).expect("Failed to deserialize");
 
-        assert_eq!(op.block.to_string(), "a5");
+        assert_eq!(op.block.to_string(), "00000000000000a5");
         assert_eq!(op.new_version, "etag:abc123");
     }
 }

@@ -176,7 +176,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let result = plugin
-            .reader("file:///test.csv", &1.into(), &*binding, None, None, None, None)
+            .reader("file:///test.csv", &ObjectId::generate(), &*binding, None, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -193,7 +193,7 @@ mod tests {
         let error = plugin
             .reader(
                 "function://",
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -219,7 +219,7 @@ mod tests {
         let error = plugin
             .reader(
                 "function://invalid",
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -266,7 +266,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let reader = plugin
-            .reader("function://mock", &1.into(), &*binding, None, None, None, None)
+            .reader("function://mock", &ObjectId::generate(), &*binding, None, None, None, None)
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 

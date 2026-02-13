@@ -105,6 +105,7 @@ impl SchemaProvider for BlockSchemaProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::ObjectId;
 
     #[test]
     fn parse_block_id_non_prefixed() {

@@ -129,11 +129,13 @@ impl DataReader for JsonReader {
         &self,
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn crate::io::IOReadFile>>, BundlebaseError> {
+        use crate::object_id::ObjectIdAlias;
+        // Use ObjectIdAlias(0) as placeholder; the actual ref is remapped by RowIdStreamAdapter
         let index_file = RowIdIndex::new()
             .build(
                 self.inner.file().as_object_store_file(),
                 data_dir,
-                &self.block_id(),
+                ObjectIdAlias::from(0u16),
                 false,
             )
             .await?;
@@ -199,7 +201,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let result = plugin
-            .reader("file:///test.csv", &1.into(), &*binding, None, None, None, None)
+            .reader("file:///test.csv", &ObjectId::generate(), &*binding, None, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -213,7 +215,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let invalid_reader = plugin
-            .reader("file:///invalid.json", &1.into(), &*binding, None, None, None, None)
+            .reader("file:///invalid.json", &ObjectId::generate(), &*binding, None, None, None, None)
             .await?;
 
         assert!(
@@ -240,7 +242,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("objects.json"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -270,7 +272,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("objects.json"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 Some(schema),
                 None,
@@ -331,7 +333,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("objects.json"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,

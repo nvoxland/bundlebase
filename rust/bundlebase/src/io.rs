@@ -35,9 +35,10 @@ pub use file::{read_yaml, write_yaml, IOReadFile, IOReadWriteFile};
 pub use file_info::FileInfo;
 
 // Re-export ObjectId from data module
-pub use crate::data::ObjectId;
+pub use crate::data::{ObjectId, ObjectIdAlias};
 
 use object_store::memory::InMemory;
+use object_store::ObjectStore;
 use std::sync::{Arc, OnceLock};
 use url::Url;
 
@@ -80,6 +81,25 @@ pub fn writable_dir_from_str(
 ) -> Result<Arc<dyn IOReadWriteDir>, crate::BundlebaseError> {
     Ok(Arc::new(plugin::object_store::ObjectStoreDir::from_str(
         url, config,
+    )?))
+}
+
+/// Create a writable directory from a URL using a pre-built object store.
+///
+/// The `path` is the root path within the store. For stores created with
+/// `LocalFileSystem::new_with_prefix()`, use `ObjectPath::from("/")` since
+/// the prefix already scopes the store to the correct directory.
+///
+/// This allows wrapping the store (e.g., with `ThrottledStore`) before
+/// creating the directory, which is useful for benchmarks and testing.
+pub fn writable_dir_with_store(
+    url: &Url,
+    store: Arc<dyn ObjectStore>,
+    path: &object_store::path::Path,
+    config: Arc<crate::BundleConfig>,
+) -> Result<Arc<dyn IOReadWriteDir>, crate::BundlebaseError> {
+    Ok(Arc::new(plugin::object_store::ObjectStoreDir::new(
+        url, store, path, config,
     )?))
 }
 

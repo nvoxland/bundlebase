@@ -99,6 +99,7 @@ pub struct Bundle {
 
     /// True if this bundle is a view (has a view field in init commit)
     is_view: Arc<RwLock<bool>>,
+
 }
 
 impl Clone for Bundle {

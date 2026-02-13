@@ -72,7 +72,6 @@ impl Operation for DropJoinOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_describe() {
         let pack_id = ObjectId::generate();
@@ -82,7 +81,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let pack_id: ObjectId = "a5".try_into().unwrap();
+        let pack_id: ObjectId = "00000000000000a5".try_into().unwrap();
         let op = DropJoinOp { id: pack_id };
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
@@ -92,7 +91,7 @@ mod tests {
 
     #[test]
     fn test_deserialization() {
-        let pack_id_str = "a5";
+        let pack_id_str = "00000000000000a5";
         let yaml = format!("id: {}\n", pack_id_str);
 
         let op: DropJoinOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");

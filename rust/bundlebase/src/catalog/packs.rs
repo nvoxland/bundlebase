@@ -98,6 +98,7 @@ impl SchemaProvider for PackSchemaProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::ObjectId;
 
     #[test]
     fn parse_pack_id_non_prefixed() {

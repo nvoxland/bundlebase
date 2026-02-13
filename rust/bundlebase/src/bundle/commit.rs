@@ -605,8 +605,8 @@ changes:
             location: "memory:///test".to_string(),
             version: "v1".to_string(),
             hash: "abcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab".to_string(),
-            id: ObjectId::from(42u8),
-            pack: ObjectId::from(53u8),
+            id: ObjectId::generate(),
+            pack: ObjectId::generate(),
             layout: None,
             num_rows: Some(100),
             bytes: Some(1000),
@@ -668,11 +668,11 @@ changes:
   description: Attach block
   operations:
   - type: attachBlock
-    pack: '3b'
+    pack: '000000000000003b'
     location: memory:///test_data/userdata.parquet
     version: test-version
     hash: 0000000000000000000000000000000000000000000000000000000000000000
-    id: '2a'
+    id: '000000000000002a'
     numRows: 100
     bytes: 1000
     schema:
@@ -713,8 +713,8 @@ changes:
     location: memory:///test_data/userdata.parquet
     version: '2'
     hash: 0000000000000000000000000000000000000000000000000000000000000000
-    id: cc
-    pack: dd
+    id: '00000000000000cc'
+    pack: '00000000000000dd'
     numRows: 1000
     bytes: 113629
     schema:

@@ -226,7 +226,6 @@ impl Operation for ReplaceBlockOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_describe() {
         let block_id = ObjectId::generate();
@@ -245,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_serialization_without_source() {
-        let block_id: ObjectId = "a5".try_into().unwrap();
+        let block_id: ObjectId = "00000000000000a5".try_into().unwrap();
         let op = ReplaceBlockOp {
             id: block_id,
             new_location: "file:///new/path.csv".to_string(),
@@ -255,7 +254,7 @@ mod tests {
         };
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        assert!(serialized.contains("id: a5"));
+        assert!(serialized.contains("id: 00000000000000a5"));
         assert!(serialized.contains("newLocation: file:///new/path.csv"));
         assert!(serialized.contains("newVersion:"), "serialized: {}", serialized);
         assert!(serialized.contains("etag:abc123"), "serialized: {}", serialized);
@@ -267,8 +266,8 @@ mod tests {
 
     #[test]
     fn test_serialization_with_source() {
-        let block_id: ObjectId = "a5".try_into().unwrap();
-        let source_id: ObjectId = "b3".try_into().unwrap();
+        let block_id: ObjectId = "00000000000000a5".try_into().unwrap();
+        let source_id: ObjectId = "00000000000000b3".try_into().unwrap();
         let op = ReplaceBlockOp {
             id: block_id,
             new_location: "file:///new/path.csv".to_string(),
@@ -282,7 +281,7 @@ mod tests {
         };
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        assert!(serialized.contains("id: a5"));
+        assert!(serialized.contains("id: 00000000000000a5"));
         assert!(serialized.contains("newLocation: file:///new/path.csv"));
         assert!(serialized.contains("newVersion:"), "serialized: {}", serialized);
         assert!(serialized.contains("etag:abc123"), "serialized: {}", serialized);
@@ -294,7 +293,7 @@ mod tests {
 
     #[test]
     fn test_deserialization_without_source() {
-        let yaml = r#"id: a5
+        let yaml = r#"id: 00000000000000a5
 newLocation: file:///new/path.csv
 newVersion: 'etag:abc123'
 newHash: 0000000000000000000000000000000000000000000000000000000000000000
@@ -302,7 +301,7 @@ newHash: 0000000000000000000000000000000000000000000000000000000000000000
 
         let op: ReplaceBlockOp = serde_yaml_ng::from_str(yaml).expect("Failed to deserialize");
 
-        assert_eq!(op.id.to_string(), "a5");
+        assert_eq!(op.id.to_string(), "00000000000000a5");
         assert_eq!(op.new_location, "file:///new/path.csv");
         assert_eq!(op.new_version, "etag:abc123");
         assert_eq!(op.new_hash, "0".repeat(64));
@@ -311,25 +310,25 @@ newHash: 0000000000000000000000000000000000000000000000000000000000000000
 
     #[test]
     fn test_deserialization_with_source() {
-        let yaml = r#"id: a5
+        let yaml = r#"id: 00000000000000a5
 newLocation: file:///new/path.csv
 newVersion: 'etag:abc123'
 newHash: 0000000000000000000000000000000000000000000000000000000000000000
 source:
-  id: b3
+  id: 00000000000000b3
   location: original/path.csv
   version: 'etag:abc123'
 "#;
 
         let op: ReplaceBlockOp = serde_yaml_ng::from_str(yaml).expect("Failed to deserialize");
 
-        assert_eq!(op.id.to_string(), "a5");
+        assert_eq!(op.id.to_string(), "00000000000000a5");
         assert_eq!(op.new_location, "file:///new/path.csv");
         assert_eq!(op.new_version, "etag:abc123");
         assert_eq!(op.new_hash, "0".repeat(64));
         assert!(op.source_info.is_some());
         let source = op.source_info.unwrap();
-        assert_eq!(source.id.to_string(), "b3");
+        assert_eq!(source.id.to_string(), "00000000000000b3");
         assert_eq!(source.location, "original/path.csv");
         assert_eq!(source.version, "etag:abc123");
     }

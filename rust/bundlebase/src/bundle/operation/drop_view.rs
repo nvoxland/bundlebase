@@ -84,7 +84,6 @@ impl Operation for DropViewOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_describe() {
         let view_id = ObjectId::generate();
@@ -94,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let view_id: ObjectId = "a5".try_into().unwrap();
+        let view_id: ObjectId = "00000000000000a5".try_into().unwrap();
         let op = DropViewOp { id: view_id };
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
@@ -104,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_deserialization() {
-        let view_id_str = "a5";
+        let view_id_str = "00000000000000a5";
         let yaml = format!("id: {}\n", view_id_str);
 
         let op: DropViewOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");

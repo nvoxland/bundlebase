@@ -3,8 +3,8 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::operation::{AttachBlockOp, CreateSourceOp, SourceInfo};
-use crate::data::ObjectId;
 use crate::source::{FetchAction, SyncMode};
+use crate::data::ObjectId;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use std::collections::HashMap;

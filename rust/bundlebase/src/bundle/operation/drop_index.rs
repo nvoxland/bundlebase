@@ -50,7 +50,6 @@ impl Operation for DropIndexOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_drop_index_describe() {
         let index_id = ObjectId::generate();

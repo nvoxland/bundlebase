@@ -382,12 +382,17 @@ mod tests {
     use super::*;
     #[test]
     fn test_table_name() {
-        assert_eq!("__block_53", DataBlock::table_name(&ObjectId::from(83)))
+        let id = ObjectId::generate();
+        let table = DataBlock::table_name(&id);
+        assert!(table.starts_with("__block_"));
+        assert_eq!(table.len(), 8 + 16); // "__block_" + 16 hex chars
     }
 
     #[test]
     fn test_parse_id() {
-        assert_eq!(Some(ObjectId::from(83)), DataBlock::parse_id("__block_53"));
+        let id = ObjectId::generate();
+        let table = DataBlock::table_name(&id);
+        assert_eq!(Some(id), DataBlock::parse_id(&table));
         assert_eq!(None, DataBlock::parse_id("random_table"));
         assert_eq!(None, DataBlock::parse_id("__block_x"));
     }

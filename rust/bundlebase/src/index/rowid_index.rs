@@ -3,7 +3,7 @@ use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadWriteDir;
 use crate::BundlebaseError;
 use bytes::Bytes;
-use crate::object_id::ObjectId;
+use crate::object_id::ObjectIdAlias;
 use futures::stream;
 use futures::stream::StreamExt;
 
@@ -25,7 +25,7 @@ impl RowIdIndex {
         &self,
         datafile: &ObjectStoreFile,
         data_dir: &dyn IOReadWriteDir,
-        block_id: &ObjectId,
+        block_ref: ObjectIdAlias,
         skip_first_line: bool,
     ) -> Result<Box<dyn crate::io::IOReadFile>, BundlebaseError> {
         // Read stream and collect all bytes
@@ -35,7 +35,7 @@ impl RowIdIndex {
             let chunk = chunk_result?;
             buffer.extend_from_slice(&chunk);
         }
-        let data = self.build_row_index(&buffer, block_id, skip_first_line);
+        let data = self.build_row_index(&buffer, block_ref, skip_first_line);
 
         // Serialize index to bytes and write using content-addressed storage
         let index_bytes = self.serialize_index(&data);
@@ -49,7 +49,7 @@ impl RowIdIndex {
     fn build_row_index(
         &self,
         bytes: &[u8],
-        block_id: &ObjectId,
+        block_ref: ObjectIdAlias,
         skip_first_line: bool,
     ) -> Vec<RowId> {
         let mut row_ids = Vec::new();
@@ -64,7 +64,7 @@ impl RowIdIndex {
                 if skip_first {
                     skip_first = false;
                 } else {
-                    row_ids.push(RowId::new(block_id, row_start, row_size));
+                    row_ids.push(RowId::new(block_ref, row_start, row_size));
                 }
                 row_start = row_end + 1;
             }
@@ -154,76 +154,76 @@ mod tests {
 
     #[test]
     fn test_build_row_index_empty() {
-        let block_id = ObjectId::from(1);
+        let block_ref = ObjectIdAlias::from(1u16);
         let bytes = b"";
-        let result = RowIdIndex::new().build_row_index(bytes, &block_id, false);
+        let result = RowIdIndex::new().build_row_index(bytes, block_ref, false);
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn test_build_row_index_single_line_no_newline() {
-        let block_id = ObjectId::from(1u8);
+        let block_ref = ObjectIdAlias::from(1u16);
         let bytes = b"data";
-        let result = RowIdIndex::new().build_row_index(bytes, &block_id, false);
+        let result = RowIdIndex::new().build_row_index(bytes, block_ref, false);
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn test_build_row_index_single_line_with_newline() {
-        let block_id = ObjectId::from(1u8);
+        let block_ref = ObjectIdAlias::from(1u16);
         let bytes = b"data\n";
-        let result = RowIdIndex::new().build_row_index(bytes, &block_id, false);
+        let result = RowIdIndex::new().build_row_index(bytes, block_ref, false);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].offset(), 0);
-        assert_eq!(result[0].block_id(), block_id);
+        assert_eq!(result[0].block_ref(), block_ref);
     }
 
     #[test]
     fn test_build_row_index_multiple_lines() {
-        let block_id = ObjectId::from(5u8);
+        let block_ref = ObjectIdAlias::from(5u16);
         let bytes = b"line1\nline2\nline3\n";
-        let result = RowIdIndex::new().build_row_index(bytes, &block_id, false);
+        let result = RowIdIndex::new().build_row_index(bytes, block_ref, false);
         assert_eq!(result.len(), 3);
 
         assert_eq!(result[0].offset(), 0);
-        assert_eq!(result[0].block_id(), block_id);
+        assert_eq!(result[0].block_ref(), block_ref);
 
         assert_eq!(result[1].offset(), 6);
-        assert_eq!(result[1].block_id(), block_id);
+        assert_eq!(result[1].block_ref(), block_ref);
 
         assert_eq!(result[2].offset(), 12);
-        assert_eq!(result[2].block_id(), block_id);
+        assert_eq!(result[2].block_ref(), block_ref);
     }
 
     #[test]
     fn test_build_row_index_skip_first_line() {
-        let block_id = ObjectId::from(10u8);
+        let block_ref = ObjectIdAlias::from(10u16);
         let bytes = b"header\nrow1\nrow2\n";
-        let result = RowIdIndex::new().build_row_index(bytes, &block_id, true);
+        let result = RowIdIndex::new().build_row_index(bytes, block_ref, true);
         assert_eq!(result.len(), 2);
 
         // First row (skip header) should start at offset 7
         assert_eq!(result[0].offset(), 7);
-        assert_eq!(result[0].block_id(), block_id);
+        assert_eq!(result[0].block_ref(), block_ref);
 
         // Second row should start at offset 12
         assert_eq!(result[1].offset(), 12);
-        assert_eq!(result[1].block_id(), block_id);
+        assert_eq!(result[1].block_ref(), block_ref);
     }
 
     #[test]
     fn test_build_row_index_skip_first_line_only_header() {
-        let block_id = ObjectId::from(15u8);
+        let block_ref = ObjectIdAlias::from(15u16);
         let bytes = b"header\n";
-        let result = RowIdIndex::new().build_row_index(bytes, &block_id, true);
+        let result = RowIdIndex::new().build_row_index(bytes, block_ref, true);
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn test_build_row_index_row_sizes() {
-        let block_id = ObjectId::from(35u8);
+        let block_ref = ObjectIdAlias::from(35u16);
         let bytes = b"short\nmedium_line\nveryverylongline\n";
-        let result = RowIdIndex::new().build_row_index(bytes, &block_id, false);
+        let result = RowIdIndex::new().build_row_index(bytes, block_ref, false);
         assert_eq!(result.len(), 3);
 
         // Row sizes include the newline character
@@ -234,9 +234,9 @@ mod tests {
 
     #[test]
     fn test_build_row_index_csv_with_header() {
-        let block_id = ObjectId::from(40u8);
+        let block_ref = ObjectIdAlias::from(40u16);
         let bytes = b"name,age,city\nAlice,30,NYC\nBob,25,LA\n";
-        let result = RowIdIndex::new().build_row_index(bytes, &block_id, true);
+        let result = RowIdIndex::new().build_row_index(bytes, block_ref, true);
         assert_eq!(result.len(), 2);
 
         // Header skipped, first data row is "Alice..."
@@ -248,11 +248,11 @@ mod tests {
     async fn test_serialize_and_load_index_single_row() {
         let dir = random_memory_dir_concrete();
         let file = dir.io_file("single_row.idx").unwrap();
-        let block_id = ObjectId::from(50u8);
+        let block_ref = ObjectIdAlias::from(50u16);
 
         let index = RowIdIndex::new();
 
-        let data = vec![RowId::new(&block_id, 100, 50)];
+        let data = vec![RowId::new(block_ref, 100, 50)];
         let bytes = index.serialize_index(&data);
         file.write(bytes).await.unwrap();
 
@@ -261,22 +261,22 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0], data[0]);
         assert_eq!(loaded[0].offset(), 100);
-        assert_eq!(loaded[0].block_id(), block_id);
+        assert_eq!(loaded[0].block_ref(), block_ref);
     }
 
     #[tokio::test]
     async fn test_serialize_and_load_index_multiple_rows() {
         let dir = random_memory_dir_concrete();
         let file = dir.io_file("multi_row.idx").unwrap();
-        let block_id = ObjectId::from(60u8);
+        let block_ref = ObjectIdAlias::from(60u16);
 
         let index = RowIdIndex::new();
 
         let data = vec![
-            RowId::new(&block_id, 0, 100),
-            RowId::new(&block_id, 100, 200),
-            RowId::new(&block_id, 300, 150),
-            RowId::new(&block_id, 450, 75),
+            RowId::new(block_ref, 0, 100),
+            RowId::new(block_ref, 100, 200),
+            RowId::new(block_ref, 300, 150),
+            RowId::new(block_ref, 450, 75),
         ];
 
         let bytes = index.serialize_index(&data);
@@ -293,11 +293,11 @@ mod tests {
     #[tokio::test]
     async fn test_index_format_binary_layout() {
         // Verify the exact binary format of serialized index
-        let block_id = ObjectId::from(110u8);
+        let block_ref = ObjectIdAlias::from(110u16);
 
         let index = RowIdIndex::new();
 
-        let data = vec![RowId::new(&block_id, 42, 100)];
+        let data = vec![RowId::new(block_ref, 42, 100)];
         let bytes = index.serialize_index(&data);
 
         // Verify structure

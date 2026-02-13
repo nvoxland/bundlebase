@@ -21,6 +21,10 @@ build/
 venv/
 .pytest_cache/
 
+# Benchmark temp files
+rust/bundlebase/benches/tmp/
+rust/bundlebase/benches/data/
+
 # Test artifacts and generated files
 test_data/*.dcon
 test_data/*.dbc
