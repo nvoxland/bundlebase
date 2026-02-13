@@ -412,18 +412,18 @@ impl DataSource for RowIdOffsetDataSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::ObjectId;
+    use crate::object_id::ObjectIdAlias;
     use crate::BundleConfig;
     use url::Url;
 
     #[test]
     fn test_row_id_sorting() {
         // Create RowIds with different offsets
-        let block_id = ObjectId::from(42);
+        let block_ref = ObjectIdAlias::from(1u16);
         let row_ids = vec![
-            RowId::new(&block_id, 1000, 10),
-            RowId::new(&block_id, 100, 10),
-            RowId::new(&block_id, 500, 10),
+            RowId::new(block_ref, 1000, 10),
+            RowId::new(block_ref, 100, 10),
+            RowId::new(block_ref, 500, 10),
         ];
 
         let file = ObjectStoreFile::from_url(
@@ -442,10 +442,10 @@ mod tests {
 
     #[test]
     fn test_partition_statistics() {
-        let block_id = ObjectId::from(42);
+        let block_ref = ObjectIdAlias::from(1u16);
         let row_ids = vec![
-            RowId::new(&block_id, 100, 10),
-            RowId::new(&block_id, 200, 10),
+            RowId::new(block_ref, 100, 10),
+            RowId::new(block_ref, 200, 10),
         ];
 
         let file = ObjectStoreFile::from_url(
@@ -463,11 +463,11 @@ mod tests {
     #[test]
     fn test_batch_row_ids_single_batch() {
         // RowIds that are close together should be batched
-        let block_id = ObjectId::from(42);
+        let block_ref = ObjectIdAlias::from(1u16);
         let row_ids = vec![
-            RowId::new(&block_id, 1000, 1), // offset 1000, size ~1MB
-            RowId::new(&block_id, 2000, 1), // offset 2000, within 1MB range of first
-            RowId::new(&block_id, 3000, 1), // offset 3000, within range
+            RowId::new(block_ref, 1000, 1), // offset 1000, size ~1MB
+            RowId::new(block_ref, 2000, 1), // offset 2000, within 1MB range of first
+            RowId::new(block_ref, 3000, 1), // offset 3000, within range
         ];
 
         let batches = RowIdOffsetDataSource::batch_row_ids(&row_ids);
@@ -483,11 +483,11 @@ mod tests {
     #[test]
     fn test_batch_row_ids_multiple_batches() {
         // RowIds that are far apart should be in separate batches
-        let block_id = ObjectId::from(42);
+        let block_ref = ObjectIdAlias::from(1u16);
         let row_ids = vec![
-            RowId::new(&block_id, 1000, 1),     // offset 1000, size ~1MB
-            RowId::new(&block_id, 5000000, 1),  // offset 5MB, far from first
-            RowId::new(&block_id, 10000000, 1), // offset 10MB, far from second
+            RowId::new(block_ref, 1000, 1),     // offset 1000, size ~1MB
+            RowId::new(block_ref, 5000000, 1),  // offset 5MB, far from first
+            RowId::new(block_ref, 10000000, 1), // offset 10MB, far from second
         ];
 
         let batches = RowIdOffsetDataSource::batch_row_ids(&row_ids);
@@ -502,13 +502,13 @@ mod tests {
     #[test]
     fn test_batch_row_ids_mixed() {
         // Mix of close and far RowIds
-        let block_id = ObjectId::from(42);
+        let block_ref = ObjectIdAlias::from(1u16);
         let row_ids = vec![
-            RowId::new(&block_id, 1000, 1),     // Batch 1
-            RowId::new(&block_id, 2000, 1),     // Batch 1
-            RowId::new(&block_id, 5000000, 1),  // Batch 2
-            RowId::new(&block_id, 5001000, 1),  // Batch 2
-            RowId::new(&block_id, 10000000, 1), // Batch 3
+            RowId::new(block_ref, 1000, 1),     // Batch 1
+            RowId::new(block_ref, 2000, 1),     // Batch 1
+            RowId::new(block_ref, 5000000, 1),  // Batch 2
+            RowId::new(block_ref, 5001000, 1),  // Batch 2
+            RowId::new(block_ref, 10000000, 1), // Batch 3
         ];
 
         let batches = RowIdOffsetDataSource::batch_row_ids(&row_ids);

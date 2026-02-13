@@ -2,89 +2,30 @@
 //!
 //! Benchmarks for filter, select, aggregation, and join operations.
 
+mod bench_data;
 mod data_generator;
 
-use bytes::Bytes;
+use bench_data::Format;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::io::{writable_dir_from_url, IOReadWriteDir};
-use bundlebase::{BundleBuilder, BundleConfig, BundlebaseError, JoinTypeOption};
+use bundlebase::{BundleBuilder, BundlebaseError, JoinTypeOption};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use data_generator::{generate_batch, generate_lookup_batch, BenchmarkDataConfig, SCALE_100K, SCALE_10K, SCALE_1K};
+use data_generator::{SCALE_100K, SCALE_10K, SCALE_1K};
 use datafusion::common::ScalarValue;
-use parquet::arrow::ArrowWriter;
+use futures::StreamExt;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use url::Url;
 
 fn random_memory_url() -> Url {
-    Url::parse(&format!("memory://bench/{}", rand::random::<u64>())).expect("valid url")
-}
-
-fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
-    writable_dir_from_url(&random_memory_url(), BundleConfig::default().into())
-        .expect("failed to create memory dir")
-}
-
-/// Write a RecordBatch to a parquet file in memory
-async fn write_parquet_to_memory(
-    dir: &dyn IOReadWriteDir,
-    name: &str,
-    rows: usize,
-) -> Result<String, BundlebaseError> {
-    let config = BenchmarkDataConfig::with_rows(rows);
-    let batch = generate_batch(&config);
-
-    let mut buffer = Vec::new();
-    {
-        let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), None)
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-        writer
-            .write(&batch)
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-        writer
-            .close()
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-    }
-
-    let file = dir.writable_file(name)?;
-    file.write(Bytes::from(buffer)).await?;
-
-    Ok(file.url().to_string())
-}
-
-/// Write a lookup table to a parquet file in memory
-async fn write_lookup_to_memory(
-    dir: &dyn IOReadWriteDir,
-    name: &str,
-    rows: usize,
-) -> Result<String, BundlebaseError> {
-    let batch = generate_lookup_batch(rows);
-
-    let mut buffer = Vec::new();
-    {
-        let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), None)
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-        writer
-            .write(&batch)
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-        writer
-            .close()
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-    }
-
-    let file = dir.writable_file(name)?;
-    file.write(Bytes::from(buffer)).await?;
-
-    Ok(file.url().to_string())
+    Url::parse(&format!("memory:///bench/{}", rand::random::<u64>())).expect("valid url")
 }
 
 /// Create a bundle with synthetic data for query benchmarks
-async fn create_benchmark_bundle(rows: usize) -> Result<BundleBuilder, BundlebaseError> {
-    let data_dir = random_memory_dir();
-    let data_url = write_parquet_to_memory(data_dir.as_ref(), "data.parquet", rows).await?;
+async fn create_benchmark_bundle(rows: usize) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+    let data_url = bench_data::get_data_url(rows, &Format::Parquet);
 
     let bundle_url = random_memory_url();
-    let mut bundle = BundleBuilder::create(bundle_url.as_str(), None).await?;
+    let bundle = BundleBuilder::create(bundle_url.as_str(), None).await?;
     bundle.attach(&data_url, None).await?;
 
     Ok(bundle)
@@ -103,11 +44,11 @@ fn bench_filter_selective(c: &mut Criterion) {
             b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
                 async move {
-                    let filtered = bundle
-                        .select("* WHERE filter_value < 1", vec![])
+                    bundle
+                        .filter("SELECT * FROM bundle WHERE filter_value < 1", vec![])
                         .await
-                        .expect("select failed");
-                    let df = filtered.dataframe().await.expect("dataframe failed");
+                        .expect("filter failed");
+                    let df = bundle.dataframe().await.expect("dataframe failed");
                     // Note: Using collect() for benchmarking only - production should use streaming
                     let _result = df.as_ref().clone().collect().await.expect("collect failed");
                 }
@@ -130,11 +71,11 @@ fn bench_filter_broad(c: &mut Criterion) {
             b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
                 async move {
-                    let filtered = bundle
-                        .select("* WHERE filter_value < 50", vec![])
+                    bundle
+                        .filter("SELECT * FROM bundle WHERE filter_value < 50", vec![])
                         .await
-                        .expect("select failed");
-                    let df = filtered.dataframe().await.expect("dataframe failed");
+                        .expect("filter failed");
+                    let df = bundle.dataframe().await.expect("dataframe failed");
                     let _result = df.as_ref().clone().collect().await.expect("collect failed");
                 }
             });
@@ -155,12 +96,14 @@ fn bench_aggregation_sum(c: &mut Criterion) {
             b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
                 async move {
-                    let result = bundle
-                        .select("category, SUM(amount) as total FROM data GROUP BY category", vec![])
+                    let mut stream = bundle
+                        .query("SELECT category, SUM(amount) as total FROM bundle GROUP BY category", vec![])
                         .await
-                        .expect("select failed");
-                    let df = result.dataframe().await.expect("dataframe failed");
-                    let _result = df.as_ref().clone().collect().await.expect("collect failed");
+                        .expect("query failed");
+                    // Consume the stream
+                    while let Some(batch_result) = stream.next().await {
+                        let _batch = batch_result.expect("batch failed");
+                    }
                 }
             });
         });
@@ -180,9 +123,9 @@ fn bench_filter_parameterized(c: &mut Criterion) {
             b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
                 async move {
-                    let mut filtered = bundle.clone();
+                    let filtered = bundle.clone();
                     filtered
-                        .filter("filter_value < $1", vec![ScalarValue::Int64(Some(50))])
+                        .filter("SELECT * FROM bundle WHERE filter_value < $1", vec![ScalarValue::Int64(Some(50))])
                         .await
                         .expect("filter failed");
                     let df = filtered.dataframe().await.expect("dataframe failed");
@@ -206,28 +149,20 @@ fn bench_join_small_large(c: &mut Criterion) {
             &main_rows,
             |b, &main_rows| {
                 // Setup: create main bundle and lookup data
-                let (bundle, lookup_url) = rt.block_on(async {
-                    let data_dir = random_memory_dir();
-                    let main_url =
-                        write_parquet_to_memory(data_dir.as_ref(), "main.parquet", main_rows)
-                            .await
-                            .expect("main parquet failed");
-                    let lookup_url =
-                        write_lookup_to_memory(data_dir.as_ref(), "lookup.parquet", SCALE_1K)
-                            .await
-                            .expect("lookup parquet failed");
-
+                let main_url = bench_data::get_data_url(main_rows, &Format::Parquet);
+                let lookup_url = bench_data::get_lookup_url(SCALE_1K, &Format::Parquet);
+                let bundle = rt.block_on(async {
                     let bundle_url = random_memory_url();
-                    let mut bundle = BundleBuilder::create(bundle_url.as_str(), None)
+                    let bundle = BundleBuilder::create(bundle_url.as_str(), None)
                         .await
                         .expect("bundle creation failed");
                     bundle.attach(&main_url, None).await.expect("attach failed");
 
-                    (bundle, lookup_url)
+                    bundle
                 });
 
                 b.to_async(&rt).iter(|| {
-                    let mut bundle = bundle.clone();
+                    let bundle = bundle.clone();
                     let lookup_url = lookup_url.clone();
                     async move {
                         bundle
@@ -262,12 +197,14 @@ fn bench_projection(c: &mut Criterion) {
             b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
                 async move {
-                    let result = bundle
-                        .select("id, category, amount", vec![])
+                    let mut stream = bundle
+                        .query("SELECT id, category, amount FROM bundle", vec![])
                         .await
-                        .expect("select failed");
-                    let df = result.dataframe().await.expect("dataframe failed");
-                    let _result = df.as_ref().clone().collect().await.expect("collect failed");
+                        .expect("query failed");
+                    // Consume the stream
+                    while let Some(batch_result) = stream.next().await {
+                        let _batch = batch_result.expect("batch failed");
+                    }
                 }
             });
         });

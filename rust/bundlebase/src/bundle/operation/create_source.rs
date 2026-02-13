@@ -106,39 +106,43 @@ mod tests {
 
     #[test]
     fn test_describe() {
+        let id = ObjectId::generate();
+        let pack = ObjectId::generate();
         let op = CreateSourceOp {
-            id: ObjectId::from(1),
-            pack: ObjectId::from(2),
+            id,
+            pack,
             function: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
         assert_eq!(
             op.describe(),
-            "CREATE SOURCE 01 at s3://bucket/data/ for pack 02"
+            format!("CREATE SOURCE {} at s3://bucket/data/ for pack {}", id, pack)
         );
     }
 
     #[test]
     fn test_describe_no_url() {
+        let id = ObjectId::generate();
+        let pack = ObjectId::generate();
         let op = CreateSourceOp {
-            id: ObjectId::from(1),
-            pack: ObjectId::from(2),
+            id,
+            pack,
             function: "custom_function".to_string(),
             args: HashMap::new(),
         };
 
         assert_eq!(
             op.describe(),
-            "CREATE SOURCE 01 at <no url> for pack 02"
+            format!("CREATE SOURCE {} at <no url> for pack {}", id, pack)
         );
     }
 
     #[test]
     fn test_setup() {
         let op = CreateSourceOp::setup(
-            ObjectId::from(1),
-            ObjectId::from(2),
+            ObjectId::generate(),
+            ObjectId::generate(),
             "remote_dir".to_string(),
             make_args("s3://bucket/", None),
         );
@@ -150,8 +154,8 @@ mod tests {
     #[test]
     fn test_setup_with_patterns() {
         let op = CreateSourceOp::setup(
-            ObjectId::from(1),
-            ObjectId::from(2),
+            ObjectId::generate(),
+            ObjectId::generate(),
             "remote_dir".to_string(),
             make_args("s3://bucket/", Some("**/*.parquet,**/*.csv")),
         );
@@ -169,8 +173,8 @@ mod tests {
         args.insert("key".to_string(), "value".to_string());
 
         let op = CreateSourceOp::setup(
-            ObjectId::from(1),
-            ObjectId::from(2),
+            ObjectId::generate(),
+            ObjectId::generate(),
             "custom_function".to_string(),
             args.clone(),
         );
@@ -181,16 +185,20 @@ mod tests {
 
     #[test]
     fn test_serialization() {
+        let id = ObjectId::generate();
+        let pack = ObjectId::generate();
         let op = CreateSourceOp {
-            id: ObjectId::from(1),
-            pack: ObjectId::from(2),
+            id,
+            pack,
             function: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
         let yaml = serde_yaml_ng::to_string(&op).unwrap();
-        assert!(yaml.contains("id: '01'"));
-        assert!(yaml.contains("pack: '02'"));
+        let id_str: String = id.into();
+        let pack_str: String = pack.into();
+        assert!(yaml.contains(&id_str));
+        assert!(yaml.contains(&pack_str));
         assert!(yaml.contains("function: remote_dir"));
         assert!(yaml.contains("url: s3://bucket/data/"));
         assert!(yaml.contains("patterns: '**/*.parquet'"));

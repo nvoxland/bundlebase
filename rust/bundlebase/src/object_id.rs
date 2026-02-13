@@ -1,69 +1,35 @@
 //! ObjectId module for unique object identification.
 
-use parking_lot::RwLock;
 use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::HashSet;
-use std::sync::OnceLock;
 
-static KNOWN_IDS: OnceLock<RwLock<HashSet<u8>>> = OnceLock::new();
-
+/// A globally unique 64-bit identifier for objects (blocks, packs, indexes, views, etc.).
+///
+/// Stored as `[u8; 8]` and serialized as 16 lowercase hex characters.
+/// Values 0–999 are reserved for well-known constants; `generate()` always produces values ≥ 1000.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ObjectId(u8);
+pub struct ObjectId([u8; 8]);
 
 impl ObjectId {
     /// Well-known ID for the base pack, always created when a bundle is created.
-    pub const BASE_PACK: ObjectId = ObjectId(0);
+    pub const BASE_PACK: ObjectId = ObjectId([0, 0, 0, 0, 0, 0, 0, 1]);
 
-    pub fn generate() -> ObjectId {
+    /// Generate a new unique ObjectId with a random 64-bit value ≥ 1000.
+    pub fn generate() -> Self {
         let mut rng = rand::rng();
-        let mut id = rng.random::<u8>();
-
-        // Keep generating random IDs until we find one that's not in the known_ids set
-        let known_ids = KNOWN_IDS.get();
-        while known_ids.is_some_and(|x| x.read().contains(&id)) {
-            id = rng.random::<u8>();
+        loop {
+            let bytes: [u8; 8] = rng.random();
+            let val = u64::from_be_bytes(bytes);
+            if val >= 1000 {
+                return ObjectId(bytes);
+            }
         }
-
-        let return_id = ObjectId(id);
-        Self::add_known(return_id);
-
-        return_id
-    }
-
-    fn add_known(id: ObjectId) -> ObjectId {
-        let ids = KNOWN_IDS.get_or_init(|| RwLock::new(HashSet::new()));
-
-        if !ids.read().contains(&id.0) {
-            ids.write().insert(id.0);
-        }
-        id
-    }
-
-    pub fn as_u8(self) -> u8 {
-        self.0
-    }
-
-    pub fn saturating_add(self, rhs: u8) -> ObjectId {
-        ObjectId(self.0.saturating_add(rhs))
-    }
-}
-
-impl From<u8> for ObjectId {
-    fn from(v: u8) -> Self {
-        Self(v)
-    }
-}
-
-impl From<ObjectId> for u8 {
-    fn from(s: ObjectId) -> u8 {
-        s.0
     }
 }
 
 impl From<ObjectId> for String {
     fn from(s: ObjectId) -> String {
-        format!("{:02x}", s.0)
+        hex::encode(s.0)
     }
 }
 
@@ -71,9 +37,7 @@ impl TryFrom<String> for ObjectId {
     type Error = String;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        u8::from_str_radix(&s, 16)
-            .map(ObjectId)
-            .map_err(|e| format!("Invalid hex string: {}", e))
+        Self::try_from(s.as_str())
     }
 }
 
@@ -81,9 +45,16 @@ impl TryFrom<&str> for ObjectId {
     type Error = String;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        u8::from_str_radix(s, 16)
-            .map(ObjectId)
-            .map_err(|e| format!("Invalid hex string: {}", e))
+        let bytes = hex::decode(s).map_err(|e| format!("Invalid hex string: {}", e))?;
+        if bytes.len() != 8 {
+            return Err(format!(
+                "Invalid hex string: expected 16 hex chars (8 bytes), got {} chars",
+                s.len()
+            ));
+        }
+        let mut arr = [0u8; 8];
+        arr.copy_from_slice(&bytes);
+        Ok(ObjectId(arr))
     }
 }
 
@@ -103,10 +74,7 @@ impl<'de> Deserialize<'de> for ObjectId {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        match ObjectId::try_from(s) {
-            Ok(id) => Ok(ObjectId::add_known(id)),
-            Err(e) => Err(serde::de::Error::custom(e)),
-        }
+        ObjectId::try_from(s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -117,75 +85,144 @@ impl std::fmt::Display for ObjectId {
     }
 }
 
+/// A compact u16 reference to an ObjectId, used for bit-packing in RowId.
+///
+/// ObjectIdAlias values are only meaningful within the context that defines them
+/// (e.g., a specific IndexBlocksOp). They are NOT global or per-bundle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ObjectIdAlias(u16);
+
+impl ObjectIdAlias {
+    pub fn as_u16(self) -> u16 {
+        self.0
+    }
+}
+
+impl From<u16> for ObjectIdAlias {
+    fn from(v: u16) -> Self {
+        Self(v)
+    }
+}
+
+impl std::fmt::Display for ObjectIdAlias {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:04x}", self.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_generate() {
-        let block_id1 = ObjectId::generate();
-        let block_id2 = ObjectId::generate();
-        let block_id3 = ObjectId::generate();
+        let id1 = ObjectId::generate();
+        let id2 = ObjectId::generate();
+        let id3 = ObjectId::generate();
 
-        assert_ne!(block_id1, block_id2);
-        assert_ne!(block_id2, block_id3);
-        assert_ne!(block_id1, block_id3);
+        assert_ne!(id1, id2);
+        assert_ne!(id2, id3);
+        assert_ne!(id1, id3);
+    }
+
+    #[test]
+    fn test_generate_above_reserved() {
+        for _ in 0..100 {
+            let id = ObjectId::generate();
+            let val = u64::from_be_bytes(id.0);
+            assert!(val >= 1000, "Generated ObjectId value {} is below 1000", val);
+        }
+    }
+
+    #[test]
+    fn test_base_pack() {
+        let hex_string: String = ObjectId::BASE_PACK.into();
+        assert_eq!(hex_string, "0000000000000001");
     }
 
     #[test]
     fn test_serialize_hex() {
-        let block_id = ObjectId(255);
+        let block_id = ObjectId([0, 0, 0, 0, 0, 0, 0, 255]);
         let json = serde_json::to_string(&block_id).unwrap();
-        assert_eq!(json, "\"ff\"");
+        assert_eq!(json, "\"00000000000000ff\"");
     }
 
     #[test]
     fn test_deserialize_hex() {
-        let json = "\"ff\"";
+        let json = "\"00000000000000ff\"";
         let block_id: ObjectId = serde_json::from_str(json).unwrap();
-        assert_eq!(block_id, ObjectId(255));
+        assert_eq!(block_id, ObjectId([0, 0, 0, 0, 0, 0, 0, 255]));
     }
 
     #[test]
     fn test_roundtrip_serialization() {
-        let original = ObjectId(200);
+        let original = ObjectId::generate();
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: ObjectId = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized);
     }
 
     #[test]
-    fn test_from_block_id_to_string() {
-        let block_id = ObjectId(255);
+    fn test_from_object_id_to_string() {
+        let block_id = ObjectId([0, 0, 0, 0, 0, 0, 0, 255]);
         let hex_string: String = block_id.into();
-        assert_eq!(hex_string, "ff");
+        assert_eq!(hex_string, "00000000000000ff");
     }
 
     #[test]
-    fn test_try_from_string_for_block_id() {
-        let hex_string = "ff".to_string();
+    fn test_try_from_string_for_object_id() {
+        let hex_string = "00000000000000ff".to_string();
         let block_id: ObjectId = hex_string.try_into().unwrap();
-        assert_eq!(block_id, ObjectId(255));
+        assert_eq!(block_id, ObjectId([0, 0, 0, 0, 0, 0, 0, 255]));
     }
 
     #[test]
-    fn test_try_from_str_for_block_id() {
-        let block_id: ObjectId = "a5".try_into().unwrap();
-        assert_eq!(block_id, ObjectId(165));
+    fn test_try_from_str_for_object_id() {
+        let block_id: ObjectId = "00000000000000a5".try_into().unwrap();
+        assert_eq!(block_id, ObjectId([0, 0, 0, 0, 0, 0, 0, 165]));
     }
 
     #[test]
     fn test_try_from_invalid_hex() {
-        let result: Result<ObjectId, _> = "zzzz".try_into();
+        let result: Result<ObjectId, _> = "zzzzzzzzzzzzzzzz".try_into();
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid hex string"));
     }
 
     #[test]
+    fn test_try_from_wrong_length() {
+        let result: Result<ObjectId, _> = "00ff".try_into();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("expected 16 hex chars"));
+    }
+
+    #[test]
     fn test_roundtrip_via_string() {
-        let original = ObjectId(42);
+        let original = ObjectId::generate();
         let hex_string: String = original.into();
         let recovered: ObjectId = hex_string.try_into().unwrap();
         assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn test_display_format() {
+        let hex_string = format!("{}", ObjectId::BASE_PACK);
+        assert_eq!(hex_string, "0000000000000001");
+    }
+
+    #[test]
+    fn test_object_id_ref() {
+        let r = ObjectIdAlias::from(42u16);
+        assert_eq!(r.as_u16(), 42);
+        assert_eq!(format!("{}", r), "002a");
+    }
+
+    #[test]
+    fn test_object_id_ref_serde() {
+        let r = ObjectIdAlias::from(255u16);
+        let json = serde_json::to_string(&r).unwrap();
+        assert_eq!(json, "255");
+        let deserialized: ObjectIdAlias = serde_json::from_str(&json).unwrap();
+        assert_eq!(r, deserialized);
     }
 }

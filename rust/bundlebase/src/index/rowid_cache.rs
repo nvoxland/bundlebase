@@ -125,7 +125,7 @@ lazy_static! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::ObjectId;
+    use crate::object_id::ObjectIdAlias;
 
     #[test]
     fn test_cache_basic_operations() {
@@ -133,9 +133,10 @@ mod tests {
         let url1 = Url::parse("file:///test1.csv").unwrap();
         let url2 = Url::parse("file:///test2.csv").unwrap();
 
+        let block_ref = ObjectIdAlias::from(1u16);
         let row_ids1 = Arc::new(vec![
-            RowId::new(&ObjectId::from(1), 0, 100),
-            RowId::new(&ObjectId::from(1), 100, 200),
+            RowId::new(block_ref, 0, 100),
+            RowId::new(block_ref, 100, 200),
         ]);
 
         // Insert and retrieve
@@ -151,15 +152,15 @@ mod tests {
     #[test]
     fn test_cache_lru_eviction() {
         let cache = RowIdCache::new(2);
-        let block_id = ObjectId::from(1);
+        let block_ref = ObjectIdAlias::from(1u16);
 
         let url1 = Url::parse("file:///test1.csv").unwrap();
         let url2 = Url::parse("file:///test2.csv").unwrap();
         let url3 = Url::parse("file:///test3.csv").unwrap();
 
-        let row_ids1 = Arc::new(vec![RowId::new(&block_id, 0, 10)]);
-        let row_ids2 = Arc::new(vec![RowId::new(&block_id, 10, 20)]);
-        let row_ids3 = Arc::new(vec![RowId::new(&block_id, 20, 30)]);
+        let row_ids1 = Arc::new(vec![RowId::new(block_ref, 0, 10)]);
+        let row_ids2 = Arc::new(vec![RowId::new(block_ref, 10, 20)]);
+        let row_ids3 = Arc::new(vec![RowId::new(block_ref, 20, 30)]);
 
         // Fill cache to capacity
         cache.insert(url1.clone(), row_ids1.clone());
@@ -193,7 +194,7 @@ mod tests {
     fn test_cache_clear() {
         let cache = RowIdCache::new(3);
         let url1 = Url::parse("file:///test1.csv").unwrap();
-        let row_ids = Arc::new(vec![RowId::new(&ObjectId::from(1), 0, 10)]);
+        let row_ids = Arc::new(vec![RowId::new(ObjectIdAlias::from(1u16), 0, 10)]);
 
         cache.insert(url1.clone(), row_ids);
         assert_eq!(cache.len(), 1);
@@ -212,7 +213,7 @@ mod tests {
         assert_eq!(stats.capacity, 10);
 
         let url = Url::parse("file:///test.csv").unwrap();
-        let row_ids = Arc::new(vec![RowId::new(&ObjectId::from(1), 0, 10)]);
+        let row_ids = Arc::new(vec![RowId::new(ObjectIdAlias::from(1u16), 0, 10)]);
         cache.insert(url, row_ids);
 
         let stats = cache.stats();
@@ -224,7 +225,7 @@ mod tests {
     fn test_stats_display() {
         let cache = RowIdCache::new(10);
         let url = Url::parse("file:///test.csv").unwrap();
-        let row_ids = Arc::new(vec![RowId::new(&ObjectId::from(1), 0, 10)]);
+        let row_ids = Arc::new(vec![RowId::new(ObjectIdAlias::from(1u16), 0, 10)]);
         cache.insert(url, row_ids);
 
         let stats = cache.stats();

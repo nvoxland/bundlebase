@@ -163,12 +163,12 @@ impl JoinTypeOption {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_table_name() {
-        let id = ObjectId::from(58);
+        let id = ObjectId::generate();
         let table = Pack::table_name(&id);
-        assert_eq!(table, "__pack_3a");
+        assert!(table.starts_with("__pack_"));
+        assert_eq!(table.len(), 7 + 16); // "__pack_" + 16 hex chars
     }
 
     #[test]

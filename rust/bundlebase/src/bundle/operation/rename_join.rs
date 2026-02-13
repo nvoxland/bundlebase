@@ -110,7 +110,6 @@ impl Operation for RenameJoinOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_describe() {
         let op = RenameJoinOp {
@@ -139,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let pack_id: ObjectId = "a5".try_into().unwrap();
+        let pack_id: ObjectId = "00000000000000a5".try_into().unwrap();
         let op = RenameJoinOp {
             id: pack_id,
             new_name: "new_join".to_string(),
@@ -152,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_deserialization() {
-        let pack_id_str = "a5";
+        let pack_id_str = "00000000000000a5";
         let yaml = format!("id: {}\nnewName: renamed_join\n", pack_id_str);
 
         let op: RenameJoinOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");

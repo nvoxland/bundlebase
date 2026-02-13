@@ -1,226 +1,133 @@
 //! Bundle lifecycle benchmarks
 //!
 //! Benchmarks for create, open, attach, and commit operations.
+//! All data is written to disk under $TMPDIR/bundlebase/ (cleaned per run).
+//!
+//! BundleBuilder also has an Arc reference cycle (BundleBuilder → Bundle →
+//! SessionContext → SchemaProviders → BundleBuilder). We break this cycle
+//! after each iteration to prevent memory leaks during long benchmark runs.
 
+mod bench_data;
 mod data_generator;
+mod throttled_store;
 
-use bytes::Bytes;
-use bundlebase::io::{writable_dir_from_url, IOReadWriteDir};
-use bundlebase::{Bundle, BundleBuilder, BundleConfig, BundlebaseError};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use data_generator::{generate_batch, BenchmarkDataConfig, SCALE_100K, SCALE_10K, SCALE_1K};
-use parquet::arrow::ArrowWriter;
+use bench_data::Format;
+use bundlebase::{BundleBuilder, BundleFacade};
+use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
+use datafusion::catalog::MemorySchemaProvider;
+use data_generator::{SCALE_10K, SCALE_1K};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::runtime::Runtime;
 use url::Url;
 
-fn random_memory_url() -> Url {
-    Url::parse(&format!("memory://bench/{}", rand::random::<u64>())).expect("valid url")
+/// Root directory for benchmark temp files, under the system temp directory.
+fn bench_tmp_dir() -> PathBuf {
+    std::env::temp_dir().join("bundlebase")
 }
 
-fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
-    writable_dir_from_url(&random_memory_url(), BundleConfig::default().into())
-        .expect("failed to create memory dir")
+/// Create a fresh subdirectory under $TMPDIR/bundlebase/ with a random name.
+/// Returns the directory path and a file:// URL pointing to it.
+fn fresh_disk_dir(prefix: &str) -> (PathBuf, Url) {
+    let dir = bench_tmp_dir().join(format!("{}_{}", prefix, rand::random::<u64>()));
+    std::fs::create_dir_all(&dir).expect("failed to create bench tmp dir");
+    let url = Url::from_directory_path(&dir).expect("valid dir path");
+    (dir, url)
 }
 
-/// Write a RecordBatch to a parquet file in memory
-async fn write_parquet_to_memory(
-    dir: &dyn IOReadWriteDir,
-    name: &str,
-    rows: usize,
-) -> Result<String, BundlebaseError> {
-    let config = BenchmarkDataConfig::with_rows(rows);
-    let batch = generate_batch(&config);
-
-    let mut buffer = Vec::new();
-    {
-        let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), None)
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-        writer
-            .write(&batch)
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-        writer
-            .close()
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
+/// Clean up all benchmark temp files before a run.
+fn clean_bench_tmp() {
+    let tmp = bench_tmp_dir();
+    if tmp.exists() {
+        let _ = std::fs::remove_dir_all(&tmp);
     }
-
-    let file = dir.writable_file(name)?;
-    file.write(Bytes::from(buffer)).await?;
-
-    Ok(file.url().to_string())
+    std::fs::create_dir_all(&tmp).expect("failed to create bench tmp dir");
 }
 
-fn bench_create_empty(c: &mut Criterion) {
-    let rt = Runtime::new().expect("tokio runtime");
+/// Break the Arc reference cycle in a BundleBuilder so it can be freed.
+///
+/// BundleBuilder → Bundle → SessionContext → SchemaProviders → BundleBuilder
+/// forms a cycle that prevents Drop. Replacing the schema providers with empty
+/// MemorySchemaProviders drops the `Arc<dyn BundleFacade>` references, breaking
+/// the cycle.
+fn break_arc_cycle(bundle: &BundleBuilder) {
+    let ctx = bundle.ctx();
+    if let Some(catalog) = ctx.catalog("bundlebase") {
+        let empty = Arc::new(MemorySchemaProvider::new());
+        let _ = catalog.register_schema("blocks", empty.clone());
+        let _ = catalog.register_schema("packs", empty.clone());
+        let _ = catalog.register_schema("default", empty.clone());
+        let _ = catalog.register_schema("bundle_info", empty);
+    }
+}
+
+/// Clean up after a benchmark iteration.
+///
+/// Breaks the Arc reference cycle to allow the BundleBuilder to be freed.
+fn cleanup_after_iter(bundle: &BundleBuilder) {
+    break_arc_cycle(bundle);
+}
+
+fn bench_create_bundle(c: &mut Criterion) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
 
     c.bench_function("create_empty_bundle", |b| {
         b.to_async(&rt).iter(|| async {
-            let url = random_memory_url();
-            BundleBuilder::create(url.as_str(), None)
+            let (_path, url) = fresh_disk_dir("bundle");
+            let bundle = BundleBuilder::create(url.as_str(), None)
                 .await
-                .expect("bundle creation failed")
+                .expect("bundle creation failed");
+            bundle.commit("Created bundle").await.expect("Commit failed");
+            cleanup_after_iter(&bundle);
         });
     });
 }
 
-fn bench_create_with_data(c: &mut Criterion) {
-    let rt = Runtime::new().expect("tokio runtime");
-    let mut group = c.benchmark_group("create_with_data");
+fn bench_attach_data(c: &mut Criterion) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
 
-    for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
+    let mut group = c.benchmark_group("attach_data");
+    group.sample_size(10);
+
+    for rows in [SCALE_1K, SCALE_10K] {
+        let data_url = bench_data::get_data_url(rows, &Format::Parquet);
+
         group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(rows), &rows, |b, &rows| {
-            b.to_async(&rt).iter(|| async move {
-                // Create data file
-                let data_dir = random_memory_dir();
-                let data_url = write_parquet_to_memory(data_dir.as_ref(), "data.parquet", rows)
-                    .await
-                    .expect("parquet write failed");
-
-                // Create bundle and attach
-                let bundle_dir = random_memory_url();
-                let mut bundle = BundleBuilder::create(bundle_dir.as_str(), None)
-                    .await
-                    .expect("bundle creation failed");
-
-                bundle
-                    .attach(&data_url, None)
-                    .await
-                    .expect("attach failed");
-
-                bundle
+        group.bench_with_input(BenchmarkId::from_parameter(rows), &rows, |b, &_rows| {
+            let data_url = data_url.clone();
+            b.to_async(&rt).iter(|| {
+                let data_url = data_url.clone();
+                async move {
+                    let (_path, url) = fresh_disk_dir("bundle");
+                    let bundle = BundleBuilder::create(url.as_str(), None)
+                        .await
+                        .expect("bundle creation failed");
+                    bundle
+                        .attach(&data_url, None)
+                        .await
+                        .expect("attach failed");
+                    bundle.commit("Attached file").await.expect("commit failed");
+                    cleanup_after_iter(&bundle);
+                }
             });
         });
     }
     group.finish();
 }
 
-fn bench_open_bundle(c: &mut Criterion) {
-    let rt = Runtime::new().expect("tokio runtime");
-
-    // Setup: Create and commit a bundle with data
-    let (bundle_url, _data_url) = rt.block_on(async {
-        let data_dir = random_memory_dir();
-        let data_url = write_parquet_to_memory(data_dir.as_ref(), "data.parquet", SCALE_10K)
-            .await
-            .expect("parquet write failed");
-
-        let bundle_url = random_memory_url();
-        let mut bundle = BundleBuilder::create(bundle_url.as_str(), None)
-            .await
-            .expect("bundle creation failed");
-
-        bundle
-            .attach(&data_url, None)
-            .await
-            .expect("attach failed");
-        bundle.commit("Initial commit").await.expect("commit failed");
-
-        (bundle_url, data_url)
-    });
-
-    c.bench_function("open_bundle", |b| {
-        b.to_async(&rt).iter(|| async {
-            Bundle::open(bundle_url.as_str(), None)
-                .await
-                .expect("open failed")
-        });
-    });
-}
-
-fn bench_commit(c: &mut Criterion) {
-    let rt = Runtime::new().expect("tokio runtime");
-    let mut group = c.benchmark_group("commit_bundle");
-
-    for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
-        group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(rows), &rows, |b, &rows| {
-            b.to_async(&rt).iter_batched(
-                || {
-                    // Setup: create bundle with data but don't commit
-                    rt.block_on(async {
-                        let data_dir = random_memory_dir();
-                        let data_url =
-                            write_parquet_to_memory(data_dir.as_ref(), "data.parquet", rows)
-                                .await
-                                .expect("parquet write failed");
-
-                        let bundle_url = random_memory_url();
-                        let mut bundle = BundleBuilder::create(bundle_url.as_str(), None)
-                            .await
-                            .expect("bundle creation failed");
-
-                        bundle
-                            .attach(&data_url, None)
-                            .await
-                            .expect("attach failed");
-
-                        bundle
-                    })
-                },
-                |mut bundle| async move {
-                    bundle.commit("Benchmark commit").await.expect("commit failed");
-                },
-                criterion::BatchSize::SmallInput,
-            );
-        });
-    }
-    group.finish();
-}
-
-fn bench_attach_multiple(c: &mut Criterion) {
-    let rt = Runtime::new().expect("tokio runtime");
-    let mut group = c.benchmark_group("attach_multiple");
-
-    for num_files in [1, 5, 10] {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(format!("{}_files", num_files)),
-            &num_files,
-            |b, &num_files| {
-                b.to_async(&rt).iter_batched(
-                    || {
-                        // Setup: create data files
-                        rt.block_on(async {
-                            let data_dir = random_memory_dir();
-                            let mut urls = Vec::new();
-                            for i in 0..num_files {
-                                let url = write_parquet_to_memory(
-                                    data_dir.as_ref(),
-                                    &format!("data_{}.parquet", i),
-                                    SCALE_1K,
-                                )
-                                .await
-                                .expect("parquet write failed");
-                                urls.push(url);
-                            }
-                            urls
-                        })
-                    },
-                    |urls| async move {
-                        let bundle_url = random_memory_url();
-                        let mut bundle = BundleBuilder::create(bundle_url.as_str(), None)
-                            .await
-                            .expect("bundle creation failed");
-
-                        for url in urls {
-                            bundle.attach(&url, None).await.expect("attach failed");
-                        }
-                        bundle
-                    },
-                    criterion::BatchSize::SmallInput,
-                );
-            },
-        );
-    }
-    group.finish();
-}
-
 criterion_group!(
     benches,
-    bench_create_empty,
-    bench_create_with_data,
-    bench_open_bundle,
-    bench_commit,
-    bench_attach_multiple,
+    bench_create_bundle,
+    bench_attach_data,
 );
-criterion_main!(benches);
+
+fn main() {
+    clean_bench_tmp();
+    benches();
+    clean_bench_tmp();
+}

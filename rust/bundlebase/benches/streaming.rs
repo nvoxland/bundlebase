@@ -3,63 +3,29 @@
 //! Critical benchmarks for verifying constant memory usage during streaming.
 //! The key constraint is ~50MB constant memory regardless of dataset size.
 
+mod bench_data;
 mod data_generator;
 
-use bytes::Bytes;
+use bench_data::Format;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::io::{writable_dir_from_url, IOReadWriteDir};
-use bundlebase::{BundleBuilder, BundleConfig, BundlebaseError};
+use bundlebase::{BundleBuilder, BundlebaseError};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use data_generator::{generate_batch, BenchmarkDataConfig, SCALE_100K, SCALE_10K, SCALE_1M};
+use data_generator::{SCALE_100K, SCALE_10K, SCALE_1M};
 use futures::StreamExt;
-use parquet::arrow::ArrowWriter;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 use url::Url;
 
 fn random_memory_url() -> Url {
-    Url::parse(&format!("memory://bench/{}", rand::random::<u64>())).expect("valid url")
-}
-
-fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
-    writable_dir_from_url(&random_memory_url(), BundleConfig::default().into())
-        .expect("failed to create memory dir")
-}
-
-/// Write a RecordBatch to a parquet file in memory
-async fn write_parquet_to_memory(
-    dir: &dyn IOReadWriteDir,
-    name: &str,
-    rows: usize,
-) -> Result<String, BundlebaseError> {
-    let config = BenchmarkDataConfig::with_rows(rows);
-    let batch = generate_batch(&config);
-
-    let mut buffer = Vec::new();
-    {
-        let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), None)
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-        writer
-            .write(&batch)
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-        writer
-            .close()
-            .map_err(|e| BundlebaseError::from(e.to_string()))?;
-    }
-
-    let file = dir.writable_file(name)?;
-    file.write(Bytes::from(buffer)).await?;
-
-    Ok(file.url().to_string())
+    Url::parse(&format!("memory:///bench/{}", rand::random::<u64>())).expect("valid url")
 }
 
 /// Create a bundle with synthetic data
-async fn create_benchmark_bundle(rows: usize) -> Result<BundleBuilder, BundlebaseError> {
-    let data_dir = random_memory_dir();
-    let data_url = write_parquet_to_memory(data_dir.as_ref(), "data.parquet", rows).await?;
+async fn create_benchmark_bundle(rows: usize) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+    let data_url = bench_data::get_data_url(rows, &Format::Parquet);
 
     let bundle_url = random_memory_url();
-    let mut bundle = BundleBuilder::create(bundle_url.as_str(), None).await?;
+    let bundle = BundleBuilder::create(bundle_url.as_str(), None).await?;
     bundle.attach(&data_url, None).await?;
 
     Ok(bundle)
@@ -111,11 +77,11 @@ fn bench_stream_with_filter(c: &mut Criterion) {
                 let bundle = bundle.clone();
                 async move {
                     // Apply filter then stream
-                    let filtered = bundle
-                        .select("* WHERE filter_value < 50", vec![])
+                    bundle
+                        .filter("SELECT * FROM bundle WHERE filter_value < 50", vec![])
                         .await
-                        .expect("select failed");
-                    let df = filtered.dataframe().await.expect("dataframe failed");
+                        .expect("filter failed");
+                    let df = bundle.dataframe().await.expect("dataframe failed");
                     let mut stream = df
                         .as_ref()
                         .clone()
@@ -148,17 +114,10 @@ fn bench_stream_with_aggregation(c: &mut Criterion) {
             b.to_async(&rt).iter(|| {
                 let bundle = bundle.clone();
                 async move {
-                    let result = bundle
-                        .select("category, SUM(amount) as total FROM data GROUP BY category", vec![])
+                    let mut stream = bundle
+                        .query("SELECT category, SUM(amount) as total FROM bundle GROUP BY category", vec![])
                         .await
-                        .expect("select failed");
-                    let df = result.dataframe().await.expect("dataframe failed");
-                    let mut stream = df
-                        .as_ref()
-                        .clone()
-                        .execute_stream()
-                        .await
-                        .expect("execute_stream failed");
+                        .expect("query failed");
 
                     let mut total_rows = 0usize;
                     while let Some(batch_result) = stream.next().await {
@@ -218,17 +177,10 @@ fn bench_stream_projection(c: &mut Criterion) {
                 b.to_async(&rt).iter(|| {
                     let bundle = bundle.clone();
                     async move {
-                        let result = bundle
-                            .select("id, amount", vec![])
+                        let mut stream = bundle
+                            .query("SELECT id, amount FROM bundle", vec![])
                             .await
-                            .expect("select failed");
-                        let df = result.dataframe().await.expect("dataframe failed");
-                        let mut stream = df
-                            .as_ref()
-                            .clone()
-                            .execute_stream()
-                            .await
-                            .expect("execute_stream failed");
+                            .expect("query failed");
 
                         let mut total_rows = 0usize;
                         while let Some(batch_result) = stream.next().await {

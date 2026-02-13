@@ -59,17 +59,19 @@ mod tests {
 
     #[test]
     fn test_versioned_block_id_display() {
-        let vb = VersionedBlockId::new(ObjectId::from(42), "v1.0".to_string());
-        assert_eq!(format!("{}", vb), "2a@v1.0"); // 42 in hex is 2a
+        let id = ObjectId::generate();
+        let vb = VersionedBlockId::new(id, "v1.0".to_string());
+        let display = format!("{}", vb);
+        assert!(display.ends_with("@v1.0"));
+        assert_eq!(display.len(), 16 + 1 + 4); // 16 hex + "@" + "v1.0"
     }
 
     #[test]
     fn test_versioned_block_id_serialization() {
-        let vb = VersionedBlockId::new(ObjectId::from(255), "v2.5".to_string());
+        let id = ObjectId::generate();
+        let vb = VersionedBlockId::new(id, "v2.5".to_string());
 
         let json = serde_json::to_string(&vb).unwrap();
-        assert_eq!(json, "\"ff@v2.5\""); // 255 in hex is ff
-
         let deserialized: VersionedBlockId = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, vb);
     }

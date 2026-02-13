@@ -481,7 +481,7 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
     );
 
     // Test 5: Non-existent ID should error
-    let result = c.view("00000000000000000000000000000000").await;
+    let result = c.view("0000000000000000").await;
     assert!(result.is_err());
     let err_msg = result.err().unwrap().to_string();
     assert!(

@@ -1,7 +1,7 @@
 use crate::bundle::BundleFacade;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
-use crate::data::{DataReader, ObjectId, RowId, RowIdBatch, SendableRowIdBatchStream};
+use crate::data::{DataReader, ObjectId, ObjectIdAlias, RowId, RowIdBatch, SendableRowIdBatchStream};
 use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
@@ -146,13 +146,13 @@ impl DataReader for ParquetDataReader {
 
     async fn extract_rowids_stream(
         &self,
+        block_ref: ObjectIdAlias,
         _ctx: Arc<SessionContext>,
         _projection: Option<&Vec<usize>>,
     ) -> Result<SendableRowIdBatchStream, BundlebaseError> {
         // Get object store components
         let store = self.inner.file().store();
         let path = self.inner.file().store_path().clone();
-        let block_id = self.block_id;
 
         // Create async Parquet reader
         let object_reader = ParquetObjectReader::new(store, path);
@@ -166,11 +166,11 @@ impl DataReader for ParquetDataReader {
 
         // Transform stream to add RowId information using a wrapper struct
         // that implements Stream
-        let block_id_bits = (block_id.as_u8() as u64) << 56;
+        let block_ref_bits = (block_ref.as_u16() as u64) << 44;
         let wrapped = RowIdStreamWrapper {
             inner: Box::new(inner_stream),
             global_row_num: 0,
-            block_id_bits,
+            block_ref_bits,
         };
 
         Ok(Box::pin(wrapped))
@@ -190,7 +190,7 @@ struct RowIdStreamWrapper {
             + Send,
     >,
     global_row_num: u64,
-    block_id_bits: u64,
+    block_ref_bits: u64,
 }
 
 impl futures::stream::Stream for RowIdStreamWrapper {
@@ -208,7 +208,7 @@ impl futures::stream::Stream for RowIdStreamWrapper {
 
                 // Generate RowIds for this batch
                 for _ in 0..num_rows {
-                    let row_id = self.block_id_bits | self.global_row_num;
+                    let row_id = self.block_ref_bits | self.global_row_num;
                     row_ids.push(RowId::from(row_id));
                     self.global_row_num += 1;
                 }
@@ -237,7 +237,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let result = plugin
-            .reader("file:///test.csv", &1.into(), &*binding, None, None, None, None)
+            .reader("file:///test.csv", &ObjectId::generate(), &*binding, None, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -251,7 +251,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let invalid_reader = plugin
-            .reader("file:///invalid.parquet", &1.into(), &*binding, None, None, None, None)
+            .reader("file:///invalid.parquet", &ObjectId::generate(), &*binding, None, None, None, None)
             .await?;
 
         assert!(invalid_reader.is_some());
@@ -275,7 +275,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -319,7 +319,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 Some(schema),
                 None,
@@ -373,7 +373,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,
@@ -421,7 +421,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
-                &1.into(),
+                &ObjectId::generate(),
                 &*binding,
                 None,
                 None,

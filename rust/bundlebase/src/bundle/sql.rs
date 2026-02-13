@@ -300,7 +300,7 @@ mod tests {
         )
         .unwrap();
 
-        let join_id: ObjectId = 5.into();
+        let join_id = ObjectId::generate();
 
         // Create and register a packs schema for testing
         use datafusion::catalog::MemorySchemaProvider;

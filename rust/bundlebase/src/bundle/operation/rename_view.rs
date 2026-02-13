@@ -105,7 +105,6 @@ impl Operation for RenameViewOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_describe() {
         let op = RenameViewOp {
@@ -134,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let view_id: ObjectId = "a5".try_into().unwrap();
+        let view_id: ObjectId = "00000000000000a5".try_into().unwrap();
         let op = RenameViewOp {
             id: view_id,
             new_name: "new_view".to_string(),
@@ -147,7 +146,7 @@ mod tests {
 
     #[test]
     fn test_deserialization() {
-        let view_id_str = "a5";
+        let view_id_str = "00000000000000a5";
         let yaml = format!("id: {}\nnewName: renamed_view\n", view_id_str);
 
         let op: RenameViewOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");

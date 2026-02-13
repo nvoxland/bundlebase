@@ -139,15 +139,17 @@ mod tests {
 
     #[test]
     fn test_new_source() {
+        let id = ObjectId::generate();
+        let pack = ObjectId::generate();
         let source = Source::new(
-            ObjectId::from(1),
-            ObjectId::from(2),
+            id,
+            pack,
             "remote_dir".to_string(),
             make_args("s3://bucket/data/", Some("**/*")),
         );
 
-        assert_eq!(source.id(), &ObjectId::from(1));
-        assert_eq!(source.pack(), &ObjectId::from(2));
+        assert_eq!(source.id(), &id);
+        assert_eq!(source.pack(), &pack);
         assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
         assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*"));
         assert_eq!(source.function(), "remote_dir");
@@ -157,16 +159,18 @@ mod tests {
     fn test_from_op() {
         let registry = SourceFunctionRegistry::new();
 
+        let id = ObjectId::generate();
+        let pack = ObjectId::generate();
         let op = CreateSourceOp {
-            id: ObjectId::from(1),
-            pack: ObjectId::from(2),
+            id,
+            pack,
             function: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
         let source = Source::from_op(&op, &registry).unwrap();
-        assert_eq!(source.id(), &ObjectId::from(1));
-        assert_eq!(source.pack(), &ObjectId::from(2));
+        assert_eq!(source.id(), &id);
+        assert_eq!(source.pack(), &pack);
         assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
         assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*.parquet"));
         assert_eq!(source.function(), "remote_dir");
@@ -180,8 +184,8 @@ mod tests {
         args.insert("key".to_string(), "value".to_string());
 
         let op = CreateSourceOp {
-            id: ObjectId::from(1),
-            pack: ObjectId::from(2),
+            id: ObjectId::generate(),
+            pack: ObjectId::generate(),
             function: "remote_dir".to_string(),
             args: args.clone(),
         };
@@ -198,8 +202,8 @@ mod tests {
         let registry = SourceFunctionRegistry::new();
 
         let op = CreateSourceOp {
-            id: ObjectId::from(1),
-            pack: ObjectId::from(2),
+            id: ObjectId::generate(),
+            pack: ObjectId::generate(),
             function: "unknown_function".to_string(),
             args: HashMap::new(),
         };

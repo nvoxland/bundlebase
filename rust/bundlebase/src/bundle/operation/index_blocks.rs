@@ -1,6 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
-use crate::data::{ObjectId, RowId, VersionedBlockId};
+use crate::data::{ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
 use crate::index::{
     ColumnIndex, ExternalSortConfig, ExternalSortWriter, IndexedValue, IndexType, TempDirManager,
     TextColumnIndex, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
@@ -110,6 +110,7 @@ where
 /// Iterates through blocks and calls the processor for each batch.
 ///
 /// This helper extracts the common streaming pattern used in both column and text index building.
+/// Each block is assigned a sequential ObjectIdAlias for compact RowId encoding.
 ///
 /// # Arguments
 /// * `block_infos` - Prepared block information
@@ -128,8 +129,10 @@ where
     for (idx, block_info) in block_infos.iter().enumerate() {
         let projection = Some(vec![block_info.col_idx]);
         let reader = block_info.block.reader();
+        // Assign a sequential ObjectIdAlias to each block for compact RowId encoding
+        let block_ref = ObjectIdAlias::from(idx as u16);
         let mut rowid_stream = reader
-            .extract_rowids_stream(bundle.ctx(), projection.as_ref())
+            .extract_rowids_stream(block_ref, bundle.ctx(), projection.as_ref())
             .await
             .map_err(|e| {
                 BundlebaseError::from(format!(
@@ -522,11 +525,14 @@ mod tests {
 
     #[test]
     fn test_index_blocks_op_serialization() {
+        let index_id = ObjectId::generate();
+        let block_id1 = ObjectId::generate();
+        let block_id2 = ObjectId::generate();
         let op = IndexBlocksOp {
-            index: ObjectId::from(1),
+            index: index_id,
             blocks: vec![
-                VersionedBlockId::new(ObjectId::from(10), "v1".to_string()),
-                VersionedBlockId::new(ObjectId::from(20), "v2".to_string()),
+                VersionedBlockId::new(block_id1, "v1".to_string()),
+                VersionedBlockId::new(block_id2, "v2".to_string()),
             ],
             path: "ab/cdef0123456789.index.idx".to_string(),
             cardinality: 100,
@@ -539,16 +545,16 @@ mod tests {
 
         assert_eq!(deserialized, op);
         assert_eq!(deserialized.blocks.len(), 2);
-        assert_eq!(format!("{}", deserialized.blocks[0]), "0a@v1");
-        assert_eq!(format!("{}", deserialized.blocks[1]), "14@v2");
     }
 
     #[test]
     fn test_index_blocks_op_serialization_with_doc_count() {
+        let index_id = ObjectId::generate();
+        let block_id = ObjectId::generate();
         let op = IndexBlocksOp {
-            index: ObjectId::from(1),
+            index: index_id,
             blocks: vec![VersionedBlockId::new(
-                ObjectId::from(10),
+                block_id,
                 "v1".to_string(),
             )],
             path: "ab/cdef0123456789.textindex.tar".to_string(),

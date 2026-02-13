@@ -14,7 +14,7 @@ use datafusion::datasource::source::DataSource;
 use datafusion::logical_expr::Expr;
 pub use datafusion::physical_plan::SendableRecordBatchStream;
 use datafusion::prelude::SessionContext;
-pub use crate::object_id::ObjectId;
+pub use crate::object_id::{ObjectId, ObjectIdAlias};
 pub use plugin::DataGenerator;
 pub use reader_factory::DataReaderFactory;
 pub use crate::row_id::{RowId, RowIdBatch, SendableRowIdBatchStream};
@@ -83,8 +83,14 @@ pub trait DataReader: Sync + Send + Debug {
     /// Stream data with RowIds for index building
     /// Each batch is paired with RowIds indicating the file position of each row
     /// Used by CreateIndexOp to build indexes that reference actual file positions
+    ///
+    /// # Arguments
+    /// * `block_ref` - The compact ObjectIdAlias to embed in each RowId for this block
+    /// * `ctx` - DataFusion session context
+    /// * `projection` - Optional column projection
     async fn extract_rowids_stream(
         &self,
+        block_ref: ObjectIdAlias,
         ctx: Arc<SessionContext>,
         projection: Option<&Vec<usize>>,
     ) -> Result<SendableRowIdBatchStream, BundlebaseError> {
@@ -102,6 +108,7 @@ pub trait DataReader: Sync + Send + Debug {
         Ok(Box::pin(RowIdStreamAdapter::new(
             record_batch_stream,
             provider,
+            block_ref,
         )))
     }
 }
