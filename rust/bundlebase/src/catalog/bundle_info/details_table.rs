@@ -8,11 +8,11 @@ use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use std::any::Any;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 /// TableProvider that queries bundle details dynamically from the BundleFacade.
 pub(super) struct BundleDetailsTable {
-    facade: Arc<dyn BundleFacade>,
+    facade: Weak<dyn BundleFacade>,
     schema: SchemaRef,
 }
 
@@ -25,11 +25,17 @@ impl std::fmt::Debug for BundleDetailsTable {
 }
 
 impl BundleDetailsTable {
-    pub fn new(facade: Arc<dyn BundleFacade>) -> Self {
+    pub fn new(facade: Weak<dyn BundleFacade>) -> Self {
         Self {
             facade,
             schema: Self::table_schema(),
         }
+    }
+
+    fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
+        self.facade.upgrade().ok_or_else(|| {
+            datafusion::error::DataFusionError::Internal("Bundle has been dropped".to_string())
+        })
     }
 
     fn table_schema() -> SchemaRef {
@@ -44,12 +50,13 @@ impl BundleDetailsTable {
     }
 
     fn build_batch(&self) -> Result<RecordBatch> {
-        let id = self.facade.id();
-        let name = self.facade.name();
-        let description = self.facade.description();
-        let url = self.facade.url().to_string();
-        let from = self.facade.from().map(|u| u.to_string());
-        let version = self.facade.version();
+        let facade = self.facade()?;
+        let id = facade.id();
+        let name = facade.name();
+        let description = facade.description();
+        let url = facade.url().to_string();
+        let from = facade.from().map(|u| u.to_string());
+        let version = facade.version();
 
         let batch = RecordBatch::try_new(
             Arc::clone(&self.schema),

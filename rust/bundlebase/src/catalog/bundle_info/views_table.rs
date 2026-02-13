@@ -8,11 +8,11 @@ use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use std::any::Any;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 /// TableProvider that queries bundle views dynamically from the BundleFacade.
 pub(super) struct BundleViewsTable {
-    facade: Arc<dyn BundleFacade>,
+    facade: Weak<dyn BundleFacade>,
     schema: SchemaRef,
 }
 
@@ -25,11 +25,17 @@ impl std::fmt::Debug for BundleViewsTable {
 }
 
 impl BundleViewsTable {
-    pub fn new(facade: Arc<dyn BundleFacade>) -> Self {
+    pub fn new(facade: Weak<dyn BundleFacade>) -> Self {
         Self {
             facade,
             schema: Self::table_schema(),
         }
+    }
+
+    fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
+        self.facade.upgrade().ok_or_else(|| {
+            datafusion::error::DataFusionError::Internal("Bundle has been dropped".to_string())
+        })
     }
 
     fn table_schema() -> SchemaRef {
@@ -40,7 +46,7 @@ impl BundleViewsTable {
     }
 
     fn build_batch(&self) -> Result<RecordBatch> {
-        let views = self.facade.views_by_name();
+        let views = self.facade()?.views_by_name();
 
         // Sort views by name for consistent ordering
         let mut view_list: Vec<_> = views.iter().collect();

@@ -20,13 +20,16 @@ use indexes_table::BundleIndexesTable;
 use packs_table::BundlePacksTable;
 use status_table::BundleStatusTable;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use views_table::BundleViewsTable;
 
 /// SchemaProvider that exposes bundle metadata tables in the "bundle_info" schema.
 ///
 /// Tables query data dynamically from the BundleFacade on each access,
 /// ensuring they always reflect the current state.
+///
+/// Sub-tables hold `Weak` references to avoid an Arc reference cycle:
+/// BundleBuilder → Bundle → SessionContext → SchemaProviders → BundleBuilder.
 pub struct BundleInfoSchemaProvider {
     tables: HashMap<&'static str, Arc<dyn TableProvider>>,
 }
@@ -39,7 +42,7 @@ impl std::fmt::Debug for BundleInfoSchemaProvider {
 
 impl BundleInfoSchemaProvider {
     /// Create a new BundleInfoSchemaProvider with the given BundleFacade.
-    pub fn new(bundle: Arc<dyn BundleFacade>) -> Self {
+    pub fn new(bundle: Weak<dyn BundleFacade>) -> Self {
         let mut tables: HashMap<&'static str, Arc<dyn TableProvider>> = HashMap::new();
         tables.insert(tables::HISTORY, Arc::new(BundleHistoryTable::new(bundle.clone())));
         tables.insert(tables::STATUS, Arc::new(BundleStatusTable::new(bundle.clone())));

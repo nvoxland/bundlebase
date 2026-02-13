@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use datafusion::error::Result;
 use std::any::Any;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 /// SchemaProvider that exposes Pack tables.
 ///
@@ -17,8 +17,11 @@ use std::sync::Arc;
 /// by the PackUnionTable implementation.
 /// Tables query data dynamically from the BundleFacade on each access,
 /// ensuring they always reflect the current state.
+///
+/// Holds a `Weak` reference to avoid an Arc reference cycle:
+/// BundleBuilder → Bundle → SessionContext → SchemaProviders → BundleBuilder.
 pub struct PackSchemaProvider {
-    facade: Arc<dyn BundleFacade>,
+    facade: Weak<dyn BundleFacade>,
 }
 
 impl std::fmt::Debug for PackSchemaProvider {
@@ -29,13 +32,14 @@ impl std::fmt::Debug for PackSchemaProvider {
 
 impl PackSchemaProvider {
     /// Create a new PackSchemaProvider with the given BundleFacade.
-    pub fn new(facade: Arc<dyn BundleFacade>) -> Self {
+    pub fn new(facade: Weak<dyn BundleFacade>) -> Self {
         Self { facade }
     }
 
-    /// Get the BundleFacade reference.
-    fn facade(&self) -> &Arc<dyn BundleFacade> {
-        &self.facade
+    /// Upgrade the weak reference to the BundleFacade.
+    /// Returns `None` if the owning Arc has been dropped.
+    fn facade(&self) -> Option<Arc<dyn BundleFacade>> {
+        self.facade.upgrade()
     }
 
     /// Extract pack ID from table name (e.g., "__pack_abc123" -> "abc123")
@@ -53,7 +57,8 @@ impl SchemaProvider for PackSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        let packs = self.facade().packs();
+        let Some(facade) = self.facade() else { return vec![] };
+        let packs = facade.packs();
         packs
             .keys()
             .map(Pack::table_name)
@@ -65,7 +70,8 @@ impl SchemaProvider for PackSchemaProvider {
 
         match pack_id {
             Some(id) => {
-                let packs = self.facade().packs();
+                let Some(facade) = self.facade() else { return Ok(None) };
+                let packs = facade.packs();
                 if let Some(pack) = packs.get(&id) {
                     if pack.is_empty() {
                         return Ok(None);
@@ -83,7 +89,8 @@ impl SchemaProvider for PackSchemaProvider {
 
     fn table_exist(&self, name: &str) -> bool {
         if let Some(pack_id) = Self::parse_id(name) {
-            let packs = self.facade().packs();
+            let Some(facade) = self.facade() else { return false };
+            let packs = facade.packs();
             if let Some(pack) = packs.get(&pack_id) {
                 !pack.is_empty()
             } else {

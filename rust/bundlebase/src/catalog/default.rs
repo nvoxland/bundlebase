@@ -1,7 +1,7 @@
 use crate::bundle::BundleFacade;
 use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, TableProvider};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 /// Alias dataframe is registered in the ctx under. User can select from this
 pub static BUNDLE_TABLE: &str = "bundle";
@@ -9,8 +9,11 @@ pub static BUNDLE_TABLE: &str = "bundle";
 /// SchemaProvider that exposes the bundle's cached dataframe as a "bundle" table.
 /// Tables query data dynamically from the BundleFacade on each access,
 /// ensuring they always reflect the current state.
+///
+/// Holds a `Weak` reference to avoid an Arc reference cycle:
+/// BundleBuilder → Bundle → SessionContext → SchemaProviders → BundleBuilder.
 pub struct DefaultSchemaProvider {
-    bundle: Arc<dyn BundleFacade>,
+    bundle: Weak<dyn BundleFacade>,
 }
 
 impl std::fmt::Debug for DefaultSchemaProvider {
@@ -21,7 +24,7 @@ impl std::fmt::Debug for DefaultSchemaProvider {
 
 impl DefaultSchemaProvider {
     /// Create a new DefaultSchemaProvider with the given BundleFacade.
-    pub fn new(bundle: Arc<dyn BundleFacade>) -> Self {
+    pub fn new(bundle: Weak<dyn BundleFacade>) -> Self {
         Self { bundle }
     }
 }
@@ -38,9 +41,11 @@ impl SchemaProvider for DefaultSchemaProvider {
 
     async fn table(&self, name: &str) -> datafusion::error::Result<Option<Arc<dyn TableProvider>>> {
         if name == BUNDLE_TABLE {
+            let facade = self.bundle.upgrade().ok_or_else(|| {
+                datafusion::error::DataFusionError::Internal("Bundle has been dropped".to_string())
+            })?;
 
-            let df = self
-                .bundle
+            let df = facade
                 .dataframe()
                 .await
                 .map_err(|e| datafusion::error::DataFusionError::External(e.into()))?;

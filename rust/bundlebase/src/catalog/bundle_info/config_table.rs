@@ -9,11 +9,11 @@ use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use futures::TryStreamExt;
 use std::any::Any;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 /// TableProvider that exposes bundle configuration entries from all layers.
 pub(super) struct BundleConfigTable {
-    facade: Arc<dyn BundleFacade>,
+    facade: Weak<dyn BundleFacade>,
 }
 
 impl std::fmt::Debug for BundleConfigTable {
@@ -23,8 +23,14 @@ impl std::fmt::Debug for BundleConfigTable {
 }
 
 impl BundleConfigTable {
-    pub fn new(facade: Arc<dyn BundleFacade>) -> Self {
+    pub fn new(facade: Weak<dyn BundleFacade>) -> Self {
         Self { facade }
+    }
+
+    fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
+        self.facade.upgrade().ok_or_else(|| {
+            datafusion::error::DataFusionError::Internal("Bundle has been dropped".to_string())
+        })
     }
 }
 
@@ -49,7 +55,7 @@ impl TableProvider for BundleConfigTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let entries = self.facade.config().all_values()
+        let entries = self.facade()?.config().all_values()
             .map_err(|e| datafusion::error::DataFusionError::External(e))?;
         let stream = Box::new(entries)
             .into_stream()
