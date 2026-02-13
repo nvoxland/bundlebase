@@ -7,7 +7,7 @@ use block_table::BlockTable;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use datafusion::error::Result;
 use std::any::Any;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 /// SchemaProvider that exposes individual DataBlock tables.
 ///
@@ -15,8 +15,11 @@ use std::sync::Arc;
 /// This provider dynamically discovers blocks by scanning through all data packs.
 /// Tables query data dynamically from the BundleFacade on each access,
 /// ensuring they always reflect the current state.
+///
+/// Holds a `Weak` reference to avoid an Arc reference cycle:
+/// BundleBuilder → Bundle → SessionContext → SchemaProviders → BundleBuilder.
 pub struct BlockSchemaProvider {
-    bundle: Arc<dyn BundleFacade>,
+    bundle: Weak<dyn BundleFacade>,
 }
 
 impl std::fmt::Debug for BlockSchemaProvider {
@@ -27,13 +30,14 @@ impl std::fmt::Debug for BlockSchemaProvider {
 
 impl BlockSchemaProvider {
     /// Create a new BlockSchemaProvider with the given BundleFacade.
-    pub fn new(facade: Arc<dyn BundleFacade>) -> Self {
+    pub fn new(facade: Weak<dyn BundleFacade>) -> Self {
         Self { bundle: facade }
     }
 
-    /// Get the BundleFacade reference.
-    fn bundle(&self) -> &Arc<dyn BundleFacade> {
-        &self.bundle
+    /// Upgrade the weak reference to the BundleFacade.
+    /// Returns `None` if the owning Arc has been dropped.
+    fn facade(&self) -> Option<Arc<dyn BundleFacade>> {
+        self.bundle.upgrade()
     }
 
     /// Extract block ID from table name (e.g., "__block_abc123" -> "abc123")
@@ -44,7 +48,8 @@ impl BlockSchemaProvider {
 
     /// Find a block by ID across all packs
     fn find_block(&self, block_id: &ObjectId) -> Option<Arc<DataBlock>> {
-        let packs = self.bundle().packs();
+        let facade = self.facade()?;
+        let packs = facade.packs();
         for pack in packs.values() {
             let blocks = pack.blocks();
             for block in blocks {
@@ -65,7 +70,8 @@ impl SchemaProvider for BlockSchemaProvider {
     }
 
     fn table_names(&self) -> Vec<String> {
-        let packs = self.bundle().packs();
+        let Some(facade) = self.facade() else { return vec![] };
+        let packs = facade.packs();
         let mut names = Vec::new();
 
         for pack in packs.values() {

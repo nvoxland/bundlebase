@@ -8,11 +8,11 @@ use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use futures::TryStreamExt;
 use std::any::Any;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 /// TableProvider that queries bundle status (uncommitted changes) dynamically from the BundleFacade.
 pub(super) struct BundleStatusTable {
-    facade: Arc<dyn BundleFacade>,
+    facade: Weak<dyn BundleFacade>,
 }
 
 impl std::fmt::Debug for BundleStatusTable {
@@ -22,8 +22,14 @@ impl std::fmt::Debug for BundleStatusTable {
 }
 
 impl BundleStatusTable {
-    pub fn new(facade: Arc<dyn BundleFacade>) -> Self {
+    pub fn new(facade: Weak<dyn BundleFacade>) -> Self {
         Self { facade }
+    }
+
+    fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
+        self.facade.upgrade().ok_or_else(|| {
+            datafusion::error::DataFusionError::Internal("Bundle has been dropped".to_string())
+        })
     }
 }
 
@@ -48,7 +54,7 @@ impl TableProvider for BundleStatusTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let status = self.facade.status();
+        let status = self.facade()?.status();
         let schema = BundleStatus::schema();
         let stream = Box::new(status)
             .into_stream()

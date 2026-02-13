@@ -32,7 +32,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use url::Url;
 use crate::bundle::pack::JoinTypeOption;
 
@@ -271,10 +271,10 @@ impl BundleBuilder {
             status: RwLock::new(BundleStatus::new()),
         });
 
-        // Re-register schema providers with BundleBuilder as facade.
+        // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
         // This overwrites the Bundle-facade providers registered by empty_internal(),
         // so bundle_info tables show uncommitted changes from BundleBuilder.
-        Bundle::register_schema_providers(&builder.bundle.ctx, builder.clone())?;
+        Bundle::register_schema_providers(&builder.bundle.ctx, Arc::downgrade(&builder) as Weak<dyn BundleFacade>)?;
 
         Ok(builder)
     }
@@ -316,10 +316,10 @@ impl BundleBuilder {
             status: RwLock::new(BundleStatus::new()),
         });
 
-        // Re-register schema providers with BundleBuilder as facade.
+        // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
         // This overwrites the Bundle-facade providers registered by Bundle::open(),
         // so bundle_info tables show uncommitted changes from BundleBuilder.
-        Bundle::register_schema_providers(&builder.bundle.ctx, builder.clone())?;
+        Bundle::register_schema_providers(&builder.bundle.ctx, Arc::downgrade(&builder) as Weak<dyn BundleFacade>)?;
 
         Ok(builder)
     }

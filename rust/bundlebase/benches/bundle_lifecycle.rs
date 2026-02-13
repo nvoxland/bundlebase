@@ -2,22 +2,16 @@
 //!
 //! Benchmarks for create, open, attach, and commit operations.
 //! All data is written to disk under $TMPDIR/bundlebase/ (cleaned per run).
-//!
-//! BundleBuilder also has an Arc reference cycle (BundleBuilder → Bundle →
-//! SessionContext → SchemaProviders → BundleBuilder). We break this cycle
-//! after each iteration to prevent memory leaks during long benchmark runs.
 
 mod bench_data;
 mod data_generator;
 mod throttled_store;
 
 use bench_data::Format;
-use bundlebase::{BundleBuilder, BundleFacade};
+use bundlebase::BundleBuilder;
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
-use datafusion::catalog::MemorySchemaProvider;
 use data_generator::{SCALE_10K, SCALE_1K};
 use std::path::PathBuf;
-use std::sync::Arc;
 use url::Url;
 
 /// Root directory for benchmark temp files, under the system temp directory.
@@ -43,30 +37,6 @@ fn clean_bench_tmp() {
     std::fs::create_dir_all(&tmp).expect("failed to create bench tmp dir");
 }
 
-/// Break the Arc reference cycle in a BundleBuilder so it can be freed.
-///
-/// BundleBuilder → Bundle → SessionContext → SchemaProviders → BundleBuilder
-/// forms a cycle that prevents Drop. Replacing the schema providers with empty
-/// MemorySchemaProviders drops the `Arc<dyn BundleFacade>` references, breaking
-/// the cycle.
-fn break_arc_cycle(bundle: &BundleBuilder) {
-    let ctx = bundle.ctx();
-    if let Some(catalog) = ctx.catalog("bundlebase") {
-        let empty = Arc::new(MemorySchemaProvider::new());
-        let _ = catalog.register_schema("blocks", empty.clone());
-        let _ = catalog.register_schema("packs", empty.clone());
-        let _ = catalog.register_schema("default", empty.clone());
-        let _ = catalog.register_schema("bundle_info", empty);
-    }
-}
-
-/// Clean up after a benchmark iteration.
-///
-/// Breaks the Arc reference cycle to allow the BundleBuilder to be freed.
-fn cleanup_after_iter(bundle: &BundleBuilder) {
-    break_arc_cycle(bundle);
-}
-
 fn bench_create_bundle(c: &mut Criterion) {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -80,7 +50,7 @@ fn bench_create_bundle(c: &mut Criterion) {
                 .await
                 .expect("bundle creation failed");
             bundle.commit("Created bundle").await.expect("Commit failed");
-            cleanup_after_iter(&bundle);
+            drop(bundle);
         });
     });
 }
@@ -112,7 +82,7 @@ fn bench_attach_data(c: &mut Criterion) {
                         .await
                         .expect("attach failed");
                     bundle.commit("Attached file").await.expect("commit failed");
-                    cleanup_after_iter(&bundle);
+                    drop(bundle);
                 }
             });
         });

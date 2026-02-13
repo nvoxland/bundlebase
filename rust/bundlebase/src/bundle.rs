@@ -54,7 +54,7 @@ use datafusion::scalar::ScalarValue;
 use log::{debug, info};
 use parking_lot::RwLock;
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use url::Url;
 use uuid::Uuid;
 pub static META_DIR: &str = "_bundlebase";
@@ -219,8 +219,8 @@ impl Bundle {
             is_view: Arc::new(RwLock::new(false)),
         });
 
-        // Register schema providers with Bundle as the facade
-        Self::register_schema_providers(&ctx, bundle.clone())?;
+        // Register schema providers with Bundle as the facade (using Weak to avoid Arc cycle)
+        Self::register_schema_providers(&ctx, Arc::downgrade(&bundle) as Weak<dyn BundleFacade>)?;
 
         Ok(bundle)
     }
@@ -231,7 +231,7 @@ impl Bundle {
     /// with the facade reference and registers them with the catalog.
     pub(crate) fn register_schema_providers(
         ctx: &SessionContext,
-        facade: Arc<dyn BundleFacade>,
+        facade: Weak<dyn BundleFacade>,
     ) -> Result<(), BundlebaseError> {
         let catalog = ctx.catalog(CATALOG_NAME).expect("Default catalog not found");
 

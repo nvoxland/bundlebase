@@ -9,11 +9,11 @@ use datafusion::error::Result;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use std::any::Any;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 /// TableProvider that queries bundle blocks dynamically from the BundleFacade.
 pub(super) struct BundleBlocksTable {
-    facade: Arc<dyn BundleFacade>,
+    facade: Weak<dyn BundleFacade>,
     schema: SchemaRef,
 }
 
@@ -26,11 +26,17 @@ impl std::fmt::Debug for BundleBlocksTable {
 }
 
 impl BundleBlocksTable {
-    pub fn new(facade: Arc<dyn BundleFacade>) -> Self {
+    pub fn new(facade: Weak<dyn BundleFacade>) -> Self {
         Self {
             facade,
             schema: Self::table_schema(),
         }
+    }
+
+    fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
+        self.facade.upgrade().ok_or_else(|| {
+            datafusion::error::DataFusionError::Internal("Bundle has been dropped".to_string())
+        })
     }
 
     fn table_schema() -> SchemaRef {
@@ -46,7 +52,7 @@ impl BundleBlocksTable {
     }
 
     fn build_batch(&self) -> Result<RecordBatch> {
-        let packs = self.facade.packs();
+        let packs = self.facade()?.packs();
 
         // Collect all blocks from all packs
         let mut blocks: Vec<(Arc<DataBlock>, ObjectId, String)> = Vec::new();
