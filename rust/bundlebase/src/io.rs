@@ -29,6 +29,9 @@ pub(crate) mod plugin;
 // Re-export core types from registry
 pub use registry::{io_registry, IOFactory, IORegistry};
 
+// Re-export custom scheme registration (for benchmarks/tests)
+pub use plugin::object_store::register_object_store_scheme;
+
 // Re-export traits and types
 pub use dir::{IOReadDir, IOReadWriteDir, WriteResult};
 pub use file::{read_yaml, write_yaml, IOReadFile, IOReadWriteFile};
