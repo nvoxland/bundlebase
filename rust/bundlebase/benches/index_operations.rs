@@ -76,7 +76,6 @@ fn bench_index_lookup_exact(c: &mut Criterion) {
 
     for format in ALL_FORMATS {
         for rows in [SCALE_10K, SCALE_100K] {
-            group.throughput(Throughput::Elements(rows as u64));
             group.bench_with_input(
                 BenchmarkId::new(format.name(), format!("{}_rows", rows)),
                 &rows,
@@ -175,7 +174,6 @@ fn bench_index_range_query(c: &mut Criterion) {
 
     for format in ALL_FORMATS {
         for rows in [SCALE_10K, SCALE_100K] {
-            group.throughput(Throughput::Elements(rows as u64));
             group.bench_with_input(
                 BenchmarkId::new(format.name(), format!("{}_rows", rows)),
                 &rows,
@@ -216,7 +214,6 @@ fn bench_index_in_query(c: &mut Criterion) {
 
     for format in ALL_FORMATS {
         for rows in [SCALE_10K, SCALE_100K] {
-            group.throughput(Throughput::Elements(rows as u64));
             group.bench_with_input(
                 BenchmarkId::new(format.name(), format!("{}_rows", rows)),
                 &rows,

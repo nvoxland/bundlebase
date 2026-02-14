@@ -31,12 +31,12 @@ def test_create_empty_bundle(benchmark, event_loop):
     benchmark(run)
 
 
-def test_create_and_attach(benchmark, event_loop):
+def test_create_and_attach(benchmark, event_loop, data_path_1k):
     """Benchmark creating a bundle and attaching data."""
 
     async def create_and_attach():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
+        c = await c.attach(data_path_1k)
         return c
 
     def run():
@@ -45,12 +45,12 @@ def test_create_and_attach(benchmark, event_loop):
     benchmark(run)
 
 
-def test_create_and_commit(benchmark, event_loop):
+def test_create_and_commit(benchmark, event_loop, data_path_1k):
     """Benchmark creating a bundle with data and committing."""
 
     async def create_and_commit():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
+        c = await c.attach(data_path_1k)
         c = await c.commit("Benchmark commit")
         return c
 
@@ -60,14 +60,14 @@ def test_create_and_commit(benchmark, event_loop):
     benchmark(run)
 
 
-def test_attach_with_operations(benchmark, event_loop):
+def test_attach_with_operations(benchmark, event_loop, data_path_1k):
     """Benchmark attaching data with additional operations."""
 
     async def attach_with_ops():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-        c = await c.drop_column("title")
-        c = await c.rename_column("first_name", "name")
+        c = await c.attach(data_path_1k)
+        c = await c.drop_column("region")
+        c = await c.rename_column("category", "cat")
         return c
 
     def run():
@@ -76,13 +76,13 @@ def test_attach_with_operations(benchmark, event_loop):
     benchmark(run)
 
 
-def test_filter_operation(benchmark, event_loop):
+def test_filter_operation(benchmark, event_loop, data_path_1k):
     """Benchmark applying a filter operation."""
 
     async def apply_filter():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-        c = await c.filter("salary > 50000")
+        c = await c.attach(data_path_1k)
+        c = await c.filter("SELECT * FROM bundle WHERE amount > 5000")
         return c
 
     def run():
@@ -91,28 +91,28 @@ def test_filter_operation(benchmark, event_loop):
     benchmark(run)
 
 
-def test_select_operation(benchmark, event_loop):
-    """Benchmark applying a select/query operation."""
+def test_filter_with_projection(benchmark, event_loop, data_path_1k):
+    """Benchmark applying a filter with column projection."""
 
-    async def run_select():
+    async def run_filter():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-        c = await c.select("first_name, last_name, salary WHERE salary > 50000")
+        c = await c.attach(data_path_1k)
+        c = await c.filter("SELECT id, name, amount FROM bundle WHERE amount > 5000")
         return c
 
     def run():
-        return event_loop.run_until_complete(run_select())
+        return event_loop.run_until_complete(run_filter())
 
     benchmark(run)
 
 
-def test_num_rows(benchmark, event_loop):
+def test_num_rows(benchmark, event_loop, data_path_1k):
     """Benchmark counting rows (forces query execution)."""
 
     # Setup: create bundle once
     async def setup():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
+        c = await c.attach(data_path_1k)
         return c
 
     bundle = event_loop.run_until_complete(setup())

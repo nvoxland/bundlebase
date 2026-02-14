@@ -149,15 +149,14 @@ fn bench_filter_parameterized(c: &mut Criterion) {
                     b.to_async(&rt).iter(|| {
                         let bundle = bundle.clone();
                         async move {
-                            let filtered = bundle.clone();
-                            filtered
+                            bundle
                                 .filter(
                                     "SELECT * FROM bundle WHERE filter_value < $1",
                                     vec![ScalarValue::Int64(Some(50))],
                                 )
                                 .await
                                 .expect("filter failed");
-                            let df = filtered.dataframe().await.expect("dataframe failed");
+                            let df = bundle.dataframe().await.expect("dataframe failed");
                             // Note: Using collect() for benchmarking only - production should use streaming
                             let _result =
                                 df.as_ref().clone().collect().await.expect("collect failed");

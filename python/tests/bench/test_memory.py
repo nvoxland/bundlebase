@@ -31,7 +31,7 @@ def get_memory_mb() -> float:
     return current / (1024 * 1024)
 
 
-def test_streaming_memory_constant(event_loop):
+def test_streaming_memory_constant(event_loop, data_path_10k):
     """Verify streaming uses constant memory.
 
     This test verifies that streaming through data does not accumulate
@@ -43,7 +43,7 @@ def test_streaming_memory_constant(event_loop):
 
     async def stream_and_measure():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
+        c = await c.attach(data_path_10k)
 
         # Force garbage collection before measurement
         gc.collect()
@@ -53,7 +53,7 @@ def test_streaming_memory_constant(event_loop):
         async for batch in bundlebase.stream_batches(c):
             total_rows += batch.num_rows
             # Sample memory periodically
-            if total_rows % 100 == 0:
+            if total_rows % 1000 == 0:
                 gc.collect()
                 memory_samples.append(get_memory_mb())
 
@@ -78,7 +78,7 @@ def test_streaming_memory_constant(event_loop):
             f"Memory grew from {first_half_avg:.1f}MB to {second_half_avg:.1f}MB during streaming"
 
 
-def test_to_pandas_memory(benchmark, event_loop):
+def test_to_pandas_memory(benchmark, event_loop, data_path_10k):
     """Benchmark memory usage of to_pandas conversion.
 
     Note: to_pandas() uses streaming internally, so memory should be bounded.
@@ -90,7 +90,7 @@ def test_to_pandas_memory(benchmark, event_loop):
         start_memory = get_memory_mb()
 
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
+        c = await c.attach(data_path_10k)
         df = await bundlebase.to_pandas(c)
 
         gc.collect()
@@ -106,12 +106,12 @@ def test_to_pandas_memory(benchmark, event_loop):
     assert len(result) > 0
 
 
-def test_stream_batches_memory(benchmark, event_loop):
+def test_stream_batches_memory(benchmark, event_loop, data_path_10k):
     """Benchmark streaming with memory tracking."""
 
     async def stream_with_memory():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
+        c = await c.attach(data_path_10k)
 
         total_rows = 0
         max_batch_size = 0
@@ -129,17 +129,17 @@ def test_stream_batches_memory(benchmark, event_loop):
     total_rows, max_batch_size = result
     assert total_rows > 0
     # Batch size should be bounded (not entire dataset)
-    assert max_batch_size < total_rows or total_rows <= 1000, \
-        f"Batch size {max_batch_size} should be smaller than total rows {total_rows} for large datasets"
+    assert max_batch_size < total_rows, \
+        f"Batch size {max_batch_size} should be smaller than total rows {total_rows}"
 
 
-def test_filter_streaming_memory(benchmark, event_loop):
+def test_filter_streaming_memory(benchmark, event_loop, data_path_10k):
     """Benchmark filtered streaming memory usage."""
 
     async def filter_and_stream():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-        c = await c.filter("salary > 50000")
+        c = await c.attach(data_path_10k)
+        c = await c.filter("SELECT * FROM bundle WHERE amount > 5000")
 
         total_rows = 0
         async for batch in bundlebase.stream_batches(c):
@@ -154,7 +154,7 @@ def test_filter_streaming_memory(benchmark, event_loop):
     assert result >= 0
 
 
-def test_aggregation_memory(benchmark, event_loop):
+def test_aggregation_memory(benchmark, event_loop, data_path_10k):
     """Benchmark aggregation memory usage.
 
     Aggregations may need to buffer data, but should still be bounded.
@@ -162,9 +162,9 @@ def test_aggregation_memory(benchmark, event_loop):
 
     async def aggregate():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-        c = await c.select("gender, COUNT(*) as count, AVG(salary) as avg_salary GROUP BY gender")
-        return await bundlebase.to_pandas(c)
+        c = await c.attach(data_path_10k)
+        result = await c.query("SELECT category, COUNT(*) as count, AVG(amount) as avg_amount FROM bundle GROUP BY category")
+        return await result.to_pandas()
 
     def run():
         return event_loop.run_until_complete(aggregate())
@@ -173,16 +173,15 @@ def test_aggregation_memory(benchmark, event_loop):
     assert len(result) > 0
 
 
-def test_multiple_operations_memory(benchmark, event_loop):
+def test_multiple_operations_memory(benchmark, event_loop, data_path_10k):
     """Benchmark memory with multiple chained operations."""
 
     async def chain_operations():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-        c = await c.filter("salary > 50000")
-        c = await c.drop_column("title")
-        c = await c.rename_column("first_name", "name")
-        c = await c.select("name, last_name, salary")
+        c = await c.attach(data_path_10k)
+        c = await c.filter("SELECT * FROM bundle WHERE amount > 5000")
+        c = await c.drop_column("region")
+        c = await c.rename_column("filter_value", "fv")
 
         total_rows = 0
         async for batch in bundlebase.stream_batches(c):

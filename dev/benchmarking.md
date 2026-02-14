@@ -4,7 +4,7 @@ This document describes how to run and use the benchmarking infrastructure for B
 
 ## Overview
 
-Bundlebase includes comprehensive benchmarks for both Rust and Python to measure performance of core operations. The benchmarks work **completely offline** using `memory://` storage (no S3/cloud access required).
+Bundlebase includes comprehensive benchmarks for both Rust and Python to measure performance of core operations. The benchmarks work **completely offline** using `throttle://` (Rust) and `memory://` (Python) storage (no S3/cloud access required).
 
 **Key Constraint:** Bundlebase targets ~50MB constant memory regardless of dataset size. The streaming benchmarks verify this property.
 
@@ -44,10 +44,10 @@ open target/criterion/report/index.html
 
 | File | Benchmarks | Description |
 |------|------------|-------------|
-| `bundle_lifecycle.rs` | `create_empty_bundle`, `create_with_data`, `open_bundle`, `commit_bundle`, `attach_multiple` | Bundle creation, opening, and persistence |
+| `bundle_lifecycle.rs` | `create_empty_bundle`, `attach_data` | Bundle creation and data attachment |
 | `query_execution.rs` | `filter_selective`, `filter_broad`, `aggregation_sum`, `filter_parameterized`, `join_small_large`, `projection` | Query operations at various scales |
 | `index_operations.rs` | `create_index`, `index_lookup_exact`, `index_vs_scan`, `index_range_query`, `index_in_query` | Index creation and query acceleration |
-| `streaming.rs` | `stream_rows`, `stream_with_filter`, `stream_with_aggregation`, `stream_projection`, `memory_assertion_1m` | Memory-efficient streaming verification |
+| `streaming.rs` | `stream_rows`, `stream_with_filter`, `stream_with_aggregation`, `stream_projection`, `stream_1m_rows` | Memory-efficient streaming verification |
 
 ### Benchmark Scales
 
@@ -102,6 +102,9 @@ poetry run pytest python/tests/bench/ --benchmark-only --benchmark-save=baseline
 rust/bundlebase/
 ├── benches/
 │   ├── data_generator.rs     # Synthetic data generation
+│   ├── bench_data.rs         # Cached data file management
+│   ├── bench_helpers.rs      # Shared benchmark utilities
+│   ├── throttled_store.rs    # Throttled storage for benchmarks
 │   ├── bundle_lifecycle.rs   # Bundle operations
 │   ├── query_execution.rs    # Query benchmarks
 │   ├── index_operations.rs   # Index benchmarks
@@ -120,8 +123,7 @@ Benchmarks generate reproducible test data at runtime (not stored in repo):
 
 ```rust
 pub struct BenchmarkDataConfig {
-    pub rows: usize,      // 1K to 10M
-    pub columns: usize,   // 5-50
+    pub rows: usize,      // 1K to 1M
     pub seed: u64,        // For reproducibility (default: 42)
 }
 ```
