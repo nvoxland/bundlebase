@@ -17,12 +17,41 @@ use object_store::path::Path as ObjectPath;
 use object_store::{ObjectMeta, ObjectStore};
 use sha2::{Digest, Sha256};
 use std::env::current_dir;
+use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use url::Url;
 
 use super::tar::TarObjectStore;
+
+// ── Custom scheme registry ─────────────────────────────────────────
+
+type ObjectStoreFactoryFn = Box<
+    dyn Fn(&Url, &BundleConfig) -> Result<(Arc<dyn ObjectStore>, ObjectPath), BundlebaseError>
+        + Send
+        + Sync,
+>;
+
+static CUSTOM_SCHEMES: OnceLock<parking_lot::RwLock<HashMap<String, ObjectStoreFactoryFn>>> =
+    OnceLock::new();
+
+/// Register a custom ObjectStore factory for a URL scheme.
+///
+/// Once registered, `parse_url()` will delegate to the factory for any URL
+/// whose scheme matches. This is intended for benchmarks and tests that need
+/// to inject a wrapped store (e.g., `ThrottledStore`) that survives the
+/// commit-reopen cycle.
+pub fn register_object_store_scheme(
+    scheme: &str,
+    factory: impl Fn(&Url, &BundleConfig) -> Result<(Arc<dyn ObjectStore>, ObjectPath), BundlebaseError>
+        + Send
+        + Sync
+        + 'static,
+) {
+    let map = CUSTOM_SCHEMES.get_or_init(|| parking_lot::RwLock::new(HashMap::new()));
+    map.write().insert(scheme.to_string(), Box::new(factory));
+}
 
 // ── Scope constants ─────────────────────────────────────────────────
 
@@ -96,6 +125,13 @@ pub(crate) fn parse_url(
     url: &Url,
     config: &BundleConfig,
 ) -> Result<(Arc<dyn ObjectStore>, ObjectPath), BundlebaseError> {
+    // Check custom scheme registry first (e.g., throttle:// for benchmarks)
+    if let Some(map) = CUSTOM_SCHEMES.get() {
+        if let Some(factory) = map.read().get(url.scheme()) {
+            return factory(url, config);
+        }
+    }
+
     // Handle tar:// scheme - format is tar:///path/to/archive.tar or tar:///path/to/archive.tar/internal/path
     if url.scheme() == "tar" {
         let full_path = url.path();
@@ -823,5 +859,34 @@ mod tests {
     fn test_compute_store_url(#[case] url: &str, #[case] expected: &str) {
         let url = Url::parse(url).unwrap();
         assert_eq!(expected, compute_store_url(&url).as_str());
+    }
+
+    #[test]
+    fn test_custom_scheme_registration() {
+        use crate::io::get_memory_store;
+
+        register_object_store_scheme("testscheme", |url, _config| {
+            Ok((get_memory_store(), ObjectPath::from(url.path())))
+        });
+
+        let url = Url::parse("testscheme:///some/path").unwrap();
+        let config = BundleConfig::new(None).unwrap();
+        let (store, path) = parse_url(&url, &config).unwrap();
+
+        assert_eq!(path.as_ref(), "some/path");
+        // Verify it returned the memory store (put + get round-trip)
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let test_path = ObjectPath::from("/custom_scheme_test");
+            store
+                .put(&test_path, object_store::PutPayload::from_static(b"hello"))
+                .await
+                .unwrap();
+            let result = store.get(&test_path).await.unwrap();
+            assert_eq!(result.bytes().await.unwrap().as_ref(), b"hello");
+        });
     }
 }

@@ -4,194 +4,212 @@
 //! The key constraint is ~50MB constant memory regardless of dataset size.
 
 mod bench_data;
+mod bench_helpers;
 mod data_generator;
+mod throttled_store;
 
-use bench_data::Format;
+use bench_data::{Format, ALL_FORMATS};
+use bench_helpers::{create_benchmark_bundle, create_runtime};
 use bundlebase::bundle::BundleFacade;
-use bundlebase::{BundleBuilder, BundlebaseError};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_100K, SCALE_10K, SCALE_1M};
 use futures::StreamExt;
-use std::sync::Arc;
-use tokio::runtime::Runtime;
-use url::Url;
-
-fn random_memory_url() -> Url {
-    Url::parse(&format!("memory:///bench/{}", rand::random::<u64>())).expect("valid url")
-}
-
-/// Create a bundle with synthetic data
-async fn create_benchmark_bundle(rows: usize) -> Result<Arc<BundleBuilder>, BundlebaseError> {
-    let data_url = bench_data::get_data_url(rows, &Format::Parquet);
-
-    let bundle_url = random_memory_url();
-    let bundle = BundleBuilder::create(bundle_url.as_str(), None).await?;
-    bundle.attach(&data_url, None).await?;
-
-    Ok(bundle)
-}
 
 fn bench_stream_rows(c: &mut Criterion) {
-    let rt = Runtime::new().expect("tokio runtime");
+    let rt = create_runtime();
     let mut group = c.benchmark_group("stream_rows");
 
-    for rows in [SCALE_10K, SCALE_100K, SCALE_1M] {
-        group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(rows), &rows, |b, &rows| {
-            let bundle = rt.block_on(create_benchmark_bundle(rows)).expect("bundle creation");
+    for format in ALL_FORMATS {
+        for rows in [SCALE_10K, SCALE_100K, SCALE_1M] {
+            group.throughput(Throughput::Elements(rows as u64));
+            group.bench_with_input(
+                BenchmarkId::new(format.name(), rows),
+                &rows,
+                |b, &rows| {
+                    let bundle = rt
+                        .block_on(create_benchmark_bundle(rows, &format))
+                        .expect("bundle creation");
 
-            b.to_async(&rt).iter(|| {
-                let bundle = bundle.clone();
-                async move {
-                    let df = bundle.dataframe().await.expect("dataframe failed");
-                    let mut stream = df
-                        .as_ref()
-                        .clone()
-                        .execute_stream()
-                        .await
-                        .expect("execute_stream failed");
+                    b.to_async(&rt).iter(|| {
+                        let bundle = bundle.clone();
+                        async move {
+                            let df = bundle.dataframe().await.expect("dataframe failed");
+                            let mut stream = df
+                                .as_ref()
+                                .clone()
+                                .execute_stream()
+                                .await
+                                .expect("execute_stream failed");
 
-                    let mut total_rows = 0usize;
-                    while let Some(batch_result) = stream.next().await {
-                        let batch = batch_result.expect("batch failed");
-                        total_rows += batch.num_rows();
-                    }
-                    total_rows
-                }
-            });
-        });
+                            let mut total_rows = 0usize;
+                            while let Some(batch_result) = stream.next().await {
+                                let batch = batch_result.expect("batch failed");
+                                total_rows += batch.num_rows();
+                            }
+                            total_rows
+                        }
+                    });
+                },
+            );
+        }
     }
     group.finish();
 }
 
 fn bench_stream_with_filter(c: &mut Criterion) {
-    let rt = Runtime::new().expect("tokio runtime");
+    let rt = create_runtime();
     let mut group = c.benchmark_group("stream_with_filter");
 
-    for rows in [SCALE_10K, SCALE_100K, SCALE_1M] {
-        group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(rows), &rows, |b, &rows| {
-            let bundle = rt.block_on(create_benchmark_bundle(rows)).expect("bundle creation");
+    for format in ALL_FORMATS {
+        for rows in [SCALE_10K, SCALE_100K, SCALE_1M] {
+            group.throughput(Throughput::Elements(rows as u64));
+            group.bench_with_input(
+                BenchmarkId::new(format.name(), rows),
+                &rows,
+                |b, &rows| {
+                    let bundle = rt
+                        .block_on(create_benchmark_bundle(rows, &format))
+                        .expect("bundle creation");
 
-            b.to_async(&rt).iter(|| {
-                let bundle = bundle.clone();
-                async move {
-                    // Apply filter then stream
-                    bundle
-                        .filter("SELECT * FROM bundle WHERE filter_value < 50", vec![])
-                        .await
-                        .expect("filter failed");
-                    let df = bundle.dataframe().await.expect("dataframe failed");
-                    let mut stream = df
-                        .as_ref()
-                        .clone()
-                        .execute_stream()
-                        .await
-                        .expect("execute_stream failed");
+                    b.to_async(&rt).iter(|| {
+                        let bundle = bundle.clone();
+                        async move {
+                            bundle
+                                .filter(
+                                    "SELECT * FROM bundle WHERE filter_value < 50",
+                                    vec![],
+                                )
+                                .await
+                                .expect("filter failed");
+                            let df = bundle.dataframe().await.expect("dataframe failed");
+                            let mut stream = df
+                                .as_ref()
+                                .clone()
+                                .execute_stream()
+                                .await
+                                .expect("execute_stream failed");
 
-                    let mut total_rows = 0usize;
-                    while let Some(batch_result) = stream.next().await {
-                        let batch = batch_result.expect("batch failed");
-                        total_rows += batch.num_rows();
-                    }
-                    total_rows
-                }
-            });
-        });
+                            let mut total_rows = 0usize;
+                            while let Some(batch_result) = stream.next().await {
+                                let batch = batch_result.expect("batch failed");
+                                total_rows += batch.num_rows();
+                            }
+                            total_rows
+                        }
+                    });
+                },
+            );
+        }
     }
     group.finish();
 }
 
 fn bench_stream_with_aggregation(c: &mut Criterion) {
-    let rt = Runtime::new().expect("tokio runtime");
+    let rt = create_runtime();
     let mut group = c.benchmark_group("stream_with_aggregation");
 
-    for rows in [SCALE_10K, SCALE_100K, SCALE_1M] {
-        group.throughput(Throughput::Elements(rows as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(rows), &rows, |b, &rows| {
-            let bundle = rt.block_on(create_benchmark_bundle(rows)).expect("bundle creation");
+    for format in ALL_FORMATS {
+        for rows in [SCALE_10K, SCALE_100K, SCALE_1M] {
+            group.throughput(Throughput::Elements(rows as u64));
+            group.bench_with_input(
+                BenchmarkId::new(format.name(), rows),
+                &rows,
+                |b, &rows| {
+                    let bundle = rt
+                        .block_on(create_benchmark_bundle(rows, &format))
+                        .expect("bundle creation");
 
-            b.to_async(&rt).iter(|| {
-                let bundle = bundle.clone();
-                async move {
-                    let mut stream = bundle
-                        .query("SELECT category, SUM(amount) as total FROM bundle GROUP BY category", vec![])
-                        .await
-                        .expect("query failed");
+                    b.to_async(&rt).iter(|| {
+                        let bundle = bundle.clone();
+                        async move {
+                            let mut stream = bundle
+                                .query(
+                                    "SELECT category, SUM(amount) as total FROM bundle GROUP BY category",
+                                    vec![],
+                                )
+                                .await
+                                .expect("query failed");
 
-                    let mut total_rows = 0usize;
-                    while let Some(batch_result) = stream.next().await {
-                        let batch = batch_result.expect("batch failed");
-                        total_rows += batch.num_rows();
-                    }
-                    total_rows
-                }
-            });
-        });
+                            let mut total_rows = 0usize;
+                            while let Some(batch_result) = stream.next().await {
+                                let batch = batch_result.expect("batch failed");
+                                total_rows += batch.num_rows();
+                            }
+                            total_rows
+                        }
+                    });
+                },
+            );
+        }
     }
     group.finish();
 }
 
 fn bench_stream_projection(c: &mut Criterion) {
-    let rt = Runtime::new().expect("tokio runtime");
+    let rt = create_runtime();
     let mut group = c.benchmark_group("stream_projection");
 
-    // Benchmark streaming with different projection sizes
-    for rows in [SCALE_100K, SCALE_1M] {
-        // Stream all columns
-        group.bench_with_input(
-            BenchmarkId::from_parameter(format!("{}_all_cols", rows)),
-            &rows,
-            |b, &rows| {
-                let bundle = rt.block_on(create_benchmark_bundle(rows)).expect("bundle creation");
+    for format in ALL_FORMATS {
+        for rows in [SCALE_100K, SCALE_1M] {
+            // Stream all columns
+            group.bench_with_input(
+                BenchmarkId::new(format.name(), format!("{}_all_cols", rows)),
+                &rows,
+                |b, &rows| {
+                    let bundle = rt
+                        .block_on(create_benchmark_bundle(rows, &format))
+                        .expect("bundle creation");
 
-                b.to_async(&rt).iter(|| {
-                    let bundle = bundle.clone();
-                    async move {
-                        let df = bundle.dataframe().await.expect("dataframe failed");
-                        let mut stream = df
-                            .as_ref()
-                            .clone()
-                            .execute_stream()
-                            .await
-                            .expect("execute_stream failed");
+                    b.to_async(&rt).iter(|| {
+                        let bundle = bundle.clone();
+                        async move {
+                            let df = bundle.dataframe().await.expect("dataframe failed");
+                            let mut stream = df
+                                .as_ref()
+                                .clone()
+                                .execute_stream()
+                                .await
+                                .expect("execute_stream failed");
 
-                        let mut total_rows = 0usize;
-                        while let Some(batch_result) = stream.next().await {
-                            let batch = batch_result.expect("batch failed");
-                            total_rows += batch.num_rows();
+                            let mut total_rows = 0usize;
+                            while let Some(batch_result) = stream.next().await {
+                                let batch = batch_result.expect("batch failed");
+                                total_rows += batch.num_rows();
+                            }
+                            total_rows
                         }
-                        total_rows
-                    }
-                });
-            },
-        );
+                    });
+                },
+            );
 
-        // Stream subset of columns (2 columns)
-        group.bench_with_input(
-            BenchmarkId::from_parameter(format!("{}_2_cols", rows)),
-            &rows,
-            |b, &rows| {
-                let bundle = rt.block_on(create_benchmark_bundle(rows)).expect("bundle creation");
+            // Stream subset of columns (2 columns)
+            group.bench_with_input(
+                BenchmarkId::new(format.name(), format!("{}_2_cols", rows)),
+                &rows,
+                |b, &rows| {
+                    let bundle = rt
+                        .block_on(create_benchmark_bundle(rows, &format))
+                        .expect("bundle creation");
 
-                b.to_async(&rt).iter(|| {
-                    let bundle = bundle.clone();
-                    async move {
-                        let mut stream = bundle
-                            .query("SELECT id, amount FROM bundle", vec![])
-                            .await
-                            .expect("query failed");
+                    b.to_async(&rt).iter(|| {
+                        let bundle = bundle.clone();
+                        async move {
+                            let mut stream = bundle
+                                .query("SELECT id, amount FROM bundle", vec![])
+                                .await
+                                .expect("query failed");
 
-                        let mut total_rows = 0usize;
-                        while let Some(batch_result) = stream.next().await {
-                            let batch = batch_result.expect("batch failed");
-                            total_rows += batch.num_rows();
+                            let mut total_rows = 0usize;
+                            while let Some(batch_result) = stream.next().await {
+                                let batch = batch_result.expect("batch failed");
+                                total_rows += batch.num_rows();
+                            }
+                            total_rows
                         }
-                        total_rows
-                    }
-                });
-            },
-        );
+                    });
+                },
+            );
+        }
     }
     group.finish();
 }
@@ -199,10 +217,13 @@ fn bench_stream_projection(c: &mut Criterion) {
 /// Memory assertion test - verifies streaming uses constant memory
 /// This benchmark processes 1M rows and should use <100MB RAM
 fn bench_memory_assertion_1m(c: &mut Criterion) {
-    let rt = Runtime::new().expect("tokio runtime");
+    let rt = create_runtime();
 
+    // Only test with parquet for the memory assertion — it's format-independent
     c.bench_function("memory_assertion_1m_rows", |b| {
-        let bundle = rt.block_on(create_benchmark_bundle(SCALE_1M)).expect("bundle creation");
+        let bundle = rt
+            .block_on(create_benchmark_bundle(SCALE_1M, &Format::Parquet))
+            .expect("bundle creation");
 
         b.to_async(&rt).iter(|| {
             let bundle = bundle.clone();
@@ -224,7 +245,6 @@ fn bench_memory_assertion_1m(c: &mut Criterion) {
                     max_batch_size = max_batch_size.max(batch.num_rows());
                 }
 
-                // Return total rows and max batch size for verification
                 (total_rows, max_batch_size)
             }
         });
@@ -239,4 +259,5 @@ criterion_group!(
     bench_stream_projection,
     bench_memory_assertion_1m,
 );
-criterion_main!(benches);
+
+bench_helpers::bench_main!(benches);

@@ -3,8 +3,6 @@
 //! Generates data files on first use and caches them to `benches/data/`.
 //! Returns file:// URLs that can be used directly with `attach()`.
 
-#![allow(dead_code)]
-
 use arrow::array::RecordBatch;
 use crate::data_generator::{generate_batch, generate_lookup_batch, BenchmarkDataConfig};
 use parquet::arrow::ArrowWriter;
@@ -12,14 +10,19 @@ use std::path::{Path, PathBuf};
 use url::Url;
 
 /// Supported output formats for benchmark data.
+#[derive(Copy, Clone)]
 pub enum Format {
     Parquet,
     Csv,
     Json,
 }
 
+/// All supported formats for iteration in benchmarks.
+pub const ALL_FORMATS: [Format; 3] = [Format::Parquet, Format::Csv, Format::Json];
+
 impl Format {
-    fn extension(&self) -> &str {
+    /// File extension and human-readable name for this format.
+    pub fn name(&self) -> &str {
         match self {
             Format::Parquet => "parquet",
             Format::Csv => "csv",
@@ -75,7 +78,7 @@ fn ensure_cached(path: &Path, generate: impl FnOnce() -> Vec<u8>) -> String {
 
 /// Return a file:// URL to cached data file, generating on first call.
 pub fn get_data_url(rows: usize, format: &Format) -> String {
-    let path = data_dir().join(format!("data_{}.{}", rows, format.extension()));
+    let path = data_dir().join(format!("data_{}.{}", rows, format.name()));
     ensure_cached(&path, || {
         let config = BenchmarkDataConfig::with_rows(rows);
         let batch = generate_batch(&config);
@@ -85,7 +88,7 @@ pub fn get_data_url(rows: usize, format: &Format) -> String {
 
 /// Return a file:// URL to cached lookup table, generating on first call.
 pub fn get_lookup_url(rows: usize, format: &Format) -> String {
-    let path = data_dir().join(format!("lookup_{}.{}", rows, format.extension()));
+    let path = data_dir().join(format!("lookup_{}.{}", rows, format.name()));
     ensure_cached(&path, || {
         let batch = generate_lookup_batch(rows);
         write_batch_to_format(&batch, format)
