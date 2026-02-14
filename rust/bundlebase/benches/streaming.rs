@@ -214,13 +214,13 @@ fn bench_stream_projection(c: &mut Criterion) {
     group.finish();
 }
 
-/// Memory assertion test - verifies streaming uses constant memory
-/// This benchmark processes 1M rows and should use <100MB RAM
-fn bench_memory_assertion_1m(c: &mut Criterion) {
+/// Stream 1M rows benchmark - processes 1M rows through streaming
+/// This benchmark verifies streaming throughput at scale
+fn bench_stream_1m_rows(c: &mut Criterion) {
     let rt = create_runtime();
 
-    // Only test with parquet for the memory assertion — it's format-independent
-    c.bench_function("memory_assertion_1m_rows", |b| {
+    // Only test with parquet — streaming throughput is format-independent at this point
+    c.bench_function("stream_1m_rows", |b| {
         let bundle = rt
             .block_on(create_benchmark_bundle(SCALE_1M, &Format::Parquet))
             .expect("bundle creation");
@@ -257,7 +257,7 @@ criterion_group!(
     bench_stream_with_filter,
     bench_stream_with_aggregation,
     bench_stream_projection,
-    bench_memory_assertion_1m,
+    bench_stream_1m_rows,
 );
 
 bench_helpers::bench_main!(benches);

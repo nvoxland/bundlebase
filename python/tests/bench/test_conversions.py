@@ -20,12 +20,12 @@ def event_loop():
 
 
 @pytest.fixture(scope="module")
-def bundle_with_data(event_loop):
+def bundle_with_data(event_loop, data_path_1k):
     """Create a bundle with test data for conversion benchmarks."""
 
     async def setup():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
+        c = await c.attach(data_path_1k)
         return c
 
     return event_loop.run_until_complete(setup())
@@ -58,13 +58,13 @@ def test_to_polars(benchmark, bundle_with_data, event_loop):
     assert len(result) > 0
 
 
-def test_to_pandas_with_filter(benchmark, event_loop):
+def test_to_pandas_with_filter(benchmark, event_loop, data_path_1k):
     """Benchmark converting filtered data to pandas."""
 
     async def filter_and_convert():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-        c = await c.filter("salary > 50000")
+        c = await c.attach(data_path_1k)
+        c = await c.filter("SELECT * FROM bundle WHERE amount > 5000")
         return await bundlebase.to_pandas(c)
 
     def run():
@@ -74,21 +74,21 @@ def test_to_pandas_with_filter(benchmark, event_loop):
     assert len(result) > 0
 
 
-def test_to_pandas_with_select(benchmark, event_loop):
+def test_to_pandas_with_projection(benchmark, event_loop, data_path_1k):
     """Benchmark converting projected data to pandas."""
 
-    async def select_and_convert():
+    async def project_and_convert():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-        c = await c.select("first_name, last_name, salary")
+        c = await c.attach(data_path_1k)
+        c = await c.filter("SELECT id, name, amount FROM bundle")
         return await bundlebase.to_pandas(c)
 
     def run():
-        return event_loop.run_until_complete(select_and_convert())
+        return event_loop.run_until_complete(project_and_convert())
 
     result = benchmark(run)
     assert len(result) > 0
-    assert set(result.columns) == {'first_name', 'last_name', 'salary'}
+    assert set(result.columns) == {'id', 'name', 'amount'}
 
 
 def test_stream_batches(benchmark, bundle_with_data, event_loop):
@@ -107,13 +107,13 @@ def test_stream_batches(benchmark, bundle_with_data, event_loop):
     assert result > 0
 
 
-def test_stream_batches_with_filter(benchmark, event_loop):
+def test_stream_batches_with_filter(benchmark, event_loop, data_path_1k):
     """Benchmark streaming filtered data."""
 
     async def stream_filtered():
         c = await bundlebase.create(bundlebase.random_memory_url())
-        c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-        c = await c.filter("salary > 50000")
+        c = await c.attach(data_path_1k)
+        c = await c.filter("SELECT * FROM bundle WHERE amount > 5000")
 
         total_rows = 0
         async for batch in bundlebase.stream_batches(c):
@@ -135,10 +135,10 @@ def test_as_pyarrow(benchmark, bundle_with_data, event_loop):
     """
 
     async def convert():
-        return await bundlebase.as_pyarrow(bundle_with_data)
+        return await bundle_with_data.as_pyarrow()
 
     def run():
         return event_loop.run_until_complete(convert())
 
     result = benchmark(run)
-    assert result.num_rows > 0
+    assert len(result) > 0

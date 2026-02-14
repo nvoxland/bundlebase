@@ -2,6 +2,8 @@
 //!
 //! Generates reproducible test data at runtime (not stored in repo).
 
+// This module is compiled into each benchmark binary; not all binaries
+// use every constant or function, so dead-code warnings are expected.
 #![allow(dead_code)]
 
 use arrow::array::{Float64Array, Int64Array, RecordBatch, StringArray};
@@ -15,8 +17,6 @@ use std::sync::Arc;
 pub struct BenchmarkDataConfig {
     /// Number of rows to generate
     pub rows: usize,
-    /// Number of columns to generate
-    pub columns: usize,
     /// Random seed for reproducibility (default: 42)
     pub seed: u64,
 }
@@ -25,7 +25,6 @@ impl Default for BenchmarkDataConfig {
     fn default() -> Self {
         Self {
             rows: 10_000,
-            columns: 10,
             seed: 42,
         }
     }
@@ -46,7 +45,6 @@ pub const SCALE_1K: usize = 1_000;
 pub const SCALE_10K: usize = 10_000;
 pub const SCALE_100K: usize = 100_000;
 pub const SCALE_1M: usize = 1_000_000;
-pub const SCALE_10M: usize = 10_000_000;
 
 /// Generate a RecordBatch with synthetic data for benchmarking
 ///

@@ -11,9 +11,11 @@ os.environ['CARGO_TARGET_DIR'] = 'target/maturin'
 
 import asyncio
 import random
-from typing import Any
+import tempfile
+from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 import bundlebase
 
@@ -65,12 +67,54 @@ def write_parquet_bytes(batch: pa.RecordBatch) -> bytes:
     return sink.getvalue()
 
 
+def create_temp_parquet(rows: int, seed: int = 42) -> tuple[str, str]:
+    """Generate synthetic data and write to a temporary parquet file.
+
+    Returns (file_url, file_path) where file_url is a file:// URL for attach()
+    and file_path is the raw path for cleanup.
+    """
+    batch = generate_benchmark_data(rows, seed)
+    table = pa.Table.from_batches([batch])
+    f = tempfile.NamedTemporaryFile(suffix='.parquet', delete=False)
+    pq.write_table(table, f.name)
+    f.close()
+    return Path(f.name).as_uri(), f.name
+
+
+async def create_bundle_with_data(rows: int, seed: int = 42):
+    """Create a bundle with synthetic benchmark data.
+
+    Returns an OperationChain wrapping a PyBundleBuilder.
+    """
+    data_url, _ = create_temp_parquet(rows, seed)
+    c = await bundlebase.create(bundlebase.random_memory_url())
+    c = await c.attach(data_url)
+    c = await c.commit("Benchmark setup")
+    return c
+
+
 @pytest.fixture
 def event_loop():
     """Create event loop for async tests."""
     loop = asyncio.new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(scope="session")
+def data_path_1k():
+    """file:// URL to temporary parquet file with 1K rows of synthetic data."""
+    file_url, file_path = create_temp_parquet(SCALE_1K)
+    yield file_url
+    os.unlink(file_path)
+
+
+@pytest.fixture(scope="session")
+def data_path_10k():
+    """file:// URL to temporary parquet file with 10K rows of synthetic data."""
+    file_url, file_path = create_temp_parquet(SCALE_10K)
+    yield file_url
+    os.unlink(file_path)
 
 
 @pytest.fixture
@@ -89,31 +133,3 @@ def benchmark_data_10k() -> pa.RecordBatch:
 def benchmark_data_100k() -> pa.RecordBatch:
     """100K row benchmark dataset."""
     return generate_benchmark_data(SCALE_100K)
-
-
-async def create_bundle_with_data(rows: int):
-    """Create a bundle with synthetic benchmark data.
-
-    Returns an OperationChain wrapping a PyBundleBuilder.
-    """
-    batch = generate_benchmark_data(rows)
-    parquet_bytes = write_parquet_bytes(batch)
-
-    # Write to memory location
-    data_url = f"memory:///bench_data_{random.randint(0, 2**63)}.parquet"
-    bundle_url = f"memory:///bench_bundle_{random.randint(0, 2**63)}"
-
-    # Use bundlebase's internal API to write the parquet file
-    # and create a bundle pointing to it
-    c = await bundlebase.create(bundle_url)
-
-    # For benchmarks, we'll use the test data file approach
-    # since we can't directly write to memory:// from Python
-    c = await c.attach(bundlebase.test_datafile("userdata.parquet"))
-
-    return c
-
-
-def run_async(coro):
-    """Run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
