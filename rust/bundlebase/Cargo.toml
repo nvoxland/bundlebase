@@ -7,6 +7,7 @@ homepage.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "High-performance data processing library with Apache Arrow and DataFusion"
+autobenches = false
 
 [lib]
 crate-type = ["rlib"]
@@ -77,4 +78,12 @@ harness = false
 
 [[bench]]
 name = "streaming"
+harness = false
+
+[[bench]]
+name = "command_operations"
+harness = false
+
+[[bench]]
+name = "indexed_queries"
 harness = false

@@ -40,6 +40,13 @@ impl BenchmarkDataConfig {
     }
 }
 
+/// NATO phonetic alphabet vocabulary for generating synthetic text descriptions.
+const VOCAB: [&str; 20] = [
+    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
+    "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa",
+    "quebec", "romeo", "sierra", "tango",
+];
+
 /// Standard row counts for benchmarks
 pub const SCALE_1K: usize = 1_000;
 pub const SCALE_10K: usize = 10_000;
@@ -86,6 +93,19 @@ pub fn generate_batch(config: &BenchmarkDataConfig) -> RecordBatch {
         .collect();
     let region_array = StringArray::from(region_values);
 
+    // Generate multi-word text descriptions for text search benchmarks
+    let descriptions: Vec<String> = (0..config.rows)
+        .map(|_| {
+            let word_count = rng.random_range(3..=8);
+            (0..word_count)
+                .map(|_| VOCAB[rng.random_range(0..VOCAB.len())])
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    let description_array =
+        StringArray::from(descriptions.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+
     // Build schema
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
@@ -94,6 +114,7 @@ pub fn generate_batch(config: &BenchmarkDataConfig) -> RecordBatch {
         Field::new("category", DataType::Utf8, false),
         Field::new("name", DataType::Utf8, false),
         Field::new("region", DataType::Utf8, false),
+        Field::new("description", DataType::Utf8, false),
     ]));
 
     RecordBatch::try_new(
@@ -105,6 +126,7 @@ pub fn generate_batch(config: &BenchmarkDataConfig) -> RecordBatch {
             Arc::new(category_array),
             Arc::new(name_array),
             Arc::new(region_array),
+            Arc::new(description_array),
         ],
     )
     .expect("Failed to create RecordBatch")
