@@ -3,8 +3,10 @@
 //! Provides temp directory management, bundle creation, runtime construction,
 //! and a `bench_main!` macro to eliminate boilerplate in each benchmark binary.
 
-#![allow(dead_code)]
+// This module is compiled into each benchmark binary; not all binaries
+// use every constant or function, so dead-code warnings are expected.
 
+#![allow(dead_code)]
 use super::bench_data;
 use super::bench_data::Format;
 use bundlebase::{BundleBuilder, BundlebaseError};
