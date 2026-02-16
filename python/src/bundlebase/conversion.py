@@ -57,6 +57,7 @@ class QueryResult:
         """
         self._stream = stream
         self._consumed = False
+        self._cached_batches = None
 
     def _check_consumed(self):
         """Raise error if stream has already been consumed."""
@@ -68,7 +69,9 @@ class QueryResult:
         self._consumed = True
 
     async def _collect_batches(self) -> List[pa.RecordBatch]:
-        """Collect all batches from the stream."""
+        """Collect all batches from the stream, caching for reuse."""
+        if self._cached_batches is not None:
+            return self._cached_batches
         self._check_consumed()
         batches = []
         while True:
@@ -76,6 +79,7 @@ class QueryResult:
             if batch is None:
                 break
             batches.append(batch)
+        self._cached_batches = batches
         return batches
 
     async def to_pandas(self) -> "pd.DataFrame":

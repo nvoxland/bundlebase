@@ -30,6 +30,23 @@ if TYPE_CHECKING:
 _loop_manager = EventLoopManager()
 
 
+class ExplainResult:
+    """Formatted query execution plan result."""
+
+    def __init__(self, rows):
+        self._rows = rows  # list of (plan_type, plan) tuples
+
+    def __str__(self):
+        parts = []
+        for plan_type, plan in self._rows:
+            parts.append(f"== {plan_type} ==")
+            parts.append(plan)
+        return "\n".join(parts)
+
+    def __repr__(self):
+        return self.__str__()
+
+
 class SyncQueryResult:
     """Synchronous wrapper for QueryResult.
 
@@ -47,6 +64,23 @@ class SyncQueryResult:
             async_result: The underlying async QueryResult
         """
         self._async = async_result
+
+    def __str__(self) -> str:
+        """Return a pretty-printed table representation of the query results."""
+        try:
+            df = self.to_pandas()
+            return str(df)
+        except ImportError:
+            pass
+        try:
+            df = self.to_polars()
+            return str(df)
+        except ImportError:
+            pass
+        return str(self.to_dict())
+
+    def __repr__(self) -> str:
+        return self.__str__()
 
     def to_pandas(self) -> Any:
         """Convert query results to pandas DataFrame."""
@@ -202,8 +236,8 @@ class SyncBundle:
         analyze: bool = False,
         format: str = None,
         sql: str = None,
-    ):
-        """Get the query execution plan as a RecordBatchStream.
+    ) -> ExplainResult:
+        """Get the query execution plan.
 
         Args:
             verbose: If True, show more detailed plan information
@@ -212,12 +246,26 @@ class SyncBundle:
             sql: Optional SQL statement to explain instead of the bundle's dataframe
 
         Returns:
-            RecordBatchStream with plan_type and plan columns
+            ExplainResult with readable string representation
         """
         coro = _call_original_method(
             self._async, "explain", verbose, analyze, format, sql
         )
-        return _loop_manager.run_sync(coro)
+        stream = _loop_manager.run_sync(coro)
+
+        # Consume stream and collect plan rows
+        async def _collect():
+            batch = await stream.next_batch()
+            rows = []
+            if batch is not None:
+                plan_types = batch.column("plan_type")
+                plans = batch.column("plan")
+                for i in range(batch.num_rows):
+                    rows.append((str(plan_types[i]), str(plans[i])))
+            return rows
+
+        rows = _loop_manager.run_sync(_collect())
+        return ExplainResult(rows)
 
     def to_pandas(self) -> Any:
         """Convert bundle data to pandas DataFrame."""
