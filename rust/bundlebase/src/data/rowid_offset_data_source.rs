@@ -87,41 +87,40 @@ impl RowIdOffsetDataSource {
         }
     }
 
-    /// Extract all complete lines from a byte range
+    /// Extract lines at specific byte offsets from a fetched byte range
     /// Works for both CSV and JSON Lines since both are line-oriented
-    /// Returns only complete lines (those ending with newline)
-    /// Partial lines after the last newline are ignored
-    fn extract_lines(bytes: &[u8], row_offsets: &[u64]) -> Vec<String> {
+    /// `batch_start` is the absolute byte offset of the start of `bytes` in the file
+    /// `row_offsets` are absolute byte offsets of individual rows in the file
+    /// Lines truncated by the read-ahead buffer (no newline found) are skipped
+    fn extract_lines(bytes: &[u8], batch_start: u64, row_offsets: &[u64]) -> Vec<String> {
         if bytes.is_empty() || row_offsets.is_empty() {
             return Vec::new();
         }
 
         let text = String::from_utf8_lossy(bytes);
         let mut lines = Vec::new();
-        let mut current_pos = 0;
 
-        // For each expected row offset, extract the next complete line
-        for _ in row_offsets {
-            if current_pos >= text.len() {
-                break; // No more data
+        for &offset in row_offsets {
+            let pos = (offset - batch_start) as usize;
+            if pos >= text.len() {
+                continue; // offset beyond buffer
             }
-
-            // Extract the line from current position to next newline
-            if let Some(relative_end) = text[current_pos..].find('\n') {
-                let end = current_pos + relative_end;
-                let trimmed = text[current_pos..end].trim();
+            if let Some(end) = text[pos..].find('\n') {
+                let trimmed = text[pos..pos + end].trim();
                 if !trimmed.is_empty() {
                     lines.push(trimmed.to_string());
                 }
-                current_pos = end + 1;
-            } else {
-                // No newline found - this is a partial line, don't include it
-                break;
             }
+            // No newline → line truncated by read-ahead buffer, skip
         }
 
         lines
     }
+
+    /// Read-ahead per row for line-oriented index reads.
+    /// Rows in CSV/JSON are typically < 1KB. 4KB provides ample buffer
+    /// while reading ~250x less data than the previous 1MB minimum.
+    const LINE_READ_AHEAD_BYTES: u64 = 4096;
 
     /// Group row IDs into batches for efficient fetching
     /// Rows are batched together if they fall within the same or overlapping byte ranges
@@ -132,12 +131,12 @@ impl RowIdOffsetDataSource {
 
         let mut batches = Vec::new();
         let mut current_start = row_ids[0].offset();
-        let mut current_end = current_start + (row_ids[0].size_mb() as u64 * 1024 * 1024);
+        let mut current_end = current_start + Self::LINE_READ_AHEAD_BYTES;
         let mut current_offsets = vec![row_ids[0].offset()];
 
         for row_id in &row_ids[1..] {
             let row_start = row_id.offset();
-            let row_end = row_start + (row_id.size_mb() as u64 * 1024 * 1024);
+            let row_end = row_start + Self::LINE_READ_AHEAD_BYTES;
 
             // If this row starts within or near the current batch range, expand the batch
             if row_start <= current_end {
@@ -248,7 +247,7 @@ impl DataSource for RowIdOffsetDataSource {
                 };
 
                 // Extract lines from this batch
-                let lines = Self::extract_lines(&bytes, &batch_offsets);
+                let lines = Self::extract_lines(&bytes, batch_start, &batch_offsets);
 
                 // Build RecordBatch from lines based on format
                 if lines.is_empty() {
@@ -462,17 +461,17 @@ mod tests {
 
     #[test]
     fn test_batch_row_ids_single_batch() {
-        // RowIds that are close together should be batched
+        // RowIds that are close together should be batched (within 4KB read-ahead)
         let block_ref = ObjectIdAlias::from(1u16);
         let row_ids = vec![
-            RowId::new(block_ref, 1000, 1), // offset 1000, size ~1MB
-            RowId::new(block_ref, 2000, 1), // offset 2000, within 1MB range of first
+            RowId::new(block_ref, 1000, 1), // offset 1000
+            RowId::new(block_ref, 2000, 1), // offset 2000, within 4KB range of first
             RowId::new(block_ref, 3000, 1), // offset 3000, within range
         ];
 
         let batches = RowIdOffsetDataSource::batch_row_ids(&row_ids);
 
-        // All three should be in one batch since they're within overlapping ranges
+        // All three should be in one batch since they're within overlapping 4KB ranges
         assert_eq!(1, batches.len());
         let (start, end, offsets) = &batches[0];
         assert_eq!(1000, *start);
@@ -485,14 +484,14 @@ mod tests {
         // RowIds that are far apart should be in separate batches
         let block_ref = ObjectIdAlias::from(1u16);
         let row_ids = vec![
-            RowId::new(block_ref, 1000, 1),     // offset 1000, size ~1MB
-            RowId::new(block_ref, 5000000, 1),  // offset 5MB, far from first
-            RowId::new(block_ref, 10000000, 1), // offset 10MB, far from second
+            RowId::new(block_ref, 1000, 1),    // offset 1000
+            RowId::new(block_ref, 50000, 1),   // offset 50KB, beyond 4KB read-ahead
+            RowId::new(block_ref, 100000, 1),  // offset 100KB, far from second
         ];
 
         let batches = RowIdOffsetDataSource::batch_row_ids(&row_ids);
 
-        // Should be in separate batches since they're far apart
+        // Should be in separate batches since they're beyond 4KB read-ahead of each other
         assert_eq!(3, batches.len());
         assert_eq!(1, batches[0].2.len());
         assert_eq!(1, batches[1].2.len());
@@ -504,11 +503,11 @@ mod tests {
         // Mix of close and far RowIds
         let block_ref = ObjectIdAlias::from(1u16);
         let row_ids = vec![
-            RowId::new(block_ref, 1000, 1),     // Batch 1
-            RowId::new(block_ref, 2000, 1),     // Batch 1
-            RowId::new(block_ref, 5000000, 1),  // Batch 2
-            RowId::new(block_ref, 5001000, 1),  // Batch 2
-            RowId::new(block_ref, 10000000, 1), // Batch 3
+            RowId::new(block_ref, 1000, 1),   // Batch 1
+            RowId::new(block_ref, 2000, 1),   // Batch 1 (within 4KB of first)
+            RowId::new(block_ref, 50000, 1),  // Batch 2 (beyond 4KB)
+            RowId::new(block_ref, 51000, 1),  // Batch 2 (within 4KB of third)
+            RowId::new(block_ref, 100000, 1), // Batch 3 (beyond 4KB)
         ];
 
         let batches = RowIdOffsetDataSource::batch_row_ids(&row_ids);
@@ -522,11 +521,11 @@ mod tests {
 
     #[test]
     fn test_extract_lines_csv() {
+        // "value1,value2,value3\n" = 21 bytes, so line 2 starts at offset 21
         let csv_data = "value1,value2,value3\nvalue4,value5,value6\nvalue7,value8,value9\n";
         let bytes = csv_data.as_bytes();
 
-        // Extract 2 lines
-        let lines = RowIdOffsetDataSource::extract_lines(bytes, &[0, 0]);
+        let lines = RowIdOffsetDataSource::extract_lines(bytes, 0, &[0, 21]);
 
         assert_eq!(2, lines.len());
         assert_eq!("value1,value2,value3", lines[0]);
@@ -538,7 +537,7 @@ mod tests {
         let csv_data = "single,line,data\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = RowIdOffsetDataSource::extract_lines(bytes, &[0]);
+        let lines = RowIdOffsetDataSource::extract_lines(bytes, 0, &[0]);
 
         assert_eq!(1, lines.len());
         assert_eq!("single,line,data", lines[0]);
@@ -546,14 +545,14 @@ mod tests {
 
     #[test]
     fn test_extract_lines_json() {
+        // {"id":1,"name":"Alice"} = 23 bytes + \n = line 2 starts at offset 24
         let json_data = r#"{"id":1,"name":"Alice"}
 {"id":2,"name":"Bob"}
 {"id":3,"name":"Charlie"}
 "#;
         let bytes = json_data.as_bytes();
 
-        // Extract 2 JSON lines
-        let lines = RowIdOffsetDataSource::extract_lines(bytes, &[0, 0]);
+        let lines = RowIdOffsetDataSource::extract_lines(bytes, 0, &[0, 24]);
 
         assert_eq!(2, lines.len());
         assert_eq!(r#"{"id":1,"name":"Alice"}"#, lines[0]);
@@ -562,13 +561,13 @@ mod tests {
 
     #[test]
     fn test_extract_lines_no_trailing_newline() {
-        // Data without trailing newline - partial line should be ignored
+        // "line1\n" = 6 bytes, "line2\n" = 6 bytes, "partial" starts at 12
         let csv_data = "line1\nline2\npartial";
         let bytes = csv_data.as_bytes();
 
-        let lines = RowIdOffsetDataSource::extract_lines(bytes, &[0, 0, 0]);
+        let lines = RowIdOffsetDataSource::extract_lines(bytes, 0, &[0, 6, 12]);
 
-        // Should only get 2 complete lines, not the partial one
+        // Should only get 2 complete lines, not the partial one (no trailing newline)
         assert_eq!(2, lines.len());
         assert_eq!("line1", lines[0]);
         assert_eq!("line2", lines[1]);
@@ -576,11 +575,11 @@ mod tests {
 
     #[test]
     fn test_extract_lines_ends_with_newline() {
-        // Data ending with newline - should include the line before it
+        // "line1\n" = 6 bytes each
         let csv_data = "line1\nline2\nline3\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = RowIdOffsetDataSource::extract_lines(bytes, &[0, 0, 0]);
+        let lines = RowIdOffsetDataSource::extract_lines(bytes, 0, &[0, 6, 12]);
 
         // Should get all 3 complete lines
         assert_eq!(3, lines.len());
@@ -591,15 +590,105 @@ mod tests {
 
     #[test]
     fn test_extract_lines_empty_lines() {
-        // Data with empty lines (just newlines)
+        // "line1\n" = 6 bytes, "\n" = 1 byte at offset 6, "line3\n" starts at offset 7
         let csv_data = "line1\n\nline3\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = RowIdOffsetDataSource::extract_lines(bytes, &[0, 0, 0]);
+        let lines = RowIdOffsetDataSource::extract_lines(bytes, 0, &[0, 6, 7]);
 
-        // Empty lines are trimmed and not included
+        // Empty line at offset 6 is trimmed and not included
         assert_eq!(2, lines.len());
         assert_eq!("line1", lines[0]);
         assert_eq!("line3", lines[1]);
+    }
+
+    #[test]
+    fn test_extract_lines_non_adjacent_rows() {
+        // Verify correct lines are extracted when rows aren't consecutive
+        // Simulates an index lookup returning rows 1 and 3 but not row 2
+        let data = "row1,data1\nrow2,data2\nrow3,data3\nrow4,data4\n";
+        let bytes = data.as_bytes();
+        // "row1,data1\n" = 11 bytes, "row2,data2\n" = 11 bytes, "row3,data3\n" starts at 22
+
+        let lines = RowIdOffsetDataSource::extract_lines(bytes, 0, &[0, 22]);
+
+        assert_eq!(2, lines.len());
+        assert_eq!("row1,data1", lines[0]);
+        assert_eq!("row3,data3", lines[1]);
+    }
+
+    #[test]
+    fn test_extract_lines_with_batch_start_offset() {
+        // Simulate reading a byte range starting at offset 100 in the file
+        // The buffer contains data from file byte 100 onwards
+        let data = "middle_row,value\nnext_row,value\n";
+        let bytes = data.as_bytes();
+
+        // Row offsets are absolute file positions
+        let lines = RowIdOffsetDataSource::extract_lines(bytes, 100, &[100, 117]);
+
+        assert_eq!(2, lines.len());
+        assert_eq!("middle_row,value", lines[0]);
+        assert_eq!("next_row,value", lines[1]);
+    }
+
+    #[test]
+    fn test_extract_lines_truncated_line() {
+        // Simulate read-ahead that doesn't capture the full line
+        // Buffer has 20 bytes but the line is longer
+        let data = "short\nthis_is_a_very";  // second line has no \n
+        let bytes = data.as_bytes();
+
+        let lines = RowIdOffsetDataSource::extract_lines(bytes, 0, &[0, 6]);
+
+        // First line is complete, second line is truncated (no \n) so it's skipped
+        assert_eq!(1, lines.len());
+        assert_eq!("short", lines[0]);
+    }
+
+    #[test]
+    fn test_extract_lines_offset_beyond_buffer() {
+        // Row offset points beyond the fetched buffer
+        let data = "only_line\n";
+        let bytes = data.as_bytes();
+
+        let lines = RowIdOffsetDataSource::extract_lines(bytes, 0, &[0, 500]);
+
+        // First line extracted, second offset is beyond buffer and skipped
+        assert_eq!(1, lines.len());
+        assert_eq!("only_line", lines[0]);
+    }
+
+    #[test]
+    fn test_batch_row_ids_small_read_ahead() {
+        // Verify that closely-spaced rows batch together with 4KB read-ahead
+        let block_ref = ObjectIdAlias::from(1u16);
+        let row_ids = vec![
+            RowId::new(block_ref, 100, 1),   // offset 100
+            RowId::new(block_ref, 200, 1),   // offset 200, within 4KB
+            RowId::new(block_ref, 4000, 1),  // offset 4000, still within 4KB of first (100+4096=4196)
+        ];
+
+        let batches = RowIdOffsetDataSource::batch_row_ids(&row_ids);
+
+        // All three should batch together since they're within 4KB range
+        assert_eq!(1, batches.len());
+        assert_eq!(3, batches[0].2.len());
+    }
+
+    #[test]
+    fn test_batch_row_ids_just_beyond_read_ahead() {
+        // Verify that rows just beyond 4KB read-ahead create separate batches
+        let block_ref = ObjectIdAlias::from(1u16);
+        let row_ids = vec![
+            RowId::new(block_ref, 100, 1),   // offset 100, range ends at 100+4096=4196
+            RowId::new(block_ref, 5000, 1),  // offset 5000, beyond 4196 → new batch
+        ];
+
+        let batches = RowIdOffsetDataSource::batch_row_ids(&row_ids);
+
+        assert_eq!(2, batches.len());
+        assert_eq!(1, batches[0].2.len());
+        assert_eq!(1, batches[1].2.len());
     }
 }

@@ -490,6 +490,16 @@ impl ColumnIndex {
 }
 ```
 
+## Format-Specific Index Behavior
+
+### Line-Oriented Formats (CSV, JSON Lines)
+
+For line-oriented formats, the `RowIdOffsetDataSource` reads only the specific byte ranges containing matched rows. Each RowId encodes the byte offset of its row within the file, and the reader fetches a small read-ahead buffer (4KB) around each offset to extract the complete line. Closely-spaced rows are batched into a single fetch to minimize I/O requests.
+
+### Parquet
+
+Parquet files do **not** use RowId-based byte-range reads. Since Parquet is a columnar format (not line-oriented), byte offsets don't map to row positions. Instead, DataFusion's native Parquet reader handles optimization via row group statistics and predicate pushdown. This is correct by design — Parquet's built-in metadata provides efficient filtering without requiring Bundlebase's line-oriented index reads.
+
 ## Performance Characteristics
 
 ### Time Complexity
