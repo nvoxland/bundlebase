@@ -1,10 +1,12 @@
 mod blocks;
 mod bundle_info;
+mod bundle_view_table;
 mod default;
 mod packs;
 
 pub use blocks::BlockSchemaProvider;
 pub use bundle_info::BundleInfoSchemaProvider;
+pub use bundle_view_table::BundleViewTable;
 pub use default::{DefaultSchemaProvider, BUNDLE_TABLE};
 pub use packs::PackSchemaProvider;
 

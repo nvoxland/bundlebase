@@ -1,5 +1,6 @@
 use crate::bundle::operation::parameter_value::ParameterValue;
 use crate::bundle::operation::Operation;
+use crate::catalog::BundleViewTable;
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
@@ -60,9 +61,9 @@ impl Operation for FilterOp {
         config.options_mut().sql_parser.enable_ident_normalization = false;
         let filter_ctx = SessionContext::new_with_config_rt(config, ctx.runtime_env());
 
-        // Register the input DataFrame as "bundle" using into_view()
-        // This provides case-insensitive column matching for SQL queries
-        filter_ctx.register_table("bundle", df.into_view())?;
+        // Register the input DataFrame as "bundle" using BundleViewTable
+        // This supports filter pushdown for index-based query acceleration
+        filter_ctx.register_table("bundle", Arc::new(BundleViewTable::new(df)))?;
 
         // Convert parameters to ScalarValues
         let params: Vec<ScalarValue> = self

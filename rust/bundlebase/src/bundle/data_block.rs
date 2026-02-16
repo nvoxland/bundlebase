@@ -272,6 +272,16 @@ impl TableProvider for DataBlock {
         TableType::Base
     }
 
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> datafusion::common::Result<Vec<datafusion::logical_expr::TableProviderFilterPushDown>> {
+        Ok(filters
+            .iter()
+            .map(|_| datafusion::logical_expr::TableProviderFilterPushDown::Inexact)
+            .collect())
+    }
+
     async fn scan(
         &self,
         _state: &dyn Session,

@@ -1,4 +1,5 @@
 use crate::bundle::BundleFacade;
+use crate::catalog::BundleViewTable;
 use async_trait::async_trait;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use std::sync::{Arc, Weak};
@@ -50,7 +51,7 @@ impl SchemaProvider for DefaultSchemaProvider {
                 .await
                 .map_err(|e| datafusion::error::DataFusionError::External(e.into()))?;
 
-            Ok(Some((*df).clone().into_view()))
+            Ok(Some(Arc::new(BundleViewTable::new((*df).clone()))))
         } else {
             Ok(None)
         }
