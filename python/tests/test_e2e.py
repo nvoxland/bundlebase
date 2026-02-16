@@ -522,6 +522,17 @@ async def test_explain_all_options():
     assert batch.num_rows > 0
 
 
+def test_explain_sync_printable():
+    """Test that sync explain() returns a printable result"""
+    import bundlebase.sync as bb
+    c = bb.create(random_bundle())
+    c.attach(datafile("userdata.parquet"))
+    result = c.explain()
+    output = str(result)
+    assert "Plan" in output or "plan" in output
+    assert len(output) > 0
+
+
 @pytest.mark.asyncio
 async def test_extend_bundle_basic():
     """Test extending a bundle to a new directory"""
