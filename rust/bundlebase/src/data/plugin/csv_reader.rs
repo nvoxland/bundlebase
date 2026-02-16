@@ -6,7 +6,7 @@ use crate::index::RowIdIndex;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadWriteDir;
 use crate::BundlebaseError;
-use arrow::datatypes::SchemaRef;
+use arrow::datatypes::{Schema, SchemaRef};
 use async_trait::async_trait;
 use bytes::Buf;
 use datafusion::common::config::CsvOptions;
@@ -184,6 +184,40 @@ fn is_line_delimiter_error(err: &BundlebaseError) -> bool {
     msg.contains("LineDelimiter") && msg.contains("unterminated string")
 }
 
+/// Trim leading/trailing whitespace from all field names in a schema.
+///
+/// CSV files commonly have whitespace in column headers (e.g., `col1, col2, col3`
+/// producing `"col1"`, `" col2"`, `" col3"`). Neither DataFusion's `CsvOptions`
+/// nor Arrow's CSV reader provides a trim option for headers, so we post-process
+/// the schema here. Short-circuits if no names need trimming.
+fn trim_schema_field_names(schema: SchemaRef) -> SchemaRef {
+    let needs_trimming = schema
+        .fields()
+        .iter()
+        .any(|f| f.name() != f.name().trim());
+    if !needs_trimming {
+        return schema;
+    }
+
+    let trimmed_fields: Vec<_> = schema
+        .fields()
+        .iter()
+        .map(|f| {
+            let trimmed = f.name().trim();
+            if trimmed != f.name() {
+                Arc::new(f.as_ref().clone().with_name(trimmed))
+            } else {
+                Arc::clone(f)
+            }
+        })
+        .collect();
+
+    Arc::new(Schema::new_with_metadata(
+        trimmed_fields,
+        schema.metadata().clone(),
+    ))
+}
+
 /// Infer CSV schema by reading a sample directly from the object store,
 /// bypassing DataFusion's LineDelimiter which can fail on certain CSV patterns.
 async fn infer_schema_from_sample(
@@ -221,7 +255,7 @@ impl DataReader for CsvReader {
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
         match self.inner.read_schema().await {
-            Ok(schema) => Ok(schema),
+            Ok(schema) => Ok(schema.map(trim_schema_field_names)),
             Err(e) if is_line_delimiter_error(&e) => {
                 log::info!(
                     "CSV file {} triggered LineDelimiter error; inferring schema from sample",
@@ -237,7 +271,7 @@ impl DataReader for CsvReader {
                 let store = self.inner.object_store();
                 let path = object_store::path::Path::parse(self.inner.url().path())?;
                 let schema = infer_schema_from_sample(&store, &path).await?;
-                Ok(Some(schema))
+                Ok(Some(trim_schema_field_names(schema)))
             }
             Err(e) => Err(e),
         }
@@ -1040,6 +1074,39 @@ mod tests {
         Ok(())
     }
 
+    /// Test that whitespace is trimmed from CSV column names during schema inference.
+    #[tokio::test]
+    async fn test_whitespace_trimmed_from_column_names() -> Result<(), BundlebaseError> {
+        let plugin = CsvPlugin::default();
+        let binding = Bundle::empty(None).await?;
+        let reader = plugin
+            .reader(
+                test_datafile("whitespace-headers.csv"),
+                &ObjectId::generate(),
+                &*binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .unwrap();
+
+        let schema = reader
+            .read_schema()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected schema"))?;
+
+        let column_names: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        assert_eq!(
+            column_names,
+            vec!["Id", "Name", "Value", "Category"],
+            "Column names should have whitespace trimmed"
+        );
+
+        Ok(())
+    }
+
     /// Verify the is_line_delimiter_error detection matches the actual error format.
     #[tokio::test]
     async fn test_is_line_delimiter_error_detection() {
@@ -1159,12 +1226,12 @@ mod tests {
             names,
             vec![
                 "Show Number",
-                " Air Date",
-                " Round",
-                " Category",
-                " Value",
-                " Question",
-                " Answer"
+                "Air Date",
+                "Round",
+                "Category",
+                "Value",
+                "Question",
+                "Answer"
             ]
         );
 
