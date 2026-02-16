@@ -72,7 +72,7 @@ impl futures::stream::Stream for RowIdStreamAdapter {
                         .map(|r| r.with_block_ref(block_ref))
                         .collect();
                     self.global_row_num = start_row + batch.num_rows();
-                    return Poll::Ready(Some(Ok(RowIdBatch::new(batch, remapped))));
+                    return Poll::Ready(Some(RowIdBatch::new(batch, remapped)));
                 }
                 Poll::Ready(Err(e)) => {
                     return Poll::Ready(Some(Err(e)));
@@ -107,7 +107,7 @@ impl futures::stream::Stream for RowIdStreamAdapter {
                             .map(|r| r.with_block_ref(block_ref))
                             .collect();
                         self.global_row_num = start_row + num_rows;
-                        Poll::Ready(Some(Ok(RowIdBatch::new(batch, remapped))))
+                        Poll::Ready(Some(RowIdBatch::new(batch, remapped)))
                     }
                     Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
                     Poll::Pending => {

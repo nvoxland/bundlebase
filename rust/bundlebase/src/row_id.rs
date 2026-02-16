@@ -129,13 +129,16 @@ pub struct RowIdBatch {
 }
 
 impl RowIdBatch {
-    pub fn new(batch: RecordBatch, row_ids: Vec<RowId>) -> Self {
-        assert_eq!(
-            batch.num_rows(),
-            row_ids.len(),
-            "Number of rows must match number of row IDs"
-        );
-        Self { batch, row_ids }
+    pub fn new(batch: RecordBatch, row_ids: Vec<RowId>) -> Result<Self, BundlebaseError> {
+        if batch.num_rows() != row_ids.len() {
+            return Err(format!(
+                "Number of rows ({}) must match number of row IDs ({})",
+                batch.num_rows(),
+                row_ids.len()
+            )
+            .into());
+        }
+        Ok(Self { batch, row_ids })
     }
 }
 
@@ -333,7 +336,7 @@ mod tests {
 
         let row_ids = vec![RowId::from(0u64), RowId::from(1u64), RowId::from(2u64)];
 
-        let rowid_batch = RowIdBatch::new(batch.clone(), row_ids.clone());
+        let rowid_batch = RowIdBatch::new(batch.clone(), row_ids.clone()).unwrap();
 
         assert_eq!(rowid_batch.batch.num_rows(), 3);
         assert_eq!(rowid_batch.row_ids.len(), 3);
@@ -341,7 +344,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Number of rows must match")]
     fn test_rowid_batch_mismatch() {
         use arrow::array::Int32Array;
         use arrow::datatypes::{DataType, Field, Schema};
@@ -353,6 +355,8 @@ mod tests {
 
         let row_ids = vec![RowId::from(0u64), RowId::from(1u64)]; // Only 2, but batch has 3
 
-        RowIdBatch::new(batch, row_ids);
+        let result = RowIdBatch::new(batch, row_ids);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Number of rows"));
     }
 }

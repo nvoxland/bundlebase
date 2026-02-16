@@ -213,7 +213,7 @@ impl futures::stream::Stream for RowIdStreamWrapper {
                     self.global_row_num += 1;
                 }
 
-                Poll::Ready(Some(Ok(RowIdBatch::new(batch, row_ids))))
+                Poll::Ready(Some(RowIdBatch::new(batch, row_ids)))
             }
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(Box::new(e) as BundlebaseError))),
             Poll::Ready(None) => Poll::Ready(None),
