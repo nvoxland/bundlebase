@@ -250,6 +250,90 @@ fn bench_projection(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark planning phase only: parse SQL and build logical plan.
+fn bench_plan_only(c: &mut Criterion) {
+    let rt = create_runtime();
+    let mut group = c.benchmark_group("plan_only");
+
+    for format in ALL_FORMATS {
+        for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
+            group.throughput(Throughput::Elements(rows as u64));
+            group.bench_with_input(
+                BenchmarkId::new(format.name(), rows),
+                &rows,
+                |b, &rows| {
+                    let bundle = rt
+                        .block_on(create_benchmark_bundle(rows, &format))
+                        .expect("bundle creation");
+
+                    b.to_async(&rt).iter(|| {
+                        let bundle = bundle.clone();
+                        async move {
+                            let ctx = bundle.ctx();
+                            let _plan = ctx
+                                .state()
+                                .create_logical_plan(
+                                    "SELECT * FROM bundle WHERE filter_value < 1",
+                                )
+                                .await
+                                .expect("planning failed");
+                        }
+                    });
+                },
+            );
+        }
+    }
+    group.finish();
+}
+
+/// Benchmark execution phase only: run a pre-built plan and consume results.
+fn bench_execute_only(c: &mut Criterion) {
+    let rt = create_runtime();
+    let mut group = c.benchmark_group("execute_only");
+
+    for format in ALL_FORMATS {
+        for rows in [SCALE_1K, SCALE_10K, SCALE_100K] {
+            group.throughput(Throughput::Elements(rows as u64));
+            group.bench_with_input(
+                BenchmarkId::new(format.name(), rows),
+                &rows,
+                |b, &rows| {
+                    let bundle = rt
+                        .block_on(create_benchmark_bundle(rows, &format))
+                        .expect("bundle creation");
+
+                    b.to_async(&rt).iter(|| {
+                        let bundle = bundle.clone();
+                        async move {
+                            let ctx = bundle.ctx();
+                            // Plan
+                            let plan = ctx
+                                .state()
+                                .create_logical_plan(
+                                    "SELECT * FROM bundle WHERE filter_value < 1",
+                                )
+                                .await
+                                .expect("planning failed");
+
+                            // Execute + consume
+                            let df = ctx
+                                .execute_logical_plan(plan)
+                                .await
+                                .expect("execute failed");
+                            let mut stream =
+                                df.execute_stream().await.expect("stream failed");
+                            while let Some(batch_result) = stream.next().await {
+                                let _batch = batch_result.expect("batch failed");
+                            }
+                        }
+                    });
+                },
+            );
+        }
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_filter_selective,
@@ -258,6 +342,8 @@ criterion_group!(
     bench_filter_parameterized,
     bench_join_small_large,
     bench_projection,
+    bench_plan_only,
+    bench_execute_only,
 );
 
 bench_helpers::bench_main!(benches);
