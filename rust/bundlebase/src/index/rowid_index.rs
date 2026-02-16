@@ -41,7 +41,7 @@ impl RowIdIndex {
         let index_bytes = self.serialize_index(&data);
         let data_stream = Box::pin(stream::once(async { Ok::<_, std::io::Error>(index_bytes) }));
 
-        let result = data_dir.write_stream(data_stream, "rowid.idx").await?;
+        let result = data_dir.write_stream(data_stream, "idx.rowid").await?;
         Ok(result.file)
     }
 

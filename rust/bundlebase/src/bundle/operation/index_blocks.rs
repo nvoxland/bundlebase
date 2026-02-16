@@ -311,7 +311,7 @@ impl IndexBlocksOp {
             ))
         })?;
 
-        let rel_path = Self::save_index_bytes(bundle, serialized, "index.idx", column).await?;
+        let rel_path = Self::save_index_bytes(bundle, serialized, "idx.column", column).await?;
 
         log::debug!(
             "Successfully created column index for '{}' at {}",
@@ -435,7 +435,7 @@ impl IndexBlocksOp {
             ))
         })?;
 
-        let rel_path = Self::save_index_bytes(bundle, serialized, "textindex.tar", column).await?;
+        let rel_path = Self::save_index_bytes(bundle, serialized, "idx.text.tar", column).await?;
 
         log::debug!(
             "Successfully created text index for '{}' at {} ({} documents)",
@@ -534,7 +534,7 @@ mod tests {
                 VersionedBlockId::new(block_id1, "v1".to_string()),
                 VersionedBlockId::new(block_id2, "v2".to_string()),
             ],
-            path: "ab/cdef0123456789.index.idx".to_string(),
+            path: "ab/cdef0123456789.idx.column".to_string(),
             cardinality: 100,
             doc_count: None,
         };
@@ -557,7 +557,7 @@ mod tests {
                 block_id,
                 "v1".to_string(),
             )],
-            path: "ab/cdef0123456789.textindex.tar".to_string(),
+            path: "ab/cdef0123456789.text.idx.tar".to_string(),
             cardinality: 50,
             doc_count: Some(150),
         };
