@@ -10,4 +10,12 @@ shutil.rmtree("jeoparady")
 bundle = bb.create("jeoparady")
 bundle.create_source("kaggle", {"dataset": "tunguz/200000-jeopardy-questions"})
 
-bundle.commit("First commit")
+bundle.commit("Attached Data")
+
+bundle.create_index("Round", "column")
+bundle.create_index("Category", "column")
+bundle.create_index("Value", "column")
+bundle.create_index("Question", "text")
+bundle.create_index("Answer", "text")
+
+bundle.commit("Indexed")

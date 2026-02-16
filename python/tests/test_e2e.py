@@ -1758,6 +1758,17 @@ async def test_bundlebase_url_with_operations():
 
 
 @pytest.mark.asyncio
+async def test_csv_whitespace_trimmed_from_column_names():
+    """Test that whitespace is trimmed from CSV column names during attach."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("whitespace-headers.csv"))
+
+    schema = await c.schema()
+    field_names = [f.name for f in schema.fields]
+    assert field_names == ["Id", "Name", "Value", "Category"]
+
+
+@pytest.mark.asyncio
 async def test_version_udf():
     """Test that the version() SQL UDF returns the bundle version."""
     c = await bundlebase.create(random_bundle())
