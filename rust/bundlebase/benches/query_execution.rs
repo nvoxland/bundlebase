@@ -204,9 +204,10 @@ fn bench_join_small_large(c: &mut Criterion) {
                                 .await
                                 .expect("join failed");
                             let df = bundle.dataframe().await.expect("dataframe failed");
-                            // Note: Using collect() for benchmarking only - production should use streaming
-                            let _result =
-                                df.as_ref().clone().collect().await.expect("collect failed");
+                            let mut stream = df.as_ref().clone().execute_stream().await.expect("stream failed");
+                            while let Some(batch_result) = stream.next().await {
+                                let _batch = batch_result.expect("batch failed");
+                            }
                         }
                     });
                 },
