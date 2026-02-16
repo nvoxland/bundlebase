@@ -2,6 +2,7 @@ use crate::bundle::operation::SourceInfo;
 use crate::data::{DataReader, VersionedBlockId};
 use crate::index::{
     ColumnIndex, FilterAnalyzer, IndexDefinition, IndexPredicate, IndexSelector, IndexableFilter,
+    GLOBAL_INDEX_CACHE,
 };
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{ObjectId, IOReadFile, IOReadWriteDir};
@@ -21,8 +22,9 @@ use std::sync::Arc;
 /// Candidate index for a query with its estimated selectivity
 struct IndexCandidate<'a> {
     filter: &'a IndexableFilter,
-    index_path: String,
     selectivity: f64,
+    /// The deserialized index, retained from selectivity estimation to avoid double disk reads
+    index: Arc<ColumnIndex>,
 }
 
 /// A DataBlock is a logical, tablular view of data contained within a single source, regardless of the underlying storage format.
@@ -84,25 +86,34 @@ impl DataBlock {
         self.source_info.as_ref()
     }
 
-    /// Load index from disk and estimate selectivity
-    /// Returns None if the index should be skipped due to high selectivity
+    /// Load index (from cache or disk) and estimate selectivity.
+    /// Returns None if the index should be skipped due to high selectivity.
+    /// On success returns both the selectivity and the deserialized index
+    /// so callers can reuse it without a second disk read.
     async fn check_index_selectivity(
         &self,
         index_path: &str,
         column: &str,
         predicate: &IndexPredicate,
-    ) -> Result<Option<f64>, Box<dyn std::error::Error + Send + Sync>> {
-        // Load index file from data directory
-        let index_file =
-            ObjectStoreFile::from_str(index_path, self.data_dir.as_ref(), self.config.clone())?;
+    ) -> Result<Option<(f64, Arc<ColumnIndex>)>, Box<dyn std::error::Error + Send + Sync>> {
+        // Check the global cache first
+        let index = if let Some(cached) = GLOBAL_INDEX_CACHE.get(index_path) {
+            cached
+        } else {
+            // Load index file from data directory
+            let index_file =
+                ObjectStoreFile::from_str(index_path, self.data_dir.as_ref(), self.config.clone())?;
 
-        let index_bytes = index_file
-            .read_bytes()
-            .await?
-            .ok_or_else(|| format!("Index file not found: {}", index_path))?;
+            let index_bytes = index_file
+                .read_bytes()
+                .await?
+                .ok_or_else(|| format!("Index file not found: {}", index_path))?;
 
-        // Deserialize the index
-        let index = ColumnIndex::deserialize(index_bytes, column.to_string())?;
+            // Deserialize and cache the index
+            let index = Arc::new(ColumnIndex::deserialize(index_bytes, column.to_string())?);
+            GLOBAL_INDEX_CACHE.insert(index_path.to_string(), index.clone());
+            index
+        };
 
         // Estimate selectivity
         let selectivity = index.estimate_selectivity(predicate);
@@ -126,30 +137,15 @@ impl DataBlock {
             selectivity * 100.0
         );
 
-        Ok(Some(selectivity))
+        Ok(Some((selectivity, index)))
     }
 
-    /// Load index from disk and perform lookup based on predicate
-    async fn load_and_lookup_index(
-        &self,
-        index_path: &str,
-        column: &str,
+    /// Perform index lookup using a pre-loaded `ColumnIndex`.
+    fn lookup_index(
+        index: &ColumnIndex,
         predicate: &IndexPredicate,
-    ) -> Result<Vec<crate::data::RowId>, Box<dyn std::error::Error + Send + Sync>> {
-        // Load index file from data directory
-        let index_file =
-            ObjectStoreFile::from_str(index_path, self.data_dir.as_ref(), self.config.clone())?;
-
-        let index_bytes = index_file
-            .read_bytes()
-            .await?
-            .ok_or_else(|| format!("Index file not found: {}", index_path))?;
-
-        // Deserialize the index
-        let index = ColumnIndex::deserialize(index_bytes, column.to_string())?;
-
-        // Perform lookup based on predicate type
-        let row_ids = match predicate {
+    ) -> Vec<crate::data::RowId> {
+        match predicate {
             IndexPredicate::Exact(val) => index.lookup_exact(val),
             IndexPredicate::In(vals) => {
                 // Process IN values in batches to bound memory usage
@@ -174,9 +170,7 @@ impl DataBlock {
                 row_ids
             }
             IndexPredicate::Range { min, max } => index.lookup_range(min, max),
-        };
-
-        Ok(row_ids)
+        }
     }
 
     pub fn schema(&self) -> SchemaRef {
@@ -216,7 +210,7 @@ impl DataBlock {
                         .check_index_selectivity(index_path, &filter.column, &filter.predicate)
                         .await
                     {
-                        Ok(Some(selectivity)) => {
+                        Ok(Some((selectivity, index))) => {
                             // This index is usable - add to candidates
                             log::debug!(
                                 "Index candidate on column '{}': selectivity {:.1}%",
@@ -225,8 +219,8 @@ impl DataBlock {
                             );
                             candidates.push(IndexCandidate {
                                 filter,
-                                index_path: index_path.to_string(),
                                 selectivity,
+                                index,
                             });
                         }
                         Ok(None) => {
@@ -325,48 +319,31 @@ impl TableProvider for DataBlock {
                     projection
                 );
 
-                // Load index from disk and perform lookup
-                match self
-                    .load_and_lookup_index(
-                        &best.index_path,
-                        &best.filter.column,
-                        &best.filter.predicate,
-                    )
-                    .await
-                {
-                    Ok(row_ids) => {
-                        log::debug!(
-                            "Index lookup found {} matching rows for column '{}'",
-                            row_ids.len(),
-                            best.filter.column
-                        );
+                // Perform lookup using the already-deserialized index (no second disk read)
+                let row_ids = Self::lookup_index(
+                    &best.index,
+                    &best.filter.predicate,
+                );
 
-                        // Record successful index hit
-                        span.set_attribute("matched_rows", row_ids.len().to_string());
-                        span.set_outcome(OperationOutcome::Success);
-                        timer.finish(OperationOutcome::Success);
+                log::debug!(
+                    "Index lookup found {} matching rows for column '{}'",
+                    row_ids.len(),
+                    best.filter.column
+                );
 
-                        // Use optimized data source with row IDs
-                        let exec = DataSourceExec::new(
-                            self.reader
-                                .data_source(projection, filters, limit, Some(&row_ids))
-                                .await?
-                                .clone(),
-                        );
-                        return Ok(Arc::new(exec));
-                    }
-                    Err(e) => {
-                        // Index loading or lookup failed, fall back to full scan
-                        log::warn!(
-                            "Index lookup failed for column '{}': {}. Falling back to full scan.",
-                            best.filter.column,
-                            e
-                        );
-                        // Record index error and fallback
-                        span.record_error(&e.to_string());
-                        timer.finish(OperationOutcome::Error);
-                    }
-                }
+                // Record successful index hit
+                span.set_attribute("matched_rows", row_ids.len().to_string());
+                span.set_outcome(OperationOutcome::Success);
+                timer.finish(OperationOutcome::Success);
+
+                // Use optimized data source with row IDs
+                let exec = DataSourceExec::new(
+                    self.reader
+                        .data_source(projection, filters, limit, Some(&row_ids))
+                        .await?
+                        .clone(),
+                );
+                return Ok(Arc::new(exec));
             } else {
                 // No suitable index found (all had high selectivity or errors)
                 log::debug!(
