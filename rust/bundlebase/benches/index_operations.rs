@@ -13,6 +13,7 @@ use bundlebase::bundle::BundleFacade;
 use bundlebase::{BundleBuilder, BundlebaseError};
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_100K, SCALE_10K, SCALE_1K};
+use futures::StreamExt;
 use std::sync::Arc;
 
 /// Create a bundle with an index already built on the 'id' column
@@ -87,16 +88,16 @@ fn bench_index_lookup_exact(c: &mut Criterion) {
                     b.to_async(&rt).iter(|| {
                         let bundle = bundle.clone();
                         async move {
-                            bundle
-                                .filter(
+                            let mut stream = bundle
+                                .query(
                                     &format!("SELECT * FROM bundle WHERE id = {}", target_id),
                                     vec![],
                                 )
                                 .await
-                                .expect("filter failed");
-                            let df = bundle.dataframe().await.expect("dataframe failed");
-                            let _result =
-                                df.as_ref().clone().collect().await.expect("collect failed");
+                                .expect("query failed");
+                            while let Some(batch_result) = stream.next().await {
+                                let _batch = batch_result.expect("batch failed");
+                            }
                         }
                     });
                 },
@@ -129,15 +130,16 @@ fn bench_index_vs_scan(c: &mut Criterion) {
                 b.to_async(&rt).iter(|| {
                     let bundle = indexed_bundle.clone();
                     async move {
-                        bundle
-                            .filter(
+                        let mut stream = bundle
+                            .query(
                                 &format!("SELECT * FROM bundle WHERE id = {}", target_id),
                                 vec![],
                             )
                             .await
-                            .expect("filter failed");
-                        let df = bundle.dataframe().await.expect("dataframe failed");
-                        let _result = df.as_ref().clone().collect().await.expect("collect failed");
+                            .expect("query failed");
+                        while let Some(batch_result) = stream.next().await {
+                            let _batch = batch_result.expect("batch failed");
+                        }
                     }
                 });
             },
@@ -150,15 +152,16 @@ fn bench_index_vs_scan(c: &mut Criterion) {
                 b.to_async(&rt).iter(|| {
                     let bundle = unindexed_bundle.clone();
                     async move {
-                        bundle
-                            .filter(
+                        let mut stream = bundle
+                            .query(
                                 &format!("SELECT * FROM bundle WHERE id = {}", target_id),
                                 vec![],
                             )
                             .await
-                            .expect("filter failed");
-                        let df = bundle.dataframe().await.expect("dataframe failed");
-                        let _result = df.as_ref().clone().collect().await.expect("collect failed");
+                            .expect("query failed");
+                        while let Some(batch_result) = stream.next().await {
+                            let _batch = batch_result.expect("batch failed");
+                        }
                     }
                 });
             },
@@ -186,8 +189,8 @@ fn bench_index_range_query(c: &mut Criterion) {
                     b.to_async(&rt).iter(|| {
                         let bundle = bundle.clone();
                         async move {
-                            bundle
-                                .filter(
+                            let mut stream = bundle
+                                .query(
                                     &format!(
                                         "SELECT * FROM bundle WHERE id >= {} AND id < {}",
                                         min_id, max_id
@@ -195,10 +198,10 @@ fn bench_index_range_query(c: &mut Criterion) {
                                     vec![],
                                 )
                                 .await
-                                .expect("filter failed");
-                            let df = bundle.dataframe().await.expect("dataframe failed");
-                            let _result =
-                                df.as_ref().clone().collect().await.expect("collect failed");
+                                .expect("query failed");
+                            while let Some(batch_result) = stream.next().await {
+                                let _batch = batch_result.expect("batch failed");
+                            }
                         }
                     });
                 },
@@ -231,8 +234,8 @@ fn bench_index_in_query(c: &mut Criterion) {
                         let bundle = bundle.clone();
                         let id_list = id_list.clone();
                         async move {
-                            bundle
-                                .filter(
+                            let mut stream = bundle
+                                .query(
                                     &format!(
                                         "SELECT * FROM bundle WHERE id IN ({})",
                                         id_list
@@ -240,10 +243,10 @@ fn bench_index_in_query(c: &mut Criterion) {
                                     vec![],
                                 )
                                 .await
-                                .expect("filter failed");
-                            let df = bundle.dataframe().await.expect("dataframe failed");
-                            let _result =
-                                df.as_ref().clone().collect().await.expect("collect failed");
+                                .expect("query failed");
+                            while let Some(batch_result) = stream.next().await {
+                                let _batch = batch_result.expect("batch failed");
+                            }
                         }
                     });
                 },

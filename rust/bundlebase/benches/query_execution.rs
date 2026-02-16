@@ -35,17 +35,16 @@ fn bench_filter_selective(c: &mut Criterion) {
                     b.to_async(&rt).iter(|| {
                         let bundle = bundle.clone();
                         async move {
-                            bundle
-                                .filter(
+                            let mut stream = bundle
+                                .query(
                                     "SELECT * FROM bundle WHERE filter_value < 1",
                                     vec![],
                                 )
                                 .await
-                                .expect("filter failed");
-                            let df = bundle.dataframe().await.expect("dataframe failed");
-                            // Note: Using collect() for benchmarking only - production should use streaming
-                            let _result =
-                                df.as_ref().clone().collect().await.expect("collect failed");
+                                .expect("query failed");
+                            while let Some(batch_result) = stream.next().await {
+                                let _batch = batch_result.expect("batch failed");
+                            }
                         }
                     });
                 },
@@ -74,17 +73,16 @@ fn bench_filter_broad(c: &mut Criterion) {
                     b.to_async(&rt).iter(|| {
                         let bundle = bundle.clone();
                         async move {
-                            bundle
-                                .filter(
+                            let mut stream = bundle
+                                .query(
                                     "SELECT * FROM bundle WHERE filter_value < 50",
                                     vec![],
                                 )
                                 .await
-                                .expect("filter failed");
-                            let df = bundle.dataframe().await.expect("dataframe failed");
-                            // Note: Using collect() for benchmarking only - production should use streaming
-                            let _result =
-                                df.as_ref().clone().collect().await.expect("collect failed");
+                                .expect("query failed");
+                            while let Some(batch_result) = stream.next().await {
+                                let _batch = batch_result.expect("batch failed");
+                            }
                         }
                     });
                 },
@@ -149,17 +147,16 @@ fn bench_filter_parameterized(c: &mut Criterion) {
                     b.to_async(&rt).iter(|| {
                         let bundle = bundle.clone();
                         async move {
-                            bundle
-                                .filter(
+                            let mut stream = bundle
+                                .query(
                                     "SELECT * FROM bundle WHERE filter_value < $1",
                                     vec![ScalarValue::Int64(Some(50))],
                                 )
                                 .await
-                                .expect("filter failed");
-                            let df = bundle.dataframe().await.expect("dataframe failed");
-                            // Note: Using collect() for benchmarking only - production should use streaming
-                            let _result =
-                                df.as_ref().clone().collect().await.expect("collect failed");
+                                .expect("query failed");
+                            while let Some(batch_result) = stream.next().await {
+                                let _batch = batch_result.expect("batch failed");
+                            }
                         }
                     });
                 },
