@@ -1,7 +1,7 @@
 mod block_table;
 
 use crate::bundle::{BundleFacade, DataBlock};
-use crate::io::ObjectId;
+use crate::io::BlockId;
 use async_trait::async_trait;
 use block_table::BlockTable;
 use datafusion::catalog::{SchemaProvider, TableProvider};
@@ -41,13 +41,13 @@ impl BlockSchemaProvider {
     }
 
     /// Extract block ID from table name (e.g., "__block_abc123" -> "abc123")
-    fn parse_id(name: &str) -> Option<ObjectId> {
+    fn parse_id(name: &str) -> Option<BlockId> {
         name.strip_prefix("__block_")
             .and_then(|id| id.try_into().ok())
     }
 
     /// Find a block by ID across all packs
-    fn find_block(&self, block_id: &ObjectId) -> Option<Arc<DataBlock>> {
+    fn find_block(&self, block_id: &BlockId) -> Option<Arc<DataBlock>> {
         let facade = self.facade()?;
         let packs = facade.packs();
         for pack in packs.values() {
@@ -111,7 +111,7 @@ impl SchemaProvider for BlockSchemaProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::ObjectId;
+    use crate::data::BlockId;
 
     #[test]
     fn parse_block_id_non_prefixed() {
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn parse_block_id_with_prefix() {
-        let id = ObjectId::generate();
+        let id = BlockId::generate();
         let table_name = DataBlock::table_name(&id);
         let parsed = BlockSchemaProvider::parse_id(&table_name);
         assert!(parsed.is_some());

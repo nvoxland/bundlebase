@@ -7,7 +7,7 @@ use crate::bundle::operation::UpdateVersionOp;
 use crate::io::readable_file_from_path;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadFile;
-use crate::data::ObjectId;
+use crate::data::BlockId;
 use crate::BundlebaseError;
 use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -246,7 +246,7 @@ impl BundleBuilderCommand for VerifyDataCommand {
         let config = builder.bundle().config();
 
         // Collect block info first to avoid borrowing issues
-        let blocks_to_verify: Vec<(ObjectId, String, Option<String>, String)> = {
+        let blocks_to_verify: Vec<(BlockId, String, Option<String>, String)> = {
             let packs = builder.bundle().packs().read().clone();
             let mut result = Vec::new();
             for pack in packs.values() {
@@ -326,7 +326,7 @@ impl BundleBuilderCommand for VerifyDataCommand {
                 if self.update_versions {
                     // Read the current version from the file
                     let adapter_factory = Arc::clone(&builder.bundle().reader_factory);
-                    let temp_id = ObjectId::generate();
+                    let temp_id = BlockId::generate();
                     if let Ok(adapter) = adapter_factory
                         .reader(&location, &temp_id, builder, None, None, None, None)
                         .await

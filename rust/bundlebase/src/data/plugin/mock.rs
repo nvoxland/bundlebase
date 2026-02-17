@@ -1,4 +1,4 @@
-use crate::data::{DataReader, ObjectId};
+use crate::data::{BlockId, DataReader};
 use crate::BundlebaseError;
 use arrow::array::RecordBatch;
 use arrow_schema::SchemaRef;
@@ -21,12 +21,12 @@ use url::Url;
 pub struct MockReader {
     url: Url,
     schema: SchemaRef,
-    block_id: ObjectId,
+    block_id: BlockId,
 }
 
 impl MockReader {
     pub fn with_schema(schema: SchemaRef) -> Self {
-        let id = ObjectId::generate();
+        let id = BlockId::generate();
         Self {
             url: Url::parse(format!("mock://reader/{}", id).as_str()).unwrap(),
             schema,
@@ -41,7 +41,7 @@ impl DataReader for MockReader {
         &self.url
     }
 
-    fn block_id(&self) -> ObjectId {
+    fn block_id(&self) -> BlockId {
         self.block_id
     }
 

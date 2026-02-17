@@ -1,6 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
-use crate::data::ObjectId;
+use crate::data::{BlockId, ObjectId};
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
@@ -16,13 +16,13 @@ use std::sync::Arc;
 #[serde(rename_all = "camelCase")]
 pub struct UpdateVersionOp {
     /// The block ID to update
-    pub block: ObjectId,
+    pub block: BlockId,
     /// The new version to store
     pub new_version: String,
 }
 
 impl UpdateVersionOp {
-    pub fn setup(block: ObjectId, new_version: String) -> Self {
+    pub fn setup(block: BlockId, new_version: String) -> Self {
         Self { block, new_version }
     }
 
@@ -102,7 +102,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_describe() {
-        let block_id = ObjectId::generate();
+        let block_id = BlockId::generate();
         let op = UpdateVersionOp::setup(block_id, "etag:new123".to_string());
         assert_eq!(
             op.describe(),
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let block_id: ObjectId = "00000000000000a5".try_into().expect("Failed to create ObjectId");
+        let block_id: BlockId = "00000000000000a5".try_into().expect("Failed to create BlockId");
         let op = UpdateVersionOp::setup(block_id, "etag:abc123".to_string());
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");

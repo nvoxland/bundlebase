@@ -1,6 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
-use crate::data::{ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
+use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
 use crate::index::{
     ColumnIndex, ExternalSortConfig, ExternalSortWriter, IndexedValue, IndexType, TempDirManager,
     TextColumnIndex, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
@@ -30,7 +30,7 @@ pub struct IndexBlocksOp {
 }
 
 /// Finds a block by ID in the bundle's packs.
-fn find_block(bundle: &Bundle, block_id: &ObjectId) -> Result<Arc<DataBlock>, BundlebaseError> {
+fn find_block(bundle: &Bundle, block_id: &BlockId) -> Result<Arc<DataBlock>, BundlebaseError> {
     for pack in bundle.packs().read().values() {
         for block in &pack.blocks() {
             if block.id() == block_id {
@@ -64,13 +64,13 @@ struct BlockInfo {
 /// * `column` - Column name to index
 /// * `data_type_validator` - Optional validator for data type requirements
 fn prepare_blocks_for_indexing<F>(
-    blocks: &[(ObjectId, String)],
+    blocks: &[(BlockId, String)],
     bundle: &Bundle,
     column: &str,
     data_type_validator: F,
 ) -> Result<Vec<BlockInfo>, BundlebaseError>
 where
-    F: Fn(&DataType, &ObjectId) -> Result<(), BundlebaseError>,
+    F: Fn(&DataType, &BlockId) -> Result<(), BundlebaseError>,
 {
     let mut block_infos = Vec::with_capacity(blocks.len());
 
@@ -184,7 +184,7 @@ impl IndexBlocksOp {
     pub async fn setup(
         index: &ObjectId,
         column: &str,
-        blocks: Vec<(ObjectId, String)>,
+        blocks: Vec<(BlockId, String)>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         let bundle = builder.bundle();
@@ -229,7 +229,7 @@ impl IndexBlocksOp {
     async fn build_column_index(
         index: &ObjectId,
         column: &str,
-        blocks: Vec<(ObjectId, String)>,
+        blocks: Vec<(BlockId, String)>,
         bundle: &Bundle,
     ) -> Result<Self, BundlebaseError> {
         // Prepare blocks first to get all data types
@@ -363,13 +363,13 @@ impl IndexBlocksOp {
     async fn build_text_index(
         index: &ObjectId,
         column: &str,
-        blocks: Vec<(ObjectId, String)>,
+        blocks: Vec<(BlockId, String)>,
         bundle: &Bundle,
         tokenizer_config: &TokenizerConfig,
     ) -> Result<Self, BundlebaseError> {
         // Validator that ensures the column is a string type
         let column_for_error = column.to_string();
-        let string_type_validator = move |data_type: &DataType, block_id: &ObjectId| {
+        let string_type_validator = move |data_type: &DataType, block_id: &BlockId| {
             match data_type {
                 DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => Ok(()),
                 other => Err(BundlebaseError::from(format!(
@@ -526,8 +526,8 @@ mod tests {
     #[test]
     fn test_index_blocks_op_serialization() {
         let index_id = ObjectId::generate();
-        let block_id1 = ObjectId::generate();
-        let block_id2 = ObjectId::generate();
+        let block_id1 = BlockId::generate();
+        let block_id2 = BlockId::generate();
         let op = IndexBlocksOp {
             index: index_id,
             blocks: vec![
@@ -550,7 +550,7 @@ mod tests {
     #[test]
     fn test_index_blocks_op_serialization_with_doc_count() {
         let index_id = ObjectId::generate();
-        let block_id = ObjectId::generate();
+        let block_id = BlockId::generate();
         let op = IndexBlocksOp {
             index: index_id,
             blocks: vec![VersionedBlockId::new(

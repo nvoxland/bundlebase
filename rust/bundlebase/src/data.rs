@@ -14,7 +14,7 @@ use datafusion::datasource::source::DataSource;
 use datafusion::logical_expr::Expr;
 pub use datafusion::physical_plan::SendableRecordBatchStream;
 use datafusion::prelude::SessionContext;
-pub use crate::object_id::{ObjectId, ObjectIdAlias};
+pub use crate::object_id::{BlockId, ObjectId, ObjectIdAlias};
 pub use plugin::DataGenerator;
 pub use reader_factory::DataReaderFactory;
 pub use crate::row_id::{RowId, RowIdBatch, SendableRowIdBatchStream};
@@ -34,7 +34,7 @@ pub use plugin::MockReader;
 pub trait DataReader: Sync + Send + Debug {
     fn url(&self) -> &Url;
 
-    fn block_id(&self) -> ObjectId;
+    fn block_id(&self) -> BlockId;
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError>;
 

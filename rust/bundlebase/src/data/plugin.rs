@@ -23,7 +23,7 @@ use std::sync::Arc;
 pub use mock::MockReader;
 
 use crate::bundle::BundleFacade;
-use crate::object_id::ObjectId;
+use crate::object_id::BlockId;
 use crate::BundlebaseError;
 
 use std::collections::HashMap;
@@ -43,7 +43,7 @@ pub trait ReaderPlugin: Send + Sync {
     async fn reader(
         &self,
         source: &str,
-        block_id: &ObjectId,
+        block_id: &BlockId,
         bundle: &dyn BundleFacade,
         schema: Option<SchemaRef>,
         layout: Option<String>,

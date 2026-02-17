@@ -35,7 +35,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA};
 use crate::udf::VersionUdf;
-use crate::data::{DataReaderFactory, ObjectId, VersionedBlockId};
+use crate::data::{BlockId, DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::source::SourceFunctionRegistry;
 use crate::functions::FunctionRegistry;
 use crate::index::IndexDefinition;
@@ -721,7 +721,7 @@ impl Bundle {
     }
 
     /// Find a block by ID across all packs
-    pub(crate) fn find_block(&self, block_id: &ObjectId) -> Option<Arc<DataBlock>> {
+    pub(crate) fn find_block(&self, block_id: &BlockId) -> Option<Arc<DataBlock>> {
         let packs = self.packs.read();
         for pack in packs.values() {
             for block in pack.blocks() {
@@ -743,8 +743,8 @@ impl Bundle {
     /// Searches through AttachBlockOp and ReplaceBlockOp operations to build
     /// a mapping from block ID to the expected hash. For blocks that have been
     /// replaced, uses the hash from the most recent ReplaceBlockOp.
-    pub fn build_block_hash_map(&self) -> HashMap<ObjectId, String> {
-        let mut block_hashes: HashMap<ObjectId, String> = HashMap::new();
+    pub fn build_block_hash_map(&self) -> HashMap<BlockId, String> {
+        let mut block_hashes: HashMap<BlockId, String> = HashMap::new();
 
         for op in self.operations.read().iter() {
             match op {
@@ -763,8 +763,8 @@ impl Bundle {
     }
 
     /// Build a map of block IDs to their stored locations from operations.
-    fn build_block_location_map(&self) -> HashMap<ObjectId, String> {
-        let mut block_locations: HashMap<ObjectId, String> = HashMap::new();
+    fn build_block_location_map(&self) -> HashMap<BlockId, String> {
+        let mut block_locations: HashMap<BlockId, String> = HashMap::new();
 
         for op in self.operations.read().iter() {
             match op {

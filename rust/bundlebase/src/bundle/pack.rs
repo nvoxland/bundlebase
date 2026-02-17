@@ -1,6 +1,6 @@
 use super::data_block::DataBlock;
 
-use crate::io::ObjectId;
+use crate::io::{BlockId, ObjectId};
 use datafusion::common::JoinType;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -109,7 +109,7 @@ impl Pack {
         self.blocks.write().push(block);
     }
 
-    pub fn remove_block(&self, block_id: &ObjectId) {
+    pub fn remove_block(&self, block_id: &BlockId) {
         self.blocks.write().retain(|b| b.id() != block_id);
     }
 

@@ -1,7 +1,7 @@
 use crate::bundle::BundleFacade;
 use crate::data::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::data::plugin::ReaderPlugin;
-use crate::data::{DataReader, ObjectId, ObjectIdAlias, RowId, RowIdBatch, SendableRowIdBatchStream};
+use crate::data::{BlockId, DataReader, ObjectIdAlias, RowId, RowIdBatch, SendableRowIdBatchStream};
 use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
@@ -49,7 +49,7 @@ impl ReaderPlugin for ParquetPlugin {
     async fn reader(
         &self,
         source: &str,
-        block_id: &ObjectId,
+        block_id: &BlockId,
         bundle: &dyn BundleFacade,
         schema: Option<SchemaRef>,
         _layout: Option<String>,
@@ -71,11 +71,11 @@ impl ReaderPlugin for ParquetPlugin {
 #[derive(Debug)]
 pub struct ParquetDataReader {
     inner: FileReader<ParquetFormatConfig>,
-    block_id: ObjectId,
+    block_id: BlockId,
 }
 
 impl ParquetDataReader {
-    pub fn new(inner: FileReader<ParquetFormatConfig>, block_id: ObjectId) -> Self {
+    pub fn new(inner: FileReader<ParquetFormatConfig>, block_id: BlockId) -> Self {
         Self { inner, block_id }
     }
 }
@@ -86,7 +86,7 @@ impl DataReader for ParquetDataReader {
         self.inner.url()
     }
 
-    fn block_id(&self) -> ObjectId {
+    fn block_id(&self) -> BlockId {
         self.block_id
     }
 
@@ -237,7 +237,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let result = plugin
-            .reader("file:///test.csv", &ObjectId::generate(), &*binding, None, None, None, None)
+            .reader("file:///test.csv", &BlockId::generate(), &*binding, None, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -251,7 +251,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let invalid_reader = plugin
-            .reader("file:///invalid.parquet", &ObjectId::generate(), &*binding, None, None, None, None)
+            .reader("file:///invalid.parquet", &BlockId::generate(), &*binding, None, None, None, None)
             .await?;
 
         assert!(invalid_reader.is_some());
@@ -275,7 +275,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
-                &ObjectId::generate(),
+                &BlockId::generate(),
                 &*binding,
                 None,
                 None,
@@ -319,7 +319,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
-                &ObjectId::generate(),
+                &BlockId::generate(),
                 &*binding,
                 Some(schema),
                 None,
@@ -373,7 +373,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
-                &ObjectId::generate(),
+                &BlockId::generate(),
                 &*binding,
                 None,
                 None,
@@ -421,7 +421,7 @@ mod tests {
         let reader = plugin
             .reader(
                 test_datafile("userdata.parquet"),
-                &ObjectId::generate(),
+                &BlockId::generate(),
                 &*binding,
                 None,
                 None,

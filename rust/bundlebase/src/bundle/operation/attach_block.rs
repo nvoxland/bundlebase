@@ -1,7 +1,7 @@
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
-use crate::data::ObjectId;
+use crate::data::{BlockId, ObjectId};
 use crate::io::readable_file_from_path;
 use crate::progress::ProgressScope;
 use crate::source::AttachedFileInfo;
@@ -32,7 +32,7 @@ pub struct SourceInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachBlockOp {
-    pub id: ObjectId,
+    pub id: BlockId,
     pub pack: ObjectId,
     pub location: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -87,7 +87,7 @@ impl AttachBlockOp {
                 // Check if this is a function:// URL - these don't support file-based hash
                 //todo: do this right
                 if location.starts_with("function://") || location.starts_with("bundle://") || location.starts_with("bundle+") || location.starts_with("bundlebase://") || location.starts_with("bundlebase+") {
-                    let temp_id = ObjectId::generate();
+                    let temp_id = BlockId::generate();
                     let adapter_factory = builder.bundle().reader_factory.clone();
                     let adapter = adapter_factory
                         .reader(location, &temp_id, builder, None, None, None, None)
@@ -105,7 +105,7 @@ impl AttachBlockOp {
             }
         };
 
-        let block_id = ObjectId::generate();
+        let block_id = BlockId::generate();
 
         progress.update(2, Some("Creating adapter"));
         let adapter_factory = builder.bundle().reader_factory.clone();
@@ -249,7 +249,7 @@ mod tests {
             location: "file:///test/data.csv".to_string(),
             version: "test-version".to_string(),
             hash: "0".repeat(64),
-            id: ObjectId::generate(),
+            id: BlockId::generate(),
             pack: ObjectId::generate(),
             num_rows: None,
             bytes: None,
@@ -423,7 +423,7 @@ schema:
             location: "file:///test/data.csv".to_string(),
             version: "test-version".to_string(),
             hash: "0".repeat(64),
-            id: ObjectId::generate(),
+            id: BlockId::generate(),
             pack: ObjectId::generate(),
             num_rows: None,
             bytes: None,
