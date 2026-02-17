@@ -34,7 +34,7 @@ impl std::fmt::Display for Mode {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "bundlebase-cli")]
+#[command(name = "bundlebase")]
 #[command(about = "Bundlebase CLI - Interactive REPL and Arrow Flight Server", long_about = None)]
 struct Args {
     /// Path to bundle to load

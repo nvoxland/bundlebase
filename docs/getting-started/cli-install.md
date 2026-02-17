@@ -9,37 +9,37 @@ The Bundlebase CLI provides an interactive REPL and an Arrow Flight SQL server f
 
 ## Download
 
-Download the latest `bundlebase-cli` binary from the [GitHub releases page](https://github.com/nvoxland/bundlebase/releases).
+Download the latest `bundlebase` binary from the [GitHub releases page](https://github.com/nvoxland/bundlebase/releases).
 
 Choose the archive matching your platform:
 
 | Platform | File |
 |---|---|
-| macOS (Apple Silicon) | `bundlebase-cli-aarch64-apple-darwin.tar.gz` |
-| macOS (Intel) | `bundlebase-cli-x86_64-apple-darwin.tar.gz` |
-| Linux (x86_64) | `bundlebase-cli-x86_64-unknown-linux-gnu.tar.gz` |
-| Windows (x86_64) | `bundlebase-cli-x86_64-pc-windows-msvc.zip` |
+| macOS (Apple Silicon) | `bundlebase-aarch64-apple-darwin.tar.gz` |
+| macOS (Intel) | `bundlebase-x86_64-apple-darwin.tar.gz` |
+| Linux (x86_64) | `bundlebase-x86_64-unknown-linux-gnu.tar.gz` |
+| Windows (x86_64) | `bundlebase-x86_64-pc-windows-msvc.zip` |
 
-Extract the archive and place the `bundlebase-cli` binary somewhere on your system.
+Extract the archive and place the `bundlebase` binary somewhere on your system.
 
 ## Verify Installation
 
 ```bash
-bundlebase-cli --help
+bundlebase --help
 ```
 
 You should see output describing the available flags and modes.
 
 ## Add to PATH
 
-To run `bundlebase-cli` from any directory, add its location to your `PATH`:
+To run `bundlebase` from any directory, add its location to your `PATH`:
 
 ```bash
 # Example: move to a directory already on your PATH
-mv bundlebase-cli /usr/local/bin/
+mv bundlebase /usr/local/bin/
 
 # Or add the directory to your PATH
-export PATH="$PATH:/path/to/bundlebase-cli"
+export PATH="$PATH:/path/to/bundlebase"
 ```
 
 ## Next Steps
