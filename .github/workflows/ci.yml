@@ -133,5 +133,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bundlebase-cli-${{ runner.os }}
-          path: target/release/bundlebase-cli
+          path: target/release/bundlebase
           retention-days: 30
