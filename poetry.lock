@@ -2330,4 +2330,4 @@ jupyter = ["nest-asyncio"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "400a8d5a8cd4f597c18798f7cd4abaae83242210a751b2ff79054398f783ac5b"
+content-hash = "1da226bf83e4b5501adb4b4f6d6417a06d651bb05aa405e4bed2f37e8991243b"
