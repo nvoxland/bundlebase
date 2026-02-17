@@ -5,7 +5,7 @@ The Bundlebase CLI includes an interactive REPL (Read-Eval-Print Loop) for worki
 ## Starting the REPL
 
 ```bash
-bundlebase-cli --bundle <path> [options]
+bundlebase --bundle <path> [options]
 ```
 
 ### Flags
@@ -22,19 +22,19 @@ bundlebase-cli --bundle <path> [options]
 
 ```bash
 # Create a new bundle
-bundlebase-cli --bundle ./my-bundle --create
+bundlebase --bundle ./my-bundle --create
 
 # Open an existing bundle
-bundlebase-cli --bundle ./my-bundle
+bundlebase --bundle ./my-bundle
 
 # Open in read-only mode
-bundlebase-cli --bundle ./my-bundle --read-only
+bundlebase --bundle ./my-bundle --read-only
 
 # Open with debug logging
-bundlebase-cli --bundle ./my-bundle --log-level debug
+bundlebase --bundle ./my-bundle --log-level debug
 
 # Open a remote bundle
-bundlebase-cli --bundle s3://mybucket/my-bundle
+bundlebase --bundle s3://mybucket/my-bundle
 ```
 
 !!! note
@@ -95,7 +95,7 @@ For SQL queries, the full result set is displayed (up to the 100-row display lim
 ## Example Session
 
 ```
-$ bundlebase-cli --bundle ./demo --create
+$ bundlebase --bundle ./demo --create
 
 Bundlebase REPL
 Type '/help' for available commands, '/exit' to quit

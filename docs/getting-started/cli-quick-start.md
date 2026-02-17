@@ -7,7 +7,7 @@ This guide walks through a basic workflow using the Bundlebase CLI's interactive
 Create a new bundle and open the interactive REPL:
 
 ```bash
-bundlebase-cli --bundle ./my-bundle --create
+bundlebase --bundle ./my-bundle --create
 ```
 
 You'll see a header and prompt:
