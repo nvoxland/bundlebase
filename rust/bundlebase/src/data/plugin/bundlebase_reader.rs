@@ -1,6 +1,6 @@
 use crate::bundle::BundleFacade;
 use crate::data::plugin::ReaderPlugin;
-use crate::data::{DataReader, ObjectId};
+use crate::data::{BlockId, DataReader};
 use crate::Bundle;
 use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
@@ -27,7 +27,7 @@ impl ReaderPlugin for BundlebasePlugin {
     async fn reader(
         &self,
         source: &str,
-        block_id: &ObjectId,
+        block_id: &BlockId,
         bundle: &dyn BundleFacade,
         _schema: Option<SchemaRef>,
         _layout: Option<String>,
@@ -71,7 +71,7 @@ impl ReaderPlugin for BundlebasePlugin {
 struct BundlebaseDataReader {
     url: Url,
     target_bundle: Arc<Bundle>,
-    block_id: ObjectId,
+    block_id: BlockId,
 }
 
 impl Debug for BundlebaseDataReader {
@@ -89,7 +89,7 @@ impl DataReader for BundlebaseDataReader {
         &self.url
     }
 
-    fn block_id(&self) -> ObjectId {
+    fn block_id(&self) -> BlockId {
         self.block_id
     }
 
@@ -233,7 +233,7 @@ mod tests {
         let result = plugin
             .reader(
                 "file:///test.csv",
-                &ObjectId::generate(),
+                &BlockId::generate(),
                 &*binding,
                 None,
                 None,
@@ -266,7 +266,7 @@ mod tests {
         let reader = plugin
             .reader(
                 &bundlebase_url,
-                &ObjectId::generate(),
+                &BlockId::generate(),
                 &*binding,
                 None,
                 None,

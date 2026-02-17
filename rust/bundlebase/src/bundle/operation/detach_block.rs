@@ -1,6 +1,6 @@
 use crate::bundle::operation::{AnyOperation, Operation};
 use crate::bundle::BundleBuilder;
-use crate::data::ObjectId;
+use crate::data::BlockId;
 use crate::{Bundle, BundleFacade, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
@@ -17,7 +17,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DetachBlockOp {
-    pub id: ObjectId,
+    pub id: BlockId,
 }
 
 impl DetachBlockOp {
@@ -111,14 +111,14 @@ mod tests {
     use super::*;
     #[test]
     fn test_describe() {
-        let block_id = ObjectId::generate();
+        let block_id = BlockId::generate();
         let op = DetachBlockOp { id: block_id };
         assert_eq!(op.describe(), format!("DETACH BLOCK: {}", block_id));
     }
 
     #[test]
     fn test_serialization() {
-        let block_id: ObjectId = "00000000000000a5".try_into().unwrap();
+        let block_id: BlockId = "00000000000000a5".try_into().unwrap();
         let op = DetachBlockOp { id: block_id };
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
@@ -133,6 +133,6 @@ mod tests {
 
         let op: DetachBlockOp = serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
 
-        assert_eq!(op.id.to_string(), block_id_str);
+        assert_eq!(op.id.to_string(), block_id_str.to_string());
     }
 }

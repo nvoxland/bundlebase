@@ -38,7 +38,7 @@ pub use file::{read_yaml, write_yaml, IOReadFile, IOReadWriteFile};
 pub use file_info::FileInfo;
 
 // Re-export ObjectId from data module
-pub use crate::data::{ObjectId, ObjectIdAlias};
+pub use crate::data::{BlockId, ObjectId, ObjectIdAlias};
 
 use object_store::memory::InMemory;
 use object_store::ObjectStore;

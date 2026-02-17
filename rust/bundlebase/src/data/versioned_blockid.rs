@@ -1,15 +1,15 @@
-use crate::data::ObjectId;
+use crate::data::BlockId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Represents a block and its version, serialized as "{block}@{version}"
 #[derive(Debug, Clone, PartialEq)]
 pub struct VersionedBlockId {
-    pub block: ObjectId,
+    pub block: BlockId,
     pub version: String,
 }
 
 impl VersionedBlockId {
-    pub fn new(block: ObjectId, version: String) -> Self {
+    pub fn new(block: BlockId, version: String) -> Self {
         Self { block, version }
     }
 }
@@ -44,8 +44,8 @@ impl<'de> Deserialize<'de> for VersionedBlockId {
             )));
         }
 
-        let block = ObjectId::try_from(parts[0]).map_err(|e| {
-            serde::de::Error::custom(format!("Invalid ObjectId '{}': {}", parts[0], e))
+        let block = BlockId::try_from(parts[0]).map_err(|e| {
+            serde::de::Error::custom(format!("Invalid BlockId '{}': {}", parts[0], e))
         })?;
         let version = parts[1].to_string();
 
@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn test_versioned_block_id_display() {
-        let id = ObjectId::generate();
+        let id = BlockId::generate();
         let vb = VersionedBlockId::new(id, "v1.0".to_string());
         let display = format!("{}", vb);
         assert!(display.ends_with("@v1.0"));
@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn test_versioned_block_id_serialization() {
-        let id = ObjectId::generate();
+        let id = BlockId::generate();
         let vb = VersionedBlockId::new(id, "v2.5".to_string());
 
         let json = serde_json::to_string(&vb).unwrap();

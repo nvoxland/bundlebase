@@ -1,4 +1,4 @@
-use crate::data::{ObjectId, VersionedBlockId};
+use crate::data::{BlockId, VersionedBlockId};
 use parking_lot::RwLock;
 
 /// Represents a set of indexed blocks with their versions.
@@ -21,7 +21,7 @@ impl IndexedBlocks {
     }
 
     /// Checks if this index contains the specified block at the specified version
-    pub fn contains(&self, block_id: &ObjectId, version: &str) -> bool {
+    pub fn contains(&self, block_id: &BlockId, version: &str) -> bool {
         self.blocks
             .read()
             .iter()

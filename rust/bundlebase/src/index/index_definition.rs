@@ -1,4 +1,4 @@
-use crate::data::{ObjectId, VersionedBlockId};
+use crate::data::{BlockId, ObjectId, VersionedBlockId};
 use crate::bundle::IndexedBlocks;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -242,7 +242,7 @@ impl TokenizerConfig {
 }
 
 /// Key for the block lookup HashMap: (block_id, version)
-type BlockLookupKey = (ObjectId, String);
+type BlockLookupKey = (BlockId, String);
 
 #[derive(Debug)]
 pub struct IndexDefinition {
@@ -325,7 +325,7 @@ impl IndexDefinition {
     ///
     /// # Returns
     /// Number of stale IndexedBlocks removed
-    pub(crate) fn prune_stale_blocks(&self, current_versions: &HashMap<ObjectId, String>) -> usize {
+    pub(crate) fn prune_stale_blocks(&self, current_versions: &HashMap<BlockId, String>) -> usize {
         let mut blocks = self.blocks.write();
         let mut lookup = self.block_lookup.write();
         let initial_count = blocks.len();

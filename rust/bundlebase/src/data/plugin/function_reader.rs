@@ -1,6 +1,6 @@
 use crate::bundle::BundleFacade;
 use crate::data::plugin::ReaderPlugin;
-use crate::data::{DataReader, ObjectId, RowId};
+use crate::data::{BlockId, DataReader, RowId};
 use crate::functions::FunctionDataSource;
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionRegistry;
@@ -31,7 +31,7 @@ impl ReaderPlugin for FunctionPlugin {
     async fn reader(
         &self,
         source: &str,
-        block_id: &ObjectId,
+        block_id: &BlockId,
         _bundle: &dyn BundleFacade,
         _schema: Option<SchemaRef>,
         _layout: Option<String>,
@@ -76,7 +76,7 @@ struct FunctionDataReader {
     url: Url,
     output: SchemaRef,
     implementation: Arc<dyn FunctionImpl>,
-    block_id: ObjectId,
+    block_id: BlockId,
 }
 
 #[async_trait]
@@ -85,7 +85,7 @@ impl DataReader for FunctionDataReader {
         &self.url
     }
 
-    fn block_id(&self) -> ObjectId {
+    fn block_id(&self) -> BlockId {
         self.block_id
     }
 
@@ -176,7 +176,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let result = plugin
-            .reader("file:///test.csv", &ObjectId::generate(), &*binding, None, None, None, None)
+            .reader("file:///test.csv", &BlockId::generate(), &*binding, None, None, None, None)
             .await?;
 
         assert!(result.is_none());
@@ -193,7 +193,7 @@ mod tests {
         let error = plugin
             .reader(
                 "function://",
-                &ObjectId::generate(),
+                &BlockId::generate(),
                 &*binding,
                 None,
                 None,
@@ -219,7 +219,7 @@ mod tests {
         let error = plugin
             .reader(
                 "function://invalid",
-                &ObjectId::generate(),
+                &BlockId::generate(),
                 &*binding,
                 None,
                 None,
@@ -266,7 +266,7 @@ mod tests {
 
         let binding = Bundle::empty(None).await?;
         let reader = plugin
-            .reader("function://mock", &ObjectId::generate(), &*binding, None, None, None, None)
+            .reader("function://mock", &BlockId::generate(), &*binding, None, None, None, None)
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 

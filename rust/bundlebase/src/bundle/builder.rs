@@ -8,7 +8,7 @@ use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::{sql, Bundle};
 use super::DataBlock;
-use crate::data::{ObjectId, VersionedBlockId};
+use crate::data::{BlockId, ObjectId, VersionedBlockId};
 use crate::source::{FetchResults, SyncMode};
 use crate::functions::FunctionImpl;
 use crate::functions::FunctionSignature;
@@ -1142,7 +1142,7 @@ impl BundleBuilder {
     /// This is used by commands that need to reindex within their own change context.
     pub(in crate::bundle) async fn reindex_internal(&self) -> Result<(), BundlebaseError> {
         // Group blocks by (index_id, column_name) for batching
-        let mut blocks_to_index: HashMap<(ObjectId, String), Vec<(ObjectId, String)>> =
+        let mut blocks_to_index: HashMap<(ObjectId, String), Vec<(BlockId, String)>> =
             HashMap::new();
 
         // Ensure dataframe is set up for queries
@@ -1238,7 +1238,7 @@ impl BundleBuilder {
     }
 
     /// Find the version of a block by its ID
-    fn find_block_version(&self, block_id: &ObjectId) -> Option<String> {
+    fn find_block_version(&self, block_id: &BlockId) -> Option<String> {
         for pack in self.bundle.packs().read().values() {
             for block in pack.blocks() {
                 if block.id() == block_id {

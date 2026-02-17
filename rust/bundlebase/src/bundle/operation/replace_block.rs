@@ -1,7 +1,7 @@
 use crate::bundle::operation::{AnyOperation, Operation, SourceInfo};
 use crate::bundle::BundleFacade;
 use crate::bundle::DataBlock;
-use crate::data::ObjectId;
+use crate::data::{BlockId, ObjectId};
 use crate::io::readable_file_from_path;
 use crate::source::AttachedFileInfo;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
@@ -21,7 +21,7 @@ use std::sync::Arc;
 #[serde(rename_all = "camelCase")]
 pub struct ReplaceBlockOp {
     /// The block ID to replace
-    pub id: ObjectId,
+    pub id: BlockId,
     /// The new location to read data from
     pub new_location: String,
     /// The version at the new location
@@ -52,7 +52,7 @@ impl ReplaceBlockOp {
             )?;
 
         // Create adapter to read version from the new location
-        let temp_id = ObjectId::generate();
+        let temp_id = BlockId::generate();
         let adapter_factory = builder.bundle().reader_factory.clone();
         let adapter = adapter_factory
             .reader(new_location, &temp_id, builder, None, None, None, None)
@@ -93,7 +93,7 @@ impl ReplaceBlockOp {
     /// Returns the block ID and the most recent source_info for that block.
     /// For blocks that have been replaced, this finds the ReplaceBlockOp with the matching new_location
     /// and returns the updated source_info from that operation.
-    fn find_block_by_location(location: &str, operations: &[AnyOperation]) -> Option<(ObjectId, Option<SourceInfo>)> {
+    fn find_block_by_location(location: &str, operations: &[AnyOperation]) -> Option<(BlockId, Option<SourceInfo>)> {
         // First, check if any ReplaceBlockOp has this as its new_location (most recent state)
         // We iterate in reverse to find the most recent replacement
         for op in operations.iter().rev() {
@@ -228,7 +228,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_describe() {
-        let block_id = ObjectId::generate();
+        let block_id = BlockId::generate();
         let op = ReplaceBlockOp {
             id: block_id,
             new_location: "s3://bucket/new_data.parquet".to_string(),
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_serialization_without_source() {
-        let block_id: ObjectId = "00000000000000a5".try_into().unwrap();
+        let block_id: BlockId = "00000000000000a5".try_into().unwrap();
         let op = ReplaceBlockOp {
             id: block_id,
             new_location: "file:///new/path.csv".to_string(),
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_serialization_with_source() {
-        let block_id: ObjectId = "00000000000000a5".try_into().unwrap();
+        let block_id: BlockId = "00000000000000a5".try_into().unwrap();
         let source_id: ObjectId = "00000000000000b3".try_into().unwrap();
         let op = ReplaceBlockOp {
             id: block_id,

@@ -592,7 +592,7 @@ changes:
     fn test_roundtrip_complex_operations() {
         // Test that serialization and deserialization are symmetric
         use crate::bundle::operation::{AttachBlockOp, DropColumnOp};
-        use crate::data::ObjectId;
+        use crate::data::{BlockId, ObjectId};
         use arrow_schema::{DataType, Field, Schema};
         use std::sync::Arc;
 
@@ -605,7 +605,7 @@ changes:
             location: "memory:///test".to_string(),
             version: "v1".to_string(),
             hash: "abcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab".to_string(),
-            id: ObjectId::generate(),
+            id: BlockId::generate(),
             pack: ObjectId::generate(),
             layout: None,
             num_rows: Some(100),

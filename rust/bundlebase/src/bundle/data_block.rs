@@ -5,7 +5,7 @@ use crate::index::{
     GLOBAL_INDEX_CACHE,
 };
 use crate::io::plugin::object_store::ObjectStoreFile;
-use crate::io::{ObjectId, IOReadFile, IOReadWriteDir};
+use crate::io::{BlockId, IOReadFile, IOReadWriteDir};
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
 use crate::BundleConfig;
 use arrow_schema::SchemaRef;
@@ -30,7 +30,7 @@ struct IndexCandidate<'a> {
 /// A DataBlock is a logical, tablular view of data contained within a single source, regardless of the underlying storage format.
 #[derive(Clone, Debug)]
 pub struct DataBlock {
-    id: ObjectId,
+    id: BlockId,
     version: String,
     schema: SchemaRef,
     reader: Arc<dyn DataReader>,
@@ -42,21 +42,21 @@ pub struct DataBlock {
 }
 
 impl DataBlock {
-    pub(crate) fn table_name(id: &ObjectId) -> String {
+    pub(crate) fn table_name(id: &BlockId) -> String {
         format!("__block_{}", id)
     }
 
-    pub(crate) fn parse_id(table_name: &str) -> Option<ObjectId> {
+    pub(crate) fn parse_id(table_name: &str) -> Option<BlockId> {
         // Handle both "blocks.__block_xxx" and "__block_xxx" formats
         let name = table_name.strip_prefix("blocks.").unwrap_or(table_name);
         match name.strip_prefix("__block_") {
-            Some(id) => ObjectId::try_from(id).ok(),
+            Some(id) => BlockId::try_from(id).ok(),
             None => None,
         }
     }
 
     pub fn new(
-        id: ObjectId,
+        id: BlockId,
         schema: SchemaRef,
         version: &str,
         reader: Arc<dyn DataReader>,
@@ -77,7 +77,7 @@ impl DataBlock {
         }
     }
 
-    pub fn id(&self) -> &ObjectId {
+    pub fn id(&self) -> &BlockId {
         &self.id
     }
 
@@ -369,7 +369,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_table_name() {
-        let id = ObjectId::generate();
+        let id = BlockId::generate();
         let table = DataBlock::table_name(&id);
         assert!(table.starts_with("__block_"));
         assert_eq!(table.len(), 8 + 16); // "__block_" + 16 hex chars
@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_parse_id() {
-        let id = ObjectId::generate();
+        let id = BlockId::generate();
         let table = DataBlock::table_name(&id);
         assert_eq!(Some(id), DataBlock::parse_id(&table));
         assert_eq!(None, DataBlock::parse_id("random_table"));

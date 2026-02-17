@@ -1,6 +1,6 @@
 use crate::bundle::BundleFacade;
 use crate::data::plugin::{BundlebasePlugin, CsvPlugin, FunctionPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin};
-use crate::data::{DataReader, ObjectId};
+use crate::data::{BlockId, DataReader};
 use crate::functions::FunctionRegistry;
 use crate::io::DataStorage;
 use crate::BundlebaseError;
@@ -49,7 +49,7 @@ impl DataReaderFactory {
     pub async fn reader(
         &self,
         source: &str,
-        block_id: &ObjectId,
+        block_id: &BlockId,
         bundle: &dyn BundleFacade,
         schema: Option<SchemaRef>,
         layout: Option<String>,
