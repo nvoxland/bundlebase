@@ -9,7 +9,7 @@ authors.workspace = true
 description = "Command-line interface for bundlebase data processing"
 
 [[bin]]
-name = "bundlebase-cli"
+name = "bundlebase"
 path = "src/main.rs"
 
 [lib]
