@@ -168,6 +168,9 @@ Creates an index on a column.
 CREATE <COLUMN|TEXT> INDEX ON <column>
 ```
 
+!!! note
+    The SQL syntax supports single-column indexes only. For multi-column text indexes, use the Python API: `bundle.create_index(["col1", "col2"], "text")`.
+
 See [Indexing](../guide/indexing.md) for details.
 
 ### DROP INDEX

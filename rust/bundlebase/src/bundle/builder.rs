@@ -1165,7 +1165,9 @@ impl BundleBuilder {
             // Use the first column to find which blocks contain the data
             let lookup_col = index_columns.first()
                 .cloned()
-                .unwrap_or_default();
+                .ok_or_else(|| BundlebaseError::from(
+                    format!("Index '{}' has no columns defined", index_id)
+                ))?;
 
             debug!("Checking index on {:?} (lookup col: {})", &index_columns, &lookup_col);
 
@@ -1194,6 +1196,9 @@ impl BundleBuilder {
                 }
             };
 
+            // source_col is unused: for multi-column text indexes, we only need the source_table
+            // to identify the block. The lookup_col (first index column) is used solely to find
+            // which blocks contain data for this index.
             for (source_table, _source_col) in sources {
                 // Extract block ID from table name "blocks.__block_{hex_id}"
                 let block_id = DataBlock::parse_id(&source_table).ok_or_else(|| {
