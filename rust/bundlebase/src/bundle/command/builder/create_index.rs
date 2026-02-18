@@ -6,23 +6,26 @@ use crate::index::IndexType;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
-use crate::bundle::BundleBuilder;
+use crate::bundle::{BundleBuilder, BundleFacade};
 
-/// Command to create an index on a column.
+/// Command to create an index on one or more columns.
 #[derive(Debug, Clone)]
 pub struct CreateIndexCommand {
-    /// The column to index
-    pub column: String,
+    /// The columns to index
+    pub columns: Vec<String>,
     /// The type of index to create
     pub index_type: IndexType,
+    /// The index name (None means auto-generate)
+    pub name: Option<String>,
 }
 
 impl CreateIndexCommand {
     /// Create a new CreateIndexCommand.
-    pub fn new(column: impl Into<String>, index_type: IndexType) -> Self {
+    pub fn new(columns: Vec<String>, index_type: IndexType, name: Option<String>) -> Self {
         Self {
-            column: column.into(),
+            columns,
             index_type,
+            name,
         }
     }
 }
@@ -34,10 +37,17 @@ impl CommandParsing for CreateIndexCommand {
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut column = None;
+        let mut index_type_str = None;
 
         for inner in pair.into_inner() {
-            if inner.as_rule() == Rule::identifier {
-                column = Some(inner.as_str().to_string());
+            match inner.as_rule() {
+                Rule::index_type => {
+                    index_type_str = Some(inner.as_str().to_lowercase());
+                }
+                Rule::identifier => {
+                    column = Some(inner.as_str().to_string());
+                }
+                _ => {}
             }
         }
 
@@ -45,15 +55,26 @@ impl CommandParsing for CreateIndexCommand {
             "CREATE INDEX statement missing column name".into()
         })?;
 
-        // Default to column index type
-        Ok(CreateIndexCommand::new(column, IndexType::Column))
+        let index_type_str = index_type_str.ok_or_else(|| -> BundlebaseError {
+            "CREATE INDEX statement missing index type (COLUMN or TEXT)".into()
+        })?;
+
+        let index_type: IndexType = index_type_str.parse()
+            .map_err(|e: crate::index::ParseIndexTypeError| BundlebaseError::from(e.to_string()))?;
+
+        Ok(CreateIndexCommand::new(vec![column], index_type, None))
     }
 
     fn to_statement(&self) -> String {
         match &self.index_type {
-            IndexType::Column => format!("CREATE INDEX ON {}", self.column),
+            IndexType::Column => format!("CREATE COLUMN INDEX ON {}", self.columns.join(", ")),
             IndexType::Text { tokenizer } => {
-                format!("CREATE TEXT INDEX ON {} (tokenizer: {:?})", self.column, tokenizer)
+                let cols = self.columns.join(", ");
+                if let Some(name) = self.name.as_deref() {
+                    format!("CREATE TEXT INDEX '{}' ON [{}] (tokenizer: {:?})", name, cols, tokenizer)
+                } else {
+                    format!("CREATE TEXT INDEX ON [{}] (tokenizer: {:?})", cols, tokenizer)
+                }
             }
         }
     }
@@ -64,9 +85,28 @@ impl BundleBuilderCommand for CreateIndexCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
+        let cols_display = self.columns.join(", ");
+
+        // Resolve the index name: use the explicit name if provided, otherwise auto-generate.
+        let name = match self.name.clone() {
+            Some(n) => n,
+            None => {
+                if self.index_type.is_text() {
+                    let has_text_index = builder.indexes().iter().any(|idx| idx.index_type().is_text());
+                    if !has_text_index {
+                        "full_text".to_string()
+                    } else {
+                        format!("idx_{}", self.columns.join("_"))
+                    }
+                } else {
+                    format!("idx_{}", self.columns.join("_"))
+                }
+            }
+        };
+
         builder
             .apply_operation(
-                CreateIndexOp::setup(&self.column, self.index_type.clone())
+                CreateIndexOp::setup(self.columns.clone(), self.index_type.clone(), name)
                     .await?
                     .into(),
             )
@@ -74,7 +114,7 @@ impl BundleBuilderCommand for CreateIndexCommand {
 
         builder.reindex_internal().await?;
 
-        Ok(format!("Created index on column: {}", self.column))
+        Ok(format!("Created index on column(s): {}", cols_display))
     }
 }
 
@@ -85,12 +125,26 @@ mod parsing_tests {
     use crate::bundle::command::BundleCommand;
 
     #[test]
-    fn test_parse_create_index() {
-        let input = "CREATE INDEX ON user_id";
+    fn test_parse_create_column_index() {
+        let input = "CREATE COLUMN INDEX ON user_id";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::CreateIndex(c) => {
-                assert_eq!(c.column, "user_id");
+                assert_eq!(c.columns, vec!["user_id"]);
+                assert_eq!(c.index_type, IndexType::Column);
+            }
+            _ => panic!("Expected CreateIndex variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_create_text_index() {
+        let input = "CREATE TEXT INDEX ON description";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateIndex(c) => {
+                assert_eq!(c.columns, vec!["description"]);
+                assert!(c.index_type.is_text());
             }
             _ => panic!("Expected CreateIndex variant"),
         }
@@ -98,14 +152,15 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip() {
-        let cmd = CreateIndexCommand::new("email", IndexType::Column);
+        let cmd = CreateIndexCommand::new(vec!["email".to_string()], IndexType::Column, None);
         let statement = cmd.to_statement();
-        assert_eq!(statement, "CREATE INDEX ON email");
+        assert_eq!(statement, "CREATE COLUMN INDEX ON email");
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::CreateIndex(c) => {
-                assert_eq!(c.column, "email");
+                assert_eq!(c.columns, vec!["email"]);
+                assert_eq!(c.index_type, IndexType::Column);
             }
             _ => panic!("Expected CreateIndex variant"),
         }

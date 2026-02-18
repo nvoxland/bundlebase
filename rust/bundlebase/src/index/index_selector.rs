@@ -25,7 +25,7 @@ impl IndexSelector {
 
         for index_def in indexes.iter() {
             // Check if this index is for the requested column
-            if index_def.column() != column {
+            if !index_def.columns().contains(&column.to_string()) {
                 continue;
             }
 

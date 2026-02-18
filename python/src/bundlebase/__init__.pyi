@@ -812,24 +812,28 @@ class PyBundleBuilder:
 
     def create_index(
         self,
-        column: str,
+        columns: Union[str, List[str]],
         index_type: str,
-        args: Optional[Dict[str, str]] = None
+        args: Optional[Dict[str, str]] = None,
+        name: Optional[str] = None
     ) -> "OperationChain":
         """
-        Create an index on a column.
+        Create an index on one or more columns.
 
         Args:
-            column: Name of the column to index
+            columns: Column name (str) or list of column names (list[str])
             index_type: Index type - "column" or "text"
-            args: Optional index-specific arguments (e.g., {"tokenizer": "en_stem"} for text indexes)
+            args: Optional index-specific arguments (e.g., {"tokenizer": "en_stem"})
+            name: Optional index name (for text indexes). Auto-generated if not provided.
 
         Returns:
             OperationChain for fluent chaining
 
         Example:
             c = await c.create_index("user_id", "column")
-            c = await c.create_index("content", "text", {"tokenizer": "en_stem"})
+            c = await c.create_index("description", "text")
+            c = await c.create_index(["title", "description"], "text")
+            c = await c.create_index(["title", "description"], "text", name="product_search")
         """
         ...
 
@@ -1232,9 +1236,10 @@ class OperationChain:
 
     def create_index(
         self,
-        column: str,
+        columns: Union[str, List[str]],
         index_type: str,
-        args: Optional[Dict[str, str]] = None
+        args: Optional[Dict[str, str]] = None,
+        name: Optional[str] = None
     ) -> "OperationChain":
         """Queue a create_index operation."""
         ...
@@ -1353,9 +1358,10 @@ class CreateChain:
 
     def create_index(
         self,
-        column: str,
+        columns: Union[str, List[str]],
         index_type: str,
-        args: Optional[Dict[str, str]] = None
+        args: Optional[Dict[str, str]] = None,
+        name: Optional[str] = None
     ) -> "CreateChain":
         """Queue a create_index operation."""
         ...
@@ -1474,9 +1480,10 @@ class ExtendChain:
 
     def create_index(
         self,
-        column: str,
+        columns: Union[str, List[str]],
         index_type: str,
-        args: Optional[Dict[str, str]] = None
+        args: Optional[Dict[str, str]] = None,
+        name: Optional[str] = None
     ) -> "ExtendChain":
         """Queue a create_index operation."""
         ...

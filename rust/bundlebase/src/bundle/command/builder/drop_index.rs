@@ -60,7 +60,7 @@ impl BundleBuilderCommand for DropIndexCommand {
             let indexes = bundle.indexes().read();
             let index = indexes
                 .iter()
-                .find(|idx| idx.column() == self.column.as_str());
+                .find(|idx| idx.columns().contains(&self.column));
 
             match index {
                 Some(idx) => *idx.id(),

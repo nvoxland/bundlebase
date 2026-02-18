@@ -139,7 +139,7 @@ pub fn available_commands() -> std::collections::HashMap<&'static str, &'static 
     map.insert("RENAME VIEW", "RENAME VIEW <old> TO <new>");
     map.insert("RENAME JOIN", "RENAME JOIN <old> TO <new>");
     map.insert("CREATE SOURCE", "CREATE SOURCE <function> WITH (<args>) [ON <pack>]");
-    map.insert("CREATE INDEX", "CREATE INDEX ON <column>");
+    map.insert("CREATE INDEX", "CREATE <COLUMN|TEXT> INDEX ON <column>");
     map.insert("CREATE VIEW", "CREATE VIEW <name> AS <sql>");
     map.insert("FETCH", "FETCH [<pack>] | FETCH ALL");
     map.insert("REINDEX", "REINDEX [ON data(<column>)]");

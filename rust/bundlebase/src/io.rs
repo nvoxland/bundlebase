@@ -13,7 +13,7 @@
 //! - `plugin::object_store` - file://, s3://, gs://, azure://, memory://, empty://
 //! - `plugin::ftp` - ftp://
 //! - `plugin::sftp` - sftp://
-//! - `plugin::tar` - tar://
+//! - `plugin::tar` - tar+file://
 
 // Generic modules
 pub mod dir;

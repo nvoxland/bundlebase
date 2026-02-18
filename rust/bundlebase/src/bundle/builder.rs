@@ -1076,31 +1076,35 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Create an index on a column
+    /// Create an index on one or more columns
     ///
     /// # Arguments
-    /// * `column` - The column name to index
+    /// * `columns` - The column name(s) to index
     /// * `index_type` - The type of index to create (Column or Text), already configured
+    /// * `name` - Optional name for the index. If None, auto-generated.
     ///
     /// # Example
     /// ```ignore
-    /// use bundlebase::IndexType;
+    /// use bundlebase::{IndexType, TokenizerConfig};
     ///
     /// // Column index
-    /// builder.create_index("email", IndexType::Column).await?;
+    /// builder.create_index(&["email"], IndexType::Column, None).await?;
     ///
-    /// // Text/BM25 index with English stemming
-    /// builder.create_index("content", IndexType::Text {
-    ///     tokenizer: TokenizerConfig::EnglishStem
-    /// }).await?;
+    /// // Text index — single column, auto-named
+    /// builder.create_index(&["content"], IndexType::text(TokenizerConfig::default()), None).await?;
+    ///
+    /// // Text index — explicit name
+    /// builder.create_index(&["title", "content"], IndexType::text(TokenizerConfig::default()), Some("my_search")).await?;
     /// ```
     pub async fn create_index(
         &self,
-        column: &str,
+        columns: &[&str],
         index_type: IndexType,
+        name: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::CreateIndexCommand;
-        self.execute_command(CreateIndexCommand::new(column, index_type)).await?;
+        let cols: Vec<String> = columns.iter().map(|s| s.to_string()).collect();
+        self.execute_command(CreateIndexCommand::new(cols, index_type, name.map(|s| s.to_string()))).await?;
         Ok(self)
     }
 
@@ -1141,8 +1145,8 @@ impl BundleBuilder {
     ///
     /// This is used by commands that need to reindex within their own change context.
     pub(in crate::bundle) async fn reindex_internal(&self) -> Result<(), BundlebaseError> {
-        // Group blocks by (index_id, column_name) for batching
-        let mut blocks_to_index: HashMap<(ObjectId, String), Vec<(BlockId, String)>> =
+        // Group blocks by (index_id, columns) for batching
+        let mut blocks_to_index: HashMap<(ObjectId, Vec<String>), Vec<(BlockId, String)>> =
             HashMap::new();
 
         // Ensure dataframe is set up for queries
@@ -1155,13 +1159,19 @@ impl BundleBuilder {
         let packs = self.bundle.packs().clone();
 
         for index_def in &index_defs {
-            let logical_col = index_def.column().to_string();
             let index_id = index_def.id();
-            debug!("Checking index on {}", &logical_col);
+            let index_columns: Vec<String> = index_def.columns().to_vec();
+
+            // Use the first column to find which blocks contain the data
+            let lookup_col = index_columns.first()
+                .cloned()
+                .unwrap_or_default();
+
+            debug!("Checking index on {:?} (lookup col: {})", &index_columns, &lookup_col);
 
             // Pass packs to expand pack tables into block tables
             let sources = match sql::column_sources_from_df(
-                logical_col.as_str(),
+                lookup_col.as_str(),
                 &df,
                 Some(&packs),
             )
@@ -1171,20 +1181,20 @@ impl BundleBuilder {
                 Ok(None) => {
                     return Err(format!(
                         "No physical sources found for column '{}'",
-                        logical_col
+                        lookup_col
                     )
                     .into());
                 }
                 Err(e) => {
                     return Err(format!(
                         "Failed to find source for column '{}': {}",
-                        logical_col, e
+                        lookup_col, e
                     )
                     .into());
                 }
             };
 
-            for (source_table, source_col) in sources {
+            for (source_table, _source_col) in sources {
                 // Extract block ID from table name "blocks.__block_{hex_id}"
                 let block_id = DataBlock::parse_id(&source_table).ok_or_else(|| {
                     BundlebaseError::from(format!("Invalid table: {}", source_table))
@@ -1204,13 +1214,13 @@ impl BundleBuilder {
                     VersionedBlockId::new(block_id, block_version.clone());
                 let needs_index = self
                     .bundle()
-                    .get_index(&source_col, &versioned_block)
+                    .get_index(&lookup_col, &versioned_block)
                     .is_none();
                 debug!("Needs index? {}", needs_index);
 
                 if needs_index {
                     blocks_to_index
-                        .entry((*index_id, source_col.clone()))
+                        .entry((*index_id, index_columns.clone()))
                         .or_default()
                         .push((block_id, block_version));
                 }
@@ -1218,16 +1228,16 @@ impl BundleBuilder {
         }
 
         // Create IndexBlocksOp for each group of blocks
-        for ((index_id, column), blocks) in blocks_to_index {
+        for ((index_id, columns), blocks) in blocks_to_index {
             if !blocks.is_empty() {
                 debug!(
-                    "Creating IndexBlocksOp for column {} with {} blocks",
-                    column,
+                    "Creating IndexBlocksOp for columns {:?} with {} blocks",
+                    columns,
                     blocks.len()
                 );
 
                 // Bundle is internally thread-safe
-                let op = IndexBlocksOp::setup(&index_id, &column, blocks, self).await?;
+                let op = IndexBlocksOp::setup(&index_id, columns, blocks, self).await?;
                 self.apply_operation(op.into()).await?;
             }
         }

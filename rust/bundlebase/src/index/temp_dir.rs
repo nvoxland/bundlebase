@@ -15,7 +15,7 @@ use tempfile::TempDir;
 /// like external sorting during index building. The strategy depends on the
 /// storage backend:
 ///
-/// - **Local storage** (file://, memory://, tar://): Creates temp directory at
+/// - **Local storage** (file://, memory://, tar+file://): Creates temp directory at
 ///   `data_dir/temp/<prefix>_<random>`. This keeps temp files on the same
 ///   filesystem as the data for better performance.
 ///
@@ -74,7 +74,7 @@ impl TempDirManager {
         let path = if url.scheme() == "file" {
             PathBuf::from(url.path())
         } else {
-            // For memory:// or tar://, use system temp as fallback
+            // For memory:// or tar+file://, use system temp as fallback
             return Self::create_system_temp(prefix);
         };
 

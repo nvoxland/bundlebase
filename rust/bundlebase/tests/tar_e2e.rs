@@ -27,7 +27,7 @@ async fn test_export_and_reopen_tar() {
     assert!(tar_path.exists(), "Tar file should be created");
 
     // Open from tar
-    let tar_bundle = Bundle::open(tar_path.to_str().unwrap(), None)
+    let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     let tar_history = tar_bundle.history();
@@ -57,7 +57,7 @@ async fn test_commit_to_tar() {
         .unwrap();
 
     // Open tar and make changes
-    let opened_bundle = Bundle::open(tar_path.to_str().unwrap(), None)
+    let opened_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     let mut tar_builder = BundleBuilder::extend(opened_bundle.into(), None).unwrap();
@@ -65,7 +65,7 @@ async fn test_commit_to_tar() {
     tar_builder.commit("v2 - filtered").await.unwrap();
 
     // Reopen and verify both commits exist
-    let reopened = Bundle::open(tar_path.to_str().unwrap(), None)
+    let reopened = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     let reopened_history = reopened.history();
@@ -94,7 +94,7 @@ async fn test_multiple_commits_to_tar() {
 
     // Make multiple commits to the tar file
     for i in 2..=5 {
-        let opened = Bundle::open(tar_path.to_str().unwrap(), None)
+        let opened = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
             .await
             .unwrap();
         let mut builder = BundleBuilder::extend(opened.into(), None).unwrap();
@@ -106,7 +106,7 @@ async fn test_multiple_commits_to_tar() {
     }
 
     // Verify all commits exist
-    let final_bundle = Bundle::open(tar_path.to_str().unwrap(), None)
+    let final_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     let final_history = final_bundle.history();
@@ -136,7 +136,7 @@ async fn test_tar_preserves_metadata() {
         .unwrap();
 
     // Open from tar and verify metadata
-    let tar_bundle = Bundle::open(tar_path.to_str().unwrap(), None)
+    let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     assert_eq!(tar_bundle.name(), Some("Test Bundle".to_string()));
@@ -162,15 +162,15 @@ async fn test_create_index_in_tar() {
         .unwrap();
 
     // Open tar and create index
-    let opened = Bundle::open(tar_path.to_str().unwrap(), None)
+    let opened = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     let mut builder = BundleBuilder::extend(opened.into(), None).unwrap();
-    builder.create_index("id", IndexType::Column).await.unwrap();
+    builder.create_index(&["id"], IndexType::Column, None).await.unwrap();
     builder.commit("v2 - added index").await.unwrap();
 
     // Reopen and verify index exists
-    let final_bundle = Bundle::open(tar_path.to_str().unwrap(), None)
+    let final_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     let final_history = final_bundle.history();
@@ -204,7 +204,7 @@ async fn test_tar_query_equivalence() {
         .await
         .unwrap();
 
-    let tar_bundle = Bundle::open(tar_path.to_str().unwrap(), None)
+    let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     let tar_count = tar_bundle.num_rows().await.unwrap();
@@ -239,7 +239,7 @@ async fn test_export_from_bundle() {
     assert!(tar_path.exists(), "Tar file should be created");
 
     // Verify we can reopen it
-    let reopened = Bundle::open(tar_path.to_str().unwrap(), None)
+    let reopened = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
     assert_eq!(reopened.history().len(), 1);
@@ -328,7 +328,7 @@ async fn test_tar_file_listing() {
         .unwrap();
 
     // Open tar and list files
-    let tar_bundle = Bundle::open(tar_path.to_str().unwrap(), None)
+    let tar_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
 

@@ -14,7 +14,7 @@ use url::Url;
 /// Each backend implements this trait to handle its supported URL schemes.
 #[async_trait]
 pub trait IOFactory: Send + Sync {
-    /// URL schemes this factory handles (e.g., ["ftp"], ["sftp"], ["tar"]).
+    /// URL schemes this factory handles (e.g., ["ftp"], ["sftp"], ["tar+file"]).
     fn schemes(&self) -> &[&str];
 
     /// Whether this backend supports write operations for the given URL.
@@ -289,9 +289,9 @@ mod tests {
     #[test]
     fn test_registry_has_tar_factory() {
         let registry = io_registry();
-        assert!(registry.get_factory("tar").is_some());
+        assert!(registry.get_factory("tar+file").is_some());
         // TAR supports writes
-        assert!(registry.supports_write(&Url::parse("tar:///data.tar/file.txt").unwrap()));
+        assert!(registry.supports_write(&Url::parse("tar+file:///data.tar/file.txt").unwrap()));
     }
 
     #[test]
@@ -308,7 +308,7 @@ mod tests {
         assert!(!registry.supports_streaming_read("sftp"));
 
         // Tar supports streaming reads (via object_store)
-        assert!(registry.supports_streaming_read("tar"));
+        assert!(registry.supports_streaming_read("tar+file"));
 
         // Unknown scheme returns false
         assert!(!registry.supports_streaming_read("unknown"));
@@ -324,7 +324,7 @@ mod tests {
         assert!(registry.supports_streaming_write("memory"));
 
         // Tar does not support true streaming writes (needs size upfront)
-        assert!(!registry.supports_streaming_write("tar"));
+        assert!(!registry.supports_streaming_write("tar+file"));
 
         // Unknown scheme returns false
         assert!(!registry.supports_streaming_write("unknown"));
@@ -344,7 +344,7 @@ mod tests {
         assert!(!registry.supports_versioning("sftp"));
 
         // Tar supports versioning (via object_store)
-        assert!(registry.supports_versioning("tar"));
+        assert!(registry.supports_versioning("tar+file"));
 
         // Unknown scheme returns false
         assert!(!registry.supports_versioning("unknown"));

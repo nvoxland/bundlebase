@@ -2,7 +2,7 @@
 //!
 //! Benchmarks comparing query performance with and without indexes.
 //! Tests ORDER BY, LIMIT, DISTINCT, GROUP BY, aggregations, LIKE,
-//! and text_search patterns.
+//! and LIKE patterns.
 
 mod bench_data;
 mod bench_helpers;

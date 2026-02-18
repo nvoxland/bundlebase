@@ -515,10 +515,10 @@ async fn test_bundle_indexes_table_schema() {
 
     // Verify schema has the expected columns
     let schema = df.schema();
-    assert_eq!(schema.fields().len(), 4, "bundle_info.indexes should have 4 columns");
+    assert_eq!(schema.fields().len(), 5, "bundle_info.indexes should have 5 columns");
 
     let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-    assert_eq!(field_names, vec!["id", "column", "type", "tokenizer"]);
+    assert_eq!(field_names, vec!["id", "name", "column", "type", "tokenizer"]);
 }
 
 #[tokio::test]
@@ -558,7 +558,7 @@ async fn test_bundle_indexes_table_with_index() {
         .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
-    bundle.create_index("id", IndexType::Column).await.unwrap();
+    bundle.create_index(&["id"], IndexType::Column, None).await.unwrap();
     bundle.commit("Initial commit with index").await.unwrap();
 
     let bundle = Bundle::open(data_dir.url().as_str(), None).await.unwrap();

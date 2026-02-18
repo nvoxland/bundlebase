@@ -4,7 +4,7 @@
 //! - `object_store`: file://, s3://, gs://, azure://, memory://, empty://
 //! - `ftp`: ftp://
 //! - `sftp`: sftp://
-//! - `tar`: tar://
+//! - `tar`: tar+file://
 
 pub mod ftp;
 pub mod object_store;

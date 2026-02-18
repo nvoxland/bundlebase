@@ -160,15 +160,15 @@ where
 impl IndexBlocksOp {
     /// Builds and registers an index across multiple blocks.
     ///
-    /// Streams through all provided blocks for the specified column, accumulates value-to-rowid
+    /// Streams through all provided blocks for the specified columns, accumulates value-to-rowid
     /// mappings, and creates either a ColumnIndex or TextColumnIndex based on the index type.
     /// The index is then registered with the IndexManager and saved to disk.
     ///
     /// # Arguments
     /// * `index` - Unique identifier for this index operation
-    /// * `column` - Column name to build index for
+    /// * `columns` - Column names to build index for
     /// * `blocks` - Vec of (block_id, version) tuples to index
-    /// * `bundle` - Bundle providing block access and index management
+    /// * `builder` - BundleBuilder providing block access and index management
     ///
     /// # Returns
     /// * `Ok(Self)` - Successfully created and registered index
@@ -183,7 +183,7 @@ impl IndexBlocksOp {
     /// - Streaming or index building fails
     pub async fn setup(
         index: &ObjectId,
-        column: &str,
+        columns: Vec<String>,
         blocks: Vec<(BlockId, String)>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
@@ -194,26 +194,31 @@ impl IndexBlocksOp {
             return Err(BundlebaseError::from("Cannot create index with no blocks"));
         }
 
-        // Look up the index definition to get its type
-        let index_type = {
+        // Look up the index definition to get its type and name
+        let (index_type, index_name) = {
             let indexes = bundle.indexes().read();
-            indexes
+            let idx = indexes
                 .iter()
                 .find(|idx| idx.id() == index)
-                .map(|idx| idx.index_type().clone())
                 .ok_or_else(|| {
                     BundlebaseError::from(format!(
                         "Index definition {} not found. CreateIndexOp must be applied first.",
                         index
                     ))
-                })?
+                })?;
+            (idx.index_type().clone(), idx.name().to_string())
         };
 
         // Dispatch to appropriate index building method
-        match index_type {
-            IndexType::Column => Self::build_column_index(index, column, blocks, bundle).await,
-            IndexType::Text { tokenizer } => {
-                Self::build_text_index(index, column, blocks, bundle, &tokenizer).await
+        match &index_type {
+            IndexType::Column => {
+                let column = columns.first().ok_or_else(|| {
+                    BundlebaseError::from("Column index requires at least one column")
+                })?;
+                Self::build_column_index(index, column, blocks, bundle).await
+            }
+            IndexType::Text { tokenizer, .. } => {
+                Self::build_text_index(index, &index_name, &columns, blocks, bundle, tokenizer).await
             }
         }
     }
@@ -358,70 +363,120 @@ impl IndexBlocksOp {
 
     /// Build a text index (BM25 full-text search)
     ///
+    /// Indexes one or more text columns into a single searchable index.
     /// Uses streaming to collect documents, then builds via Tantivy's streaming builder.
     /// Tantivy's internal 50MB heap handles batching during index construction.
     async fn build_text_index(
         index: &ObjectId,
-        column: &str,
+        index_name: &str,
+        text_columns: &[String],
         blocks: Vec<(BlockId, String)>,
         bundle: &Bundle,
         tokenizer_config: &TokenizerConfig,
     ) -> Result<Self, BundlebaseError> {
-        // Validator that ensures the column is a string type
-        let column_for_error = column.to_string();
-        let string_type_validator = move |data_type: &DataType, block_id: &BlockId| {
-            match data_type {
-                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => Ok(()),
-                other => Err(BundlebaseError::from(format!(
-                    "Text index requires string column, but '{}' in block {} has type {:?}",
-                    column_for_error, block_id, other
-                ))),
-            }
-        };
-
-        // Prepare and validate blocks
-        let block_infos = prepare_blocks_for_indexing(&blocks, bundle, column, string_type_validator)?;
-
         // Create progress scope for tracking
         let progress = ProgressScope::new(
-            &format!("Building text index for '{}'", column),
+            &format!("Building text index for '{}'", index_name),
             Some(blocks.len() as u64),
         );
 
-        // Collect documents as (text, rowid) pairs for streaming build
-        // Tantivy's 50MB heap handles batching during indexing
-        let mut documents: Vec<(String, RowId)> = Vec::new();
+        // Collect multi-column documents as (column_values, rowid) pairs
+        let mut documents: Vec<(std::collections::HashMap<String, String>, RowId)> = Vec::new();
 
-        // Iterate through all blocks and process batches
-        iterate_blocks(&block_infos, bundle, &progress, |batch, row_ids| {
-            let array = batch.column(0);
+        // For each block, project all text columns, extract values, and build documents
+        for (block_idx, (block_id, _version)) in blocks.iter().enumerate() {
+            let block = find_block(bundle, block_id)?;
+            let schema = block.schema();
 
-            for (row, row_id) in row_ids.iter().enumerate() {
-                let scalar = ScalarValue::try_from_array(array, row)?;
+            // Find column indices for all text columns
+            let mut col_indices = Vec::new();
+            for col_name in text_columns {
+                let (col_idx, field) = schema.column_with_name(col_name).ok_or_else(|| {
+                    BundlebaseError::from(format!(
+                        "Column '{}' not found in block {}",
+                        col_name, block_id,
+                    ))
+                })?;
 
-                // Extract string value, skipping nulls
-                let text_value = match &scalar {
-                    ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => s.clone(),
-                    ScalarValue::Utf8View(Some(s)) => s.to_string(),
-                    _ => continue, // Skip nulls
-                };
+                // Validate string type
+                match field.data_type() {
+                    DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => {}
+                    other => {
+                        return Err(BundlebaseError::from(format!(
+                            "Text index requires string column, but '{}' in block {} has type {:?}",
+                            col_name, block_id, other
+                        )));
+                    }
+                }
 
-                documents.push((text_value, *row_id));
+                col_indices.push((col_name.clone(), col_idx));
             }
-            Ok(())
-        })
-        .await?;
 
-        // Build the text index using streaming builder
-        let text_index = TextColumnIndex::build_streaming(
-            column,
+            // Project all text columns
+            let projection: Vec<usize> = col_indices.iter().map(|(_, idx)| *idx).collect();
+            let reader = block.reader();
+            let block_ref = ObjectIdAlias::from(block_idx as u16);
+            let mut rowid_stream = reader
+                .extract_rowids_stream(block_ref, bundle.ctx(), Some(&projection))
+                .await
+                .map_err(|e| {
+                    BundlebaseError::from(format!(
+                        "Failed to stream data from block for indexing: {}",
+                        e
+                    ))
+                })?;
+
+            while let Some(batch_result) = rowid_stream.next().await {
+                let rowid_batch = batch_result.map_err(|e| {
+                    BundlebaseError::from(format!("Failed to read row batch from block: {}", e))
+                })?;
+
+                let batch = &rowid_batch.batch;
+                let row_ids = &rowid_batch.row_ids;
+
+                for (row, row_id) in row_ids.iter().enumerate() {
+                    let mut column_values = std::collections::HashMap::new();
+                    let mut has_any_value = false;
+
+                    for (proj_idx, (col_name, _)) in col_indices.iter().enumerate() {
+                        let array = batch.column(proj_idx);
+                        let scalar = ScalarValue::try_from_array(array, row)?;
+
+                        let text_value = match &scalar {
+                            ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => {
+                                s.clone()
+                            }
+                            ScalarValue::Utf8View(Some(s)) => s.to_string(),
+                            _ => continue, // Skip nulls for this column
+                        };
+
+                        column_values.insert(col_name.clone(), text_value);
+                        has_any_value = true;
+                    }
+
+                    // Only add document if at least one column has a value
+                    if has_any_value {
+                        documents.push((column_values, *row_id));
+                    }
+                }
+            }
+
+            // Update progress after each block
+            let msg = format!("Block {}/{}", block_idx + 1, blocks.len());
+            progress.update((block_idx + 1) as u64, Some(&msg));
+        }
+
+        // Build the text index using multi-column streaming builder
+        let text_index = TextColumnIndex::build_streaming_multi(
+            index_name,
+            text_columns,
             documents.into_iter(),
             tokenizer_config,
         )
         .map_err(|e| {
             BundlebaseError::from(format!(
-                "Failed to build text index for column '{}': {}",
-                column, e
+                "Failed to build text index for '{}': {}",
+                index_name, e
             ))
         })?;
 
@@ -430,16 +485,18 @@ impl IndexBlocksOp {
         // Serialize and save the index
         let serialized = text_index.serialize().map_err(|e| {
             BundlebaseError::from(format!(
-                "Failed to serialize text index for column '{}': {}",
-                column, e
+                "Failed to serialize text index for '{}': {}",
+                index_name, e
             ))
         })?;
 
-        let rel_path = Self::save_index_bytes(bundle, serialized, "idx.text.tar", column).await?;
+        let rel_path =
+            Self::save_index_bytes(bundle, serialized, "idx.text.tar", index_name).await?;
 
         log::debug!(
-            "Successfully created text index for '{}' at {} ({} documents)",
-            column,
+            "Successfully created text index '{}' for columns [{}] at {} ({} documents)",
+            index_name,
+            text_columns.join(", "),
             rel_path,
             doc_count
         );
@@ -451,7 +508,7 @@ impl IndexBlocksOp {
                 .map(|(block, version)| VersionedBlockId { block, version })
                 .collect(),
             path: rel_path,
-            cardinality: doc_count, // For text indexes, cardinality = unique text values indexed
+            cardinality: doc_count,
             doc_count: Some(doc_count),
         })
     }
@@ -504,7 +561,7 @@ impl Operation for IndexBlocksOp {
             log::debug!(
                 "Added indexed blocks to index {} (column '{}'): {} blocks",
                 self.index,
-                index_def.column(),
+                index_def.columns().join(", "),
                 self.blocks.len()
             );
 
