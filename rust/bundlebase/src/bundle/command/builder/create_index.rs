@@ -65,6 +65,11 @@ impl CommandParsing for CreateIndexCommand {
         Ok(CreateIndexCommand::new(vec![column], index_type, None))
     }
 
+    // TODO: to_statement() and from_statement() are asymmetric for text indexes.
+    // to_statement() outputs name, multi-column, and tokenizer info that from_statement()
+    // cannot parse back. Text index statements cannot round-trip through SQL serialization.
+    // If these statements are stored in the operation log, this needs to be fixed by extending
+    // the parser grammar to support the full text index syntax.
     fn to_statement(&self) -> String {
         match &self.index_type {
             IndexType::Column => format!("CREATE COLUMN INDEX ON {}", self.columns.join(", ")),
@@ -85,17 +90,19 @@ impl BundleBuilderCommand for CreateIndexCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let cols_display = self.columns.join(", ");
+        let CreateIndexCommand { columns, index_type, name } = *self;
+
+        let cols_display = columns.join(", ");
 
         // Resolve the index name: use the explicit name if provided, otherwise auto-generate.
-        let name = match self.name.clone() {
+        let resolved_name = match name {
             Some(n) => n,
-            None => format!("idx_{}", self.columns.join("_")),
+            None => format!("idx_{}", columns.join("_")),
         };
 
         builder
             .apply_operation(
-                CreateIndexOp::setup(self.columns.clone(), self.index_type.clone(), name)
+                CreateIndexOp::setup(columns, index_type, resolved_name)
                     .await?
                     .into(),
             )

@@ -119,6 +119,16 @@ SELECT * FROM search('product_search', '+title:machine +description:learning')
 
 When no field is specified, all columns in the index are searched.
 
+### Result Limit
+
+By default, `search()` returns up to **10,000** results when no SQL `LIMIT` clause is specified. If your query matches more documents than this, results are truncated to the top 10,000 by relevance score. Always use `LIMIT` for best performance and predictable results:
+
+```sql
+SELECT * FROM search('product_search', 'common term')
+ORDER BY _score DESC
+LIMIT 100
+```
+
 ### The Score Column
 
 Every `search()` query returns a `_score` column (Float64) with the BM25 relevance score. Higher scores indicate better matches. Use `ORDER BY _score DESC` to rank results by relevance.

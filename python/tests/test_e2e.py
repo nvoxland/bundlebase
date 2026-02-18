@@ -938,6 +938,77 @@ async def test_search_no_matches():
 
 
 @pytest.mark.asyncio
+async def test_search_after_reopen():
+    """Test that search() works after closing and reopening a bundle"""
+    temp_path = random_bundle()
+    c = await bundlebase.create(temp_path)
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.create_index(["Company"], "text", name="company_search")
+    await c.commit("Text index created")
+
+    # Reopen the bundle
+    c2 = await bundlebase.open(temp_path)
+
+    result = await c2.query("SELECT \"Company\", _score FROM search('company_search', 'Group') ORDER BY _score DESC")
+    df = await result.to_polars()
+
+    assert len(df) > 0, "search() should return results after reopen"
+    for company in df["Company"].to_list():
+        assert "group" in company.lower(), f"Expected '{company}' to contain 'group'"
+    assert all(s > 0 for s in df["_score"].to_list()), "All scores should be positive"
+
+
+@pytest.mark.asyncio
+async def test_search_across_multiple_blocks():
+    """Test that search() works across data from multiple attached files"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.attach(datafile("customers-101-150.csv"))
+
+    c = await c.create_index(["Company"], "text", name="company_search")
+    await c.commit("Text index created")
+
+    result = await c.query("SELECT \"Company\", _score FROM search('company_search', 'Group') ORDER BY _score DESC")
+    df = await result.to_polars()
+
+    assert len(df) > 0, "search() should return results across multiple blocks"
+    for company in df["Company"].to_list():
+        assert "group" in company.lower(), f"Expected '{company}' to contain 'group'"
+
+
+@pytest.mark.asyncio
+async def test_drop_index_by_name():
+    """Test dropping a text index by its name"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    c = await c.create_index(["Company"], "text", name="company_search")
+    await c.commit("Text index created")
+
+    # Drop by name
+    c = await c.drop_index("company_search")
+
+    # Verify bundle still works
+    assert await c.num_rows() == 100
+
+
+@pytest.mark.asyncio
+async def test_search_auto_generated_index_name():
+    """Test that auto-generated index names work with search()"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    # Create index without explicit name — should auto-name as "idx_Company"
+    c = await c.create_index(["Company"], "text")
+    await c.commit("Text index created")
+
+    result = await c.query("SELECT \"Company\", _score FROM search('idx_Company', 'Group') ORDER BY _score DESC")
+    df = await result.to_polars()
+
+    assert len(df) > 0, "search() should work with auto-generated index name"
+
+
+@pytest.mark.asyncio
 async def test_status_empty_bundle():
     """Test status() on a newly created bundle"""
     c = await bundlebase.create(random_bundle())

@@ -33,7 +33,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use futures::StreamExt;
 use parking_lot::RwLock;
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -230,6 +230,10 @@ impl TableProvider for SearchResultTableProvider {
             .collect())
     }
 
+    // TODO: This implementation materializes all matching rows in memory before returning.
+    // For large datasets with broad search terms, this violates the streaming-first philosophy.
+    // A future streaming implementation should yield batches incrementally instead of collecting
+    // all result_batches into a Vec<RecordBatch>.
     async fn scan(
         &self,
         _state: &dyn Session,
@@ -246,14 +250,23 @@ impl TableProvider for SearchResultTableProvider {
             return self.empty_exec(&output_schema, projection);
         }
 
-        // Collect the set of indexed BlockIds so we only scan those blocks
-        let indexed_block_ids: HashSet<BlockId> = all_indexed_blocks
-            .iter()
-            .flat_map(|ib| ib.blocks().into_iter().map(|vb| vb.block))
-            .collect();
+        // Build a map from BlockId -> block_ref (u16) preserving the order from index building.
+        // During index building, blocks are assigned sequential ObjectIdAlias values (0, 1, 2, ...)
+        // based on their position. We must use the same mapping here so that RowId block_refs match.
+        // NOTE: If multiple IndexedBlocks entries exist (from incremental indexing), block_refs
+        // could collide across entries. This works correctly when all blocks are in a single
+        // IndexedBlocks entry (the common case after reindex).
+        let mut block_id_to_ref: HashMap<BlockId, u16> = HashMap::new();
+        for indexed_blocks in &all_indexed_blocks {
+            for (ref_idx, vb) in indexed_blocks.blocks().iter().enumerate() {
+                block_id_to_ref.insert(vb.block, ref_idx as u16);
+            }
+        }
 
         // Collect (row_id, score) pairs from all indexed blocks
         let mut row_id_scores: Vec<(RowId, f64)> = Vec::new();
+        // Default to 10,000 results when no SQL LIMIT is specified.
+        // This prevents unbounded result sets for broad search terms.
         let search_limit = limit.unwrap_or(10000);
 
         for indexed_blocks in &all_indexed_blocks {
@@ -304,17 +317,16 @@ impl TableProvider for SearchResultTableProvider {
 
         // Scan only indexed blocks to find matching rows
         let mut result_batches: Vec<RecordBatch> = Vec::new();
-        let mut block_ref_counter: u16 = 0;
 
         for pack in self.packs.values() {
             for block in pack.blocks() {
-                if !indexed_block_ids.contains(block.id()) {
-                    continue;
-                }
+                let block_ref_idx = match block_id_to_ref.get(block.id()) {
+                    Some(idx) => *idx,
+                    None => continue, // Block not in this index
+                };
 
                 let reader = block.reader();
-                let block_ref = ObjectIdAlias::from(block_ref_counter);
-                block_ref_counter += 1;
+                let block_ref = ObjectIdAlias::from(block_ref_idx);
 
                 let mut rowid_stream = reader
                     .extract_rowids_stream(block_ref, self.ctx.clone(), None)
