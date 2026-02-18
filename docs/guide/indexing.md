@@ -4,39 +4,57 @@ While Bundlebase can query any attached data, the base formats are not always th
 
 Creating indexes on columns you frequently filter on will allow for faster query execution.
 
-## Creating Indexes
+## Column Indexes
 
-The `create_index()` method requires a column name and an index type (`"column"` or `"text"`).
+Column indexes accelerate exact-match lookups and range queries. Use `create_index()` with `index_type="column"`.
 
 === "Async API"
 
     ```python
-    # Column index for exact lookups and range queries
     await bundle.create_index("email", index_type="column")
-
-    # Text index for full-text search
-    await bundle.create_index("description", index_type="text")
-
-    # Text index with a custom tokenizer
-    await bundle.create_index("content", index_type="text", options={"tokenizer": "en_stem"})
     ```
 
 === "Sync API"
 
     ```python
     bundle.create_index("email", index_type="column")
-    bundle.create_index("description", index_type="text")
-    bundle.create_index("content", index_type="text", options={"tokenizer": "en_stem"})
     ```
 
 === "SQL"
 
     ```sql
-    CREATE INDEX ON email
+    CREATE COLUMN INDEX ON email
     ```
 
 !!! note
     Until you commit, the index will not be used when the bundle is reopened.
+
+## Text Indexes
+
+Text indexes enable full-text search with BM25 ranking. Use `create_index()` with `index_type="text"` and one or more columns. If no name is provided, indexes are auto-named as `idx_{columns}`.
+
+=== "Async API"
+
+    ```python
+    # Single-column text index (auto-named "idx_description")
+    await bundle.create_index("description", "text")
+
+    # Multi-column text index (auto-named "idx_title_description")
+    await bundle.create_index(["title", "description"], "text")
+
+    # With explicit name and tokenizer
+    await bundle.create_index("content", "text", name="content_search", args={"tokenizer": "en_stem"})
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle.create_index("description", "text")
+    bundle.create_index(["title", "description"], "text")
+    bundle.create_index("content", "text", name="content_search", args={"tokenizer": "en_stem"})
+    ```
+
+For more details on querying and tokenizers, see [Text Search](text-search.md).
 
 ## Drop Index
 

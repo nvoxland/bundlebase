@@ -9,10 +9,15 @@
 //! ORDER BY _score DESC
 //! LIMIT 10
 //! ```
+//!
+//! Also supports single-arg form when only one text index exists:
+//! ```sql
+//! SELECT * FROM search('query')
+//! ```
 
 use crate::bundle::{BundleFacade, Pack};
-use crate::data::{ObjectId, RowId};
-use crate::index::{IndexDefinition, TextColumnIndex};
+use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId};
+use crate::index::{IndexDefinition, TextIndex};
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadFile;
 use arrow::array::{Float64Array, RecordBatch, UInt64Array};
@@ -28,13 +33,24 @@ use datafusion::physical_plan::ExecutionPlan;
 use futures::StreamExt;
 use parking_lot::RwLock;
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
+
+/// Extract a string literal from an Expr
+fn extract_string_literal(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Literal(datafusion::common::ScalarValue::Utf8(Some(s)), _) => Some(s.clone()),
+        Expr::Literal(datafusion::common::ScalarValue::Utf8View(Some(s)), _) => {
+            Some(s.to_string())
+        }
+        _ => None,
+    }
+}
 
 /// Table function that creates a `SearchResultTableProvider` for text search
 pub struct SearchTableFunction {
-    facade: Weak<dyn BundleFacade>,
+    facade: std::sync::Weak<dyn BundleFacade>,
 }
 
 impl std::fmt::Debug for SearchTableFunction {
@@ -44,52 +60,76 @@ impl std::fmt::Debug for SearchTableFunction {
 }
 
 impl SearchTableFunction {
-    pub fn new(facade: Weak<dyn BundleFacade>) -> Self {
+    pub fn new(facade: std::sync::Weak<dyn BundleFacade>) -> Self {
         Self { facade }
     }
 }
 
 impl TableFunctionImpl for SearchTableFunction {
     fn call(&self, args: &[Expr]) -> datafusion::common::Result<Arc<dyn TableProvider>> {
-        if args.len() != 2 {
-            return Err(DataFusionError::Plan(
-                "search() requires exactly 2 arguments: search('index_name', 'query')".to_string(),
-            ));
-        }
-
-        let index_name = match &args[0] {
-            Expr::Literal(datafusion::common::ScalarValue::Utf8(Some(s)), _) => s.clone(),
-            Expr::Literal(datafusion::common::ScalarValue::Utf8View(Some(s)), _) => s.to_string(),
-            other => {
-                return Err(DataFusionError::Plan(format!(
-                    "search() first argument must be a string literal (index name), got: {:?}",
-                    other
-                )));
-            }
-        };
-
-        let query = match &args[1] {
-            Expr::Literal(datafusion::common::ScalarValue::Utf8(Some(s)), _) => s.clone(),
-            Expr::Literal(datafusion::common::ScalarValue::Utf8View(Some(s)), _) => s.to_string(),
-            other => {
-                return Err(DataFusionError::Plan(format!(
-                    "search() second argument must be a string literal (query), got: {:?}",
-                    other
-                )));
-            }
-        };
-
         let facade = self.facade.upgrade().ok_or_else(|| {
             DataFusionError::Internal("Bundle has been dropped".to_string())
         })?;
 
-        // Look up the index definition to validate it exists
         let indexes = facade.indexes();
+
+        let (index_name, query) = match args.len() {
+            1 => {
+                // Single arg: search('query') — find the single text index
+                let query = extract_string_literal(&args[0]).ok_or_else(|| {
+                    DataFusionError::Plan(
+                        "search() argument must be a string literal (query)".to_string(),
+                    )
+                })?;
+
+                let text_indexes: Vec<_> =
+                    indexes.iter().filter(|idx| idx.is_text()).collect();
+
+                match text_indexes.len() {
+                    0 => {
+                        return Err(DataFusionError::Plan(
+                            "search() with 1 argument requires exactly one text index, but none exist on this bundle".to_string(),
+                        ));
+                    }
+                    1 => (text_indexes[0].name().to_string(), query),
+                    n => {
+                        let names: Vec<String> =
+                            text_indexes.iter().map(|idx| idx.name().to_string()).collect();
+                        return Err(DataFusionError::Plan(format!(
+                            "search() with 1 argument requires exactly one text index, but {} exist: {}. Use search('index_name', 'query') to specify which index.",
+                            n,
+                            names.join(", ")
+                        )));
+                    }
+                }
+            }
+            2 => {
+                // Two args: search('index_name', 'query')
+                let index_name = extract_string_literal(&args[0]).ok_or_else(|| {
+                    DataFusionError::Plan(
+                        "search() first argument must be a string literal (index name)".to_string(),
+                    )
+                })?;
+
+                let query = extract_string_literal(&args[1]).ok_or_else(|| {
+                    DataFusionError::Plan(
+                        "search() second argument must be a string literal (query)".to_string(),
+                    )
+                })?;
+
+                (index_name, query)
+            }
+            _ => {
+                return Err(DataFusionError::Plan(
+                    "search() requires 1 or 2 arguments: search('query') or search('index_name', 'query')".to_string(),
+                ));
+            }
+        };
+
+        // Look up the index definition by name only
         let index_def = indexes
             .iter()
-            .find(|idx| {
-                idx.is_text() && (idx.name() == index_name || idx.columns().contains(&index_name.to_string()))
-            })
+            .find(|idx| idx.is_text() && idx.name() == index_name)
             .ok_or_else(|| {
                 let available_text: Vec<String> = indexes
                     .iter()
@@ -206,6 +246,12 @@ impl TableProvider for SearchResultTableProvider {
             return self.empty_exec(&output_schema, projection);
         }
 
+        // Collect the set of indexed BlockIds so we only scan those blocks
+        let indexed_block_ids: HashSet<BlockId> = all_indexed_blocks
+            .iter()
+            .flat_map(|ib| ib.blocks().into_iter().map(|vb| vb.block))
+            .collect();
+
         // Collect (row_id, score) pairs from all indexed blocks
         let mut row_id_scores: Vec<(RowId, f64)> = Vec::new();
         let search_limit = limit.unwrap_or(10000);
@@ -231,7 +277,7 @@ impl TableProvider for SearchResultTableProvider {
                     ))
                 })?;
 
-            let text_index = TextColumnIndex::deserialize(index_bytes)
+            let text_index = TextIndex::deserialize(index_bytes)
                 .map_err(|e| DataFusionError::External(e))?;
 
             let results = text_index
@@ -248,7 +294,7 @@ impl TableProvider for SearchResultTableProvider {
         }
 
         // Sort by score descending
-        row_id_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        row_id_scores.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         // Build a map from row_id to score for lookup
         let score_map: HashMap<u64, f64> = row_id_scores
@@ -256,13 +302,19 @@ impl TableProvider for SearchResultTableProvider {
             .map(|(row_id, score)| (row_id.as_u64(), *score))
             .collect();
 
-        // Scan all blocks to find matching rows
+        // Scan only indexed blocks to find matching rows
         let mut result_batches: Vec<RecordBatch> = Vec::new();
+        let mut block_ref_counter: u16 = 0;
 
         for pack in self.packs.values() {
             for block in pack.blocks() {
+                if !indexed_block_ids.contains(block.id()) {
+                    continue;
+                }
+
                 let reader = block.reader();
-                let block_ref = crate::data::ObjectIdAlias::from(0u16);
+                let block_ref = ObjectIdAlias::from(block_ref_counter);
+                block_ref_counter += 1;
 
                 let mut rowid_stream = reader
                     .extract_rowids_stream(block_ref, self.ctx.clone(), None)
@@ -300,7 +352,7 @@ impl TableProvider for SearchResultTableProvider {
                     );
                     let mut filtered_columns: Vec<Arc<dyn arrow::array::Array>> = Vec::new();
                     for col in batch.columns() {
-                        let filtered = compute::take(col.as_ref(), &indices, None)?;
+                        let filtered = compute::take(col, &indices, None)?;
                         filtered_columns.push(filtered);
                     }
 
@@ -354,7 +406,7 @@ impl SearchResultTableProvider {
     }
 }
 
-/// Simple batch generator that yields pre-computed batches
+/// Batch generator that yields pre-computed search result batches
 #[derive(Debug)]
 struct SearchBatchGenerator {
     batches: Vec<RecordBatch>,

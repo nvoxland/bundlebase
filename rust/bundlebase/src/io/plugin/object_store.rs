@@ -132,12 +132,17 @@ pub(crate) fn parse_url(
         }
     }
 
-    // Handle tar:// scheme - format is tar:///path/to/archive.tar or tar:///path/to/archive.tar/internal/path
-    if url.scheme() == "tar" {
-        let full_path = url.path();
+    // Handle tar+<scheme>:// compound scheme (e.g., tar+file://, tar+s3://)
+    if let Some(inner_scheme) = url.scheme().strip_prefix("tar+") {
+        // Reconstruct the inner URL with the original scheme
+        // AfterScheme position is right after the scheme name but before the ':'
+        let inner_url_str = format!("{}:{}", inner_scheme, &url.as_str()[url.scheme().len() + 1..]);
+        let inner_url = Url::parse(&inner_url_str)?;
+
+        let full_path = inner_url.path();
         // Find where the .tar file ends and internal path begins
         let (tar_path, internal_path) = if let Some(tar_idx) = full_path.find(".tar") {
-            let tar_end = tar_idx + 4; // ".tar" is 4 chars
+            let tar_end = tar_idx + 4;
             let tar_file = &full_path[..tar_end];
             let internal = if tar_end < full_path.len() {
                 &full_path[tar_end..]
@@ -146,7 +151,6 @@ pub(crate) fn parse_url(
             };
             (tar_file, internal)
         } else {
-            // No .tar found, treat entire path as tar file
             (full_path, "/")
         };
 
@@ -154,18 +158,6 @@ pub(crate) fn parse_url(
             format!("Failed to create TarObjectStore for {}: {}", tar_path, e)
         })?;
         return Ok((Arc::new(store), ObjectPath::from(internal_path)));
-    }
-
-    // Check for .tar file extension first (before other file:// handling)
-    if url.scheme() == "file" {
-        if let Ok(path) = url.to_file_path() {
-            if path.extension().and_then(|s| s.to_str()) == Some("tar") {
-                let store = TarObjectStore::new(path).map_err(|e| {
-                    format!("Failed to create TarObjectStore: {}", e)
-                })?;
-                return Ok((Arc::new(store), ObjectPath::from("/")));
-            }
-        }
     }
 
     if url.scheme() == EMPTY_SCHEME {
@@ -649,13 +641,7 @@ fn str_to_url(path: &str) -> Result<Url, BundlebaseError> {
     if path.contains(":") {
         Ok(Url::parse(path)?)
     } else {
-        // Check if this is a tar file - if so, use tar:// scheme
-        let file = file_url(path)?;
-        if file.path().ends_with(".tar") {
-            Ok(Url::parse(&format!("tar://{}", file.path()))?)
-        } else {
-            Ok(file)
-        }
+        file_url(path)
     }
 }
 
@@ -889,4 +875,5 @@ mod tests {
             assert_eq!(result.bytes().await.unwrap().as_ref(), b"hello");
         });
     }
+
 }

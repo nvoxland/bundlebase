@@ -197,10 +197,14 @@ impl DataBlock {
 
         // Evaluate each indexable filter
         for filter in indexable_filters {
-            // Try to find an index for this column
+            // Try to find a column index for this filter
             if let Some(index_def) =
                 IndexSelector::select_index_from_ref(&filter.column, versioned_block, &self.indexes)
             {
+                // Skip text indexes — they can't serve column predicates
+                if index_def.is_text() {
+                    continue;
+                }
                 // Get the index file path
                 if let Some(indexed_blocks) = index_def.indexed_blocks(versioned_block) {
                     let index_path = indexed_blocks.path();
@@ -270,9 +274,11 @@ impl TableProvider for DataBlock {
         &self,
         filters: &[&Expr],
     ) -> datafusion::common::Result<Vec<datafusion::logical_expr::TableProviderFilterPushDown>> {
+        use datafusion::logical_expr::TableProviderFilterPushDown;
+
         Ok(filters
             .iter()
-            .map(|_| datafusion::logical_expr::TableProviderFilterPushDown::Inexact)
+            .map(|_| TableProviderFilterPushDown::Inexact)
             .collect())
     }
 
@@ -283,14 +289,13 @@ impl TableProvider for DataBlock {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        // Phase 1: Try index optimization
+        let versioned_block = VersionedBlockId::new(self.id, self.version.clone());
+
+        // Try column index optimization
         let indexable_filters = FilterAnalyzer::extract_indexable(filters);
 
         if !indexable_filters.is_empty() {
-            // Create VersionedBlockId for this block
-            let versioned_block = VersionedBlockId::new(self.id, self.version.clone());
-
-            // Evaluate all indexable filters and select the best index
+            // Evaluate all indexable filters and select the best column index
             if let Some(best) = self
                 .select_best_index(&indexable_filters, &versioned_block)
                 .await

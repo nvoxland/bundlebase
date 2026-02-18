@@ -90,18 +90,7 @@ impl BundleBuilderCommand for CreateIndexCommand {
         // Resolve the index name: use the explicit name if provided, otherwise auto-generate.
         let name = match self.name.clone() {
             Some(n) => n,
-            None => {
-                if self.index_type.is_text() {
-                    let has_text_index = builder.indexes().iter().any(|idx| idx.index_type().is_text());
-                    if !has_text_index {
-                        "full_text".to_string()
-                    } else {
-                        format!("idx_{}", self.columns.join("_"))
-                    }
-                } else {
-                    format!("idx_{}", self.columns.join("_"))
-                }
-            }
+            None => format!("idx_{}", self.columns.join("_")),
         };
 
         builder

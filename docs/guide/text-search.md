@@ -4,15 +4,15 @@ Bundlebase includes full-text search powered by [Tantivy](https://github.com/qui
 
 ## Creating a Text Index
 
-Use `create_index()` with one or more columns and `index_type="text"`. You can optionally provide a `name` for the index (used when querying). If no name is provided, the first text index defaults to `"full_text"`. Additional text indexes are auto-named as `idx_{columns joined by _}`.
+Use `create_index()` with one or more columns and `index_type="text"`. You can optionally provide a `name` for the index (used when querying). If no name is provided, indexes are auto-named as `idx_{columns joined by _}`.
 
 === "Async API"
 
     ```python
-    # Single-column text index (auto-named "full_text" — the first text index)
+    # Single-column text index (auto-named "idx_description")
     await bundle.create_index("description", "text")
 
-    # Additional text index (auto-named "idx_title_description")
+    # Multi-column text index (auto-named "idx_title_description")
     await bundle.create_index(["title", "description"], "text")
 
     # With an explicit name
@@ -48,14 +48,20 @@ await bundle.create_index(["title", "description", "tags"], "text", name="produc
 
 ## Querying
 
-Use the `search()` table function to perform full-text search. It takes the index name and a query string, and replaces `FROM bundle` in your SQL.
+Use the `search()` table function to perform full-text search. It replaces `FROM bundle` in your SQL. You can call it with one or two arguments:
+
+- **`search('query')`** — When only one text index exists, you can omit the index name.
+- **`search('index_name', 'query')`** — Specify which index to search when multiple exist.
 
 Results include all columns from the bundle plus a `_score` column with the BM25 relevance score.
 
 === "SQL"
 
     ```sql
-    -- Basic search
+    -- Basic search (when only one text index exists)
+    SELECT * FROM search('machine learning')
+
+    -- Specify index name
     SELECT * FROM search('desc_search', 'machine learning')
 
     -- Order by relevance

@@ -745,7 +745,12 @@ impl PyBundleBuilder {
             let stream = inner
                 .query(sql.as_str(), params_vec)
                 .await
-                .map_err(|e| to_py_error_ctx("Failed to execute query", e))?;
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to execute query: {}\n  SQL: {}",
+                        e, sql
+                    ))
+                })?;
 
             let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
             Python::attach(|py| {
@@ -920,46 +925,68 @@ impl PyBundleBuilder {
         self.inner.bundle().url().to_string()
     }
 
-    /// Create an index on the specified column for optimized lookups
+    /// Create an index on the specified column(s) for optimized lookups
     ///
     /// # Arguments
-    /// * `column` - The column name to index
+    /// * `column` - Column name (str) or list of column names (list[str])
     /// * `index_type` - Index type: "column" or "text"
     /// * `args` - Optional index-specific arguments (e.g., {"tokenizer": "en_stem"} for text indexes)
+    /// * `name` - Optional index name (for text indexes). If not provided, auto-generated as idx_{columns}
     ///
     /// # Example
     /// ```python
-    /// # Column index (no args needed)
+    /// # Column index
     /// c = await c.create_index("id", "column")
     ///
-    /// # Text/BM25 index with English stemming
-    /// c = await c.create_index("content", "text", {"tokenizer": "en_stem"})
+    /// # Text index — single column, auto-named "idx_description"
+    /// c = await c.create_index("description", "text")
     ///
-    /// # Text index with default tokenizer
-    /// c = await c.create_index("title", "text")
+    /// # Text index — multiple columns, auto-named "idx_title_description"
+    /// c = await c.create_index(["title", "description"], "text")
+    ///
+    /// # Text index — explicit name
+    /// c = await c.create_index(["title", "description"], "text", name="product_search")
+    ///
+    /// # Text index — with tokenizer
+    /// c = await c.create_index("content", "text", args={"tokenizer": "en_stem"})
     /// ```
-    #[pyo3(signature = (column, index_type, args=None))]
+    #[pyo3(signature = (columns, index_type, args=None, name=None))]
     fn create_index<'py>(
         slf: PyRef<'_, Self>,
-        column: &str,
+        columns: &Bound<'py, PyAny>,
         index_type: &str,
         args: Option<HashMap<String, String>>,
+        name: Option<String>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         use pyo3::exceptions::PyValueError;
 
         let inner = slf.inner.clone();
-        let column = column.to_string();
 
-        // Convert string + args → configured IndexType
-        let configured_type = bundlebase::IndexType::from_str(index_type)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?
+        // Accept either a single string or a list of strings
+        let columns: Vec<String> = if let Ok(s) = columns.extract::<String>() {
+            vec![s]
+        } else if let Ok(list) = columns.extract::<Vec<String>>() {
+            list
+        } else {
+            return Err(PyValueError::new_err(
+                "columns must be a string or list of strings"
+            ));
+        };
+
+        // Build the IndexType
+        let mut configured_type = bundlebase::IndexType::from_str(index_type)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+        // Apply args (e.g., tokenizer)
+        configured_type = configured_type
             .with_args(&args.unwrap_or_default())
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let col_refs: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
             inner
-                .create_index(&column, configured_type)
+                .create_index(&col_refs, configured_type, name.as_deref())
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to create index", e))?;
             Python::attach(|py| {

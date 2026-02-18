@@ -3,7 +3,7 @@ use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
 use crate::index::{
     ColumnIndex, ExternalSortConfig, ExternalSortWriter, IndexedValue, IndexType, TempDirManager,
-    TextColumnIndex, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
+    TextIndex, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
 };
 use crate::progress::ProgressScope;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
@@ -161,7 +161,7 @@ impl IndexBlocksOp {
     /// Builds and registers an index across multiple blocks.
     ///
     /// Streams through all provided blocks for the specified columns, accumulates value-to-rowid
-    /// mappings, and creates either a ColumnIndex or TextColumnIndex based on the index type.
+    /// mappings, and creates either a ColumnIndex or TextIndex based on the index type.
     /// The index is then registered with the IndexManager and saved to disk.
     ///
     /// # Arguments
@@ -381,7 +381,8 @@ impl IndexBlocksOp {
         );
 
         // Collect multi-column documents as (column_values, rowid) pairs
-        let mut documents: Vec<(std::collections::HashMap<String, String>, RowId)> = Vec::new();
+        let mut documents: Vec<(Vec<Option<String>>, RowId)> = Vec::new();
+        let num_columns = text_columns.len();
 
         // For each block, project all text columns, extract values, and build documents
         for (block_idx, (block_id, _version)) in blocks.iter().enumerate() {
@@ -409,11 +410,11 @@ impl IndexBlocksOp {
                     }
                 }
 
-                col_indices.push((col_name.clone(), col_idx));
+                col_indices.push(col_idx);
             }
 
             // Project all text columns
-            let projection: Vec<usize> = col_indices.iter().map(|(_, idx)| *idx).collect();
+            let projection: Vec<usize> = col_indices.clone();
             let reader = block.reader();
             let block_ref = ObjectIdAlias::from(block_idx as u16);
             let mut rowid_stream = reader
@@ -435,23 +436,25 @@ impl IndexBlocksOp {
                 let row_ids = &rowid_batch.row_ids;
 
                 for (row, row_id) in row_ids.iter().enumerate() {
-                    let mut column_values = std::collections::HashMap::new();
+                    let mut column_values: Vec<Option<String>> = Vec::with_capacity(num_columns);
                     let mut has_any_value = false;
 
-                    for (proj_idx, (col_name, _)) in col_indices.iter().enumerate() {
+                    for proj_idx in 0..num_columns {
                         let array = batch.column(proj_idx);
                         let scalar = ScalarValue::try_from_array(array, row)?;
 
                         let text_value = match &scalar {
                             ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => {
-                                s.clone()
+                                Some(s.clone())
                             }
-                            ScalarValue::Utf8View(Some(s)) => s.to_string(),
-                            _ => continue, // Skip nulls for this column
+                            ScalarValue::Utf8View(Some(s)) => Some(s.to_string()),
+                            _ => None, // Null for this column
                         };
 
-                        column_values.insert(col_name.clone(), text_value);
-                        has_any_value = true;
+                        if text_value.is_some() {
+                            has_any_value = true;
+                        }
+                        column_values.push(text_value);
                     }
 
                     // Only add document if at least one column has a value
@@ -467,7 +470,7 @@ impl IndexBlocksOp {
         }
 
         // Build the text index using multi-column streaming builder
-        let text_index = TextColumnIndex::build_streaming_multi(
+        let text_index = TextIndex::build_streaming_multi(
             index_name,
             text_columns,
             documents.into_iter(),

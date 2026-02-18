@@ -71,11 +71,6 @@ impl TableProvider for PackTable {
     {
         use datafusion::logical_expr::TableProviderFilterPushDown;
 
-        // Return Inexact for all filters - this tells DataFusion:
-        // - "Pass the filters to scan() so we can use them for index optimization"
-        // - "But still apply them afterwards to ensure correctness"
-        //
-        // This enables index-based query optimization while maintaining correctness.
         Ok(filters
             .iter()
             .map(|_| TableProviderFilterPushDown::Inexact)

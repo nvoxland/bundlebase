@@ -61,10 +61,10 @@ impl TableProvider for BundleViewTable {
         &self,
         filters: &[&Expr],
     ) -> datafusion::common::Result<Vec<TableProviderFilterPushDown>> {
-        // Return Inexact for all filters - this tells DataFusion:
-        // - "Pass the filters to scan() so we can use them for index optimization"
-        // - "But still apply them afterwards to ensure correctness"
-        Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
+        Ok(filters
+            .iter()
+            .map(|_| TableProviderFilterPushDown::Inexact)
+            .collect())
     }
 
     async fn scan(

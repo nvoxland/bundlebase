@@ -165,7 +165,7 @@ Commands for managing search indexes.
 Creates an index on a column.
 
 ```sql
-CREATE INDEX ON <column>
+CREATE <COLUMN|TEXT> INDEX ON <column>
 ```
 
 See [Indexing](../guide/indexing.md) for details.
@@ -199,6 +199,41 @@ REINDEX
 ```
 
 See [Indexing](../guide/indexing.md) for details.
+
+## Functions
+
+Functions available in SQL queries.
+
+### SEARCH
+
+Table function for full-text search against a named text index. Returns matching rows with a BM25 relevance `_score` column.
+
+```sql
+SELECT * FROM search('<index_name>', '<query>')
+```
+
+**Parameters:**
+
+- `index_name` — The name of the text index (created with `create_index()`)
+- `query` — The search query string using [Tantivy query syntax](https://docs.rs/tantivy/latest/tantivy/query/struct.QueryParser.html)
+
+**Examples:**
+
+```sql
+-- Basic search
+SELECT * FROM search('my_search', 'machine learning')
+
+-- Order by relevance score
+SELECT title, description, _score FROM search('my_search', 'machine learning') ORDER BY _score DESC
+
+-- Field-specific search (for multi-column indexes)
+SELECT * FROM search('product_search', 'title:learning')
+
+-- Additional filters on top of search results
+SELECT * FROM search('my_search', 'machine learning') WHERE category = 'AI'
+```
+
+See [Text Search](../guide/text-search.md) for details on creating text indexes and available tokenizers.
 
 ## Version Control
 
