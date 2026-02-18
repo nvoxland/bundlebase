@@ -3,7 +3,7 @@ use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
 use crate::index::{
     ColumnIndex, ExternalSortConfig, ExternalSortWriter, IndexedValue, IndexType, TempDirManager,
-    TextIndex, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
+    TextIndexBuilder, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
 };
 use crate::progress::ProgressScope;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
@@ -380,8 +380,15 @@ impl IndexBlocksOp {
             Some(blocks.len() as u64),
         );
 
-        // Collect multi-column documents as (column_values, rowid) pairs
-        let mut documents: Vec<(Vec<Option<String>>, RowId)> = Vec::new();
+        // Build the text index incrementally — documents are fed directly to Tantivy
+        // via TextIndexBuilder instead of buffering the entire corpus in memory.
+        let mut builder = TextIndexBuilder::new(index_name, text_columns, tokenizer_config)
+            .map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to create text index builder for '{}': {}",
+                    index_name, e
+                ))
+            })?;
         let num_columns = text_columns.len();
 
         // For each block, project all text columns, extract values, and build documents
@@ -459,7 +466,7 @@ impl IndexBlocksOp {
 
                     // Only add document if at least one column has a value
                     if has_any_value {
-                        documents.push((column_values, *row_id));
+                        builder.add_document(&column_values, *row_id)?;
                     }
                 }
             }
@@ -469,16 +476,10 @@ impl IndexBlocksOp {
             progress.update((block_idx + 1) as u64, Some(&msg));
         }
 
-        // Build the text index using multi-column streaming builder
-        let text_index = TextIndex::build_streaming_multi(
-            index_name,
-            text_columns,
-            documents.into_iter(),
-            tokenizer_config,
-        )
-        .map_err(|e| {
+        // Finalize the text index
+        let text_index = builder.finish().map_err(|e| {
             BundlebaseError::from(format!(
-                "Failed to build text index for '{}': {}",
+                "Failed to finalize text index for '{}': {}",
                 index_name, e
             ))
         })?;

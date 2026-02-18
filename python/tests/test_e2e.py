@@ -1911,3 +1911,68 @@ async def test_version_udf():
     # Also verify we get a valid 12-char hex version string
     assert len(results["ver"][0]) == 12
     assert all(ch in '0123456789abcdef' for ch in results["ver"][0])
+
+
+@pytest.mark.asyncio
+async def test_search_single_arg():
+    """Test that search('query') works when the bundle has exactly one text index."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    c = await c.create_index(["Company"], "text", name="company_search")
+    await c.commit("Text index created")
+
+    # Use single-arg search (no index name)
+    result = await c.query("SELECT \"Company\", _score FROM search('Group') ORDER BY _score DESC")
+    df = await result.to_polars()
+
+    assert len(df) > 0, "search() with single arg should return matching rows"
+    for company in df["Company"].to_list():
+        assert "group" in company.lower(), f"Expected '{company}' to contain 'group'"
+    assert all(s > 0 for s in df["_score"].to_list()), "All scores should be positive"
+
+
+@pytest.mark.asyncio
+async def test_search_multi_column_text_index():
+    """Test text index on multiple columns with field-specific queries."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    # Create index on both Company and City columns
+    c = await c.create_index(["Company", "City"], "text", name="company_city_search")
+    await c.commit("Multi-column text index created")
+
+    # Field-specific search on Company (field names are case-sensitive, matching column names)
+    result = await c.query(
+        "SELECT \"Company\", \"City\", _score FROM search('company_city_search', 'Company:group') ORDER BY _score DESC"
+    )
+    df = await result.to_polars()
+    assert len(df) > 0, "Field-specific search on Company should return results"
+    for company in df["Company"].to_list():
+        assert "group" in company.lower(), f"Expected '{company}' to contain 'group'"
+
+    # Field-specific search on City
+    result = await c.query(
+        "SELECT \"City\", _score FROM search('company_city_search', 'City:east') ORDER BY _score DESC"
+    )
+    df = await result.to_polars()
+    assert len(df) > 0, "Field-specific search on City should return results"
+    for city in df["City"].to_list():
+        assert "east" in city.lower(), f"Expected '{city}' to contain 'east'"
+
+
+@pytest.mark.asyncio
+async def test_search_wrong_index_name_error():
+    """Test that search() with a non-existent index name gives a helpful error."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    c = await c.create_index(["Company"], "text", name="company_search")
+    await c.commit("Text index created")
+
+    with pytest.raises(Exception) as exc_info:
+        result = await c.query("SELECT * FROM search('nonexistent', 'Group')")
+        await result.to_polars()
+
+    err_msg = str(exc_info.value)
+    assert "nonexistent" in err_msg, "Error should mention the requested index name"

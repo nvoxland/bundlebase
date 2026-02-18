@@ -37,7 +37,7 @@ use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::ExecutionPlan;
 use futures::stream::{self, StreamExt};
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -193,6 +193,9 @@ impl std::fmt::Debug for SearchResultTableProvider {
 }
 
 impl SearchResultTableProvider {
+    /// Returns the data schema from the first available block.
+    /// All blocks in a bundle are guaranteed to share the same schema,
+    /// so any block's schema is representative.
     fn data_schema(&self) -> SchemaRef {
         for pack in self.packs.values() {
             for block in pack.blocks() {
@@ -317,6 +320,15 @@ impl TableProvider for SearchResultTableProvider {
                 .collect(),
         );
 
+        // Pre-build the set of block_refs that have at least one search match.
+        // This allows skipping entire blocks with zero matches during streaming.
+        let matching_block_refs: Arc<HashSet<u16>> = Arc::new(
+            row_id_scores
+                .iter()
+                .map(|(row_id, _)| row_id.block_ref().as_u16())
+                .collect(),
+        );
+
         let projected_schema = project_schema(&output_schema, projection)?;
 
         let data_source = SearchDataSource {
@@ -324,6 +336,7 @@ impl TableProvider for SearchResultTableProvider {
             projected_schema,
             projection: projection.cloned(),
             score_map,
+            matching_block_refs,
             block_id_to_ref: Arc::new(block_id_to_ref),
             packs: self.packs.clone(),
             ctx: self.ctx.clone(),
@@ -358,6 +371,8 @@ struct SearchDataSource {
     projected_schema: SchemaRef,
     projection: Option<Vec<usize>>,
     score_map: Arc<HashMap<u64, f64>>,
+    /// Block refs (u16) that have at least one matching row — used to skip non-matching blocks.
+    matching_block_refs: Arc<HashSet<u16>>,
     block_id_to_ref: Arc<HashMap<BlockId, u16>>,
     packs: HashMap<ObjectId, Arc<Pack>>,
     ctx: Arc<datafusion::prelude::SessionContext>,
@@ -397,12 +412,17 @@ impl DataSource for SearchDataSource {
         let ctx = self.ctx.clone();
         let projection = self.projection.clone();
 
+        let matching_block_refs = self.matching_block_refs.clone();
+
         // Collect (block, block_ref_idx) pairs for blocks that are in the index
+        // and have at least one matching row — skip blocks with zero search matches.
         let mut blocks_to_scan: Vec<(Arc<crate::bundle::DataBlock>, u16)> = Vec::new();
         for pack in self.packs.values() {
             for block in pack.blocks() {
                 if let Some(&ref_idx) = block_id_to_ref.get(block.id()) {
-                    blocks_to_scan.push((block, ref_idx));
+                    if matching_block_refs.contains(&ref_idx) {
+                        blocks_to_scan.push((block, ref_idx));
+                    }
                 }
             }
         }
