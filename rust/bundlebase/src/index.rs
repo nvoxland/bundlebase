@@ -21,4 +21,4 @@ pub use index_cache::GLOBAL_INDEX_CACHE;
 pub use rowid_cache::GLOBAL_ROWID_CACHE;
 pub use rowid_index::RowIdIndex;
 pub use temp_dir::TempDirManager;
-pub use text_column_index::TextIndex;
+pub use text_column_index::{TextIndex, TextIndexBuilder};

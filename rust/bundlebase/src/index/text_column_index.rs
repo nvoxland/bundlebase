@@ -58,24 +58,30 @@ pub struct TextSearchResult {
     pub score: f32,
 }
 
-impl TextIndex {
-    /// Build a text index from an iterator of (column_values, row_id) pairs
-    ///
-    /// # Arguments
-    /// * `name` - Index name (used as identifier)
-    /// * `columns` - Column names to index
-    /// * `documents` - Iterator of (column_values, row_id) pairs where column_values
-    ///   is a Vec with one Option<String> per column (positional, matching `columns` order)
-    /// * `tokenizer_config` - Tokenizer configuration to use
-    pub fn build_streaming_multi<I>(
+/// Builder for incrementally constructing a TextIndex.
+///
+/// Documents are added one at a time via `add_document()`,
+/// then `finish()` commits and returns the final TextIndex.
+/// This avoids buffering all documents in memory before indexing.
+pub struct TextIndexBuilder {
+    name: String,
+    columns: Vec<String>,
+    index: TantivyIndex,
+    index_writer: IndexWriter,
+    column_fields: Vec<Field>,
+    rowid_field: Field,
+    doc_count: u64,
+    tokenizer_config: TokenizerConfig,
+    _temp_dir: TempDir,
+}
+
+impl TextIndexBuilder {
+    /// Create a new builder, setting up the Tantivy schema and index writer.
+    pub fn new(
         name: &str,
         columns: &[String],
-        documents: I,
         tokenizer_config: &TokenizerConfig,
-    ) -> Result<Self, BundlebaseError>
-    where
-        I: Iterator<Item = (Vec<Option<String>>, RowId)>,
-    {
+    ) -> Result<Self, BundlebaseError> {
         // Build schema with one text field per column + rowid field
         let mut schema_builder = Schema::builder();
 
@@ -84,8 +90,7 @@ impl TextIndex {
                 TextFieldIndexing::default()
                     .set_tokenizer(tokenizer_config.tantivy_tokenizer_name())
                     .set_index_option(IndexRecordOption::WithFreqsAndPositions),
-            )
-            .set_stored();
+            );
 
         let mut column_fields: Vec<Field> = Vec::with_capacity(columns.len());
         for col in columns {
@@ -108,46 +113,86 @@ impl TextIndex {
         })?;
 
         // Register custom tokenizers
-        Self::register_tokenizers(&index)?;
+        TextIndex::register_tokenizers(&index)?;
 
         // Create index writer with 50MB heap
-        let mut index_writer: IndexWriter = index
+        let index_writer: IndexWriter = index
             .writer(50_000_000)
             .map_err(|e| BundlebaseError::from(format!("Failed to create index writer: {}", e)))?;
-
-        let mut doc_count = 0u64;
-
-        // Index all documents from iterator
-        for (column_values, row_id) in documents {
-            let mut doc = TantivyDocument::default();
-
-            for (col_idx, field) in column_fields.iter().enumerate() {
-                if let Some(Some(text_value)) = column_values.get(col_idx) {
-                    doc.add_text(*field, text_value);
-                }
-            }
-            doc.add_u64(rowid_field, row_id.as_u64());
-
-            index_writer.add_document(doc).map_err(|e| {
-                BundlebaseError::from(format!("Failed to add document to index: {}", e))
-            })?;
-
-            doc_count += 1;
-        }
-
-        // Commit the index
-        index_writer.commit().map_err(|e| {
-            BundlebaseError::from(format!("Failed to commit index: {}", e))
-        })?;
 
         Ok(Self {
             name: name.to_string(),
             columns: columns.to_vec(),
             index,
-            doc_count,
+            index_writer,
+            column_fields,
+            rowid_field,
+            doc_count: 0,
             tokenizer_config: tokenizer_config.clone(),
-            _temp_dir: Some(temp_dir),
+            _temp_dir: temp_dir,
         })
+    }
+
+    /// Add a single document to the index.
+    pub fn add_document(
+        &mut self,
+        column_values: &[Option<String>],
+        row_id: RowId,
+    ) -> Result<(), BundlebaseError> {
+        let mut doc = TantivyDocument::default();
+        for (col_idx, field) in self.column_fields.iter().enumerate() {
+            if let Some(Some(text_value)) = column_values.get(col_idx) {
+                doc.add_text(*field, text_value);
+            }
+        }
+        doc.add_u64(self.rowid_field, row_id.as_u64());
+        self.index_writer.add_document(doc).map_err(|e| {
+            BundlebaseError::from(format!("Failed to add document to index: {}", e))
+        })?;
+        self.doc_count += 1;
+        Ok(())
+    }
+
+    /// Commit and finalize into a TextIndex.
+    pub fn finish(mut self) -> Result<TextIndex, BundlebaseError> {
+        self.index_writer.commit().map_err(|e| {
+            BundlebaseError::from(format!("Failed to commit index: {}", e))
+        })?;
+
+        Ok(TextIndex {
+            name: self.name,
+            columns: self.columns,
+            index: self.index,
+            doc_count: self.doc_count,
+            tokenizer_config: self.tokenizer_config,
+            _temp_dir: Some(self._temp_dir),
+        })
+    }
+}
+
+impl TextIndex {
+    /// Build a text index from an iterator of (column_values, row_id) pairs
+    ///
+    /// # Arguments
+    /// * `name` - Index name (used as identifier)
+    /// * `columns` - Column names to index
+    /// * `documents` - Iterator of (column_values, row_id) pairs where column_values
+    ///   is a Vec with one Option<String> per column (positional, matching `columns` order)
+    /// * `tokenizer_config` - Tokenizer configuration to use
+    pub fn build_streaming_multi<I>(
+        name: &str,
+        columns: &[String],
+        documents: I,
+        tokenizer_config: &TokenizerConfig,
+    ) -> Result<Self, BundlebaseError>
+    where
+        I: Iterator<Item = (Vec<Option<String>>, RowId)>,
+    {
+        let mut builder = TextIndexBuilder::new(name, columns, tokenizer_config)?;
+        for (column_values, row_id) in documents {
+            builder.add_document(&column_values, row_id)?;
+        }
+        builder.finish()
     }
 
     /// Register all supported tokenizers with the index.
@@ -308,11 +353,11 @@ impl TextIndex {
     pub fn serialize(&self) -> Result<Bytes, BundlebaseError> {
         // Create metadata
         let metadata = serde_json::json!({
-            "column_name": self.name,
+            "name": self.name,
             "columns": self.columns,
             "doc_count": self.doc_count,
             "tokenizer": self.tokenizer_config,
-            "version": 2,
+            "version": 3,
         });
         let metadata_bytes = serde_json::to_vec(&metadata).map_err(|e| {
             BundlebaseError::from(format!("Failed to serialize metadata: {}", e))
@@ -411,9 +456,10 @@ impl TextIndex {
             BundlebaseError::from(format!("Failed to parse metadata: {}", e))
         })?;
 
-        let column_name = metadata["column_name"]
+        let column_name = metadata["name"]
             .as_str()
-            .ok_or_else(|| BundlebaseError::from("Missing column_name in metadata"))?
+            .or_else(|| metadata["column_name"].as_str()) // backward compat
+            .ok_or_else(|| BundlebaseError::from("Missing 'name' in metadata"))?
             .to_string();
 
         let doc_count = metadata["doc_count"]

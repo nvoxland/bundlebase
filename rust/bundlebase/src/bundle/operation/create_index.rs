@@ -119,3 +119,23 @@ impl Operation for CreateIndexOp {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_column_index_rejects_multiple_columns() {
+        let result = CreateIndexOp::setup(
+            vec!["col1".to_string(), "col2".to_string()],
+            IndexType::Column,
+            "test_idx".to_string(),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("exactly one column"));
+    }
+}
