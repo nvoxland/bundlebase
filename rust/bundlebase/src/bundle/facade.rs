@@ -230,7 +230,7 @@ pub trait BundleFacade: Send + Sync {
     /// # Example
     /// ```ignore
     /// bundle.export_tar("archive.tar").await?;
-    /// let archived = Bundle::open("archive.tar", None).await?;
+    /// let archived = Bundle::open("tar+file:///path/to/archive.tar", None).await?;
     /// ```
     async fn export_tar(&self, tar_path: &str) -> Result<String, BundlebaseError>;
 

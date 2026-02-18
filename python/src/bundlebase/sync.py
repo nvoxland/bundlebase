@@ -17,7 +17,7 @@ For Jupyter notebooks, install with:
     poetry install -E jupyter
 """
 
-from typing import Any, Dict, List, Optional, TYPE_CHECKING, Iterator
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Iterator, Union
 
 from bundlebase._loop_manager import EventLoopManager
 from bundlebase.chain import _ORIGINAL_METHODS
@@ -611,18 +611,20 @@ class SyncBundleBuilder(SyncBundle):
 
     def create_index(
         self,
-        column: str,
+        columns: Union[str, List[str]],
         index_type: str,
-        args: Optional[Dict[str, str]] = None
+        args: Optional[Dict[str, str]] = None,
+        name: Optional[str] = None
     ) -> "SyncBundleBuilder":
-        """Create an index on a column for faster lookups.
+        """Create an index on one or more columns.
 
         Args:
-            column: The column name to index
+            columns: Column name (str) or list of column names (list[str])
             index_type: Index type - "column" or "text"
-            args: Optional index-specific arguments (e.g., {"tokenizer": "en_stem"} for text indexes)
+            args: Optional index-specific arguments (e.g., {"tokenizer": "en_stem"})
+            name: Optional index name (for text indexes). Auto-generated if not provided.
         """
-        coro = _call_original_method(self._async, "create_index", column, index_type, args)
+        coro = _call_original_method(self._async, "create_index", columns, index_type, args, name)
         self._async = _loop_manager.run_sync(coro)
         return self
 

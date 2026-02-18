@@ -6,23 +6,24 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-/// Type of index for a column
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+/// Type of index
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum IndexType {
     /// B-tree style column index for equality/range queries
-    #[default]
     Column,
-    /// BM25 full-text search index
+    /// BM25 full-text search index spanning one or more columns
     Text {
         tokenizer: TokenizerConfig,
     },
 }
 
 impl IndexType {
-    /// Create a new Text index type with the specified tokenizer
+    /// Create a new Text index type with the specified tokenizer.
     pub fn text(tokenizer: TokenizerConfig) -> Self {
-        IndexType::Text { tokenizer }
+        IndexType::Text {
+            tokenizer,
+        }
     }
 
     /// Check if this is a text/full-text index
@@ -38,7 +39,7 @@ impl IndexType {
     /// Get the tokenizer config if this is a text index
     pub fn tokenizer(&self) -> Option<&TokenizerConfig> {
         match self {
-            IndexType::Text { tokenizer } => Some(tokenizer),
+            IndexType::Text { tokenizer, .. } => Some(tokenizer),
             IndexType::Column => None,
         }
     }
@@ -247,7 +248,8 @@ type BlockLookupKey = (BlockId, String);
 #[derive(Debug)]
 pub struct IndexDefinition {
     id: ObjectId,
-    column: String,
+    name: String,
+    columns: Vec<String>,
     index_type: IndexType,
     blocks: RwLock<Vec<Arc<IndexedBlocks>>>,
     /// O(1) lookup from versioned block ID to its IndexedBlocks
@@ -256,10 +258,11 @@ pub struct IndexDefinition {
 
 impl IndexDefinition {
     /// Create a new index definition with a specific type
-    pub(crate) fn new(id: &ObjectId, column: &String, index_type: IndexType) -> IndexDefinition {
+    pub(crate) fn new(id: &ObjectId, name: String, columns: Vec<String>, index_type: IndexType) -> IndexDefinition {
         Self {
             id: *id,
-            column: column.clone(),
+            name,
+            columns,
             index_type,
             blocks: RwLock::new(Vec::new()),
             block_lookup: RwLock::new(HashMap::new()),
@@ -270,8 +273,13 @@ impl IndexDefinition {
         &self.id
     }
 
-    pub fn column(&self) -> &String {
-        &self.column
+    /// Get the index name
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn columns(&self) -> &[String] {
+        &self.columns
     }
 
     pub fn index_type(&self) -> &IndexType {
@@ -364,7 +372,7 @@ impl IndexDefinition {
                 "Pruned {} stale IndexedBlocks from index {} (column '{}')",
                 removed_count,
                 self.id,
-                self.column
+                self.columns.join(", ")
             );
         }
 

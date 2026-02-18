@@ -12,16 +12,23 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateIndexOp {
-    pub column: String,
+    pub columns: Vec<String>,
     pub id: ObjectId,
+    pub name: String,
     pub index_type: IndexType,
 }
 
 impl CreateIndexOp {
-    pub async fn setup(column: &str, index_type: IndexType) -> Result<Self, BundlebaseError> {
+    pub async fn setup(columns: Vec<String>, index_type: IndexType, name: String) -> Result<Self, BundlebaseError> {
+        // For column indexes, validate exactly one column
+        if index_type.is_column() && columns.len() != 1 {
+            return Err("Column indexes must have exactly one column".into());
+        }
+
         Ok(Self {
             id: ObjectId::generate(),
-            column: column.to_string(),
+            columns,
+            name,
             index_type,
         })
     }
@@ -31,43 +38,68 @@ impl CreateIndexOp {
 impl Operation for CreateIndexOp {
     fn describe(&self) -> String {
         match &self.index_type {
-            IndexType::Column => format!("CREATE INDEX on {}", self.column),
+            IndexType::Column => format!("CREATE INDEX on {}", self.columns.join(", ")),
             IndexType::Text { tokenizer } => {
-                format!("CREATE TEXT INDEX on {} (tokenizer: {:?})", self.column, tokenizer)
+                let cols = self.columns.join(", ");
+                format!("CREATE TEXT INDEX '{}' on [{}] (tokenizer: {:?})", self.name, cols, tokenizer)
             }
         }
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        // Verify column exists in schema
         let schema = bundle.schema().await?;
-        let field = schema
-            .column_with_name(&self.column)
-            .map(|(_, f)| f);
 
-        let field = match field {
-            Some(f) => f,
-            None => return Err(format!("Column '{}' not found in schema", self.column).into()),
-        };
-
-        // For text indexes, verify the column is a string type
         if self.index_type.is_text() {
-            match field.data_type() {
-                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => {}
-                other => {
-                    return Err(format!(
-                        "Text index requires a string column, but '{}' has type {:?}",
-                        self.column, other
-                    )
-                    .into());
+            // Validate all columns exist and are string types
+            for col in &self.columns {
+                let field = schema.column_with_name(col).map(|(_, f)| f);
+                let field = match field {
+                    Some(f) => f,
+                    None => return Err(format!("Column '{}' not found in schema", col).into()),
+                };
+                match field.data_type() {
+                    DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => {}
+                    other => {
+                        return Err(format!(
+                            "Text index requires a string column, but '{}' has type {:?}",
+                            col, other
+                        ).into());
+                    }
                 }
             }
+
+            // Validate name doesn't conflict with data column names
+            if schema.column_with_name(&self.name).is_some() {
+                return Err(format!(
+                    "Text index name '{}' conflicts with an existing data column",
+                    self.name
+                ).into());
+            }
+
+            // Check if a text index with this name already exists
+            let indexes = bundle.indexes().read();
+            if indexes.iter().any(|idx| idx.name() == self.name) {
+                return Err(format!("Index already exists with name '{}'", self.name).into());
+            }
+
+            return Ok(());
         }
+
+        // Single-column index validation (Column type)
+        let col = &self.columns[0];
+        let field = schema
+            .column_with_name(col)
+            .map(|(_, f)| f);
+
+        match field {
+            Some(_) => {}
+            None => return Err(format!("Column '{}' not found in schema", col).into()),
+        };
 
         // Check if an index already exists for this column
         let indexes = bundle.indexes().read();
-        if indexes.iter().any(|idx| idx.column() == &self.column) {
-            return Err(format!("Index already exists for column '{}'", self.column).into());
+        if indexes.iter().any(|idx| idx.columns().contains(col)) {
+            return Err(format!("Index already exists for column '{}'", col).into());
         }
 
         Ok(())
@@ -79,7 +111,8 @@ impl Operation for CreateIndexOp {
             .write()
             .push(Arc::new(IndexDefinition::new(
                 &self.id,
-                &self.column,
+                self.name.clone(),
+                self.columns.clone(),
                 self.index_type.clone(),
             )));
 

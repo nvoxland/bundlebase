@@ -41,6 +41,7 @@ impl BundleIndexesTable {
     fn table_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
+            Field::new("name", DataType::Utf8, false),
             Field::new("column", DataType::Utf8, false),
             Field::new("type", DataType::Utf8, false),
             Field::new("tokenizer", DataType::Utf8, true),
@@ -51,7 +52,9 @@ impl BundleIndexesTable {
         let indexes = self.facade()?.indexes();
 
         let ids: Vec<String> = indexes.iter().map(|idx| idx.id().to_string()).collect();
-        let columns: Vec<&str> = indexes.iter().map(|idx| idx.column().as_str()).collect();
+        let names: Vec<&str> = indexes.iter().map(|idx| idx.name()).collect();
+        let columns: Vec<String> = indexes.iter().map(|idx| idx.columns().join(", ")).collect();
+        let columns: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
         let types: Vec<&str> = indexes
             .iter()
             .map(|idx| {
@@ -77,6 +80,7 @@ impl BundleIndexesTable {
                 Arc::new(StringArray::from(
                     ids.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
                 )),
+                Arc::new(StringArray::from(names)),
                 Arc::new(StringArray::from(columns)),
                 Arc::new(StringArray::from(types)),
                 Arc::new(StringArray::from(

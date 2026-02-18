@@ -15,7 +15,6 @@ bundle.commit("Attached Data")
 bundle.create_index("Round", "column")
 bundle.create_index("Category", "column")
 bundle.create_index("Value", "column")
-bundle.create_index("Question", "text")
-bundle.create_index("Answer", "text")
+bundle.create_index(["Question", "Answer"], "text")
 
 bundle.commit("Indexed")

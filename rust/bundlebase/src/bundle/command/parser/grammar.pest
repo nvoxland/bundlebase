@@ -392,11 +392,13 @@ view_sql = @{
 // ============================================================================
 // CREATE INDEX Statement
 // ============================================================================
-// Syntax: CREATE INDEX ON <column>
+// Syntax: CREATE <index_type> INDEX ON <column>
 
 create_index_stmt = {
-    ^"create" ~ ^"index" ~ ^"on" ~ identifier
+    ^"create" ~ index_type ~ ^"index" ~ ^"on" ~ identifier
 }
+
+index_type = { ^"column" | ^"text" }
 
 // ============================================================================
 // DROP COLUMN Statement
