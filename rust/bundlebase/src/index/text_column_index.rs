@@ -8,7 +8,6 @@ use crate::data::RowId;
 use crate::index::{Index, IndexType, TokenizerConfig};
 use crate::BundlebaseError;
 use bytes::Bytes;
-use std::collections::HashMap;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::{Schema, STORED, TextFieldIndexing, TextOptions, IndexRecordOption, Field};
@@ -29,9 +28,9 @@ const ROWID_FIELD: &str = "rowid";
 ///
 /// The index files are stored in a temporary directory that is automatically
 /// cleaned up when this struct is dropped.
-pub struct TextColumnIndex {
+pub struct TextIndex {
     /// Index name
-    column_name: String,
+    name: String,
     /// The columns indexed by this text index
     columns: Vec<String>,
     index: TantivyIndex,
@@ -41,10 +40,10 @@ pub struct TextColumnIndex {
     _temp_dir: Option<TempDir>,
 }
 
-impl std::fmt::Debug for TextColumnIndex {
+impl std::fmt::Debug for TextIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TextColumnIndex")
-            .field("column_name", &self.column_name)
+        f.debug_struct("TextIndex")
+            .field("name", &self.name)
             .field("columns", &self.columns)
             .field("doc_count", &self.doc_count)
             .field("tokenizer_config", &self.tokenizer_config)
@@ -59,13 +58,14 @@ pub struct TextSearchResult {
     pub score: f32,
 }
 
-impl TextColumnIndex {
+impl TextIndex {
     /// Build a text index from an iterator of (column_values, row_id) pairs
     ///
     /// # Arguments
     /// * `name` - Index name (used as identifier)
     /// * `columns` - Column names to index
-    /// * `documents` - Iterator of (column_name -> text_value, row_id) pairs
+    /// * `documents` - Iterator of (column_values, row_id) pairs where column_values
+    ///   is a Vec with one Option<String> per column (positional, matching `columns` order)
     /// * `tokenizer_config` - Tokenizer configuration to use
     pub fn build_streaming_multi<I>(
         name: &str,
@@ -74,7 +74,7 @@ impl TextColumnIndex {
         tokenizer_config: &TokenizerConfig,
     ) -> Result<Self, BundlebaseError>
     where
-        I: Iterator<Item = (HashMap<String, String>, RowId)>,
+        I: Iterator<Item = (Vec<Option<String>>, RowId)>,
     {
         // Build schema with one text field per column + rowid field
         let mut schema_builder = Schema::builder();
@@ -87,10 +87,10 @@ impl TextColumnIndex {
             )
             .set_stored();
 
-        let mut column_fields: HashMap<String, Field> = HashMap::new();
+        let mut column_fields: Vec<Field> = Vec::with_capacity(columns.len());
         for col in columns {
             let field = schema_builder.add_text_field(col, text_options.clone());
-            column_fields.insert(col.clone(), field);
+            column_fields.push(field);
         }
         let rowid_field = schema_builder.add_u64_field(ROWID_FIELD, STORED);
 
@@ -121,8 +121,8 @@ impl TextColumnIndex {
         for (column_values, row_id) in documents {
             let mut doc = TantivyDocument::default();
 
-            for (col_name, field) in &column_fields {
-                if let Some(text_value) = column_values.get(col_name) {
+            for (col_idx, field) in column_fields.iter().enumerate() {
+                if let Some(Some(text_value)) = column_values.get(col_idx) {
                     doc.add_text(*field, text_value);
                 }
             }
@@ -141,7 +141,7 @@ impl TextColumnIndex {
         })?;
 
         Ok(Self {
-            column_name: name.to_string(),
+            name: name.to_string(),
             columns: columns.to_vec(),
             index,
             doc_count,
@@ -282,9 +282,9 @@ impl TextColumnIndex {
         Ok(!results.is_empty())
     }
 
-    /// Get the index name (for multi-column) or column name (for single-column)
-    pub fn column_name(&self) -> &str {
-        &self.column_name
+    /// Get the index name
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// Get the columns indexed by this text index
@@ -308,7 +308,7 @@ impl TextColumnIndex {
     pub fn serialize(&self) -> Result<Bytes, BundlebaseError> {
         // Create metadata
         let metadata = serde_json::json!({
-            "column_name": self.column_name,
+            "column_name": self.name,
             "columns": self.columns,
             "doc_count": self.doc_count,
             "tokenizer": self.tokenizer_config,
@@ -443,7 +443,7 @@ impl TextColumnIndex {
         Self::register_tokenizers(&index)?;
 
         Ok(Self {
-            column_name,
+            name: column_name,
             columns,
             index,
             doc_count,
@@ -453,7 +453,7 @@ impl TextColumnIndex {
     }
 }
 
-impl Index for TextColumnIndex {
+impl Index for TextIndex {
     fn serialize(&self) -> Result<Bytes, BundlebaseError> {
         self.serialize()
     }
@@ -463,7 +463,7 @@ impl Index for TextColumnIndex {
     }
 
     fn column_name(&self) -> &str {
-        &self.column_name
+        &self.name
     }
 
     fn index_type(&self) -> IndexType {
@@ -486,15 +486,12 @@ mod tests {
         column_name: &str,
         documents: Vec<(&str, u64)>,
         tokenizer_config: &TokenizerConfig,
-    ) -> TextColumnIndex {
+    ) -> TextIndex {
         let columns = vec![column_name.to_string()];
-        let col = column_name.to_string();
         let docs = documents.into_iter().map(move |(text, row_id)| {
-            let mut doc = HashMap::new();
-            doc.insert(col.clone(), text.to_string());
-            (doc, RowId::from(row_id))
+            (vec![Some(text.to_string())], RowId::from(row_id))
         });
-        TextColumnIndex::build_streaming_multi(column_name, &columns, docs, tokenizer_config)
+        TextIndex::build_streaming_multi(column_name, &columns, docs, tokenizer_config)
             .expect("Failed to build index")
     }
 
@@ -545,9 +542,9 @@ mod tests {
         let bytes = index.serialize().expect("Serialization failed");
 
         // Deserialize
-        let restored = TextColumnIndex::deserialize(bytes).expect("Deserialization failed");
+        let restored = TextIndex::deserialize(bytes).expect("Deserialization failed");
 
-        assert_eq!(restored.column_name(), "test_col");
+        assert_eq!(restored.name(), "test_col");
         assert_eq!(restored.doc_count(), 2);
 
         // Verify search still works
@@ -572,27 +569,12 @@ mod tests {
         let columns = vec!["company".to_string(), "city".to_string()];
 
         let documents = vec![
-            {
-                let mut doc = HashMap::new();
-                doc.insert("company".to_string(), "Acme Group".to_string());
-                doc.insert("city".to_string(), "East Leonard".to_string());
-                (doc, RowId::from(1u64))
-            },
-            {
-                let mut doc = HashMap::new();
-                doc.insert("company".to_string(), "Beta Corp".to_string());
-                doc.insert("city".to_string(), "West Haven".to_string());
-                (doc, RowId::from(2u64))
-            },
-            {
-                let mut doc = HashMap::new();
-                doc.insert("company".to_string(), "Group Holdings".to_string());
-                doc.insert("city".to_string(), "East Bay".to_string());
-                (doc, RowId::from(3u64))
-            },
+            (vec![Some("Acme Group".to_string()), Some("East Leonard".to_string())], RowId::from(1u64)),
+            (vec![Some("Beta Corp".to_string()), Some("West Haven".to_string())], RowId::from(2u64)),
+            (vec![Some("Group Holdings".to_string()), Some("East Bay".to_string())], RowId::from(3u64)),
         ];
 
-        let index = TextColumnIndex::build_streaming_multi(
+        let index = TextIndex::build_streaming_multi(
             "my_search",
             &columns,
             documents.into_iter(),
@@ -623,21 +605,11 @@ mod tests {
         let columns = vec!["title".to_string(), "body".to_string()];
 
         let documents = vec![
-            {
-                let mut doc = HashMap::new();
-                doc.insert("title".to_string(), "Hello World".to_string());
-                doc.insert("body".to_string(), "This is the body text".to_string());
-                (doc, RowId::from(1u64))
-            },
-            {
-                let mut doc = HashMap::new();
-                doc.insert("title".to_string(), "Goodbye World".to_string());
-                doc.insert("body".to_string(), "Another body here".to_string());
-                (doc, RowId::from(2u64))
-            },
+            (vec![Some("Hello World".to_string()), Some("This is the body text".to_string())], RowId::from(1u64)),
+            (vec![Some("Goodbye World".to_string()), Some("Another body here".to_string())], RowId::from(2u64)),
         ];
 
-        let index = TextColumnIndex::build_streaming_multi(
+        let index = TextIndex::build_streaming_multi(
             "my_index",
             &columns,
             documents.into_iter(),
@@ -646,9 +618,9 @@ mod tests {
         .expect("Failed to build index");
 
         let bytes = index.serialize().expect("Serialization failed");
-        let restored = TextColumnIndex::deserialize(bytes).expect("Deserialization failed");
+        let restored = TextIndex::deserialize(bytes).expect("Deserialization failed");
 
-        assert_eq!(restored.column_name(), "my_index");
+        assert_eq!(restored.name(), "my_index");
         assert_eq!(restored.columns(), &["title", "body"]);
         assert_eq!(restored.doc_count(), 2);
 

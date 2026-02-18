@@ -1,8 +1,8 @@
-//! Tar IO backend - file and directory operations on tar archives with tar:// URLs.
+//! Tar IO backend - file and directory operations on tar archives with tar+file:// URLs.
 //!
-//! Provides first-class support for `tar://` URLs:
-//! - `tar:///path/to/archive.tar/internal/path`
-//! - `tar:///data.tar/` (root of archive)
+//! Provides first-class support for `tar+<scheme>://` URLs:
+//! - `tar+file:///path/to/archive.tar/internal/path`
+//! - `tar+file:///data.tar/` (root of archive)
 
 use crate::io::registry::IOFactory;
 use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
@@ -528,25 +528,25 @@ impl ObjectStore for TarObjectStore {
 // Tar URL parsing
 // ============================================================================
 
-/// Parse a tar:// URL into archive path and internal path.
+/// Parse a `tar+<scheme>://` URL into archive path and internal path.
 ///
 /// # URL Format
-/// `tar:///<path-to-archive.tar>/<internal-path>`
+/// `tar+file:///<path-to-archive.tar>/<internal-path>`
 ///
 /// Examples:
-/// - `tar:///home/user/data.tar/subdir/file.parquet`
-/// - `tar:///data.tar/` (root of archive)
+/// - `tar+file:///home/user/data.tar/subdir/file.parquet`
+/// - `tar+file:///data.tar/` (root of archive)
 ///
 /// # Returns
 /// Tuple of (archive_path, internal_path)
 pub fn parse_tar_url(url: &Url) -> Result<(PathBuf, String), BundlebaseError> {
-    if url.scheme() != "tar" {
-        return Err(format!("Expected 'tar' URL scheme, got '{}'", url.scheme()).into());
+    if !url.scheme().starts_with("tar+") {
+        return Err(format!("Expected 'tar+<scheme>' URL scheme, got '{}'", url.scheme()).into());
     }
 
     let full_path = url.path();
     if full_path.is_empty() || full_path == "/" {
-        return Err("tar:// URL must include a path to a .tar file".into());
+        return Err("tar+<scheme>:// URL must include a path to a .tar file".into());
     }
 
     // Find the .tar extension to split archive path from internal path
@@ -560,7 +560,7 @@ pub fn parse_tar_url(url: &Url) -> Result<(PathBuf, String), BundlebaseError> {
                 None
             }
         })
-        .ok_or_else(|| BundlebaseError::from("tar:// URL must contain .tar in path"))?;
+        .ok_or_else(|| BundlebaseError::from("tar+<scheme>:// URL must contain .tar in path"))?;
 
     let archive_path = PathBuf::from(&full_path[..tar_idx + 4]); // Include .tar
     let internal_path = full_path
@@ -593,7 +593,7 @@ impl Debug for TarFile {
 }
 
 impl TarFile {
-    /// Create a TarFile from a tar:// URL.
+    /// Create a TarFile from a `tar+<scheme>://` URL.
     pub fn from_url(url: &Url) -> Result<Self, BundlebaseError> {
         let (archive_path, internal_path) = parse_tar_url(url)?;
         let store = Arc::new(TarObjectStore::new(archive_path)?);
@@ -741,7 +741,7 @@ impl Debug for TarDir {
 }
 
 impl TarDir {
-    /// Create a TarDir from a tar:// URL.
+    /// Create a TarDir from a `tar+<scheme>://` URL.
     pub fn from_url(url: &Url) -> Result<Self, BundlebaseError> {
         let (archive_path, internal_path) = parse_tar_url(url)?;
         let store = Arc::new(TarObjectStore::new(archive_path.clone())?);
@@ -781,7 +781,7 @@ impl IOReadDir for TarDir {
 
             // Construct tar:// URL for file
             let file_url = format!(
-                "tar://{}/{}",
+                "tar+file://{}/{}",
                 self.archive_path.display(),
                 if relative_path.is_empty() {
                     location_str.to_string()
@@ -809,7 +809,7 @@ impl IOReadDir for TarDir {
         };
 
         let new_url = Url::parse(&format!(
-            "tar://{}/{}",
+            "tar+file://{}/{}",
             self.archive_path.display(),
             new_path.as_ref()
         ))?;
@@ -830,7 +830,7 @@ impl IOReadDir for TarDir {
         };
 
         let new_url = Url::parse(&format!(
-            "tar://{}/{}",
+            "tar+file://{}/{}",
             self.archive_path.display(),
             new_path.as_ref()
         ))?;
@@ -849,7 +849,7 @@ impl IOReadWriteDir for TarDir {
         };
 
         let new_url = Url::parse(&format!(
-            "tar://{}/{}",
+            "tar+file://{}/{}",
             self.archive_path.display(),
             new_path.as_ref()
         ))?;
@@ -870,7 +870,7 @@ impl IOReadWriteDir for TarDir {
         };
 
         let new_url = Url::parse(&format!(
-            "tar://{}/{}",
+            "tar+file://{}/{}",
             self.archive_path.display(),
             new_path.as_ref()
         ))?;
@@ -893,7 +893,7 @@ pub struct TarIOFactory;
 #[async_trait]
 impl IOFactory for TarIOFactory {
     fn schemes(&self) -> &[&str] {
-        &["tar"]
+        &["tar+file"]
     }
 
     fn supports_write(&self, _url: &Url) -> bool {
@@ -1059,7 +1059,7 @@ mod tests {
 
     #[test]
     fn test_parse_tar_url_with_internal_path() {
-        let url = Url::parse("tar:///home/user/data.tar/subdir/file.parquet").unwrap();
+        let url = Url::parse("tar+file:///home/user/data.tar/subdir/file.parquet").unwrap();
         let (archive_path, internal_path) = parse_tar_url(&url).unwrap();
         assert_eq!(archive_path, PathBuf::from("/home/user/data.tar"));
         assert_eq!(internal_path, "subdir/file.parquet");
@@ -1067,7 +1067,7 @@ mod tests {
 
     #[test]
     fn test_parse_tar_url_root() {
-        let url = Url::parse("tar:///data.tar/").unwrap();
+        let url = Url::parse("tar+file:///data.tar/").unwrap();
         let (archive_path, internal_path) = parse_tar_url(&url).unwrap();
         assert_eq!(archive_path, PathBuf::from("/data.tar"));
         assert_eq!(internal_path, "");
@@ -1075,7 +1075,7 @@ mod tests {
 
     #[test]
     fn test_parse_tar_url_no_internal_path() {
-        let url = Url::parse("tar:///archive.tar").unwrap();
+        let url = Url::parse("tar+file:///archive.tar").unwrap();
         let (archive_path, internal_path) = parse_tar_url(&url).unwrap();
         assert_eq!(archive_path, PathBuf::from("/archive.tar"));
         assert_eq!(internal_path, "");
@@ -1086,12 +1086,12 @@ mod tests {
         let url = Url::parse("file:///data.tar").unwrap();
         let result = parse_tar_url(&url);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Expected 'tar'"));
+        assert!(result.unwrap_err().to_string().contains("Expected 'tar+<scheme>'"));
     }
 
     #[test]
     fn test_parse_tar_url_no_tar_extension() {
-        let url = Url::parse("tar:///data/file.txt").unwrap();
+        let url = Url::parse("tar+file:///data/file.txt").unwrap();
         let result = parse_tar_url(&url);
         assert!(result.is_err());
         assert!(result

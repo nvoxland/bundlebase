@@ -100,10 +100,10 @@ pub trait IOReadWriteDir: IOReadDir {
     /// Check if this directory uses local filesystem storage.
     /// Used to determine optimal temp directory location for index building.
     ///
-    /// Returns `true` for local storage backends (file://, tar://, memory://)
+    /// Returns `true` for local storage backends (file://, tar+file://, memory://)
     /// and `false` for remote storage backends (s3://, gs://, azure://).
     fn is_local_storage(&self) -> bool {
-        matches!(self.url().scheme(), "file" | "tar" | "memory")
+        matches!(self.url().scheme(), "file" | "tar+file" | "memory")
     }
 
     /// Get a writable subdirectory reference.

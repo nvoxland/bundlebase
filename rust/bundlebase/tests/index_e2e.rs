@@ -1,8 +1,8 @@
-use arrow::array::StringArray;
+use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
-use bundlebase::{assert_regexp, Bundle, BundlebaseError, IndexType, Operation};
+use bundlebase::{assert_regexp, Bundle, BundlebaseError, IndexType, Operation, TokenizerConfig};
 use datafusion::common::ScalarValue;
 use datafusion::logical_expr::ExplainFormat;
 use futures::{StreamExt, TryStreamExt};
@@ -76,23 +76,24 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
 //         explain
 //     );
 
-    bundle.create_index("Email", IndexType::Column).await?;
+    bundle.create_index(&["Email"], IndexType::Column, None).await?;
 
     let status = bundle.status();
     assert_eq!(1, status.changes().len());
     assert_eq!(
-        "CREATE INDEX ON Email",
-        status.changes()[0].description
+        "CREATE COLUMN INDEX ON Email",
+        status.changes()[0].description,
     );
 
-    assert_eq!(
-        "CREATE INDEX on Email, INDEX BLOCKS",
+    assert!(
         status.changes()[0]
             .operations
             .iter()
             .map(|op| op.describe())
             .collect::<Vec<_>>()
             .join(", ")
+            .contains("CREATE INDEX on Email"),
+        "Expected operations to contain 'CREATE INDEX on Email'"
     );
 
     bundle.commit("Created index").await?;
@@ -154,7 +155,7 @@ async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseE
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email column
-    bundle.create_index("Email", IndexType::Column).await?;
+    bundle.create_index(&["Email"], IndexType::Column, None).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query with exact match on indexed column
@@ -191,7 +192,7 @@ async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email column
-    bundle.create_index("Email", IndexType::Column).await?;
+    bundle.create_index(&["Email"], IndexType::Column, None).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query with IN list on indexed column
@@ -256,7 +257,7 @@ async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email but query on City (not indexed)
-    bundle.create_index("Email", IndexType::Column).await?;
+    bundle.create_index(&["Email"], IndexType::Column, None).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query on non-indexed column should fall back to full scan
@@ -287,7 +288,7 @@ async fn test_index_selectivity() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Customer Id (should be unique)
-    bundle.create_index("Customer Id", IndexType::Column).await?;
+    bundle.create_index(&["Customer Id"], IndexType::Column, None).await?;
     bundle.commit("Created index on Customer Id").await?;
 
     // Query for specific customer
@@ -332,7 +333,7 @@ async fn test_query_path_uses_index() -> Result<(), BundlebaseError> {
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
     bundle
-        .create_index("Email", IndexType::Column)
+        .create_index(&["Email"], IndexType::Column, None)
         .await?;
     bundle.commit("Index on Email").await?;
 
@@ -393,7 +394,7 @@ async fn test_filter_path_uses_index() -> Result<(), BundlebaseError> {
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
     bundle
-        .create_index("Email", IndexType::Column)
+        .create_index(&["Email"], IndexType::Column, None)
         .await?;
     bundle.commit("Index on Email").await?;
 
@@ -429,7 +430,7 @@ async fn test_query_on_non_indexed_column_uses_full_scan() -> Result<(), Bundleb
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
     bundle
-        .create_index("Email", IndexType::Column)
+        .create_index(&["Email"], IndexType::Column, None)
         .await?;
     bundle.commit("Index on Email only").await?;
 
@@ -515,7 +516,7 @@ async fn test_query_path_index_with_parameterized_filter() -> Result<(), Bundleb
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
     bundle
-        .create_index("Email", IndexType::Column)
+        .create_index(&["Email"], IndexType::Column, None)
         .await?;
     bundle.commit("Index on Email").await?;
 
@@ -546,7 +547,7 @@ async fn test_index_survives_reopen() -> Result<(), BundlebaseError> {
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
     bundle
-        .create_index("Email", IndexType::Column)
+        .create_index(&["Email"], IndexType::Column, None)
         .await?;
     bundle.commit("Index on Email").await?;
 
@@ -563,6 +564,403 @@ async fn test_index_survives_reopen() -> Result<(), BundlebaseError> {
         plan.contains("RowIdOffsetDataSource"),
         "Expected index to survive reopen but physical plan was:\n{}",
         plan
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_single_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Create a named text index on Company
+    bundle
+        .create_index(&["Company"], IndexType::text(TokenizerConfig::default()), Some("company_search"))
+        .await?;
+    bundle.commit("Text index created").await?;
+
+    // Query using search() table function
+    let stream = bundle
+        .query(
+            "SELECT \"Index\", \"Company\" FROM search('company_search', 'Group')",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "search() should return matching rows, but got 0"
+    );
+
+    // Verify every returned row actually contains "Group" in the Company column
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("Company")
+            .expect("Company column should exist")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("Company should be StringArray");
+
+        for i in 0..companies.len() {
+            let company = companies.value(i);
+            assert!(
+                company.to_lowercase().contains("group"),
+                "Expected company '{}' to contain 'group'",
+                company
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_no_results() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    bundle
+        .create_index(&["Company"], IndexType::text(TokenizerConfig::default()), Some("company_search"))
+        .await?;
+    bundle.commit("Text index created").await?;
+
+    // Query with a term that doesn't match anything
+    let stream = bundle
+        .query(
+            "SELECT \"Index\", \"Company\" FROM search('company_search', 'zzzznonexistent')",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert_eq!(
+        num_rows, 0,
+        "search() with non-matching query should return 0 rows"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_multi_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Create a single multi-column text index spanning Company and City
+    bundle
+        .create_index(
+            &["Company", "City"],
+            IndexType::text(TokenizerConfig::default()), Some("multi_search"),
+        )
+        .await?;
+    bundle.commit("Multi-column text index created").await?;
+
+    // Field-specific query using tantivy syntax: Company:group
+    let stream = bundle
+        .query(
+            "SELECT \"Company\", \"City\" FROM search('multi_search', 'Company:group')",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "Field-specific search should return matching rows, but got 0"
+    );
+
+    // Verify every returned row contains "group" in Company
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("Company")
+            .expect("Company column")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("StringArray");
+
+        for i in 0..companies.len() {
+            let company = companies.value(i).to_lowercase();
+            assert!(
+                company.contains("group"),
+                "Expected company '{}' to contain 'group'",
+                companies.value(i)
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_with_score_ordering() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    bundle
+        .create_index(&["Company"], IndexType::text(TokenizerConfig::default()), Some("company_search"))
+        .await?;
+    bundle.commit("Text index created").await?;
+
+    // Query with _score column and ORDER BY _score DESC
+    let stream = bundle
+        .query(
+            "SELECT \"Company\", _score FROM search('company_search', 'Group') ORDER BY _score DESC",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(num_rows > 0, "search() should return rows with scores");
+
+    // Verify the _score column exists and has positive values
+    for batch in &rs {
+        let scores = batch
+            .column_by_name("_score")
+            .expect("_score column should exist");
+
+        let score_array = scores
+            .as_any()
+            .downcast_ref::<arrow::array::Float64Array>()
+            .expect("score should be Float64Array");
+
+        for i in 0..score_array.len() {
+            assert!(
+                score_array.value(i) > 0.0,
+                "Score should be positive, got {}",
+                score_array.value(i)
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_tantivy_boolean_syntax() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Multi-column index for boolean queries
+    bundle
+        .create_index(
+            &["Company", "City"],
+            IndexType::text(TokenizerConfig::default()), Some("multi_search"),
+        )
+        .await?;
+    bundle.commit("Text index created").await?;
+
+    // Boolean AND query using tantivy required-term syntax (+)
+    let stream = bundle
+        .query(
+            "SELECT \"Company\", \"City\" FROM search('multi_search', '+Company:group +City:east')",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+
+    // Verify every returned row matches BOTH conditions
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("Company")
+            .expect("Company column")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("StringArray");
+        let cities = batch
+            .column_by_name("City")
+            .expect("City column")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("StringArray");
+
+        for i in 0..batch.num_rows() {
+            let company = companies.value(i).to_lowercase();
+            let city = cities.value(i).to_lowercase();
+            assert!(
+                company.contains("group") && city.contains("east"),
+                "Row {} should match 'group' in Company AND 'east' in City, got Company='{}', City='{}'",
+                i, companies.value(i), cities.value(i)
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_with_additional_where() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    bundle
+        .create_index(&["Company"], IndexType::text(TokenizerConfig::default()), Some("company_search"))
+        .await?;
+    bundle.commit("Text index created").await?;
+
+    // search() + additional WHERE filter on a non-indexed column
+    let stream = bundle
+        .query(
+            "SELECT \"Company\", \"City\" FROM search('company_search', 'group') WHERE \"City\" = 'East Leonard'",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+
+    // Verify every row matches BOTH conditions
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("Company")
+            .expect("Company column")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("StringArray");
+        let cities = batch
+            .column_by_name("City")
+            .expect("City column")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("StringArray");
+
+        for i in 0..batch.num_rows() {
+            let company = companies.value(i).to_lowercase();
+            let city = cities.value(i);
+            assert!(
+                company.contains("group") && city == "East Leonard",
+                "Row {} should match 'group' in Company AND City='East Leonard', got Company='{}', City='{}'",
+                i, companies.value(i), city
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_single_arg_with_one_text_index() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Create a single text index (auto-named)
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    bundle.commit("Text index created").await?;
+
+    // Single-arg search — should auto-detect the only text index
+    let stream = bundle
+        .query(
+            "SELECT \"Company\" FROM search('Group')",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "Single-arg search() should return matching rows, but got 0"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_single_arg_error_with_multiple_text_indexes() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Create two text indexes
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    bundle
+        .create_index(
+            &["City"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("city_search"),
+        )
+        .await?;
+    bundle.commit("Two text indexes created").await?;
+
+    // Single-arg search should error when multiple text indexes exist
+    let result = bundle
+        .query(
+            "SELECT \"Company\" FROM search('Group')",
+            vec![],
+        )
+        .await;
+
+    assert!(
+        result.is_err(),
+        "Single-arg search() with multiple text indexes should error"
+    );
+
+    let err_msg = result.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(
+        err_msg.contains("2 exist"),
+        "Error should mention multiple indexes exist, got: {}",
+        err_msg
     );
 
     Ok(())

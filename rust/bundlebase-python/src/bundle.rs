@@ -312,8 +312,8 @@ impl PyBundle {
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to execute query: {}",
-                        e
+                        "Failed to execute query: {}\n  SQL: {}",
+                        e, sql
                     ))
                 })?;
 

@@ -4,7 +4,7 @@
 //! DataFusion's SQL capabilities for Bundlebase.
 
 mod bundle_info;
-mod text_search;
+pub(crate) mod search_table_fn;
 
 pub use bundle_info::VersionUdf;
-pub use text_search::{extract_text_search_args, TextSearchUdf, TextSearchUdfState};
+pub use search_table_fn::SearchTableFunction;

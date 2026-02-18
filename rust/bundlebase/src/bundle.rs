@@ -34,7 +34,7 @@ pub use source::Source;
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA};
-use crate::udf::VersionUdf;
+use crate::udf::{SearchTableFunction, VersionUdf};
 use crate::data::{BlockId, DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::source::SourceFunctionRegistry;
 use crate::functions::FunctionRegistry;
@@ -220,7 +220,11 @@ impl Bundle {
         });
 
         // Register schema providers with Bundle as the facade (using Weak to avoid Arc cycle)
-        Self::register_schema_providers(&ctx, Arc::downgrade(&bundle) as Weak<dyn BundleFacade>)?;
+        let facade_weak = Arc::downgrade(&bundle) as Weak<dyn BundleFacade>;
+        Self::register_schema_providers(&ctx, facade_weak.clone())?;
+
+        // Register the search() table function for text search queries
+        ctx.register_udtf("search", Arc::new(SearchTableFunction::new(facade_weak)));
 
         Ok(bundle)
     }
@@ -683,7 +687,7 @@ impl Bundle {
         block: &VersionedBlockId,
     ) -> Option<Arc<IndexedBlocks>> {
         for index in self.indexes.read().iter() {
-            if index.column() == column {
+            if index.columns().contains(&column.to_string()) {
                 if let Some(indexed_blocks) = index.indexed_blocks(block) {
                     return Some(indexed_blocks);
                 }
@@ -1376,6 +1380,18 @@ mod tests {
         // Schema should have the no_data column
         assert_eq!(result_schema.fields().len(), 1);
         assert_eq!(result_schema.field(0).name(), "no_data");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_search_udtf_registered() -> Result<(), BundlebaseError> {
+        let bundle = Bundle::empty(None).await?;
+
+        // search should be a recognized table function even on an empty bundle.
+        let ctx = bundle.ctx();
+        let result = ctx.table_function("search");
+        assert!(result.is_ok(), "search UDTF should be registered: {:?}", result.err());
 
         Ok(())
     }

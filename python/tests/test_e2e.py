@@ -893,8 +893,48 @@ async def test_drop_index_nonexistent():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Try to drop an index that doesn't exist
-    with pytest.raises(ValueError, match="No index found for column 'nonexistent'"):
+    with pytest.raises(ValueError, match="No index found matching 'nonexistent'"):
         await c.drop_index("nonexistent")
+
+
+@pytest.mark.asyncio
+async def test_search_returns_matching_rows():
+    """Test that search() table function returns matching rows via text index"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    # Create a named text index on the Company column
+    c = await c.create_index(["Company"], "text", name="company_search")
+    await c.commit("Text index created")
+
+    # Query using search() table function
+    result = await c.query("SELECT \"Index\", \"Company\", _score FROM search('company_search', 'Group')")
+    df = await result.to_polars()
+
+    assert len(df) > 0, "search() should return matching rows"
+
+    # Verify every result contains the search term
+    for company in df["Company"].to_list():
+        assert "group" in company.lower(), f"Expected '{company}' to contain 'group'"
+
+    # Verify _score column exists and has positive values
+    assert "_score" in df.columns, "search() should return a _score column"
+    assert all(s > 0 for s in df["_score"].to_list()), "All scores should be positive"
+
+
+@pytest.mark.asyncio
+async def test_search_no_matches():
+    """Test that search() returns no rows when nothing matches"""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    c = await c.create_index(["Company"], "text", name="company_search")
+    await c.commit("Text index created")
+
+    result = await c.query("SELECT \"Index\", \"Company\" FROM search('company_search', 'zzzznonexistent')")
+    df = await result.to_polars()
+
+    assert len(df) == 0, "search() with non-matching query should return 0 rows"
 
 
 @pytest.mark.asyncio

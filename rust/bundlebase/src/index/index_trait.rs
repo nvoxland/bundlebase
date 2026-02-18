@@ -1,7 +1,7 @@
 //! Common trait for index implementations
 //!
 //! This module defines the `Index` trait that provides a polymorphic interface
-//! for different index types (ColumnIndex, TextColumnIndex, etc.).
+//! for different index types (ColumnIndex, TextIndex, etc.).
 
 use crate::index::IndexType;
 use crate::BundlebaseError;

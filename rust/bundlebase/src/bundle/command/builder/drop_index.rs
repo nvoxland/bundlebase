@@ -7,18 +7,18 @@ use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
-/// Command to drop an index on a column.
+/// Command to drop an index by name or column.
 #[derive(Debug, Clone)]
 pub struct DropIndexCommand {
-    /// The column whose index should be dropped
-    pub column: String,
+    /// The index name or column name to identify the index to drop
+    pub identifier: String,
 }
 
 impl DropIndexCommand {
     /// Create a new DropIndexCommand.
-    pub fn new(column: impl Into<String>) -> Self {
+    pub fn new(identifier: impl Into<String>) -> Self {
         Self {
-            column: column.into(),
+            identifier: identifier.into(),
         }
     }
 }
@@ -29,23 +29,23 @@ impl CommandParsing for DropIndexCommand {
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        let mut column = None;
+        let mut identifier = None;
 
         for inner_pair in pair.into_inner() {
             if inner_pair.as_rule() == Rule::identifier {
-                column = Some(inner_pair.as_str().to_string());
+                identifier = Some(inner_pair.as_str().to_string());
             }
         }
 
-        let column = column.ok_or_else(|| -> BundlebaseError {
-            "DROP INDEX statement missing column name".into()
+        let identifier = identifier.ok_or_else(|| -> BundlebaseError {
+            "DROP INDEX statement missing index name or column name".into()
         })?;
 
-        Ok(DropIndexCommand::new(column))
+        Ok(DropIndexCommand::new(identifier))
     }
 
     fn to_statement(&self) -> String {
-        format!("DROP INDEX {}", self.column)
+        format!("DROP INDEX {}", self.identifier)
     }
 }
 
@@ -54,18 +54,18 @@ impl BundleBuilderCommand for DropIndexCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        // Find the index ID for the given column
+        // Find the index ID: look up by name first, then fall back to column match
         let index_id = {
             let bundle = builder.bundle();
             let indexes = bundle.indexes().read();
             let index = indexes
                 .iter()
-                .find(|idx| idx.columns().contains(&self.column));
+                .find(|idx| idx.name() == self.identifier || idx.columns().contains(&self.identifier));
 
             match index {
                 Some(idx) => *idx.id(),
                 None => {
-                    return Err(format!("No index found for column '{}'", self.column).into());
+                    return Err(format!("No index found matching '{}'", self.identifier).into());
                 }
             }
         };
@@ -74,7 +74,7 @@ impl BundleBuilderCommand for DropIndexCommand {
             .apply_operation(DropIndexOp::setup(&index_id).await?.into())
             .await?;
 
-        Ok(format!("Dropped index on column: {}", self.column))
+        Ok(format!("Dropped index: {}", self.identifier))
     }
 }
 
@@ -90,7 +90,7 @@ mod parsing_tests {
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::DropIndex(c) => {
-                assert_eq!(c.column, "user_id");
+                assert_eq!(c.identifier, "user_id");
             }
             _ => panic!("Expected DropIndex variant"),
         }
@@ -105,7 +105,7 @@ mod parsing_tests {
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::DropIndex(c) => {
-                assert_eq!(c.column, "email");
+                assert_eq!(c.identifier, "email");
             }
             _ => panic!("Expected DropIndex variant"),
         }
