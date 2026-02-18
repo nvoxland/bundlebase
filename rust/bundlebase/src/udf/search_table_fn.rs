@@ -25,13 +25,17 @@ use arrow::compute;
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datafusion::catalog::{Session, TableFunctionImpl, TableProvider};
+use datafusion::common::{project_schema, Statistics};
+use datafusion::datasource::source::{DataSource, DataSourceExec};
 use datafusion::datasource::TableType;
 use datafusion::error::DataFusionError;
+use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::physical_plan::memory::LazyMemoryExec;
+use datafusion::physical_expr::projection::ProjectionExprs;
+use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
+use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::ExecutionPlan;
-use futures::StreamExt;
-use parking_lot::RwLock;
+use futures::stream::{self, StreamExt};
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;
@@ -230,10 +234,6 @@ impl TableProvider for SearchResultTableProvider {
             .collect())
     }
 
-    // TODO: This implementation materializes all matching rows in memory before returning.
-    // For large datasets with broad search terms, this violates the streaming-first philosophy.
-    // A future streaming implementation should yield batches incrementally instead of collecting
-    // all result_batches into a Vec<RecordBatch>.
     async fn scan(
         &self,
         _state: &dyn Session,
@@ -310,94 +310,27 @@ impl TableProvider for SearchResultTableProvider {
         row_id_scores.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         // Build a map from row_id to score for lookup
-        let score_map: HashMap<u64, f64> = row_id_scores
-            .iter()
-            .map(|(row_id, score)| (row_id.as_u64(), *score))
-            .collect();
+        let score_map: Arc<HashMap<u64, f64>> = Arc::new(
+            row_id_scores
+                .iter()
+                .map(|(row_id, score)| (row_id.as_u64(), *score))
+                .collect(),
+        );
 
-        // Scan only indexed blocks to find matching rows
-        let mut result_batches: Vec<RecordBatch> = Vec::new();
+        let projected_schema = project_schema(&output_schema, projection)?;
 
-        for pack in self.packs.values() {
-            for block in pack.blocks() {
-                let block_ref_idx = match block_id_to_ref.get(block.id()) {
-                    Some(idx) => *idx,
-                    None => continue, // Block not in this index
-                };
-
-                let reader = block.reader();
-                let block_ref = ObjectIdAlias::from(block_ref_idx);
-
-                let mut rowid_stream = reader
-                    .extract_rowids_stream(block_ref, self.ctx.clone(), None)
-                    .await
-                    .map_err(|e| DataFusionError::External(e))?;
-
-                while let Some(batch_result) = rowid_stream.next().await {
-                    let rowid_batch =
-                        batch_result.map_err(|e| DataFusionError::External(e))?;
-
-                    let batch = &rowid_batch.batch;
-                    let row_ids = &rowid_batch.row_ids;
-
-                    // Find matching rows in this batch
-                    let mut matching_indices: Vec<usize> = Vec::new();
-                    let mut matching_scores: Vec<f64> = Vec::new();
-
-                    for (idx, row_id) in row_ids.iter().enumerate() {
-                        if let Some(&score) = score_map.get(&row_id.as_u64()) {
-                            matching_indices.push(idx);
-                            matching_scores.push(score);
-                        }
-                    }
-
-                    if matching_indices.is_empty() {
-                        continue;
-                    }
-
-                    // Filter the batch to only matching rows using take
-                    let indices = UInt64Array::from(
-                        matching_indices
-                            .iter()
-                            .map(|&i| i as u64)
-                            .collect::<Vec<_>>(),
-                    );
-                    let mut filtered_columns: Vec<Arc<dyn arrow::array::Array>> = Vec::new();
-                    for col in batch.columns() {
-                        let filtered = compute::take(col, &indices, None)?;
-                        filtered_columns.push(filtered);
-                    }
-
-                    // Append score column
-                    let score_array = Float64Array::from(matching_scores);
-                    filtered_columns.push(Arc::new(score_array));
-
-                    let result_batch =
-                        RecordBatch::try_new(output_schema.clone(), filtered_columns)?;
-
-                    result_batches.push(result_batch);
-                }
-            }
-        }
-
-        if result_batches.is_empty() {
-            return self.empty_exec(&output_schema, projection);
-        }
-
-        // Wrap result batches in a LazyMemoryExec
-        let generator = SearchBatchGenerator::new(result_batches);
-        let exec = LazyMemoryExec::try_new(
+        let data_source = SearchDataSource {
             output_schema,
-            vec![Arc::new(RwLock::new(generator))],
-        )?;
-
-        let exec = if let Some(proj) = projection {
-            exec.with_projection(Some(proj.clone()))
-        } else {
-            exec
+            projected_schema,
+            projection: projection.cloned(),
+            score_map,
+            block_id_to_ref: Arc::new(block_id_to_ref),
+            packs: self.packs.clone(),
+            ctx: self.ctx.clone(),
+            fetch: limit,
         };
 
-        Ok(Arc::new(exec))
+        Ok(Arc::new(DataSourceExec::new(Arc::new(data_source))))
     }
 }
 
@@ -407,59 +340,313 @@ impl SearchResultTableProvider {
         schema: &SchemaRef,
         projection: Option<&Vec<usize>>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        let generator = SearchBatchGenerator::new(vec![]);
-        let exec = LazyMemoryExec::try_new(schema.clone(), vec![Arc::new(RwLock::new(generator))])?;
-        let exec = if let Some(proj) = projection {
-            exec.with_projection(Some(proj.clone()))
-        } else {
-            exec
+        let projected_schema = project_schema(schema, projection)?;
+        let data_source = EmptySearchDataSource {
+            projected_schema,
         };
-        Ok(Arc::new(exec))
+        Ok(Arc::new(DataSourceExec::new(Arc::new(data_source))))
     }
 }
 
-/// Batch generator that yields pre-computed search result batches
-#[derive(Debug)]
-struct SearchBatchGenerator {
-    batches: Vec<RecordBatch>,
-    index: usize,
+/// DataSource that streams search results by scanning blocks on demand.
+///
+/// The Tantivy search phase (producing `score_map`) completes in `scan()`,
+/// but the data-fetching phase is deferred to `open()` so rows are streamed
+/// rather than materialized into a `Vec<RecordBatch>`.
+struct SearchDataSource {
+    output_schema: SchemaRef,
+    projected_schema: SchemaRef,
+    projection: Option<Vec<usize>>,
+    score_map: Arc<HashMap<u64, f64>>,
+    block_id_to_ref: Arc<HashMap<BlockId, u16>>,
+    packs: HashMap<ObjectId, Arc<Pack>>,
+    ctx: Arc<datafusion::prelude::SessionContext>,
+    fetch: Option<usize>,
 }
 
-impl SearchBatchGenerator {
-    fn new(batches: Vec<RecordBatch>) -> Self {
-        Self { batches, index: 0 }
+impl fmt::Debug for SearchDataSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SearchDataSource")
+            .field("matches", &self.score_map.len())
+            .field("fetch", &self.fetch)
+            .finish()
     }
 }
 
-impl fmt::Display for SearchBatchGenerator {
+impl fmt::Display for SearchDataSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "SearchBatchGenerator({} batches, at {})",
-            self.batches.len(),
-            self.index
+            "SearchDataSource[matches={}, fetch={:?}]",
+            self.score_map.len(),
+            self.fetch
         )
     }
 }
 
-impl datafusion::physical_plan::memory::LazyBatchGenerator for SearchBatchGenerator {
+impl DataSource for SearchDataSource {
+    fn open(
+        &self,
+        _partition: usize,
+        _context: Arc<TaskContext>,
+    ) -> datafusion::common::Result<SendableRecordBatchStream> {
+        let output_schema = self.output_schema.clone();
+        let projected_schema = self.projected_schema.clone();
+        let score_map = self.score_map.clone();
+        let block_id_to_ref = self.block_id_to_ref.clone();
+        let ctx = self.ctx.clone();
+        let projection = self.projection.clone();
+
+        // Collect (block, block_ref_idx) pairs for blocks that are in the index
+        let mut blocks_to_scan: Vec<(Arc<crate::bundle::DataBlock>, u16)> = Vec::new();
+        for pack in self.packs.values() {
+            for block in pack.blocks() {
+                if let Some(&ref_idx) = block_id_to_ref.get(block.id()) {
+                    blocks_to_scan.push((block, ref_idx));
+                }
+            }
+        }
+
+        // Build an async stream that iterates blocks, extracts rowids, filters, and appends scores
+        let stream = stream::iter(blocks_to_scan)
+            .then(move |(block, block_ref_idx)| {
+                let score_map = score_map.clone();
+                let output_schema = output_schema.clone();
+                let ctx = ctx.clone();
+                let projection = projection.clone();
+
+                async move {
+                    let reader = block.reader();
+                    let block_ref = ObjectIdAlias::from(block_ref_idx);
+
+                    let rowid_stream = reader
+                        .extract_rowids_stream(block_ref, ctx, None)
+                        .await
+                        .map_err(|e| DataFusionError::External(e))?;
+
+                    // Return a stream of filtered+scored batches for this block
+                    let batch_stream = rowid_stream.filter_map(move |batch_result| {
+                        let score_map = score_map.clone();
+                        let output_schema = output_schema.clone();
+                        let projection = projection.clone();
+
+                        async move {
+                            let rowid_batch = match batch_result {
+                                Ok(b) => b,
+                                Err(e) => return Some(Err(DataFusionError::External(e))),
+                            };
+
+                            let batch = &rowid_batch.batch;
+                            let row_ids = &rowid_batch.row_ids;
+
+                            // Find matching rows in this batch
+                            let mut matching_indices: Vec<usize> = Vec::new();
+                            let mut matching_scores: Vec<f64> = Vec::new();
+
+                            for (idx, row_id) in row_ids.iter().enumerate() {
+                                if let Some(&score) = score_map.get(&row_id.as_u64()) {
+                                    matching_indices.push(idx);
+                                    matching_scores.push(score);
+                                }
+                            }
+
+                            if matching_indices.is_empty() {
+                                return None;
+                            }
+
+                            // Filter the batch to only matching rows using take
+                            let indices = UInt64Array::from(
+                                matching_indices
+                                    .iter()
+                                    .map(|&i| i as u64)
+                                    .collect::<Vec<_>>(),
+                            );
+                            let mut filtered_columns: Vec<Arc<dyn arrow::array::Array>> =
+                                Vec::new();
+                            for col in batch.columns() {
+                                match compute::take(col, &indices, None) {
+                                    Ok(filtered) => filtered_columns.push(filtered),
+                                    Err(e) => {
+                                        return Some(Err(DataFusionError::ArrowError(
+                                            Box::new(e),
+                                            None,
+                                        )))
+                                    }
+                                }
+                            }
+
+                            // Append score column
+                            let score_array = Float64Array::from(matching_scores);
+                            filtered_columns.push(Arc::new(score_array));
+
+                            let result_batch =
+                                match RecordBatch::try_new(output_schema.clone(), filtered_columns)
+                                {
+                                    Ok(b) => b,
+                                    Err(e) => {
+                                        return Some(Err(DataFusionError::ArrowError(
+                                            Box::new(e),
+                                            None,
+                                        )))
+                                    }
+                                };
+
+                            // Apply projection if specified
+                            let final_batch = if let Some(ref proj) = projection {
+                                let projected_columns: Vec<_> =
+                                    proj.iter().map(|&i| result_batch.column(i).clone()).collect();
+                                let proj_schema = Arc::new(
+                                    match output_schema.project(proj) {
+                                        Ok(s) => s,
+                                        Err(e) => {
+                                            return Some(Err(DataFusionError::ArrowError(
+                                                Box::new(e),
+                                                None,
+                                            )))
+                                        }
+                                    },
+                                );
+                                match RecordBatch::try_new(proj_schema, projected_columns) {
+                                    Ok(b) => b,
+                                    Err(e) => {
+                                        return Some(Err(DataFusionError::ArrowError(
+                                            Box::new(e),
+                                            None,
+                                        )))
+                                    }
+                                }
+                            } else {
+                                result_batch
+                            };
+
+                            Some(Ok(final_batch))
+                        }
+                    });
+
+                    Ok::<_, DataFusionError>(batch_stream)
+                }
+            })
+            // Flatten per-block streams into a single stream of RecordBatch results
+            .flat_map(|block_stream_result| {
+                match block_stream_result {
+                    Ok(batch_stream) => {
+                        futures::future::Either::Left(batch_stream)
+                    }
+                    Err(e) => {
+                        futures::future::Either::Right(stream::once(async move { Err(e) }))
+                    }
+                }
+            });
+
+        Ok(Box::pin(RecordBatchStreamAdapter::new(
+            projected_schema,
+            stream,
+        )))
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
 
-    fn generate_next_batch(
-        &mut self,
-    ) -> datafusion::common::Result<Option<RecordBatch>> {
-        if self.index < self.batches.len() {
-            let batch = self.batches[self.index].clone();
-            self.index += 1;
-            Ok(Some(batch))
-        } else {
-            Ok(None)
-        }
+    fn fmt_as(&self, _t: datafusion::physical_plan::DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SearchDataSource")
     }
 
-    fn reset_state(&self) -> Arc<RwLock<dyn datafusion::physical_plan::memory::LazyBatchGenerator>> {
-        Arc::new(RwLock::new(SearchBatchGenerator::new(self.batches.clone())))
+    fn output_partitioning(&self) -> Partitioning {
+        Partitioning::UnknownPartitioning(1)
+    }
+
+    fn eq_properties(&self) -> EquivalenceProperties {
+        EquivalenceProperties::new(self.projected_schema.clone())
+    }
+
+    fn partition_statistics(
+        &self,
+        _partition: Option<usize>,
+    ) -> datafusion::common::Result<Statistics> {
+        Ok(Statistics::new_unknown(&self.output_schema))
+    }
+
+    fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
+        None
+    }
+
+    fn fetch(&self) -> Option<usize> {
+        self.fetch
+    }
+
+    fn try_swapping_with_projection(
+        &self,
+        _projection: &ProjectionExprs,
+    ) -> datafusion::common::Result<Option<Arc<dyn DataSource>>> {
+        Ok(None)
+    }
+}
+
+/// Simple DataSource that returns an empty stream for no-match cases
+struct EmptySearchDataSource {
+    projected_schema: SchemaRef,
+}
+
+impl fmt::Debug for EmptySearchDataSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EmptySearchDataSource").finish()
+    }
+}
+
+impl fmt::Display for EmptySearchDataSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "EmptySearchDataSource")
+    }
+}
+
+impl DataSource for EmptySearchDataSource {
+    fn open(
+        &self,
+        _partition: usize,
+        _context: Arc<TaskContext>,
+    ) -> datafusion::common::Result<SendableRecordBatchStream> {
+        let schema = self.projected_schema.clone();
+        let empty: futures::stream::Empty<datafusion::common::Result<RecordBatch>> =
+            stream::empty();
+        Ok(Box::pin(RecordBatchStreamAdapter::new(schema, empty)))
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn fmt_as(&self, _t: datafusion::physical_plan::DisplayFormatType, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "EmptySearchDataSource")
+    }
+
+    fn output_partitioning(&self) -> Partitioning {
+        Partitioning::UnknownPartitioning(1)
+    }
+
+    fn eq_properties(&self) -> EquivalenceProperties {
+        EquivalenceProperties::new(self.projected_schema.clone())
+    }
+
+    fn partition_statistics(
+        &self,
+        _partition: Option<usize>,
+    ) -> datafusion::common::Result<Statistics> {
+        Ok(Statistics::new_unknown(&self.projected_schema))
+    }
+
+    fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
+        None
+    }
+
+    fn fetch(&self) -> Option<usize> {
+        None
+    }
+
+    fn try_swapping_with_projection(
+        &self,
+        _projection: &ProjectionExprs,
+    ) -> datafusion::common::Result<Option<Arc<dyn DataSource>>> {
+        Ok(None)
     }
 }
