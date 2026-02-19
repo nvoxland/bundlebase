@@ -30,9 +30,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            rust/bundlebase -> target
-            rust/bundlebase-python -> target
+          workspaces: . -> target
 
       - name: Run Rust tests
         run: cargo test --verbose --package bundlebase
@@ -56,9 +54,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            rust/bundlebase -> target
-            rust/bundlebase-python -> target
+          workspaces: . -> target
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -84,19 +80,21 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Build Rust extension (development)
-        run: poetry run maturin develop
+        run: |
+          poetry run maturin build --out dist
+          poetry run pip install --force-reinstall dist/*.whl
 
       - name: Run Python tests
         run: poetry run pytest -v --timeout=300
 
       - name: Build Python wheel (release)
-        run: poetry run maturin build --release
+        run: poetry run maturin build --release --out dist-release
 
       - name: Upload Python wheel artifacts
         uses: actions/upload-artifact@v4
         with:
           name: wheels-py${{ matrix.python-version }}-${{ runner.os }}
-          path: target/wheels/*.whl
+          path: dist-release/*.whl
           retention-days: 30
 
       - name: Upload test results on failure
@@ -124,7 +122,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust/bundlebase-cli -> target
+          workspaces: . -> target
 
       - name: Build bundlebase-cli (release)
         run: cargo build --release --package bundlebase-cli
