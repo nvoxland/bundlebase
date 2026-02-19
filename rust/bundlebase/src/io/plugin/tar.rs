@@ -336,7 +336,6 @@ impl ObjectStore for TarObjectStore {
         payload: PutPayload,
         _opts: PutOptions,
     ) -> ObjectStoreResult<PutResult> {
-        // Ignore options, just use regular put
         self.put(location, payload).await
     }
 
@@ -375,8 +374,6 @@ impl ObjectStore for TarObjectStore {
     }
 
     async fn get_opts(&self, location: &ObjectPath, _options: GetOptions) -> ObjectStoreResult<GetResult> {
-        // For simplicity, ignore options and use regular get
-        // A full implementation would handle range requests
         self.get(location).await
     }
 

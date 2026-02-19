@@ -191,35 +191,35 @@ lazy_static! {
         .u64_counter("bundlebase.operations")
         .with_description("Number of operations by category and outcome")
         .with_unit("operations")
-        .init();
+        .build();
 
     /// Histogram for operation latency
     static ref OPERATION_DURATION: Histogram<f64> = METER
         .f64_histogram("bundlebase.duration")
         .with_description("Duration of operations in milliseconds")
         .with_unit("ms")
-        .init();
+        .build();
 
     /// Counter for bytes processed (read/written)
     static ref BYTES_PROCESSED: Counter<u64> = METER
         .u64_counter("bundlebase.bytes")
         .with_description("Total bytes processed by operations")
         .with_unit("bytes")
-        .init();
+        .build();
 
     /// Counter for cache operations
     static ref CACHE_OPERATIONS: Counter<u64> = METER
         .u64_counter("bundlebase.cache.operations")
         .with_description("Cache hits and misses")
         .with_unit("operations")
-        .init();
+        .build();
 
     /// Gauge for current cache size
     static ref CACHE_SIZE: ObservableGauge<u64> = METER
         .u64_observable_gauge("bundlebase.cache.size")
         .with_description("Current number of entries in cache")
         .with_unit("entries")
-        .init();
+        .build();
 }
 
 /// Records an operation attempt with outcome and category

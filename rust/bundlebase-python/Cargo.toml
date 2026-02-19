@@ -34,5 +34,5 @@ datafusion = { workspace = true }
 
 # Async runtime and utilities
 tokio = { workspace = true }
-futures = "0.3"
-parking_lot = "0.12"
+futures = { workspace = true }
+parking_lot = { workspace = true }
