@@ -82,7 +82,7 @@ jobs:
       - name: Build Rust extension (development)
         run: |
           poetry run maturin build --out dist
-          poetry run pip install --force-reinstall dist/*.whl
+          poetry run pip install --force-reinstall --no-deps dist/*.whl
 
       - name: Run Python tests
         run: poetry run pytest -v --timeout=300

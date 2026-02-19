@@ -103,9 +103,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            rust/bundlebase -> target
-            rust/bundlebase-python -> target
+          workspaces: . -> target
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -144,9 +142,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            rust/bundlebase -> target
-            rust/bundlebase-python -> target
+          workspaces: . -> target
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -183,9 +179,7 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            rust/bundlebase -> target
-            rust/bundlebase-python -> target
+          workspaces: . -> target
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
