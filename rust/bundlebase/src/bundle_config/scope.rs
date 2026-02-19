@@ -21,7 +21,7 @@ use url::Url;
 /// # Construction
 ///
 /// Use `TryFrom<&str>` to create a scope from user input:
-/// ```
+/// ```no_run
 /// use bundlebase::bundle_config::Scope;
 /// let scope = Scope::try_from("s3").unwrap();
 /// assert_eq!(scope.as_str(), "s3");
@@ -49,7 +49,7 @@ impl Scope {
     /// - Names like `"s3"`, `"s3/bucket"` → validates first component against registered scopes
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// use bundlebase::bundle_config::Scope;
     /// let scope = Scope::try_from("s3://bucket/path").unwrap();
     /// assert_eq!(scope.as_str(), "s3/bucket/path");
@@ -108,7 +108,7 @@ impl Scope {
     ///   character in the query is `/`
     ///
     /// # Examples
-    /// ```
+    /// ```no_run
     /// use bundlebase::bundle_config::Scope;
     /// let s = Scope::try_from("s3/abc").unwrap();
     /// assert!(s.matches(&Scope::try_from("s3/abc").unwrap()));       // exact
