@@ -110,6 +110,7 @@ impl Completer for BundleCompleter {
                                 extra: None,
                                 span,
                                 append_whitespace: false,
+                                match_indices: None,
                             });
                         }
                     }
@@ -131,6 +132,7 @@ impl Completer for BundleCompleter {
                                 extra: None,
                                 span,
                                 append_whitespace: false,
+                                match_indices: None,
                             });
                         }
                     }
@@ -156,6 +158,7 @@ impl Completer for BundleCompleter {
                         extra: None,
                         span,
                         append_whitespace: true,
+                        match_indices: None,
                     });
                 }
             }
@@ -192,6 +195,7 @@ impl Completer for BundleCompleter {
                                 extra: None,
                                 span,
                                 append_whitespace: false,
+                                match_indices: None,
                             });
                         }
                     }

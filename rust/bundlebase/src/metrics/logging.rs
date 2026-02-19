@@ -17,9 +17,9 @@
 use opentelemetry::global;
 use opentelemetry_sdk::{
     metrics::{PeriodicReader, SdkMeterProvider},
-    trace::{BatchSpanProcessor, TracerProvider},
+    trace::{BatchSpanProcessor, SdkTracerProvider},
 };
-use opentelemetry_stdout::{MetricsExporter, SpanExporter};
+use opentelemetry_stdout::{MetricExporter, SpanExporter};
 
 // Add tokio runtime handling to avoid panics when called without an existing runtime
 use std::thread;
@@ -68,18 +68,18 @@ pub fn init_logging_metrics_with_interval(interval: std::time::Duration) -> bool
         // Initialize tracing (spans)
         let span_exporter = SpanExporter::default();
         let span_processor =
-            BatchSpanProcessor::builder(span_exporter, opentelemetry_sdk::runtime::Tokio).build();
+            BatchSpanProcessor::builder(span_exporter).build();
 
-        let tracer_provider = TracerProvider::builder()
+        let tracer_provider = SdkTracerProvider::builder()
             .with_span_processor(span_processor)
             .build();
 
         global::set_tracer_provider(tracer_provider);
 
         // Initialize metrics
-        let metrics_exporter = MetricsExporter::default();
+        let metrics_exporter = MetricExporter::default();
 
-        let reader = PeriodicReader::builder(metrics_exporter, opentelemetry_sdk::runtime::Tokio)
+        let reader = PeriodicReader::builder(metrics_exporter)
             .with_interval(interval)
             .build();
 

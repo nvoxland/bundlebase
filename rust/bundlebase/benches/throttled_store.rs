@@ -110,8 +110,6 @@ impl ObjectStore for ThrottledLocalStore {
         &self,
         prefix: Option<&ObjectPath>,
     ) -> futures::stream::BoxStream<'static, object_store::Result<ObjectMeta>> {
-        // Note: no async delay on list since it returns a stream synchronously.
-        // The latency cost is amortized across iteration.
         self.inner.list(prefix)
     }
 

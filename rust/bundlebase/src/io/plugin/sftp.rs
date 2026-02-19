@@ -11,9 +11,8 @@ use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
-use russh::client::{self, Handle};
-use russh_keys::key::PublicKey;
-use russh_keys::load_secret_key;
+use russh::client::{self, AuthResult, Handle};
+use russh::keys::{load_secret_key, PrivateKeyWithHashAlg, ssh_key};
 use russh_sftp::client::SftpSession;
 use std::fmt::Debug;
 use std::path::Path;
@@ -33,17 +32,16 @@ config_keys!(sftp_keys, {
 /// SSH client handler for russh.
 struct SshHandler;
 
-#[async_trait::async_trait]
 impl client::Handler for SshHandler {
     type Error = russh::Error;
 
-    async fn check_server_key(
+    fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
-    ) -> Result<bool, Self::Error> {
+        _server_public_key: &ssh_key::PublicKey,
+    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
         // Accept all host keys for now
         // TODO: Add known_hosts verification support
-        Ok(true)
+        async { Ok(true) }
     }
 }
 
@@ -123,8 +121,21 @@ impl SftpClient {
                 ))
             })?;
 
-        let auth_success = session
-            .authenticate_publickey(user, Arc::new(key))
+        let best_rsa_hash = session
+            .best_supported_rsa_hash()
+            .await
+            .map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to negotiate RSA hash for user '{}': {}",
+                    user, e
+                ))
+            })?
+            .flatten();
+
+        let key_with_hash = PrivateKeyWithHashAlg::new(Arc::new(key), best_rsa_hash);
+
+        let auth_result = session
+            .authenticate_publickey(user, key_with_hash)
             .await
             .map_err(|e| {
                 BundlebaseError::from(format!(
@@ -133,7 +144,7 @@ impl SftpClient {
                 ))
             })?;
 
-        if !auth_success {
+        if !matches!(auth_result, AuthResult::Success) {
             return Err(BundlebaseError::from(format!(
                 "SSH authentication failed for user '{}': public key not accepted",
                 user
