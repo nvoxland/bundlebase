@@ -70,6 +70,12 @@ impl RowIdIndex {
             }
         }
 
+        // Handle the final line if it doesn't end with a newline
+        if !bytes.is_empty() && bytes[bytes.len() - 1] != b'\n' && !skip_first {
+            let row_size = bytes.len() - row_start as usize;
+            row_ids.push(RowId::new(block_ref, row_start, row_size));
+        }
+
         row_ids
     }
 
@@ -165,7 +171,9 @@ mod tests {
         let block_ref = ObjectIdAlias::from(1u16);
         let bytes = b"data";
         let result = RowIdIndex::new().build_row_index(bytes, block_ref, false);
-        assert_eq!(result.len(), 0);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].offset(), 0);
+        assert_eq!(result[0].block_ref(), block_ref);
     }
 
     #[test]
