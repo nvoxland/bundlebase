@@ -1033,3 +1033,182 @@ async fn test_create_index_after_standardize_column_names() -> Result<(), Bundle
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_search_after_standardize_column_names() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // standardize_column_names lowercases column names (e.g. "Company" -> "company")
+    bundle.standardize_column_names().await?;
+
+    // Create a text index using the standardized (lowercase) column names
+    bundle
+        .create_index(
+            &["company", "city"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("search_idx"),
+        )
+        .await?;
+    bundle.commit("Text index after standardize").await?;
+
+    // Query using the lowercase column names — this should work because
+    // search() now applies rename operations to the physical schema
+    let stream = bundle
+        .query(
+            "SELECT company, city FROM search('search_idx', 'group')",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "search() after standardize_column_names should return matching rows"
+    );
+
+    // Verify every returned row actually contains "group" in the company column
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("company")
+            .expect("company column should exist with standardized name")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("company should be StringArray");
+
+        for i in 0..companies.len() {
+            let company = companies.value(i).to_lowercase();
+            assert!(
+                company.contains("group"),
+                "Expected company '{}' to contain 'group'",
+                companies.value(i)
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_with_projection_and_where_on_score() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    bundle
+        .create_index(
+            &["Company", "City"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("multi_search"),
+        )
+        .await?;
+    bundle.commit("Text index created").await?;
+
+    // Project a subset of columns and filter on _score.
+    // This reproduced a bug where partition_statistics used the full output schema
+    // while the DataSource emitted the projected schema, causing DataFusion's
+    // ExprBoundaries to fail with a column-index-out-of-bounds error.
+    let stream = bundle
+        .query(
+            "SELECT \"Company\", _score FROM search('multi_search', 'group') WHERE _score > 0",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "search() with projection and WHERE on _score should return rows"
+    );
+
+    for batch in &rs {
+        let scores = batch
+            .column_by_name("_score")
+            .expect("_score column should exist")
+            .as_any()
+            .downcast_ref::<arrow::array::Float64Array>()
+            .expect("_score should be Float64Array");
+
+        for i in 0..scores.len() {
+            assert!(
+                scores.value(i) > 0.0,
+                "Score should be > 0, got {}",
+                scores.value(i)
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_field_specific_after_standardize_column_names() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    bundle.standardize_column_names().await?;
+
+    bundle
+        .create_index(
+            &["company", "city"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("search_idx"),
+        )
+        .await?;
+    bundle.commit("Text index after standardize").await?;
+
+    // Field-specific query using lowercase (logical) field names
+    // These should be rewritten to the physical names (e.g. "Company") before Tantivy sees them
+    let stream = bundle
+        .query(
+            "SELECT company, city FROM search('search_idx', 'company:group')",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "Field-specific search with standardized column names should return matching rows"
+    );
+
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("company")
+            .expect("company column should exist")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("company should be StringArray");
+
+        for i in 0..companies.len() {
+            let company = companies.value(i).to_lowercase();
+            assert!(
+                company.contains("group"),
+                "Expected company '{}' to contain 'group'",
+                companies.value(i)
+            );
+        }
+    }
+
+    Ok(())
+}

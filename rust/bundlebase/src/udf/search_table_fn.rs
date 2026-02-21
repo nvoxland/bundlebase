@@ -15,7 +15,7 @@
 //! SELECT * FROM search('query')
 //! ```
 
-use crate::bundle::{BundleFacade, Pack};
+use crate::bundle::{AnyOperation, BundleFacade, Pack};
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId};
 use crate::index::{IndexDefinition, TextIndex};
 use crate::io::plugin::object_store::ObjectStoreFile;
@@ -168,6 +168,7 @@ impl TableFunctionImpl for SearchTableFunction {
             data_dir,
             config,
             packs,
+            operations: facade.operations(),
         }))
     }
 }
@@ -181,6 +182,7 @@ struct SearchResultTableProvider {
     data_dir: Arc<dyn crate::io::IOReadWriteDir>,
     config: Arc<crate::BundleConfig>,
     packs: HashMap<ObjectId, Arc<Pack>>,
+    operations: Vec<AnyOperation>,
 }
 
 impl std::fmt::Debug for SearchResultTableProvider {
@@ -193,16 +195,41 @@ impl std::fmt::Debug for SearchResultTableProvider {
 }
 
 impl SearchResultTableProvider {
-    /// Returns the data schema from the first available block.
+    /// Returns the logical data schema (with renames applied) from the first available block.
     /// All blocks in a bundle are guaranteed to share the same schema,
     /// so any block's schema is representative.
     fn data_schema(&self) -> SchemaRef {
         for pack in self.packs.values() {
             for block in pack.blocks() {
-                return block.schema();
+                return self.apply_schema_operations(block.schema());
             }
         }
         Arc::new(Schema::empty())
+    }
+
+    /// Apply schema-altering operations (renames, drops) to a physical schema to get the logical schema
+    fn apply_schema_operations(&self, schema: SchemaRef) -> SchemaRef {
+        let mut fields: Vec<Arc<Field>> = schema.fields().iter().cloned().collect();
+        for op in &self.operations {
+            match op {
+                AnyOperation::RenameColumn(rename) => {
+                    for field in fields.iter_mut() {
+                        if field.name() == &rename.old_name {
+                            *field = Arc::new(Field::new(
+                                &rename.new_name,
+                                field.data_type().clone(),
+                                field.is_nullable(),
+                            ));
+                        }
+                    }
+                }
+                AnyOperation::DropColumn(drop) => {
+                    fields.retain(|f| !drop.names.contains(&f.name().to_string()));
+                }
+                _ => {}
+            }
+        }
+        Arc::new(Schema::new(fields))
     }
 
     fn output_schema(&self) -> SchemaRef {
@@ -210,6 +237,31 @@ impl SearchResultTableProvider {
         let mut fields: Vec<Arc<Field>> = data_schema.fields().iter().cloned().collect();
         fields.push(Arc::new(Field::new("_score", DataType::Float64, false)));
         Arc::new(Schema::new(fields))
+    }
+
+    /// Rewrite logical field names in a search query to physical field names.
+    /// E.g., after renaming "Answer" → "answer", rewrites "answer:foo" → "Answer:foo"
+    fn rewrite_query_fields(&self, query: &str) -> String {
+        // Build reverse rename map: new_name → old_name (logical → physical)
+        let mut logical_to_physical: HashMap<String, String> = HashMap::new();
+        for op in &self.operations {
+            if let AnyOperation::RenameColumn(rename) = op {
+                logical_to_physical.insert(rename.new_name.clone(), rename.old_name.clone());
+            }
+        }
+        if logical_to_physical.is_empty() {
+            return query.to_string();
+        }
+
+        // Replace field:term patterns in the query
+        let mut result = query.to_string();
+        for (logical, physical) in &logical_to_physical {
+            result = result.replace(
+                &format!("{}:", logical),
+                &format!("{}:", physical),
+            );
+        }
+        result
     }
 }
 
@@ -245,6 +297,7 @@ impl TableProvider for SearchResultTableProvider {
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         let output_schema = self.output_schema();
+        let rewritten_query = self.rewrite_query_fields(&self.query);
 
         // Step 1: Load text indexes and execute search across all indexed blocks
         let all_indexed_blocks = self.index_def.all_indexed_blocks();
@@ -297,7 +350,7 @@ impl TableProvider for SearchResultTableProvider {
                 .map_err(|e| DataFusionError::External(e))?;
 
             let results = text_index
-                .search(&self.query, search_limit)
+                .search(&rewritten_query, search_limit)
                 .map_err(|e| DataFusionError::External(e))?;
 
             for result in results {
@@ -584,7 +637,7 @@ impl DataSource for SearchDataSource {
         &self,
         _partition: Option<usize>,
     ) -> datafusion::common::Result<Statistics> {
-        Ok(Statistics::new_unknown(&self.output_schema))
+        Ok(Statistics::new_unknown(&self.projected_schema))
     }
 
     fn with_fetch(&self, _limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
