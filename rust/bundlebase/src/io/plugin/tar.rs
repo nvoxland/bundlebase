@@ -1,8 +1,13 @@
 //! Tar IO backend - file and directory operations on tar archives with tar+file:// URLs.
 //!
 //! Provides first-class support for `tar+<scheme>://` URLs:
-//! - `tar+file:///path/to/archive.tar/internal/path`
-//! - `tar+file:///data.tar/` (root of archive)
+//! - `tar+file:///path/to/archive.tar/internal/path` (read+write, local)
+//! - `tar+s3://bucket/archive.tar/internal/path` (read-only, remote)
+//! - `tar+gs://bucket/archive.tar/internal/path` (read-only, remote)
+//! - `tar+azure://container/archive.tar/internal/path` (read-only, remote)
+//!
+//! Remote tar archives must contain a `_bundlebase_manifest.json` as the first entry
+//! (written by `export_tar()`). This enables O(1) startup via two range requests.
 
 use crate::io::registry::IOFactory;
 use crate::io::{FileInfo, IOReadDir, IOReadFile, IOReadWriteDir, IOReadWriteFile};
@@ -11,6 +16,7 @@ use crate::BundlebaseError;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::{self, BoxStream, StreamExt, TryStreamExt};
+use futures::FutureExt;
 use object_store::path::Path as ObjectPath;
 use object_store::{
     GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore, PutOptions,
@@ -28,11 +34,14 @@ use std::sync::Arc;
 use tar::{Archive, Builder, Header};
 use url::Url;
 
+/// Name of the manifest file embedded as the first tar entry by `export_tar()`.
+pub const TAR_MANIFEST_FILENAME: &str = "_bundlebase_manifest.json";
+
 // ============================================================================
-// TarObjectStore - ObjectStore implementation for tar archives
+// TarObjectStore - Local read+write ObjectStore for tar archives
 // ============================================================================
 
-/// An ObjectStore implementation that reads from and writes to tar archives.
+/// An ObjectStore implementation that reads from and writes to local tar archives.
 ///
 /// Features:
 /// - **Read support**: Lazy indexing on first access, cached in memory
@@ -117,8 +126,8 @@ impl TarObjectStore {
                 source: "Invalid UTF-8 in tar entry path".into(),
             })?;
 
-            // Skip directories
-            if path_str.ends_with('/') {
+            // Skip directories and the bundlebase manifest (internal metadata)
+            if path_str.ends_with('/') || path_str == TAR_MANIFEST_FILENAME {
                 continue;
             }
 
@@ -522,23 +531,422 @@ impl ObjectStore for TarObjectStore {
 }
 
 // ============================================================================
+// ReadOnlyTarObjectStore - Remote read-only ObjectStore backed by any store
+// ============================================================================
+
+/// A read-only ObjectStore that reads individual files from a tar archive stored
+/// in any `ObjectStore` (S3, GCS, Azure, etc.) using range requests.
+///
+/// Requires a `_bundlebase_manifest.json` as the first tar entry (written by
+/// `export_tar()`). The manifest lists all entry names and sizes, enabling
+/// O(1) byte-offset computation without scanning the entire archive.
+///
+/// Indexing requires exactly 2 range requests:
+/// 1. `0..512` — parse the first tar header to learn manifest size
+/// 2. `512..512+size` — read the manifest JSON, compute all offsets
+///
+/// Each subsequent file read is a single `get_range()` at the computed offset.
+#[derive(Clone)]
+pub struct ReadOnlyTarObjectStore {
+    inner_store: Arc<dyn ObjectStore>,
+    archive_path: ObjectPath,
+    index: Arc<RwLock<TarIndex>>,
+    indexed: Arc<AtomicBool>,
+}
+
+impl Debug for ReadOnlyTarObjectStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReadOnlyTarObjectStore")
+            .field("archive_path", &self.archive_path)
+            .finish()
+    }
+}
+
+/// Round up to the next 512-byte boundary (tar block size).
+fn pad512(size: u64) -> u64 {
+    (size + 511) & !511
+}
+
+/// Compute byte offsets for all entries given the manifest data size and entry list.
+///
+/// Returns a map from entry name to (data_offset, data_size).
+/// The layout is: manifest_header(512) + manifest_data(padded) + for each entry: header(512) + data(padded).
+fn compute_offsets(manifest_data_size: u64, entries: &[(String, u64)]) -> HashMap<ObjectPath, TarEntry> {
+    let mut offset = 512 + pad512(manifest_data_size); // skip past manifest entry
+    let mut result = HashMap::new();
+
+    for (name, size) in entries {
+        let data_offset = offset + 512; // skip this entry's header
+        result.insert(
+            ObjectPath::from(name.as_str()),
+            TarEntry {
+                offset: data_offset,
+                size: *size,
+                modified: chrono::DateTime::UNIX_EPOCH,
+            },
+        );
+        offset = data_offset + pad512(*size);
+    }
+
+    result
+}
+
+impl ReadOnlyTarObjectStore {
+    /// Create a new ReadOnlyTarObjectStore backed by the given object store.
+    pub fn new(inner_store: Arc<dyn ObjectStore>, archive_path: ObjectPath) -> Self {
+        Self {
+            inner_store,
+            archive_path,
+            index: Arc::new(RwLock::new(TarIndex {
+                entries: HashMap::new(),
+            })),
+            indexed: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Build the index by reading the manifest from the first tar entry.
+    /// This requires exactly 2 range requests to the backing store.
+    async fn build_index(&self) -> ObjectStoreResult<()> {
+        if self.indexed.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        // Request 1: Read the first 512 bytes (tar header of the manifest entry)
+        let header_bytes = self
+            .inner_store
+            .get_range(&self.archive_path, 0..512)
+            .await?;
+
+        // Parse the tar header to get the entry name and size
+        let mut header = Header::new_gnu();
+        header.as_mut_bytes().copy_from_slice(&header_bytes[..512]);
+
+        let entry_name = header.path().map_err(|e| object_store::Error::Generic {
+            store: "ReadOnlyTarObjectStore",
+            source: Box::new(e),
+        })?;
+        let entry_name_str = entry_name.to_str().ok_or_else(|| object_store::Error::Generic {
+            store: "ReadOnlyTarObjectStore",
+            source: "Invalid UTF-8 in tar header path".into(),
+        })?;
+
+        if entry_name_str != TAR_MANIFEST_FILENAME {
+            return Err(object_store::Error::Generic {
+                store: "ReadOnlyTarObjectStore",
+                source: format!(
+                    "Remote tar archives require a bundlebase manifest. \
+                     Expected first entry to be '{}', got '{}'. \
+                     Use `export_tar()` to create a compatible archive.",
+                    TAR_MANIFEST_FILENAME, entry_name_str
+                )
+                .into(),
+            });
+        }
+
+        let manifest_size = header.size().map_err(|e| object_store::Error::Generic {
+            store: "ReadOnlyTarObjectStore",
+            source: Box::new(e),
+        })?;
+
+        // Request 2: Read the manifest data
+        let manifest_bytes = self
+            .inner_store
+            .get_range(&self.archive_path, 512..512 + manifest_size)
+            .await?;
+
+        // Parse the manifest JSON: [{"name": "...", "size": N}, ...]
+        let manifest: Vec<serde_json::Value> =
+            serde_json::from_slice(&manifest_bytes).map_err(|e| object_store::Error::Generic {
+                store: "ReadOnlyTarObjectStore",
+                source: Box::new(e),
+            })?;
+
+        let entries_vec: Vec<(String, u64)> = manifest
+            .iter()
+            .map(|entry| {
+                let name = entry["name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                let size = entry["size"].as_u64().unwrap_or(0);
+                (name, size)
+            })
+            .collect();
+
+        let computed = compute_offsets(manifest_size, &entries_vec);
+
+        let mut index = self.index.write();
+        index.entries = computed;
+        self.indexed.store(true, Ordering::Release);
+
+        Ok(())
+    }
+
+    /// Ensure the index is built.
+    async fn ensure_indexed(&self) -> ObjectStoreResult<()> {
+        if !self.indexed.load(Ordering::Acquire) {
+            self.build_index().await?;
+        }
+        Ok(())
+    }
+
+    /// Read an entry's data via a single range request.
+    async fn read_entry(&self, path: &ObjectPath) -> ObjectStoreResult<Bytes> {
+        self.ensure_indexed().await?;
+
+        let (offset, size) = {
+            let index = self.index.read();
+            let entry = index.entries.get(path).ok_or_else(|| object_store::Error::NotFound {
+                path: path.to_string(),
+                source: "File not found in remote tar index".into(),
+            })?;
+            (entry.offset, entry.size)
+        };
+
+        self.inner_store
+            .get_range(&self.archive_path, offset..offset + size)
+            .await
+    }
+}
+
+impl Display for ReadOnlyTarObjectStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ReadOnlyTarObjectStore({})", self.archive_path)
+    }
+}
+
+#[async_trait]
+impl ObjectStore for ReadOnlyTarObjectStore {
+    async fn put(&self, _location: &ObjectPath, _payload: PutPayload) -> ObjectStoreResult<PutResult> {
+        Err(object_store::Error::NotSupported {
+            source: "Remote tar archives are read-only".into(),
+        })
+    }
+
+    async fn put_opts(
+        &self,
+        _location: &ObjectPath,
+        _payload: PutPayload,
+        _opts: PutOptions,
+    ) -> ObjectStoreResult<PutResult> {
+        Err(object_store::Error::NotSupported {
+            source: "Remote tar archives are read-only".into(),
+        })
+    }
+
+    async fn put_multipart(&self, _location: &ObjectPath) -> ObjectStoreResult<Box<dyn MultipartUpload>> {
+        Err(object_store::Error::NotSupported {
+            source: "Remote tar archives are read-only".into(),
+        })
+    }
+
+    async fn put_multipart_opts(
+        &self,
+        _location: &ObjectPath,
+        _opts: object_store::PutMultipartOptions,
+    ) -> ObjectStoreResult<Box<dyn MultipartUpload>> {
+        Err(object_store::Error::NotSupported {
+            source: "Remote tar archives are read-only".into(),
+        })
+    }
+
+    async fn get(&self, location: &ObjectPath) -> ObjectStoreResult<GetResult> {
+        let bytes = self.read_entry(location).await?;
+        let size = bytes.len() as u64;
+
+        Ok(GetResult {
+            payload: object_store::GetResultPayload::Stream(Box::pin(stream::once(async move {
+                Ok(bytes)
+            }))),
+            meta: ObjectMeta {
+                location: location.clone(),
+                last_modified: chrono::DateTime::UNIX_EPOCH,
+                size,
+                e_tag: None,
+                version: None,
+            },
+            range: 0..size,
+            attributes: Default::default(),
+        })
+    }
+
+    async fn get_opts(&self, location: &ObjectPath, _options: GetOptions) -> ObjectStoreResult<GetResult> {
+        self.get(location).await
+    }
+
+    async fn get_range(&self, location: &ObjectPath, range: Range<u64>) -> ObjectStoreResult<Bytes> {
+        let bytes = self.read_entry(location).await?;
+
+        let start = range.start as usize;
+        let end = range.end as usize;
+
+        if end > bytes.len() {
+            return Err(object_store::Error::Generic {
+                store: "ReadOnlyTarObjectStore",
+                source: "Range out of bounds".into(),
+            });
+        }
+
+        Ok(bytes.slice(start..end))
+    }
+
+    async fn head(&self, location: &ObjectPath) -> ObjectStoreResult<ObjectMeta> {
+        self.ensure_indexed().await?;
+
+        let index = self.index.read();
+        let entry = index.entries.get(location).ok_or_else(|| {
+            object_store::Error::NotFound {
+                path: location.to_string(),
+                source: "File not found in remote tar archive".into(),
+            }
+        })?;
+
+        Ok(ObjectMeta {
+            location: location.clone(),
+            last_modified: entry.modified,
+            size: entry.size,
+            e_tag: None,
+            version: None,
+        })
+    }
+
+    async fn delete(&self, _location: &ObjectPath) -> ObjectStoreResult<()> {
+        Err(object_store::Error::NotSupported {
+            source: "Remote tar archives are read-only".into(),
+        })
+    }
+
+    fn list(&self, prefix: Option<&ObjectPath>) -> BoxStream<'static, ObjectStoreResult<ObjectMeta>> {
+        let this = self.clone();
+        let prefix_owned = prefix.cloned();
+
+        // Use a future that builds the index if needed, then streams entries
+        let fut = async move {
+            this.ensure_indexed().await?;
+
+            let guard = this.index.read();
+            let entries: Vec<ObjectMeta> = guard
+                .entries
+                .iter()
+                .filter(|(path, _)| {
+                    if let Some(ref prefix) = prefix_owned {
+                        path.as_ref().starts_with(prefix.as_ref())
+                    } else {
+                        true
+                    }
+                })
+                .map(|(path, entry)| ObjectMeta {
+                    location: path.clone(),
+                    last_modified: entry.modified,
+                    size: entry.size,
+                    e_tag: None,
+                    version: None,
+                })
+                .collect();
+
+            Ok::<_, object_store::Error>(stream::iter(entries.into_iter().map(Ok)))
+        };
+
+        Box::pin(fut.into_stream().try_flatten())
+    }
+
+    async fn list_with_delimiter(&self, prefix: Option<&ObjectPath>) -> ObjectStoreResult<ListResult> {
+        self.ensure_indexed().await?;
+
+        let index = self.index.read();
+        let prefix_str = prefix.map(|p| p.as_ref()).unwrap_or("");
+
+        let mut objects = Vec::new();
+        let mut common_prefixes = std::collections::HashSet::new();
+
+        for (path, entry) in &index.entries {
+            let path_str = path.as_ref();
+            if !path_str.starts_with(prefix_str) {
+                continue;
+            }
+
+            let relative = &path_str[prefix_str.len()..];
+            if relative.is_empty() {
+                continue;
+            }
+
+            if let Some(slash_pos) = relative.find('/') {
+                let dir_name = &relative[..=slash_pos];
+                let full_prefix = format!("{}{}", prefix_str, dir_name);
+                common_prefixes.insert(ObjectPath::from(full_prefix));
+            } else {
+                objects.push(ObjectMeta {
+                    location: path.clone(),
+                    last_modified: entry.modified,
+                    size: entry.size,
+                    e_tag: None,
+                    version: None,
+                });
+            }
+        }
+
+        Ok(ListResult {
+            objects,
+            common_prefixes: common_prefixes.into_iter().collect(),
+        })
+    }
+
+    async fn copy(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
+        Err(object_store::Error::NotSupported {
+            source: "Remote tar archives are read-only".into(),
+        })
+    }
+
+    async fn copy_if_not_exists(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
+        Err(object_store::Error::NotSupported {
+            source: "Remote tar archives are read-only".into(),
+        })
+    }
+
+    async fn rename(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
+        Err(object_store::Error::NotSupported {
+            source: "Remote tar archives are read-only".into(),
+        })
+    }
+
+    async fn rename_if_not_exists(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
+        Err(object_store::Error::NotSupported {
+            source: "Remote tar archives are read-only".into(),
+        })
+    }
+}
+
+// ============================================================================
 // Tar URL parsing
 // ============================================================================
 
-/// Parse a `tar+<scheme>://` URL into archive path and internal path.
+/// Represents the location of a tar archive — either local or remote.
+#[derive(Debug)]
+pub enum TarArchiveLocation {
+    /// Local filesystem path (read+write).
+    Local(PathBuf),
+    /// Remote object store (read-only). Contains the backing store and path to the .tar file.
+    Remote {
+        store: Arc<dyn ObjectStore>,
+        path: ObjectPath,
+    },
+}
+
+/// Parse a `tar+<scheme>://` URL into the archive location and internal path.
 ///
-/// # URL Format
-/// `tar+file:///<path-to-archive.tar>/<internal-path>`
-///
-/// Examples:
-/// - `tar+file:///home/user/data.tar/subdir/file.parquet`
-/// - `tar+file:///data.tar/` (root of archive)
+/// For `tar+file://` URLs, returns `Local` with a filesystem path.
+/// For other `tar+*://` URLs (s3, gs, azure, etc.), strips the `tar+` prefix,
+/// builds an ObjectStore for the inner scheme, and returns `Remote`.
 ///
 /// # Returns
-/// Tuple of (archive_path, internal_path)
-pub fn parse_tar_url(url: &Url) -> Result<(PathBuf, String), BundlebaseError> {
-    if !url.scheme().starts_with("tar+") {
-        return Err(format!("Expected 'tar+<scheme>' URL scheme, got '{}'", url.scheme()).into());
+/// Tuple of (TarArchiveLocation, internal_path)
+pub fn parse_tar_url(
+    url: &Url,
+    config: &BundleConfig,
+) -> Result<(TarArchiveLocation, String), BundlebaseError> {
+    let scheme = url.scheme();
+    if !scheme.starts_with("tar+") {
+        return Err(format!("Expected 'tar+<scheme>' URL scheme, got '{}'", scheme).into());
     }
 
     let full_path = url.path();
@@ -550,7 +958,6 @@ pub fn parse_tar_url(url: &Url) -> Result<(PathBuf, String), BundlebaseError> {
     let tar_idx = full_path
         .find(".tar/")
         .or_else(|| {
-            // Check if the path ends with .tar (no internal path)
             if full_path.ends_with(".tar") {
                 Some(full_path.len() - 4)
             } else {
@@ -559,14 +966,67 @@ pub fn parse_tar_url(url: &Url) -> Result<(PathBuf, String), BundlebaseError> {
         })
         .ok_or_else(|| BundlebaseError::from("tar+<scheme>:// URL must contain .tar in path"))?;
 
-    let archive_path = PathBuf::from(&full_path[..tar_idx + 4]); // Include .tar
+    let archive_path_str = &full_path[..tar_idx + 4]; // Include .tar
     let internal_path = full_path
         .get(tar_idx + 5..)
         .unwrap_or("")
         .trim_start_matches('/')
         .to_string();
 
-    Ok((archive_path, internal_path))
+    let inner_scheme = &scheme[4..]; // strip "tar+"
+
+    let location = if inner_scheme == "file" {
+        TarArchiveLocation::Local(PathBuf::from(archive_path_str))
+    } else {
+        // Build the inner URL: e.g. "s3://bucket/path/to/archive.tar"
+        // Reconstruct from the original URL but with the inner scheme and only the archive path
+        let inner_url_str = format!(
+            "{}:{}",
+            inner_scheme,
+            &url.as_str()[scheme.len() + 1..] // everything after "tar+<scheme>:"
+        );
+        // Parse to get the full URL, then truncate to just the archive path
+        let inner_full_url = Url::parse(&inner_url_str)?;
+
+        // Build a URL that points to just the archive .tar file
+        let archive_url_str = format!(
+            "{}://{}{}",
+            inner_scheme,
+            inner_full_url.authority(),
+            archive_path_str
+        );
+        let archive_url = Url::parse(&archive_url_str)?;
+
+        let store = super::object_store::build_object_store(
+            &archive_url,
+            &archive_url_str,
+            config,
+        )?;
+        let obj_path = ObjectPath::from(archive_path_str);
+
+        TarArchiveLocation::Remote {
+            store: Arc::from(store),
+            path: obj_path,
+        }
+    };
+
+    Ok((location, internal_path))
+}
+
+/// Construct the base tar URL string from the original URL and internal path.
+/// E.g., for `tar+s3://bucket/data.tar/some/file`, returns `tar+s3://bucket/data.tar`.
+fn base_tar_url(url: &Url, internal_path: &str) -> String {
+    let full = url.as_str();
+    if internal_path.is_empty() {
+        // URL might or might not end with "/"
+        full.trim_end_matches('/').to_string()
+    } else {
+        // Remove the "/internal_path" suffix
+        let suffix = format!("/{}", internal_path);
+        full.strip_suffix(&suffix)
+            .unwrap_or(full)
+            .to_string()
+    }
 }
 
 // ============================================================================
@@ -576,8 +1036,9 @@ pub fn parse_tar_url(url: &Url) -> Result<(PathBuf, String), BundlebaseError> {
 /// Tar file reader/writer - access to a single file within a tar archive.
 pub struct TarFile {
     url: Url,
-    store: Arc<TarObjectStore>,
+    store: Arc<dyn ObjectStore>,
     path: ObjectPath,
+    writable: bool,
 }
 
 impl Debug for TarFile {
@@ -591,21 +1052,30 @@ impl Debug for TarFile {
 
 impl TarFile {
     /// Create a TarFile from a `tar+<scheme>://` URL.
-    pub fn from_url(url: &Url) -> Result<Self, BundlebaseError> {
-        let (archive_path, internal_path) = parse_tar_url(url)?;
-        let store = Arc::new(TarObjectStore::new(archive_path)?);
+    pub fn from_url(url: &Url, config: &BundleConfig) -> Result<Self, BundlebaseError> {
+        let (location, internal_path) = parse_tar_url(url, config)?;
         let path = ObjectPath::from(internal_path.as_str());
+
+        let (store, writable): (Arc<dyn ObjectStore>, bool) = match location {
+            TarArchiveLocation::Local(tar_path) => {
+                (Arc::new(TarObjectStore::new(tar_path)?), true)
+            }
+            TarArchiveLocation::Remote { store, path: archive_path } => {
+                (Arc::new(ReadOnlyTarObjectStore::new(store, archive_path)), false)
+            }
+        };
 
         Ok(Self {
             url: url.clone(),
             store,
             path,
+            writable,
         })
     }
 
     /// Create a TarFile with an existing store.
-    pub fn new(url: Url, store: Arc<TarObjectStore>, path: ObjectPath) -> Self {
-        Self { url, store, path }
+    pub fn new(url: Url, store: Arc<dyn ObjectStore>, path: ObjectPath, writable: bool) -> Self {
+        Self { url, store, path, writable }
     }
 }
 
@@ -687,6 +1157,9 @@ impl IOReadFile for TarFile {
 #[async_trait]
 impl IOReadWriteFile for TarFile {
     async fn write(&self, data: Bytes) -> Result<(), BundlebaseError> {
+        if !self.writable {
+            return Err("Remote tar archives are read-only".into());
+        }
         let put_result = object_store::PutPayload::from_bytes(data);
         self.store.put(&self.path, put_result).await?;
         Ok(())
@@ -696,6 +1169,9 @@ impl IOReadWriteFile for TarFile {
         &self,
         mut source: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>>,
     ) -> Result<(), BundlebaseError> {
+        if !self.writable {
+            return Err("Remote tar archives are read-only".into());
+        }
         // NOTE: Tar format requires knowing file size before writing the entry header.
         // True streaming is not possible without significant protocol changes.
         // We must buffer the entire content to determine size.
@@ -723,9 +1199,10 @@ impl IOReadWriteFile for TarFile {
 /// Tar directory lister - access to list files within a tar archive.
 pub struct TarDir {
     url: Url,
-    store: Arc<TarObjectStore>,
+    store: Arc<dyn ObjectStore>,
     path: ObjectPath,
-    archive_path: PathBuf,
+    base_tar_url: String,
+    writable: bool,
 }
 
 impl Debug for TarDir {
@@ -739,16 +1216,26 @@ impl Debug for TarDir {
 
 impl TarDir {
     /// Create a TarDir from a `tar+<scheme>://` URL.
-    pub fn from_url(url: &Url) -> Result<Self, BundlebaseError> {
-        let (archive_path, internal_path) = parse_tar_url(url)?;
-        let store = Arc::new(TarObjectStore::new(archive_path.clone())?);
+    pub fn from_url(url: &Url, config: &BundleConfig) -> Result<Self, BundlebaseError> {
+        let (location, internal_path) = parse_tar_url(url, config)?;
         let path = ObjectPath::from(internal_path.as_str());
+        let tar_url = base_tar_url(url, &internal_path);
+
+        let (store, writable): (Arc<dyn ObjectStore>, bool) = match location {
+            TarArchiveLocation::Local(tar_path) => {
+                (Arc::new(TarObjectStore::new(tar_path)?), true)
+            }
+            TarArchiveLocation::Remote { store, path: archive_path } => {
+                (Arc::new(ReadOnlyTarObjectStore::new(store, archive_path)), false)
+            }
+        };
 
         Ok(Self {
             url: url.clone(),
             store,
             path,
-            archive_path,
+            base_tar_url: tar_url,
+            writable,
         })
     }
 }
@@ -776,10 +1263,10 @@ impl IOReadDir for TarDir {
                 location_str
             };
 
-            // Construct tar:// URL for file
+            // Construct tar URL for file using base_tar_url
             let file_url = format!(
-                "tar+file://{}/{}",
-                self.archive_path.display(),
+                "{}/{}",
+                self.base_tar_url,
                 if relative_path.is_empty() {
                     location_str.to_string()
                 } else {
@@ -806,8 +1293,8 @@ impl IOReadDir for TarDir {
         };
 
         let new_url = Url::parse(&format!(
-            "tar+file://{}/{}",
-            self.archive_path.display(),
+            "{}/{}",
+            self.base_tar_url,
             new_path.as_ref()
         ))?;
 
@@ -815,7 +1302,8 @@ impl IOReadDir for TarDir {
             url: new_url,
             store: self.store.clone(),
             path: new_path,
-            archive_path: self.archive_path.clone(),
+            base_tar_url: self.base_tar_url.clone(),
+            writable: self.writable,
         }))
     }
 
@@ -827,12 +1315,12 @@ impl IOReadDir for TarDir {
         };
 
         let new_url = Url::parse(&format!(
-            "tar+file://{}/{}",
-            self.archive_path.display(),
+            "{}/{}",
+            self.base_tar_url,
             new_path.as_ref()
         ))?;
 
-        Ok(Box::new(TarFile::new(new_url, self.store.clone(), new_path)))
+        Ok(Box::new(TarFile::new(new_url, self.store.clone(), new_path, self.writable)))
     }
 }
 
@@ -846,8 +1334,8 @@ impl IOReadWriteDir for TarDir {
         };
 
         let new_url = Url::parse(&format!(
-            "tar+file://{}/{}",
-            self.archive_path.display(),
+            "{}/{}",
+            self.base_tar_url,
             new_path.as_ref()
         ))?;
 
@@ -855,7 +1343,8 @@ impl IOReadWriteDir for TarDir {
             url: new_url,
             store: self.store.clone(),
             path: new_path,
-            archive_path: self.archive_path.clone(),
+            base_tar_url: self.base_tar_url.clone(),
+            writable: self.writable,
         }))
     }
 
@@ -867,12 +1356,12 @@ impl IOReadWriteDir for TarDir {
         };
 
         let new_url = Url::parse(&format!(
-            "tar+file://{}/{}",
-            self.archive_path.display(),
+            "{}/{}",
+            self.base_tar_url,
             new_path.as_ref()
         ))?;
 
-        Ok(Box::new(TarFile::new(new_url, self.store.clone(), new_path)))
+        Ok(Box::new(TarFile::new(new_url, self.store.clone(), new_path, self.writable)))
     }
 
     async fn rename(&self, _from: &str, _to: &str) -> Result<(), BundlebaseError> {
@@ -884,17 +1373,19 @@ impl IOReadWriteDir for TarDir {
 // TarIOFactory - Factory for creating Tar IO instances
 // ============================================================================
 
-/// Factory for Tar IO backends.
+/// Factory for Tar IO backends. Handles both local (`tar+file://`) and
+/// remote (`tar+s3://`, `tar+gs://`, `tar+azure://`, `tar+az://`) schemes.
 pub struct TarIOFactory;
 
 #[async_trait]
 impl IOFactory for TarIOFactory {
     fn schemes(&self) -> &[&str] {
-        &["tar+file"]
+        &["tar+file", "tar+s3", "tar+gs", "tar+azure", "tar+az"]
     }
 
-    fn supports_write(&self, _url: &Url) -> bool {
-        true // Tar supports append-only writes
+    fn supports_write(&self, url: &Url) -> bool {
+        // Only local tar archives support writes
+        url.scheme() == "tar+file"
     }
 
     fn supports_streaming_write(&self) -> bool {
@@ -906,33 +1397,39 @@ impl IOFactory for TarIOFactory {
     async fn create_reader(
         &self,
         url: &Url,
-        _config: Arc<BundleConfig>,
+        config: Arc<BundleConfig>,
     ) -> Result<Box<dyn IOReadFile>, BundlebaseError> {
-        Ok(Box::new(TarFile::from_url(url)?))
+        Ok(Box::new(TarFile::from_url(url, &config)?))
     }
 
     async fn create_lister(
         &self,
         url: &Url,
-        _config: Arc<BundleConfig>,
+        config: Arc<BundleConfig>,
     ) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
-        Ok(Box::new(TarDir::from_url(url)?))
+        Ok(Box::new(TarDir::from_url(url, &config)?))
     }
 
     async fn create_writable_lister(
         &self,
         url: &Url,
-        _config: Arc<BundleConfig>,
+        config: Arc<BundleConfig>,
     ) -> Result<Option<Box<dyn IOReadWriteDir>>, BundlebaseError> {
-        Ok(Some(Box::new(TarDir::from_url(url)?)))
+        if !self.supports_write(url) {
+            return Ok(None);
+        }
+        Ok(Some(Box::new(TarDir::from_url(url, &config)?)))
     }
 
     async fn create_writer(
         &self,
         url: &Url,
-        _config: Arc<BundleConfig>,
+        config: Arc<BundleConfig>,
     ) -> Result<Option<Box<dyn IOReadWriteFile>>, BundlebaseError> {
-        Ok(Some(Box::new(TarFile::from_url(url)?)))
+        if !self.supports_write(url) {
+            return Ok(None);
+        }
+        Ok(Some(Box::new(TarFile::from_url(url, &config)?)))
     }
 }
 
@@ -1052,48 +1549,348 @@ mod tests {
         assert!(matches!(result, Err(object_store::Error::NotFound { .. })));
     }
 
+    #[tokio::test]
+    async fn test_tar_store_skips_manifest_in_index() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let tar_path = temp_file.path().to_path_buf();
+
+        // Build a tar with a manifest entry and a data entry
+        {
+            let file = File::create(&tar_path).unwrap();
+            let mut builder = Builder::new(file);
+
+            let manifest_data = b"[]";
+            let mut header = Header::new_gnu();
+            header.set_size(manifest_data.len() as u64);
+            header.set_mode(0o644);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder.append_data(&mut header, TAR_MANIFEST_FILENAME, &manifest_data[..]).unwrap();
+
+            let file_data = b"hello";
+            let mut header = Header::new_gnu();
+            header.set_size(file_data.len() as u64);
+            header.set_mode(0o644);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder.append_data(&mut header, "data.txt", &file_data[..]).unwrap();
+
+            builder.finish().unwrap();
+        }
+
+        let store = TarObjectStore::new(tar_path).unwrap();
+        let results: Vec<_> = store.list(None).collect::<Vec<_>>().await;
+
+        // Should only see data.txt, not the manifest
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].as_ref().unwrap().location.as_ref(), "data.txt");
+    }
+
     // Tar URL parsing tests
 
     #[test]
     fn test_parse_tar_url_with_internal_path() {
+        let config = BundleConfig::new(None).unwrap();
         let url = Url::parse("tar+file:///home/user/data.tar/subdir/file.parquet").unwrap();
-        let (archive_path, internal_path) = parse_tar_url(&url).unwrap();
-        assert_eq!(archive_path, PathBuf::from("/home/user/data.tar"));
+        let (location, internal_path) = parse_tar_url(&url, &config).unwrap();
+        assert!(matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/home/user/data.tar")));
         assert_eq!(internal_path, "subdir/file.parquet");
     }
 
     #[test]
     fn test_parse_tar_url_root() {
+        let config = BundleConfig::new(None).unwrap();
         let url = Url::parse("tar+file:///data.tar/").unwrap();
-        let (archive_path, internal_path) = parse_tar_url(&url).unwrap();
-        assert_eq!(archive_path, PathBuf::from("/data.tar"));
+        let (location, internal_path) = parse_tar_url(&url, &config).unwrap();
+        assert!(matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/data.tar")));
         assert_eq!(internal_path, "");
     }
 
     #[test]
     fn test_parse_tar_url_no_internal_path() {
+        let config = BundleConfig::new(None).unwrap();
         let url = Url::parse("tar+file:///archive.tar").unwrap();
-        let (archive_path, internal_path) = parse_tar_url(&url).unwrap();
-        assert_eq!(archive_path, PathBuf::from("/archive.tar"));
+        let (location, internal_path) = parse_tar_url(&url, &config).unwrap();
+        assert!(matches!(location, TarArchiveLocation::Local(ref p) if *p == PathBuf::from("/archive.tar")));
         assert_eq!(internal_path, "");
     }
 
     #[test]
     fn test_parse_tar_url_wrong_scheme() {
+        let config = BundleConfig::new(None).unwrap();
         let url = Url::parse("file:///data.tar").unwrap();
-        let result = parse_tar_url(&url);
+        let result = parse_tar_url(&url, &config);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Expected 'tar+<scheme>'"));
     }
 
     #[test]
     fn test_parse_tar_url_no_tar_extension() {
+        let config = BundleConfig::new(None).unwrap();
         let url = Url::parse("tar+file:///data/file.txt").unwrap();
-        let result = parse_tar_url(&url);
+        let result = parse_tar_url(&url, &config);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
             .contains("must contain .tar"));
+    }
+
+    #[test]
+    fn test_parse_tar_url_s3_returns_remote() {
+        let config = BundleConfig::new(None).unwrap();
+        let url = Url::parse("tar+s3://mybucket/path/data.tar/some/file.csv").unwrap();
+        let result = parse_tar_url(&url, &config);
+        // This will fail because we don't have real S3 credentials,
+        // but we can verify it attempts to create a remote store
+        // (the error should be about building the store, not about parsing)
+        match result {
+            Ok((location, internal_path)) => {
+                assert!(matches!(location, TarArchiveLocation::Remote { .. }));
+                assert_eq!(internal_path, "some/file.csv");
+            }
+            Err(e) => {
+                // Expected: S3 builder may fail without credentials, that's OK
+                let msg = e.to_string();
+                assert!(
+                    !msg.contains("Expected 'tar+<scheme>'") && !msg.contains("must contain .tar"),
+                    "Should not fail on URL parsing, got: {}",
+                    msg
+                );
+            }
+        }
+    }
+
+    // Offset computation tests
+
+    #[test]
+    fn test_pad512() {
+        assert_eq!(pad512(0), 0);
+        assert_eq!(pad512(1), 512);
+        assert_eq!(pad512(511), 512);
+        assert_eq!(pad512(512), 512);
+        assert_eq!(pad512(513), 1024);
+        assert_eq!(pad512(1024), 1024);
+    }
+
+    #[test]
+    fn test_compute_offsets_empty() {
+        let result = compute_offsets(100, &[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_compute_offsets_single_entry() {
+        let entries = vec![("data.txt".to_string(), 100u64)];
+        let result = compute_offsets(50, &entries);
+
+        // manifest: header(512) + pad512(50) = 512 + 512 = 1024
+        // data.txt: header at 1024, data at 1024+512 = 1536
+        let entry = result.get(&ObjectPath::from("data.txt")).unwrap();
+        assert_eq!(entry.offset, 1536);
+        assert_eq!(entry.size, 100);
+    }
+
+    #[test]
+    fn test_compute_offsets_multiple_entries() {
+        let entries = vec![
+            ("file1.txt".to_string(), 100u64),
+            ("file2.txt".to_string(), 600u64),
+        ];
+        let result = compute_offsets(50, &entries);
+
+        // manifest: header(512) + pad512(50) = 512 + 512 = 1024
+        // file1: header at 1024, data at 1536, size=100, padded=512, next at 1536+512=2048
+        // file2: header at 2048, data at 2560, size=600
+        let e1 = result.get(&ObjectPath::from("file1.txt")).unwrap();
+        assert_eq!(e1.offset, 1536);
+        assert_eq!(e1.size, 100);
+
+        let e2 = result.get(&ObjectPath::from("file2.txt")).unwrap();
+        assert_eq!(e2.offset, 2560);
+        assert_eq!(e2.size, 600);
+    }
+
+    // ReadOnlyTarObjectStore tests
+
+    #[tokio::test]
+    async fn test_readonly_tar_store_with_manifest() {
+        // Create a tar file with a manifest, then wrap it in InMemory store
+        let mut tar_buffer = Vec::new();
+        {
+            let mut builder = Builder::new(&mut tar_buffer);
+
+            // Write manifest as first entry
+            let manifest = serde_json::json!([
+                {"name": "hello.txt", "size": 5},
+                {"name": "subdir/world.txt", "size": 11},
+            ]);
+            let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+
+            let mut header = Header::new_gnu();
+            header.set_size(manifest_bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, TAR_MANIFEST_FILENAME, &manifest_bytes[..])
+                .unwrap();
+
+            // Write hello.txt
+            let data = b"hello";
+            let mut header = Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder.append_data(&mut header, "hello.txt", &data[..]).unwrap();
+
+            // Write subdir/world.txt
+            let data = b"hello world";
+            let mut header = Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder.append_data(&mut header, "subdir/world.txt", &data[..]).unwrap();
+
+            builder.finish().unwrap();
+        }
+
+        // Put the tar into an InMemory object store
+        let mem_store = object_store::memory::InMemory::new();
+        let archive_path = ObjectPath::from("test.tar");
+        mem_store
+            .put(&archive_path, PutPayload::from_bytes(Bytes::from(tar_buffer)))
+            .await
+            .unwrap();
+
+        // Create ReadOnlyTarObjectStore
+        let store = ReadOnlyTarObjectStore::new(Arc::new(mem_store), archive_path);
+
+        // Test reading hello.txt
+        let result = store.get(&ObjectPath::from("hello.txt")).await.unwrap();
+        let bytes = result.bytes().await.unwrap();
+        assert_eq!(&bytes[..], b"hello");
+
+        // Test reading subdir/world.txt
+        let result = store.get(&ObjectPath::from("subdir/world.txt")).await.unwrap();
+        let bytes = result.bytes().await.unwrap();
+        assert_eq!(&bytes[..], b"hello world");
+
+        // Test head
+        let meta = store.head(&ObjectPath::from("hello.txt")).await.unwrap();
+        assert_eq!(meta.size, 5);
+
+        // Test not found
+        let err = store.get(&ObjectPath::from("nope.txt")).await;
+        assert!(matches!(err, Err(object_store::Error::NotFound { .. })));
+
+        // Test list
+        let all: Vec<_> = store.list(None).collect::<Vec<_>>().await;
+        assert_eq!(all.len(), 2);
+
+        // Test writes are rejected
+        let put_err = store
+            .put(
+                &ObjectPath::from("new.txt"),
+                PutPayload::from_bytes(Bytes::from("data")),
+            )
+            .await;
+        assert!(matches!(put_err, Err(object_store::Error::NotSupported { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_readonly_tar_store_no_manifest_error() {
+        // Create a tar without a manifest
+        let mut tar_buffer = Vec::new();
+        {
+            let mut builder = Builder::new(&mut tar_buffer);
+
+            let data = b"hello";
+            let mut header = Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder.append_data(&mut header, "hello.txt", &data[..]).unwrap();
+
+            builder.finish().unwrap();
+        }
+
+        let mem_store = object_store::memory::InMemory::new();
+        let archive_path = ObjectPath::from("no_manifest.tar");
+        mem_store
+            .put(&archive_path, PutPayload::from_bytes(Bytes::from(tar_buffer)))
+            .await
+            .unwrap();
+
+        let store = ReadOnlyTarObjectStore::new(Arc::new(mem_store), archive_path);
+
+        // Should fail with a clear error about missing manifest
+        let err = store.get(&ObjectPath::from("hello.txt")).await;
+        assert!(err.is_err());
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("bundlebase manifest"),
+            "Error should mention manifest, got: {}",
+            msg
+        );
+        assert!(
+            msg.contains("export_tar()"),
+            "Error should mention export_tar(), got: {}",
+            msg
+        );
+    }
+
+    // base_tar_url tests
+
+    #[test]
+    fn test_base_tar_url_with_internal_path() {
+        let url = Url::parse("tar+file:///path/to/data.tar/subdir/file.txt").unwrap();
+        assert_eq!(
+            base_tar_url(&url, "subdir/file.txt"),
+            "tar+file:///path/to/data.tar"
+        );
+    }
+
+    #[test]
+    fn test_base_tar_url_empty_internal() {
+        let url = Url::parse("tar+file:///path/to/data.tar/").unwrap();
+        assert_eq!(
+            base_tar_url(&url, ""),
+            "tar+file:///path/to/data.tar"
+        );
+    }
+
+    #[test]
+    fn test_base_tar_url_no_trailing_slash() {
+        let url = Url::parse("tar+file:///path/to/data.tar").unwrap();
+        assert_eq!(
+            base_tar_url(&url, ""),
+            "tar+file:///path/to/data.tar"
+        );
+    }
+
+    // TarIOFactory tests
+
+    #[test]
+    fn test_tar_factory_schemes() {
+        let factory = TarIOFactory;
+        let schemes = factory.schemes();
+        assert!(schemes.contains(&"tar+file"));
+        assert!(schemes.contains(&"tar+s3"));
+        assert!(schemes.contains(&"tar+gs"));
+        assert!(schemes.contains(&"tar+azure"));
+        assert!(schemes.contains(&"tar+az"));
+    }
+
+    #[test]
+    fn test_tar_factory_supports_write() {
+        let factory = TarIOFactory;
+        assert!(factory.supports_write(&Url::parse("tar+file:///data.tar/file.txt").unwrap()));
+        assert!(!factory.supports_write(&Url::parse("tar+s3://bucket/data.tar/file.txt").unwrap()));
+        assert!(!factory.supports_write(&Url::parse("tar+gs://bucket/data.tar/file.txt").unwrap()));
+        assert!(!factory.supports_write(&Url::parse("tar+azure://container/data.tar/file.txt").unwrap()));
     }
 }

@@ -3,7 +3,7 @@ use crate::bundle::Operation;
 use crate::data::DataReaderFactory;
 use crate::functions::FunctionRegistry;
 use crate::io::plugin::object_store::ObjectStoreFile;
-use crate::io::{writable_dir_from_url, DataStorage, IOReadWriteDir, IOReadWriteFile};
+use crate::io::{writable_dir_with_store, DataStorage, IOReadWriteDir, IOReadWriteFile};
 use crate::{BundleBuilder, BundleConfig, BundleFacade};
 use arrow_schema::SchemaRef;
 use parking_lot::RwLock;
@@ -85,7 +85,10 @@ pub fn random_memory_url() -> Url {
 /// Create a random memory directory for testing.
 /// Returns an Arc<dyn IOReadWriteDir> that can be used in tests.
 pub fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
-    writable_dir_from_url(&random_memory_url(), BundleConfig::new(None).unwrap().into()).unwrap()
+    let url = random_memory_url();
+    let config: Arc<BundleConfig> = BundleConfig::new(None).unwrap().into();
+    let store = crate::io::get_memory_store();
+    writable_dir_with_store(&url, store, &object_store::path::Path::from(url.path()), config).unwrap()
 }
 
 /// Internal function for unit tests that need the concrete ObjectStoreDir type.

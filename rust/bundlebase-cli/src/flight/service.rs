@@ -231,6 +231,7 @@ impl BundlebaseFlightSqlService {
                 .await
                 .map_err(|e| Status::internal(format!("Failed to open bundle: {}", e)))?
                 .extend(None)
+                .await
                 .map_err(|e| Status::internal(format!("Failed to extend bundle: {}", e)))?
         };
 

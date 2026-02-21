@@ -23,7 +23,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use url::Url;
 
-use super::tar::TarObjectStore;
 
 // ── Custom scheme registry ─────────────────────────────────────────
 
@@ -132,34 +131,6 @@ pub(crate) fn parse_url(
         }
     }
 
-    // Handle tar+<scheme>:// compound scheme (e.g., tar+file://, tar+s3://)
-    if let Some(inner_scheme) = url.scheme().strip_prefix("tar+") {
-        // Reconstruct the inner URL with the original scheme
-        // AfterScheme position is right after the scheme name but before the ':'
-        let inner_url_str = format!("{}:{}", inner_scheme, &url.as_str()[url.scheme().len() + 1..]);
-        let inner_url = Url::parse(&inner_url_str)?;
-
-        let full_path = inner_url.path();
-        // Find where the .tar file ends and internal path begins
-        let (tar_path, internal_path) = if let Some(tar_idx) = full_path.find(".tar") {
-            let tar_end = tar_idx + 4;
-            let tar_file = &full_path[..tar_end];
-            let internal = if tar_end < full_path.len() {
-                &full_path[tar_end..]
-            } else {
-                "/"
-            };
-            (tar_file, internal)
-        } else {
-            (full_path, "/")
-        };
-
-        let store = TarObjectStore::new(std::path::PathBuf::from(tar_path)).map_err(|e| {
-            format!("Failed to create TarObjectStore for {}: {}", tar_path, e)
-        })?;
-        return Ok((Arc::new(store), ObjectPath::from(internal_path)));
-    }
-
     if url.scheme() == EMPTY_SCHEME {
         let store: Arc<dyn ObjectStore> = get_null_store();
 
@@ -186,7 +157,7 @@ pub(crate) fn parse_url(
 /// Starts with Builder::from_env() to pick up environment variables,
 /// then applies config values on top via `config.get(key, &scope)`.
 /// TODO: use config first, then fallback to defaults
-fn build_object_store(
+pub(crate) fn build_object_store(
     url: &Url,
     url_str: &str,
     config: &BundleConfig,
@@ -637,7 +608,7 @@ impl Display for ObjectStoreDir {
     }
 }
 
-fn str_to_url(path: &str) -> Result<Url, BundlebaseError> {
+pub(crate) fn str_to_url(path: &str) -> Result<Url, BundlebaseError> {
     if path.contains(":") {
         Ok(Url::parse(path)?)
     } else {
@@ -701,10 +672,6 @@ impl IOFactory for ObjectStoreIOFactory {
         url: &Url,
         config: Arc<BundleConfig>,
     ) -> Result<Option<Box<dyn IOReadWriteDir>>, BundlebaseError> {
-        // empty:// is read-only
-        if url.scheme() == "empty" {
-            return Ok(None);
-        }
         Ok(Some(Box::new(ObjectStoreDir::from_url(url, config)?)))
     }
 

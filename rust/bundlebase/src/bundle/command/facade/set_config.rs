@@ -132,7 +132,7 @@ impl BundleFacadeCommand for SetConfigCommand {
             &self.scope,
             &self.key,
             &self.value,
-        )?;
+        ).await?;
 
         let is_secure = ConfigKey::is_key_secure(&self.scope, &self.key);
         let display_value = if is_secure {

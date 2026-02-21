@@ -36,7 +36,7 @@ pub async fn latest_commit(
     match last_file {
         None => Ok(None),
         Some(file) => {
-            let io_file = readable_file_from_url(&file.url, BundleConfig::new(None)?.into())?;
+            let io_file = readable_file_from_url(&file.url, BundleConfig::new(None)?.into()).await?;
             let yaml = io_file.read_str().await?;
             Ok(yaml.map(|content| {
                 (

@@ -33,7 +33,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     assert_eq!(None, opened1.from());
     assert_eq!(*temp1.url(), opened1.url());
 
-    let mut c2 = opened1.extend(Some(&temp2.url().to_string()))?;
+    let mut c2 = opened1.extend(Some(&temp2.url().to_string())).await?;
     assert_eq!(Some(temp1.url()), c2.bundle().from().as_ref());
     assert_eq!(*temp2.url(), c2.url());
 
@@ -74,7 +74,7 @@ async fn test_simple_extend_chain() -> Result<(), BundlebaseError> {
     // Extend and commit
     let base1 = Bundle::open(&temp1.to_string(), None).await?;
     assert_eq!(1, base1.history().len());
-    let mut c2 = base1.extend(Some(&temp2.to_string()))?;
+    let mut c2 = base1.extend(Some(&temp2.to_string())).await?;
     c2.drop_column("country").await?;
     c2.commit("Extended commit").await?;
 
@@ -106,12 +106,12 @@ async fn test_lazy_history_traversal() -> Result<(), BundlebaseError> {
     c1.commit("Base commit").await?;
 
     let base1 = Bundle::open(&temp1.to_string(), None).await?;
-    let mut c2 = base1.extend(Some(&temp2.to_string()))?;
+    let mut c2 = base1.extend(Some(&temp2.to_string())).await?;
     c2.drop_column("country").await?;
     c2.commit("Second commit").await?;
 
     let base2 = Bundle::open(&temp2.to_string(), None).await?;
-    let mut c3 = base2.extend(Some(&temp3.to_string()))?;
+    let mut c3 = base2.extend(Some(&temp3.to_string())).await?;
     c3.drop_column("phone").await?;
     c3.commit("Third commit").await?;
 
@@ -166,7 +166,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
     // Read source data and write to local location
     let source_obj =
-        readable_file_from_url(&Url::parse(source_file)?, BundleConfig::new(None)?.into())?;
+        readable_file_from_url(&Url::parse(source_file)?, BundleConfig::new(None)?.into()).await?;
     let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?
@@ -179,7 +179,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
     // Extend to Bundle B in different location
     let bundle_a_reopened = Bundle::open(&temp1.url().to_string(), None).await?;
-    let mut bundle_b = bundle_a_reopened.extend(Some(&temp2.url().to_string()))?;
+    let mut bundle_b = bundle_a_reopened.extend(Some(&temp2.url().to_string())).await?;
     bundle_b.drop_column("country").await?;
     bundle_b.commit("Bundle B extends A").await?;
 
@@ -240,7 +240,7 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     let base1 = Bundle::open(&temp1.url().to_string(), None).await?;
     assert_eq!(base_id, base1.id(), "Opened bundle should have same ID as InitCommit");
 
-    let mut c2 = base1.extend(Some(&temp2.url().to_string()))?;
+    let mut c2 = base1.extend(Some(&temp2.url().to_string())).await?;
     c2.drop_column("country").await?;
     c2.commit("Second commit").await?;
 
@@ -265,7 +265,7 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     );
 
     // Extend again to third bundle and verify ID is still the same
-    let mut c3 = base2.extend(Some(&temp3.url().to_string()))?;
+    let mut c3 = base2.extend(Some(&temp3.url().to_string())).await?;
     c3.drop_column("phone").await?;
     c3.commit("Third commit").await?;
 

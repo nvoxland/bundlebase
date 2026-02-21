@@ -31,7 +31,7 @@ async fn copy_test_file(
     target_name: &str,
 ) -> Result<(), BundlebaseError> {
     let source_obj =
-        readable_file_from_url(&Url::parse(test_file)?, BundleConfig::new(None)?.into())?;
+        readable_file_from_url(&Url::parse(test_file)?, BundleConfig::new(None)?.into()).await?;
     let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?
@@ -404,7 +404,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
 
     // Extend to new location
     let loaded = Bundle::open(bundle_dir1.url().as_str(), None).await?;
-    let mut extended = loaded.extend(Some(bundle_dir2.url().as_str()))?;
+    let mut extended = loaded.extend(Some(bundle_dir2.url().as_str())).await?;
 
     // Add a new file to source
     copy_test_file(

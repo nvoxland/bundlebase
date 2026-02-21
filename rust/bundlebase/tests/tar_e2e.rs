@@ -60,7 +60,7 @@ async fn test_commit_to_tar() {
     let opened_bundle = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
-    let mut tar_builder = BundleBuilder::extend(opened_bundle.into(), None).unwrap();
+    let mut tar_builder = BundleBuilder::extend(opened_bundle.into(), None).await.unwrap();
     tar_builder.filter("id > 100", vec![]).await.unwrap();
     tar_builder.commit("v2 - filtered").await.unwrap();
 
@@ -97,7 +97,7 @@ async fn test_multiple_commits_to_tar() {
         let opened = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
             .await
             .unwrap();
-        let mut builder = BundleBuilder::extend(opened.into(), None).unwrap();
+        let mut builder = BundleBuilder::extend(opened.into(), None).await.unwrap();
         builder
             .filter(&format!("id > {}", i * 50), vec![])
             .await
@@ -165,7 +165,7 @@ async fn test_create_index_in_tar() {
     let opened = Bundle::open(&format!("tar+file://{}", tar_path.display()), None)
         .await
         .unwrap();
-    let mut builder = BundleBuilder::extend(opened.into(), None).unwrap();
+    let mut builder = BundleBuilder::extend(opened.into(), None).await.unwrap();
     builder.create_index(&["id"], IndexType::Column, None).await.unwrap();
     builder.commit("v2 - added index").await.unwrap();
 

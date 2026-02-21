@@ -278,17 +278,22 @@ impl PyBundle {
     }
 
     #[pyo3(signature = (data_dir=None))]
-    fn extend(
+    fn extend<'py>(
         &self,
+        py: Python<'py>,
         data_dir: Option<&str>,
-    ) -> PyResult<super::builder::PyBundleBuilder> {
-        let builder = self.inner.extend(data_dir).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Failed to extend bundle: {}",
-                e
-            ))
-        })?;
-        Ok(super::builder::PyBundleBuilder::new(builder))
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let data_dir_owned = data_dir.map(|s| s.to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let builder = inner.extend(data_dir_owned.as_deref()).await.map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to extend bundle: {}",
+                    e
+                ))
+            })?;
+            Ok(super::builder::PyBundleBuilder::new(builder))
+        })
     }
 
     #[pyo3(signature = (sql, params=None))]
@@ -394,6 +399,7 @@ impl PyBundle {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
                 .set_config(&scope, &key, &value)
+                .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                         "Failed to set config '{}': {}",

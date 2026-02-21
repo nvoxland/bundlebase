@@ -68,7 +68,7 @@ impl ReplaceBlockOp {
             hasher.update(new_version.as_bytes());
             hex::encode(hasher.finalize())
         } else {
-            let file = readable_file_from_path(new_location, builder.data_dir(), builder.config())?;
+            let file = readable_file_from_path(new_location, builder.data_dir(), builder.config()).await?;
             file.compute_hash().await?
         };
 

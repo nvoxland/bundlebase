@@ -282,7 +282,7 @@ impl BundleBuilderCommand for VerifyDataCommand {
 
             // Compute the actual hash
             let data_dir = builder.bundle().data_dir();
-            let file = match readable_file_from_path(&location, data_dir, config.clone()) {
+            let file = match readable_file_from_path(&location, data_dir, config.clone()).await {
                 Ok(f) => f,
                 Err(e) => {
                     results.push(FileVerificationResult {
