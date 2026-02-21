@@ -68,6 +68,7 @@ _original_methods = {
     # Column operations
     "drop_column": _PyBundleBuilder.drop_column,
     "rename_column": _PyBundleBuilder.rename_column,
+    "standardize_column_names": _PyBundleBuilder.standardize_column_names,
 
     # Row operations
     "filter": _PyBundleBuilder.filter,

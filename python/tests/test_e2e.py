@@ -1976,3 +1976,36 @@ async def test_search_wrong_index_name_error():
 
     err_msg = str(exc_info.value)
     assert "nonexistent" in err_msg, "Error should mention the requested index name"
+
+
+@pytest.mark.asyncio
+async def test_standardize_column_names():
+    """Test that standardize_column_names() converts column names to lowercase+underscore."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    # Before standardization, columns have spaces and mixed case
+    schema_before = await c.schema()
+    original_names = [f.name for f in schema_before]
+    assert "Customer Id" in original_names
+    assert "First Name" in original_names
+    assert "Phone 1" in original_names
+
+    # Standardize
+    c = await c.standardize_column_names()
+
+    # After standardization, all names should be lowercase+underscore only
+    schema_after = await c.schema()
+    standardized_names = [f.name for f in schema_after]
+    for name in standardized_names:
+        assert name == name.lower(), f"Column '{name}' is not lowercase"
+        assert all(
+            c.isalnum() or c == '_' for c in name
+        ), f"Column '{name}' contains non-alphanumeric/underscore characters"
+
+    assert "customer_id" in standardized_names
+    assert "first_name" in standardized_names
+    assert "phone_1" in standardized_names
+
+    # Verify data is still accessible
+    assert await c.num_rows() == 100

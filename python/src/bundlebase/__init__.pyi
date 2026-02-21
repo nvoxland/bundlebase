@@ -563,6 +563,21 @@ class PyBundleBuilder:
         """
         ...
 
+    def standardize_column_names(self) -> "OperationChain":
+        """
+        Queue a standardize_column_names operation.
+
+        Converts all column names to lowercase+underscore identifiers
+        that work without quoting in SQL.
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.standardize_column_names()
+        """
+        ...
+
     def rename_column(self, old_name: str, new_name: str) -> "OperationChain":
         """
         Queue a rename_column operation.
@@ -1156,6 +1171,10 @@ class OperationChain:
         """Queue a drop_column operation."""
         ...
 
+    def standardize_column_names(self) -> "OperationChain":
+        """Queue a standardize_column_names operation."""
+        ...
+
     def rename_column(self, old_name: str, new_name: str) -> "OperationChain":
         """Queue a rename_column operation."""
         ...
@@ -1278,6 +1297,10 @@ class CreateChain:
         """Queue a drop_column operation."""
         ...
 
+    def standardize_column_names(self) -> "CreateChain":
+        """Queue a standardize_column_names operation."""
+        ...
+
     def rename_column(self, old_name: str, new_name: str) -> "CreateChain":
         """Queue a rename_column operation."""
         ...
@@ -1398,6 +1421,10 @@ class ExtendChain:
 
     def drop_column(self, name: str) -> "ExtendChain":
         """Queue a drop_column operation."""
+        ...
+
+    def standardize_column_names(self) -> "ExtendChain":
+        """Queue a standardize_column_names operation."""
         ...
 
     def rename_column(self, old_name: str, new_name: str) -> "ExtendChain":

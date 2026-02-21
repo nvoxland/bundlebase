@@ -977,6 +977,13 @@ impl BundleBuilder {
         Ok(self)
     }
 
+    /// Standardize all column names to lowercase+underscore identifiers.
+    pub async fn standardize_column_names(&self) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::StandardizeColumnNamesCommand;
+        self.execute_command(StandardizeColumnNamesCommand).await?;
+        Ok(self)
+    }
+
     /// Filter rows with a SELECT query.
     /// Parameters can be referenced as $1, $2, etc. in the query.
     pub async fn filter(

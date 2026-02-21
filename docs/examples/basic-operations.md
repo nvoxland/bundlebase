@@ -121,6 +121,20 @@ c = await (bb.create("memory:///")
 df = await c.to_pandas()
 ```
 
+### Standardizing Column Names
+
+```python
+import bundlebase as bb
+
+# Convert messy column names to clean identifiers
+# e.g. "Customer Id" -> "customer_id", "Phone 1" -> "phone_1"
+c = await (bb.create("memory:///")
+    .attach("file:///path/customers.csv")
+    .standardize_column_names())
+
+df = await c.to_pandas()
+```
+
 ## Data Export
 
 ### Pandas DataFrame
