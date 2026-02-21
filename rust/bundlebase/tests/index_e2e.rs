@@ -965,3 +965,71 @@ async fn test_search_single_arg_error_with_multiple_text_indexes() -> Result<(),
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_create_index_after_rename_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Rename a column, then create an index on the new name
+    bundle.rename_column("City", "city").await?;
+    bundle
+        .create_index(&["city"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Index on renamed column").await?;
+
+    // Verify the index works by querying with the new column name
+    let stream = bundle
+        .query(
+            "SELECT \"Index\" FROM bundle WHERE city = 'East Leonard'",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(
+        num_rows, 1,
+        "Query on renamed+indexed column should return 1 row"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_create_index_after_standardize_column_names() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // standardize_column_names lowercases and replaces spaces/special chars
+    bundle.standardize_column_names().await?;
+    bundle
+        .create_index(&["city"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Index after standardize").await?;
+
+    // Verify the index works
+    let stream = bundle
+        .query(
+            "SELECT \"index\" FROM bundle WHERE city = 'East Leonard'",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(
+        num_rows, 1,
+        "Query on standardized+indexed column should return 1 row"
+    );
+
+    Ok(())
+}

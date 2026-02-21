@@ -1178,6 +1178,24 @@ impl BundleBuilder {
 
             debug!("Checking index on {:?} (lookup col: {})", &index_columns, &lookup_col);
 
+            // Resolve each logical index column name to its physical block column name.
+            // This is necessary because rename operations (e.g., standardize_column_names)
+            // create a logical projection with new names, but blocks still use the original
+            // physical column names.
+            let mut physical_columns = Vec::with_capacity(index_columns.len());
+            for col in &index_columns {
+                let col_sources = sql::column_sources_from_df(col.as_str(), &df, Some(&packs)).await?;
+                if let Some(ref sources) = col_sources {
+                    if let Some((_table, phys_col)) = sources.first() {
+                        physical_columns.push(phys_col.clone());
+                    } else {
+                        physical_columns.push(col.clone());
+                    }
+                } else {
+                    physical_columns.push(col.clone());
+                }
+            }
+
             // Pass packs to expand pack tables into block tables
             let sources = match sql::column_sources_from_df(
                 lookup_col.as_str(),
@@ -1203,9 +1221,9 @@ impl BundleBuilder {
                 }
             };
 
-            // source_col is unused: for multi-column text indexes, we only need the source_table
-            // to identify the block. The lookup_col (first index column) is used solely to find
-            // which blocks contain data for this index.
+            // Use source_table to identify blocks. Physical column names are resolved above
+            // and passed to IndexBlocksOp::setup so it can find columns in blocks even after
+            // rename operations.
             for (source_table, _source_col) in sources {
                 // Extract block ID from table name "blocks.__block_{hex_id}"
                 let block_id = DataBlock::parse_id(&source_table).ok_or_else(|| {
@@ -1232,7 +1250,7 @@ impl BundleBuilder {
 
                 if needs_index {
                     blocks_to_index
-                        .entry((*index_id, index_columns.clone()))
+                        .entry((*index_id, physical_columns.clone()))
                         .or_default()
                         .push((block_id, block_version));
                 }
