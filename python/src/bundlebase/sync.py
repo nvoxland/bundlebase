@@ -318,12 +318,9 @@ class SyncBundle:
         Raises:
             ValueError: If data_dir is invalid
         """
-        # extend() is synchronous in Rust, so we call the original method directly
-        original_extend = _ORIGINAL_METHODS.get("extend")
-        if original_extend:
-            async_extended = original_extend(self._async, data_dir)
-        else:
-            async_extended = self._async.extend(data_dir)
+        # extend() is async in Rust, so we need to await it
+        coro = _call_original_method(self._async, "extend", data_dir)
+        async_extended = _loop_manager.run_sync(coro)
         return SyncBundleBuilder(async_extended)
 
     def query(self, sql: str, params: Optional[List[Any]] = None) -> SyncQueryResult:
@@ -550,8 +547,9 @@ class SyncBundleBuilder(SyncBundle):
             extended = c.extend()
             extended.filter("active = true", [])
         """
-        # extend() is synchronous in Rust on PyBundleBuilder, call it directly
-        async_extended = self._async.extend(data_dir)
+        # extend() is async in Rust, so we need to await it
+        coro = _call_original_method(self._async, "extend", data_dir)
+        async_extended = _loop_manager.run_sync(coro)
         return SyncBundleBuilder(async_extended)
 
     def query(self, sql: str, params: Optional[List[Any]] = None) -> SyncQueryResult:

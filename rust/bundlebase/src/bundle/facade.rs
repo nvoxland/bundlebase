@@ -73,7 +73,7 @@ pub trait BundleFacade: Send + Sync {
     /// let builder = bundle.extend(None)?;
     /// builder.filter("active = true", vec![]).await?;
     /// ```
-    fn extend(
+    async fn extend(
         &self,
         data_dir: Option<&str>,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError>;
@@ -291,7 +291,7 @@ pub trait BundleFacade: Send + Sync {
     /// * `scope` - Normalized scope for this config value.
     /// * `key` - Configuration key. Supports compound `"scope__key"` format.
     /// * `value` - Configuration value
-    fn set_config(
+    async fn set_config(
         &self,
         scope: &Scope,
         key: &str,

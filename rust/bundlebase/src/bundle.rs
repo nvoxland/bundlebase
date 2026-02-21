@@ -190,7 +190,7 @@ impl Bundle {
         );
 
         let bundle_config = Arc::new(BundleConfig::new(passed_config.as_ref())?);
-        let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, Arc::clone(&bundle_config))?));
+        let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, Arc::clone(&bundle_config)).await?));
 
         let bundle = Arc::new(Self {
             ctx: Arc::clone(&ctx),
@@ -288,10 +288,10 @@ impl Bundle {
         arc_bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
 
         // Refresh data_dir with the config
-        arc_bundle.refresh_data_dir()?;
+        arc_bundle.refresh_data_dir().await?;
 
         Self::open_recursive(
-            writable_dir_from_str(path, arc_bundle.config())?
+            writable_dir_from_str(path, arc_bundle.config()).await?
                 .url()
                 .as_str(),
             &mut visited,
@@ -314,7 +314,7 @@ impl Bundle {
             );
         }
 
-        let data_dir = writable_dir_from_str(url, bundle.config())?;
+        let data_dir = writable_dir_from_str(url, bundle.config()).await?;
         let manifest_dir = data_dir.writable_subdir(META_DIR)?;
 
         debug!("Loading initial commit from {}", INIT_FILENAME);
@@ -402,7 +402,7 @@ impl Bundle {
         for manifest_file_info in manifest_files {
             *bundle.last_manifest_version.write() = manifest_version(manifest_file_info.filename().unwrap_or(""));
             // Create IOFile from FileInfo to read the manifest
-            let manifest_file = readable_file_from_url(&manifest_file_info.url, bundle.config())?;
+            let manifest_file = readable_file_from_url(&manifest_file_info.url, bundle.config()).await?;
             let mut commit: BundleCommit = read_yaml(manifest_file.as_ref()).await?.ok_or_else(|| {
                 BundlebaseError::from(format!("Failed to read manifest: {}", manifest_file_info.url))
             })?;
@@ -536,9 +536,9 @@ impl Bundle {
 
     /// Recreate data_dir from the current URL + config.
     /// Called after SaveConfigOp changes config.
-    pub(crate) fn refresh_data_dir(&self) -> Result<(), BundlebaseError> {
+    pub(crate) async fn refresh_data_dir(&self) -> Result<(), BundlebaseError> {
         let url = self.data_dir.read().url().clone();
-        *self.data_dir.write() = writable_dir_from_url(&url, self.config())?;
+        *self.data_dir.write() = writable_dir_from_url(&url, self.config()).await?;
         Ok(())
     }
 
@@ -873,7 +873,7 @@ impl Bundle {
     ) -> Result<(String, bool), BundlebaseError> {
         use crate::io::readable_file_from_path;
 
-        let file = readable_file_from_path(location, self.data_dir(), self.config())?;
+        let file = readable_file_from_path(location, self.data_dir(), self.config()).await?;
         let actual_hash = file.compute_hash().await?;
 
         let passed = match expected_hash {
@@ -1054,11 +1054,11 @@ impl BundleFacade for Bundle {
         Ok(self.dataframe.dataframe())
     }
 
-    fn extend(
+    async fn extend(
         &self,
         data_dir: Option<&str>,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
-        BundleBuilder::extend(Arc::new(self.clone()), data_dir)
+        BundleBuilder::extend(Arc::new(self.clone()), data_dir).await
     }
 
     async fn query(
@@ -1120,10 +1120,14 @@ impl BundleFacade for Bundle {
 
         debug!("Exporting {} files to tar archive", files.len());
 
-        for file in files {
-            // Extract relative path from file URL
+        // First pass: collect relative paths and sizes for the manifest.
+        // FileInfo.size comes from list_files() metadata, so no extra I/O needed.
+        let mut manifest_entries: Vec<serde_json::Value> = Vec::with_capacity(files.len());
+        let base_url = data_dir.url();
+        let mut relative_paths: Vec<String> = Vec::with_capacity(files.len());
+
+        for file in &files {
             let file_url = &file.url;
-            let base_url = data_dir.url();
 
             let relative_path = if file_url.as_str().starts_with(base_url.as_str()) {
                 &file_url.as_str()[base_url.as_str().len()..]
@@ -1135,13 +1139,46 @@ impl BundleFacade for Bundle {
                     .into());
             };
 
-            // Remove leading slash if present
-            let relative_path = relative_path.trim_start_matches('/');
+            let relative_path = relative_path.trim_start_matches('/').to_string();
+            let size = file.size.unwrap_or(0);
+
+            manifest_entries.push(serde_json::json!({
+                "name": relative_path,
+                "size": size,
+            }));
+            relative_paths.push(relative_path);
+        }
+
+        // Write _bundlebase_manifest.json as the first tar entry
+        let manifest_json = serde_json::to_vec(&manifest_entries).map_err(|e| {
+            format!("Failed to serialize tar manifest: {}", e)
+        })?;
+
+        let mtime = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("BUG: current time should be after Unix epoch")
+            .as_secs();
+
+        let mut manifest_header = Header::new_gnu();
+        manifest_header.set_size(manifest_json.len() as u64);
+        manifest_header.set_mode(0o644);
+        manifest_header.set_mtime(mtime);
+        manifest_header.set_cksum();
+
+        builder
+            .append_data(&mut manifest_header, "_bundlebase_manifest.json", &manifest_json[..])
+            .map_err(|e| {
+                format!("Failed to write tar manifest: {}", e)
+            })?;
+
+        // Second pass: write each file's data
+        for (i, file) in files.iter().enumerate() {
+            let relative_path = &relative_paths[i];
 
             debug!("Adding file to tar: {}", relative_path);
 
             // Read file contents via stream
-            let io_file = readable_file_from_url(&file.url, self.config())?;
+            let io_file = readable_file_from_url(&file.url, self.config()).await?;
             let mut stream = io_file.read_stream().await?.ok_or_else(|| {
                 BundlebaseError::from(format!("File not found: {}", file.url))
             })?;
@@ -1157,17 +1194,12 @@ impl BundleFacade for Bundle {
             let mut header = Header::new_gnu();
             header.set_size(buffer.len() as u64);
             header.set_mode(0o644);
-            header.set_mtime(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .expect("BUG: current time should be after Unix epoch")
-                    .as_secs(),
-            );
+            header.set_mtime(mtime);
             header.set_cksum();
 
             // Append to tar
             builder
-                .append_data(&mut header, relative_path, &buffer[..])
+                .append_data(&mut header, relative_path.as_str(), &buffer[..])
                 .map_err(|e| {
                     format!("Failed to append file '{}' to tar: {}", relative_path, e)
                 })?;
@@ -1210,14 +1242,14 @@ impl BundleFacade for Bundle {
         Bundle::config(self)
     }
 
-    fn set_config(
+    async fn set_config(
         &self,
         scope: &Scope,
         key: &str,
         value: &str,
     ) -> Result<(), BundlebaseError> {
         self.config.set(scope, key, value, crate::bundle_config::ConfigSource::Runtime)?;
-        self.refresh_data_dir()?;
+        self.refresh_data_dir().await?;
         Ok(())
     }
 

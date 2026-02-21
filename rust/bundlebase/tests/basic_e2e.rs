@@ -26,7 +26,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     let version = readable_file_from_url(
         &Url::parse(test_datafile("userdata.parquet"))?,
         BundleConfig::new(None)?.into(),
-    )?
+    ).await?
     .version()
     .await?;
 
@@ -583,7 +583,7 @@ changes:
         &layout,
         loaded_bundle.data_dir(),
         BundleConfig::new(None)?.into(),
-    )?;
+    ).await?;
     assert!(
         layout_file.exists().await?,
         "Layout file should exist at: {}",

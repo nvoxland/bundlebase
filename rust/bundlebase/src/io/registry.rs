@@ -290,8 +290,16 @@ mod tests {
     fn test_registry_has_tar_factory() {
         let registry = io_registry();
         assert!(registry.get_factory("tar+file").is_some());
-        // TAR supports writes
+        assert!(registry.get_factory("tar+s3").is_some());
+        assert!(registry.get_factory("tar+gs").is_some());
+        assert!(registry.get_factory("tar+azure").is_some());
+        assert!(registry.get_factory("tar+az").is_some());
+
+        // Only tar+file supports writes
         assert!(registry.supports_write(&Url::parse("tar+file:///data.tar/file.txt").unwrap()));
+        assert!(!registry.supports_write(&Url::parse("tar+s3://bucket/data.tar/file.txt").unwrap()));
+        assert!(!registry.supports_write(&Url::parse("tar+gs://bucket/data.tar/file.txt").unwrap()));
+        assert!(!registry.supports_write(&Url::parse("tar+azure://container/data.tar/file.txt").unwrap()));
     }
 
     #[test]

@@ -248,8 +248,8 @@ impl BundleBuilder {
         config: Option<PassedBundleConfig>,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         let bundle = Bundle::empty(config).await?;
-        bundle.refresh_data_dir()?;
-        *bundle.data_dir.write() = writable_dir_from_str(path, bundle.config())?;
+        bundle.refresh_data_dir().await?;
+        *bundle.data_dir.write() = writable_dir_from_str(path, bundle.config()).await?;
 
         // Check if a bundle already exists at this location
         let meta_dir = bundle.data_dir().writable_subdir(META_DIR)?;
@@ -290,7 +290,7 @@ impl BundleBuilder {
     /// The returned builder has **independent** status tracking from the source bundle.
     /// Changes made to this builder will not appear in the original bundle's status,
     /// and vice versa.
-    pub fn extend(
+    pub async fn extend(
         bundle: Arc<Bundle>,
         data_dir: Option<&str>,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
@@ -302,7 +302,7 @@ impl BundleBuilder {
         // If data_dir is provided and not empty, use it; otherwise keep the current bundle's data_dir
         if let Some(dir) = data_dir {
             if !dir.is_empty() {
-                let new_data_dir = writable_dir_from_str(dir, bundle.config())?;
+                let new_data_dir = writable_dir_from_str(dir, bundle.config()).await?;
                 if *new_data_dir.url() != bundle.url() {
                     *new_bundle.last_manifest_version.write() = 0;
                 }
@@ -496,8 +496,8 @@ impl BundleBuilder {
             // empty() returns Arc<Bundle>, clone inner Bundle for reload_from
             let arc = Bundle::empty(Some(passed_config)).await?;
             let bundle = (*arc).clone();
-            bundle.refresh_data_dir()?;
-            *bundle.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, bundle.config())?;
+            bundle.refresh_data_dir().await?;
+            *bundle.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, bundle.config()).await?;
             bundle
         } else {
             // Preserve explicit_config when reopening
@@ -1401,13 +1401,13 @@ impl BundleFacade for BundleBuilder {
         self.bundle.dataframe().await
     }
 
-    fn extend(
+    async fn extend(
         &self,
         data_dir: Option<&str>,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         // Create a new builder based on the current bundle state without modifying self
         let current_bundle = Arc::new(self.bundle.deref().clone());
-        BundleBuilder::extend(current_bundle, data_dir)
+        BundleBuilder::extend(current_bundle, data_dir).await
     }
 
     async fn query(
@@ -1463,13 +1463,13 @@ impl BundleFacade for BundleBuilder {
         self.bundle.config()
     }
 
-    fn set_config(
+    async fn set_config(
         &self,
         scope: &Scope,
         key: &str,
         value: &str,
     ) -> Result<(), BundlebaseError> {
-        self.bundle.set_config(scope, key, value)
+        self.bundle.set_config(scope, key, value).await
     }
 
     fn ctx(&self) -> Arc<SessionContext> {

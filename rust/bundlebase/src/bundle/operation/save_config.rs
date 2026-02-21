@@ -66,6 +66,7 @@ impl Operation for SaveConfigOp {
         // Recreate data_dir with updated config
         bundle
             .refresh_data_dir()
+            .await
             .map_err(DataFusionError::External)?;
 
         Ok(())

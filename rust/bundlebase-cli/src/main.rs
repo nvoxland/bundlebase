@@ -176,7 +176,7 @@ async fn main() -> Result<(), BundlebaseError> {
             } else {
                 // Read-write mode - open and extend
                 info!("Opening bundle in read-write mode: {}", args.bundle);
-                Bundle::open(&args.bundle, config.clone()).await?.extend(None)?
+                Bundle::open(&args.bundle, config.clone()).await?.extend(None).await?
             };
 
             repl::start(state).await?;

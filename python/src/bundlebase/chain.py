@@ -293,7 +293,9 @@ class ExtendChain:
             existing_bundle: The PyBundle to extend
             data_dir: The directory path for the new extended bundle
         """
-        self._bundle: Any = original_extend_method(existing_bundle, data_dir)
+        self._extend_method = original_extend_method
+        self._bundle_ref = existing_bundle
+        self._data_dir = data_dir
         self._operations: List[Tuple[str, tuple, dict]] = []
         self._executed = False
 
@@ -341,9 +343,10 @@ class ExtendChain:
         return self._execute().__await__()
 
     async def _execute(self) -> Any:
-        """Execute all queued operations and return the final bundle."""
+        """Execute the extend first, then all queued operations."""
         self._executed = True
-        return await _execute_operations(self._bundle, self._operations)
+        bundle = await self._extend_method(self._bundle_ref, self._data_dir)
+        return await _execute_operations(bundle, self._operations)
 
     def __del__(self):
         """Detect if extend chain was never executed.
