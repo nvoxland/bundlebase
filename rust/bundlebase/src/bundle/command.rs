@@ -64,8 +64,8 @@ pub use builder::{
     CreateViewCommand, DetachBlockCommand, DropColumnCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand,
     ReindexCommand, RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand,
-    ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand, UndoCommand,
-    VerifyDataCommand,
+    ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand,
+    StandardizeColumnNamesCommand, UndoCommand, VerifyDataCommand,
 };
 
 // Re-export verification result types

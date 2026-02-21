@@ -122,6 +122,11 @@ All operations work synchronously without `await`:
   c.rename_column("old_name", "new_name")
   ```
 
+- **`standardize_column_names()`** - Convert all column names to lowercase+underscore identifiers
+  ```python
+  c.standardize_column_names()
+  ```
+
 - **`filter(expr: str, params: List = [])`** - Filter rows
   ```python
   c.filter("salary > $1", [50000])
