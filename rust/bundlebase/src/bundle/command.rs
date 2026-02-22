@@ -60,7 +60,7 @@ pub use parser::Rule;
 
 // Re-export builder command structs
 pub use builder::{
-    AttachCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
+    AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
     CreateViewCommand, DetachBlockCommand, DropColumnCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand,
     ReindexCommand, RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand,
@@ -139,6 +139,7 @@ impl BundleCommand {
                     BundleCommand::Filter(_) => "FILTER",
                     BundleCommand::Join(_) => "JOIN",
                     BundleCommand::ReplaceBlock(_) => "REPLACE",
+                    BundleCommand::CastColumn(_) => "CAST COLUMN",
                     BundleCommand::DropColumn(_) => "ALTER TABLE DROP COLUMN",
                     BundleCommand::RenameColumn(_) => "ALTER TABLE RENAME COLUMN",
                     BundleCommand::CreateIndex(_) => "CREATE INDEX",
@@ -432,6 +433,7 @@ register_commands! {
         ReplaceBlock(ReplaceBlockCommand) => Rule::replace_stmt,
 
         // Schema commands
+        CastColumn(CastColumnCommand) => Rule::cast_column_stmt,
         DropColumn(DropColumnCommand) => Rule::drop_column_stmt,
         RenameColumn(RenameColumnCommand) => Rule::rename_column_stmt,
         CreateIndex(CreateIndexCommand) => Rule::create_index_stmt,

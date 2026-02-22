@@ -87,6 +87,22 @@ pub(crate) async fn column_sources_from_df(
     }
 }
 
+/// Recursively extract the underlying column name from an expression,
+/// peeling through Cast, TryCast, Alias, and single-column ScalarFunction wrappers.
+fn extract_source_column(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Column(col) => Some(&col.name),
+        Expr::Alias(alias) => extract_source_column(&alias.expr),
+        Expr::Cast(cast) => extract_source_column(&cast.expr),
+        Expr::TryCast(try_cast) => extract_source_column(&try_cast.expr),
+        Expr::ScalarFunction(func) => {
+            // For single-column functions like regexp_replace, the first arg is the input column
+            func.args.first().and_then(extract_source_column)
+        }
+        _ => None,
+    }
+}
+
 /// Recursively traces a column back to its physical source(s) in the execution plan.
 ///
 /// This function walks the logical execution plan to find where a column originally comes from.
@@ -130,13 +146,13 @@ fn find_orig(plan: &LogicalPlan, target: &str, sources: &mut Vec<(String, String
                     expr
                 };
 
-                // Now recursively find the source for the underlying expression
-                if let Expr::Column(col) = source_expr {
-                    // Direct column reference - recurse with the original column name
-                    find_orig(&proj.input, col.name.as_str(), sources);
+                // Now recursively find the source for the underlying expression,
+                // tracing through Cast, TryCast, ScalarFunction wrappers
+                if let Some(col_name) = extract_source_column(source_expr) {
+                    find_orig(&proj.input, col_name, sources);
                 }
-                // Note: We ignore computed columns (SELECT expressions that aren't direct column refs)
-                // e.g., "SELECT col1 + col2 AS total" - the expression col1+col2 is not a Column
+                // Note: We ignore computed columns that don't trace to a single source column
+                // e.g., "SELECT col1 + col2 AS total"
                 return;
             }
         }
@@ -350,6 +366,87 @@ mod tests {
         .join("\n");
         assert_eq!("BinaryExpr(BinaryExpr { left: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"base\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) }), op: And, right: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }), op: Gt, right: Literal(Int64(3), None) }) })",
                    preds.as_str());
+    }
+
+    #[test]
+    fn test_extract_source_column_from_plain_column() {
+        let expr = Expr::Column(datafusion::common::Column::new_unqualified("my_col"));
+        assert_eq!(extract_source_column(&expr), Some("my_col"));
+    }
+
+    #[test]
+    fn test_extract_source_column_from_alias() {
+        use datafusion::logical_expr::expr::Alias;
+        let inner = Expr::Column(datafusion::common::Column::new_unqualified("orig"));
+        let expr = Expr::Alias(Alias {
+            expr: Box::new(inner),
+            relation: None,
+            name: "renamed".to_string(),
+            metadata: None,
+        });
+        assert_eq!(extract_source_column(&expr), Some("orig"));
+    }
+
+    #[test]
+    fn test_extract_source_column_from_cast() {
+        use datafusion::logical_expr::expr::Cast;
+        let inner = Expr::Column(datafusion::common::Column::new_unqualified("id_col"));
+        let expr = Expr::Cast(Cast {
+            expr: Box::new(inner),
+            data_type: DataType::Int64,
+        });
+        assert_eq!(extract_source_column(&expr), Some("id_col"));
+    }
+
+    #[test]
+    fn test_extract_source_column_from_alias_cast() {
+        use datafusion::logical_expr::expr::{Alias, Cast};
+        let col = Expr::Column(datafusion::common::Column::new_unqualified("id_col"));
+        let cast = Expr::Cast(Cast {
+            expr: Box::new(col),
+            data_type: DataType::Int64,
+        });
+        let expr = Expr::Alias(Alias {
+            expr: Box::new(cast),
+            relation: None,
+            name: "id_col".to_string(),
+            metadata: None,
+        });
+        assert_eq!(extract_source_column(&expr), Some("id_col"));
+    }
+
+    #[test]
+    fn test_extract_source_column_from_try_cast() {
+        use datafusion::logical_expr::expr::TryCast;
+        let inner = Expr::Column(datafusion::common::Column::new_unqualified("val"));
+        let expr = Expr::TryCast(TryCast {
+            expr: Box::new(inner),
+            data_type: DataType::Float64,
+        });
+        assert_eq!(extract_source_column(&expr), Some("val"));
+    }
+
+    #[test]
+    fn test_extract_source_column_from_scalar_function() {
+        use datafusion::logical_expr::expr::ScalarFunction;
+        use datafusion::functions::regex::regexp_replace;
+        let col = Expr::Column(datafusion::common::Column::new_unqualified("dirty_col"));
+        let func = regexp_replace();
+        let expr = Expr::ScalarFunction(ScalarFunction {
+            func: func,
+            args: vec![
+                col,
+                Expr::Literal(datafusion::common::ScalarValue::Utf8(Some("[^0-9]".to_string())), None),
+                Expr::Literal(datafusion::common::ScalarValue::Utf8(Some("".to_string())), None),
+            ],
+        });
+        assert_eq!(extract_source_column(&expr), Some("dirty_col"));
+    }
+
+    #[test]
+    fn test_extract_source_column_returns_none_for_literal() {
+        let expr = Expr::Literal(datafusion::common::ScalarValue::Int32(Some(42)), None);
+        assert_eq!(extract_source_column(&expr), None);
     }
 
     #[tokio::test]
