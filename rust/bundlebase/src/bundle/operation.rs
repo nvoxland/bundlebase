@@ -1,4 +1,5 @@
 mod attach_block;
+mod cast_column;
 mod create_view;
 mod create_function;
 mod create_index;
@@ -23,6 +24,7 @@ mod set_name;
 mod update_version;
 
 pub use crate::bundle::operation::attach_block::{AttachBlockOp, SourceInfo};
+pub use crate::bundle::operation::cast_column::CastColumnOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
 pub use crate::bundle::operation::create_function::CreateFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
@@ -195,6 +197,7 @@ macro_rules! define_any_operation {
 // To add a new operation, simply add a line here.
 define_any_operation! {
     AttachBlock(AttachBlockOp),
+    CastColumn(CastColumnOp),
     CreateFunction(CreateFunctionOp),
     CreateIndex(CreateIndexOp),
     CreateJoin(CreateJoinOp),

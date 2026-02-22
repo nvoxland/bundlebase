@@ -14,6 +14,7 @@ impl PyOperation {
     fn op_type(&self) -> String {
         match &self.inner {
             AnyOperation::AttachBlock(_) => "attachBlock".to_string(),
+            AnyOperation::CastColumn(_) => "castColumn".to_string(),
             AnyOperation::CreateView(_) => "CreateView".to_string(),
             AnyOperation::DropColumn(_) => "dropColumn".to_string(),
             AnyOperation::RenameColumn(_) => "renameColumn".to_string(),

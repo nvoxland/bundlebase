@@ -977,6 +977,19 @@ impl BundleBuilder {
         Ok(self)
     }
 
+    /// Cast a column to a different data type, optionally cleaning values first.
+    pub async fn cast_column(
+        &self,
+        column_name: &str,
+        new_type: &str,
+        clean: Option<String>,
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::CastColumnCommand;
+        self.execute_command(CastColumnCommand::new(column_name, new_type, clean))
+            .await?;
+        Ok(self)
+    }
+
     /// Standardize all column names to lowercase+underscore identifiers.
     pub async fn standardize_column_names(&self) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::StandardizeColumnNamesCommand;

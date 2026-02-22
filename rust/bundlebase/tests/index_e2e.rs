@@ -1,4 +1,4 @@
-use arrow::array::{Array, StringArray};
+use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
@@ -1209,6 +1209,262 @@ async fn test_search_field_specific_after_standardize_column_names() -> Result<(
             );
         }
     }
+
+    Ok(())
+}
+
+/// Verify that field-specific text search works after chained renames.
+/// E.g., Company → company (standardize) → co (rename) should resolve co → Company for Tantivy.
+#[tokio::test]
+async fn test_search_after_chained_renames() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("search_idx"),
+        )
+        .await?;
+
+    bundle.standardize_column_names().await?;
+    bundle.rename_column("company", "co").await?;
+    bundle.commit("Text index with chained renames").await?;
+
+    // Field-specific query using the twice-renamed name "co"
+    // Should resolve: co → company → Company (the physical Tantivy field)
+    let stream = bundle
+        .query(
+            "SELECT co FROM search('search_idx', 'co:group')",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "Field-specific search with chained renames should return matching rows"
+    );
+
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("co")
+            .expect("co column should exist")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("co should be StringArray");
+
+        for i in 0..companies.len() {
+            let company = companies.value(i).to_lowercase();
+            assert!(
+                company.contains("group"),
+                "Expected company '{}' to contain 'group'",
+                companies.value(i)
+            );
+        }
+    }
+
+    Ok(())
+}
+
+// ==========================================================================
+// Cast column + index interaction tests
+// ==========================================================================
+
+/// Verify that casting a column and then creating an index on it works correctly.
+/// The Index column in the CSV is a numeric string — cast it to integer, index it, query with integer filter.
+#[tokio::test]
+async fn test_cast_column_then_create_index() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Cast "Index" from string to integer
+    bundle.cast_column("Index", "integer", None).await?;
+
+    // Create column index on the cast column
+    bundle
+        .create_index(&["Index"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Cast + index").await?;
+
+    // Query with integer filter
+    let stream = bundle
+        .query(
+            "SELECT * FROM bundle WHERE \"Index\" = 1",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(
+        1, num_rows,
+        "Query on cast+indexed column should return 1 row"
+    );
+
+    Ok(())
+}
+
+/// Verify that an existing column index still works after casting a *different* column.
+#[tokio::test]
+async fn test_create_index_then_cast_column_different_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Create index on City first
+    bundle
+        .create_index(&["City"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Index on City").await?;
+
+    // Cast a different column (Index → integer)
+    bundle.cast_column("Index", "integer", None).await?;
+    bundle.commit("Cast Index").await?;
+
+    // Verify the City index still works
+    let plan = get_physical_plan(
+        bundle.as_ref(),
+        Some("SELECT * FROM bundle WHERE City = 'East Leonard'"),
+    )
+    .await?;
+
+    assert!(
+        plan.contains("RowIdOffsetDataSource"),
+        "Expected City index to still work after casting a different column, plan:\n{}",
+        plan
+    );
+
+    Ok(())
+}
+
+/// Verify that casting a column that already has an index, then reindexing, works correctly.
+#[tokio::test]
+async fn test_create_index_then_cast_same_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Create column index on Index (as string)
+    bundle
+        .create_index(&["Index"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Index on string Index").await?;
+
+    // Now cast Index to integer and reindex
+    bundle.cast_column("Index", "integer", None).await?;
+    bundle.reindex().await?;
+    bundle.commit("Cast and reindex").await?;
+
+    // Query with integer filter
+    let stream = bundle
+        .query(
+            "SELECT * FROM bundle WHERE \"Index\" = 1",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(
+        1, num_rows,
+        "Query on reindexed cast column should return 1 row"
+    );
+
+    Ok(())
+}
+
+/// Verify that cast_column with a `clean` regex pattern still allows indexing.
+/// This tests the Cast(ScalarFunction(Column)) expression chain.
+#[tokio::test]
+async fn test_cast_column_with_clean_then_create_index() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Cast Index to integer with clean (strip non-digits, though Index is already numeric)
+    bundle
+        .cast_column("Index", "integer", Some("[^0-9]".to_string()))
+        .await?;
+
+    // Create column index on the cleaned+cast column
+    bundle
+        .create_index(&["Index"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Cast with clean + index").await?;
+
+    // Query with integer filter
+    let stream = bundle
+        .query(
+            "SELECT * FROM bundle WHERE \"Index\" = 1",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(
+        1, num_rows,
+        "Query on clean+cast+indexed column should return 1 row"
+    );
+
+    Ok(())
+}
+
+/// Verify that casting one column doesn't break indexing on a different (non-cast) column.
+#[tokio::test]
+async fn test_cast_column_then_create_index_on_different_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Cast Index to integer
+    bundle.cast_column("Index", "integer", None).await?;
+
+    // Create index on City (not the cast column)
+    bundle
+        .create_index(&["City"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Cast Index, index City").await?;
+
+    // Verify the City index works
+    let plan = get_physical_plan(
+        bundle.as_ref(),
+        Some("SELECT * FROM bundle WHERE City = 'East Leonard'"),
+    )
+    .await?;
+
+    assert!(
+        plan.contains("RowIdOffsetDataSource"),
+        "Expected City index to work after casting a different column, plan:\n{}",
+        plan
+    );
 
     Ok(())
 }

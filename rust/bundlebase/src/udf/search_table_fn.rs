@@ -253,6 +253,17 @@ impl SearchResultTableProvider {
             return query.to_string();
         }
 
+        // Resolve transitive chains: if q→question and question→Question,
+        // then q should map to Question
+        let keys: Vec<String> = logical_to_physical.keys().cloned().collect();
+        for key in &keys {
+            let mut target = logical_to_physical[key].clone();
+            while let Some(next) = logical_to_physical.get(&target) {
+                target = next.clone();
+            }
+            logical_to_physical.insert(key.clone(), target);
+        }
+
         // Replace field:term patterns in the query
         let mut result = query.to_string();
         for (logical, physical) in &logical_to_physical {

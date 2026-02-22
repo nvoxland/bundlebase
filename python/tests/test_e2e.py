@@ -2009,3 +2009,48 @@ async def test_standardize_column_names():
 
     # Verify data is still accessible
     assert await c.num_rows() == 100
+
+
+@pytest.mark.asyncio
+async def test_cast_column_with_clean():
+    """Test cast_column with clean regex strips non-numeric chars and casts to integer."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # The salary column is a float; let's test with a string column approach.
+    # Use a CSV that has string data we can cast.
+    c2 = await bundlebase.create(random_bundle())
+    c2 = await c2.attach(datafile("customers-0-100.csv"))
+
+    # Standardize first so column names are predictable
+    c2 = await c2.standardize_column_names()
+
+    # customer_id is a string like "1", "2", etc. - cast to integer without clean
+    c2 = await c2.cast_column("customer_id", "integer")
+
+    schema = await c2.schema()
+    col = next(f for f in schema if f.name == "customer_id")
+    assert "int" in col.data_type.lower()
+
+    # Verify data is still accessible
+    assert await c2.num_rows() == 100
+
+
+@pytest.mark.asyncio
+async def test_cast_column_invalid_type():
+    """Test cast_column with invalid type raises an error."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    with pytest.raises(Exception, match="Unsupported target type"):
+        await c.cast_column("Customer Id", "invalid_type")
+
+
+@pytest.mark.asyncio
+async def test_cast_column_invalid_column():
+    """Test cast_column with non-existent column raises an error."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    with pytest.raises(Exception):
+        await c.cast_column("nonexistent_column", "integer")

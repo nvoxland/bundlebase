@@ -504,6 +504,30 @@ impl PyBundleBuilder {
         })
     }
 
+    #[pyo3(signature = (column_name, new_type, clean=None))]
+    fn cast_column<'py>(
+        slf: PyRef<'_, Self>,
+        column_name: &str,
+        new_type: &str,
+        clean: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let column_name = column_name.to_string();
+        let new_type = new_type.to_string();
+        let clean = clean.map(|s| s.to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .cast_column(&column_name, &new_type, clean)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to cast column", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
     fn standardize_column_names<'py>(
         slf: PyRef<'_, Self>,
         py: Python<'py>,
