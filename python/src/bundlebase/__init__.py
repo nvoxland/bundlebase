@@ -66,6 +66,7 @@ _original_methods = {
     "fetch_all": _PyBundleBuilder.fetch_all,
 
     # Column operations
+    "add_column": _PyBundleBuilder.add_column,
     "cast_column": _PyBundleBuilder.cast_column,
     "drop_column": _PyBundleBuilder.drop_column,
     "rename_column": _PyBundleBuilder.rename_column,
@@ -154,7 +155,7 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 # Note: extend is NOT here because it's synchronous and returns a new builder directly
 mutation_methods = [
     "attach", "detach_block", "replace_block", "create_source",
-    "cast_column", "drop_column", "rename_column", "filter", "join",
+    "add_column", "cast_column", "drop_column", "rename_column", "filter", "join",
     "create_view", "rename_view", "drop_view", "drop_join", "rename_join",
     "set_name", "set_description", "save_config", "set_config", "create_function",
     "create_index", "drop_index", "rebuild_index", "reindex",

@@ -13,6 +13,7 @@ impl PyOperation {
     #[getter]
     fn op_type(&self) -> String {
         match &self.inner {
+            AnyOperation::AddColumn(_) => "addColumn".to_string(),
             AnyOperation::AttachBlock(_) => "attachBlock".to_string(),
             AnyOperation::CastColumn(_) => "castColumn".to_string(),
             AnyOperation::CreateView(_) => "CreateView".to_string(),

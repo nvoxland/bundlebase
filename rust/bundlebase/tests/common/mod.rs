@@ -49,6 +49,45 @@ pub async fn latest_commit(
     }
 }
 
+/// Strip columnId/columnIds fields from serialized YAML for comparison.
+/// These contain random generated IDs that differ between test runs.
+#[allow(dead_code)]
+pub fn strip_column_ids(yaml: &str) -> String {
+    let mut result = Vec::new();
+    let mut in_column_ids_list = false;
+
+    for line in yaml.lines() {
+        let trimmed = line.trim();
+
+        // Skip standalone columnId lines (e.g., "    columnId: abc123")
+        if trimmed.starts_with("columnId: ") || trimmed.starts_with("columnId:") {
+            continue;
+        }
+
+        // Detect start of columnIds list
+        if trimmed.starts_with("columnIds:") {
+            in_column_ids_list = true;
+            continue;
+        }
+
+        // Skip list items under columnIds
+        if in_column_ids_list {
+            if trimmed.starts_with("- ") && !trimmed.contains(": ") {
+                continue;
+            }
+            in_column_ids_list = false;
+        }
+
+        result.push(line);
+    }
+
+    let mut output = result.join("\n");
+    if yaml.ends_with('\n') {
+        output.push('\n');
+    }
+    output
+}
+
 /// Count total rows in a DataFrame by collecting and summing batch row counts
 #[allow(dead_code)]
 pub async fn count_rows(df: &DataFrame) -> Result<usize, BundlebaseError> {

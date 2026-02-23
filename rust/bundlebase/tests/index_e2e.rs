@@ -1433,6 +1433,131 @@ async fn test_cast_column_with_clean_then_create_index() -> Result<(), Bundlebas
     Ok(())
 }
 
+/// Verify that search() includes columns added via add_column.
+#[tokio::test]
+async fn test_search_with_add_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Create text index on Company
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+
+    // Add a computed column
+    bundle
+        .add_column("company_upper", "upper(\"Company\")")
+        .await?;
+    bundle.commit("Text index + add_column").await?;
+
+    // Search and select the computed column
+    let stream = bundle
+        .query(
+            "SELECT \"Company\", company_upper, _score FROM search('company_search', 'Group')",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "search() with add_column should return matching rows, but got 0"
+    );
+
+    // Verify company_upper column exists and contains uppercase values
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("Company")
+            .expect("Company column should exist")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("Company should be StringArray");
+
+        let uppers = batch
+            .column_by_name("company_upper")
+            .expect("company_upper column should exist in search results")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("company_upper should be StringArray");
+
+        for i in 0..companies.len() {
+            assert_eq!(
+                uppers.value(i),
+                companies.value(i).to_uppercase(),
+                "company_upper should be uppercase of Company"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Verify that search() reflects cast_column type changes.
+#[tokio::test]
+async fn test_search_with_cast_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Create text index on Company
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+
+    // Cast Index column from string to integer
+    bundle.cast_column("Index", "integer", None).await?;
+    bundle.commit("Text index + cast_column").await?;
+
+    // Search and select the cast column
+    let stream = bundle
+        .query(
+            "SELECT \"Index\", \"Company\", _score FROM search('company_search', 'Group')",
+            vec![],
+        )
+        .await?;
+
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "search() with cast_column should return matching rows, but got 0"
+    );
+
+    // Verify Index column is now integer type
+    for batch in &rs {
+        let index_col = batch
+            .column_by_name("Index")
+            .expect("Index column should exist in search results");
+        assert!(
+            index_col.as_any().downcast_ref::<Int64Array>().is_some(),
+            "Index should be Int64Array after cast, got {:?}",
+            index_col.data_type()
+        );
+    }
+
+    Ok(())
+}
+
 /// Verify that casting one column doesn't break indexing on a different (non-cast) column.
 #[tokio::test]
 async fn test_cast_column_then_create_index_on_different_column() -> Result<(), BundlebaseError> {
@@ -1465,6 +1590,246 @@ async fn test_cast_column_then_create_index_on_different_column() -> Result<(), 
         "Expected City index to work after casting a different column, plan:\n{}",
         plan
     );
+
+    Ok(())
+}
+
+// ==========================================================================
+// Computed column (add_column) + index tests
+// ==========================================================================
+
+/// Verify that creating a column index on an add_column computed column works.
+#[tokio::test]
+async fn test_create_column_index_on_added_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Add a computed column
+    bundle
+        .add_column("company_upper", "upper(\"Company\")")
+        .await?;
+
+    // Create column index on the computed column
+    bundle
+        .create_index(&["company_upper"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Index on computed column").await?;
+
+    // Query using the computed column with the index
+    let stream = bundle
+        .query(
+            "SELECT \"Company\", company_upper FROM bundle WHERE company_upper = 'RASMUSSEN GROUP'",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(
+        num_rows, 1,
+        "Query on indexed computed column should return exactly 1 row"
+    );
+
+    // Verify the computed column value is correct
+    let uppers = rs[0]
+        .column_by_name("company_upper")
+        .expect("company_upper column should exist")
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .expect("company_upper should be StringArray");
+    assert_eq!(uppers.value(0), "RASMUSSEN GROUP");
+
+    // Verify the index was built by checking committed operations include INDEX BLOCKS
+    let reopened = Bundle::open(data_dir.url().as_str(), None).await?;
+    let ops_description = reopened
+        .operations()
+        .iter()
+        .map(|op| op.describe())
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        ops_description.contains("INDEX BLOCKS"),
+        "Expected operations to contain 'INDEX BLOCKS' for computed column, got: {}",
+        ops_description
+    );
+
+    Ok(())
+}
+
+/// Verify that creating a text index on an add_column computed column works.
+#[tokio::test]
+async fn test_create_text_index_on_added_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Add a computed column
+    bundle
+        .add_column("company_upper", "upper(\"Company\")")
+        .await?;
+
+    // Create text index on the computed column
+    bundle
+        .create_index(
+            &["company_upper"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("upper_search"),
+        )
+        .await?;
+    bundle.commit("Text index on computed column").await?;
+
+    // Search using the text index on the computed column
+    let stream = bundle
+        .query(
+            "SELECT \"Company\", company_upper FROM search('upper_search', 'GROUP')",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "search() on computed column text index should return matching rows, but got 0"
+    );
+
+    // Verify every returned row contains "GROUP" in the company_upper column
+    for batch in &rs {
+        let uppers = batch
+            .column_by_name("company_upper")
+            .expect("company_upper column should exist")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("company_upper should be StringArray");
+
+        for i in 0..uppers.len() {
+            assert!(
+                uppers.value(i).contains("GROUP"),
+                "Expected company_upper '{}' to contain 'GROUP'",
+                uppers.value(i)
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Verify that indexing a computed column works after renaming a source column.
+#[tokio::test]
+async fn test_create_column_index_on_added_column_after_rename() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Rename Company → company, then add computed column referencing the renamed name
+    bundle.rename_column("Company", "company").await?;
+    bundle
+        .add_column("company_upper", "upper(company)")
+        .await?;
+
+    // Create column index on the computed column
+    bundle
+        .create_index(&["company_upper"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Index on computed column after rename").await?;
+
+    // Verify the index works
+    let stream = bundle
+        .query(
+            "SELECT company, company_upper FROM bundle WHERE company_upper = 'RASMUSSEN GROUP'",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert!(
+        num_rows > 0,
+        "Query on indexed computed column (after rename) should return rows"
+    );
+
+    Ok(())
+}
+
+/// Verify that search() results include a computed column when the text index is on a physical column.
+#[tokio::test]
+async fn test_search_with_index_on_added_column() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+
+    // Create text index on Company (physical column)
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+
+    // Also create a column index on a computed column
+    bundle
+        .add_column("company_upper", "upper(\"Company\")")
+        .await?;
+    bundle
+        .create_index(&["company_upper"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Text index + computed column index").await?;
+
+    // Search using the text index and verify the computed column is accessible
+    let stream = bundle
+        .query(
+            "SELECT \"Company\", company_upper FROM search('company_search', 'Group')",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+
+    assert!(
+        num_rows > 0,
+        "search() should return rows with computed column accessible"
+    );
+
+    // Verify computed column values are correct in search results
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("Company")
+            .expect("Company column should exist")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("Company should be StringArray");
+
+        let uppers = batch
+            .column_by_name("company_upper")
+            .expect("company_upper column should exist in search results")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("company_upper should be StringArray");
+
+        for i in 0..companies.len() {
+            assert_eq!(
+                uppers.value(i),
+                companies.value(i).to_uppercase(),
+                "company_upper should be uppercase of Company in search results"
+            );
+        }
+    }
 
     Ok(())
 }

@@ -504,21 +504,43 @@ impl PyBundleBuilder {
         })
     }
 
-    #[pyo3(signature = (column_name, new_type, clean=None))]
+    #[pyo3(signature = (name, expression))]
+    fn add_column<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        expression: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let expression = expression.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .add_column(&name, &expression)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to add column", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    #[pyo3(signature = (name, new_type, clean=None))]
     fn cast_column<'py>(
         slf: PyRef<'_, Self>,
-        column_name: &str,
+        name: &str,
         new_type: &str,
         clean: Option<&str>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
-        let column_name = column_name.to_string();
+        let name = name.to_string();
         let new_type = new_type.to_string();
         let clean = clean.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .cast_column(&column_name, &new_type, clean)
+                .cast_column(&name, &new_type, clean)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to cast column", e))?;
             Python::attach(|py| {

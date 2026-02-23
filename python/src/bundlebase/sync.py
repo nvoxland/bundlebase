@@ -406,9 +406,32 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def add_column(self, name: str, expression: str) -> "SyncBundleBuilder":
+        """Add a computed column to the bundle.
+
+        Args:
+            name: Name for the new column
+            expression: SQL expression to compute the column value
+        """
+        coro = _call_original_method(self._async, "add_column", name, expression)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
     def drop_column(self, name: str) -> "SyncBundleBuilder":
         """Remove a column from the bundle."""
         coro = _call_original_method(self._async, "drop_column", name)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def cast_column(self, name: str, new_type: str, clean: Optional[str] = None) -> "SyncBundleBuilder":
+        """Cast a column to a different data type.
+
+        Args:
+            name: Name of the column to cast
+            new_type: Target type (e.g., "integer", "float", "string")
+            clean: Optional regex pattern to clean values before casting
+        """
+        coro = _call_original_method(self._async, "cast_column", name, new_type, clean)
         self._async = _loop_manager.run_sync(coro)
         return self
 

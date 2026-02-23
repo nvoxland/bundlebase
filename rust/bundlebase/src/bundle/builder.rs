@@ -977,15 +977,27 @@ impl BundleBuilder {
         Ok(self)
     }
 
+    /// Add a computed column to the bundle.
+    pub async fn add_column(
+        &self,
+        name: &str,
+        expression: &str,
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::AddColumnCommand;
+        self.execute_command(AddColumnCommand::new(name, expression))
+            .await?;
+        Ok(self)
+    }
+
     /// Cast a column to a different data type, optionally cleaning values first.
     pub async fn cast_column(
         &self,
-        column_name: &str,
+        name: &str,
         new_type: &str,
         clean: Option<String>,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::CastColumnCommand;
-        self.execute_command(CastColumnCommand::new(column_name, new_type, clean))
+        self.execute_command(CastColumnCommand::new(name, new_type, clean))
             .await?;
         Ok(self)
     }
@@ -1168,6 +1180,9 @@ impl BundleBuilder {
         // Group blocks by (index_id, columns) for batching
         let mut blocks_to_index: HashMap<(ObjectId, Vec<String>), Vec<(BlockId, String)>> =
             HashMap::new();
+        // Computed columns need operation-based indexing (separate path)
+        let mut computed_blocks_to_index: HashMap<(ObjectId, Vec<String>), Vec<(BlockId, String)>> =
+            HashMap::new();
 
         // Ensure dataframe is set up for queries
         let df = self.dataframe().await?;
@@ -1219,11 +1234,34 @@ impl BundleBuilder {
             {
                 Ok(Some(s)) => s,
                 Ok(None) => {
-                    return Err(format!(
-                        "No physical sources found for column '{}'",
-                        lookup_col
-                    )
-                    .into());
+                    // Column doesn't trace to physical blocks — likely a computed column
+                    // from add_column(). Collect ALL blocks and use operation-based indexing.
+                    let mut computed_blocks = Vec::new();
+                    for pack in packs.read().values() {
+                        for block in pack.blocks() {
+                            let block_version = self.find_block_version(block.id())
+                                .ok_or_else(|| format!("Block {} not found", block.id()))?;
+
+                            let versioned_block =
+                                VersionedBlockId::new(*block.id(), block_version.clone());
+                            let needs_index = self
+                                .bundle()
+                                .get_index(&lookup_col, &versioned_block)
+                                .is_none();
+
+                            if needs_index {
+                                computed_blocks.push((*block.id(), block_version));
+                            }
+                        }
+                    }
+
+                    if !computed_blocks.is_empty() {
+                        computed_blocks_to_index
+                            .entry((*index_id, index_columns.clone()))
+                            .or_default()
+                            .extend(computed_blocks);
+                    }
+                    continue;
                 }
                 Err(e) => {
                     return Err(format!(
@@ -1270,7 +1308,7 @@ impl BundleBuilder {
             }
         }
 
-        // Create IndexBlocksOp for each group of blocks
+        // Create IndexBlocksOp for each group of physical-column blocks
         for ((index_id, columns), blocks) in blocks_to_index {
             if !blocks.is_empty() {
                 debug!(
@@ -1281,6 +1319,28 @@ impl BundleBuilder {
 
                 // Bundle is internally thread-safe
                 let op = IndexBlocksOp::setup(&index_id, columns, blocks, self).await?;
+                self.apply_operation(op.into()).await?;
+            }
+        }
+
+        // Create IndexBlocksOp for computed columns (require operation application)
+        let all_operations = self.operations();
+        for ((index_id, columns), blocks) in computed_blocks_to_index {
+            if !blocks.is_empty() {
+                debug!(
+                    "Creating computed IndexBlocksOp for columns {:?} with {} blocks",
+                    columns,
+                    blocks.len()
+                );
+
+                let op = IndexBlocksOp::setup_computed(
+                    &index_id,
+                    columns,
+                    blocks,
+                    self,
+                    all_operations.clone(),
+                )
+                .await?;
                 self.apply_operation(op.into()).await?;
             }
         }

@@ -162,6 +162,83 @@ impl std::fmt::Display for BlockId {
     }
 }
 
+/// A type-safe wrapper around ObjectId specifically for column identifiers.
+///
+/// Provides compile-time distinction between column IDs and other object IDs
+/// (blocks, packs, indexes, views, sources, joins).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ColumnId(ObjectId);
+
+impl ColumnId {
+    /// Generate a new unique ColumnId.
+    pub fn generate() -> Self {
+        Self(ObjectId::generate())
+    }
+
+    /// Access the inner ObjectId.
+    pub fn as_object_id(&self) -> &ObjectId {
+        &self.0
+    }
+}
+
+impl From<ColumnId> for ObjectId {
+    fn from(id: ColumnId) -> ObjectId {
+        id.0
+    }
+}
+
+impl From<ObjectId> for ColumnId {
+    fn from(id: ObjectId) -> ColumnId {
+        ColumnId(id)
+    }
+}
+
+impl From<ColumnId> for String {
+    fn from(id: ColumnId) -> String {
+        id.0.into()
+    }
+}
+
+impl TryFrom<String> for ColumnId {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        ObjectId::try_from(s).map(ColumnId)
+    }
+}
+
+impl TryFrom<&str> for ColumnId {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        ObjectId::try_from(s).map(ColumnId)
+    }
+}
+
+impl Serialize for ColumnId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ColumnId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        ObjectId::deserialize(deserializer).map(ColumnId)
+    }
+}
+
+impl std::fmt::Display for ColumnId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// A compact u16 reference to an ObjectId, used for bit-packing in RowId.
 ///
 /// ObjectIdAlias values are only meaningful within the context that defines them

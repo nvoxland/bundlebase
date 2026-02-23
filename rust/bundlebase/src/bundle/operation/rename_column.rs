@@ -1,5 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
+use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
@@ -11,13 +12,15 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RenameColumnOp {
+    pub id: ColumnId,
     pub old_name: String,
     pub new_name: String,
 }
 
 impl RenameColumnOp {
-    pub fn setup(old_name: &str, new_name: &str) -> Self {
+    pub fn setup(id: ColumnId, old_name: &str, new_name: &str) -> Self {
         Self {
+            id,
             old_name: old_name.to_string(),
             new_name: new_name.to_string(),
         }
@@ -59,7 +62,7 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = RenameColumnOp::setup("first_name", "fname");
+        let op = RenameColumnOp::setup(ColumnId::generate(), "first_name", "fname");
         assert_eq!(op.describe(), "RENAME COLUMN: first_name to fname");
     }
 
@@ -76,42 +79,27 @@ mod tests {
         ];
 
         for (old, new, expected) in cases {
-            let op = RenameColumnOp::setup(old, new);
+            let op = RenameColumnOp::setup(ColumnId::generate(), old, new);
             assert_eq!(op.describe(), expected);
         }
     }
 
     #[test]
     fn test_config_serialization() {
-        let op = RenameColumnOp::setup("first_name", "fname");
+        let op = RenameColumnOp::setup(ColumnId::generate(), "first_name", "fname");
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        let expected = r#"oldName: first_name
-newName: fname
-"#;
-        assert_eq!(serialized, expected);
-    }
-
-    #[test]
-    fn test_config_serialization_various() {
-        let cases = vec![
-            ("col1", "col2", "oldName: col1\nnewName: col2\n"),
-            ("a", "b", "oldName: a\nnewName: b\n"),
-            ("x_old", "y_new", "oldName: x_old\nnewName: y_new\n"),
-        ];
-
-        for (old, new, expected) in cases {
-            let op = RenameColumnOp::setup(old, new);
-            let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-            assert_eq!(serialized, expected);
-        }
+        assert!(serialized.starts_with("id: "));
+        assert!(serialized.contains("oldName: first_name\nnewName: fname"));
     }
 
     #[test]
     fn test_version_exact_value() {
-        let op = RenameColumnOp::setup("first_name", "fname");
+        let op = RenameColumnOp::setup(ColumnId::generate(), "first_name", "fname");
         let version = op.version();
 
-        assert_eq!(version, "98c6271248e2");
+        // Version now includes column id so it varies per invocation
+        assert!(!version.is_empty());
+        assert_eq!(version.len(), 12);
     }
 }

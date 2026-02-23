@@ -47,6 +47,7 @@ schema_stmt = {
     | drop_column_stmt
     | rename_column_stmt
     | cast_column_stmt
+    | add_column_stmt
     | create_view_stmt
     | drop_view_stmt
     | rename_view_stmt
@@ -429,6 +430,22 @@ rename_column_stmt = {
 
 cast_column_stmt = {
     ^"cast" ~ ^"column" ~ identifier ~ ^"to" ~ identifier ~ (^"clean" ~ quoted_string)?
+}
+
+// ============================================================================
+// ADD COLUMN Statement
+// ============================================================================
+// Syntax: ADD COLUMN <name> AS <expression>
+// Examples:
+//   ADD COLUMN full_name AS first_name || ' ' || last_name
+//   ADD COLUMN total AS price * quantity
+
+add_column_stmt = {
+    ^"add" ~ ^"column" ~ identifier ~ ^"as" ~ add_column_expression
+}
+
+add_column_expression = @{
+    (!EOI ~ ANY)+
 }
 
 // ============================================================================

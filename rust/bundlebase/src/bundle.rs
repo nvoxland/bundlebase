@@ -1,5 +1,6 @@
 mod builder;
 mod column_lineage;
+pub(crate) mod column_registry;
 pub(crate) mod command;
 mod commit;
 mod data_block;
@@ -15,6 +16,7 @@ use crate::io::EMPTY_SCHEME;
 pub use builder::BundleBuilder;
 pub use builder::BundleStatus;
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
+pub use column_registry::ColumnRegistry;
 pub use command::parser::{available_commands, is_command_statement, parse_command};
 pub use command::BundleCommand;
 pub use command::CommandResponse;
@@ -613,6 +615,11 @@ impl Bundle {
         // Re-register version() UDF with the updated version
         self.ctx
             .register_udf(ScalarUDF::new_from_impl(VersionUdf::new(new_version)));
+    }
+
+    /// Build a ColumnRegistry from this bundle's operations.
+    pub(crate) fn column_registry(&self) -> ColumnRegistry {
+        ColumnRegistry::from_operations(&self.operations.read())
     }
 
     pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<Pack>) {

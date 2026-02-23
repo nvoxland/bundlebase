@@ -96,6 +96,7 @@ mod tests {
     use crate::bundle::operation::{
         BundleChange, DropColumnOp, RenameColumnOp, SetDescriptionOp, SetNameOp,
     };
+    use crate::object_id::ColumnId;
     use uuid::Uuid;
 
     // Helper function to create a test UUID
@@ -125,7 +126,8 @@ changes: []
 
     #[test]
     fn test_serialize_single_operation() {
-        let op = DropColumnOp::setup(vec!["col1"]);
+        let id1 = ColumnId::generate();
+        let op = DropColumnOp::setup(vec![id1], vec!["col1"]);
         let change = BundleChange {
             id: test_uuid(),
             description: "Remove columns".to_string(),
@@ -141,7 +143,7 @@ changes: []
         };
         let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
-        let expected = r"author: test-user
+        let expected = format!(r"author: test-user
 message: Remove column
 timestamp: 2024-01-01T00:00:00Z
 changes:
@@ -149,17 +151,21 @@ changes:
   description: Remove columns
   operations:
   - type: dropColumn
+    ids:
+    - {}
     names:
     - col1
-";
+", id1);
         assert_eq!(yaml, expected);
     }
 
     #[test]
     fn test_serialize_multiple_operations() {
         let op1 = SetNameOp::setup("Test");
-        let op2 = DropColumnOp::setup(vec!["col1"]);
-        let op3 = RenameColumnOp::setup("old", "new");
+        let drop_id = ColumnId::generate();
+        let op2 = DropColumnOp::setup(vec![drop_id], vec!["col1"]);
+        let rename_id = ColumnId::generate();
+        let op3 = RenameColumnOp::setup(rename_id, "old", "new");
 
         let change = BundleChange {
             id: test_uuid(),
@@ -176,7 +182,7 @@ changes:
         };
         let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
-        let expected = r"author: test-user
+        let expected = format!(r"author: test-user
 message: Multiple ops
 timestamp: 2024-01-01T00:00:00Z
 changes:
@@ -186,12 +192,15 @@ changes:
   - type: setName
     name: Test
   - type: dropColumn
+    ids:
+    - {drop_id}
     names:
     - col1
   - type: renameColumn
+    id: {rename_id}
     oldName: old
     newName: new
-";
+");
         assert_eq!(yaml, expected);
     }
 
@@ -269,9 +278,12 @@ changes:
   - type: setName
     name: Test
   - type: dropColumn
+    ids:
+    - '0000000000000001'
     names:
     - col1
   - type: renameColumn
+    id: '0000000000000002'
     oldName: old
     newName: new
 ";
@@ -294,7 +306,8 @@ changes:
     #[test]
     fn test_serialize_camel_case_conversion() {
         // Test that camelCase conversion happens for all field names
-        let op = RenameColumnOp::setup("firstName", "first_name");
+        let col_id = ColumnId::generate();
+        let op = RenameColumnOp::setup(col_id, "firstName", "first_name");
         let change = BundleChange {
             id: test_uuid(),
             operations: vec![op.into()],
@@ -310,8 +323,8 @@ changes:
         };
         let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
-        // Should have oldName and newName in camelCase
-        let expected = r"author: test-user
+        // Should have oldName and newName in camelCase, and columnId
+        let expected = format!(r"author: test-user
 message: Test camelCase
 timestamp: 2024-01-01T00:00:00Z
 changes:
@@ -319,16 +332,18 @@ changes:
   description: Rename column
   operations:
   - type: renameColumn
+    id: {col_id}
     oldName: firstName
     newName: first_name
-";
+");
         assert_eq!(yaml, expected);
     }
 
     #[test]
     fn test_serialize_type_always_first() {
         // Verify that "type" field is always added first in the mapping
-        let op = RenameColumnOp::setup("a", "b");
+        let col_id = ColumnId::generate();
+        let op = RenameColumnOp::setup(col_id, "a", "b");
         let change = BundleChange {
             id: test_uuid(),
             operations: vec![op.into()],
@@ -353,7 +368,7 @@ changes:
         assert!(first_line_after_dash > 0);
 
         // Verify the exact order
-        let expected = r"author: test-user
+        let expected = format!(r"author: test-user
 message: Test
 timestamp: 2024-01-01T00:00:00Z
 changes:
@@ -361,9 +376,10 @@ changes:
   description: Rename
   operations:
   - type: renameColumn
+    id: {col_id}
     oldName: a
     newName: b
-";
+");
         assert_eq!(yaml, expected);
     }
 
@@ -457,7 +473,8 @@ changes:
 
     #[test]
     fn test_serialize_special_characters_in_names() {
-        let op = RenameColumnOp::setup("col_with_underscore", "col-with-dash");
+        let col_id = ColumnId::generate();
+        let op = RenameColumnOp::setup(col_id, "col_with_underscore", "col-with-dash");
         let change = BundleChange {
             id: test_uuid(),
             operations: vec![op.into()],
@@ -473,7 +490,7 @@ changes:
         };
 
         let yaml = serde_yaml_ng::to_string(&commit).unwrap();
-        let expected = r"author: test-user
+        let expected = format!(r"author: test-user
 message: Rename
 timestamp: 2024-01-01T00:00:00Z
 changes:
@@ -481,9 +498,10 @@ changes:
   description: Rename
   operations:
   - type: renameColumn
+    id: {col_id}
     oldName: col_with_underscore
     newName: col-with-dash
-";
+");
         assert_eq!(yaml, expected);
     }
 
@@ -613,10 +631,12 @@ changes:
             schema: Some(schema),
             source_info: None,
             read_options: None,
+            column_ids: vec![ColumnId::generate(), ColumnId::generate()],
         };
 
         let remove_config = DropColumnOp {
             names: vec!["col1".to_string()],
+            ids: vec![ColumnId::generate()],
         };
 
         let change = BundleChange {
@@ -684,6 +704,8 @@ changes:
         dict_is_ordered: false
         metadata: {}
       metadata: {}
+    columnIds:
+    - '0000000000000001'
 "#;
         let commit: BundleCommit = serde_yaml_ng::from_str(yaml).unwrap();
 
@@ -741,10 +763,17 @@ changes:
         dict_is_ordered: false
         metadata: {}
       metadata: {}
+    columnIds:
+    - '0000000000000aa1'
+    - '0000000000000aa2'
+    - '0000000000000aa3'
   - type: dropColumn
+    ids:
+    - '0000000000000aa3'
     names:
     - title
   - type: renameColumn
+    id: '0000000000000aa2'
     oldName: first_name
     newName: name
 "#;

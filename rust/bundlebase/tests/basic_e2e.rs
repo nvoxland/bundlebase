@@ -177,7 +177,11 @@ changes:
         commit.changes[1].id,
         commit.changes[2].id,
     );
-    assert_eq!(contents, expected);
+    assert_eq!(common::strip_column_ids(&contents), expected);
+
+    // Verify column IDs are present in the actual serialized output
+    assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
+    assert!(contents.contains("columnId:"), "RenameColumn should have columnId");
 
     // Open the saved bundle
     let loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;
@@ -383,7 +387,11 @@ changes:
         commit.changes[3].id,
         commit.changes[4].id,
     );
-    assert_eq!(contents.trim(), expected.trim());
+    assert_eq!(common::strip_column_ids(&contents).trim(), expected.trim());
+
+    // Verify column IDs are present in the actual serialized output
+    assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
+    assert!(contents.contains("columnId:"), "RenameColumn should have columnId");
 
     Ok(())
 }
@@ -565,8 +573,11 @@ changes:
             )
         )
         .trim(),
-        contents.trim()
+        common::strip_column_ids(&contents).trim()
     );
+
+    // Verify column IDs are present in the actual serialized output
+    assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
 
     // Open the saved bundle
     let loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;

@@ -1,4 +1,4 @@
-use crate::bundle::operation::Operation;
+use crate::bundle::operation::{AnyOperation, Operation};
 use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
 use crate::index::{
@@ -8,10 +8,12 @@ use crate::index::{
 use crate::progress::ProgressScope;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use arrow::record_batch::RecordBatch;
-use arrow_schema::DataType;
+use arrow_schema::{DataType, SchemaRef};
 use async_trait::async_trait;
 use bytes::Bytes;
+use datafusion::datasource::MemTable;
 use datafusion::error::DataFusionError;
+use datafusion::prelude::{SessionConfig, SessionContext};
 use datafusion::scalar::ScalarValue;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -499,6 +501,417 @@ impl IndexBlocksOp {
 
         log::debug!(
             "Successfully created text index '{}' for columns [{}] at {} ({} documents)",
+            index_name,
+            text_columns.join(", "),
+            rel_path,
+            doc_count
+        );
+
+        Ok(Self {
+            index: *index,
+            blocks: blocks
+                .into_iter()
+                .map(|(block, version)| VersionedBlockId { block, version })
+                .collect(),
+            path: rel_path,
+            cardinality: doc_count,
+            doc_count: Some(doc_count),
+        })
+    }
+
+    /// Builds and registers an index for a computed column (from `add_column`).
+    ///
+    /// Unlike `setup()`, which reads column values directly from blocks, this method
+    /// applies the full operation chain to each batch to compute the column value
+    /// before indexing it.
+    pub async fn setup_computed(
+        index: &ObjectId,
+        columns: Vec<String>,
+        blocks: Vec<(BlockId, String)>,
+        builder: &BundleBuilder,
+        operations: Vec<AnyOperation>,
+    ) -> Result<Self, BundlebaseError> {
+        let bundle = builder.bundle();
+
+        if blocks.is_empty() {
+            return Err(BundlebaseError::from("Cannot create index with no blocks"));
+        }
+
+        let (index_type, index_name) = {
+            let indexes = bundle.indexes().read();
+            let idx = indexes
+                .iter()
+                .find(|idx| idx.id() == index)
+                .ok_or_else(|| {
+                    BundlebaseError::from(format!(
+                        "Index definition {} not found. CreateIndexOp must be applied first.",
+                        index
+                    ))
+                })?;
+            (idx.index_type().clone(), idx.name().to_string())
+        };
+
+        match &index_type {
+            IndexType::Column => {
+                let column = columns.first().ok_or_else(|| {
+                    BundlebaseError::from("Column index requires at least one column")
+                })?;
+                Self::build_computed_column_index(index, column, blocks, bundle, operations).await
+            }
+            IndexType::Text { tokenizer, .. } => {
+                Self::build_computed_text_index(
+                    index, &index_name, &columns, blocks, bundle, tokenizer, operations,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Infer the data type of a computed column by planning an empty query.
+    ///
+    /// Reuses the same pattern as `search_table_fn::infer_add_column_field()`.
+    fn infer_computed_column_type(
+        column: &str,
+        operations: &[AnyOperation],
+        base_schema: &SchemaRef,
+    ) -> Result<DataType, BundlebaseError> {
+        let result = futures::executor::block_on(async {
+            let mut config = SessionConfig::new();
+            config.options_mut().sql_parser.enable_ident_normalization = false;
+            let ctx = SessionContext::new_with_config(config);
+            let empty_batch = RecordBatch::new_empty(base_schema.clone());
+            ctx.register_batch("bundle", empty_batch)
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let mut df = ctx.table("bundle").await?;
+
+            for op in operations {
+                df = op
+                    .apply_dataframe(df, ctx.clone().into())
+                    .await
+                    .map_err(|e| DataFusionError::External(e))?;
+            }
+
+            let schema = df.schema();
+            let field = schema
+                .fields()
+                .iter()
+                .find(|f| f.name() == column)
+                .ok_or_else(|| {
+                    DataFusionError::Internal(format!(
+                        "Computed column '{}' not found after applying operations",
+                        column
+                    ))
+                })?;
+            Ok::<_, DataFusionError>(field.data_type().clone())
+        });
+
+        result.map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to infer type for computed column '{}': {}",
+                column, e
+            ))
+        })
+    }
+
+    /// Apply all operations to a raw batch and extract the computed column values.
+    ///
+    /// Returns the result batches containing only the target column.
+    async fn apply_ops_to_batch(
+        batch: &RecordBatch,
+        column: &str,
+        operations: &[AnyOperation],
+        ctx: &SessionContext,
+    ) -> Result<Vec<RecordBatch>, BundlebaseError> {
+        let mut config = SessionConfig::new();
+        config.options_mut().sql_parser.enable_ident_normalization = false;
+        let op_ctx = SessionContext::new_with_config_rt(config, ctx.runtime_env());
+
+        let mem_table = MemTable::try_new(batch.schema(), vec![vec![batch.clone()]])
+            .map_err(|e| BundlebaseError::from(format!("Failed to create MemTable: {}", e)))?;
+        op_ctx
+            .register_table("bundle", Arc::new(mem_table))
+            .map_err(|e| BundlebaseError::from(format!("Failed to register table: {}", e)))?;
+        let mut df = op_ctx
+            .table("bundle")
+            .await
+            .map_err(|e| BundlebaseError::from(format!("Failed to get table: {}", e)))?;
+
+        for op in operations {
+            df = op.apply_dataframe(df, op_ctx.clone().into()).await?;
+        }
+
+        df.select_columns(&[column])
+            .map_err(|e| {
+                BundlebaseError::from(format!("Failed to select column '{}': {}", column, e))
+            })?
+            .collect()
+            .await
+            .map_err(|e| {
+                BundlebaseError::from(format!("Failed to collect computed column '{}': {}", column, e))
+            })
+    }
+
+    /// Build a column index on a computed column by applying operations to each batch.
+    async fn build_computed_column_index(
+        index: &ObjectId,
+        column: &str,
+        blocks: Vec<(BlockId, String)>,
+        bundle: &Bundle,
+        operations: Vec<AnyOperation>,
+    ) -> Result<Self, BundlebaseError> {
+        // Find block references
+        let block_refs: Vec<(Arc<DataBlock>, BlockId, String)> = blocks
+            .iter()
+            .map(|(block_id, version)| {
+                let block = find_block(bundle, block_id)?;
+                Ok((block, *block_id, version.clone()))
+            })
+            .collect::<Result<Vec<_>, BundlebaseError>>()?;
+
+        // Infer data type from the first block's schema + operations
+        let base_schema = block_refs
+            .first()
+            .map(|(b, _, _)| b.schema())
+            .ok_or_else(|| BundlebaseError::from("No blocks to index"))?;
+        let data_type = Self::infer_computed_column_type(column, &operations, &base_schema)?;
+
+        let progress = ProgressScope::new(
+            &format!("Indexing computed column '{}'", column),
+            Some(blocks.len() as u64),
+        );
+
+        let temp_manager = TempDirManager::new(&bundle.data_dir(), "column_index")?;
+        let sort_config = ExternalSortConfig::new(
+            DEFAULT_MEMORY_LIMIT_BYTES,
+            temp_manager.path().clone(),
+        );
+        let mut sorter = ExternalSortWriter::new(sort_config)?;
+
+        for (idx, (block, _block_id, _version)) in block_refs.iter().enumerate() {
+            let block_ref = ObjectIdAlias::from(idx as u16);
+            let mut rowid_stream = block
+                .reader()
+                .extract_rowids_stream(block_ref, bundle.ctx(), None)
+                .await
+                .map_err(|e| {
+                    BundlebaseError::from(format!(
+                        "Failed to stream data from block for computed indexing: {}",
+                        e
+                    ))
+                })?;
+
+            while let Some(batch_result) = rowid_stream.next().await {
+                let rowid_batch = batch_result.map_err(|e| {
+                    BundlebaseError::from(format!("Failed to read row batch from block: {}", e))
+                })?;
+
+                let batch = &rowid_batch.batch;
+                let row_ids = &rowid_batch.row_ids;
+
+                let result_batches = Self::apply_ops_to_batch(
+                    batch,
+                    column,
+                    &operations,
+                    bundle.ctx().as_ref(),
+                )
+                .await?;
+
+                for result_batch in &result_batches {
+                    let array = result_batch.column(0);
+                    for (row, row_id) in row_ids.iter().enumerate() {
+                        if row < array.len() {
+                            let scalar = ScalarValue::try_from_array(array, row)?;
+                            let indexed_value = IndexedValue::from_scalar(&scalar)?;
+                            sorter.add(indexed_value, *row_id)?;
+                        }
+                    }
+                }
+            }
+
+            let msg = format!("Block {}/{}", idx + 1, block_refs.len());
+            progress.update((idx + 1) as u64, Some(&msg));
+        }
+
+        // Build index from sorted stream
+        let sorted_iter = sorter.finish()?;
+        let column_index = ColumnIndex::build_streaming(
+            column,
+            &data_type,
+            sorted_iter.map(|r| r.map(|e| (e.value, e.row_id))),
+        )
+        .map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to build index for computed column '{}': {}",
+                column, e
+            ))
+        })?;
+
+        let total_cardinality = column_index.cardinality();
+
+        let serialized = column_index.serialize().map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to serialize index for computed column '{}': {}",
+                column, e
+            ))
+        })?;
+
+        let rel_path = Self::save_index_bytes(bundle, serialized, "idx.column", column).await?;
+
+        log::debug!(
+            "Successfully created computed column index for '{}' at {}",
+            column,
+            rel_path
+        );
+
+        Ok(Self {
+            index: *index,
+            blocks: blocks
+                .into_iter()
+                .map(|(block, version)| VersionedBlockId { block, version })
+                .collect(),
+            path: rel_path,
+            cardinality: total_cardinality,
+            doc_count: None,
+        })
+    }
+
+    /// Build a text index on a computed column by applying operations to each batch.
+    async fn build_computed_text_index(
+        index: &ObjectId,
+        index_name: &str,
+        text_columns: &[String],
+        blocks: Vec<(BlockId, String)>,
+        bundle: &Bundle,
+        tokenizer_config: &TokenizerConfig,
+        operations: Vec<AnyOperation>,
+    ) -> Result<Self, BundlebaseError> {
+        let progress = ProgressScope::new(
+            &format!("Building computed text index for '{}'", index_name),
+            Some(blocks.len() as u64),
+        );
+
+        let mut builder = TextIndexBuilder::new(index_name, text_columns, tokenizer_config)
+            .map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to create text index builder for '{}': {}",
+                    index_name, e
+                ))
+            })?;
+        let num_columns = text_columns.len();
+
+        for (block_idx, (block_id, _version)) in blocks.iter().enumerate() {
+            let block = find_block(bundle, block_id)?;
+            let block_ref = ObjectIdAlias::from(block_idx as u16);
+            let mut rowid_stream = block
+                .reader()
+                .extract_rowids_stream(block_ref, bundle.ctx(), None)
+                .await
+                .map_err(|e| {
+                    BundlebaseError::from(format!(
+                        "Failed to stream data from block for computed text indexing: {}",
+                        e
+                    ))
+                })?;
+
+            while let Some(batch_result) = rowid_stream.next().await {
+                let rowid_batch = batch_result.map_err(|e| {
+                    BundlebaseError::from(format!("Failed to read row batch from block: {}", e))
+                })?;
+
+                let batch = &rowid_batch.batch;
+                let row_ids = &rowid_batch.row_ids;
+
+                // Apply operations and select all text columns
+                let mut config = SessionConfig::new();
+                config.options_mut().sql_parser.enable_ident_normalization = false;
+                let op_ctx =
+                    SessionContext::new_with_config_rt(config, bundle.ctx().runtime_env());
+
+                let mem_table =
+                    MemTable::try_new(batch.schema(), vec![vec![batch.clone()]]).map_err(|e| {
+                        BundlebaseError::from(format!("Failed to create MemTable: {}", e))
+                    })?;
+                op_ctx.register_table("bundle", Arc::new(mem_table)).map_err(|e| {
+                    BundlebaseError::from(format!("Failed to register table: {}", e))
+                })?;
+                let mut df = op_ctx.table("bundle").await.map_err(|e| {
+                    BundlebaseError::from(format!("Failed to get table: {}", e))
+                })?;
+
+                for op in &operations {
+                    df = op.apply_dataframe(df, op_ctx.clone().into()).await?;
+                }
+
+                let col_refs: Vec<&str> = text_columns.iter().map(|s| s.as_str()).collect();
+                let result_batches = df
+                    .select_columns(&col_refs)
+                    .map_err(|e| {
+                        BundlebaseError::from(format!("Failed to select text columns: {}", e))
+                    })?
+                    .collect()
+                    .await
+                    .map_err(|e| {
+                        BundlebaseError::from(format!("Failed to collect text columns: {}", e))
+                    })?;
+
+                for result_batch in &result_batches {
+                    for (row, row_id) in row_ids.iter().enumerate() {
+                        if row >= result_batch.num_rows() {
+                            break;
+                        }
+                        let mut column_values: Vec<Option<String>> =
+                            Vec::with_capacity(num_columns);
+                        let mut has_any_value = false;
+
+                        for col_idx in 0..num_columns {
+                            let array = result_batch.column(col_idx);
+                            let scalar = ScalarValue::try_from_array(array, row)?;
+
+                            let text_value = match &scalar {
+                                ScalarValue::Utf8(Some(s))
+                                | ScalarValue::LargeUtf8(Some(s)) => Some(s.clone()),
+                                ScalarValue::Utf8View(Some(s)) => Some(s.to_string()),
+                                _ => None,
+                            };
+
+                            if text_value.is_some() {
+                                has_any_value = true;
+                            }
+                            column_values.push(text_value);
+                        }
+
+                        if has_any_value {
+                            builder.add_document(&column_values, *row_id)?;
+                        }
+                    }
+                }
+            }
+
+            let msg = format!("Block {}/{}", block_idx + 1, blocks.len());
+            progress.update((block_idx + 1) as u64, Some(&msg));
+        }
+
+        let text_index = builder.finish().map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to finalize computed text index for '{}': {}",
+                index_name, e
+            ))
+        })?;
+
+        let doc_count = text_index.doc_count();
+
+        let serialized = text_index.serialize().map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to serialize computed text index for '{}': {}",
+                index_name, e
+            ))
+        })?;
+
+        let rel_path =
+            Self::save_index_bytes(bundle, serialized, "idx.text.tar", index_name).await?;
+
+        log::debug!(
+            "Successfully created computed text index '{}' for columns [{}] at {} ({} documents)",
             index_name,
             text_columns.join(", "),
             rel_path,

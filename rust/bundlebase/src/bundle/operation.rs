@@ -1,3 +1,4 @@
+mod add_column;
 mod attach_block;
 mod cast_column;
 mod create_view;
@@ -23,6 +24,7 @@ mod set_description;
 mod set_name;
 mod update_version;
 
+pub use crate::bundle::operation::add_column::AddColumnOp;
 pub use crate::bundle::operation::attach_block::{AttachBlockOp, SourceInfo};
 pub use crate::bundle::operation::cast_column::CastColumnOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
@@ -196,6 +198,7 @@ macro_rules! define_any_operation {
 // Define all operations in one place.
 // To add a new operation, simply add a line here.
 define_any_operation! {
+    AddColumn(AddColumnOp),
     AttachBlock(AttachBlockOp),
     CastColumn(CastColumnOp),
     CreateFunction(CreateFunctionOp),

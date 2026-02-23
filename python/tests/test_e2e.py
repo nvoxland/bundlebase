@@ -2054,3 +2054,37 @@ async def test_cast_column_invalid_column():
 
     with pytest.raises(Exception):
         await c.cast_column("nonexistent_column", "integer")
+
+
+@pytest.mark.asyncio
+async def test_add_column():
+    """Test add_column() adds a computed column to the bundle."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.standardize_column_names()
+
+    # Add a computed column combining first_name and company
+    c = await c.add_column("name_and_company", "first_name || ' - ' || company")
+
+    # Verify schema has new column
+    schema = await c.schema()
+    col_names = [f.name for f in schema]
+    assert "name_and_company" in col_names
+
+    # Verify data contains expected concatenation
+    result = await c.query("SELECT name_and_company FROM bundle LIMIT 5")
+    df = await result.to_pandas()
+    assert len(df) == 5
+    for val in df["name_and_company"]:
+        assert " - " in val
+
+
+@pytest.mark.asyncio
+async def test_add_column_duplicate():
+    """Test add_column with existing column name raises an error."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.standardize_column_names()
+
+    with pytest.raises(Exception, match="already exists"):
+        await c.add_column("first_name", "first_name || ' test'")
