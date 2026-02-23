@@ -38,7 +38,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     assert_eq!(*temp2.url(), c2.url());
 
     // Add operation to extended bundle
-    c2.drop_column("country").await?;
+    c2.drop_column("Country").await?;
     c2.commit("Remove country column").await?;
     assert_eq!(Some(temp1.url()), c2.bundle().from().as_ref());
 
@@ -53,7 +53,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     assert_eq!(reopened.url(), c2.url());
 
     // Verify the schema doesn't have country
-    assert!(!common::has_column(&reopened.schema().await?, "country"));
+    assert!(!common::has_column(&reopened.schema().await?, "Country"));
     // The number of operations should include both from base and new
     // Since we're extending from path1, it should have attach + remove
     assert!(reopened.operations().len() >= 1); // At least the remove_column
@@ -75,7 +75,7 @@ async fn test_simple_extend_chain() -> Result<(), BundlebaseError> {
     let base1 = Bundle::open(&temp1.to_string(), None).await?;
     assert_eq!(1, base1.history().len());
     let mut c2 = base1.extend(Some(&temp2.to_string())).await?;
-    c2.drop_column("country").await?;
+    c2.drop_column("Country").await?;
     c2.commit("Extended commit").await?;
 
     // Reopen extended bundle and verify history
@@ -107,12 +107,12 @@ async fn test_lazy_history_traversal() -> Result<(), BundlebaseError> {
 
     let base1 = Bundle::open(&temp1.to_string(), None).await?;
     let mut c2 = base1.extend(Some(&temp2.to_string())).await?;
-    c2.drop_column("country").await?;
+    c2.drop_column("Country").await?;
     c2.commit("Second commit").await?;
 
     let base2 = Bundle::open(&temp2.to_string(), None).await?;
     let mut c3 = base2.extend(Some(&temp3.to_string())).await?;
-    c3.drop_column("phone").await?;
+    c3.drop_column("Phone 1").await?;
     c3.commit("Third commit").await?;
 
     let final_bundle = Bundle::open(&temp3.to_string(), None).await?;
@@ -136,7 +136,8 @@ async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
 
     let mut bundle = bundlebase::BundleBuilder::create(&temp.to_string(), None).await?;
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
-    bundle.drop_column("country").await?;
+
+    bundle.drop_column("Country").await?;
 
     assert_eq!(bundle.bundle().operations().len(), 2);
     assert_eq!(bundle.bundle().operations().len(), 2);
@@ -180,7 +181,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     // Extend to Bundle B in different location
     let bundle_a_reopened = Bundle::open(&temp1.url().to_string(), None).await?;
     let mut bundle_b = bundle_a_reopened.extend(Some(&temp2.url().to_string())).await?;
-    bundle_b.drop_column("country").await?;
+    bundle_b.drop_column("Country").await?;
     bundle_b.commit("Bundle B extends A").await?;
 
     // Reopen Bundle B - this should work without file-not-found errors
@@ -197,7 +198,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
     // Verify country column was removed
     assert!(!common::has_column(
         &bundle_b_reopened.schema().await?,
-        "country"
+        "Country"
     ));
 
     let operations = bundle_b_reopened.operations();
@@ -241,7 +242,7 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     assert_eq!(base_id, base1.id(), "Opened bundle should have same ID as InitCommit");
 
     let mut c2 = base1.extend(Some(&temp2.url().to_string())).await?;
-    c2.drop_column("country").await?;
+    c2.drop_column("Country").await?;
     c2.commit("Second commit").await?;
 
     // Verify extended bundle's InitCommit has only 'from', not 'id'
@@ -266,7 +267,7 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
 
     // Extend again to third bundle and verify ID is still the same
     let mut c3 = base2.extend(Some(&temp3.url().to_string())).await?;
-    c3.drop_column("phone").await?;
+    c3.drop_column("Phone 1").await?;
     c3.commit("Third commit").await?;
 
     let init_file3 = temp3.subdir(META_DIR)?.file(INIT_FILENAME)?;

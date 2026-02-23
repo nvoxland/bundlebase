@@ -181,7 +181,8 @@ changes:
 
     // Verify column IDs are present in the actual serialized output
     assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
-    assert!(contents.contains("columnId:"), "RenameColumn should have columnId");
+    assert!(contents.contains("type: dropColumn\n    ids:"), "DropColumn should have ids");
+    assert!(contents.contains("type: renameColumn\n    id:"), "RenameColumn should have id");
 
     // Open the saved bundle
     let loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;
@@ -391,7 +392,8 @@ changes:
 
     // Verify column IDs are present in the actual serialized output
     assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
-    assert!(contents.contains("columnId:"), "RenameColumn should have columnId");
+    assert!(contents.contains("type: dropColumn\n    ids:"), "DropColumn should have ids");
+    assert!(contents.contains("type: renameColumn\n    id:"), "RenameColumn should have id");
 
     Ok(())
 }

@@ -721,7 +721,7 @@ async def test_extend_bundle_inherits_id():
 
                 # Extend again to third bundle and verify ID is still the same
                 c3 = await c2_opened.extend(temp3)
-                c3 = await c3.drop_column("phone")
+                c3 = await c3.drop_column("title")
                 await c3.commit("Third commit")
 
                 # Verify third bundle's 00000000000000000.yaml

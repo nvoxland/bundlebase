@@ -49,36 +49,77 @@ pub async fn latest_commit(
     }
 }
 
-/// Strip columnId/columnIds fields from serialized YAML for comparison.
+/// Strip column ID fields from serialized YAML for comparison.
 /// These contain random generated IDs that differ between test runs.
+///
+/// Strips:
+/// - `columnIds:` lists (on AttachBlockOp)
+/// - `columnId:` fields (legacy naming)
+/// - `ids:` lists (on DropColumnOp)
+/// - `id:` fields on column operations (RenameColumn, CastColumn, AddColumn)
+///   but NOT on AttachBlock or change-level `id:` lines
 #[allow(dead_code)]
 pub fn strip_column_ids(yaml: &str) -> String {
+    let lines: Vec<&str> = yaml.lines().collect();
     let mut result = Vec::new();
-    let mut in_column_ids_list = false;
+    let mut i = 0;
+    // Track which operation type we're currently inside
+    let mut in_column_op = false;
+    let mut in_ids_list = false;
 
-    for line in yaml.lines() {
-        let trimmed = line.trim();
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
 
-        // Skip standalone columnId lines (e.g., "    columnId: abc123")
-        if trimmed.starts_with("columnId: ") || trimmed.starts_with("columnId:") {
-            continue;
+        // Track operation type context (may appear as "type: X" or "- type: X" in YAML lists)
+        let type_value = if trimmed.starts_with("- type: ") {
+            Some(trimmed.trim_start_matches("- type: "))
+        } else if trimmed.starts_with("type: ") {
+            Some(trimmed.trim_start_matches("type: "))
+        } else {
+            None
+        };
+        if let Some(op_type) = type_value {
+            in_column_op = matches!(
+                op_type,
+                "renameColumn" | "castColumn" | "addColumn" | "dropColumn"
+            );
         }
 
-        // Detect start of columnIds list
+        // Skip columnId/columnIds lines (legacy naming, used by AttachBlock)
+        if trimmed.starts_with("columnId:") && !trimmed.starts_with("columnIds:") {
+            i += 1;
+            continue;
+        }
         if trimmed.starts_with("columnIds:") {
-            in_column_ids_list = true;
+            in_ids_list = true;
+            i += 1;
             continue;
         }
 
-        // Skip list items under columnIds
-        if in_column_ids_list {
+        // Skip `ids:` list in column operations (DropColumnOp)
+        if in_column_op && trimmed == "ids:" {
+            in_ids_list = true;
+            i += 1;
+            continue;
+        }
+
+        // Skip `id:` field in column operations (Rename/Cast/AddColumn)
+        if in_column_op && trimmed.starts_with("id: ") {
+            i += 1;
+            continue;
+        }
+
+        // Skip list items under ids/columnIds
+        if in_ids_list {
             if trimmed.starts_with("- ") && !trimmed.contains(": ") {
+                i += 1;
                 continue;
             }
-            in_column_ids_list = false;
+            in_ids_list = false;
         }
 
-        result.push(line);
+        result.push(lines[i]);
+        i += 1;
     }
 
     let mut output = result.join("\n");
