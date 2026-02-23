@@ -1,5 +1,6 @@
 use crate::data::{BlockId, ObjectId, VersionedBlockId};
 use crate::bundle::IndexedBlocks;
+use crate::object_id::ColumnId;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -251,6 +252,7 @@ pub struct IndexDefinition {
     name: String,
     columns: Vec<String>,
     index_type: IndexType,
+    column_ids: Vec<ColumnId>,
     blocks: RwLock<Vec<Arc<IndexedBlocks>>>,
     /// O(1) lookup from versioned block ID to its IndexedBlocks
     block_lookup: RwLock<HashMap<BlockLookupKey, Arc<IndexedBlocks>>>,
@@ -258,12 +260,19 @@ pub struct IndexDefinition {
 
 impl IndexDefinition {
     /// Create a new index definition with a specific type
-    pub(crate) fn new(id: &ObjectId, name: String, columns: Vec<String>, index_type: IndexType) -> IndexDefinition {
+    pub(crate) fn new(
+        id: &ObjectId,
+        name: String,
+        columns: Vec<String>,
+        index_type: IndexType,
+        column_ids: Vec<ColumnId>,
+    ) -> IndexDefinition {
         Self {
             id: *id,
             name,
             columns,
             index_type,
+            column_ids,
             blocks: RwLock::new(Vec::new()),
             block_lookup: RwLock::new(HashMap::new()),
         }
@@ -280,6 +289,11 @@ impl IndexDefinition {
 
     pub fn columns(&self) -> &[String] {
         &self.columns
+    }
+
+    /// Get the column IDs for this index.
+    pub fn column_ids(&self) -> &[ColumnId] {
+        &self.column_ids
     }
 
     pub fn index_type(&self) -> &IndexType {

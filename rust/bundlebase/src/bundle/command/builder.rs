@@ -3,6 +3,7 @@
 //! This module contains command implementations that mutate a `BundleBuilder`.
 
 // Builder command implementations
+mod add_column;
 mod attach;
 mod cast_column;
 mod commit;
@@ -31,6 +32,7 @@ mod set_name;
 mod undo;
 mod verify_data;
 
+pub use add_column::AddColumnCommand;
 pub use attach::AttachCommand;
 pub use cast_column::CastColumnCommand;
 pub use commit::CommitCommand;

@@ -1,4 +1,5 @@
 use crate::bundle::operation::Operation;
+use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
@@ -10,13 +11,15 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DropColumnOp {
+    pub ids: Vec<ColumnId>,
     pub names: Vec<String>,
 }
 
 impl DropColumnOp {
-    pub fn setup(names: Vec<&str>) -> Self {
+    pub fn setup(ids: Vec<ColumnId>, names: Vec<&str>) -> Self {
         Self {
             names: names.iter().map(|s| s.to_string()).collect(),
+            ids,
         }
     }
 }
@@ -51,45 +54,32 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = DropColumnOp::setup(vec!["col1", "col2"]);
+        let op = DropColumnOp::setup(vec![ColumnId::generate(), ColumnId::generate()], vec!["col1", "col2"]);
         assert_eq!(op.describe(), r#"DROP COLUMN: ["col1", "col2"]"#);
     }
 
     #[test]
     fn test_describe_single_column() {
-        let op = DropColumnOp::setup(vec!["title"]);
+        let op = DropColumnOp::setup(vec![ColumnId::generate()], vec!["title"]);
         assert_eq!(op.describe(), r#"DROP COLUMN: ["title"]"#);
     }
 
     #[test]
     fn test_serialization() {
-        let op = DropColumnOp::setup(vec!["col1", "col2"]);
+        let op = DropColumnOp::setup(vec![ColumnId::generate(), ColumnId::generate()], vec!["col1", "col2"]);
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        let expected = r#"names:
-- col1
-- col2
-"#;
-        assert_eq!(serialized, expected);
-    }
-
-    #[test]
-    fn test_serialization_single() {
-        let op = DropColumnOp::setup(vec!["title"]);
-
-        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        let expected = r#"names:
-- title
-"#;
-        assert_eq!(serialized, expected);
+        assert!(serialized.starts_with("ids:\n"));
+        assert!(serialized.contains("names:\n- col1\n- col2"));
     }
 
     #[test]
     fn test_version() {
-        let op = DropColumnOp::setup(vec!["title"]);
+        let op = DropColumnOp::setup(vec![ColumnId::generate()], vec!["title"]);
         let version = op.version();
 
-        // Exact value for this specific config (first 12 chars of SHA256)
-        assert_eq!(version, "bdd2c52a4e75");
+        // Version now includes column ids so it varies per invocation
+        assert!(!version.is_empty());
+        assert_eq!(version.len(), 12);
     }
 }

@@ -545,6 +545,27 @@ class PyBundleBuilder:
         """
         ...
 
+    def add_column(self, name: str, expression: str) -> "OperationChain":
+        """
+        Queue an add_column operation.
+
+        Adds a computed column to the bundle using a SQL expression.
+
+        Args:
+            name: Name for the new column
+            expression: SQL expression to compute the column value
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Raises:
+            ValueError: If the column already exists
+
+        Example:
+            c = await c.add_column("full_name", "first_name || ' ' || last_name")
+        """
+        ...
+
     def drop_column(self, name: str) -> "OperationChain":
         """
         Queue a drop_column operation.
@@ -1167,6 +1188,10 @@ class OperationChain:
         """Queue a replace_block operation."""
         ...
 
+    def add_column(self, name: str, expression: str) -> "OperationChain":
+        """Queue an add_column operation."""
+        ...
+
     def drop_column(self, name: str) -> "OperationChain":
         """Queue a drop_column operation."""
         ...
@@ -1293,6 +1318,10 @@ class CreateChain:
         """Queue a replace_block operation."""
         ...
 
+    def add_column(self, name: str, expression: str) -> "CreateChain":
+        """Queue an add_column operation."""
+        ...
+
     def drop_column(self, name: str) -> "CreateChain":
         """Queue a drop_column operation."""
         ...
@@ -1417,6 +1446,10 @@ class ExtendChain:
 
     def replace_block(self, old_location: str, new_location: str) -> "ExtendChain":
         """Queue a replace_block operation."""
+        ...
+
+    def add_column(self, name: str, expression: str) -> "ExtendChain":
+        """Queue an add_column operation."""
         ...
 
     def drop_column(self, name: str) -> "ExtendChain":

@@ -1,7 +1,9 @@
 //! DropColumn command implementation.
 
+use crate::bundle::column_registry::ColumnRegistry;
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::DropColumnOp;
+use crate::bundle::BundleFacade;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
@@ -51,8 +53,14 @@ impl BundleBuilderCommand for DropColumnCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
+        let registry = ColumnRegistry::from_operations(&builder.operations());
+        let column_id = registry.id_for_name(&self.name)
+            .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found in column registry", self.name)))?;
+
         builder
-            .apply_operation(DropColumnOp::setup(vec![self.name.as_str()]).into())
+            .apply_operation(
+                DropColumnOp::setup(vec![column_id], vec![self.name.as_str()]).into(),
+            )
             .await?;
 
         Ok(format!("Dropped column: {}", self.name))

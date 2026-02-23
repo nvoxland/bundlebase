@@ -15,7 +15,8 @@
 //! SELECT * FROM search('query')
 //! ```
 
-use crate::bundle::{AnyOperation, BundleFacade, Pack};
+use crate::bundle::{AnyOperation, BundleFacade, Operation, Pack};
+use crate::catalog::BundleViewTable;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId};
 use crate::index::{IndexDefinition, TextIndex};
 use crate::io::plugin::object_store::ObjectStoreFile;
@@ -27,6 +28,7 @@ use async_trait::async_trait;
 use datafusion::catalog::{Session, TableFunctionImpl, TableProvider};
 use datafusion::common::{project_schema, Statistics};
 use datafusion::datasource::source::{DataSource, DataSourceExec};
+use datafusion::datasource::MemTable;
 use datafusion::datasource::TableType;
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
@@ -35,6 +37,7 @@ use datafusion::physical_expr::projection::ProjectionExprs;
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::ExecutionPlan;
+use datafusion::prelude::{SessionConfig, SessionContext};
 use futures::stream::{self, StreamExt};
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -195,19 +198,27 @@ impl std::fmt::Debug for SearchResultTableProvider {
 }
 
 impl SearchResultTableProvider {
-    /// Returns the logical data schema (with renames applied) from the first available block.
-    /// All blocks in a bundle are guaranteed to share the same schema,
-    /// so any block's schema is representative.
-    fn data_schema(&self) -> SchemaRef {
+    /// Returns the raw physical data schema from the first available block.
+    fn physical_schema(&self) -> SchemaRef {
         for pack in self.packs.values() {
             for block in pack.blocks() {
-                return self.apply_schema_operations(block.schema());
+                return block.schema();
             }
         }
         Arc::new(Schema::empty())
     }
 
-    /// Apply schema-altering operations (renames, drops) to a physical schema to get the logical schema
+    /// Returns the physical schema plus `_score` column.
+    /// This is the schema of raw search result batches before operations are applied.
+    fn physical_output_schema(&self) -> SchemaRef {
+        let physical = self.physical_schema();
+        let mut fields: Vec<Arc<Field>> = physical.fields().iter().cloned().collect();
+        fields.push(Arc::new(Field::new("_score", DataType::Float64, false)));
+        Arc::new(Schema::new(fields))
+    }
+
+    /// Apply schema-altering operations to a schema to get the logical schema.
+    /// Handles renames, drops, casts, and added columns.
     fn apply_schema_operations(&self, schema: SchemaRef) -> SchemaRef {
         let mut fields: Vec<Arc<Field>> = schema.fields().iter().cloned().collect();
         for op in &self.operations {
@@ -226,45 +237,121 @@ impl SearchResultTableProvider {
                 AnyOperation::DropColumn(drop) => {
                     fields.retain(|f| !drop.names.contains(&f.name().to_string()));
                 }
+                AnyOperation::CastColumn(cast) => {
+                    let arrow_type = match cast.new_type.to_lowercase().as_str() {
+                        "integer" | "int" => DataType::Int64,
+                        "float" | "double" => DataType::Float64,
+                        "string" | "text" => DataType::Utf8,
+                        "boolean" | "bool" => DataType::Boolean,
+                        "date" => DataType::Date32,
+                        "timestamp" => DataType::Timestamp(
+                            arrow::datatypes::TimeUnit::Microsecond,
+                            None,
+                        ),
+                        _ => continue,
+                    };
+                    for field in fields.iter_mut() {
+                        if field.name() == &cast.name {
+                            *field = Arc::new(Field::new(
+                                field.name(),
+                                arrow_type.clone(),
+                                field.is_nullable(),
+                            ));
+                        }
+                    }
+                }
+                AnyOperation::AddColumn(add) => {
+                    // Infer the expression's result type by planning against an empty table
+                    let current_schema = Arc::new(Schema::new(fields.clone()));
+                    let field = Self::infer_add_column_field(
+                        &add.name,
+                        &add.expression,
+                        &current_schema,
+                    );
+                    fields.push(Arc::new(field));
+                }
                 _ => {}
             }
         }
         Arc::new(Schema::new(fields))
     }
 
+    /// Infer the Arrow Field for an ADD COLUMN expression by planning it
+    /// against an empty table with the current schema.
+    fn infer_add_column_field(
+        column_name: &str,
+        expression: &str,
+        current_schema: &SchemaRef,
+    ) -> Field {
+        let result = futures::executor::block_on(async {
+            let mut config = SessionConfig::new();
+            config.options_mut().sql_parser.enable_ident_normalization = false;
+            let ctx = SessionContext::new_with_config(config);
+            let empty_batch = RecordBatch::new_empty(current_schema.clone());
+            ctx.register_batch("bundle", empty_batch)
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let sql = format!(
+                "SELECT *, ({}) AS \"{}\" FROM bundle",
+                expression, column_name
+            );
+            let plan = ctx.state().create_logical_plan(&sql).await?;
+            let schema = plan.schema();
+            // The new column is the last field in the plan's schema
+            let new_field = schema
+                .fields()
+                .iter()
+                .find(|f| f.name() == column_name)
+                .cloned()
+                .ok_or_else(|| {
+                    DataFusionError::Internal(format!(
+                        "Could not find column '{}' in planned schema",
+                        column_name
+                    ))
+                })?;
+            Ok::<_, DataFusionError>(new_field)
+        });
+        match result {
+            Ok(field) => field.as_ref().clone(),
+            Err(_) => Field::new(column_name, DataType::Utf8, true),
+        }
+    }
+
     fn output_schema(&self) -> SchemaRef {
-        let data_schema = self.data_schema();
-        let mut fields: Vec<Arc<Field>> = data_schema.fields().iter().cloned().collect();
-        fields.push(Arc::new(Field::new("_score", DataType::Float64, false)));
-        Arc::new(Schema::new(fields))
+        // Start with physical columns + _score (matching physical_output_schema),
+        // then apply operations. This ensures column ordering matches the actual
+        // data produced by open(), where operations are applied to batches that
+        // already include _score.
+        let physical_with_score = self.physical_output_schema();
+        self.apply_schema_operations(physical_with_score)
     }
 
     /// Rewrite logical field names in a search query to physical field names.
     /// E.g., after renaming "Answer" → "answer", rewrites "answer:foo" → "Answer:foo"
+    ///
+    /// Uses the ColumnRegistry for robust name resolution that survives transitive renames.
     fn rewrite_query_fields(&self, query: &str) -> String {
-        // Build reverse rename map: new_name → old_name (logical → physical)
+        let index_column_ids = self.index_def.column_ids();
+        let registry = crate::bundle::ColumnRegistry::from_operations(&self.operations);
+
         let mut logical_to_physical: HashMap<String, String> = HashMap::new();
-        for op in &self.operations {
-            if let AnyOperation::RenameColumn(rename) = op {
-                logical_to_physical.insert(rename.new_name.clone(), rename.old_name.clone());
+        for col_id in index_column_ids.iter() {
+            if let (Some(current_name), Some(original_name)) = (
+                registry.name_for_id(col_id),
+                registry.original_name_for_id(col_id),
+            ) {
+                if current_name != original_name {
+                    logical_to_physical.insert(
+                        current_name.to_string(),
+                        original_name.to_string(),
+                    );
+                }
             }
         }
+
         if logical_to_physical.is_empty() {
             return query.to_string();
         }
 
-        // Resolve transitive chains: if q→question and question→Question,
-        // then q should map to Question
-        let keys: Vec<String> = logical_to_physical.keys().cloned().collect();
-        for key in &keys {
-            let mut target = logical_to_physical[key].clone();
-            while let Some(next) = logical_to_physical.get(&target) {
-                target = next.clone();
-            }
-            logical_to_physical.insert(key.clone(), target);
-        }
-
-        // Replace field:term patterns in the query
         let mut result = query.to_string();
         for (logical, physical) in &logical_to_physical {
             result = result.replace(
@@ -397,6 +484,7 @@ impl TableProvider for SearchResultTableProvider {
 
         let data_source = SearchDataSource {
             output_schema,
+            physical_output_schema: self.physical_output_schema(),
             projected_schema,
             projection: projection.cloned(),
             score_map,
@@ -404,6 +492,7 @@ impl TableProvider for SearchResultTableProvider {
             block_id_to_ref: Arc::new(block_id_to_ref),
             packs: self.packs.clone(),
             ctx: self.ctx.clone(),
+            operations: self.operations.clone(),
             fetch: limit,
         };
 
@@ -431,7 +520,10 @@ impl SearchResultTableProvider {
 /// but the data-fetching phase is deferred to `open()` so rows are streamed
 /// rather than materialized into a `Vec<RecordBatch>`.
 struct SearchDataSource {
+    /// The final logical schema (operations applied + `_score`).
     output_schema: SchemaRef,
+    /// The raw physical schema (block columns + `_score`), before operations.
+    physical_output_schema: SchemaRef,
     projected_schema: SchemaRef,
     projection: Option<Vec<usize>>,
     score_map: Arc<HashMap<u64, f64>>,
@@ -440,6 +532,8 @@ struct SearchDataSource {
     block_id_to_ref: Arc<HashMap<BlockId, u16>>,
     packs: HashMap<ObjectId, Arc<Pack>>,
     ctx: Arc<datafusion::prelude::SessionContext>,
+    /// Operations to apply to raw search results to produce logical output.
+    operations: Vec<AnyOperation>,
     fetch: Option<usize>,
 }
 
@@ -470,11 +564,13 @@ impl DataSource for SearchDataSource {
         _context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
         let output_schema = self.output_schema.clone();
+        let physical_output_schema = self.physical_output_schema.clone();
         let projected_schema = self.projected_schema.clone();
         let score_map = self.score_map.clone();
         let block_id_to_ref = self.block_id_to_ref.clone();
         let ctx = self.ctx.clone();
         let projection = self.projection.clone();
+        let operations = self.operations.clone();
 
         let matching_block_refs = self.matching_block_refs.clone();
 
@@ -491,140 +587,159 @@ impl DataSource for SearchDataSource {
             }
         }
 
-        // Build an async stream that iterates blocks, extracts rowids, filters, and appends scores
-        let stream = stream::iter(blocks_to_scan)
-            .then(move |(block, block_ref_idx)| {
-                let score_map = score_map.clone();
-                let output_schema = output_schema.clone();
-                let ctx = ctx.clone();
-                let projection = projection.clone();
+        // Check if any operations transform data (not just rename/drop schema changes)
+        let has_data_transforming_ops = operations.iter().any(|op| {
+            matches!(
+                op,
+                AnyOperation::AddColumn(_)
+                    | AnyOperation::CastColumn(_)
+                    | AnyOperation::Filter(_)
+            )
+        });
 
-                async move {
-                    let reader = block.reader();
-                    let block_ref = ObjectIdAlias::from(block_ref_idx);
+        // Build an async stream that collects raw batches, applies operations, then streams results
+        let result_stream = stream::once(async move {
+            // Step 1: Collect raw physical batches with scores from all matching blocks
+            let mut raw_batches: Vec<RecordBatch> = Vec::new();
 
-                    let rowid_stream = reader
-                        .extract_rowids_stream(block_ref, ctx, None)
-                        .await
+            for (block, block_ref_idx) in blocks_to_scan {
+                let reader = block.reader();
+                let block_ref = ObjectIdAlias::from(block_ref_idx);
+
+                let mut rowid_stream = reader
+                    .extract_rowids_stream(block_ref, ctx.clone(), None)
+                    .await
+                    .map_err(|e| DataFusionError::External(e))?;
+
+                while let Some(batch_result) = rowid_stream.next().await {
+                    let rowid_batch = batch_result
                         .map_err(|e| DataFusionError::External(e))?;
 
-                    // Return a stream of filtered+scored batches for this block
-                    let batch_stream = rowid_stream.filter_map(move |batch_result| {
-                        let score_map = score_map.clone();
-                        let output_schema = output_schema.clone();
-                        let projection = projection.clone();
+                    let batch = &rowid_batch.batch;
+                    let row_ids = &rowid_batch.row_ids;
 
-                        async move {
-                            let rowid_batch = match batch_result {
-                                Ok(b) => b,
-                                Err(e) => return Some(Err(DataFusionError::External(e))),
-                            };
+                    // Find matching rows in this batch
+                    let mut matching_indices: Vec<usize> = Vec::new();
+                    let mut matching_scores: Vec<f64> = Vec::new();
 
-                            let batch = &rowid_batch.batch;
-                            let row_ids = &rowid_batch.row_ids;
-
-                            // Find matching rows in this batch
-                            let mut matching_indices: Vec<usize> = Vec::new();
-                            let mut matching_scores: Vec<f64> = Vec::new();
-
-                            for (idx, row_id) in row_ids.iter().enumerate() {
-                                if let Some(&score) = score_map.get(&row_id.as_u64()) {
-                                    matching_indices.push(idx);
-                                    matching_scores.push(score);
-                                }
-                            }
-
-                            if matching_indices.is_empty() {
-                                return None;
-                            }
-
-                            // Filter the batch to only matching rows using take
-                            let indices = UInt64Array::from(
-                                matching_indices
-                                    .iter()
-                                    .map(|&i| i as u64)
-                                    .collect::<Vec<_>>(),
-                            );
-                            let mut filtered_columns: Vec<Arc<dyn arrow::array::Array>> =
-                                Vec::new();
-                            for col in batch.columns() {
-                                match compute::take(col, &indices, None) {
-                                    Ok(filtered) => filtered_columns.push(filtered),
-                                    Err(e) => {
-                                        return Some(Err(DataFusionError::ArrowError(
-                                            Box::new(e),
-                                            None,
-                                        )))
-                                    }
-                                }
-                            }
-
-                            // Append score column
-                            let score_array = Float64Array::from(matching_scores);
-                            filtered_columns.push(Arc::new(score_array));
-
-                            let result_batch =
-                                match RecordBatch::try_new(output_schema.clone(), filtered_columns)
-                                {
-                                    Ok(b) => b,
-                                    Err(e) => {
-                                        return Some(Err(DataFusionError::ArrowError(
-                                            Box::new(e),
-                                            None,
-                                        )))
-                                    }
-                                };
-
-                            // Apply projection if specified
-                            let final_batch = if let Some(ref proj) = projection {
-                                let projected_columns: Vec<_> =
-                                    proj.iter().map(|&i| result_batch.column(i).clone()).collect();
-                                let proj_schema = Arc::new(
-                                    match output_schema.project(proj) {
-                                        Ok(s) => s,
-                                        Err(e) => {
-                                            return Some(Err(DataFusionError::ArrowError(
-                                                Box::new(e),
-                                                None,
-                                            )))
-                                        }
-                                    },
-                                );
-                                match RecordBatch::try_new(proj_schema, projected_columns) {
-                                    Ok(b) => b,
-                                    Err(e) => {
-                                        return Some(Err(DataFusionError::ArrowError(
-                                            Box::new(e),
-                                            None,
-                                        )))
-                                    }
-                                }
-                            } else {
-                                result_batch
-                            };
-
-                            Some(Ok(final_batch))
+                    for (idx, row_id) in row_ids.iter().enumerate() {
+                        if let Some(&score) = score_map.get(&row_id.as_u64()) {
+                            matching_indices.push(idx);
+                            matching_scores.push(score);
                         }
-                    });
+                    }
 
-                    Ok::<_, DataFusionError>(batch_stream)
-                }
-            })
-            // Flatten per-block streams into a single stream of RecordBatch results
-            .flat_map(|block_stream_result| {
-                match block_stream_result {
-                    Ok(batch_stream) => {
-                        futures::future::Either::Left(batch_stream)
+                    if matching_indices.is_empty() {
+                        continue;
                     }
-                    Err(e) => {
-                        futures::future::Either::Right(stream::once(async move { Err(e) }))
+
+                    // Filter the batch to only matching rows using take
+                    let indices = UInt64Array::from(
+                        matching_indices
+                            .iter()
+                            .map(|&i| i as u64)
+                            .collect::<Vec<_>>(),
+                    );
+                    let mut filtered_columns: Vec<Arc<dyn arrow::array::Array>> =
+                        Vec::new();
+                    for col in batch.columns() {
+                        let filtered = compute::take(col, &indices, None)
+                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+                        filtered_columns.push(filtered);
                     }
+
+                    // Append score column
+                    let score_array = Float64Array::from(matching_scores);
+                    filtered_columns.push(Arc::new(score_array));
+
+                    let result_batch = RecordBatch::try_new(
+                        physical_output_schema.clone(),
+                        filtered_columns,
+                    )
+                    .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+
+                    raw_batches.push(result_batch);
                 }
-            });
+            }
+
+            if raw_batches.is_empty() {
+                // Return empty batch with the correct output schema
+                return Ok(stream::iter(Vec::<datafusion::common::Result<RecordBatch>>::new()));
+            }
+
+            // Step 2: Apply operations to transform raw batches into logical output
+            let final_batches = if has_data_transforming_ops {
+                // Register raw batches as a "bundle" table and apply operations
+                let mut config = SessionConfig::new();
+                config.options_mut().sql_parser.enable_ident_normalization = false;
+                let op_ctx = SessionContext::new_with_config_rt(config, ctx.runtime_env());
+
+                let mem_table = MemTable::try_new(physical_output_schema.clone(), vec![raw_batches])?;
+                op_ctx.register_table("bundle", Arc::new(mem_table))?;
+                let mut df = op_ctx.table("bundle").await?;
+
+                // Apply each operation to transform the data
+                for op in &operations {
+                    df = op
+                        .apply_dataframe(df, op_ctx.clone().into())
+                        .await
+                        .map_err(|e: crate::BundlebaseError| {
+                            DataFusionError::External(e)
+                        })?;
+                }
+
+                // Re-register the transformed DataFrame as "bundle" to get _score back
+                // Operations only act on bundle columns, so _score passes through
+                let result_batches: Vec<RecordBatch> = df
+                    .collect()
+                    .await?;
+
+                result_batches
+            } else {
+                // No data-transforming operations, just apply schema rename/drop
+                // by re-mapping the physical batches to use the logical schema
+                let mut result_batches = Vec::new();
+                for batch in raw_batches {
+                    let result_batch = RecordBatch::try_new(
+                        output_schema.clone(),
+                        batch.columns().to_vec(),
+                    )
+                    .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+                    result_batches.push(result_batch);
+                }
+                result_batches
+            };
+
+            // Step 3: Apply projection if specified
+            let projected_batches: Vec<datafusion::common::Result<RecordBatch>> = final_batches
+                .into_iter()
+                .map(|batch| {
+                    if let Some(ref proj) = projection {
+                        let projected_columns: Vec<_> =
+                            proj.iter().map(|&i| batch.column(i).clone()).collect();
+                        let proj_schema = Arc::new(
+                            output_schema
+                                .project(proj)
+                                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
+                        );
+                        RecordBatch::try_new(proj_schema, projected_columns)
+                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None).into())
+                    } else {
+                        Ok(batch)
+                    }
+                })
+                .collect();
+
+            Ok(stream::iter(projected_batches))
+        })
+        .flat_map(|result| match result {
+            Ok(batch_stream) => futures::future::Either::Left(batch_stream),
+            Err(e) => futures::future::Either::Right(stream::once(async move { Err(e) })),
+        });
 
         Ok(Box::pin(RecordBatchStreamAdapter::new(
             projected_schema,
-            stream,
+            result_stream,
         )))
     }
 

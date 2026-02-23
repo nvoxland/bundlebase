@@ -2,6 +2,7 @@ use crate::bundle::operation::Operation;
 use crate::bundle::{Bundle, BundleFacade};
 use crate::index::{IndexDefinition, IndexType};
 use crate::io::ObjectId;
+use crate::object_id::ColumnId;
 use crate::BundlebaseError;
 use arrow_schema::DataType;
 use async_trait::async_trait;
@@ -16,10 +17,11 @@ pub struct CreateIndexOp {
     pub id: ObjectId,
     pub name: String,
     pub index_type: IndexType,
+    pub column_ids: Vec<ColumnId>,
 }
 
 impl CreateIndexOp {
-    pub async fn setup(columns: Vec<String>, index_type: IndexType, name: String) -> Result<Self, BundlebaseError> {
+    pub async fn setup(columns: Vec<String>, index_type: IndexType, name: String, column_ids: Vec<ColumnId>) -> Result<Self, BundlebaseError> {
         // For column indexes, validate exactly one column
         if index_type.is_column() && columns.len() != 1 {
             return Err("Column indexes must have exactly one column".into());
@@ -30,6 +32,7 @@ impl CreateIndexOp {
             columns,
             name,
             index_type,
+            column_ids,
         })
     }
 }
@@ -114,6 +117,7 @@ impl Operation for CreateIndexOp {
                 self.name.clone(),
                 self.columns.clone(),
                 self.index_type.clone(),
+                self.column_ids.clone(),
             )));
 
         Ok(())
@@ -130,6 +134,7 @@ mod tests {
             vec!["col1".to_string(), "col2".to_string()],
             IndexType::Column,
             "test_idx".to_string(),
+            vec![ColumnId::generate(), ColumnId::generate()],
         )
         .await;
         assert!(result.is_err());

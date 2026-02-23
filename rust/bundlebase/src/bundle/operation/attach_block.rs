@@ -3,6 +3,7 @@ use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId};
 use crate::io::readable_file_from_path;
+use crate::object_id::ColumnId;
 use crate::progress::ProgressScope;
 use crate::source::AttachedFileInfo;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
@@ -54,6 +55,8 @@ pub struct AttachBlockOp {
         deserialize_with = "super::serde_util::deserialize_schema_option"
     )]
     pub schema: Option<SchemaRef>,
+    #[serde(rename = "columnIds")]
+    pub column_ids: Vec<ColumnId>,
 }
 
 impl AttachBlockOp {
@@ -127,6 +130,10 @@ impl AttachBlockOp {
             Some(detected_options)
         };
 
+        let column_ids = schema.as_ref()
+            .map(|s| s.fields().iter().map(|_| ColumnId::generate()).collect())
+            .unwrap_or_default();
+
         let mut op = AttachBlockOp {
             location: location.to_string(),
             num_rows: None,
@@ -139,6 +146,7 @@ impl AttachBlockOp {
             layout: None,
             source_info,
             read_options,
+            column_ids,
         };
 
         progress.update(5, Some("Reading statistics"));
@@ -257,6 +265,7 @@ mod tests {
             layout: None,
             source_info: None,
             read_options: None,
+            column_ids: vec![],
         };
 
         assert_eq!(op.describe(), "ATTACH: file:///test/data.csv");
@@ -277,9 +286,11 @@ mod tests {
         .version()
         .await?;
 
-        assert_eq!(
-            format!(
-                r#"id: {}
+        let serialized = serde_yaml_ng::to_string(&op)?;
+
+        // Check the static portion (before columnIds which contains random values)
+        let expected_prefix = format!(
+            r#"id: {}
 pack: {}
 location: memory:///test_data/userdata.parquet
 version: {}
@@ -371,12 +382,21 @@ schema:
     metadata: {{}}
   metadata: {{}}
 "#,
-                for_yaml(block_id),
-                for_yaml(pack),
-                for_yaml(version),
-            ),
-            serde_yaml_ng::to_string(&op)?
+            for_yaml(block_id),
+            for_yaml(pack),
+            for_yaml(version),
         );
+        assert!(
+            serialized.starts_with(&expected_prefix),
+            "Serialized output doesn't start with expected prefix.\nActual:\n{}",
+            serialized
+        );
+
+        // Verify columnIds section has 13 entries (one per schema field)
+        assert!(serialized.contains("columnIds:"));
+        let column_ids_section = serialized.split("columnIds:").nth(1).unwrap();
+        let column_id_count = column_ids_section.lines().filter(|l| l.trim().starts_with("- ")).count();
+        assert_eq!(column_id_count, 13, "Expected 13 column IDs for 13 schema fields");
         Ok(())
     }
 
@@ -431,6 +451,7 @@ schema:
             layout: None,
             source_info: None,
             read_options: None,
+            column_ids: vec![],
         };
 
         let version = op.version();
