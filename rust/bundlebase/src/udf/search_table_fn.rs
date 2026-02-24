@@ -235,7 +235,7 @@ impl SearchResultTableProvider {
                     }
                 }
                 AnyOperation::DropColumn(drop) => {
-                    fields.retain(|f| !drop.names.contains(&f.name().to_string()));
+                    fields.retain(|f| f.name() != &drop.name);
                 }
                 AnyOperation::CastColumn(cast) => {
                     let arrow_type = match cast.new_type.to_lowercase().as_str() {

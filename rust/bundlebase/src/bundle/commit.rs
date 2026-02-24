@@ -127,7 +127,7 @@ changes: []
     #[test]
     fn test_serialize_single_operation() {
         let id1 = ColumnId::generate();
-        let op = DropColumnOp::setup(vec![id1], vec!["col1"]);
+        let op = DropColumnOp::setup(id1, "col1");
         let change = BundleChange {
             id: test_uuid(),
             description: "Remove columns".to_string(),
@@ -151,10 +151,8 @@ changes:
   description: Remove columns
   operations:
   - type: dropColumn
-    ids:
-    - {}
-    names:
-    - col1
+    id: {}
+    name: col1
 ", id1);
         assert_eq!(yaml, expected);
     }
@@ -163,7 +161,7 @@ changes:
     fn test_serialize_multiple_operations() {
         let op1 = SetNameOp::setup("Test");
         let drop_id = ColumnId::generate();
-        let op2 = DropColumnOp::setup(vec![drop_id], vec!["col1"]);
+        let op2 = DropColumnOp::setup(drop_id, "col1");
         let rename_id = ColumnId::generate();
         let op3 = RenameColumnOp::setup(rename_id, "old", "new");
 
@@ -192,10 +190,8 @@ changes:
   - type: setName
     name: Test
   - type: dropColumn
-    ids:
-    - {drop_id}
-    names:
-    - col1
+    id: {drop_id}
+    name: col1
   - type: renameColumn
     id: {rename_id}
     oldName: old
@@ -278,10 +274,8 @@ changes:
   - type: setName
     name: Test
   - type: dropColumn
-    ids:
-    - '0000000000000001'
-    names:
-    - col1
+    id: '0000000000000001'
+    name: col1
   - type: renameColumn
     id: '0000000000000002'
     oldName: old
@@ -635,8 +629,8 @@ changes:
         };
 
         let remove_config = DropColumnOp {
-            names: vec!["col1".to_string()],
-            ids: vec![ColumnId::generate()],
+            name: "col1".to_string(),
+            id: ColumnId::generate(),
         };
 
         let change = BundleChange {
@@ -768,10 +762,8 @@ changes:
     - '0000000000000aa2'
     - '0000000000000aa3'
   - type: dropColumn
-    ids:
-    - '0000000000000aa3'
-    names:
-    - title
+    id: '0000000000000aa3'
+    name: title
   - type: renameColumn
     id: '0000000000000aa2'
     oldName: first_name
@@ -800,7 +792,7 @@ changes:
         // Verify RemoveColumns operation
         match &commit.operations()[1] {
             AnyOperation::DropColumn(config) => {
-                assert_eq!(config.names, vec!["title".to_string()]);
+                assert_eq!(config.name, "title");
             }
             _ => panic!("Expected RemoveColumns operation"),
         }

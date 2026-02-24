@@ -45,9 +45,7 @@ impl ColumnRegistry {
                     registry.rename_by_id(&rename.id, &rename.new_name);
                 }
                 AnyOperation::DropColumn(drop) => {
-                    for id in &drop.ids {
-                        registry.drop_by_id(id);
-                    }
+                    registry.drop_by_id(&drop.id);
                 }
                 AnyOperation::CastColumn(cast) => {
                     // Cast doesn't change name, but record the ID if not already present
