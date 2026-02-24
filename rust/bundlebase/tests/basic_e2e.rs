@@ -150,8 +150,7 @@ changes:
   description: DROP COLUMN title
   operations:
   - type: dropColumn
-    names:
-    - title
+    name: title
 - id: {}
   description: RENAME COLUMN first_name TO name
   operations:
@@ -181,7 +180,7 @@ changes:
 
     // Verify column IDs are present in the actual serialized output
     assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
-    assert!(contents.contains("type: dropColumn\n    ids:"), "DropColumn should have ids");
+    assert!(contents.contains("type: dropColumn\n    id:"), "DropColumn should have id");
     assert!(contents.contains("type: renameColumn\n    id:"), "RenameColumn should have id");
 
     // Open the saved bundle
@@ -343,14 +342,12 @@ changes:
   description: DROP COLUMN title
   operations:
   - type: dropColumn
-    names:
-    - title
+    name: title
 - id: {}
   description: DROP COLUMN comments
   operations:
   - type: dropColumn
-    names:
-    - comments
+    name: comments
 - id: {}
   description: RENAME COLUMN first_name TO fname
   operations:
@@ -392,7 +389,7 @@ changes:
 
     // Verify column IDs are present in the actual serialized output
     assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
-    assert!(contents.contains("type: dropColumn\n    ids:"), "DropColumn should have ids");
+    assert!(contents.contains("type: dropColumn\n    id:"), "DropColumn should have id");
     assert!(contents.contains("type: renameColumn\n    id:"), "RenameColumn should have id");
 
     Ok(())

@@ -11,15 +11,15 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DropColumnOp {
-    pub ids: Vec<ColumnId>,
-    pub names: Vec<String>,
+    pub id: ColumnId,
+    pub name: String,
 }
 
 impl DropColumnOp {
-    pub fn setup(ids: Vec<ColumnId>, names: Vec<&str>) -> Self {
+    pub fn setup(id: ColumnId, name: &str) -> Self {
         Self {
-            names: names.iter().map(|s| s.to_string()).collect(),
-            ids,
+            name: name.to_string(),
+            id,
         }
     }
 }
@@ -27,7 +27,7 @@ impl DropColumnOp {
 #[async_trait]
 impl Operation for DropColumnOp {
     fn describe(&self) -> String {
-        format!("DROP COLUMN: {:?}", self.names)
+        format!("DROP COLUMN: {}", self.name)
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -43,8 +43,7 @@ impl Operation for DropColumnOp {
         df: DataFrame,
         _ctx: Arc<SessionContext>,
     ) -> Result<DataFrame, BundlebaseError> {
-        let names_slice: Vec<&str> = self.names.as_slice().iter().map(|x| x.as_str()).collect();
-        Ok(df.drop_columns(names_slice.as_slice())?)
+        Ok(df.drop_columns(&[self.name.as_str()])?)
     }
 }
 
@@ -54,28 +53,22 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = DropColumnOp::setup(vec![ColumnId::generate(), ColumnId::generate()], vec!["col1", "col2"]);
-        assert_eq!(op.describe(), r#"DROP COLUMN: ["col1", "col2"]"#);
-    }
-
-    #[test]
-    fn test_describe_single_column() {
-        let op = DropColumnOp::setup(vec![ColumnId::generate()], vec!["title"]);
-        assert_eq!(op.describe(), r#"DROP COLUMN: ["title"]"#);
+        let op = DropColumnOp::setup(ColumnId::generate(), "col1");
+        assert_eq!(op.describe(), "DROP COLUMN: col1");
     }
 
     #[test]
     fn test_serialization() {
-        let op = DropColumnOp::setup(vec![ColumnId::generate(), ColumnId::generate()], vec!["col1", "col2"]);
+        let op = DropColumnOp::setup(ColumnId::generate(), "col1");
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        assert!(serialized.starts_with("ids:\n"));
-        assert!(serialized.contains("names:\n- col1\n- col2"));
+        assert!(serialized.starts_with("id:"));
+        assert!(serialized.contains("name: col1"));
     }
 
     #[test]
     fn test_version() {
-        let op = DropColumnOp::setup(vec![ColumnId::generate()], vec!["title"]);
+        let op = DropColumnOp::setup(ColumnId::generate(), "title");
         let version = op.version();
 
         // Version now includes column ids so it varies per invocation

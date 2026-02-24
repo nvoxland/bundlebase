@@ -55,8 +55,7 @@ pub async fn latest_commit(
 /// Strips:
 /// - `columnIds:` lists (on AttachBlockOp)
 /// - `columnId:` fields (legacy naming)
-/// - `ids:` lists (on DropColumnOp)
-/// - `id:` fields on column operations (RenameColumn, CastColumn, AddColumn)
+/// - `id:` fields on column operations (RenameColumn, CastColumn, AddColumn, DropColumn)
 ///   but NOT on AttachBlock or change-level `id:` lines
 #[allow(dead_code)]
 pub fn strip_column_ids(yaml: &str) -> String {
@@ -96,14 +95,7 @@ pub fn strip_column_ids(yaml: &str) -> String {
             continue;
         }
 
-        // Skip `ids:` list in column operations (DropColumnOp)
-        if in_column_op && trimmed == "ids:" {
-            in_ids_list = true;
-            i += 1;
-            continue;
-        }
-
-        // Skip `id:` field in column operations (Rename/Cast/AddColumn)
+        // Skip `id:` field in column operations (Rename/Cast/AddColumn/DropColumn)
         if in_column_op && trimmed.starts_with("id: ") {
             i += 1;
             continue;

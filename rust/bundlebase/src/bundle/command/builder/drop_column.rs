@@ -59,7 +59,7 @@ impl BundleBuilderCommand for DropColumnCommand {
 
         builder
             .apply_operation(
-                DropColumnOp::setup(vec![column_id], vec![self.name.as_str()]).into(),
+                DropColumnOp::setup(column_id, self.name.as_str()).into(),
             )
             .await?;
 
