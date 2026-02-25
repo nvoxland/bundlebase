@@ -1,6 +1,5 @@
 //! CastColumn command implementation.
 
-use crate::bundle::column_registry::ColumnRegistry;
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::CastColumnOp;
@@ -88,15 +87,13 @@ impl BundleBuilderCommand for CastColumnCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let registry = ColumnRegistry::from_operations(&builder.operations());
-        let id = registry.id_for_name(&self.name)
-            .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found in column registry", self.name)))?;
+        let id = builder.column_id(&self.name)
+            .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", self.name)))?;
 
         builder
             .apply_operation(
                 CastColumnOp::setup(
                     id,
-                    &self.name,
                     &self.new_type,
                     self.clean.clone(),
                 )

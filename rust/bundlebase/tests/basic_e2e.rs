@@ -150,12 +150,10 @@ changes:
   description: DROP COLUMN title
   operations:
   - type: dropColumn
-    name: title
 - id: {}
   description: RENAME COLUMN first_name TO name
   operations:
   - type: renameColumn
-    oldName: first_name
     newName: name
 "#,
         commit.author,
@@ -342,23 +340,19 @@ changes:
   description: DROP COLUMN title
   operations:
   - type: dropColumn
-    name: title
 - id: {}
   description: DROP COLUMN comments
   operations:
   - type: dropColumn
-    name: comments
 - id: {}
   description: RENAME COLUMN first_name TO fname
   operations:
   - type: renameColumn
-    oldName: first_name
     newName: fname
 - id: {}
   description: RENAME COLUMN last_name TO lname
   operations:
   - type: renameColumn
-    oldName: last_name
     newName: lname
 "#,
         commit.author,
@@ -625,7 +619,8 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     assert!(contents.contains("type: attachBlock"));
     assert!(contents.contains("location: memory:///test_data/objects.json"));
     assert!(contents.contains("type: renameColumn"));
-    assert!(contents.contains("oldName: score"));
+    // oldName is no longer serialized (resolved at runtime from column ID)
+    assert!(!contents.contains("oldName: score"));
     assert!(contents.contains("newName: points"));
     assert!(contents.contains("numRows: 4"));
 

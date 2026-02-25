@@ -1,6 +1,5 @@
 //! StandardizeColumnNames command implementation.
 
-use crate::bundle::column_registry::ColumnRegistry;
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RenameColumnOp;
 use crate::bundle::BundleFacade;
@@ -108,14 +107,12 @@ impl BundleBuilderCommand for StandardizeColumnNamesCommand {
         let renames = compute_renames(&schema);
         let count = renames.len();
 
-        let registry = ColumnRegistry::from_operations(&builder.operations());
-
         for (old_name, new_name) in &renames {
-            let column_id = registry.id_for_name(old_name)
-                .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found in column registry", old_name)))?;
+            let column_id = builder.column_id(old_name)
+                .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", old_name)))?;
             builder
                 .apply_operation(
-                    RenameColumnOp::setup(column_id, old_name, new_name).into(),
+                    RenameColumnOp::setup(column_id, new_name).into(),
                 )
                 .await?;
         }

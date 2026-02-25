@@ -13,7 +13,6 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateIndexOp {
-    pub columns: Vec<String>,
     pub id: ObjectId,
     pub name: String,
     pub index_type: IndexType,
@@ -21,15 +20,14 @@ pub struct CreateIndexOp {
 }
 
 impl CreateIndexOp {
-    pub async fn setup(columns: Vec<String>, index_type: IndexType, name: String, column_ids: Vec<ColumnId>) -> Result<Self, BundlebaseError> {
+    pub async fn setup(column_ids: Vec<ColumnId>, index_type: IndexType, name: String) -> Result<Self, BundlebaseError> {
         // For column indexes, validate exactly one column
-        if index_type.is_column() && columns.len() != 1 {
+        if index_type.is_column() && column_ids.len() != 1 {
             return Err("Column indexes must have exactly one column".into());
         }
 
         Ok(Self {
             id: ObjectId::generate(),
-            columns,
             name,
             index_type,
             column_ids,
@@ -41,10 +39,9 @@ impl CreateIndexOp {
 impl Operation for CreateIndexOp {
     fn describe(&self) -> String {
         match &self.index_type {
-            IndexType::Column => format!("CREATE INDEX on {}", self.columns.join(", ")),
+            IndexType::Column => format!("CREATE INDEX on column IDs: {:?}", self.column_ids),
             IndexType::Text { tokenizer } => {
-                let cols = self.columns.join(", ");
-                format!("CREATE TEXT INDEX '{}' on [{}] (tokenizer: {:?})", self.name, cols, tokenizer)
+                format!("CREATE TEXT INDEX '{}' on column IDs: {:?} (tokenizer: {:?})", self.name, self.column_ids, tokenizer)
             }
         }
     }
@@ -52,9 +49,15 @@ impl Operation for CreateIndexOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         let schema = bundle.schema().await?;
 
+        // Resolve column names from IDs
+        let columns: Vec<String> = self.column_ids.iter()
+            .map(|id| bundle.column_name(id)
+                .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", id))))
+            .collect::<Result<Vec<_>, _>>()?;
+
         if self.index_type.is_text() {
             // Validate all columns exist and are string types
-            for col in &self.columns {
+            for col in &columns {
                 let field = schema.column_with_name(col).map(|(_, f)| f);
                 let field = match field {
                     Some(f) => f,
@@ -89,15 +92,7 @@ impl Operation for CreateIndexOp {
         }
 
         // Single-column index validation (Column type)
-        let col = &self.columns[0];
-        let field = schema
-            .column_with_name(col)
-            .map(|(_, f)| f);
-
-        match field {
-            Some(_) => {}
-            None => return Err(format!("Column '{}' not found in schema", col).into()),
-        };
+        let col = &columns[0];
 
         // Check if an index already exists for this column
         let indexes = bundle.indexes().read();
@@ -109,13 +104,19 @@ impl Operation for CreateIndexOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
+        // Resolve column names from operations
+        let columns: Vec<String> = self.column_ids.iter()
+            .map(|id| bundle.column_name(id)
+                .ok_or_else(|| DataFusionError::Internal(format!("Column with ID '{}' not found", id))))
+            .collect::<Result<Vec<_>, _>>()?;
+
         bundle
             .indexes
             .write()
             .push(Arc::new(IndexDefinition::new(
                 &self.id,
                 self.name.clone(),
-                self.columns.clone(),
+                columns,
                 self.index_type.clone(),
                 self.column_ids.clone(),
             )));
@@ -131,10 +132,9 @@ mod tests {
     #[tokio::test]
     async fn test_column_index_rejects_multiple_columns() {
         let result = CreateIndexOp::setup(
-            vec!["col1".to_string(), "col2".to_string()],
+            vec![ColumnId::generate(), ColumnId::generate()],
             IndexType::Column,
             "test_idx".to_string(),
-            vec![ColumnId::generate(), ColumnId::generate()],
         )
         .await;
         assert!(result.is_err());

@@ -127,7 +127,7 @@ changes: []
     #[test]
     fn test_serialize_single_operation() {
         let id1 = ColumnId::generate();
-        let op = DropColumnOp::setup(id1, "col1");
+        let op = DropColumnOp::setup(id1);
         let change = BundleChange {
             id: test_uuid(),
             description: "Remove columns".to_string(),
@@ -152,7 +152,6 @@ changes:
   operations:
   - type: dropColumn
     id: {}
-    name: col1
 ", id1);
         assert_eq!(yaml, expected);
     }
@@ -161,9 +160,9 @@ changes:
     fn test_serialize_multiple_operations() {
         let op1 = SetNameOp::setup("Test");
         let drop_id = ColumnId::generate();
-        let op2 = DropColumnOp::setup(drop_id, "col1");
+        let op2 = DropColumnOp::setup(drop_id);
         let rename_id = ColumnId::generate();
-        let op3 = RenameColumnOp::setup(rename_id, "old", "new");
+        let op3 = RenameColumnOp::setup(rename_id, "new");
 
         let change = BundleChange {
             id: test_uuid(),
@@ -191,10 +190,8 @@ changes:
     name: Test
   - type: dropColumn
     id: {drop_id}
-    name: col1
   - type: renameColumn
     id: {rename_id}
-    oldName: old
     newName: new
 ");
         assert_eq!(yaml, expected);
@@ -301,7 +298,7 @@ changes:
     fn test_serialize_camel_case_conversion() {
         // Test that camelCase conversion happens for all field names
         let col_id = ColumnId::generate();
-        let op = RenameColumnOp::setup(col_id, "firstName", "first_name");
+        let op = RenameColumnOp::setup(col_id, "first_name");
         let change = BundleChange {
             id: test_uuid(),
             operations: vec![op.into()],
@@ -317,7 +314,7 @@ changes:
         };
         let yaml = serde_yaml_ng::to_string(&commit).unwrap();
 
-        // Should have oldName and newName in camelCase, and columnId
+        // Should have newName in camelCase
         let expected = format!(r"author: test-user
 message: Test camelCase
 timestamp: 2024-01-01T00:00:00Z
@@ -327,7 +324,6 @@ changes:
   operations:
   - type: renameColumn
     id: {col_id}
-    oldName: firstName
     newName: first_name
 ");
         assert_eq!(yaml, expected);
@@ -337,7 +333,7 @@ changes:
     fn test_serialize_type_always_first() {
         // Verify that "type" field is always added first in the mapping
         let col_id = ColumnId::generate();
-        let op = RenameColumnOp::setup(col_id, "a", "b");
+        let op = RenameColumnOp::setup(col_id, "b");
         let change = BundleChange {
             id: test_uuid(),
             operations: vec![op.into()],
@@ -371,7 +367,6 @@ changes:
   operations:
   - type: renameColumn
     id: {col_id}
-    oldName: a
     newName: b
 ");
         assert_eq!(yaml, expected);
@@ -468,7 +463,7 @@ changes:
     #[test]
     fn test_serialize_special_characters_in_names() {
         let col_id = ColumnId::generate();
-        let op = RenameColumnOp::setup(col_id, "col_with_underscore", "col-with-dash");
+        let op = RenameColumnOp::setup(col_id, "col-with-dash");
         let change = BundleChange {
             id: test_uuid(),
             operations: vec![op.into()],
@@ -493,7 +488,6 @@ changes:
   operations:
   - type: renameColumn
     id: {col_id}
-    oldName: col_with_underscore
     newName: col-with-dash
 ");
         assert_eq!(yaml, expected);
@@ -628,10 +622,7 @@ changes:
             column_ids: vec![ColumnId::generate(), ColumnId::generate()],
         };
 
-        let remove_config = DropColumnOp {
-            name: "col1".to_string(),
-            id: ColumnId::generate(),
-        };
+        let remove_config = DropColumnOp::setup(ColumnId::generate());
 
         let change = BundleChange {
             id: test_uuid(),
@@ -789,18 +780,17 @@ changes:
             _ => panic!("Expected AttachBlock operation"),
         }
 
-        // Verify RemoveColumns operation
+        // Verify DropColumn operation
         match &commit.operations()[1] {
             AnyOperation::DropColumn(config) => {
-                assert_eq!(config.name, "title");
+                assert_eq!(config.id.to_string(), "0000000000000aa3");
             }
-            _ => panic!("Expected RemoveColumns operation"),
+            _ => panic!("Expected DropColumn operation"),
         }
 
         // Verify RenameColumn operation
         match &commit.operations()[2] {
             AnyOperation::RenameColumn(config) => {
-                assert_eq!(config.old_name, "first_name");
                 assert_eq!(config.new_name, "name");
             }
             _ => panic!("Expected RenameColumn operation"),

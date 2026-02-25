@@ -1,6 +1,5 @@
 //! CreateIndex command implementation.
 
-use crate::bundle::column_registry::ColumnRegistry;
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::CreateIndexOp;
 use crate::index::IndexType;
@@ -101,16 +100,14 @@ impl BundleBuilderCommand for CreateIndexCommand {
             None => format!("idx_{}", columns.join("_")),
         };
 
-        // Look up column IDs from registry
-        let registry = ColumnRegistry::from_operations(&builder.operations());
         let mut column_ids = Vec::with_capacity(columns.len());
         for col_name in &columns {
-            let id = registry.id_for_name(col_name)
-                .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found in column registry", col_name)))?;
+            let id = builder.column_id(col_name)
+                .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", col_name)))?;
             column_ids.push(id);
         }
 
-        let op = CreateIndexOp::setup(columns, index_type, resolved_name, column_ids).await?;
+        let op = CreateIndexOp::setup(column_ids, index_type, resolved_name).await?;
 
         builder
             .apply_operation(op.into())

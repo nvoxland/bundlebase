@@ -1,3 +1,4 @@
+use crate::bundle::column_metadata::ColumnNames;
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleBuilder;
 use crate::data::ObjectId;
@@ -64,6 +65,7 @@ impl Operation for DropJoinOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
+        _column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
         Ok(df)
     }

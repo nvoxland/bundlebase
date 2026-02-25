@@ -15,8 +15,8 @@
 //! SELECT * FROM search('query')
 //! ```
 
+use crate::bundle::column_metadata;
 use crate::bundle::{AnyOperation, BundleFacade, Operation, Pack};
-use crate::catalog::BundleViewTable;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId};
 use crate::index::{IndexDefinition, TextIndex};
 use crate::io::plugin::object_store::ObjectStoreFile;
@@ -217,133 +217,50 @@ impl SearchResultTableProvider {
         Arc::new(Schema::new(fields))
     }
 
-    /// Apply schema-altering operations to a schema to get the logical schema.
-    /// Handles renames, drops, casts, and added columns.
-    fn apply_schema_operations(&self, schema: SchemaRef) -> SchemaRef {
-        let mut fields: Vec<Arc<Field>> = schema.fields().iter().cloned().collect();
-        for op in &self.operations {
-            match op {
-                AnyOperation::RenameColumn(rename) => {
-                    for field in fields.iter_mut() {
-                        if field.name() == &rename.old_name {
-                            *field = Arc::new(Field::new(
-                                &rename.new_name,
-                                field.data_type().clone(),
-                                field.is_nullable(),
-                            ));
-                        }
-                    }
-                }
-                AnyOperation::DropColumn(drop) => {
-                    fields.retain(|f| f.name() != &drop.name);
-                }
-                AnyOperation::CastColumn(cast) => {
-                    let arrow_type = match cast.new_type.to_lowercase().as_str() {
-                        "integer" | "int" => DataType::Int64,
-                        "float" | "double" => DataType::Float64,
-                        "string" | "text" => DataType::Utf8,
-                        "boolean" | "bool" => DataType::Boolean,
-                        "date" => DataType::Date32,
-                        "timestamp" => DataType::Timestamp(
-                            arrow::datatypes::TimeUnit::Microsecond,
-                            None,
-                        ),
-                        _ => continue,
-                    };
-                    for field in fields.iter_mut() {
-                        if field.name() == &cast.name {
-                            *field = Arc::new(Field::new(
-                                field.name(),
-                                arrow_type.clone(),
-                                field.is_nullable(),
-                            ));
-                        }
-                    }
-                }
-                AnyOperation::AddColumn(add) => {
-                    // Infer the expression's result type by planning against an empty table
-                    let current_schema = Arc::new(Schema::new(fields.clone()));
-                    let field = Self::infer_add_column_field(
-                        &add.name,
-                        &add.expression,
-                        &current_schema,
-                    );
-                    fields.push(Arc::new(field));
-                }
-                _ => {}
-            }
-        }
-        Arc::new(Schema::new(fields))
-    }
+    /// Compute the logical output schema by applying operations to an empty DataFrame.
+    /// This reuses the authoritative `apply_dataframe` code path, avoiding duplication
+    /// of rename/drop/cast/add logic.
+    fn output_schema(&self) -> SchemaRef {
+        let physical_with_score = self.physical_output_schema();
 
-    /// Infer the Arrow Field for an ADD COLUMN expression by planning it
-    /// against an empty table with the current schema.
-    fn infer_add_column_field(
-        column_name: &str,
-        expression: &str,
-        current_schema: &SchemaRef,
-    ) -> Field {
         let result = futures::executor::block_on(async {
             let mut config = SessionConfig::new();
             config.options_mut().sql_parser.enable_ident_normalization = false;
             let ctx = SessionContext::new_with_config(config);
-            let empty_batch = RecordBatch::new_empty(current_schema.clone());
+            let empty_batch = RecordBatch::new_empty(physical_with_score.clone());
             ctx.register_batch("bundle", empty_batch)
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
-            let sql = format!(
-                "SELECT *, ({}) AS \"{}\" FROM bundle",
-                expression, column_name
-            );
-            let plan = ctx.state().create_logical_plan(&sql).await?;
-            let schema = plan.schema();
-            // The new column is the last field in the plan's schema
-            let new_field = schema
-                .fields()
-                .iter()
-                .find(|f| f.name() == column_name)
-                .cloned()
-                .ok_or_else(|| {
-                    DataFusionError::Internal(format!(
-                        "Could not find column '{}' in planned schema",
-                        column_name
-                    ))
-                })?;
-            Ok::<_, DataFusionError>(new_field)
-        });
-        match result {
-            Ok(field) => field.as_ref().clone(),
-            Err(_) => Field::new(column_name, DataType::Utf8, true),
-        }
-    }
+            let mut df = ctx.table("bundle").await?;
 
-    fn output_schema(&self) -> SchemaRef {
-        // Start with physical columns + _score (matching physical_output_schema),
-        // then apply operations. This ensures column ordering matches the actual
-        // data produced by open(), where operations are applied to batches that
-        // already include _score.
-        let physical_with_score = self.physical_output_schema();
-        self.apply_schema_operations(physical_with_score)
+            let mut col_names = column_metadata::build_column_names(&self.operations);
+            for op in self.operations.iter() {
+                df = op
+                    .apply_dataframe(df, ctx.clone().into(), &mut col_names)
+                    .await
+                    .map_err(|e| DataFusionError::External(e))?;
+            }
+            Ok::<_, DataFusionError>(Arc::new(df.schema().as_arrow().clone()))
+        });
+
+        result.unwrap_or(physical_with_score)
     }
 
     /// Rewrite logical field names in a search query to physical field names.
     /// E.g., after renaming "Answer" → "answer", rewrites "answer:foo" → "Answer:foo"
-    ///
-    /// Uses the ColumnRegistry for robust name resolution that survives transitive renames.
     fn rewrite_query_fields(&self, query: &str) -> String {
         let index_column_ids = self.index_def.column_ids();
-        let registry = crate::bundle::ColumnRegistry::from_operations(&self.operations);
+
+        let id_to_current = column_metadata::resolve_column_names(&self.operations);
+        let id_to_original = column_metadata::build_column_names(&self.operations);
 
         let mut logical_to_physical: HashMap<String, String> = HashMap::new();
         for col_id in index_column_ids.iter() {
             if let (Some(current_name), Some(original_name)) = (
-                registry.name_for_id(col_id),
-                registry.original_name_for_id(col_id),
+                id_to_current.get(col_id),
+                id_to_original.get(col_id),
             ) {
                 if current_name != original_name {
-                    logical_to_physical.insert(
-                        current_name.to_string(),
-                        original_name.to_string(),
-                    );
+                    logical_to_physical.insert(current_name.clone(), original_name.clone());
                 }
             }
         }
@@ -679,9 +596,10 @@ impl DataSource for SearchDataSource {
                 let mut df = op_ctx.table("bundle").await?;
 
                 // Apply each operation to transform the data
-                for op in &operations {
+                let mut col_names = column_metadata::build_column_names(&operations);
+                for op in operations.iter() {
                     df = op
-                        .apply_dataframe(df, op_ctx.clone().into())
+                        .apply_dataframe(df, op_ctx.clone().into(), &mut col_names)
                         .await
                         .map_err(|e: crate::BundlebaseError| {
                             DataFusionError::External(e)

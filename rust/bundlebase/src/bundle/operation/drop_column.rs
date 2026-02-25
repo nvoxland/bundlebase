@@ -1,3 +1,4 @@
+use crate::bundle::column_metadata::ColumnNames;
 use crate::bundle::operation::Operation;
 use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
@@ -12,22 +13,18 @@ use std::sync::Arc;
 #[serde(rename_all = "camelCase")]
 pub struct DropColumnOp {
     pub id: ColumnId,
-    pub name: String,
 }
 
 impl DropColumnOp {
-    pub fn setup(id: ColumnId, name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            id,
-        }
+    pub fn setup(id: ColumnId) -> Self {
+        Self { id }
     }
 }
 
 #[async_trait]
 impl Operation for DropColumnOp {
     fn describe(&self) -> String {
-        format!("DROP COLUMN: {}", self.name)
+        format!("DROP COLUMN: {}", self.id)
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -42,8 +39,13 @@ impl Operation for DropColumnOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
+        column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
-        Ok(df.drop_columns(&[self.name.as_str()])?)
+        let name = column_names.get(&self.id)
+            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?
+            .clone();
+        column_names.remove(&self.id);
+        Ok(df.drop_columns(&[name.as_str()])?)
     }
 }
 
@@ -53,22 +55,22 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = DropColumnOp::setup(ColumnId::generate(), "col1");
-        assert_eq!(op.describe(), "DROP COLUMN: col1");
+        let id = ColumnId::generate();
+        let op = DropColumnOp::setup(id);
+        assert!(op.describe().starts_with("DROP COLUMN:"));
     }
 
     #[test]
     fn test_serialization() {
-        let op = DropColumnOp::setup(ColumnId::generate(), "col1");
+        let op = DropColumnOp::setup(ColumnId::generate());
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(serialized.starts_with("id:"));
-        assert!(serialized.contains("name: col1"));
     }
 
     #[test]
     fn test_version() {
-        let op = DropColumnOp::setup(ColumnId::generate(), "title");
+        let op = DropColumnOp::setup(ColumnId::generate());
         let version = op.version();
 
         // Version now includes column ids so it varies per invocation
