@@ -55,7 +55,6 @@ pub struct AttachBlockOp {
         deserialize_with = "super::serde_util::deserialize_schema_option"
     )]
     pub schema: Option<SchemaRef>,
-    #[serde(rename = "columnIds")]
     pub column_ids: Vec<ColumnId>,
 }
 
