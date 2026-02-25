@@ -1,3 +1,4 @@
+use crate::bundle::column_metadata::ColumnNames;
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::catalog::BundleViewTable;
@@ -54,7 +55,9 @@ impl Operation for AddColumnOp {
         &self,
         df: DataFrame,
         ctx: Arc<SessionContext>,
+        column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
+        column_names.insert(self.id, self.name.clone());
         let sql = format!(
             "SELECT *, ({}) AS \"{}\" FROM bundle",
             self.expression, self.name

@@ -1,6 +1,5 @@
 //! RenameColumn command implementation.
 
-use crate::bundle::column_registry::ColumnRegistry;
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RenameColumnOp;
 use crate::bundle::BundleFacade;
@@ -67,13 +66,12 @@ impl BundleBuilderCommand for RenameColumnCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let registry = ColumnRegistry::from_operations(&builder.operations());
-        let column_id = registry.id_for_name(&self.old_name)
-            .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found in column registry", self.old_name)))?;
+        let column_id = builder.column_id(&self.old_name)
+            .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", self.old_name)))?;
 
         builder
             .apply_operation(
-                RenameColumnOp::setup(column_id, &self.old_name, &self.new_name).into(),
+                RenameColumnOp::setup(column_id, &self.new_name).into(),
             )
             .await?;
         Ok(format!("Renamed column: {} to {}", self.old_name, self.new_name))

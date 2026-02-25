@@ -6,7 +6,7 @@ use crate::bundle::init::InitCommit;
 use crate::bundle::operation::AnyOperation;
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
-use crate::bundle::{sql, Bundle};
+use crate::bundle::{column_metadata, sql, Bundle};
 use super::DataBlock;
 use crate::data::{BlockId, ObjectId, VersionedBlockId};
 use crate::source::{FetchResults, SyncMode};
@@ -1486,6 +1486,9 @@ impl BundleFacade for BundleBuilder {
         ops
     }
 
+    fn column_names(&self) -> column_metadata::ColumnNames {
+        column_metadata::resolve_column_names(&self.operations())
+    }
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {
         self.bundle.schema().await

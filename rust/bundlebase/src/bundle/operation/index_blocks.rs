@@ -1,3 +1,4 @@
+use crate::bundle::column_metadata;
 use crate::bundle::operation::{AnyOperation, Operation};
 use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
@@ -584,9 +585,10 @@ impl IndexBlocksOp {
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
             let mut df = ctx.table("bundle").await?;
 
-            for op in operations {
+            let mut col_names = column_metadata::build_column_names(&operations);
+            for op in operations.iter() {
                 df = op
-                    .apply_dataframe(df, ctx.clone().into())
+                    .apply_dataframe(df, ctx.clone().into(), &mut col_names)
                     .await
                     .map_err(|e| DataFusionError::External(e))?;
             }
@@ -636,8 +638,9 @@ impl IndexBlocksOp {
             .await
             .map_err(|e| BundlebaseError::from(format!("Failed to get table: {}", e)))?;
 
-        for op in operations {
-            df = op.apply_dataframe(df, op_ctx.clone().into()).await?;
+        let mut col_names = column_metadata::build_column_names(&operations);
+        for op in operations.iter() {
+            df = op.apply_dataframe(df, op_ctx.clone().into(), &mut col_names).await?;
         }
 
         df.select_columns(&[column])
@@ -838,8 +841,9 @@ impl IndexBlocksOp {
                     BundlebaseError::from(format!("Failed to get table: {}", e))
                 })?;
 
-                for op in &operations {
-                    df = op.apply_dataframe(df, op_ctx.clone().into()).await?;
+                let mut col_names = column_metadata::build_column_names(&operations);
+                for op in operations.iter() {
+                    df = op.apply_dataframe(df, op_ctx.clone().into(), &mut col_names).await?;
                 }
 
                 let col_refs: Vec<&str> = text_columns.iter().map(|s| s.as_str()).collect();

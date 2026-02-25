@@ -1,4 +1,5 @@
 use crate::bundle::operation::parameter_value::ParameterValue;
+use crate::bundle::column_metadata::ColumnNames;
 use crate::bundle::operation::Operation;
 use crate::catalog::BundleViewTable;
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
@@ -47,6 +48,7 @@ impl Operation for FilterOp {
         &self,
         df: DataFrame,
         ctx: Arc<SessionContext>,
+        _column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
         let mut span = start_span(OperationCategory::Select, "filter");
         span.set_attribute("sql", &self.query);

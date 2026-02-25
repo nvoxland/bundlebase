@@ -1,6 +1,6 @@
 mod builder;
 mod column_lineage;
-pub(crate) mod column_registry;
+pub(crate) mod column_metadata;
 pub(crate) mod command;
 mod commit;
 mod data_block;
@@ -16,7 +16,6 @@ use crate::io::EMPTY_SCHEME;
 pub use builder::BundleBuilder;
 pub use builder::BundleStatus;
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
-pub use column_registry::ColumnRegistry;
 pub use command::parser::{available_commands, is_command_statement, parse_command};
 pub use command::BundleCommand;
 pub use command::CommandResponse;
@@ -44,6 +43,7 @@ use crate::index::IndexDefinition;
 use crate::io::{read_yaml, readable_file_from_url, writable_dir_from_str, writable_dir_from_url, DataStorage, IOReadWriteDir, EMPTY_URL};
 use crate::bundle_config::Scope;
 use crate::bundle_config::PassedBundleConfig;
+use crate::bundle::column_metadata::ColumnNames;
 use crate::{BundleConfig, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -88,6 +88,7 @@ pub struct Bundle {
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     views: Arc<RwLock<HashMap<String, ObjectId>>>,
     dataframe: DataFrameHolder,
+    column_names: Arc<RwLock<Option<ColumnNames>>>,
 
     ctx: Arc<SessionContext>,
     storage: Arc<DataStorage>,
@@ -134,6 +135,7 @@ impl Clone for Bundle {
             dataframe: DataFrameHolder {
                 dataframe: Arc::new(RwLock::new(self.dataframe.dataframe.read().clone())),
             },
+            column_names: Arc::clone(&self.column_names),
             ctx: Arc::clone(&self.ctx),
             storage: Arc::clone(&self.storage),
             reader_factory: Arc::clone(&self.reader_factory),
@@ -217,6 +219,7 @@ impl Bundle {
             data_dir,
             commits,
             dataframe,
+            column_names: Arc::new(RwLock::new(None)),
             config: bundle_config,
             is_view: Arc::new(RwLock::new(false)),
         });
@@ -521,6 +524,7 @@ impl Bundle {
         self.compute_version();
         // clear cached values
         self.dataframe.clear();
+        *self.column_names.write() = None;
         debug!("Cleared dataframe");
 
         debug!("Applying operation to bundle: {}...DONE", &description);
@@ -568,6 +572,7 @@ impl Bundle {
         *self.data_dir.write() = Arc::clone(&*other.data_dir.read());
         *self.is_view.write() = *other.is_view.read();
         self.dataframe.clear();
+        *self.column_names.write() = None;
     }
 
     pub fn ctx(&self) -> Arc<SessionContext> {
@@ -602,6 +607,17 @@ impl Bundle {
         )?)
     }
 
+    fn resolved_column_names(&self) -> ColumnNames {
+        {
+            if let Some(cached) = self.column_names.read().as_ref() {
+                return cached.clone();
+            }
+        }
+        let resolved = column_metadata::resolve_column_names(&self.operations.read());
+        *self.column_names.write() = Some(resolved.clone());
+        resolved
+    }
+
     fn compute_version(&self) {
         let mut hasher = Sha256::new();
 
@@ -615,11 +631,6 @@ impl Bundle {
         // Re-register version() UDF with the updated version
         self.ctx
             .register_udf(ScalarUDF::new_from_impl(VersionUdf::new(new_version)));
-    }
-
-    /// Build a ColumnRegistry from this bundle's operations.
-    pub(crate) fn column_registry(&self) -> ColumnRegistry {
-        ColumnRegistry::from_operations(&self.operations.read())
     }
 
     pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<Pack>) {
@@ -654,6 +665,7 @@ impl Bundle {
         self.data_dir = Arc::new(RwLock::new(current_data_dir));
         self.last_manifest_version = Arc::new(RwLock::new(current_manifest_version));
         self.operations = Arc::new(RwLock::new(current_operations));
+        self.column_names = Arc::new(RwLock::new(None));
     }
 
     /// Find a join pack by its name
@@ -983,6 +995,10 @@ impl BundleFacade for Bundle {
         self.operations.read().clone()
     }
 
+    fn column_names(&self) -> ColumnNames {
+        self.resolved_column_names()
+    }
+
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {
         Ok(Arc::new(
             self.dataframe().await?.schema().clone().as_arrow().clone(),
@@ -1041,9 +1057,10 @@ impl BundleFacade for Bundle {
                     ops.len()
                 );
 
+            let mut col_names = column_metadata::build_column_names(&ops);
             for op in ops.iter() {
                 debug!("Applying to dataframe: {}", &op.describe());
-                df = op.apply_dataframe(df, self.ctx.clone()).await?;
+                df = op.apply_dataframe(df, self.ctx.clone(), &mut col_names).await?;
             }
             debug!(
                     "dataframe: Applying {} operations to dataframe...DONE",

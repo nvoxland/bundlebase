@@ -47,6 +47,7 @@ pub use crate::bundle::operation::save_config::SaveConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
 pub use crate::bundle::operation::update_version::UpdateVersionOp;
+use crate::bundle::column_metadata::ColumnNames;
 use crate::{versioning, Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
@@ -102,6 +103,7 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
+        _column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
         Ok(df)
     }
@@ -165,9 +167,10 @@ macro_rules! define_any_operation {
                 &self,
                 df: DataFrame,
                 ctx: Arc<SessionContext>,
+                column_names: &mut ColumnNames,
             ) -> Result<DataFrame, BundlebaseError> {
                 match self {
-                    $( AnyOperation::$variant(op) => op.apply_dataframe(df, ctx).await, )*
+                    $( AnyOperation::$variant(op) => op.apply_dataframe(df, ctx, column_names).await, )*
                 }
             }
 

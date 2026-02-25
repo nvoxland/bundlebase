@@ -1,9 +1,9 @@
+use crate::bundle::column_metadata::ColumnNames;
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::catalog::BundleViewTable;
 use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
-use arrow::datatypes::DataType;
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -15,24 +15,22 @@ use std::sync::Arc;
 #[serde(rename_all = "camelCase")]
 pub struct CastColumnOp {
     pub id: ColumnId,
-    pub name: String,
     pub new_type: String,
     pub clean: Option<String>,
 }
 
 impl CastColumnOp {
-    pub fn setup(id: ColumnId, name: &str, new_type: &str, clean: Option<String>) -> Self {
+    pub fn setup(id: ColumnId, new_type: &str, clean: Option<String>) -> Self {
         Self {
-            name: name.to_string(),
+            id,
             new_type: new_type.to_string(),
             clean,
-            id,
         }
     }
 }
 
 /// Parse a user-facing type string into (Arrow DataType, SQL type string).
-fn parse_target_type(type_str: &str) -> Result<(&'static str), BundlebaseError> {
+fn parse_target_type(type_str: &str) -> Result<&'static str, BundlebaseError> {
     match type_str.to_lowercase().as_str() {
         "integer" | "int" => Ok("BIGINT"),
         "float" | "double" => Ok("DOUBLE"),
@@ -50,8 +48,8 @@ fn parse_target_type(type_str: &str) -> Result<(&'static str), BundlebaseError> 
 #[async_trait]
 impl Operation for CastColumnOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        let schema = bundle.schema().await?;
-        schema.field_with_name(&self.name)?;
+        bundle.column_name(&self.id)
+            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?;
 
         // Validate target type
         parse_target_type(&self.new_type)?;
@@ -74,29 +72,35 @@ impl Operation for CastColumnOp {
         &self,
         df: DataFrame,
         ctx: Arc<SessionContext>,
+        column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
         let sql_type = parse_target_type(&self.new_type)?;
         let schema = df.schema().clone();
 
+        // Resolve the column name from the column names map
+        let name = column_names.get(&self.id)
+            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?
+            .clone();
+
         // Build SELECT expression list
         let mut select_exprs: Vec<String> = Vec::new();
         for field in schema.fields() {
-            let name = field.name();
-            if name == &self.name {
-                let quoted = format!("\"{}\"", name);
+            let field_name = field.name();
+            if field_name == &name {
+                let quoted = format!("\"{}\"", field_name);
                 let expr = if let Some(ref pattern) = self.clean {
                     // Escape single quotes in the pattern for SQL
                     let escaped_pattern = pattern.replace('\'', "''");
                     format!(
                         "CAST(regexp_replace({}, '{}', '', 'g') AS {}) AS \"{}\"",
-                        quoted, escaped_pattern, sql_type, name
+                        quoted, escaped_pattern, sql_type, field_name
                     )
                 } else {
-                    format!("CAST({} AS {}) AS \"{}\"", quoted, sql_type, name)
+                    format!("CAST({} AS {}) AS \"{}\"", quoted, sql_type, field_name)
                 };
                 select_exprs.push(expr);
             } else {
-                select_exprs.push(format!("\"{}\"", name));
+                select_exprs.push(format!("\"{}\"", field_name));
             }
         }
 
@@ -124,11 +128,11 @@ impl Operation for CastColumnOp {
         match &self.clean {
             Some(pattern) => format!(
                 "CAST COLUMN: {} to {} (clean: {})",
-                self.name, self.new_type, pattern
+                self.id, self.new_type, pattern
             ),
             None => format!(
                 "CAST COLUMN: {} to {}",
-                self.name, self.new_type
+                self.id, self.new_type
             ),
         }
     }
@@ -140,26 +144,24 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = CastColumnOp::setup(ColumnId::generate(), "value", "integer", None);
-        assert_eq!(op.describe(), "CAST COLUMN: value to integer");
+        let op = CastColumnOp::setup(ColumnId::generate(), "integer", None);
+        assert!(op.describe().contains("to integer"));
     }
 
     #[test]
     fn test_describe_with_clean() {
-        let op = CastColumnOp::setup(ColumnId::generate(), "value", "integer", Some("[^0-9]".to_string()));
-        assert_eq!(
-            op.describe(),
-            "CAST COLUMN: value to integer (clean: [^0-9])"
-        );
+        let op = CastColumnOp::setup(ColumnId::generate(), "integer", Some("[^0-9]".to_string()));
+        assert!(op.describe().contains("to integer"));
+        assert!(op.describe().contains("clean: [^0-9]"));
     }
 
     #[test]
     fn test_config_serialization() {
         let id = ColumnId::generate();
-        let op = CastColumnOp::setup(id, "value", "integer", Some("[^0-9]".to_string()));
+        let op = CastColumnOp::setup(id, "integer", Some("[^0-9]".to_string()));
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        assert!(serialized.contains("name: value\nnewType: integer\nclean: '[^0-9]'"));
+        assert!(serialized.contains("newType: integer\nclean: '[^0-9]'"));
 
         let deserialized: CastColumnOp =
             serde_yaml_ng::from_str(&serialized).expect("Failed to deserialize");
@@ -168,7 +170,7 @@ mod tests {
 
     #[test]
     fn test_config_serialization_no_clean() {
-        let op = CastColumnOp::setup(ColumnId::generate(), "id", "integer", None);
+        let op = CastColumnOp::setup(ColumnId::generate(), "integer", None);
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let deserialized: CastColumnOp =
@@ -207,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_version_exact_value() {
-        let op = CastColumnOp::setup(ColumnId::generate(), "value", "integer", None);
+        let op = CastColumnOp::setup(ColumnId::generate(), "integer", None);
         let version = op.version();
         // Version now includes column id so it varies per invocation
         assert!(!version.is_empty());

@@ -92,8 +92,8 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
             .map(|op| op.describe())
             .collect::<Vec<_>>()
             .join(", ")
-            .contains("CREATE INDEX on Email"),
-        "Expected operations to contain 'CREATE INDEX on Email'"
+            .contains("CREATE INDEX on column IDs"),
+        "Expected operations to contain 'CREATE INDEX on column IDs'"
     );
 
     bundle.commit("Created index").await?;
@@ -106,8 +106,8 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
         .collect::<Vec<_>>()
         .join(", ");
     assert!(
-        ops_description.contains("CREATE INDEX on Email"),
-        "Expected operations to contain 'CREATE INDEX on Email', got: {}",
+        ops_description.contains("CREATE INDEX on column IDs"),
+        "Expected operations to contain 'CREATE INDEX on column IDs', got: {}",
         ops_description
     );
     assert!(

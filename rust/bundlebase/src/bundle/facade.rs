@@ -1,3 +1,4 @@
+use super::column_metadata::{self, ColumnNames};
 use super::command::parser::{is_command_statement, parse_command};
 use super::command::{BundleCommand, ExplainPlanCommand, FacadeCommand, CommandResponse, OutputShape};
 use super::operation::BundleChange;
@@ -6,6 +7,7 @@ use crate::bundle::BundleStatus;
 use crate::bundle::Pack;
 use crate::index::IndexDefinition;
 use crate::io::{IOReadWriteDir, ObjectId};
+use crate::object_id::ColumnId;
 use crate::bundle_config::Scope;
 use crate::{AnyOperation, Bundle, BundleBuilder, BundleConfig, BundlebaseError};
 use arrow_schema::SchemaRef;
@@ -43,6 +45,22 @@ pub trait BundleFacade: Send + Sync {
 
     /// All operations applied to this bundle
     fn operations(&self) -> Vec<AnyOperation>;
+
+    /// Returns the fully-resolved column ID → name map after all operations.
+    fn column_names(&self) -> ColumnNames;
+
+    /// Resolve a column name to its ColumnId using the current operations.
+    fn column_id(&self, name: &str) -> Option<ColumnId> {
+        self.column_names()
+            .iter()
+            .find(|(_, n)| n.as_str() == name)
+            .map(|(id, _)| *id)
+    }
+
+    /// Resolve a ColumnId to its current column name using the current operations.
+    fn column_name(&self, id: &ColumnId) -> Option<String> {
+        self.column_names().get(id).cloned()
+    }
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError>;
 

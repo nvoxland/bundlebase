@@ -1,3 +1,4 @@
+use crate::bundle::column_metadata::ColumnNames;
 use crate::bundle::commit::BundleCommit;
 use crate::bundle::operation::{AnyOperation, BundleChange, FilterOp, Operation};
 use crate::bundle::META_DIR;
@@ -159,6 +160,7 @@ impl Operation for CreateViewOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
+        _column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
         // CreateViewOp doesn't modify the dataframe
         Ok(df)
