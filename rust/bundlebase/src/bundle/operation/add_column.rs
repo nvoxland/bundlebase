@@ -4,6 +4,7 @@ use crate::bundle::BundleFacade;
 use crate::catalog::BundleViewTable;
 use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
+use arrow::array::RecordBatch;
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -44,6 +45,22 @@ impl Operation for AddColumnOp {
             .into());
         }
 
+        // Validate the expression by planning it against an empty DataFrame
+        let sql = format!(
+            "SELECT *, ({}) AS \"{}\" FROM bundle",
+            self.expression, self.name
+        );
+        let mut config = SessionConfig::new();
+        config.options_mut().sql_parser.enable_ident_normalization = false;
+        let ctx = SessionContext::new_with_config(config);
+        let empty_batch = RecordBatch::new_empty(schema);
+        ctx.register_batch("bundle", empty_batch)
+            .map_err(|e| BundlebaseError::from(format!("Failed to validate expression: {}", e)))?;
+        ctx.state()
+            .create_logical_plan(&sql)
+            .await
+            .map_err(|e| BundlebaseError::from(format!("Invalid expression '{}': {}", self.expression, e)))?;
+
         Ok(())
     }
 
@@ -57,7 +74,6 @@ impl Operation for AddColumnOp {
         ctx: Arc<SessionContext>,
         column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
-        column_names.insert(self.id, self.name.clone());
         let sql = format!(
             "SELECT *, ({}) AS \"{}\" FROM bundle",
             self.expression, self.name
@@ -74,10 +90,13 @@ impl Operation for AddColumnOp {
             .await
             .map_err(|e| Box::new(e) as BundlebaseError)?;
 
-        add_ctx
+        let result = add_ctx
             .execute_logical_plan(plan)
             .await
-            .map_err(|e| Box::new(e) as BundlebaseError)
+            .map_err(|e| Box::new(e) as BundlebaseError)?;
+
+        column_names.insert(self.id, self.name.clone());
+        Ok(result)
     }
 
     fn describe(&self) -> String {

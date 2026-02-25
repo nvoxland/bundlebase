@@ -2088,3 +2088,36 @@ async def test_add_column_duplicate():
 
     with pytest.raises(Exception, match="already exists"):
         await c.add_column("first_name", "first_name || ' test'")
+
+
+@pytest.mark.asyncio
+async def test_add_column_invalid_expression():
+    """Test add_column with an invalid expression raises an error at check time."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.standardize_column_names()
+
+    with pytest.raises(Exception):
+        await c.add_column("bad_col", "nonexistent_column + 1")
+
+
+@pytest.mark.asyncio
+async def test_drop_nonexistent_column():
+    """Test drop_column with a column that doesn't exist raises an error."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.standardize_column_names()
+
+    with pytest.raises(Exception):
+        await c.drop_column("nonexistent_column")
+
+
+@pytest.mark.asyncio
+async def test_rename_to_existing_column():
+    """Test rename_column to an already-existing column name raises an error."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.standardize_column_names()
+
+    with pytest.raises(Exception, match="already exists"):
+        await c.rename_column("first_name", "last_name")

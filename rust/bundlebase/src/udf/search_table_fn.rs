@@ -232,7 +232,7 @@ impl SearchResultTableProvider {
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
             let mut df = ctx.table("bundle").await?;
 
-            let mut col_names = column_metadata::build_column_names(&self.operations);
+            let mut col_names = column_metadata::initial_column_names(&self.operations);
             for op in self.operations.iter() {
                 df = op
                     .apply_dataframe(df, ctx.clone().into(), &mut col_names)
@@ -242,7 +242,10 @@ impl SearchResultTableProvider {
             Ok::<_, DataFusionError>(Arc::new(df.schema().as_arrow().clone()))
         });
 
-        result.unwrap_or(physical_with_score)
+        result.unwrap_or_else(|e| {
+            log::warn!("Failed to compute output schema via operations, falling back to physical schema: {}", e);
+            physical_with_score
+        })
     }
 
     /// Rewrite logical field names in a search query to physical field names.
@@ -250,8 +253,8 @@ impl SearchResultTableProvider {
     fn rewrite_query_fields(&self, query: &str) -> String {
         let index_column_ids = self.index_def.column_ids();
 
-        let id_to_current = column_metadata::resolve_column_names(&self.operations);
-        let id_to_original = column_metadata::build_column_names(&self.operations);
+        let id_to_current = column_metadata::resolved_column_names(&self.operations);
+        let id_to_original = column_metadata::initial_column_names(&self.operations);
 
         let mut logical_to_physical: HashMap<String, String> = HashMap::new();
         for col_id in index_column_ids.iter() {
@@ -596,7 +599,7 @@ impl DataSource for SearchDataSource {
                 let mut df = op_ctx.table("bundle").await?;
 
                 // Apply each operation to transform the data
-                let mut col_names = column_metadata::build_column_names(&operations);
+                let mut col_names = column_metadata::initial_column_names(&operations);
                 for op in operations.iter() {
                     df = op
                         .apply_dataframe(df, op_ctx.clone().into(), &mut col_names)

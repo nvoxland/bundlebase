@@ -1487,7 +1487,7 @@ impl BundleFacade for BundleBuilder {
     }
 
     fn column_names(&self) -> column_metadata::ColumnNames {
-        column_metadata::resolve_column_names(&self.operations())
+        column_metadata::resolved_column_names(&self.operations())
     }
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {

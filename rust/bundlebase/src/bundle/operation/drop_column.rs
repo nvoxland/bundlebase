@@ -1,5 +1,6 @@
 use crate::bundle::column_metadata::ColumnNames;
 use crate::bundle::operation::Operation;
+use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
@@ -27,7 +28,9 @@ impl Operation for DropColumnOp {
         format!("DROP COLUMN: {}", self.id)
     }
 
-    async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
+    async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
+        bundle.column_name(&self.id)
+            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?;
         Ok(())
     }
 
