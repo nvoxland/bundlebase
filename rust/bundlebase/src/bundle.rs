@@ -613,7 +613,7 @@ impl Bundle {
                 return cached.clone();
             }
         }
-        let resolved = column_metadata::resolve_column_names(&self.operations.read());
+        let resolved = column_metadata::resolved_column_names(&self.operations.read());
         *self.column_names.write() = Some(resolved.clone());
         resolved
     }
@@ -1057,7 +1057,7 @@ impl BundleFacade for Bundle {
                     ops.len()
                 );
 
-            let mut col_names = column_metadata::build_column_names(&ops);
+            let mut col_names = column_metadata::initial_column_names(&ops);
             for op in ops.iter() {
                 debug!("Applying to dataframe: {}", &op.describe());
                 df = op.apply_dataframe(df, self.ctx.clone(), &mut col_names).await?;

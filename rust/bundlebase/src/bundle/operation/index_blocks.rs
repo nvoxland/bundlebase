@@ -585,7 +585,7 @@ impl IndexBlocksOp {
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
             let mut df = ctx.table("bundle").await?;
 
-            let mut col_names = column_metadata::build_column_names(&operations);
+            let mut col_names = column_metadata::initial_column_names(&operations);
             for op in operations.iter() {
                 df = op
                     .apply_dataframe(df, ctx.clone().into(), &mut col_names)
@@ -638,11 +638,12 @@ impl IndexBlocksOp {
             .await
             .map_err(|e| BundlebaseError::from(format!("Failed to get table: {}", e)))?;
 
-        let mut col_names = column_metadata::build_column_names(&operations);
+        let mut col_names = column_metadata::initial_column_names(&operations);
         for op in operations.iter() {
             df = op.apply_dataframe(df, op_ctx.clone().into(), &mut col_names).await?;
         }
 
+        // .collect() is acceptable here: operates on a single block's batch, not the full dataset
         df.select_columns(&[column])
             .map_err(|e| {
                 BundlebaseError::from(format!("Failed to select column '{}': {}", column, e))
@@ -841,7 +842,7 @@ impl IndexBlocksOp {
                     BundlebaseError::from(format!("Failed to get table: {}", e))
                 })?;
 
-                let mut col_names = column_metadata::build_column_names(&operations);
+                let mut col_names = column_metadata::initial_column_names(&operations);
                 for op in operations.iter() {
                     df = op.apply_dataframe(df, op_ctx.clone().into(), &mut col_names).await?;
                 }

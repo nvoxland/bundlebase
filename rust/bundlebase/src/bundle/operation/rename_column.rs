@@ -32,6 +32,16 @@ impl Operation for RenameColumnOp {
         bundle.column_name(&self.id)
             .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?;
 
+        // Check that the new name doesn't conflict with an existing column
+        let schema = bundle.schema().await?;
+        if schema.field_with_name(&self.new_name).is_ok() {
+            return Err(format!(
+                "Column '{}' already exists in the schema",
+                self.new_name
+            )
+            .into());
+        }
+
         Ok(())
     }
 

@@ -14,7 +14,7 @@ pub type ColumnNames = HashMap<ColumnId, String>;
 /// Only populates from AttachBlock and AddColumn operations. Renames and drops
 /// are NOT applied here — those mutations happen incrementally as each operation's
 /// `apply_dataframe` updates the map during the apply loop.
-pub fn build_column_names(operations: &[AnyOperation]) -> ColumnNames {
+pub fn initial_column_names(operations: &[AnyOperation]) -> ColumnNames {
     let mut id_to_name: ColumnNames = HashMap::new();
     let mut name_to_id: HashMap<String, ColumnId> = HashMap::new();
 
@@ -46,10 +46,10 @@ pub fn build_column_names(operations: &[AnyOperation]) -> ColumnNames {
 
 /// Build a fully-resolved ColumnNames map from an operation list.
 ///
-/// Unlike `build_column_names`, this applies all mutations (renames, drops) to produce
+/// Unlike `initial_column_names`, this applies all mutations (renames, drops) to produce
 /// the final state after all operations. Used by `check()` methods that need to know
 /// the current column names after all operations have been applied.
-pub fn resolve_column_names(operations: &[AnyOperation]) -> ColumnNames {
+pub fn resolved_column_names(operations: &[AnyOperation]) -> ColumnNames {
     let mut id_to_name: ColumnNames = HashMap::new();
     let mut name_to_id: HashMap<String, ColumnId> = HashMap::new();
 
