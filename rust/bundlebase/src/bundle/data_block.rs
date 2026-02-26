@@ -7,6 +7,7 @@ use crate::index::{
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{BlockId, IOReadFile, IOReadWriteDir};
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
+use crate::object_id::ColumnId;
 use crate::BundleConfig;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -39,6 +40,8 @@ pub struct DataBlock {
     config: Arc<BundleConfig>,
     /// Source information if this block was attached via a source fetch
     source_info: Option<SourceInfo>,
+    /// Column IDs for this block's schema fields (positional, matching schema field order)
+    column_ids: Vec<ColumnId>,
 }
 
 impl DataBlock {
@@ -64,6 +67,7 @@ impl DataBlock {
         data_dir: Arc<dyn IOReadWriteDir>,
         config: Arc<BundleConfig>,
         source_info: Option<SourceInfo>,
+        column_ids: Vec<ColumnId>,
     ) -> Self {
         Self {
             id,
@@ -74,6 +78,7 @@ impl DataBlock {
             data_dir,
             config,
             source_info,
+            column_ids,
         }
     }
 
@@ -81,9 +86,21 @@ impl DataBlock {
         &self.id
     }
 
+    /// Resolve a physical column name to its ColumnId
+    fn column_id_for_physical_name(&self, name: &str) -> Option<ColumnId> {
+        self.schema
+            .column_with_name(name)
+            .and_then(|(idx, _)| self.column_ids.get(idx).copied())
+    }
+
     /// Returns source information if this block was attached via a source fetch
     pub fn source_info(&self) -> Option<&SourceInfo> {
         self.source_info.as_ref()
+    }
+
+    /// Returns the column IDs for this block's schema fields
+    pub fn column_ids(&self) -> &[ColumnId] {
+        &self.column_ids
     }
 
     /// Load index (from cache or disk) and estimate selectivity.
@@ -197,9 +214,15 @@ impl DataBlock {
 
         // Evaluate each indexable filter
         for filter in indexable_filters {
+            // Resolve filter column name to ColumnId via block's column_ids
+            let column_id = match self.column_id_for_physical_name(&filter.column) {
+                Some(id) => id,
+                None => continue, // Column not found in schema, skip
+            };
+
             // Try to find a column index for this filter
             if let Some(index_def) =
-                IndexSelector::select_index_from_ref(&filter.column, versioned_block, &self.indexes)
+                IndexSelector::select_index_from_ref(&column_id, versioned_block, &self.indexes)
             {
                 // Skip text indexes — they can't serve column predicates
                 if index_def.is_text() {

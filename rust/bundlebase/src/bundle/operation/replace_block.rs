@@ -174,6 +174,7 @@ impl Operation for ReplaceBlockOp {
             bundle.data_dir(),
             bundle.config(),
             self.source_info.clone(),
+            old_block.column_ids().to_vec(),
         ));
 
         // Replace the old block with the new one in the pack

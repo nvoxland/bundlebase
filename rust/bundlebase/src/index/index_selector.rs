@@ -1,5 +1,6 @@
 use crate::data::VersionedBlockId;
 use crate::index::IndexDefinition;
+use crate::object_id::ColumnId;
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -7,17 +8,17 @@ use std::sync::Arc;
 pub struct IndexSelector;
 
 impl IndexSelector {
-    /// Select an appropriate index for the given column and block using indexes reference
+    /// Select an appropriate index for the given column ID and block using indexes reference
     ///
     /// This is a convenience method that accepts the indexes RwLock directly,
     /// useful when you have the indexes reference but not the full bundle.
     ///
     /// # Arguments
-    /// * `column` - The column name to check for an index
+    /// * `column_id` - The column ID to check for an index
     /// * `block` - The VersionedBlockId (block ID + version) to check coverage
     /// * `indexes` - Reference to the indexes RwLock
     pub fn select_index_from_ref(
-        column: &str,
+        column_id: &ColumnId,
         block: &VersionedBlockId,
         indexes: &Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     ) -> Option<Arc<IndexDefinition>> {
@@ -25,7 +26,7 @@ impl IndexSelector {
 
         for index_def in indexes.iter() {
             // Check if this index is for the requested column
-            if !index_def.columns().contains(&column.to_string()) {
+            if !index_def.column_ids().contains(column_id) {
                 continue;
             }
 

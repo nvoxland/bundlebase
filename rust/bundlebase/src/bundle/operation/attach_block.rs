@@ -217,6 +217,7 @@ impl Operation for AttachBlockOp {
             bundle.data_dir(),
             bundle.config(),
             self.source_info.clone(),
+            self.column_ids.clone(),
         ));
 
         let pack = bundle.get_pack(&self.pack).expect("Cannot find pack");

@@ -1,4 +1,5 @@
 use crate::bundle::column_metadata;
+use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::{AnyOperation, Operation};
 use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
@@ -6,6 +7,7 @@ use crate::index::{
     ColumnIndex, ExternalSortConfig, ExternalSortWriter, IndexedValue, IndexType, TempDirManager,
     TextIndexBuilder, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
 };
+use crate::object_id::ColumnId;
 use crate::progress::ProgressScope;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use arrow::record_batch::RecordBatch;
@@ -163,30 +165,17 @@ where
 impl IndexBlocksOp {
     /// Builds and registers an index across multiple blocks.
     ///
-    /// Streams through all provided blocks for the specified columns, accumulates value-to-rowid
-    /// mappings, and creates either a ColumnIndex or TextIndex based on the index type.
-    /// The index is then registered with the IndexManager and saved to disk.
+    /// Automatically detects whether columns are physical (from AttachBlock) or
+    /// computed (from AddColumn) and uses the appropriate indexing strategy.
     ///
     /// # Arguments
     /// * `index` - Unique identifier for this index operation
-    /// * `columns` - Column names to build index for
+    /// * `column_ids` - Column IDs to build index for
     /// * `blocks` - Vec of (block_id, version) tuples to index
     /// * `builder` - BundleBuilder providing block access and index management
-    ///
-    /// # Returns
-    /// * `Ok(Self)` - Successfully created and registered index
-    /// * `Err(e)` - Failed at any step (missing block, column, data type mismatch, etc.)
-    ///
-    /// # Errors
-    /// Returns error if:
-    /// - `blocks` is empty (cannot create index with no data)
-    /// - Any block is not found in packs
-    /// - Column doesn't exist in a block
-    /// - Data types differ between blocks for the same column
-    /// - Streaming or index building fails
     pub async fn setup(
         index: &ObjectId,
-        columns: Vec<String>,
+        column_ids: Vec<ColumnId>,
         blocks: Vec<(BlockId, String)>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
@@ -212,16 +201,51 @@ impl IndexBlocksOp {
             (idx.index_type().clone(), idx.name().to_string())
         };
 
+        // Use bundle's applied operations directly (not builder.operations() which
+        // combines committed + pending and can contain duplicates)
+        let operations = builder.bundle().operations.read().clone();
+
+        // Check if any indexed column is computed
+        let is_computed = column_ids.iter().any(|id| {
+            column_metadata::is_computed_column(&operations, id)
+        });
+
+        // Resolve column names for the appropriate context
+        let columns: Vec<String> = if is_computed {
+            // For computed columns, use current (resolved) names
+            let resolved = column_metadata::resolved_column_names(&operations);
+            column_ids.iter()
+                .map(|id| resolved.get(id).cloned()
+                    .ok_or_else(|| BundlebaseError::from(format!("Column ID '{}' not found in operations", id))))
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            // For physical columns, use physical names from AttachBlock schema
+            column_ids.iter()
+                .map(|id| column_metadata::physical_column_name(&operations, id)
+                    .ok_or_else(|| BundlebaseError::from(format!("Physical column name not found for ID '{}'", id))))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+
         // Dispatch to appropriate index building method
         match &index_type {
             IndexType::Column => {
                 let column = columns.first().ok_or_else(|| {
                     BundlebaseError::from("Column index requires at least one column")
                 })?;
-                Self::build_column_index(index, column, blocks, bundle).await
+                if is_computed {
+                    Self::build_computed_column_index(index, column, blocks, bundle, operations).await
+                } else {
+                    Self::build_column_index(index, column, blocks, bundle).await
+                }
             }
             IndexType::Text { tokenizer, .. } => {
-                Self::build_text_index(index, &index_name, &columns, blocks, bundle, tokenizer).await
+                if is_computed {
+                    Self::build_computed_text_index(
+                        index, &index_name, &columns, blocks, bundle, tokenizer, operations,
+                    ).await
+                } else {
+                    Self::build_text_index(index, &index_name, &columns, blocks, bundle, tokenizer).await
+                }
             }
         }
     }
@@ -518,54 +542,6 @@ impl IndexBlocksOp {
             cardinality: doc_count,
             doc_count: Some(doc_count),
         })
-    }
-
-    /// Builds and registers an index for a computed column (from `add_column`).
-    ///
-    /// Unlike `setup()`, which reads column values directly from blocks, this method
-    /// applies the full operation chain to each batch to compute the column value
-    /// before indexing it.
-    pub async fn setup_computed(
-        index: &ObjectId,
-        columns: Vec<String>,
-        blocks: Vec<(BlockId, String)>,
-        builder: &BundleBuilder,
-        operations: Vec<AnyOperation>,
-    ) -> Result<Self, BundlebaseError> {
-        let bundle = builder.bundle();
-
-        if blocks.is_empty() {
-            return Err(BundlebaseError::from("Cannot create index with no blocks"));
-        }
-
-        let (index_type, index_name) = {
-            let indexes = bundle.indexes().read();
-            let idx = indexes
-                .iter()
-                .find(|idx| idx.id() == index)
-                .ok_or_else(|| {
-                    BundlebaseError::from(format!(
-                        "Index definition {} not found. CreateIndexOp must be applied first.",
-                        index
-                    ))
-                })?;
-            (idx.index_type().clone(), idx.name().to_string())
-        };
-
-        match &index_type {
-            IndexType::Column => {
-                let column = columns.first().ok_or_else(|| {
-                    BundlebaseError::from("Column index requires at least one column")
-                })?;
-                Self::build_computed_column_index(index, column, blocks, bundle, operations).await
-            }
-            IndexType::Text { tokenizer, .. } => {
-                Self::build_computed_text_index(
-                    index, &index_name, &columns, blocks, bundle, tokenizer, operations,
-                )
-                .await
-            }
-        }
     }
 
     /// Infer the data type of a computed column by planning an empty query.
@@ -981,9 +957,9 @@ impl Operation for IndexBlocksOp {
             index_def.add_indexed_blocks(indexed_blocks);
 
             log::debug!(
-                "Added indexed blocks to index {} (column '{}'): {} blocks",
+                "Added indexed blocks to index {} (column IDs: {:?}): {} blocks",
                 self.index,
-                index_def.columns().join(", "),
+                index_def.column_ids(),
                 self.blocks.len()
             );
 

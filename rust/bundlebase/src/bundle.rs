@@ -37,6 +37,7 @@ use std::collections::{HashMap, HashSet};
 use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA};
 use crate::udf::{SearchTableFunction, VersionUdf};
 use crate::data::{BlockId, DataReaderFactory, ObjectId, VersionedBlockId};
+use crate::object_id::ColumnId;
 use crate::source::SourceFunctionRegistry;
 use crate::functions::FunctionRegistry;
 use crate::index::IndexDefinition;
@@ -699,14 +700,14 @@ impl Bundle {
         &self.indexes
     }
 
-    /// Check if an index already exists at the correct version
+    /// Check if an index already exists at the correct version for the given column ID
     pub(crate) fn get_index(
         &self,
-        column: &str,
+        column_id: &ColumnId,
         block: &VersionedBlockId,
     ) -> Option<Arc<IndexedBlocks>> {
         for index in self.indexes.read().iter() {
-            if index.columns().contains(&column.to_string()) {
+            if index.column_ids().contains(column_id) {
                 if let Some(indexed_blocks) = index.indexed_blocks(block) {
                     return Some(indexed_blocks);
                 }
