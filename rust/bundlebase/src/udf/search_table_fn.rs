@@ -198,20 +198,16 @@ impl std::fmt::Debug for SearchResultTableProvider {
 }
 
 impl SearchResultTableProvider {
-    /// Returns the raw physical data schema from the first available block.
-    fn physical_schema(&self) -> SchemaRef {
-        for pack in self.packs.values() {
-            for block in pack.blocks() {
-                return block.schema();
-            }
-        }
-        Arc::new(Schema::empty())
+    /// Returns the unified physical schema derived from all AttachBlock operations,
+    /// plus the corresponding column IDs.
+    fn physical_schema_and_ids(&self) -> (SchemaRef, Vec<crate::object_id::ColumnId>) {
+        column_metadata::unified_physical_schema(&self.operations)
     }
 
     /// Returns the physical schema plus `_score` column.
     /// This is the schema of raw search result batches before operations are applied.
     fn physical_output_schema(&self) -> SchemaRef {
-        let physical = self.physical_schema();
+        let (physical, _) = self.physical_schema_and_ids();
         let mut fields: Vec<Arc<Field>> = physical.fields().iter().cloned().collect();
         fields.push(Arc::new(Field::new("_score", DataType::Float64, false)));
         Arc::new(Schema::new(fields))
@@ -494,14 +490,14 @@ impl DataSource for SearchDataSource {
 
         let matching_block_refs = self.matching_block_refs.clone();
 
-        // Collect (block, block_ref_idx) pairs for blocks that are in the index
+        // Collect (block, block_ref_idx) for blocks that are in the index
         // and have at least one matching row — skip blocks with zero search matches.
         let mut blocks_to_scan: Vec<(Arc<crate::bundle::DataBlock>, u16)> = Vec::new();
         for pack in self.packs.values() {
             for block in pack.blocks() {
                 if let Some(&ref_idx) = block_id_to_ref.get(block.id()) {
                     if matching_block_refs.contains(&ref_idx) {
-                        blocks_to_scan.push((block, ref_idx));
+                        blocks_to_scan.push((block.clone(), ref_idx));
                     }
                 }
             }
@@ -522,9 +518,27 @@ impl DataSource for SearchDataSource {
             // Step 1: Collect raw physical batches with scores from all matching blocks
             let mut raw_batches: Vec<RecordBatch> = Vec::new();
 
+            // Build a mapping from ColumnId → position in unified schema.
+            // With shared ColumnIds across blocks, we can align by ID directly.
+            let (_, unified_column_ids) = column_metadata::unified_physical_schema(&operations);
+            let num_physical_cols = physical_output_schema.fields().len() - 1;
+            let unified_id_to_pos: HashMap<crate::object_id::ColumnId, usize> = unified_column_ids
+                .iter()
+                .enumerate()
+                .map(|(i, id)| (*id, i))
+                .collect();
+
             for (block, block_ref_idx) in blocks_to_scan {
                 let reader = block.reader();
                 let block_ref = ObjectIdAlias::from(block_ref_idx);
+
+                // Build mapping: unified position → block column index (None if block lacks this column)
+                let mut unified_to_block: Vec<Option<usize>> = vec![None; num_physical_cols];
+                for (block_idx, col_id) in block.column_ids().iter().enumerate() {
+                    if let Some(&unified_pos) = unified_id_to_pos.get(col_id) {
+                        unified_to_block[unified_pos] = Some(block_idx);
+                    }
+                }
 
                 let mut rowid_stream = reader
                     .extract_rowids_stream(block_ref, ctx.clone(), None)
@@ -553,6 +567,8 @@ impl DataSource for SearchDataSource {
                         continue;
                     }
 
+                    let num_matching = matching_indices.len();
+
                     // Filter the batch to only matching rows using take
                     let indices = UInt64Array::from(
                         matching_indices
@@ -560,21 +576,32 @@ impl DataSource for SearchDataSource {
                             .map(|&i| i as u64)
                             .collect::<Vec<_>>(),
                     );
-                    let mut filtered_columns: Vec<Arc<dyn arrow::array::Array>> =
-                        Vec::new();
-                    for col in batch.columns() {
-                        let filtered = compute::take(col, &indices, None)
-                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
-                        filtered_columns.push(filtered);
+
+                    // Align columns to unified schema order, inserting nulls for missing columns
+                    let mut aligned_columns: Vec<Arc<dyn arrow::array::Array>> = Vec::new();
+                    for (unified_pos, maybe_block_idx) in unified_to_block.iter().enumerate() {
+                        match maybe_block_idx {
+                            Some(block_idx) => {
+                                let filtered = compute::take(&batch.columns()[*block_idx], &indices, None)
+                                    .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+                                aligned_columns.push(filtered);
+                            }
+                            None => {
+                                // Block doesn't have this column — insert null array of correct type
+                                let field = physical_output_schema.field(unified_pos);
+                                let null_array = arrow::array::new_null_array(field.data_type(), num_matching);
+                                aligned_columns.push(null_array);
+                            }
+                        }
                     }
 
                     // Append score column
                     let score_array = Float64Array::from(matching_scores);
-                    filtered_columns.push(Arc::new(score_array));
+                    aligned_columns.push(Arc::new(score_array));
 
                     let result_batch = RecordBatch::try_new(
                         physical_output_schema.clone(),
-                        filtered_columns,
+                        aligned_columns,
                     )
                     .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
 

@@ -1,8 +1,9 @@
 use crate::bundle::operation::AnyOperation;
 use crate::data::BlockId;
 use crate::object_id::ColumnId;
-use arrow::datatypes::Schema;
-use std::collections::HashMap;
+use arrow::datatypes::{Schema, SchemaRef};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 pub const COLUMN_ID_KEY: &str = "bundlebase:column_id";
 pub const ORIGINAL_NAME_KEY: &str = "bundlebase:original_name";
@@ -164,6 +165,32 @@ pub fn blocks_for_column(operations: &[AnyOperation], id: &ColumnId) -> Vec<(Blo
         }
     }
     blocks
+}
+
+/// Build a unified physical schema from all AttachBlock operations.
+///
+/// Iterates AttachBlock ops in order, collecting unique columns by ColumnId.
+/// Returns the schema (with fields in first-seen order) and the corresponding
+/// column IDs. This represents all physical columns across all blocks.
+pub fn unified_physical_schema(operations: &[AnyOperation]) -> (SchemaRef, Vec<ColumnId>) {
+    let mut fields: Vec<Arc<arrow::datatypes::Field>> = Vec::new();
+    let mut column_ids: Vec<ColumnId> = Vec::new();
+    let mut seen_ids: HashSet<ColumnId> = HashSet::new();
+
+    for op in operations {
+        if let AnyOperation::AttachBlock(attach) = op {
+            if let Some(schema) = &attach.schema {
+                for (field, col_id) in schema.fields().iter().zip(attach.column_ids.iter()) {
+                    if seen_ids.insert(*col_id) {
+                        fields.push(field.clone());
+                        column_ids.push(*col_id);
+                    }
+                }
+            }
+        }
+    }
+
+    (Arc::new(Schema::new(fields)), column_ids)
 }
 
 /// For a physical column, returns the original field name from the AttachBlock schema.
