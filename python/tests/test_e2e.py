@@ -2121,3 +2121,85 @@ async def test_rename_to_existing_column():
 
     with pytest.raises(Exception, match="already exists"):
         await c.rename_column("first_name", "last_name")
+
+
+@pytest.mark.asyncio
+async def test_rename_column_across_multiple_blocks():
+    """Test rename_column works correctly across two attached blocks."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.attach(datafile("customers-101-150.csv"))
+    c = await c.standardize_column_names()
+
+    c = await c.rename_column("first_name", "given_name")
+
+    schema = await c.schema()
+    col_names = [f.name for f in schema]
+    assert "given_name" in col_names
+    assert "first_name" not in col_names
+    assert await c.num_rows() == 150
+
+
+@pytest.mark.asyncio
+async def test_drop_column_across_multiple_blocks():
+    """Test drop_column works correctly across two attached blocks."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.attach(datafile("customers-101-150.csv"))
+    c = await c.standardize_column_names()
+
+    c = await c.drop_column("country")
+
+    schema = await c.schema()
+    col_names = [f.name for f in schema]
+    assert "country" not in col_names
+    assert await c.num_rows() == 150
+
+
+@pytest.mark.asyncio
+async def test_add_column_across_multiple_blocks():
+    """Test add_column works correctly across two attached blocks."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.attach(datafile("customers-101-150.csv"))
+    c = await c.standardize_column_names()
+
+    c = await c.add_column("name_and_company", "first_name || ' - ' || company")
+
+    schema = await c.schema()
+    col_names = [f.name for f in schema]
+    assert "name_and_company" in col_names
+    assert await c.num_rows() == 150
+
+    result = await c.query("SELECT name_and_company FROM bundle")
+    df = await result.to_pandas()
+    assert len(df) == 150
+    for val in df["name_and_company"]:
+        assert " - " in val
+
+
+@pytest.mark.asyncio
+async def test_operations_pipeline_across_multiple_blocks():
+    """Test a pipeline of rename + drop + add_column across two blocks."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+    c = await c.attach(datafile("customers-101-150.csv"))
+    c = await c.standardize_column_names()
+
+    c = await c.rename_column("first_name", "given_name")
+    c = await c.drop_column("country")
+    c = await c.add_column("name_and_company", "given_name || ' - ' || company")
+
+    schema = await c.schema()
+    col_names = [f.name for f in schema]
+    assert "given_name" in col_names
+    assert "first_name" not in col_names
+    assert "country" not in col_names
+    assert "name_and_company" in col_names
+    assert await c.num_rows() == 150
+
+    result = await c.query("SELECT name_and_company FROM bundle")
+    df = await result.to_pandas()
+    assert len(df) == 150
+    for val in df["name_and_company"]:
+        assert " - " in val
