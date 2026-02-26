@@ -250,7 +250,6 @@ type BlockLookupKey = (BlockId, String);
 pub struct IndexDefinition {
     id: ObjectId,
     name: String,
-    columns: Vec<String>,
     index_type: IndexType,
     column_ids: Vec<ColumnId>,
     blocks: RwLock<Vec<Arc<IndexedBlocks>>>,
@@ -263,14 +262,12 @@ impl IndexDefinition {
     pub(crate) fn new(
         id: &ObjectId,
         name: String,
-        columns: Vec<String>,
         index_type: IndexType,
         column_ids: Vec<ColumnId>,
     ) -> IndexDefinition {
         Self {
             id: *id,
             name,
-            columns,
             index_type,
             column_ids,
             blocks: RwLock::new(Vec::new()),
@@ -285,10 +282,6 @@ impl IndexDefinition {
     /// Get the index name
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    pub fn columns(&self) -> &[String] {
-        &self.columns
     }
 
     /// Get the column IDs for this index.
@@ -383,10 +376,10 @@ impl IndexDefinition {
 
         if removed_count > 0 {
             log::debug!(
-                "Pruned {} stale IndexedBlocks from index {} (column '{}')",
+                "Pruned {} stale IndexedBlocks from index {} (column IDs: {:?})",
                 removed_count,
                 self.id,
-                self.columns.join(", ")
+                self.column_ids
             );
         }
 

@@ -1,4 +1,5 @@
 use crate::bundle::operation::AnyOperation;
+use crate::data::BlockId;
 use crate::object_id::ColumnId;
 use arrow::datatypes::Schema;
 use std::collections::HashMap;
@@ -123,6 +124,58 @@ pub fn original_name_by_id(schema: &Schema, id: &ColumnId) -> Option<String> {
         if let Some(meta_id) = field.metadata().get(COLUMN_ID_KEY) {
             if meta_id == &id_str {
                 return field.metadata().get(ORIGINAL_NAME_KEY).cloned();
+            }
+        }
+    }
+    None
+}
+
+/// Check if a column is computed (from AddColumn) vs physical (from AttachBlock).
+///
+/// Scans operations to determine origin. Returns `true` if the column was
+/// created by an AddColumn operation, `false` if it comes from AttachBlock.
+pub fn is_computed_column(operations: &[AnyOperation], id: &ColumnId) -> bool {
+    for op in operations {
+        match op {
+            AnyOperation::AddColumn(add) if &add.id == id => return true,
+            AnyOperation::AttachBlock(attach) => {
+                if attach.column_ids.contains(id) {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// For a physical column, returns all (block_id, version) pairs from AttachBlock ops
+/// that contain the column. For a computed column, returns ALL blocks from ALL
+/// AttachBlock ops (since computed columns span all blocks).
+pub fn blocks_for_column(operations: &[AnyOperation], id: &ColumnId) -> Vec<(BlockId, String)> {
+    let computed = is_computed_column(operations, id);
+
+    let mut blocks = Vec::new();
+    for op in operations {
+        if let AnyOperation::AttachBlock(attach) = op {
+            if computed || attach.column_ids.contains(id) {
+                blocks.push((attach.id, attach.version.clone()));
+            }
+        }
+    }
+    blocks
+}
+
+/// For a physical column, returns the original field name from the AttachBlock schema.
+///
+/// This is the name as it appears in the underlying data file, before any renames.
+pub fn physical_column_name(operations: &[AnyOperation], id: &ColumnId) -> Option<String> {
+    for op in operations {
+        if let AnyOperation::AttachBlock(attach) = op {
+            if let Some(pos) = attach.column_ids.iter().position(|cid| cid == id) {
+                if let Some(schema) = &attach.schema {
+                    return schema.fields().get(pos).map(|f| f.name().to_string());
+                }
             }
         }
     }

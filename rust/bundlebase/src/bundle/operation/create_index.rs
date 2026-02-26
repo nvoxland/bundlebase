@@ -93,10 +93,11 @@ impl Operation for CreateIndexOp {
 
         // Single-column index validation (Column type)
         let col = &columns[0];
+        let col_id = &self.column_ids[0];
 
         // Check if an index already exists for this column
         let indexes = bundle.indexes().read();
-        if indexes.iter().any(|idx| idx.columns().contains(col)) {
+        if indexes.iter().any(|idx| idx.column_ids().contains(col_id)) {
             return Err(format!("Index already exists for column '{}'", col).into());
         }
 
@@ -104,19 +105,12 @@ impl Operation for CreateIndexOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        // Resolve column names from operations
-        let columns: Vec<String> = self.column_ids.iter()
-            .map(|id| bundle.column_name(id)
-                .ok_or_else(|| DataFusionError::Internal(format!("Column with ID '{}' not found", id))))
-            .collect::<Result<Vec<_>, _>>()?;
-
         bundle
             .indexes
             .write()
             .push(Arc::new(IndexDefinition::new(
                 &self.id,
                 self.name.clone(),
-                columns,
                 self.index_type.clone(),
                 self.column_ids.clone(),
             )));

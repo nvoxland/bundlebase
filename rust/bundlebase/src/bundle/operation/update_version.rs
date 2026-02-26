@@ -69,6 +69,7 @@ impl Operation for UpdateVersionOp {
             bundle.data_dir(),
             bundle.config(),
             old_block.source_info().cloned(),
+            old_block.column_ids().to_vec(),
         ));
 
         // Replace the old block with the new one in the pack

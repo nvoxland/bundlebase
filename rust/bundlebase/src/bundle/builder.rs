@@ -7,7 +7,6 @@ use crate::bundle::operation::AnyOperation;
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::{column_metadata, sql, Bundle};
-use super::DataBlock;
 use crate::data::{BlockId, ObjectId, VersionedBlockId};
 use crate::source::{FetchResults, SyncMode};
 use crate::functions::FunctionImpl;
@@ -1177,170 +1176,63 @@ impl BundleBuilder {
     ///
     /// This is used by commands that need to reindex within their own change context.
     pub(in crate::bundle) async fn reindex_internal(&self) -> Result<(), BundlebaseError> {
-        // Group blocks by (index_id, columns) for batching
-        let mut blocks_to_index: HashMap<(ObjectId, Vec<String>), Vec<(BlockId, String)>> =
-            HashMap::new();
-        // Computed columns need operation-based indexing (separate path)
-        let mut computed_blocks_to_index: HashMap<(ObjectId, Vec<String>), Vec<(BlockId, String)>> =
-            HashMap::new();
+        use crate::object_id::ColumnId;
 
-        // Ensure dataframe is set up for queries
-        let df = self.dataframe().await?;
+        // Group blocks by (index_id, column_ids) for batching
+        let mut blocks_to_index: HashMap<(ObjectId, Vec<ColumnId>), Vec<(BlockId, String)>> =
+            HashMap::new();
 
         // Collect index definitions before the loop to avoid holding the lock across awaits
         let index_defs: Vec<Arc<IndexDefinition>> =
             self.bundle.indexes.read().iter().cloned().collect();
 
-        let packs = self.bundle.packs().clone();
+        // Use bundle's operations directly (not self.operations() which includes
+        // pending changes and would duplicate operations already applied to bundle)
+        let operations = self.bundle.operations.read().clone();
 
         for index_def in &index_defs {
             let index_id = index_def.id();
-            let index_columns: Vec<String> = index_def.columns().to_vec();
+            let index_column_ids: Vec<ColumnId> = index_def.column_ids().to_vec();
 
-            // Use the first column to find which blocks contain the data
-            let lookup_col = index_columns.first()
-                .cloned()
+            // Use the first column ID for "needs reindex" checks
+            let first_col_id = index_column_ids.first()
                 .ok_or_else(|| BundlebaseError::from(
                     format!("Index '{}' has no columns defined", index_id)
                 ))?;
 
-            debug!("Checking index on {:?} (lookup col: {})", &index_columns, &lookup_col);
+            debug!("Checking index on column IDs {:?}", &index_column_ids);
 
-            // Resolve each logical index column name to its physical block column name.
-            // This is necessary because rename operations (e.g., standardize_column_names)
-            // create a logical projection with new names, but blocks still use the original
-            // physical column names.
-            let mut physical_columns = Vec::with_capacity(index_columns.len());
-            for col in &index_columns {
-                let col_sources = sql::column_sources_from_df(col.as_str(), &df, Some(&packs)).await?;
-                if let Some(ref sources) = col_sources {
-                    if let Some((_table, phys_col)) = sources.first() {
-                        physical_columns.push(phys_col.clone());
-                    } else {
-                        physical_columns.push(col.clone());
-                    }
-                } else {
-                    physical_columns.push(col.clone());
-                }
-            }
+            // Use blocks_for_column to find which blocks need indexing
+            let candidate_blocks = column_metadata::blocks_for_column(&operations, first_col_id);
 
-            // Pass packs to expand pack tables into block tables
-            let sources = match sql::column_sources_from_df(
-                lookup_col.as_str(),
-                &df,
-                Some(&packs),
-            )
-            .await
-            {
-                Ok(Some(s)) => s,
-                Ok(None) => {
-                    // Column doesn't trace to physical blocks — likely a computed column
-                    // from add_column(). Collect ALL blocks and use operation-based indexing.
-                    let mut computed_blocks = Vec::new();
-                    for pack in packs.read().values() {
-                        for block in pack.blocks() {
-                            let block_version = self.find_block_version(block.id())
-                                .ok_or_else(|| format!("Block {} not found", block.id()))?;
-
-                            let versioned_block =
-                                VersionedBlockId::new(*block.id(), block_version.clone());
-                            let needs_index = self
-                                .bundle()
-                                .get_index(&lookup_col, &versioned_block)
-                                .is_none();
-
-                            if needs_index {
-                                computed_blocks.push((*block.id(), block_version));
-                            }
-                        }
-                    }
-
-                    if !computed_blocks.is_empty() {
-                        computed_blocks_to_index
-                            .entry((*index_id, index_columns.clone()))
-                            .or_default()
-                            .extend(computed_blocks);
-                    }
-                    continue;
-                }
-                Err(e) => {
-                    return Err(format!(
-                        "Failed to find source for column '{}': {}",
-                        lookup_col, e
-                    )
-                    .into());
-                }
-            };
-
-            // Use source_table to identify blocks. Physical column names are resolved above
-            // and passed to IndexBlocksOp::setup so it can find columns in blocks even after
-            // rename operations.
-            for (source_table, _source_col) in sources {
-                // Extract block ID from table name "blocks.__block_{hex_id}"
-                let block_id = DataBlock::parse_id(&source_table).ok_or_else(|| {
-                    BundlebaseError::from(format!("Invalid table: {}", source_table))
-                })?;
-
-                // Find the block and get its version
-                let block_version = self
-                    .find_block_version(&block_id)
-                    .ok_or_else(|| format!("Block {} not found in packs", block_id))?;
-                debug!(
-                    "Physical source: block {} version {}",
-                    &block_id, &block_version
-                );
+            for (block_id, block_version) in candidate_blocks {
+                let versioned_block = VersionedBlockId::new(block_id, block_version.clone());
 
                 // Check if index already exists at this version
-                let versioned_block =
-                    VersionedBlockId::new(block_id, block_version.clone());
                 let needs_index = self
                     .bundle()
-                    .get_index(&lookup_col, &versioned_block)
+                    .get_index(first_col_id, &versioned_block)
                     .is_none();
-                debug!("Needs index? {}", needs_index);
 
                 if needs_index {
                     blocks_to_index
-                        .entry((*index_id, physical_columns.clone()))
+                        .entry((*index_id, index_column_ids.clone()))
                         .or_default()
                         .push((block_id, block_version));
                 }
             }
         }
 
-        // Create IndexBlocksOp for each group of physical-column blocks
-        for ((index_id, columns), blocks) in blocks_to_index {
+        // Create IndexBlocksOp for each group of blocks
+        for ((index_id, column_ids), blocks) in blocks_to_index {
             if !blocks.is_empty() {
                 debug!(
-                    "Creating IndexBlocksOp for columns {:?} with {} blocks",
-                    columns,
+                    "Creating IndexBlocksOp for column IDs {:?} with {} blocks",
+                    column_ids,
                     blocks.len()
                 );
 
-                // Bundle is internally thread-safe
-                let op = IndexBlocksOp::setup(&index_id, columns, blocks, self).await?;
-                self.apply_operation(op.into()).await?;
-            }
-        }
-
-        // Create IndexBlocksOp for computed columns (require operation application)
-        let all_operations = self.operations();
-        for ((index_id, columns), blocks) in computed_blocks_to_index {
-            if !blocks.is_empty() {
-                debug!(
-                    "Creating computed IndexBlocksOp for columns {:?} with {} blocks",
-                    columns,
-                    blocks.len()
-                );
-
-                let op = IndexBlocksOp::setup_computed(
-                    &index_id,
-                    columns,
-                    blocks,
-                    self,
-                    all_operations.clone(),
-                )
-                .await?;
+                let op = IndexBlocksOp::setup(&index_id, column_ids, blocks, self).await?;
                 self.apply_operation(op.into()).await?;
             }
         }

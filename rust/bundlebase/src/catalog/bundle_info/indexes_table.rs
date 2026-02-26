@@ -49,11 +49,18 @@ impl BundleIndexesTable {
     }
 
     fn build_batch(&self) -> Result<RecordBatch> {
-        let indexes = self.facade()?.indexes();
+        let facade = self.facade()?;
+        let indexes = facade.indexes();
+        let col_names = facade.column_names();
 
         let ids: Vec<String> = indexes.iter().map(|idx| idx.id().to_string()).collect();
         let names: Vec<&str> = indexes.iter().map(|idx| idx.name()).collect();
-        let columns: Vec<String> = indexes.iter().map(|idx| idx.columns().join(", ")).collect();
+        let columns: Vec<String> = indexes.iter().map(|idx| {
+            idx.column_ids().iter()
+                .filter_map(|id| col_names.get(id).cloned())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }).collect();
         let columns: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
         let types: Vec<&str> = indexes
             .iter()

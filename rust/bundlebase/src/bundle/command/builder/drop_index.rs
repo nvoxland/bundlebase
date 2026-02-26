@@ -1,6 +1,8 @@
 //! DropIndex command implementation.
 
+use crate::bundle::column_metadata;
 use crate::bundle::command::{CommandParsing, Rule};
+use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::DropIndexOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -54,13 +56,28 @@ impl BundleBuilderCommand for DropIndexCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        // Find the index ID: look up by name first, then fall back to column match
+        // Find the index ID: look up by name first, then fall back to column name match
         let index_id = {
             let bundle = builder.bundle();
             let indexes = bundle.indexes().read();
-            let index = indexes
-                .iter()
-                .find(|idx| idx.name() == self.identifier || idx.columns().contains(&self.identifier));
+
+            // First try matching by index name
+            let index = indexes.iter().find(|idx| idx.name() == self.identifier);
+
+            // Fall back to matching by column name -> column ID -> index
+            let index = index.or_else(|| {
+                let col_names = column_metadata::resolved_column_names(&builder.operations());
+                // Find the ColumnId for the given column name
+                let target_col_id = col_names.iter()
+                    .find(|(_, name)| name.as_str() == self.identifier)
+                    .map(|(id, _)| *id);
+
+                if let Some(col_id) = target_col_id {
+                    indexes.iter().find(|idx| idx.column_ids().contains(&col_id))
+                } else {
+                    None
+                }
+            });
 
             match index {
                 Some(idx) => *idx.id(),
