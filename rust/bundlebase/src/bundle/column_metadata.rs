@@ -266,4 +266,236 @@ mod tests {
         let unknown_id = ColumnId::generate();
         assert_eq!(column_name_by_id(&schema, &unknown_id), None);
     }
+
+    // --- Test helpers for building fake operations ---
+
+    use crate::bundle::operation::{AttachBlockOp, AddColumnOp, RenameColumnOp, DropColumnOp};
+    use crate::data::ObjectId;
+
+    fn fake_attach(names: &[&str], ids: &[ColumnId]) -> AnyOperation {
+        let fields: Vec<Arc<Field>> = names
+            .iter()
+            .map(|n| Arc::new(Field::new(*n, DataType::Utf8, true)))
+            .collect();
+        AnyOperation::AttachBlock(AttachBlockOp {
+            id: BlockId::generate(),
+            pack: ObjectId::generate(),
+            location: "memory:///fake".to_string(),
+            read_options: None,
+            version: "v1".to_string(),
+            hash: "0".repeat(64),
+            source_info: None,
+            layout: None,
+            num_rows: None,
+            bytes: None,
+            schema: Some(Arc::new(Schema::new(fields))),
+            column_ids: ids.to_vec(),
+        })
+    }
+
+    fn fake_attach_with_block_id(names: &[&str], ids: &[ColumnId], block_id: BlockId) -> AnyOperation {
+        let fields: Vec<Arc<Field>> = names
+            .iter()
+            .map(|n| Arc::new(Field::new(*n, DataType::Utf8, true)))
+            .collect();
+        AnyOperation::AttachBlock(AttachBlockOp {
+            id: block_id,
+            pack: ObjectId::generate(),
+            location: "memory:///fake".to_string(),
+            read_options: None,
+            version: "v1".to_string(),
+            hash: "0".repeat(64),
+            source_info: None,
+            layout: None,
+            num_rows: None,
+            bytes: None,
+            schema: Some(Arc::new(Schema::new(fields))),
+            column_ids: ids.to_vec(),
+        })
+    }
+
+    fn fake_add_column(id: ColumnId, name: &str) -> AnyOperation {
+        AnyOperation::AddColumn(AddColumnOp {
+            id,
+            name: name.to_string(),
+            expression: "1 + 1".to_string(),
+        })
+    }
+
+    fn fake_rename(id: ColumnId, new_name: &str) -> AnyOperation {
+        AnyOperation::RenameColumn(RenameColumnOp {
+            id,
+            new_name: new_name.to_string(),
+        })
+    }
+
+    fn fake_drop(id: ColumnId) -> AnyOperation {
+        AnyOperation::DropColumn(DropColumnOp { id })
+    }
+
+    // --- initial_column_names tests ---
+
+    #[test]
+    fn test_initial_column_names_from_attach() {
+        let id_a = ColumnId::generate();
+        let id_b = ColumnId::generate();
+        let ops = vec![fake_attach(&["col_a", "col_b"], &[id_a, id_b])];
+
+        let names = initial_column_names(&ops);
+        assert_eq!(names.len(), 2);
+        assert_eq!(names.get(&id_a), Some(&"col_a".to_string()));
+        assert_eq!(names.get(&id_b), Some(&"col_b".to_string()));
+    }
+
+    #[test]
+    fn test_initial_column_names_deduplicates_across_blocks() {
+        let id_a = ColumnId::generate();
+        let id_b = ColumnId::generate();
+        let ops = vec![
+            fake_attach(&["col_a", "col_b"], &[id_a, id_b]),
+            fake_attach(&["col_a", "col_b"], &[id_a, id_b]),
+        ];
+
+        let names = initial_column_names(&ops);
+        assert_eq!(names.len(), 2, "Should deduplicate shared ColumnIds across blocks");
+    }
+
+    #[test]
+    fn test_initial_column_names_includes_add_column() {
+        let id_a = ColumnId::generate();
+        let id_computed = ColumnId::generate();
+        let ops = vec![
+            fake_attach(&["col_a"], &[id_a]),
+            fake_add_column(id_computed, "computed"),
+        ];
+
+        let names = initial_column_names(&ops);
+        assert_eq!(names.len(), 2);
+        assert_eq!(names.get(&id_computed), Some(&"computed".to_string()));
+    }
+
+    #[test]
+    fn test_initial_column_names_ignores_renames_and_drops() {
+        let id_a = ColumnId::generate();
+        let id_b = ColumnId::generate();
+        let ops = vec![
+            fake_attach(&["col_a", "col_b"], &[id_a, id_b]),
+            fake_rename(id_a, "renamed_a"),
+            fake_drop(id_b),
+        ];
+
+        let names = initial_column_names(&ops);
+        assert_eq!(names.len(), 2, "Renames/drops should not affect initial names");
+        assert_eq!(names.get(&id_a), Some(&"col_a".to_string()), "Should keep original name");
+        assert_eq!(names.get(&id_b), Some(&"col_b".to_string()), "Dropped column should still appear");
+    }
+
+    // --- resolved_column_names tests ---
+
+    #[test]
+    fn test_resolved_column_names_applies_rename_and_drop() {
+        let id_a = ColumnId::generate();
+        let id_b = ColumnId::generate();
+        let ops = vec![
+            fake_attach(&["col_a", "col_b"], &[id_a, id_b]),
+            fake_rename(id_a, "renamed_a"),
+            fake_drop(id_b),
+        ];
+
+        let names = resolved_column_names(&ops);
+        assert_eq!(names.len(), 1, "Dropped column should be removed");
+        assert_eq!(names.get(&id_a), Some(&"renamed_a".to_string()));
+        assert!(names.get(&id_b).is_none(), "Dropped column should not appear");
+    }
+
+    // --- unified_physical_schema tests ---
+
+    #[test]
+    fn test_unified_physical_schema_deduplicates_by_id() {
+        let id_a = ColumnId::generate();
+        let id_b = ColumnId::generate();
+        let id_c = ColumnId::generate();
+        let ops = vec![
+            fake_attach(&["col_a", "col_b"], &[id_a, id_b]),
+            fake_attach(&["col_a", "col_c"], &[id_a, id_c]),
+        ];
+
+        let (schema, col_ids) = unified_physical_schema(&ops);
+        assert_eq!(schema.fields().len(), 3, "Should have 3 unique fields: a, b, c");
+        assert_eq!(col_ids.len(), 3);
+        assert_eq!(schema.field(0).name(), "col_a");
+        assert_eq!(schema.field(1).name(), "col_b");
+        assert_eq!(schema.field(2).name(), "col_c");
+    }
+
+    // --- is_computed_column tests ---
+
+    #[test]
+    fn test_is_computed_column() {
+        let id_physical = ColumnId::generate();
+        let id_computed = ColumnId::generate();
+        let id_unknown = ColumnId::generate();
+        let ops = vec![
+            fake_attach(&["col_a"], &[id_physical]),
+            fake_add_column(id_computed, "computed"),
+        ];
+
+        assert!(!is_computed_column(&ops, &id_physical), "AttachBlock column is not computed");
+        assert!(is_computed_column(&ops, &id_computed), "AddColumn column is computed");
+        assert!(!is_computed_column(&ops, &id_unknown), "Unknown column is not computed");
+    }
+
+    // --- blocks_for_column tests ---
+
+    #[test]
+    fn test_blocks_for_physical_column() {
+        let id_a = ColumnId::generate();
+        let id_b = ColumnId::generate();
+        let block1 = BlockId::generate();
+        let block2 = BlockId::generate();
+        let ops = vec![
+            fake_attach_with_block_id(&["col_a", "col_b"], &[id_a, id_b], block1),
+            fake_attach_with_block_id(&["col_a"], &[id_a], block2),
+        ];
+
+        let blocks = blocks_for_column(&ops, &id_a);
+        assert_eq!(blocks.len(), 2, "col_a appears in both blocks");
+
+        let blocks_b = blocks_for_column(&ops, &id_b);
+        assert_eq!(blocks_b.len(), 1, "col_b appears in only block1");
+        assert_eq!(blocks_b[0].0, block1);
+    }
+
+    #[test]
+    fn test_blocks_for_computed_column() {
+        let id_a = ColumnId::generate();
+        let id_computed = ColumnId::generate();
+        let block1 = BlockId::generate();
+        let block2 = BlockId::generate();
+        let ops = vec![
+            fake_attach_with_block_id(&["col_a"], &[id_a], block1),
+            fake_attach_with_block_id(&["col_a"], &[id_a], block2),
+            fake_add_column(id_computed, "computed"),
+        ];
+
+        let blocks = blocks_for_column(&ops, &id_computed);
+        assert_eq!(blocks.len(), 2, "Computed column spans ALL blocks");
+    }
+
+    // --- physical_column_name tests ---
+
+    #[test]
+    fn test_physical_column_name() {
+        let id_a = ColumnId::generate();
+        let id_computed = ColumnId::generate();
+        let id_unknown = ColumnId::generate();
+        let ops = vec![
+            fake_attach(&["col_a"], &[id_a]),
+            fake_add_column(id_computed, "computed"),
+        ];
+
+        assert_eq!(physical_column_name(&ops, &id_a), Some("col_a".to_string()));
+        assert_eq!(physical_column_name(&ops, &id_computed), None, "Computed column has no physical name");
+        assert_eq!(physical_column_name(&ops, &id_unknown), None, "Unknown column has no physical name");
+    }
 }

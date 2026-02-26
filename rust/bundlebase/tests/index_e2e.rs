@@ -1833,3 +1833,98 @@ async fn test_search_with_index_on_added_column() -> Result<(), BundlebaseError>
 
     Ok(())
 }
+
+#[tokio::test]
+#[ignore = "Column index across multiple blocks hits range error — known issue to fix"]
+async fn test_column_index_across_multiple_blocks() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    bundle
+        .attach(test_datafile("customers-101-150.csv"), None)
+        .await?;
+
+    bundle
+        .create_index(&["Email"], IndexType::Column, None)
+        .await?;
+    bundle.commit("Attach + index").await?;
+
+    // Verify querying with WHERE on the indexed column works across both blocks
+    let stream = bundle
+        .query(
+            "select Email from bundle where Email='elizabethbarr@ewing.com'",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(1, num_rows, "Should find email from block 1 with index");
+
+    let stream = bundle
+        .query(
+            "select Email from bundle where Email='olivia.reyes@armstrong.com'",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert_eq!(1, num_rows, "Should find email from block 2 with index");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_text_search_across_multiple_blocks() -> Result<(), BundlebaseError> {
+    common::enable_logging();
+    let data_dir = random_memory_dir();
+    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await?;
+    bundle
+        .attach(test_datafile("customers-101-150.csv"), None)
+        .await?;
+    bundle.commit("Attach two blocks").await?;
+
+    bundle
+        .create_index(
+            &["Company"],
+            IndexType::text(TokenizerConfig::default()),
+            Some("company_search"),
+        )
+        .await?;
+    bundle.commit("Created text index").await?;
+
+    let stream = bundle
+        .query(
+            "SELECT \"Company\" FROM search('company_search', 'Group')",
+            vec![],
+        )
+        .await?;
+    let rs: Vec<RecordBatch> = stream.try_collect().await?;
+    let num_rows: usize = rs.iter().map(|rb| rb.num_rows()).sum();
+    assert!(num_rows > 0, "Should find results containing 'Group'");
+
+    for batch in &rs {
+        let companies = batch
+            .column_by_name("Company")
+            .expect("Company column should exist")
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("Company should be StringArray");
+        for i in 0..companies.len() {
+            assert!(
+                companies.value(i).to_lowercase().contains("group"),
+                "All results should contain 'group': got '{}'",
+                companies.value(i)
+            );
+        }
+    }
+
+    Ok(())
+}
