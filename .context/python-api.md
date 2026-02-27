@@ -87,6 +87,8 @@ c = await Bundlebase.open("/my/container/dir")
 - `remove_column(name)` - Remove column
 - `rename_column(old_name, new_name)` - Rename column
 - `standardize_column_names()` - Convert all column names to lowercase+underscore identifiers
+- `add_column(name, expression)` - Add a computed column using a SQL expression
+- `cast_column(name, new_type, clean=None)` - Cast column to a different data type
 - `filter(query, params)` - Filter rows with a SELECT query (e.g., `"SELECT * FROM bundle WHERE salary > $1"`)
 - `join(url, expression, join_type)` - Join with another source
 - `set_name(name)` - Set container name

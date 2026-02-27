@@ -566,6 +566,29 @@ class PyBundleBuilder:
         """
         ...
 
+    def cast_column(self, name: str, new_type: str, clean: Optional[str] = None) -> "OperationChain":
+        """
+        Queue a cast_column operation.
+
+        Casts a column to a different data type, with optional regex cleaning.
+
+        Args:
+            name: Name of the column to cast
+            new_type: Target type (e.g., "integer", "float", "string")
+            clean: Optional regex pattern to clean values before casting
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Raises:
+            ValueError: If the column doesn't exist
+
+        Example:
+            c = await c.cast_column("price", "integer")
+            c = await c.cast_column("price", "integer", clean="[^0-9]")
+        """
+        ...
+
     def drop_column(self, name: str) -> "OperationChain":
         """
         Queue a drop_column operation.
@@ -1192,6 +1215,10 @@ class OperationChain:
         """Queue an add_column operation."""
         ...
 
+    def cast_column(self, name: str, new_type: str, clean: Optional[str] = None) -> "OperationChain":
+        """Queue a cast_column operation."""
+        ...
+
     def drop_column(self, name: str) -> "OperationChain":
         """Queue a drop_column operation."""
         ...
@@ -1322,6 +1349,10 @@ class CreateChain:
         """Queue an add_column operation."""
         ...
 
+    def cast_column(self, name: str, new_type: str, clean: Optional[str] = None) -> "CreateChain":
+        """Queue a cast_column operation."""
+        ...
+
     def drop_column(self, name: str) -> "CreateChain":
         """Queue a drop_column operation."""
         ...
@@ -1450,6 +1481,10 @@ class ExtendChain:
 
     def add_column(self, name: str, expression: str) -> "ExtendChain":
         """Queue an add_column operation."""
+        ...
+
+    def cast_column(self, name: str, new_type: str, clean: Optional[str] = None) -> "ExtendChain":
+        """Queue a cast_column operation."""
         ...
 
     def drop_column(self, name: str) -> "ExtendChain":

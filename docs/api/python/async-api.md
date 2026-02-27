@@ -51,6 +51,8 @@ Mutable bundle class returned by `create()` and transformation methods.
       show_root_full_path: false
       members:
         - attach
+        - add_column
+        - cast_column
         - remove_column
         - rename_column
         - filter
