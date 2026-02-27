@@ -685,10 +685,6 @@ changes:
       - name: id
         data_type: Int32
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {}
-      metadata: {}
     columnIds:
     - '0000000000000001'
 "#;
@@ -732,22 +728,12 @@ changes:
           unit: Nanosecond
           timezone: null
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {}
       - name: id
         data_type: Int32
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {}
       - name: first_name
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {}
-      metadata: {}
     columnIds:
     - '0000000000000aa1'
     - '0000000000000aa2'

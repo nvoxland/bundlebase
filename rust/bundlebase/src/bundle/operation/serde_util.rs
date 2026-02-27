@@ -9,9 +9,8 @@ pub struct SerializedField {
     pub name: String,
     pub data_type: Value,
     pub nullable: bool,
-    pub dict_id: i32,
-    pub dict_is_ordered: bool,
-    pub metadata: Mapping,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Mapping>,
 }
 
 /// Serialize a DataType to structured YAML format (avoiding YAML tags)
@@ -366,14 +365,12 @@ fn serialize_field_internal(field: &Field) -> Result<SerializedField, String> {
     let metadata_map = serde_yaml_ng::to_value(field.metadata())
         .ok()
         .and_then(|v| v.as_mapping().cloned())
-        .unwrap_or_default();
+        .filter(|m| !m.is_empty());
 
     Ok(SerializedField {
         name: field.name().clone(),
         data_type: serialize_data_type(field.data_type())?,
         nullable: field.is_nullable(),
-        dict_id: 0,
-        dict_is_ordered: false,
         metadata: metadata_map,
     })
 }
@@ -438,10 +435,13 @@ where
         Value::String("fields".to_string()),
         Value::Sequence(fields_values),
     );
-    map.insert(
-        Value::String("metadata".to_string()),
-        Value::Mapping(Mapping::new()),
-    );
+
+    let schema_metadata = schema.metadata();
+    if !schema_metadata.is_empty() {
+        let metadata_value =
+            serde_yaml_ng::to_value(schema_metadata).map_err(serde::ser::Error::custom)?;
+        map.insert(Value::String("metadata".to_string()), metadata_value);
+    }
 
     serde_yaml_ng::to_value(&map)
         .map_err(serde::ser::Error::custom)
