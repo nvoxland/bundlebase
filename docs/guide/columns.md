@@ -61,3 +61,54 @@ For example, `"Customer Id"` becomes `customer_id` and `"Phone 1"` becomes `phon
     ```python
     bundle.standardize_column_names()
     ```
+
+## Add Column
+
+Create a computed column from a SQL expression.
+
+=== "Async API"
+
+    ```python
+    await bundle.add_column("full_name", "first_name || ' ' || last_name")
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle.add_column("full_name", "first_name || ' ' || last_name")
+    ```
+
+=== "SQL"
+
+    ```sql
+    ADD COLUMN full_name AS first_name || ' ' || last_name
+    ```
+
+Computed columns can be indexed just like regular columns.
+
+## Cast Column
+
+Change a column's data type, with optional regex cleaning to strip invalid characters before conversion.
+
+=== "Async API"
+
+    ```python
+    await bundle.cast_column("price", "integer")
+
+    # With regex cleaning (removes non-numeric characters before casting)
+    await bundle.cast_column("price", "integer", clean="[^0-9]")
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle.cast_column("price", "integer")
+    ```
+
+=== "SQL"
+
+    ```sql
+    CAST COLUMN price TO integer
+
+    CAST COLUMN price TO integer CLEAN '[^0-9]'
+    ```
