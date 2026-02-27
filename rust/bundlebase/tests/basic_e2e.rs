@@ -70,82 +70,42 @@ changes:
           unit: Nanosecond
           timezone: null
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: id
         data_type: Int32
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: first_name
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: last_name
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: email
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: gender
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: ip_address
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: cc
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: country
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: birthdate
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: salary
         data_type: Float64
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: title
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: comments
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
-      metadata: {{}}
 - id: {}
   description: DROP COLUMN title
   operations:
@@ -260,82 +220,42 @@ changes:
           unit: Nanosecond
           timezone: null
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: id
         data_type: Int32
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: first_name
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: last_name
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: email
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: gender
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: ip_address
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: cc
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: country
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: birthdate
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: salary
         data_type: Float64
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: title
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: comments
         data_type: Utf8View
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
-      metadata: {{}}
 - id: {}
   description: DROP COLUMN title
   operations:
@@ -476,76 +396,39 @@ changes:
       - name: Index
         data_type: Int64
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: Customer Id
         data_type: Utf8
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: First Name
         data_type: Utf8
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: Last Name
         data_type: Utf8
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: Company
         data_type: Utf8
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: City
         data_type: Utf8
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: Country
         data_type: Utf8
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: Phone 1
         data_type: Utf8
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: Phone 2
         data_type: Utf8
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: Email
         data_type: Utf8
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: Subscription Date
         data_type: Date32
         nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
       - name: Website
         data_type: Utf8
-        nullable: true
-        dict_id: 0
-        dict_is_ordered: false
-        metadata: {{}}
-      metadata: {{}}",
+        nullable: true",
             commit.author,
             commit.timestamp,
             commit.changes[0].id,

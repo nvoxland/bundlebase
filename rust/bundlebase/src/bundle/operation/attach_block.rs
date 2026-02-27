@@ -319,82 +319,42 @@ schema:
       unit: Nanosecond
       timezone: null
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: id
     data_type: Int32
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: first_name
     data_type: Utf8View
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: last_name
     data_type: Utf8View
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: email
     data_type: Utf8View
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: gender
     data_type: Utf8View
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: ip_address
     data_type: Utf8View
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: cc
     data_type: Utf8View
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: country
     data_type: Utf8View
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: birthdate
     data_type: Utf8View
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: salary
     data_type: Float64
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: title
     data_type: Utf8View
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
   - name: comments
     data_type: Utf8View
     nullable: true
-    dict_id: 0
-    dict_is_ordered: false
-    metadata: {{}}
-  metadata: {{}}
 "#,
             for_yaml(block_id),
             for_yaml(pack),
