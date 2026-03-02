@@ -7,15 +7,14 @@
 //! - `url` (required): PostgreSQL connection URL (postgres://user:pass@host:port/dbname)
 //! - `query` (required): SQL query to execute
 //! - `sort_column` (required): Column to ORDER BY and partition on
-//! - `batch_size` (optional): Rows per output file (default: 10000)
+//! - `batch_size` (optional): Rows per output file (default: 1000000)
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, MaterializedData, FetchAction,
-    MaterializeResult, SourceFunction,
+    ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
-use super::SyncMode;
-use crate::io::{IOReadWriteDir, WriteResult};
+use super::source_utils;
 use crate::{BundleConfig, BundlebaseError};
+use url::Url;
 use arrow::array::{
     ArrayRef, BooleanBuilder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
     Int64Builder, StringBuilder, TimestampMicrosecondBuilder,
@@ -23,27 +22,38 @@ use arrow::array::{
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
-use bytes::Bytes;
-use futures::stream;
-use parquet::arrow::ArrowWriter;
-use parquet::file::properties::WriterProperties;
+use futures::stream::BoxStream;
+use futures::StreamExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio_postgres::{Client, NoTls, Row};
-use url::Url;
+
+/// Number of rows fetched per page during streaming data retrieval.
+const PAGE_SIZE: usize = 10_000;
+
+/// Dollar-quote tag for safe SQL value interpolation.
+const DOLLAR_TAG: &str = "$__bb$";
 
 /// PostgreSQL source function.
 ///
 /// Extracts data from a PostgreSQL query, partitioned into chunks by row count.
 pub struct PostgresFunction;
 
-/// Represents a chunk of data with its value range.
+/// JSON-serializable location identifying a partition by sort column range.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct PartitionLocation {
+    sort_col: String,
+    min: String,
+    max: String,
+}
+
+/// A partition boundary discovered during the discover phase.
 #[derive(Debug, Clone)]
-struct DataChunk {
-    /// Source location identifier (sort_column:min-max)
-    source_location: String,
-    /// The actual rows in this chunk
-    rows: Vec<Row>,
+struct PartitionBoundary {
+    /// Location string: JSON `{"sort_col":"id","min":"1","max":"100"}`
+    location: String,
+    /// Version string: "count:checksum"
+    version: String,
 }
 
 impl PostgresFunction {
@@ -63,78 +73,316 @@ impl PostgresFunction {
         Ok(client)
     }
 
-    /// Execute query and partition results into chunks using keyset pagination.
-    /// This is memory-efficient as it only holds one batch at a time.
-    async fn execute_query_chunked(
+    /// Validate that a SQL identifier contains only safe characters.
+    ///
+    /// Accepts alphanumeric, underscore, and dot (for schema-qualified names).
+    fn validate_identifier(name: &str) -> Result<(), BundlebaseError> {
+        if name.is_empty() {
+            return Err("Identifier cannot be empty".into());
+        }
+        if !name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        {
+            return Err(format!(
+                "Invalid identifier '{}': only alphanumeric, underscore, and dot characters are allowed",
+                name
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    /// Dollar-quote a value for safe SQL interpolation.
+    fn dollar_quote(value: &str) -> String {
+        format!("{}{}{}", DOLLAR_TAG, value, DOLLAR_TAG)
+    }
+
+    /// Parse a location JSON string into a `PartitionLocation`.
+    fn parse_location(location: &str) -> Result<PartitionLocation, BundlebaseError> {
+        serde_json::from_str(location).map_err(|e| {
+            BundlebaseError::from(format!("Invalid location JSON: {}: {}", location, e))
+        })
+    }
+
+    /// Build a location JSON string from components.
+    fn build_location(sort_column: &str, min_val: &str, max_val: &str) -> String {
+        serde_json::to_string(&PartitionLocation {
+            sort_col: sort_column.to_string(),
+            min: min_val.to_string(),
+            max: max_val.to_string(),
+        })
+        .expect("PartitionLocation serialization cannot fail")
+    }
+
+    /// Build a range query with dollar-quoted boundary values.
+    fn build_range_query(
+        query: &str,
+        sort_column: &str,
+        min_val: &str,
+        max_val: &str,
+    ) -> String {
+        let base_query = query.trim_end_matches(';');
+        format!(
+            "SELECT * FROM ({}) AS _q WHERE {} >= {} AND {} <= {} ORDER BY {} ASC",
+            base_query,
+            sort_column,
+            Self::dollar_quote(min_val),
+            sort_column,
+            Self::dollar_quote(max_val),
+            sort_column
+        )
+    }
+
+    /// Parse attached_locations to extract existing partition boundaries.
+    ///
+    /// Returns `Vec<(min, max)>` pairs for locations matching the given sort_column.
+    fn parse_attached_boundaries(
+        attached_locations: &HashSet<String>,
+        sort_column: &str,
+    ) -> Vec<(String, String)> {
+        let mut boundaries = Vec::new();
+        for loc in attached_locations {
+            if let Ok(parsed) = Self::parse_location(loc) {
+                if parsed.sort_col == sort_column {
+                    boundaries.push((parsed.min, parsed.max));
+                }
+            }
+        }
+        // Sort by min value for consistent ordering
+        boundaries.sort_by(|a, b| a.0.cmp(&b.0));
+        boundaries
+    }
+
+    /// Discover partition boundaries.
+    ///
+    /// When `existing_boundaries` is empty (initial fetch), partitions the entire
+    /// dataset using a window function. When non-empty (incremental sync),
+    /// re-verifies existing partitions and discovers new tail data.
+    async fn discover_partitions(
         client: &Client,
         query: &str,
         sort_column: &str,
         batch_size: usize,
-    ) -> Result<Vec<DataChunk>, BundlebaseError> {
+        existing_boundaries: &[(String, String)],
+    ) -> Result<Vec<PartitionBoundary>, BundlebaseError> {
         let base_query = query.trim_end_matches(';');
-        let mut chunks = Vec::new();
-        let mut last_max_value: Option<String> = None;
+        let mut partitions = Vec::new();
 
-        loop {
-            // Build query with keyset pagination
-            let paginated_query = match &last_max_value {
-                None => {
-                    // First batch - no WHERE clause needed
-                    format!(
-                        "SELECT * FROM ({}) AS _q ORDER BY {} ASC LIMIT {}",
-                        base_query, sort_column, batch_size
-                    )
-                }
-                Some(last_max) => {
-                    // Subsequent batches - use keyset pagination
-                    format!(
-                        "SELECT * FROM ({}) AS _q WHERE {} > '{}' ORDER BY {} ASC LIMIT {}",
-                        base_query, sort_column, last_max, sort_column, batch_size
-                    )
-                }
-            };
-
-            let rows = client
-                .query(&paginated_query, &[])
-                .await
-                .map_err(|e| BundlebaseError::from(format!("Query failed: {}", e)))?;
-
-            if rows.is_empty() {
-                break;
+        // Re-verify existing partitions (skip when initial)
+        if !existing_boundaries.is_empty() {
+            let mut case_arms = String::new();
+            for (idx, (min_val, max_val)) in existing_boundaries.iter().enumerate() {
+                case_arms.push_str(&format!(
+                    "WHEN {sort_col}::text >= {min} AND {sort_col}::text <= {max} THEN {idx} ",
+                    sort_col = sort_column,
+                    min = Self::dollar_quote(min_val),
+                    max = Self::dollar_quote(max_val),
+                    idx = idx
+                ));
             }
 
-            // Find the sort column index
-            let columns = rows[0].columns();
-            let sort_col_idx = columns
-                .iter()
-                .position(|c| c.name() == sort_column)
-                .ok_or_else(|| {
-                    BundlebaseError::from(format!(
-                        "Sort column '{}' not found in query results",
-                        sort_column
-                    ))
-                })?;
+            let sql = format!(
+                "SELECT \
+                   CASE {cases} ELSE -1 END AS part_idx, \
+                   count(*) AS cnt, \
+                   sum(hashtext(row_to_json(_q.*)::text)::bigint) AS chk, \
+                   min({sort_col}::text) AS min_val, \
+                   max({sort_col}::text) AS max_val \
+                 FROM ({base}) AS _q \
+                 GROUP BY part_idx ORDER BY part_idx",
+                cases = case_arms,
+                sort_col = sort_column,
+                base = base_query
+            );
 
-            let min_value = Self::get_value_as_string(&rows[0], sort_col_idx)?;
-            let max_value = Self::get_value_as_string(&rows[rows.len() - 1], sort_col_idx)?;
+            let rows = client
+                .query(&sql, &[])
+                .await
+                .map_err(|e| BundlebaseError::from(format!("Discovery query failed: {}", e)))?;
 
-            let source_location = format!("{}:{}-{}", sort_column, min_value, max_value);
+            let mut has_tail = false;
+            for row in &rows {
+                let part_idx: i32 = row.get("part_idx");
+                let count: i64 = row.get("cnt");
+                let checksum: i64 = row.get("chk");
 
-            // Update last_max_value for next iteration
-            last_max_value = Some(max_value.clone());
+                if part_idx >= 0 {
+                    let idx = part_idx as usize;
+                    let (orig_min, orig_max) = &existing_boundaries[idx];
+                    partitions.push(PartitionBoundary {
+                        location: Self::build_location(sort_column, orig_min, orig_max),
+                        version: format!("{}:{}", count, checksum),
+                    });
+                } else {
+                    has_tail = true;
+                }
+            }
 
-            chunks.push(DataChunk {
-                source_location,
-                rows,
-            });
-
-            // If we got fewer rows than batch_size, we're done
-            if chunks.last().map(|c| c.rows.len()).unwrap_or(0) < batch_size {
-                break;
+            if !has_tail {
+                return Ok(partitions);
             }
         }
 
-        Ok(chunks)
+        // Partition new data using window function.
+        // For initial discovery this covers all rows; for incremental it covers
+        // only rows outside existing boundaries.
+        let where_clause = if existing_boundaries.is_empty() {
+            String::new()
+        } else {
+            let exclusions: Vec<String> = existing_boundaries
+                .iter()
+                .map(|(min_val, max_val)| {
+                    format!(
+                        "NOT ({sort_col}::text >= {min} AND {sort_col}::text <= {max})",
+                        sort_col = sort_column,
+                        min = Self::dollar_quote(min_val),
+                        max = Self::dollar_quote(max_val)
+                    )
+                })
+                .collect();
+            format!("WHERE {}", exclusions.join(" AND "))
+        };
+
+        let sql = format!(
+            "SELECT pnum, min(sort_val) AS min_val, max(sort_val) AS max_val, \
+             count(*) AS cnt, sum(hashtext(row_json)::bigint) AS chk \
+             FROM ( \
+               SELECT {sort_col}::text AS sort_val, \
+                      row_to_json(_q.*)::text AS row_json, \
+                      floor((row_number() OVER (ORDER BY {sort_col}) - 1) / {batch}) AS pnum \
+               FROM ({base}) AS _q \
+               {where_clause} \
+             ) AS _p \
+             GROUP BY pnum ORDER BY pnum",
+            sort_col = sort_column,
+            batch = batch_size,
+            base = base_query,
+            where_clause = where_clause
+        );
+
+        let rows = client
+            .query(&sql, &[])
+            .await
+            .map_err(|e| BundlebaseError::from(format!("Discovery query failed: {}", e)))?;
+
+        for row in &rows {
+            let min_val: String = row.get("min_val");
+            let max_val: String = row.get("max_val");
+            let count: i64 = row.get("cnt");
+            let checksum: i64 = row.get("chk");
+
+            partitions.push(PartitionBoundary {
+                location: Self::build_location(sort_column, &min_val, &max_val),
+                version: format!("{}:{}", count, checksum),
+            });
+        }
+
+        Ok(partitions)
+    }
+
+    /// Stream data for a range using keyset pagination.
+    ///
+    /// Returns a BoxStream of RecordBatches, each containing up to PAGE_SIZE rows.
+    fn stream_range_as_batches(
+        client: Arc<Client>,
+        query: String,
+        sort_column: String,
+        min_val: String,
+        max_val: String,
+    ) -> BoxStream<'static, Result<RecordBatch, BundlebaseError>> {
+        struct PageState {
+            client: Arc<Client>,
+            query: String,
+            sort_column: String,
+            current_min: String,
+            max_val: String,
+            is_first_page: bool,
+            done: bool,
+        }
+
+        let state = PageState {
+            client,
+            query,
+            sort_column,
+            current_min: min_val,
+            max_val,
+            is_first_page: true,
+            done: false,
+        };
+
+        futures::stream::unfold(state, |mut state| async move {
+            if state.done {
+                return None;
+            }
+
+            let base_query = state.query.trim_end_matches(';');
+
+            // First page: >= min_val; subsequent pages: > current_min
+            let compare_op = if state.is_first_page { ">=" } else { ">" };
+
+            let page_query = format!(
+                "SELECT * FROM ({base}) AS _q \
+                 WHERE {col} {op} {min} AND {col} <= {max} \
+                 ORDER BY {col} ASC LIMIT {limit}",
+                base = base_query,
+                col = state.sort_column,
+                op = compare_op,
+                min = Self::dollar_quote(&state.current_min),
+                max = Self::dollar_quote(&state.max_val),
+                limit = PAGE_SIZE
+            );
+
+            let rows = match state.client.query(&page_query, &[]).await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    state.done = true;
+                    return Some((
+                        Err(BundlebaseError::from(format!("Page query failed: {}", e))),
+                        state,
+                    ));
+                }
+            };
+
+            if rows.is_empty() {
+                return None;
+            }
+
+            let row_count = rows.len();
+
+            // Find sort column index to get the last value for keyset pagination
+            let sort_col_idx = rows[0]
+                .columns()
+                .iter()
+                .position(|c| c.name() == state.sort_column);
+
+            if let Some(idx) = sort_col_idx {
+                match Self::get_value_as_string(&rows[rows.len() - 1], idx) {
+                    Ok(last_val) => {
+                        state.current_min = last_val;
+                    }
+                    Err(e) => {
+                        state.done = true;
+                        return Some((Err(e), state));
+                    }
+                }
+            }
+
+            state.is_first_page = false;
+
+            if row_count < PAGE_SIZE {
+                state.done = true;
+            }
+
+            match Self::rows_to_record_batch(&rows) {
+                Ok(batch) => Some((Ok(batch), state)),
+                Err(e) => {
+                    state.done = true;
+                    Some((Err(e), state))
+                }
+            }
+        })
+        .boxed()
     }
 
     /// Get a column value as a string for source_location.
@@ -291,135 +539,61 @@ impl PostgresFunction {
             .map_err(|e| BundlebaseError::from(format!("Failed to create RecordBatch: {}", e)))
     }
 
-    /// Write a chunk to parquet and return WriteResult with file and hash.
-    async fn write_chunk_to_parquet(
-        chunk: &DataChunk,
-        data_dir: &dyn IOReadWriteDir,
-    ) -> Result<WriteResult, BundlebaseError> {
-        let batch = Self::rows_to_record_batch(&chunk.rows)?;
-
-        // Write to in-memory buffer
-        let mut buffer = Vec::new();
-        {
-            let props = WriterProperties::builder().build();
-            let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props))
-                .map_err(|e| BundlebaseError::from(format!("Failed to create parquet writer: {}", e)))?;
-            writer
-                .write(&batch)
-                .map_err(|e| BundlebaseError::from(format!("Failed to write batch: {}", e)))?;
-            writer
-                .close()
-                .map_err(|e| BundlebaseError::from(format!("Failed to close writer: {}", e)))?;
-        }
-
-        // Write with content-addressed naming
-        let suffix = format!("{}.parquet", chunk.source_location.replace(':', "_").replace('-', "_"));
-        let data_stream = Box::pin(stream::once(async { Ok(Bytes::from(buffer)) }));
-        data_dir.write_stream(data_stream, &suffix).await
-    }
-
     /// Parse batch_size from args with default.
     fn get_batch_size(args: &HashMap<String, String>) -> Result<usize, BundlebaseError> {
         match args.get("batch_size") {
             Some(s) => s
                 .parse::<usize>()
                 .map_err(|_| BundlebaseError::from("batch_size must be a positive integer")),
-            None => Ok(10000),
+            None => Ok(1_000_000),
         }
-    }
-
-    /// Re-fetch data for an existing range, keeping the same boundaries.
-    async fn refetch_range(
-        client: &Client,
-        query: &str,
-        sort_column: &str,
-        source_location: &str,
-    ) -> Result<Option<DataChunk>, BundlebaseError> {
-        // Parse source_location: "sort_column:min-max"
-        let parts: Vec<&str> = source_location.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(format!("Invalid source_location format: {}", source_location).into());
-        }
-
-        let range_parts: Vec<&str> = parts[1].splitn(2, '-').collect();
-        if range_parts.len() != 2 {
-            return Err(format!("Invalid range in source_location: {}", source_location).into());
-        }
-
-        let min_value = range_parts[0];
-        let max_value = range_parts[1];
-
-        // Re-fetch this exact range
-        let ranged_query = format!(
-            "SELECT * FROM ({}) AS _q WHERE {} >= '{}' AND {} <= '{}' ORDER BY {} ASC",
-            query.trim_end_matches(';'),
-            sort_column,
-            min_value,
-            sort_column,
-            max_value,
-            sort_column
-        );
-
-        let rows = client
-            .query(&ranged_query, &[])
-            .await
-            .map_err(|e| BundlebaseError::from(format!("Query failed: {}", e)))?;
-
-        if rows.is_empty() {
-            return Ok(None);
-        }
-
-        Ok(Some(DataChunk {
-            source_location: source_location.to_string(),
-            rows,
-        }))
     }
 }
 
 #[async_trait]
 impl SourceFunction for PostgresFunction {
-    fn name(&self) -> &str {
-        "postgres"
-    }
-
-    fn arg_specs(&self) -> Vec<ArgSpec> {
-        vec![
-            ArgSpec {
-                name: "url",
-                description: "PostgreSQL connection URL (postgres://user:pass@host:port/dbname)",
-                required: true,
-                default: None,
-            },
-            ArgSpec {
-                name: "query",
-                description: "SQL query to execute",
-                required: true,
-                default: None,
-            },
-            ArgSpec {
-                name: "sort_column",
-                description: "Column to sort and partition by (e.g., id, created_at)",
-                required: true,
-                default: None,
-            },
-            ArgSpec {
-                name: "batch_size",
-                description: "Number of rows per output file",
-                required: false,
-                default: Some("10000"),
-            },
-        ]
+    fn signature(&self) -> SourceFunctionSignature {
+        SourceFunctionSignature {
+            name: "postgres".to_string(),
+            arg_specs: vec![
+                ArgSpec {
+                    name: "url",
+                    description: "PostgreSQL connection URL (postgres://user:pass@host:port/dbname)",
+                    required: true,
+                    default: None,
+                },
+                ArgSpec {
+                    name: "query",
+                    description: "SQL query to execute",
+                    required: true,
+                    default: None,
+                },
+                ArgSpec {
+                    name: "sort_column",
+                    description: "Column to sort and partition by (e.g., id, created_at)",
+                    required: true,
+                    default: None,
+                },
+                ArgSpec {
+                    name: "batch_size",
+                    description: "Number of rows per output file",
+                    required: false,
+                    default: Some("1000000"),
+                },
+            ],
+        }
     }
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        self.default_validate_args(args)?;
-
         // Validate URL format
-        let url = args
-            .get("url")
-            .ok_or_else(|| BundlebaseError::from("postgres source requires 'url' argument"))?;
+        let url = source_utils::require_arg(args, "url", "postgres")?;
         if !url.starts_with("postgres://") && !url.starts_with("postgresql://") {
             return Err("url must be a PostgreSQL connection URL (postgres://...)".into());
+        }
+
+        // Validate sort_column is a safe identifier
+        if let Some(sort_column) = args.get("sort_column") {
+            Self::validate_identifier(sort_column)?;
         }
 
         // Validate batch_size if provided
@@ -438,208 +612,84 @@ impl SourceFunction for PostgresFunction {
         attached_locations: &HashSet<String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let url = args.get("url").ok_or("url is required")?;
-        let query = args.get("query").ok_or("query is required")?;
-        let sort_column = args.get("sort_column").ok_or("sort_column is required")?;
+        let url = source_utils::require_arg(args, "url", "postgres")?;
+        let query = source_utils::require_arg(args, "query", "postgres")?;
+        let sort_column = source_utils::require_arg(args, "sort_column", "postgres")?;
         let batch_size = Self::get_batch_size(args)?;
 
+        Self::validate_identifier(sort_column)?;
+
         let client = Self::connect(url).await?;
-        let chunks = Self::execute_query_chunked(&client, query, sort_column, batch_size).await?;
 
-        // Filter out already-attached locations
-        let locations = chunks
+        let existing = Self::parse_attached_boundaries(attached_locations, sort_column);
+
+        let partitions =
+            Self::discover_partitions(&client, query, sort_column, batch_size, &existing).await?;
+
+        Ok(partitions
             .into_iter()
-            .filter(|chunk| !attached_locations.contains(&chunk.source_location))
-            .map(|chunk| {
-                // Create a pseudo-URL for the source location
-                let pseudo_url = Url::parse(&format!("postgres://query/{}", chunk.source_location))
-                    .unwrap_or_else(|_| Url::parse("postgres://query/unknown").expect("valid url"));
-                DiscoveredLocation {
-                    url: pseudo_url,
-                    source_location: chunk.source_location,
-                }
+            .map(|p| DiscoveredLocation {
+                location: p.location,
+                must_copy: true,
+                format: "parquet".to_string(),
+                version: p.version,
             })
-            .collect();
-
-        Ok(locations)
+            .collect())
     }
 
-    async fn materialize(
+    async fn data(
         &self,
         location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        data_dir: &dyn IOReadWriteDir,
         _config: &Arc<BundleConfig>,
-    ) -> Result<MaterializeResult, BundlebaseError> {
-        let url = args.get("url").ok_or("url is required")?;
-        let query = args.get("query").ok_or("query is required")?;
-        let sort_column = args.get("sort_column").ok_or("sort_column is required")?;
+    ) -> Result<Option<SourceData>, BundlebaseError> {
+        let url = source_utils::require_arg(args, "url", "postgres")?;
+        let query = source_utils::require_arg(args, "query", "postgres")?;
+        let sort_column = source_utils::require_arg(args, "sort_column", "postgres")?;
 
-        // Parse the source_location to get min/max values
-        // Format: sort_column:min-max
-        let parts: Vec<&str> = location.source_location.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(format!(
-                "Invalid source_location format: {}",
-                location.source_location
-            )
-            .into());
-        }
+        let parsed = Self::parse_location(&location.location)?;
 
-        let range_parts: Vec<&str> = parts[1].splitn(2, '-').collect();
-        if range_parts.len() != 2 {
-            return Err(format!(
-                "Invalid range format in source_location: {}",
-                location.source_location
-            )
-            .into());
-        }
-
-        let min_value = range_parts[0];
-        let max_value = range_parts[1];
-
-        // Execute query with WHERE clause to fetch this specific range
-        let ranged_query = format!(
-            "SELECT * FROM ({}) AS _q WHERE {} >= '{}' AND {} <= '{}' ORDER BY {} ASC",
-            query.trim_end_matches(';'),
-            sort_column,
-            min_value,
-            sort_column,
-            max_value,
-            sort_column
+        let client = Arc::new(Self::connect(url).await?);
+        let stream = Self::stream_range_as_batches(
+            client,
+            query.to_string(),
+            sort_column.to_string(),
+            parsed.min,
+            parsed.max,
         );
 
-        let client = Self::connect(url).await?;
-        let rows = client
-            .query(&ranged_query, &[])
-            .await
-            .map_err(|e| BundlebaseError::from(format!("Query failed: {}", e)))?;
-
-        if rows.is_empty() {
-            return Err(format!(
-                "No rows returned for range {} in source_location",
-                location.source_location
-            )
-            .into());
-        }
-
-        let chunk = DataChunk {
-            source_location: location.source_location.clone(),
-            rows,
-        };
-
-        let result = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
-        Ok(MaterializeResult {
-            file: result.file,
-            hash: result.hash,
-        })
+        Ok(Some(SourceData::Arrow(stream)))
     }
 
-    async fn fetch_with_mode(
+    async fn stable_url(
         &self,
-        args: &HashMap<String, String>,
-        attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &dyn IOReadWriteDir,
-        _config: Arc<BundleConfig>,
-        mode: SyncMode,
-    ) -> Result<Vec<FetchAction>, BundlebaseError> {
-        let url = args.get("url").ok_or("url is required")?;
-        let query = args.get("query").ok_or("query is required")?;
-        let sort_column = args.get("sort_column").ok_or("sort_column is required")?;
-        let batch_size = Self::get_batch_size(args)?;
-
-        let client = Self::connect(url).await?;
-        let mut actions = Vec::new();
-
-        // For Update/Sync mode: re-fetch existing ranges (keeping same boundaries)
-        if mode == SyncMode::Update || mode == SyncMode::Sync {
-            for (source_location, _attached_info) in attached_files {
-                match Self::refetch_range(&client, query, sort_column, source_location).await? {
-                    Some(chunk) => {
-                        let result = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
-                        // Use relative path if file is in data_dir, otherwise full URL
-                        let attach_location = data_dir
-                            .relative_path(result.file.as_ref())
-                            .unwrap_or_else(|_| result.file.url().to_string());
-                        // For Postgres, source_url is the attach_location since there's no remote file
-                        actions.push(FetchAction::Replace {
-                            old_source_location: source_location.clone(),
-                            data: MaterializedData {
-                                attach_location: attach_location.clone(),
-                                source_location: source_location.clone(),
-                                source_url: attach_location,
-                                hash: result.hash.clone(),
-                                // Postgres has no native version identifier, so use the
-                                // content hash as a proxy for change detection.
-                                version: result.hash,
-                            },
-                        });
-                    }
-                    None => {
-                        // Range is now empty - in Sync mode, remove it
-                        if mode == SyncMode::Sync {
-                            actions.push(FetchAction::Remove {
-                                source_location: source_location.clone(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        // For Add mode (or discovering new data): partition new data into chunks
-        let chunks =
-            Self::execute_query_chunked(&client, query, sort_column, batch_size).await?;
-
-        for chunk in chunks {
-            let source_location = chunk.source_location.clone();
-
-            // Skip if already attached (handled above for Update/Sync, skip for Add)
-            if attached_files.contains_key(&source_location) {
-                continue;
-            }
-
-            // New chunk - add it
-            let result = Self::write_chunk_to_parquet(&chunk, data_dir).await?;
-            // Use relative path if file is in data_dir, otherwise full URL
-            let attach_location = data_dir
-                .relative_path(result.file.as_ref())
-                .unwrap_or_else(|_| result.file.url().to_string());
-            // For Postgres, source_url is the attach_location since there's no remote file
-            actions.push(FetchAction::Add(MaterializedData {
-                attach_location: attach_location.clone(),
-                source_location,
-                source_url: attach_location,
-                hash: result.hash.clone(),
-                // Postgres has no native version identifier, so use the
-                // content hash as a proxy for change detection.
-                version: result.hash,
-            }));
-        }
-
-        Ok(actions)
+        _location: &DiscoveredLocation,
+        _args: &HashMap<String, String>,
+        _config: &Arc<BundleConfig>,
+    ) -> Result<Option<Url>, BundlebaseError> {
+        // Postgres data is generated from queries, no stable URL
+        Ok(None)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::source_function::validate_source_args;
 
     #[test]
-    fn test_name() {
+    fn test_signature() {
         let func = PostgresFunction;
-        assert_eq!(func.name(), "postgres");
-    }
-
-    #[test]
-    fn test_arg_specs() {
-        let func = PostgresFunction;
-        let specs = func.arg_specs();
-        assert_eq!(specs.len(), 4);
-        assert!(specs.iter().any(|s| s.name == "url" && s.required));
-        assert!(specs.iter().any(|s| s.name == "query" && s.required));
-        assert!(specs.iter().any(|s| s.name == "sort_column" && s.required));
-        assert!(specs.iter().any(|s| s.name == "batch_size" && !s.required));
+        let sig = func.signature();
+        assert_eq!(sig.name, "postgres");
+        assert_eq!(sig.arg_specs.len(), 4);
+        assert!(sig.arg_specs.iter().any(|s| s.name == "url" && s.required));
+        assert!(sig.arg_specs.iter().any(|s| s.name == "query" && s.required));
+        assert!(sig.arg_specs.iter().any(|s| s.name == "sort_column" && s.required));
+        assert!(sig.arg_specs.iter().any(|s| s.name == "batch_size" && !s.required));
+        // Check default batch_size is 1000000
+        let batch_spec = sig.arg_specs.iter().find(|s| s.name == "batch_size").expect("batch_size spec");
+        assert_eq!(batch_spec.default, Some("1000000"));
     }
 
     #[test]
@@ -649,7 +699,7 @@ mod tests {
         args.insert("url".to_string(), "postgres://user:pass@localhost/db".to_string());
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
-        assert!(func.validate_args(&args).is_ok());
+        assert!(validate_source_args(&func, &args).is_ok());
     }
 
     #[test]
@@ -659,7 +709,7 @@ mod tests {
         args.insert("url".to_string(), "postgresql://user:pass@localhost/db".to_string());
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
-        assert!(func.validate_args(&args).is_ok());
+        assert!(validate_source_args(&func, &args).is_ok());
     }
 
     #[test]
@@ -669,7 +719,7 @@ mod tests {
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
     }
 
@@ -681,9 +731,9 @@ mod tests {
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("PostgreSQL"));
+        assert!(result.err().expect("expected error").to_string().contains("PostgreSQL"));
     }
 
     #[test]
@@ -695,8 +745,207 @@ mod tests {
         args.insert("sort_column".to_string(), "id".to_string());
         args.insert("batch_size".to_string(), "not_a_number".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
     }
 
+    // --- validate_identifier tests ---
+
+    #[test]
+    fn test_validate_identifier_simple() {
+        assert!(PostgresFunction::validate_identifier("id").is_ok());
+        assert!(PostgresFunction::validate_identifier("created_at").is_ok());
+        assert!(PostgresFunction::validate_identifier("public.users").is_ok());
+        assert!(PostgresFunction::validate_identifier("col123").is_ok());
+    }
+
+    #[test]
+    fn test_validate_identifier_rejects_special_chars() {
+        assert!(PostgresFunction::validate_identifier("id; DROP TABLE").is_err());
+        assert!(PostgresFunction::validate_identifier("col'name").is_err());
+        assert!(PostgresFunction::validate_identifier("col-name").is_err());
+        assert!(PostgresFunction::validate_identifier("").is_err());
+        assert!(PostgresFunction::validate_identifier("col name").is_err());
+    }
+
+    #[test]
+    fn test_validate_args_rejects_unsafe_sort_column() {
+        let func = PostgresFunction;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "postgres://user:pass@localhost/db".to_string());
+        args.insert("query".to_string(), "SELECT * FROM users".to_string());
+        args.insert("sort_column".to_string(), "id; DROP TABLE users".to_string());
+
+        let result = validate_source_args(&func, &args);
+        assert!(result.is_err());
+    }
+
+    // --- parse_location tests ---
+
+    #[test]
+    fn test_parse_location_normal() {
+        let loc = r#"{"sort_col":"id","min":"1","max":"100"}"#;
+        let parsed = PostgresFunction::parse_location(loc).expect("should parse");
+        assert_eq!(parsed.sort_col, "id");
+        assert_eq!(parsed.min, "1");
+        assert_eq!(parsed.max, "100");
+    }
+
+    #[test]
+    fn test_parse_location_negative_values() {
+        let loc = r#"{"sort_col":"temperature","min":"-50","max":"-10"}"#;
+        let parsed = PostgresFunction::parse_location(loc).expect("should parse");
+        assert_eq!(parsed.sort_col, "temperature");
+        assert_eq!(parsed.min, "-50");
+        assert_eq!(parsed.max, "-10");
+    }
+
+    #[test]
+    fn test_parse_location_timestamps() {
+        let loc = r#"{"sort_col":"created_at","min":"2024-01-01T00:00:00","max":"2024-06-30T23:59:59"}"#;
+        let parsed = PostgresFunction::parse_location(loc).expect("should parse");
+        assert_eq!(parsed.sort_col, "created_at");
+        assert_eq!(parsed.min, "2024-01-01T00:00:00");
+        assert_eq!(parsed.max, "2024-06-30T23:59:59");
+    }
+
+    #[test]
+    fn test_parse_location_hyphenated_strings() {
+        let loc = r#"{"sort_col":"code","min":"abc-def-123","max":"xyz-789-end"}"#;
+        let parsed = PostgresFunction::parse_location(loc).expect("should parse");
+        assert_eq!(parsed.sort_col, "code");
+        assert_eq!(parsed.min, "abc-def-123");
+        assert_eq!(parsed.max, "xyz-789-end");
+    }
+
+    #[test]
+    fn test_parse_location_missing_sort_col() {
+        let loc = r#"{"min":"1","max":"100"}"#;
+        assert!(PostgresFunction::parse_location(loc).is_err());
+    }
+
+    #[test]
+    fn test_parse_location_missing_min() {
+        let loc = r#"{"sort_col":"id","max":"100"}"#;
+        assert!(PostgresFunction::parse_location(loc).is_err());
+    }
+
+    #[test]
+    fn test_parse_location_missing_max() {
+        let loc = r#"{"sort_col":"id","min":"1"}"#;
+        assert!(PostgresFunction::parse_location(loc).is_err());
+    }
+
+    #[test]
+    fn test_parse_location_invalid_json() {
+        assert!(PostgresFunction::parse_location("not json").is_err());
+    }
+
+    // --- build_range_query tests ---
+
+    #[test]
+    fn test_build_range_query() {
+        let query = PostgresFunction::build_range_query(
+            "SELECT * FROM users",
+            "id",
+            "1",
+            "100",
+        );
+        assert!(query.contains("$__bb$1$__bb$"));
+        assert!(query.contains("$__bb$100$__bb$"));
+        assert!(query.contains("ORDER BY id ASC"));
+        assert!(query.contains("WHERE id >= "));
+        assert!(query.contains("AND id <= "));
+    }
+
+    #[test]
+    fn test_build_range_query_with_semicolon() {
+        let query = PostgresFunction::build_range_query(
+            "SELECT * FROM users;",
+            "id",
+            "1",
+            "100",
+        );
+        // Should strip trailing semicolon
+        assert!(!query.contains(";;"));
+    }
+
+    #[test]
+    fn test_build_range_query_dollar_quoting_special_values() {
+        let query = PostgresFunction::build_range_query(
+            "SELECT * FROM data",
+            "val",
+            "-50",
+            "2024-01-01T00:00:00",
+        );
+        assert!(query.contains("$__bb$-50$__bb$"));
+        assert!(query.contains("$__bb$2024-01-01T00:00:00$__bb$"));
+    }
+
+    // --- parse_attached_boundaries tests ---
+
+    #[test]
+    fn test_parse_attached_boundaries() {
+        let mut attached = HashSet::new();
+        attached.insert(r#"{"sort_col":"id","min":"1","max":"100"}"#.to_string());
+        attached.insert(r#"{"sort_col":"id","min":"101","max":"200"}"#.to_string());
+        attached.insert(r#"{"sort_col":"other_col","min":"a","max":"z"}"#.to_string());
+
+        let boundaries = PostgresFunction::parse_attached_boundaries(&attached, "id");
+        assert_eq!(boundaries.len(), 2);
+        // Should be sorted
+        assert_eq!(boundaries[0], ("1".to_string(), "100".to_string()));
+        assert_eq!(boundaries[1], ("101".to_string(), "200".to_string()));
+    }
+
+    #[test]
+    fn test_parse_attached_boundaries_empty() {
+        let attached = HashSet::new();
+        let boundaries = PostgresFunction::parse_attached_boundaries(&attached, "id");
+        assert!(boundaries.is_empty());
+    }
+
+    #[test]
+    fn test_parse_attached_boundaries_wrong_column() {
+        let mut attached = HashSet::new();
+        attached.insert(r#"{"sort_col":"other","min":"1","max":"100"}"#.to_string());
+
+        let boundaries = PostgresFunction::parse_attached_boundaries(&attached, "id");
+        assert!(boundaries.is_empty());
+    }
+
+    // --- build_location tests ---
+
+    #[test]
+    fn test_build_location() {
+        let loc = PostgresFunction::build_location("id", "1", "100");
+        let parsed: serde_json::Value = serde_json::from_str(&loc).expect("should be valid JSON");
+        assert_eq!(parsed["sort_col"], "id");
+        assert_eq!(parsed["min"], "1");
+        assert_eq!(parsed["max"], "100");
+    }
+
+    #[test]
+    fn test_build_location_roundtrip() {
+        let loc = PostgresFunction::build_location("created_at", "2024-01-01", "2024-12-31");
+        let parsed = PostgresFunction::parse_location(&loc).expect("should roundtrip");
+        assert_eq!(parsed.sort_col, "created_at");
+        assert_eq!(parsed.min, "2024-01-01");
+        assert_eq!(parsed.max, "2024-12-31");
+    }
+
+    // --- batch_size default ---
+
+    #[test]
+    fn test_default_batch_size() {
+        let args = HashMap::new();
+        assert_eq!(PostgresFunction::get_batch_size(&args).expect("should parse"), 1_000_000);
+    }
+
+    #[test]
+    fn test_custom_batch_size() {
+        let mut args = HashMap::new();
+        args.insert("batch_size".to_string(), "50000".to_string());
+        assert_eq!(PostgresFunction::get_batch_size(&args).expect("should parse"), 50_000);
+    }
 }

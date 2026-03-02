@@ -142,7 +142,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
                     let op = AttachBlockOp::setup(
                         &pack_id,
                         &data.attach_location,
-                        Some(&data.hash),
+                        data.hash.as_deref(),
                         Some(SourceInfo {
                             id: source_id,
                             location: data.source_location,

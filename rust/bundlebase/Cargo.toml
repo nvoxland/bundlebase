@@ -56,6 +56,7 @@ tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
 postgres-types = { version = "0.2", features = ["derive"] }
 tantivy = "0.25"
 tempfile = { workspace = true }
+tokio-util = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }

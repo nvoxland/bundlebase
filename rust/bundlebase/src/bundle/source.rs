@@ -2,7 +2,8 @@
 
 use crate::bundle::{BundleBuilder, CreateSourceOp};
 use crate::data::ObjectId;
-use crate::source::{AttachedFileInfo, FetchAction, SourceFunctionRegistry, SyncMode};
+use crate::source::{AttachedFileInfo, FetchAction, SourceFunctionRegistry, SyncMode, orchestrate_fetch};
+use crate::source::source_utils;
 use crate::BundlebaseError;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -86,16 +87,25 @@ impl Source {
             let registry = bundle.source_function_registry();
             let reg = registry.read();
             let func = reg
-                .get(&self.function)
+                .create_instance(&self.function)
                 .ok_or_else(|| format!("Unknown source function '{}'", self.function))?;
             (func, bundle.data_dir(), bundle.config())
         };
 
         // Get attached files directly from self
         let attached_files = self.attached_files();
+        let should_copy = source_utils::should_copy(&self.args);
 
-        func.fetch_with_mode(&self.args, &attached_files, data_dir.as_ref(), config, mode)
-            .await
+        orchestrate_fetch(
+            func.as_ref(),
+            &self.args,
+            mode,
+            should_copy,
+            data_dir.as_ref(),
+            &attached_files,
+            &config,
+        )
+        .await
     }
 
     /// Get attached files with metadata for change detection.

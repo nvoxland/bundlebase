@@ -1,10 +1,11 @@
 //! Source module for source function definitions and discovery.
 
+mod ipc;
 pub(crate) mod kaggle;
 mod postgres;
 mod remote_dir;
 mod source_function;
-mod source_utils;
+pub(crate) mod source_utils;
 mod web_scrape;
 
 use crate::BundlebaseError;
@@ -52,7 +53,9 @@ pub use kaggle::KaggleSource;
 pub use postgres::PostgresFunction;
 pub use remote_dir::RemoteDirFunction;
 pub use source_function::{
-    format_fetch_summary, AttachedFileInfo, FetchAction, FetchedBlock, FetchResults,
-    MaterializedData, SourceFunction, SourceFunctionRegistry,
+    format_fetch_summary, validate_source_args, ArgSpec, AttachedFileInfo, DiscoveredLocation,
+    FetchAction, FetchedBlock, FetchResults, MaterializedData, SourceData, SourceFunction,
+    SourceFunctionRegistry, SourceFunctionSignature,
 };
+pub use source_utils::orchestrate_fetch;
 pub use web_scrape::WebScrapeFunction;

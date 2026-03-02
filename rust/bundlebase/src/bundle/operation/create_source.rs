@@ -1,5 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::data::ObjectId;
+use crate::source::validate_source_args;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
@@ -76,7 +77,7 @@ impl Operation for CreateSourceOp {
             )
         })?;
 
-        func.validate_args(&self.args)?;
+        validate_source_args(func.as_ref(), &self.args)?;
 
         Ok(())
     }

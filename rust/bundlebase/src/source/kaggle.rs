@@ -4,14 +4,14 @@
 //! Authentication is read from `~/.kaggle/kaggle.json`.
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, MaterializedData, SourceFunction,
+    ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
-use super::SyncMode;
-use super::source_utils::{self, MaterializeResult};
+use super::source_utils;
 use crate::bundle_config::{config_keys, config_scopes, ConfigKey, ConfigScope};
-use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError, Scope};
 use async_trait::async_trait;
+use bytes::Bytes;
+use futures::stream::BoxStream;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
@@ -90,38 +90,35 @@ pub struct KaggleSource;
 
 #[async_trait]
 impl SourceFunction for KaggleSource {
-    fn name(&self) -> &str {
-        "kaggle"
-    }
-
-    fn arg_specs(&self) -> Vec<ArgSpec> {
-        vec![
-            ArgSpec {
-                name: "dataset",
-                description: "Dataset identifier in owner/dataset-name format (e.g., zillow/zecon)",
-                required: true,
-                default: None,
-            },
-            ArgSpec {
-                name: "patterns",
-                description: "Comma-separated glob patterns to filter files",
-                required: false,
-                default: Some("**/*"),
-            },
-            ArgSpec {
-                name: "version",
-                description: "Dataset version number to download (default: latest)",
-                required: false,
-                default: None,
-            },
-        ]
+    fn signature(&self) -> SourceFunctionSignature {
+        SourceFunctionSignature {
+            name: "kaggle".to_string(),
+            arg_specs: vec![
+                ArgSpec {
+                    name: "dataset",
+                    description: "Dataset identifier in owner/dataset-name format (e.g., zillow/zecon)",
+                    required: true,
+                    default: None,
+                },
+                ArgSpec {
+                    name: "patterns",
+                    description: "Comma-separated glob patterns to filter files",
+                    required: false,
+                    default: Some("**/*"),
+                },
+                ArgSpec {
+                    name: "version",
+                    description: "Dataset version number to download (default: latest)",
+                    required: false,
+                    default: None,
+                },
+            ],
+        }
     }
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        self.default_validate_args(args)?;
-
         // Validate dataset format: must be exactly "owner/dataset-name"
-        let dataset = source_utils::require_arg(args, "dataset", self.name())?;
+        let dataset = source_utils::require_arg(args, "dataset", "kaggle")?;
         let parts: Vec<&str> = dataset.splitn(3, '/').collect();
         if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
             return Err(BundlebaseError::from(format!(
@@ -155,62 +152,13 @@ impl SourceFunction for KaggleSource {
     async fn discover(
         &self,
         args: &HashMap<String, String>,
-        attached_locations: &HashSet<String>,
+        _attached_locations: &HashSet<String>,
         config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let dataset = source_utils::require_arg(args, "dataset", self.name())?;
+        let dataset = source_utils::require_arg(args, "dataset", "kaggle")?;
         let patterns = source_utils::get_patterns(args)?;
         let version = args.get("version").map(|s| s.as_str());
         let client = KaggleClient::from_config(config, dataset)?;
-
-        // Version is intentionally discarded during discovery — it is only needed
-        // when materializing files (in fetch/fetch_with_mode) to record in MaterializedData.
-        let (all_files, _dataset_version) = Self::list_kaggle_files(
-            &client,
-            dataset,
-            &patterns,
-            version,
-        )
-        .await?;
-
-        // Filter out already attached files
-        let locations = all_files
-            .into_iter()
-            .filter(|loc| !attached_locations.contains(&loc.source_location))
-            .collect();
-
-        Ok(locations)
-    }
-
-    async fn materialize(
-        &self,
-        location: &DiscoveredLocation,
-        args: &HashMap<String, String>,
-        data_dir: &dyn IOReadWriteDir,
-        config: &Arc<BundleConfig>,
-    ) -> Result<MaterializeResult, BundlebaseError> {
-        let dataset = source_utils::require_arg(args, "dataset", self.name())?;
-        let client = KaggleClient::from_config(config, dataset)?;
-        Self::download_kaggle_file(
-            &client,
-            &location.url,
-            &location.source_location,
-            data_dir,
-        )
-        .await
-    }
-
-    async fn fetch(
-        &self,
-        args: &HashMap<String, String>,
-        attached_locations: HashSet<String>,
-        data_dir: &dyn IOReadWriteDir,
-        config: Arc<BundleConfig>,
-    ) -> Result<Vec<MaterializedData>, BundlebaseError> {
-        let dataset = source_utils::require_arg(args, "dataset", self.name())?;
-        let patterns = source_utils::get_patterns(args)?;
-        let version = args.get("version").map(|s| s.as_str());
-        let client = KaggleClient::from_config(&config, dataset)?;
 
         let (all_files, dataset_version) = Self::list_kaggle_files(
             &client,
@@ -220,147 +168,64 @@ impl SourceFunction for KaggleSource {
         )
         .await?;
 
-        // Filter out already-attached locations
-        let new_files: Vec<_> = all_files
+        let locations = all_files
             .into_iter()
-            .filter(|loc| !attached_locations.contains(&loc.source_location))
+            .map(|kf| {
+                let format = kf.filename
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or("dat")
+                    .to_string();
+                DiscoveredLocation {
+                    location: kf.filename,
+                    must_copy: true,
+                    format,
+                    version: dataset_version.clone(),
+                }
+            })
             .collect();
 
-        let mut results = Vec::with_capacity(new_files.len());
-        for location in new_files {
-            let source_url = location.url.to_string();
-            let result = Self::download_kaggle_file(
-                &client,
-                &location.url,
-                &location.source_location,
-                data_dir,
-            )
-            .await?;
-            let attach_location = data_dir
-                .relative_path(result.file.as_ref())
-                .unwrap_or_else(|_| result.file.url().to_string());
-            results.push(MaterializedData {
-                attach_location,
-                source_location: location.source_location,
-                source_url,
-                hash: result.hash,
-                version: dataset_version.clone(),
-            });
-        }
-
-        Ok(results)
+        Ok(locations)
     }
 
-    async fn fetch_with_mode(
+    async fn data(
         &self,
+        location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &dyn IOReadWriteDir,
-        config: Arc<BundleConfig>,
-        mode: SyncMode,
-    ) -> Result<Vec<FetchAction>, BundlebaseError> {
-        match mode {
-            SyncMode::Add => {
-                let attached_locations: HashSet<String> = attached_files.keys().cloned().collect();
-                let materialized = self
-                    .fetch(args, attached_locations, data_dir, config)
-                    .await?;
-                Ok(materialized.into_iter().map(FetchAction::Add).collect())
-            }
-            SyncMode::Update | SyncMode::Sync => {
-                let dataset = source_utils::require_arg(args, "dataset", self.name())?;
-                let patterns = source_utils::get_patterns(args)?;
-                let version = args.get("version").map(|s| s.as_str());
-                let client = KaggleClient::from_config(&config, dataset)?;
+        config: &Arc<BundleConfig>,
+    ) -> Result<Option<SourceData>, BundlebaseError> {
+        let dataset = source_utils::require_arg(args, "dataset", "kaggle")?;
+        let version = args.get("version").map(|s| s.as_str());
+        let client = KaggleClient::from_config(config, dataset)?;
 
-                let (discovered, dataset_version) = Self::list_kaggle_files(
-                    &client,
-                    dataset,
-                    &patterns,
-                    version,
-                )
-                .await?;
-
-                // Build set of discovered source_locations for Remove detection
-                let discovered_locations: HashSet<String> = discovered
-                    .iter()
-                    .map(|d| d.source_location.clone())
-                    .collect();
-
-                let mut actions = Vec::new();
-
-                for location in discovered {
-                    let source_location = location.source_location.clone();
-                    let source_url = location.url.to_string();
-
-                    if let Some(attached_info) = attached_files.get(&source_location) {
-                        // Already attached — compare dataset version
-                        if dataset_version != attached_info.version {
-                            log::debug!(
-                                "File {} changed: version {} -> {}",
-                                source_location,
-                                attached_info.version,
-                                dataset_version
-                            );
-                            let result = Self::download_kaggle_file(
-                                &client,
-                                &location.url,
-                                &source_location,
-                                data_dir,
-                            )
-                            .await?;
-                            let attach_location = data_dir
-                                .relative_path(result.file.as_ref())
-                                .unwrap_or_else(|_| result.file.url().to_string());
-                            actions.push(FetchAction::Replace {
-                                old_source_location: source_location.clone(),
-                                data: MaterializedData {
-                                    attach_location,
-                                    source_location,
-                                    source_url,
-                                    hash: result.hash,
-                                    version: dataset_version.clone(),
-                                },
-                            });
-                        }
-                    } else {
-                        // New file — add it
-                        let result = Self::download_kaggle_file(
-                            &client,
-                            &location.url,
-                            &source_location,
-                            data_dir,
-                        )
-                        .await?;
-                        let attach_location = data_dir
-                            .relative_path(result.file.as_ref())
-                            .unwrap_or_else(|_| result.file.url().to_string());
-                        actions.push(FetchAction::Add(MaterializedData {
-                            attach_location,
-                            source_location,
-                            source_url,
-                            hash: result.hash,
-                            version: dataset_version.clone(),
-                        }));
-                    }
-                }
-
-                // For Sync mode: detect removed files
-                if mode == SyncMode::Sync {
-                    for source_location in attached_files.keys() {
-                        if !discovered_locations.contains(source_location) {
-                            log::debug!("File {} no longer exists at remote", source_location);
-                            actions.push(FetchAction::Remove {
-                                source_location: source_location.clone(),
-                            });
-                        }
-                    }
-                }
-
-                Ok(actions)
-            }
+        // Build download URL for this file
+        let mut download_url = format!(
+            "{}/api/v1/datasets/download/{}/{}",
+            client.base_url, dataset, location.location
+        );
+        if let Some(v) = version {
+            download_url.push_str(&format!("?datasetVersionNumber={}", v));
         }
+
+        let stream = Self::download_kaggle_bytes(&client, &download_url, &location.location).await?;
+        Ok(Some(SourceData::RawBytes(stream)))
     }
+
+    async fn stable_url(
+        &self,
+        _location: &DiscoveredLocation,
+        _args: &HashMap<String, String>,
+        _config: &Arc<BundleConfig>,
+    ) -> Result<Option<Url>, BundlebaseError> {
+        // Kaggle files require authentication, no stable URL
+        Ok(None)
+    }
+}
+
+/// Internal representation of a Kaggle file from the API.
+struct KaggleFileInfo {
+    /// Filename as returned by the Kaggle API
+    filename: String,
 }
 
 impl KaggleSource {
@@ -440,7 +305,7 @@ impl KaggleSource {
 
     /// List files in a Kaggle dataset, filtered by patterns.
     ///
-    /// Returns `(discovered_locations, dataset_version_number)`. The version
+    /// Returns `(kaggle_file_infos, dataset_version_number)`. The version
     /// number is fetched from the dataset view endpoint and applies to all
     /// files in the dataset.
     async fn list_kaggle_files(
@@ -448,7 +313,7 @@ impl KaggleSource {
         dataset: &str,
         patterns: &[glob::Pattern],
         version: Option<&str>,
-    ) -> Result<(Vec<DiscoveredLocation>, String), BundlebaseError> {
+    ) -> Result<(Vec<KaggleFileInfo>, String), BundlebaseError> {
         let mut list_path = format!(
             "/api/v1/datasets/list/{}",
             dataset
@@ -514,47 +379,35 @@ impl KaggleSource {
             };
 
             // Kaggle API returns flat file names (no subdirectory paths), so matching
-            // against the bare filename is correct. Users should use simple patterns
-            // like "*.csv" rather than path-based patterns like "subdir/*.csv".
+            // against the bare filename is correct.
             if !patterns.iter().any(|pattern| pattern.matches(file_name)) {
                 continue;
             }
 
-            let mut download_url = format!(
-                "{}/api/v1/datasets/download/{}/{}",
-                client.base_url, dataset, file_name
-            );
-            if let Some(v) = version {
-                download_url.push_str(&format!("?datasetVersionNumber={}", v));
-            }
-            if let Ok(url) = Url::parse(&download_url) {
-                locations.push(DiscoveredLocation {
-                    url,
-                    source_location: file_name.to_string(),
-                });
-            }
+            locations.push(KaggleFileInfo {
+                filename: file_name.to_string(),
+            });
         }
 
         Ok((locations, dataset_version))
     }
 
-    /// Download a file from Kaggle with authentication.
+    /// Download a file from Kaggle with authentication and return a byte stream.
     ///
     /// Kaggle's individual file download API returns ZIP archives containing
     /// the requested file. This method streams the ZIP to a temp file on disk,
-    /// then reads it back for extraction. This avoids holding both the ZIP and
-    /// extracted content in memory simultaneously.
-    async fn download_kaggle_file(
+    /// extracts if needed, then returns a stream that reads from disk in chunks
+    /// rather than loading the entire file into memory.
+    async fn download_kaggle_bytes(
         client: &KaggleClient,
-        url: &Url,
+        url: &str,
         source_location: &str,
-        data_dir: &dyn IOReadWriteDir,
-    ) -> Result<MaterializeResult, BundlebaseError> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, BundlebaseError> {
         use futures::StreamExt;
         use tokio::io::AsyncWriteExt;
 
         let response = client
-            .get_url(url.as_str())
+            .get_url(url)
             .send()
             .await
             .map_err(|e| {
@@ -579,7 +432,6 @@ impl KaggleSource {
                 source_location, e
             ))
         })?;
-        let temp_path = temp.path().to_path_buf();
         {
             let std_file = temp.reopen().map_err(|e| {
                 BundlebaseError::from(format!(
@@ -611,43 +463,51 @@ impl KaggleSource {
             })?;
         }
 
-        // Read temp file and extract from ZIP
-        let zip_data = bytes::Bytes::from(std::fs::read(&temp_path).map_err(|e| {
-            BundlebaseError::from(format!(
-                "Failed to read temp file for Kaggle download '{}': {}",
-                source_location, e
-            ))
-        })?);
-        let data = if zip_data.starts_with(b"PK") {
-            Self::extract_from_zip(&zip_data, source_location)?
-        } else {
-            // Some Kaggle files are served uncompressed
-            zip_data
-        };
-        drop(temp); // Clean up temp file
+        // Check first 2 bytes to detect ZIP format
+        let mut magic = [0u8; 2];
+        {
+            use std::io::Read;
+            let mut f = temp.reopen().map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to reopen temp file for Kaggle download '{}': {}",
+                    source_location, e
+                ))
+            })?;
+            f.read_exact(&mut magic).map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to read temp file header for Kaggle download '{}': {}",
+                    source_location, e
+                ))
+            })?;
+        }
 
-        let filename = source_location
-            .rsplit('/')
-            .next()
-            .unwrap_or(source_location);
-        let result = source_utils::download_to_data_dir(data, filename, data_dir).await?;
-        Ok(MaterializeResult {
-            file: result.file,
-            hash: result.hash,
-        })
+        let final_temp = if &magic == b"PK" {
+            Self::extract_from_zip_to_file(temp.path(), source_location)?
+        } else {
+            // Non-ZIP: stream directly from the downloaded temp file
+            temp
+        };
+
+        Ok(source_utils::stream_from_temp_file(final_temp))
     }
 
-    /// Extract the first file from a ZIP archive.
+    /// Extract the first file from a ZIP archive on disk to a new temp file.
     ///
     /// Kaggle's API wraps individual file downloads in ZIP archives.
-    fn extract_from_zip(
-        zip_data: &bytes::Bytes,
+    /// Returns a `NamedTempFile` containing the extracted content.
+    fn extract_from_zip_to_file(
+        zip_path: &std::path::Path,
         source_location: &str,
-    ) -> Result<bytes::Bytes, BundlebaseError> {
-        use std::io::Read;
+    ) -> Result<tempfile::NamedTempFile, BundlebaseError> {
+        use std::io::{Read, Write};
 
-        let cursor = std::io::Cursor::new(zip_data.as_ref());
-        let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
+        let zip_file = std::fs::File::open(zip_path).map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to open ZIP file from Kaggle for '{}': {}",
+                source_location, e
+            ))
+        })?;
+        let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| {
             BundlebaseError::from(format!(
                 "Failed to read ZIP from Kaggle for '{}': {}",
                 source_location, e
@@ -661,43 +521,64 @@ impl KaggleSource {
             )));
         }
 
-        let mut file = archive.by_index(0).map_err(|e| {
+        let mut entry = archive.by_index(0).map_err(|e| {
             BundlebaseError::from(format!(
                 "Failed to extract file from Kaggle ZIP for '{}': {}",
                 source_location, e
             ))
         })?;
 
-        let mut buf = Vec::with_capacity(file.size() as usize);
-        file.read_to_end(&mut buf).map_err(|e| {
+        let mut out_temp = tempfile::NamedTempFile::new().map_err(|e| {
             BundlebaseError::from(format!(
-                "Failed to read extracted file from Kaggle ZIP for '{}': {}",
+                "Failed to create temp file for ZIP extraction '{}': {}",
                 source_location, e
             ))
         })?;
 
-        Ok(bytes::Bytes::from(buf))
+        // Copy in chunks to avoid loading the entire extracted file into memory
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let n = entry.read(&mut buf).map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to read extracted file from Kaggle ZIP for '{}': {}",
+                    source_location, e
+                ))
+            })?;
+            if n == 0 {
+                break;
+            }
+            out_temp.write_all(&buf[..n]).map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to write extracted file for '{}': {}",
+                    source_location, e
+                ))
+            })?;
+        }
+        out_temp.flush().map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to flush extracted file for '{}': {}",
+                source_location, e
+            ))
+        })?;
+
+        Ok(out_temp)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::source_function::validate_source_args;
 
     #[test]
-    fn test_name() {
+    fn test_signature() {
         let func = KaggleSource;
-        assert_eq!(func.name(), "kaggle");
-    }
-
-    #[test]
-    fn test_arg_specs() {
-        let func = KaggleSource;
-        let specs = func.arg_specs();
-        assert_eq!(specs.len(), 3);
-        assert!(specs.iter().any(|s| s.name == "dataset" && s.required));
-        assert!(specs.iter().any(|s| s.name == "patterns" && !s.required));
-        assert!(specs.iter().any(|s| s.name == "version" && !s.required));
+        let sig = func.signature();
+        assert_eq!(sig.name, "kaggle");
+        assert_eq!(sig.arg_specs.len(), 3);
+        assert!(sig.arg_specs.iter().any(|s| s.name == "dataset" && s.required));
+        assert!(sig.arg_specs.iter().any(|s| s.name == "patterns" && !s.required));
+        assert!(sig.arg_specs.iter().any(|s| s.name == "version" && !s.required));
     }
 
     #[test]
@@ -705,7 +586,7 @@ mod tests {
         let func = KaggleSource;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
-        assert!(func.validate_args(&args).is_ok());
+        assert!(validate_source_args(&func, &args).is_ok());
     }
 
     #[test]
@@ -713,9 +594,9 @@ mod tests {
         let func = KaggleSource;
         let args = HashMap::new();
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(err.contains("requires a 'dataset' argument"));
     }
 
@@ -725,9 +606,9 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "just-a-name".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid dataset format"));
         assert!(err.contains("owner/dataset-name"));
     }
@@ -738,9 +619,9 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "a/b/c".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid dataset format"));
     }
 
@@ -750,12 +631,12 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "/dataset".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
 
         let mut args2 = HashMap::new();
         args2.insert("dataset".to_string(), "owner/".to_string());
-        let result2 = func.validate_args(&args2);
+        let result2 = validate_source_args(&func, &args2);
         assert!(result2.is_err());
     }
 
@@ -765,7 +646,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("patterns".to_string(), "*.csv".to_string());
-        assert!(func.validate_args(&args).is_ok());
+        assert!(validate_source_args(&func, &args).is_ok());
     }
 
     #[test]
@@ -774,7 +655,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "3".to_string());
-        assert!(func.validate_args(&args).is_ok());
+        assert!(validate_source_args(&func, &args).is_ok());
     }
 
     #[test]
@@ -784,9 +665,9 @@ mod tests {
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "0".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid version"));
         assert!(err.contains("positive integer"));
     }
@@ -798,9 +679,9 @@ mod tests {
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "-1".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid version"));
     }
 
@@ -811,9 +692,9 @@ mod tests {
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "abc".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid version"));
         assert!(err.contains("abc"));
     }
@@ -825,19 +706,16 @@ mod tests {
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("unknown".to_string(), "value".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(err.contains("does not accept argument 'unknown'"));
     }
 
-#[test]
+    #[test]
     fn test_kaggle_client_from_config_missing_credentials() {
-        // Credentials are optional — client should succeed with None values
-        let config = BundleConfig::new(None).unwrap();
-        let client = KaggleClient::from_config(&config, "zillow/zecon").unwrap();
-        // If ~/.kaggle/kaggle.json exists, default_fn may populate these;
-        // otherwise they should be None
+        let config = BundleConfig::new(None).expect("config creation failed");
+        let client = KaggleClient::from_config(&config, "zillow/zecon").expect("client creation failed");
         if client.username.is_none() {
             assert!(client.key.is_none() || client.key.is_some());
         }
@@ -845,28 +723,28 @@ mod tests {
 
     #[test]
     fn test_kaggle_client_from_config() {
-        let config = BundleConfig::new(None).unwrap();
-        let scope = Scope::try_from("kaggle").unwrap();
+        let config = BundleConfig::new(None).expect("config creation failed");
+        let scope = Scope::try_from("kaggle").expect("scope creation failed");
         config.set(
             &scope,
             URL_CFG.key,
             "https://test.kaggle.com",
             crate::bundle_config::ConfigSource::Passed,
-        ).unwrap();
+        ).expect("set url failed");
         config.set(
             &scope,
             USERNAME_CFG.key,
             "config_user",
             crate::bundle_config::ConfigSource::Passed,
-        ).unwrap();
+        ).expect("set username failed");
         config.set(
             &scope,
             API_KEY_CFG.key,
             "config_key",
             crate::bundle_config::ConfigSource::Passed,
-        ).unwrap();
+        ).expect("set key failed");
 
-        let client = KaggleClient::from_config(&config, "zillow/zecon").unwrap();
+        let client = KaggleClient::from_config(&config, "zillow/zecon").expect("client creation failed");
         assert_eq!(client.base_url, "https://test.kaggle.com");
         assert_eq!(client.username, Some("config_user".to_string()));
         assert_eq!(client.key, Some("config_key".to_string()));
@@ -874,66 +752,74 @@ mod tests {
 
     #[test]
     fn test_kaggle_client_from_config_partial_falls_back_to_default_fn() {
-        // If only username is set in config (no key), key falls back to default_fn.
-        // If default_fn also returns None, key is simply None.
-        let config = BundleConfig::new(None).unwrap();
-        let scope = Scope::try_from("kaggle").unwrap();
+        let config = BundleConfig::new(None).expect("config creation failed");
+        let scope = Scope::try_from("kaggle").expect("scope creation failed");
         config.set(
             &scope,
             USERNAME_CFG.key,
             "config_user",
             crate::bundle_config::ConfigSource::Passed,
-        ).unwrap();
+        ).expect("set username failed");
 
-        let client = KaggleClient::from_config(&config, "zillow/zecon").unwrap();
+        let client = KaggleClient::from_config(&config, "zillow/zecon").expect("client creation failed");
         assert_eq!(client.username, Some("config_user".to_string()));
-        // key may be Some (if ~/.kaggle/kaggle.json exists) or None
     }
 
     // ── extract_from_zip tests ──────────────────────────────────────
 
     #[test]
     fn test_extract_from_zip_single_file() {
-        use std::io::Write;
+        use std::io::{Read, Write};
 
-        let mut buf = Vec::new();
+        // Write a ZIP to a temp file
+        let mut zip_temp = tempfile::NamedTempFile::new().expect("temp file failed");
         {
-            let cursor = std::io::Cursor::new(&mut buf);
-            let mut zip = zip::ZipWriter::new(cursor);
+            let mut zip = zip::ZipWriter::new(&mut zip_temp);
             let options = zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored);
-            zip.start_file("hello.txt", options).unwrap();
-            zip.write_all(b"hello world").unwrap();
-            zip.finish().unwrap();
+            zip.start_file("hello.txt", options).expect("start_file failed");
+            zip.write_all(b"hello world").expect("write_all failed");
+            zip.finish().expect("finish failed");
         }
 
-        let zip_bytes = bytes::Bytes::from(buf);
-        let result = KaggleSource::extract_from_zip(&zip_bytes, "hello.txt").unwrap();
-        assert_eq!(result.as_ref(), b"hello world");
+        let result_temp = KaggleSource::extract_from_zip_to_file(zip_temp.path(), "hello.txt")
+            .expect("extract failed");
+        let mut contents = Vec::new();
+        std::fs::File::open(result_temp.path())
+            .expect("open failed")
+            .read_to_end(&mut contents)
+            .expect("read failed");
+        assert_eq!(contents, b"hello world");
     }
 
     #[test]
     fn test_extract_from_zip_empty_archive() {
-        let mut buf = Vec::new();
-        {
-            let cursor = std::io::Cursor::new(&mut buf);
-            let zip = zip::ZipWriter::new(cursor);
-            zip.finish().unwrap();
-        }
+        use std::io::Write;
 
-        let zip_bytes = bytes::Bytes::from(buf);
-        let result = KaggleSource::extract_from_zip(&zip_bytes, "test.csv");
+        let mut zip_temp = tempfile::NamedTempFile::new().expect("temp file failed");
+        {
+            let zip = zip::ZipWriter::new(&mut zip_temp);
+            zip.finish().expect("finish failed");
+        }
+        zip_temp.flush().expect("flush failed");
+
+        let result = KaggleSource::extract_from_zip_to_file(zip_temp.path(), "test.csv");
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(err.contains("empty"), "Expected 'empty' in: {}", err);
     }
 
     #[test]
     fn test_extract_from_zip_invalid_data() {
-        let garbage = bytes::Bytes::from(vec![0u8, 1, 2, 3, 4, 5]);
-        let result = KaggleSource::extract_from_zip(&garbage, "test.csv");
+        use std::io::Write;
+
+        let mut garbage_temp = tempfile::NamedTempFile::new().expect("temp file failed");
+        garbage_temp.write_all(&[0u8, 1, 2, 3, 4, 5]).expect("write failed");
+        garbage_temp.flush().expect("flush failed");
+
+        let result = KaggleSource::extract_from_zip_to_file(garbage_temp.path(), "test.csv");
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(
             err.contains("Failed to read ZIP"),
             "Expected 'Failed to read ZIP' in: {}",
@@ -945,14 +831,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_kaggle_version_with_explicit_version() {
-        let client = KaggleClient::new("http://unused", Some("user".into()), Some("key".into())).unwrap();
+        let client = KaggleClient::new("http://unused", Some("user".into()), Some("key".into())).expect("client creation failed");
         let result = KaggleSource::read_kaggle_version(
             &client,
             "owner/ds",
             Some("5"),
         )
         .await
-        .unwrap();
+        .expect("read_kaggle_version failed");
         assert_eq!(result, "5");
     }
 
@@ -971,14 +857,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
         let result = KaggleSource::read_kaggle_version(
             &client,
             "zillow/zecon",
             None,
         )
         .await
-        .unwrap();
+        .expect("read_kaggle_version failed");
         assert_eq!(result, "42");
     }
 
@@ -996,14 +882,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
         let result = KaggleSource::read_kaggle_version(
             &client,
             "zillow/zecon",
             None,
         )
         .await
-        .unwrap();
+        .expect("read_kaggle_version failed");
         assert_eq!(result, "unknown");
     }
 
@@ -1017,14 +903,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
         let result = KaggleSource::read_kaggle_version(
             &client,
             "zillow/zecon",
             None,
         )
         .await
-        .unwrap();
+        .expect("read_kaggle_version failed");
         assert_eq!(result, "unknown");
     }
 
@@ -1038,14 +924,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
         let result = KaggleSource::read_kaggle_version(
             &client,
             "zillow/zecon",
             None,
         )
         .await
-        .unwrap();
+        .expect("read_kaggle_version failed");
         assert_eq!(result, "unknown");
     }
 
@@ -1064,16 +950,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("myuser".into()), Some("mykey".into())).unwrap();
+        let client = KaggleClient::new(&server.uri(), Some("myuser".into()), Some("mykey".into())).expect("client creation failed");
         let result = KaggleSource::read_kaggle_version(
             &client,
             "zillow/zecon",
             None,
         )
         .await
-        .unwrap();
-        // If the Authorization header wasn't sent, wiremock would not match and
-        // reqwest would get a 404, causing the function to return "unknown".
+        .expect("read_kaggle_version failed");
         assert_eq!(result, "1");
     }
 
@@ -1083,7 +967,6 @@ mod tests {
     async fn test_list_kaggle_files_basic() {
         let server = wiremock::MockServer::start().await;
 
-        // Mock the file list endpoint
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path(
                 "/api/v1/datasets/list/zillow/zecon",
@@ -1099,7 +982,6 @@ mod tests {
             .mount(&server)
             .await;
 
-        // Mock the version search endpoint
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path("/api/v1/datasets/list"))
             .and(wiremock::matchers::query_param("search", "zillow/zecon"))
@@ -1111,8 +993,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
-        let patterns = vec![glob::Pattern::new("**/*").unwrap()];
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
+        let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
         let (files, version) = KaggleSource::list_kaggle_files(
             &client,
             "zillow/zecon",
@@ -1120,19 +1002,11 @@ mod tests {
             None,
         )
         .await
-        .unwrap();
+        .expect("list_kaggle_files failed");
 
         assert_eq!(files.len(), 2);
-        assert_eq!(files[0].source_location, "data.csv");
-        assert_eq!(files[1].source_location, "readme.md");
-        assert!(files[0]
-            .url
-            .as_str()
-            .contains("/api/v1/datasets/download/zillow/zecon/data.csv"));
-        assert!(files[1]
-            .url
-            .as_str()
-            .contains("/api/v1/datasets/download/zillow/zecon/readme.md"));
+        assert_eq!(files[0].filename, "data.csv");
+        assert_eq!(files[1].filename, "readme.md");
         assert_eq!(version, "7");
     }
 
@@ -1166,8 +1040,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
-        let patterns = vec![glob::Pattern::new("*.csv").unwrap()];
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
+        let patterns = vec![glob::Pattern::new("*.csv").expect("pattern creation failed")];
         let (files, _) = KaggleSource::list_kaggle_files(
             &client,
             "zillow/zecon",
@@ -1175,17 +1049,16 @@ mod tests {
             None,
         )
         .await
-        .unwrap();
+        .expect("list_kaggle_files failed");
 
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].source_location, "data.csv");
+        assert_eq!(files[0].filename, "data.csv");
     }
 
     #[tokio::test]
     async fn test_list_kaggle_files_with_version_param() {
         let server = wiremock::MockServer::start().await;
 
-        // File list endpoint should receive the version query param
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path(
                 "/api/v1/datasets/list/zillow/zecon",
@@ -1201,10 +1074,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        // No version search mock needed — explicit version skips the API call
-
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
-        let patterns = vec![glob::Pattern::new("**/*").unwrap()];
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
+        let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
         let (files, version) = KaggleSource::list_kaggle_files(
             &client,
             "zillow/zecon",
@@ -1212,16 +1083,10 @@ mod tests {
             Some("2"),
         )
         .await
-        .unwrap();
+        .expect("list_kaggle_files failed");
 
         assert_eq!(files.len(), 1);
         assert_eq!(version, "2");
-        // Download URL should also include version
-        assert!(
-            files[0].url.as_str().contains("datasetVersionNumber=2"),
-            "Expected version in download URL: {}",
-            files[0].url
-        );
     }
 
     #[tokio::test]
@@ -1236,8 +1101,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
-        let patterns = vec![glob::Pattern::new("**/*").unwrap()];
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
+        let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
         let result = KaggleSource::list_kaggle_files(
             &client,
             "zillow/zecon",
@@ -1247,7 +1112,7 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(
             err.contains("Failed to list"),
             "Expected 'Failed to list' in: {}",
@@ -1267,15 +1132,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        // Version search mock (called before datasetFiles is checked)
         wiremock::Mock::given(wiremock::matchers::method("GET"))
             .and(wiremock::matchers::path("/api/v1/datasets/list"))
             .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
             .mount(&server)
             .await;
 
-        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).unwrap();
-        let patterns = vec![glob::Pattern::new("**/*").unwrap()];
+        let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
+        let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
         let result = KaggleSource::list_kaggle_files(
             &client,
             "zillow/zecon",
@@ -1285,7 +1149,7 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(
             err.contains("missing 'datasetFiles'"),
             "Expected \"missing 'datasetFiles'\" in: {}",
@@ -1315,7 +1179,6 @@ mod tests {
 
     #[test]
     fn test_kaggle_scope_url_to_name_scheme() {
-        // In kaggle://config, "config" is the host (not the path), so url.path() is empty
         let result = KAGGLE_SCOPE.url_to_name("kaggle://config");
         assert_eq!(result, Some("kaggle".to_string()));
     }

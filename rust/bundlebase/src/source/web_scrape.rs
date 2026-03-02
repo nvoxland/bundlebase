@@ -4,11 +4,9 @@
 //! and downloads files that match specified glob patterns.
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction,
+    ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
-use super::SyncMode;
 use super::source_utils;
-use crate::io::IOReadWriteDir;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use scraper::{Html, Selector};
@@ -30,116 +28,112 @@ pub struct WebScrapeFunction;
 
 #[async_trait]
 impl SourceFunction for WebScrapeFunction {
-    fn name(&self) -> &str {
-        "web_scrape"
-    }
-
-    fn arg_specs(&self) -> Vec<ArgSpec> {
-        vec![
-            ArgSpec {
-                name: "url",
-                description: "The webpage URL to fetch and parse for links",
-                required: true,
-                default: None,
-            },
-            ArgSpec {
-                name: "patterns",
-                description: "Comma-separated glob patterns to match href attributes",
-                required: false,
-                default: Some("**/*"),
-            },
-            ArgSpec {
-                name: "copy",
-                description: "Whether to copy files into bundle's data directory",
-                required: false,
-                default: Some("true"),
-            },
-        ]
+    fn signature(&self) -> SourceFunctionSignature {
+        SourceFunctionSignature {
+            name: "web_scrape".to_string(),
+            arg_specs: vec![
+                ArgSpec {
+                    name: "url",
+                    description: "The webpage URL to fetch and parse for links",
+                    required: true,
+                    default: None,
+                },
+                ArgSpec {
+                    name: "patterns",
+                    description: "Comma-separated glob patterns to match href attributes",
+                    required: false,
+                    default: Some("**/*"),
+                },
+                ArgSpec {
+                    name: "copy",
+                    description: "Whether to copy files into bundle's data directory",
+                    required: false,
+                    default: Some("true"),
+                },
+            ],
+        }
     }
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        // Use default validation for required args and copy validation
-        self.default_validate_args(args)?;
-
-        // Additional: URL must be HTTP or HTTPS
-        let url = source_utils::require_url(args, self.name())?;
+        // URL must be HTTP or HTTPS
+        let url = source_utils::require_url(args, "web_scrape")?;
         if url.scheme() != "http" && url.scheme() != "https" {
             return Err(format!(
-                "Function '{}': URL must be http:// or https://, got '{}'",
-                self.name(),
+                "Function 'web_scrape': URL must be http:// or https://, got '{}'",
                 url.scheme()
             )
             .into());
         }
-
         Ok(())
     }
 
     async fn discover(
         &self,
         args: &HashMap<String, String>,
-        attached_locations: &HashSet<String>,
+        _attached_locations: &HashSet<String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let base_url = source_utils::require_url(args, self.name())?;
+        let base_url = source_utils::require_url(args, "web_scrape")?;
         let patterns = source_utils::get_patterns(args)?;
 
         // Fetch the webpage
         let html = self.fetch_page(&base_url).await?;
 
-        // Extract and resolve all links, filter by pattern and already-attached
-        let locations = self
-            .extract_links(&html, &base_url)
-            .into_iter()
-            .filter(|url| source_utils::matches_patterns(url, &patterns))
-            .filter(|url| !attached_locations.contains(url.as_str()))
-            .map(DiscoveredLocation::from_url)
-            .collect();
+        // Extract and resolve all links, filter by pattern
+        let mut locations = Vec::new();
+        for url in self.extract_links(&html, &base_url) {
+            if !source_utils::matches_patterns(&url, &patterns) {
+                continue;
+            }
+
+            // Get format from URL extension
+            let format = source_utils::filename_from_url(&url)
+                .rsplit('.')
+                .next()
+                .unwrap_or("dat")
+                .to_string();
+
+            // Read version from HTTP headers
+            let version = source_utils::read_http_version(&url)
+                .await
+                .unwrap_or_else(|_| "unknown".to_string());
+
+            locations.push(DiscoveredLocation {
+                location: url.to_string(),
+                must_copy: false,
+                format,
+                version,
+            });
+        }
 
         Ok(locations)
     }
 
-    async fn fetch_with_mode(
+    async fn data(
         &self,
-        args: &HashMap<String, String>,
-        attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &dyn IOReadWriteDir,
-        config: Arc<BundleConfig>,
-        mode: SyncMode,
-    ) -> Result<Vec<FetchAction>, BundlebaseError> {
-        let base_url = source_utils::require_url(args, self.name())?;
-        let patterns = source_utils::get_patterns(args)?;
-
-        // Fetch and extract links (same as discover)
-        let html = self.fetch_page(&base_url).await?;
-        let discovered: Vec<DiscoveredLocation> = self
-            .extract_links(&html, &base_url)
-            .into_iter()
-            .filter(|url| source_utils::matches_patterns(url, &patterns))
-            .map(DiscoveredLocation::from_url)
-            .collect();
-
-        // Use shared sync logic
-        let should_copy = source_utils::should_copy(args);
-        let config = config.clone();
-
-        source_utils::process_sync_mode(
-            discovered,
-            attached_files,
-            data_dir,
-            mode,
-            |url| Box::pin(source_utils::read_http_version(url)),
-            |loc| {
-                let config = config.clone();
-                async move {
-                    source_utils::materialize_url(&loc.url, should_copy, data_dir, &config).await
-                }
-            },
-        )
-        .await
+        _location: &DiscoveredLocation,
+        _args: &HashMap<String, String>,
+        _config: &Arc<BundleConfig>,
+    ) -> Result<Option<SourceData>, BundlebaseError> {
+        // Web scrape uses stable_url for downloading
+        Ok(None)
     }
 
-    // Uses default materialize() and fetch() implementations
+    async fn stable_url(
+        &self,
+        location: &DiscoveredLocation,
+        _args: &HashMap<String, String>,
+        _config: &Arc<BundleConfig>,
+    ) -> Result<Option<Url>, BundlebaseError> {
+        let url = Url::parse(&location.location).map_err(|e| {
+            BundlebaseError::from(format!(
+                "Invalid URL in discovered location '{}': {}",
+                location.location, e
+            ))
+        })?;
+
+        Ok(Some(url))
+    }
 }
 
 impl WebScrapeFunction {
@@ -158,12 +152,12 @@ impl WebScrapeFunction {
             .into());
         }
 
-        response
-            .text()
-            .await
-            .map_err(|e| {
-                BundlebaseError::from(format!("Failed to read response from '{}': {}", url, e))
-            })
+        response.text().await.map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to read response from '{}': {}",
+                url, e
+            ))
+        })
     }
 
     /// Extract all links from HTML and resolve them to absolute URLs.
@@ -213,38 +207,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_name() {
+    fn test_signature() {
         let func = WebScrapeFunction;
-        assert_eq!(func.name(), "web_scrape");
-    }
-
-    #[test]
-    fn test_arg_specs() {
-        let func = WebScrapeFunction;
-        let specs = func.arg_specs();
-        assert_eq!(specs.len(), 3);
-        assert!(specs.iter().any(|s| s.name == "url" && s.required));
-        assert!(specs.iter().any(|s| s.name == "patterns" && !s.required));
-        assert!(specs.iter().any(|s| s.name == "copy" && !s.required));
+        let sig = func.signature();
+        assert_eq!(sig.name, "web_scrape");
+        assert_eq!(sig.arg_specs.len(), 3);
+        assert!(sig.arg_specs.iter().any(|s| s.name == "url" && s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "patterns" && !s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "copy" && !s.required));
     }
 
     #[test]
     fn test_validate_args_with_url() {
         let func = WebScrapeFunction;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), "https://example.com/data/".to_string());
+        args.insert(
+            "url".to_string(),
+            "https://example.com/data/".to_string(),
+        );
         assert!(func.validate_args(&args).is_ok());
     }
 
     #[test]
     fn test_validate_args_missing_url() {
+        use super::super::source_function::validate_source_args;
         let func = WebScrapeFunction;
         let args = HashMap::new();
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
         assert!(result
-            .unwrap_err()
+            .err()
+            .expect("expected error")
             .to_string()
             .contains("requires a 'url' argument"));
     }
@@ -257,7 +257,11 @@ mod tests {
 
         let result = func.validate_args(&args);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid URL"));
+        assert!(result
+            .err()
+            .expect("expected error")
+            .to_string()
+            .contains("Invalid URL"));
     }
 
     #[test]
@@ -269,7 +273,8 @@ mod tests {
         let result = func.validate_args(&args);
         assert!(result.is_err());
         assert!(result
-            .unwrap_err()
+            .err()
+            .expect("expected error")
             .to_string()
             .contains("must be http:// or https://"));
     }
@@ -278,7 +283,10 @@ mod tests {
     fn test_validate_args_copy_true() {
         let func = WebScrapeFunction;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), "https://example.com/data/".to_string());
+        args.insert(
+            "url".to_string(),
+            "https://example.com/data/".to_string(),
+        );
         args.insert("copy".to_string(), "true".to_string());
         assert!(func.validate_args(&args).is_ok());
     }
@@ -287,22 +295,30 @@ mod tests {
     fn test_validate_args_copy_false() {
         let func = WebScrapeFunction;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), "https://example.com/data/".to_string());
+        args.insert(
+            "url".to_string(),
+            "https://example.com/data/".to_string(),
+        );
         args.insert("copy".to_string(), "false".to_string());
         assert!(func.validate_args(&args).is_ok());
     }
 
     #[test]
-    fn test_validate_args_copy_invalid() {
+    fn test_validate_source_args_copy_invalid() {
+        use super::super::source_function::validate_source_args;
         let func = WebScrapeFunction;
         let mut args = HashMap::new();
-        args.insert("url".to_string(), "https://example.com/data/".to_string());
+        args.insert(
+            "url".to_string(),
+            "https://example.com/data/".to_string(),
+        );
         args.insert("copy".to_string(), "invalid".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
         assert!(result
-            .unwrap_err()
+            .err()
+            .expect("expected error")
             .to_string()
             .contains("'copy' argument must be 'true' or 'false'"));
     }
@@ -310,7 +326,7 @@ mod tests {
     #[test]
     fn test_extract_links() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/data/").unwrap();
+        let base_url = Url::parse("https://example.com/data/").expect("valid url");
         let html = r#"
             <html>
             <body>
@@ -337,7 +353,7 @@ mod tests {
     #[test]
     fn test_extract_links_skips_invalid() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/").unwrap();
+        let base_url = Url::parse("https://example.com/").expect("valid url");
         let html = r##"
             <html>
             <body>
@@ -360,20 +376,23 @@ mod tests {
     #[test]
     fn test_resolve_url_absolute() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/data/").unwrap();
+        let base_url = Url::parse("https://example.com/data/").expect("valid url");
 
         let resolved = func.resolve_url("https://other.com/file.txt", &base_url);
-        assert_eq!(resolved.unwrap().as_str(), "https://other.com/file.txt");
+        assert_eq!(
+            resolved.expect("should resolve").as_str(),
+            "https://other.com/file.txt"
+        );
     }
 
     #[test]
     fn test_resolve_url_relative() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/data/").unwrap();
+        let base_url = Url::parse("https://example.com/data/").expect("valid url");
 
         let resolved = func.resolve_url("file.txt", &base_url);
         assert_eq!(
-            resolved.unwrap().as_str(),
+            resolved.expect("should resolve").as_str(),
             "https://example.com/data/file.txt"
         );
     }
@@ -381,11 +400,11 @@ mod tests {
     #[test]
     fn test_resolve_url_parent() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/data/subdir/").unwrap();
+        let base_url = Url::parse("https://example.com/data/subdir/").expect("valid url");
 
         let resolved = func.resolve_url("../file.txt", &base_url);
         assert_eq!(
-            resolved.unwrap().as_str(),
+            resolved.expect("should resolve").as_str(),
             "https://example.com/data/file.txt"
         );
     }
@@ -393,11 +412,11 @@ mod tests {
     #[test]
     fn test_resolve_url_absolute_path() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/data/").unwrap();
+        let base_url = Url::parse("https://example.com/data/").expect("valid url");
 
         let resolved = func.resolve_url("/other/file.txt", &base_url);
         assert_eq!(
-            resolved.unwrap().as_str(),
+            resolved.expect("should resolve").as_str(),
             "https://example.com/other/file.txt"
         );
     }
@@ -405,16 +424,14 @@ mod tests {
     #[test]
     fn test_resolve_url_skips_javascript() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/").unwrap();
-
+        let base_url = Url::parse("https://example.com/").expect("valid url");
         assert!(func.resolve_url("javascript:void(0)", &base_url).is_none());
     }
 
     #[test]
     fn test_resolve_url_skips_mailto() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/").unwrap();
-
+        let base_url = Url::parse("https://example.com/").expect("valid url");
         assert!(func
             .resolve_url("mailto:test@example.com", &base_url)
             .is_none());
@@ -423,8 +440,7 @@ mod tests {
     #[test]
     fn test_resolve_url_skips_data() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/").unwrap();
-
+        let base_url = Url::parse("https://example.com/").expect("valid url");
         assert!(func
             .resolve_url("data:text/plain,hello", &base_url)
             .is_none());
@@ -433,16 +449,14 @@ mod tests {
     #[test]
     fn test_resolve_url_skips_fragment() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/").unwrap();
-
+        let base_url = Url::parse("https://example.com/").expect("valid url");
         assert!(func.resolve_url("#section", &base_url).is_none());
     }
 
     #[test]
     fn test_resolve_url_skips_empty() {
         let func = WebScrapeFunction;
-        let base_url = Url::parse("https://example.com/").unwrap();
-
+        let base_url = Url::parse("https://example.com/").expect("valid url");
         assert!(func.resolve_url("", &base_url).is_none());
         assert!(func.resolve_url("   ", &base_url).is_none());
     }
