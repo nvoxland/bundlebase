@@ -1,35 +1,64 @@
-//! Source function system for data discovery and materialization.
+//! Source function system for data discovery and fetching.
 //!
-//! Source functions define how data is discovered and materialized into files.
-//! Different implementations can provide different strategies (e.g., directory listing,
-//! database queries, API pagination, web scraping, etc.).
+//! Source functions define how data is partitioned, discovered, and made available.
+//! Each source divides its data into partitions that become blocks in the bundle.
+//! For file-based sources, partitions are individual files. For structured sources
+//! (databases, APIs), the source function decides how to chunk data into stable
+//! partitions so that sync can detect changes at the block level.
 //!
-//! ## Architecture
+//! The trait has four methods:
+//! - `signature()` - Name and argument declarations
+//! - `discover()` - Partition source data into locations with version info
+//! - `data()` - Provide raw data bytes for a location
+//! - `stable_url()` - Provide a stable URL for downloading a location
 //!
-//! The `SourceFunction` trait separates concerns:
-//! - `discover()` - Find new data locations (URLs, row ranges, etc.)
-//! - `materialize()` - Download/copy data to the bundle's data directory
-//! - `fetch()` - Orchestrates discovery and materialization (default impl provided)
-//!
-//! Most implementations only need to implement `discover()`. The default `materialize()`
-//! and `fetch()` implementations handle the common case.
+//! Orchestration (sync mode handling, materialization, file management)
+//! lives in `source_utils::orchestrate_fetch()`.
 
+use super::ipc::IpcSourceFunction;
 use super::kaggle::KaggleSource;
 use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
 use super::source_utils;
 use super::web_scrape::WebScrapeFunction;
-use super::SyncMode;
 
-// Re-export MaterializeResult for use by source function implementations
-pub use super::source_utils::MaterializeResult;
-use crate::io::IOReadWriteDir;
-use crate::progress::ProgressScope;
 use crate::{BundleConfig, BundlebaseError};
+use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use bytes::Bytes;
+use futures::stream::{self, BoxStream};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
+
+/// Data returned by a source function's `data()` method.
+///
+/// Sources that produce structured data (e.g., database queries, IPC subprocess)
+/// return `Arrow` batch streams, and the orchestration layer handles Parquet serialization.
+/// Sources that provide raw file bytes (e.g., Kaggle downloads, SFTP files)
+/// return `RawBytes` as a stream, which is written directly as-is.
+pub enum SourceData {
+    /// Stream of Arrow RecordBatches (will be converted to Parquet by the orchestrator).
+    Arrow(BoxStream<'static, Result<RecordBatch, BundlebaseError>>),
+    /// Raw byte stream (written directly as-is).
+    RawBytes(BoxStream<'static, Result<Bytes, std::io::Error>>),
+}
+
+impl SourceData {
+    /// Create an Arrow variant from a single RecordBatch.
+    ///
+    /// Convenience constructor that wraps a batch in a single-element stream.
+    pub fn from_batch(batch: RecordBatch) -> Self {
+        SourceData::Arrow(Box::pin(stream::once(async { Ok(batch) })))
+    }
+
+    /// Create a RawBytes variant from in-memory bytes.
+    ///
+    /// Convenience constructor that wraps `Bytes` in a single-element stream.
+    pub fn from_bytes(bytes: Bytes) -> Self {
+        SourceData::RawBytes(Box::pin(stream::once(async { Ok(bytes) })))
+    }
+}
 
 /// Describes a source function argument for documentation and validation.
 #[derive(Debug, Clone)]
@@ -44,24 +73,65 @@ pub struct ArgSpec {
     pub default: Option<&'static str>,
 }
 
-/// A discovered location ready for materialization.
-///
-/// Represents a unit of data found by the source function's discovery phase.
+/// Signature of a source function: its name and argument specifications.
 #[derive(Debug, Clone)]
-pub struct DiscoveredLocation {
-    /// URL to fetch the data from
-    pub url: Url,
-    /// Identifier to track this location (stored in AttachBlockOp.source_location)
-    /// Often the same as url.to_string(), but can differ (e.g., for normalized URLs)
-    pub source_location: String,
+pub struct SourceFunctionSignature {
+    /// Unique name for this source function (e.g., "remote_dir")
+    pub name: String,
+    /// Argument declarations
+    pub arg_specs: Vec<ArgSpec>,
 }
 
-impl DiscoveredLocation {
-    /// Create a new discovered location where source_location equals the URL string.
-    pub fn from_url(url: Url) -> Self {
-        let source_location = url.to_string();
-        Self { url, source_location }
-    }
+/// A partition of source data discovered during the discovery phase.
+///
+/// Each `DiscoveredLocation` becomes one block in the bundle. For file-based
+/// sources (remote_dir, web_scrape, kaggle), partitions map naturally to
+/// individual files. For structured sources (postgres, APIs), the source
+/// function decides how to divide data into partitions — for example,
+/// postgres partitions query results into row-range chunks based on a
+/// sort column.
+///
+/// **Partition stability matters.** During sync, the orchestrator matches
+/// discovered locations against previously-attached blocks by `location`
+/// string. Stable partitioning means unchanged data keeps its existing
+/// blocks (no re-fetch), new data appears as new blocks, and modified or
+/// removed partitions are detected via `version` changes or absence.
+/// If partitioning is unstable (e.g., row boundaries shift when data is
+/// inserted), blocks appear changed even when the underlying data hasn't.
+#[derive(Debug, Clone)]
+pub struct DiscoveredLocation {
+    /// Stable identifier that describes what data this partition contains.
+    ///
+    /// The location should be meaningful to the data's natural structure:
+    /// a file-based source uses a path or URL, a database uses a key range,
+    /// a spreadsheet might use a cell range. The identifier must be consistent
+    /// across `discover()` calls so the orchestrator can match partitions to
+    /// previously-attached blocks during sync.
+    ///
+    /// Examples:
+    /// - **remote_dir:** relative file path (e.g., `"subdir/data.parquet"`)
+    /// - **kaggle:** filename (e.g., `"train.csv"`)
+    /// - **postgres:** JSON range (e.g., `{"sort_col":"id","min":"1","max":"1000"}`)
+    /// - **spreadsheet:** cell range (e.g., `"Sheet1!A1:Z500"`)
+    /// - **ipc:** subprocess-defined identifier
+    pub location: String,
+    /// Whether this location requires copying data into the bundle's data directory.
+    /// True for sources without stable URLs (e.g., Kaggle, Postgres).
+    pub must_copy: bool,
+    /// Data format / file extension (e.g., "parquet", "csv").
+    pub format: String,
+    /// Source-specific version string used for change detection during sync.
+    ///
+    /// The orchestrator compares this against the version stored when the block
+    /// was last attached. A mismatch triggers a re-fetch of this partition.
+    ///
+    /// The meaning varies by source function:
+    /// - **remote_dir:** file metadata such as ETag or Last-Modified
+    /// - **web_scrape:** HTTP ETag or Last-Modified
+    /// - **kaggle:** dataset version number (e.g., `"42"`)
+    /// - **postgres:** `"count:checksum"` — row count and content hash
+    /// - **ipc:** subprocess-defined version string
+    pub version: String,
 }
 
 /// Result of materializing a single data unit from a source.
@@ -73,16 +143,10 @@ pub struct MaterializedData {
     pub source_location: String,
     /// Full URL to the source file (may differ from source_location)
     pub source_url: String,
-    /// SHA256 hash of the content (full 64-character hex string)
-    pub hash: String,
+    /// SHA256 hash of the content (full 64-character hex string).
+    /// None if the hash is not yet known (will be computed during attach).
+    pub hash: Option<String>,
     /// Source-specific version string used for change detection in Update/Sync modes.
-    ///
-    /// The meaning varies by source function:
-    /// - **remote_dir / web_scrape:** file metadata such as ETag or Last-Modified
-    /// - **kaggle:** dataset version number (e.g., "42")
-    /// - **postgres:** content hash
-    ///
-    /// Compared against stored versions to decide whether a file should be replaced.
     pub version: String,
 }
 
@@ -230,135 +294,58 @@ pub fn format_fetch_summary(results: &[FetchResults]) -> String {
 
 /// Trait for source function implementations.
 ///
-/// Source functions define how data is discovered and materialized.
+/// Source functions define how data is discovered and made available.
 /// Each source function controls:
-/// - What "location" means (file URL, row range, API cursor, etc.)
-/// - How to discover new locations
-/// - How to materialize data into files (optional override)
+/// - What "location" means (file path, row range, filename, etc.)
+/// - How to discover all locations with version info
+/// - How to provide data (either raw bytes or a stable URL)
 ///
 /// ## Implementing a Source Function
 ///
-/// Most implementations only need to provide:
-/// - `name()` - Unique identifier
-/// - `arg_specs()` - Argument declarations
-/// - `discover()` - Find new data locations
+/// Provide all four methods:
+/// - `signature()` - Name and argument specs
+/// - `discover()` - Find all locations
+/// - `data()` - Return raw bytes (or None to use stable_url)
+/// - `stable_url()` - Return a downloadable URL (or None to use data)
 ///
-/// The default implementations handle validation, materialization, and the fetch loop.
-///
-/// ## Example
-///
-/// ```ignore
-/// impl SourceFunction for MySourceFunction {
-///     fn name(&self) -> &str { "my_source" }
-///
-///     fn arg_specs(&self) -> Vec<ArgSpec> {
-///         vec![
-///             ArgSpec { name: "url", description: "Source URL", required: true, default: None },
-///         ]
-///     }
-///
-///     async fn discover(&self, args: &HashMap<String, String>, attached: &HashSet<String>, config: &BundleConfig)
-///         -> Result<Vec<DiscoveredLocation>, BundlebaseError>
-///     {
-///         // Find and return new locations...
-///     }
-/// }
-/// ```
+/// At least one of `data()` or `stable_url()` must return Some for each location.
 #[async_trait]
 pub trait SourceFunction: Send + Sync {
-    /// Name of this source function (e.g., "remote_dir", "web_scrape")
-    fn name(&self) -> &str;
+    /// Return the signature (name + arg specs) for this source function.
+    fn signature(&self) -> SourceFunctionSignature;
 
-    /// Declare arguments this function accepts.
+    /// Custom validation for function-specific arguments.
     ///
-    /// Used for documentation, validation, and potential UI generation.
-    /// Default: empty (no declared arguments).
-    fn arg_specs(&self) -> Vec<ArgSpec> {
-        vec![]
+    /// Called after standard validation (required/unknown/copy checks).
+    /// Override to add custom validation. Default does nothing.
+    fn validate_args(&self, _args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
+        Ok(())
     }
 
-    /// Validate arguments for this function.
+    /// Discover all data partitions from the source.
     ///
-    /// Default implementation checks required arguments from `arg_specs()`
-    /// and validates the `copy` argument if present.
+    /// Each returned [`DiscoveredLocation`] defines one partition of source data
+    /// that will become a block in the bundle. For file-based sources this means
+    /// listing files; for structured sources (databases, APIs) this means deciding
+    /// how to divide data into manageable, stable chunks whose `location` strings
+    /// describe the data they contain (e.g., a key range for a database table,
+    /// a cell range for a spreadsheet, a date range for time-series data).
     ///
-    /// Override to add custom validation (call default first via `default_validate_args`).
-    fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        self.default_validate_args(args)
-    }
-
-    /// Default argument validation logic.
+    /// **Partitioning should be as stable as possible.** The orchestrator matches
+    /// locations by their `location` string against previously-attached blocks.
+    /// Stable partitions let sync detect exactly which blocks have changed, which
+    /// are new, and which have been removed — without re-fetching unchanged data.
+    /// For example, a database source that partitions by ID ranges will correctly
+    /// detect that existing ranges are unchanged while new rows appear as new
+    /// partitions, whereas partitioning by row offset would cause every block to
+    /// appear changed whenever rows are inserted.
     ///
-    /// Checks required arguments, validates unknown arguments, and validates `copy` argument.
-    /// Call this from custom `validate_args` implementations.
-    fn default_validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        let specs = self.arg_specs();
-        let valid_names: HashSet<&str> = specs.iter().map(|s| s.name).collect();
-
-        // Check for required arguments
-        for spec in &specs {
-            if spec.required && !args.contains_key(spec.name) {
-                let valid_args: Vec<String> = specs
-                    .iter()
-                    .map(|s| {
-                        if s.required {
-                            format!("{} (required)", s.name)
-                        } else if let Some(default) = s.default {
-                            format!("{} (optional, default: {})", s.name, default)
-                        } else {
-                            format!("{} (optional)", s.name)
-                        }
-                    })
-                    .collect();
-                return Err(format!(
-                    "Function '{}' requires a '{}' argument. Valid arguments: {}",
-                    self.name(),
-                    spec.name,
-                    valid_args.join(", ")
-                )
-                .into());
-            }
-        }
-
-        // Check for unknown arguments
-        for key in args.keys() {
-            if !valid_names.contains(key.as_str()) {
-                let valid_args: Vec<String> = specs
-                    .iter()
-                    .map(|s| {
-                        if s.required {
-                            format!("{} (required)", s.name)
-                        } else if let Some(default) = s.default {
-                            format!("{} (optional, default: {})", s.name, default)
-                        } else {
-                            format!("{} (optional)", s.name)
-                        }
-                    })
-                    .collect();
-                return Err(format!(
-                    "Function '{}' does not accept argument '{}'. Valid arguments: {}",
-                    self.name(),
-                    key,
-                    valid_args.join(", ")
-                )
-                .into());
-            }
-        }
-
-        source_utils::validate_copy_arg(self.name(), args)
-    }
-
-    /// Discover new data locations.
-    ///
-    /// This is the core method that each source function must implement.
-    /// It should:
-    /// 1. Query/list/scrape the source to find all available locations
-    /// 2. Filter out locations already in `attached_locations`
-    /// 3. Return the new locations to be materialized
+    /// Returns ALL matching locations (including already-attached ones).
+    /// The orchestration layer handles filtering based on sync mode.
     ///
     /// # Arguments
     /// * `args` - Source configuration arguments
-    /// * `attached_locations` - Locations already attached from this source
+    /// * `attached_locations` - Locations already attached (for optional optimization)
     /// * `config` - Bundle configuration (credentials, etc.)
     async fn discover(
         &self,
@@ -367,124 +354,99 @@ pub trait SourceFunction: Send + Sync {
         config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError>;
 
-    /// Materialize a single discovered location.
+    /// Provide data for a discovered location.
     ///
-    /// Downloads/copies the data to `data_dir` and returns a MaterializeResult
-    /// containing the file reference and its SHA256 hash.
-    ///
-    /// Default implementation uses `source_utils::materialize_url` which handles
-    /// HTTP(S) via reqwest and other schemes via IOFile.
-    ///
-    /// Override for special protocols (SFTP, FTP) or custom handling.
-    async fn materialize(
+    /// Return `Ok(Some(SourceData::Arrow(batches)))` for structured data (converted to Parquet by orchestrator).
+    /// Return `Ok(Some(SourceData::RawBytes(bytes)))` for raw file bytes (written as-is).
+    /// Return `Ok(None)` if data should be fetched via `stable_url()` instead.
+    async fn data(
         &self,
         location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
-    ) -> Result<MaterializeResult, BundlebaseError> {
-        let should_copy = source_utils::should_copy(args);
-        source_utils::materialize_url(&location.url, should_copy, data_dir, config).await
-    }
+    ) -> Result<Option<SourceData>, BundlebaseError>;
 
-    /// Fetch the source: discover new data and materialize it.
+    /// Provide a stable URL where the data can be downloaded.
     ///
-    /// Default implementation orchestrates the discover/materialize loop.
-    /// Most implementations should not need to override this.
-    ///
-    /// # Arguments
-    /// * `args` - Source configuration
-    /// * `attached_locations` - Locations already attached from this source
-    /// * `data_dir` - Where to write materialized files
-    /// * `config` - Bundle configuration
-    ///
-    /// # Returns
-    /// List of materialized data ready for attachment
-    async fn fetch(
+    /// Return `Ok(Some(Url))` with the stable download URL.
+    /// Return `Ok(None)` if data is only available via `data()`.
+    async fn stable_url(
         &self,
+        location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        attached_locations: HashSet<String>,
-        data_dir: &dyn IOReadWriteDir,
-        config: Arc<BundleConfig>,
-    ) -> Result<Vec<MaterializedData>, BundlebaseError> {
-        let discovered = self.discover(args, &attached_locations, &config).await?;
+        config: &Arc<BundleConfig>,
+    ) -> Result<Option<Url>, BundlebaseError>;
+}
 
-        let progress = ProgressScope::new(
-            &format!("Fetching {} files from {}", discovered.len(), self.name()),
-            Some(discovered.len() as u64),
-        );
+/// Validate arguments against a source function signature.
+///
+/// Performs standard validation:
+/// - Checks that all required arguments are present
+/// - Checks for unknown arguments
+/// - Validates the `copy` argument if present
+/// - Calls the function's custom `validate_args` method
+pub fn validate_source_args(
+    func: &dyn SourceFunction,
+    args: &HashMap<String, String>,
+) -> Result<(), BundlebaseError> {
+    let sig = func.signature();
+    validate_args_standard(&sig, args)?;
+    func.validate_args(args)?;
+    Ok(())
+}
 
-        let mut results = Vec::with_capacity(discovered.len());
-        for (idx, location) in discovered.into_iter().enumerate() {
-            progress.update(idx as u64, Some(&location.source_location));
-            let source_url = location.url.to_string();
-            let result = self.materialize(&location, args, data_dir, &config).await?;
-            // Read version from the local file's metadata (e.g., ETag, Last-Modified).
-            // Sources that need remote version tracking (e.g., Kaggle dataset version
-            // numbers) should override fetch() to supply their own version string.
-            let version = result.file.version().await.unwrap_or_else(|_| result.hash.clone());
-            // Use relative path if file is in data_dir, otherwise full URL
-            let attach_location = data_dir
-                .relative_path(result.file.as_ref())
-                .unwrap_or_else(|_| result.file.url().to_string());
-            results.push(MaterializedData {
-                attach_location,
-                source_location: location.source_location,
-                source_url,
-                hash: result.hash,
-                version,
-            });
-        }
+/// Standard argument validation against a signature.
+///
+/// Checks required arguments, validates unknown arguments, and validates `copy` argument.
+fn validate_args_standard(
+    signature: &SourceFunctionSignature,
+    args: &HashMap<String, String>,
+) -> Result<(), BundlebaseError> {
+    let specs = &signature.arg_specs;
+    let valid_names: HashSet<&str> = specs.iter().map(|s| s.name).collect();
 
-        Ok(results)
-    }
-
-    /// Fetch the source with sync mode support.
-    ///
-    /// This method extends fetch() to support update and sync modes:
-    /// - `Add`: Only add new files (same as fetch())
-    /// - `Update`: Add new files and replace files that have changed
-    /// - `Sync`: Add new, replace changed, and remove files no longer at source
-    ///
-    /// Default implementation delegates to fetch() for Add mode and returns
-    /// an error for other modes. Source functions that support update/sync modes
-    /// should override this method.
-    ///
-    /// # Arguments
-    /// * `args` - Source configuration
-    /// * `attached_files` - Map of source_location to AttachedFileInfo for already-attached files
-    /// * `data_dir` - Where to write materialized files
-    /// * `config` - Bundle configuration
-    /// * `mode` - Sync mode to use
-    ///
-    /// # Returns
-    /// List of fetch actions (Add, Replace, Remove)
-    async fn fetch_with_mode(
-        &self,
-        args: &HashMap<String, String>,
-        attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &dyn IOReadWriteDir,
-        config: Arc<BundleConfig>,
-        mode: SyncMode,
-    ) -> Result<Vec<FetchAction>, BundlebaseError> {
-        match mode {
-            SyncMode::Add => {
-                // For Add mode, delegate to existing fetch() behavior
-                let attached_locations: HashSet<String> = attached_files.keys().cloned().collect();
-                let materialized = self.fetch(args, attached_locations, data_dir, config).await?;
-                Ok(materialized.into_iter().map(FetchAction::Add).collect())
-            }
-            SyncMode::Update | SyncMode::Sync => {
-                // Default implementation doesn't support update/sync
-                Err(format!(
-                    "Source function '{}' does not support mode '{:?}'. Only 'add' mode is supported.",
-                    self.name(),
-                    mode
-                )
-                .into())
-            }
+    // Check for required arguments
+    for spec in specs {
+        if spec.required && !args.contains_key(spec.name) {
+            let valid_args = format_arg_list(specs);
+            return Err(format!(
+                "Function '{}' requires a '{}' argument. Valid arguments: {}",
+                signature.name, spec.name, valid_args
+            )
+            .into());
         }
     }
+
+    // Check for unknown arguments
+    for key in args.keys() {
+        if !valid_names.contains(key.as_str()) {
+            let valid_args = format_arg_list(specs);
+            return Err(format!(
+                "Function '{}' does not accept argument '{}'. Valid arguments: {}",
+                signature.name, key, valid_args
+            )
+            .into());
+        }
+    }
+
+    source_utils::validate_copy_arg(&signature.name, args)
+}
+
+/// Format arg specs as a human-readable list for error messages.
+fn format_arg_list(specs: &[ArgSpec]) -> String {
+    let items: Vec<String> = specs
+        .iter()
+        .map(|s| {
+            if s.required {
+                format!("{} (required)", s.name)
+            } else if let Some(default) = s.default {
+                format!("{} (optional, default: {})", s.name, default)
+            } else {
+                format!("{} (optional)", s.name)
+            }
+        })
+        .collect();
+    items.join(", ")
 }
 
 /// Registry for source functions.
@@ -503,6 +465,7 @@ impl SourceFunctionRegistry {
         };
 
         // Register built-in functions
+        registry.register(Arc::new(IpcSourceFunction::new()));
         registry.register(Arc::new(KaggleSource));
         registry.register(Arc::new(PostgresFunction));
         registry.register(Arc::new(RemoteDirFunction));
@@ -513,11 +476,22 @@ impl SourceFunctionRegistry {
 
     /// Register a source function.
     pub fn register(&mut self, func: Arc<dyn SourceFunction>) {
-        self.functions.insert(func.name().to_string(), func);
+        self.functions.insert(func.signature().name.clone(), func);
     }
 
     /// Get a source function by name.
     pub fn get(&self, name: &str) -> Option<Arc<dyn SourceFunction>> {
+        self.functions.get(name).cloned()
+    }
+
+    /// Create a fresh instance for source functions that hold per-fetch state.
+    ///
+    /// For "ipc", returns a new `IpcSourceFunction` with its own subprocess handle.
+    /// For all other functions, returns the shared singleton (same as `get`).
+    pub fn create_instance(&self, name: &str) -> Option<Arc<dyn SourceFunction>> {
+        if name == "ipc" {
+            return Some(Arc::new(IpcSourceFunction::new()));
+        }
         self.functions.get(name).cloned()
     }
 
@@ -547,23 +521,15 @@ mod tests {
     #[test]
     fn test_registry_get_remote_dir() {
         let registry = SourceFunctionRegistry::new();
-        let func = registry.get("remote_dir").unwrap();
-        assert_eq!(func.name(), "remote_dir");
+        let func = registry.get("remote_dir").expect("remote_dir not found");
+        assert_eq!(func.signature().name, "remote_dir");
     }
 
     #[test]
     fn test_registry_get_web_scrape() {
         let registry = SourceFunctionRegistry::new();
-        let func = registry.get("web_scrape").unwrap();
-        assert_eq!(func.name(), "web_scrape");
-    }
-
-    #[test]
-    fn test_discovered_location_from_url() {
-        let url = Url::parse("https://example.com/file.parquet").unwrap();
-        let loc = DiscoveredLocation::from_url(url.clone());
-        assert_eq!(loc.url, url);
-        assert_eq!(loc.source_location, "https://example.com/file.parquet");
+        let func = registry.get("web_scrape").expect("web_scrape not found");
+        assert_eq!(func.signature().name, "web_scrape");
     }
 
     #[test]
@@ -581,15 +547,15 @@ mod tests {
     #[test]
     fn test_validate_args_unknown_arg() {
         let registry = SourceFunctionRegistry::new();
-        let func = registry.get("remote_dir").unwrap();
+        let func = registry.get("remote_dir").expect("remote_dir not found");
 
         let mut args = HashMap::new();
         args.insert("url".to_string(), "file:///test/".to_string());
         args.insert("invalid_arg".to_string(), "value".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(func.as_ref(), &args);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(err.contains("does not accept argument 'invalid_arg'"));
         assert!(err.contains("Valid arguments:"));
         assert!(err.contains("url (required)"));
@@ -598,13 +564,13 @@ mod tests {
     #[test]
     fn test_validate_args_missing_required() {
         let registry = SourceFunctionRegistry::new();
-        let func = registry.get("remote_dir").unwrap();
+        let func = registry.get("remote_dir").expect("remote_dir not found");
 
         let args = HashMap::new(); // Missing required 'url'
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(func.as_ref(), &args);
         assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
+        let err = result.err().expect("expected error").to_string();
         assert!(err.contains("requires a 'url' argument"));
         assert!(err.contains("Valid arguments:"));
     }
@@ -612,13 +578,42 @@ mod tests {
     #[test]
     fn test_validate_args_valid() {
         let registry = SourceFunctionRegistry::new();
-        let func = registry.get("remote_dir").unwrap();
+        let func = registry.get("remote_dir").expect("remote_dir not found");
 
         let mut args = HashMap::new();
         args.insert("url".to_string(), "file:///test/".to_string());
         args.insert("patterns".to_string(), "*.parquet".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(func.as_ref(), &args);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_discovered_location() {
+        let loc = DiscoveredLocation {
+            location: "subdir/file.parquet".to_string(),
+            must_copy: false,
+            format: "parquet".to_string(),
+            version: "etag-123".to_string(),
+        };
+        assert_eq!(loc.location, "subdir/file.parquet");
+        assert!(!loc.must_copy);
+        assert_eq!(loc.format, "parquet");
+        assert_eq!(loc.version, "etag-123");
+    }
+
+    #[test]
+    fn test_source_function_signature() {
+        let sig = SourceFunctionSignature {
+            name: "test".to_string(),
+            arg_specs: vec![ArgSpec {
+                name: "url",
+                description: "The URL",
+                required: true,
+                default: None,
+            }],
+        };
+        assert_eq!(sig.name, "test");
+        assert_eq!(sig.arg_specs.len(), 1);
     }
 }

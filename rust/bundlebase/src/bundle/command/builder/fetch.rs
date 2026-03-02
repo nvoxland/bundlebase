@@ -244,7 +244,7 @@ async fn fetch_from_source(
                 let op = AttachBlockOp::setup(
                     pack_id,
                     &data.attach_location,
-                    Some(&data.hash),
+                    data.hash.as_deref(),
                     Some(SourceInfo {
                         id: source_id,
                         location: data.source_location.clone(),
@@ -271,7 +271,7 @@ async fn fetch_from_source(
                 let op = AttachBlockOp::setup(
                     pack_id,
                     &data.attach_location,
-                    Some(&data.hash),
+                    data.hash.as_deref(),
                     Some(SourceInfo {
                         id: source_id,
                         location: data.source_location.clone(),

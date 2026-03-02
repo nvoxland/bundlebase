@@ -233,6 +233,16 @@ impl SftpClient {
         Ok(Bytes::from(buffer))
     }
 
+    /// Open a remote file for reading, returning an async reader.
+    pub async fn open_file(
+        &self,
+        path: &str,
+    ) -> Result<russh_sftp::client::fs::File, BundlebaseError> {
+        self.sftp.open(path).await.map_err(|e| {
+            BundlebaseError::from(format!("Failed to open remote file '{}': {}", path, e))
+        })
+    }
+
     /// Close the SFTP session and SSH connection.
     pub async fn close(self) -> Result<(), BundlebaseError> {
         self.sftp.close().await.map_err(|e| {
@@ -340,13 +350,36 @@ impl IOReadFile for SftpFile {
     async fn read_stream(
         &self,
     ) -> Result<Option<BoxStream<'static, Result<Bytes, BundlebaseError>>>, BundlebaseError> {
-        match self.read_bytes().await? {
-            Some(bytes) => {
-                let stream = futures::stream::once(async move { Ok(bytes) });
-                Ok(Some(Box::pin(stream)))
-            }
-            None => Ok(None),
+        let client = self.connect().await?;
+
+        // Check if file exists first
+        let exists = client.sftp.metadata(&self.path).await;
+        if exists.is_err() {
+            client.close().await?;
+            return Ok(None);
         }
+
+        // Stream from SFTP into a temp file
+        let mut remote_file = client.open_file(&self.path).await?;
+        let temp = tempfile::NamedTempFile::new().map_err(|e| {
+            BundlebaseError::from(format!("Failed to create temp file for SFTP download: {}", e))
+        })?;
+        let mut async_temp = tokio::fs::File::from_std(temp.reopen().map_err(|e| {
+            BundlebaseError::from(format!("Failed to reopen temp file for SFTP download: {}", e))
+        })?);
+        tokio::io::copy(&mut remote_file, &mut async_temp).await.map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to download SFTP file '{}': {}",
+                self.path, e
+            ))
+        })?;
+
+        client.close().await?;
+
+        let stream = crate::source::source_utils::stream_from_temp_file(temp);
+        Ok(Some(Box::pin(futures::StreamExt::map(stream, |r| {
+            r.map_err(|e| BundlebaseError::from(format!("Failed to read temp file: {}", e)))
+        }))))
     }
 
     async fn metadata(&self) -> Result<Option<FileInfo>, BundlebaseError> {
@@ -500,8 +533,7 @@ impl IOFactory for SftpIOFactory {
     }
 
     fn supports_streaming_read(&self) -> bool {
-        // SFTP reads entire file into memory before returning a stream
-        false
+        true
     }
 
     fn supports_versioning(&self) -> bool {

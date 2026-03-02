@@ -92,6 +92,72 @@ impl Debug for FtpFile {
 }
 
 impl FtpFile {
+    /// Download the file to a temp file by streaming from FTP, returning the temp file.
+    pub async fn download_to_temp_file(
+        &self,
+    ) -> Result<Option<tempfile::NamedTempFile>, BundlebaseError> {
+        let mut stream = self.connect().await?;
+
+        let result = stream.retr_as_stream(&self.path).await;
+
+        match result {
+            Ok(mut data_stream) => {
+                let temp = tempfile::NamedTempFile::new().map_err(|e| {
+                    BundlebaseError::from(format!(
+                        "Failed to create temp file for FTP download: {}",
+                        e
+                    ))
+                })?;
+                let mut async_temp =
+                    tokio::fs::File::from_std(temp.reopen().map_err(|e| {
+                        BundlebaseError::from(format!(
+                            "Failed to reopen temp file for FTP download: {}",
+                            e
+                        ))
+                    })?);
+                tokio::io::copy(&mut data_stream, &mut async_temp)
+                    .await
+                    .map_err(|e| {
+                        BundlebaseError::from(format!(
+                            "Failed to download FTP file '{}': {}",
+                            self.path, e
+                        ))
+                    })?;
+
+                stream
+                    .finalize_retr_stream(data_stream)
+                    .await
+                    .map_err(|e| {
+                        BundlebaseError::from(format!(
+                            "Failed to finalize FTP download for '{}': {}",
+                            self.path, e
+                        ))
+                    })?;
+                if let Err(e) = stream.quit().await {
+                    debug!("Error closing FTP connection: {}", e);
+                }
+                Ok(Some(temp))
+            }
+            Err(e) => {
+                if let Err(e) = stream.quit().await {
+                    debug!("Error closing FTP connection: {}", e);
+                }
+                let err_str = e.to_string().to_lowercase();
+                if err_str.contains("550")
+                    || err_str.contains("not found")
+                    || err_str.contains("no such file")
+                {
+                    Ok(None)
+                } else {
+                    Err(
+                        format!("Failed to download FTP file '{}': {}", self.path, e)
+                            .into(),
+                    )
+                }
+            }
+        }
+    }
+
     /// Create an FtpFile from a URL, resolving credentials from config.
     pub fn from_url(url: &Url, config: Arc<BundleConfig>) -> Result<Self, BundlebaseError> {
         let (host, port, path) = parse_ftp_url(url)?;
@@ -192,11 +258,14 @@ impl IOReadFile for FtpFile {
     async fn read_stream(
         &self,
     ) -> Result<Option<BoxStream<'static, Result<Bytes, BundlebaseError>>>, BundlebaseError> {
-        // FTP doesn't have native streaming support, read all bytes and wrap in stream
-        match self.read_bytes().await? {
-            Some(bytes) => {
-                let stream = futures::stream::once(async move { Ok(bytes) });
-                Ok(Some(Box::pin(stream)))
+        match self.download_to_temp_file().await? {
+            Some(temp) => {
+                let stream = crate::source::source_utils::stream_from_temp_file(temp);
+                Ok(Some(Box::pin(futures::StreamExt::map(stream, |r| {
+                    r.map_err(|e| {
+                        BundlebaseError::from(format!("Failed to read temp file: {}", e))
+                    })
+                }))))
             }
             None => Ok(None),
         }
@@ -418,8 +487,7 @@ impl IOFactory for FtpIOFactory {
     }
 
     fn supports_streaming_read(&self) -> bool {
-        // FTP reads entire file into memory before returning a stream
-        false
+        true
     }
 
     fn supports_versioning(&self) -> bool {

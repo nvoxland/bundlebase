@@ -4,17 +4,18 @@
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
 use super::source_function::{
-    ArgSpec, AttachedFileInfo, DiscoveredLocation, FetchAction, SourceFunction,
+    ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
-use super::SyncMode;
-use super::source_utils::{self, MaterializeResult};
+use super::source_utils;
+use crate::io::file::IOReadFile;
 use crate::io::plugin::ftp::FtpFile;
 use crate::io::plugin::object_store::ObjectStoreFile;
-use crate::io::IOReadWriteDir;
 use crate::io::plugin::sftp::{parse_sftp_url, SftpClient};
-use crate::io::{io_registry, IOReadFile};
+use crate::io::io_registry;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
+use bytes::Bytes;
+use futures::stream::BoxStream;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
@@ -35,54 +36,53 @@ pub struct RemoteDirFunction;
 
 #[async_trait]
 impl SourceFunction for RemoteDirFunction {
-    fn name(&self) -> &str {
-        "remote_dir"
-    }
-
-    fn arg_specs(&self) -> Vec<ArgSpec> {
-        vec![
-            ArgSpec {
-                name: "url",
-                description: "The directory URL to list (e.g., s3://bucket/data/)",
-                required: true,
-                default: None,
-            },
-            ArgSpec {
-                name: "patterns",
-                description: "Comma-separated glob patterns to filter files",
-                required: false,
-                default: Some("**/*"),
-            },
-            ArgSpec {
-                name: "copy",
-                description: "Whether to copy files into bundle's data directory",
-                required: false,
-                default: Some("true"),
-            },
-            ArgSpec {
-                name: "key_path",
-                description: "SSH key path for SFTP sources",
-                required: false,
-                default: None,
-            },
-        ]
+    fn signature(&self) -> SourceFunctionSignature {
+        SourceFunctionSignature {
+            name: "remote_dir".to_string(),
+            arg_specs: vec![
+                ArgSpec {
+                    name: "url",
+                    description: "The directory URL to list (e.g., s3://bucket/data/)",
+                    required: true,
+                    default: None,
+                },
+                ArgSpec {
+                    name: "patterns",
+                    description: "Comma-separated glob patterns to filter files",
+                    required: false,
+                    default: Some("**/*"),
+                },
+                ArgSpec {
+                    name: "copy",
+                    description: "Whether to copy files into bundle's data directory",
+                    required: false,
+                    default: Some("true"),
+                },
+                ArgSpec {
+                    name: "key_path",
+                    description: "SSH key path for SFTP sources",
+                    required: false,
+                    default: None,
+                },
+            ],
+        }
     }
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        self.default_validate_args(args)?;
         // Validate URL is parseable
-        source_utils::require_url(args, self.name())?;
+        source_utils::require_url(args, "remote_dir")?;
         Ok(())
     }
 
     async fn discover(
         &self,
         args: &HashMap<String, String>,
-        attached_locations: &HashSet<String>,
+        _attached_locations: &HashSet<String>,
         config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let base_url = source_utils::require_url(args, self.name())?;
+        let base_url = source_utils::require_url(args, "remote_dir")?;
         let patterns = source_utils::get_patterns(args)?;
+        let must_copy = Self::must_copy(&base_url);
 
         // Use IORegistry to create lister for any URL scheme
         let lister = io_registry()
@@ -90,110 +90,81 @@ impl SourceFunction for RemoteDirFunction {
             .await?;
         let all_files = lister.list_files().await?;
 
-        // Filter files by pattern and already-attached status
-        // Use relative path as source_location (relative to base_url)
-        let locations: Vec<DiscoveredLocation> = all_files
-            .into_iter()
-            .filter_map(|file| {
-                let relative_path = Self::relative_path(&base_url, &file.url);
-                // Check pattern match
-                if !patterns.iter().any(|pattern| pattern.matches(&relative_path)) {
-                    return None;
-                }
-                // Check if already attached (by relative path)
-                if attached_locations.contains(&relative_path) {
-                    return None;
-                }
-                Some(DiscoveredLocation {
-                    url: file.url,
-                    source_location: relative_path,
-                })
-            })
-            .collect();
+        let mut locations = Vec::new();
+        for file in all_files {
+            let relative_path = Self::relative_path(&base_url, &file.url);
+            // Check pattern match
+            if !patterns
+                .iter()
+                .any(|pattern| pattern.matches(&relative_path))
+            {
+                continue;
+            }
+
+            // Get format from file extension
+            let format = relative_path
+                .rsplit('.')
+                .next()
+                .unwrap_or("dat")
+                .to_string();
+
+            // Read version from remote file
+            let version = Self::read_remote_version(&file.url, config).await
+                .unwrap_or_else(|_| "unknown".to_string());
+
+            locations.push(DiscoveredLocation {
+                location: relative_path,
+                must_copy,
+                format,
+                version,
+            });
+        }
 
         Ok(locations)
     }
 
-    async fn materialize(
+    async fn data(
         &self,
         location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        data_dir: &dyn IOReadWriteDir,
         config: &Arc<BundleConfig>,
-    ) -> Result<MaterializeResult, BundlebaseError> {
-        let should_copy = source_utils::should_copy(args);
-        let key_path = args.get("key_path").map(|s| s.as_str());
+    ) -> Result<Option<SourceData>, BundlebaseError> {
+        let base_url = source_utils::require_url(args, "remote_dir")?;
+        let scheme = base_url.scheme();
 
-        // Delegate to internal method that handles special protocols
-        self.materialize_url(&location.url, should_copy, key_path, data_dir, config)
-            .await
+        // Only provide data directly for special protocols (SFTP, FTP)
+        match scheme {
+            "sftp" => {
+                let file_url = Self::full_url(&base_url, &location.location)?;
+                let key_path = args.get("key_path").map(|s| s.as_str());
+                let stream = Self::download_sftp_stream(&file_url, key_path).await?;
+                Ok(Some(SourceData::RawBytes(stream)))
+            }
+            "ftp" => {
+                let file_url = Self::full_url(&base_url, &location.location)?;
+                let stream = Self::download_ftp_stream(&file_url, config).await?;
+                Ok(Some(SourceData::RawBytes(stream)))
+            }
+            _ => Ok(None),
+        }
     }
 
-    async fn fetch_with_mode(
+    async fn stable_url(
         &self,
+        location: &DiscoveredLocation,
         args: &HashMap<String, String>,
-        attached_files: &HashMap<String, AttachedFileInfo>,
-        data_dir: &dyn IOReadWriteDir,
-        config: Arc<BundleConfig>,
-        mode: SyncMode,
-    ) -> Result<Vec<FetchAction>, BundlebaseError> {
-        let base_url = source_utils::require_url(args, self.name())?;
-        let patterns = source_utils::get_patterns(args)?;
+        _config: &Arc<BundleConfig>,
+    ) -> Result<Option<Url>, BundlebaseError> {
+        let base_url = source_utils::require_url(args, "remote_dir")?;
 
-        // List all files from the remote directory
-        let lister = io_registry()
-            .create_lister(&base_url, config.clone())
-            .await?;
-        let all_files = lister.list_files().await?;
+        // No stable URL for special protocols (handled by data())
+        if Self::must_copy(&base_url) {
+            return Ok(None);
+        }
 
-        // Filter files by pattern and convert to DiscoveredLocation
-        // Use relative path as source_location (relative to base_url)
-        let discovered: Vec<DiscoveredLocation> = all_files
-            .into_iter()
-            .filter_map(|file| {
-                let relative_path = Self::relative_path(&base_url, &file.url);
-                // Check pattern match
-                if !patterns.iter().any(|pattern| pattern.matches(&relative_path)) {
-                    return None;
-                }
-                Some(DiscoveredLocation {
-                    url: file.url,
-                    source_location: relative_path,
-                })
-            })
-            .collect();
+        let file_url = Self::full_url(&base_url, &location.location)?;
 
-        // Use shared sync logic
-        let config_for_version = config.clone();
-        let should_copy = source_utils::should_copy(args);
-        let key_path = args.get("key_path").cloned();
-        let config_for_materialize = config.clone();
-
-        source_utils::process_sync_mode(
-            discovered,
-            attached_files,
-            data_dir,
-            mode,
-            |url| {
-                let cfg = config_for_version.clone();
-                Box::pin(async move { Self::read_remote_version(url, &cfg).await })
-            },
-            |loc| {
-                let cfg = config_for_materialize.clone();
-                let kp = key_path.clone();
-                async move {
-                    Self::materialize_url_static(
-                        &loc.url,
-                        should_copy,
-                        kp.as_deref(),
-                        data_dir,
-                        &cfg,
-                    )
-                    .await
-                }
-            },
-        )
-        .await
+        Ok(Some(file_url))
     }
 }
 
@@ -201,7 +172,10 @@ impl RemoteDirFunction {
     /// Read the version string from a remote URL.
     ///
     /// Uses IOFile to get version (ETag/S3 version/mtime hash) from the remote file.
-    async fn read_remote_version(url: &Url, config: &Arc<BundleConfig>) -> Result<String, BundlebaseError> {
+    async fn read_remote_version(
+        url: &Url,
+        config: &Arc<BundleConfig>,
+    ) -> Result<String, BundlebaseError> {
         let io_file = ObjectStoreFile::from_url(url, config.clone())?;
         io_file.version().await
     }
@@ -218,61 +192,23 @@ impl RemoteDirFunction {
         }
     }
 
-    /// Materialize a file to the data directory (static version for use in closures).
+    /// Reconstruct a full URL from a base URL and a relative location path.
     ///
-    /// Handles special protocols (SFTP, FTP) that require custom download logic,
-    /// and delegates to standard utilities for other schemes.
-    /// Returns MaterializeResult containing the file and its SHA256 hash.
-    async fn materialize_url_static(
-        url: &Url,
-        should_copy: bool,
-        key_path: Option<&str>,
-        data_dir: &dyn IOReadWriteDir,
-        config: &Arc<BundleConfig>,
-    ) -> Result<MaterializeResult, BundlebaseError> {
-        if !should_copy {
-            // For non-copied files, compute the hash by streaming
-            let file: Box<dyn IOReadFile> = Box::new(ObjectStoreFile::from_url(url, config.clone())?);
-            let hash = file.compute_hash().await?;
-            return Ok(MaterializeResult { file, hash });
-        }
-
-        let scheme = url.scheme();
-
-        // Handle special protocols that need custom download logic
-        match scheme {
-            "sftp" => Self::download_sftp_static(url, key_path, data_dir).await,
-            "ftp" => Self::download_ftp_static(url, data_dir, config).await,
-            _ => {
-                // Use standard materialization for other schemes
-                source_utils::materialize_url(url, true, data_dir, config).await
-            }
-        }
+    /// Unlike `Url::join()`, this always appends the relative path to the base path
+    /// regardless of whether the base URL ends with a slash.
+    fn full_url(base_url: &Url, relative_path: &str) -> Result<Url, BundlebaseError> {
+        let mut url = base_url.clone();
+        let base_path = url.path().to_string();
+        let separator = if base_path.ends_with('/') { "" } else { "/" };
+        url.set_path(&format!("{}{}{}", base_path, separator, relative_path));
+        Ok(url)
     }
 
-    /// Materialize a file to the data directory.
-    ///
-    /// Handles special protocols (SFTP, FTP) that require custom download logic,
-    /// and delegates to standard utilities for other schemes.
-    /// Returns MaterializeResult containing the file and its SHA256 hash.
-    async fn materialize_url(
-        &self,
-        url: &Url,
-        should_copy: bool,
-        key_path: Option<&str>,
-        data_dir: &dyn IOReadWriteDir,
-        config: &Arc<BundleConfig>,
-    ) -> Result<MaterializeResult, BundlebaseError> {
-        Self::materialize_url_static(url, should_copy, key_path, data_dir, config).await
-    }
-
-    /// Download a file via SFTP (static version).
-    /// Returns MaterializeResult containing the file and its SHA256 hash.
-    async fn download_sftp_static(
+    /// Download a file via SFTP to a temp file, returning a byte stream.
+    async fn download_sftp_stream(
         url: &Url,
         key_path: Option<&str>,
-        data_dir: &dyn IOReadWriteDir,
-    ) -> Result<MaterializeResult, BundlebaseError> {
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, BundlebaseError> {
         let (user, host, port, remote_path) = parse_sftp_url(url)?;
         let key_path_str = key_path.ok_or_else(|| {
             BundlebaseError::from(
@@ -284,37 +220,41 @@ impl RemoteDirFunction {
         let sftp =
             SftpClient::connect(&host, port, &user, std::path::Path::new(&key_path_expanded))
                 .await?;
-        let data = sftp.read_file(&remote_path).await?;
-        sftp.close().await?;
 
-        // Extract filename and save to data_dir
-        let filename = std::path::Path::new(&remote_path)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "data".to_string());
-
-        let result = source_utils::download_to_data_dir(data, &filename, data_dir).await?;
-        Ok(MaterializeResult {
-            file: result.file,
-            hash: result.hash,
-        })
-    }
-
-    /// Download a file via FTP.
-    /// Returns MaterializeResult containing the file and its SHA256 hash.
-    async fn download_ftp_static(url: &Url, data_dir: &dyn IOReadWriteDir, config: &Arc<BundleConfig>) -> Result<MaterializeResult, BundlebaseError> {
-        let ftp_file = FtpFile::from_url(url, config.clone())?;
-        let data = ftp_file.read_bytes().await?.ok_or_else(|| {
-            BundlebaseError::from(format!("FTP file not found: {}", url))
+        // Stream from SFTP into a temp file
+        let mut remote_file = sftp.open_file(&remote_path).await?;
+        let temp = tempfile::NamedTempFile::new().map_err(|e| {
+            BundlebaseError::from(format!("Failed to create temp file for SFTP download: {}", e))
+        })?;
+        let mut async_temp = tokio::fs::File::from_std(temp.reopen().map_err(|e| {
+            BundlebaseError::from(format!("Failed to reopen temp file for SFTP download: {}", e))
+        })?);
+        tokio::io::copy(&mut remote_file, &mut async_temp).await.map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to download SFTP file '{}': {}",
+                remote_path, e
+            ))
         })?;
 
-        let filename = source_utils::filename_from_url(url);
-        let result = source_utils::download_to_data_dir(data, &filename, data_dir).await?;
-        Ok(MaterializeResult {
-            file: result.file,
-            hash: result.hash,
-        })
+        sftp.close().await?;
+
+        Ok(source_utils::stream_from_temp_file(temp))
+    }
+
+    /// Download a file via FTP to a temp file, returning a byte stream.
+    async fn download_ftp_stream(
+        url: &Url,
+        config: &Arc<BundleConfig>,
+    ) -> Result<BoxStream<'static, Result<Bytes, std::io::Error>>, BundlebaseError> {
+        let ftp_file = FtpFile::from_url(url, config.clone())?;
+        let temp = ftp_file.download_to_temp_file().await?.ok_or_else(|| {
+            BundlebaseError::from(format!("FTP file not found: {}", url))
+        })?;
+        Ok(source_utils::stream_from_temp_file(temp))
+    }
+
+    fn must_copy(base_url: &Url) -> bool {
+        base_url.scheme() == "sftp" || base_url.scheme() == "ftp"
     }
 }
 
@@ -323,20 +263,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_name() {
+    fn test_signature() {
         let func = RemoteDirFunction;
-        assert_eq!(func.name(), "remote_dir");
-    }
-
-    #[test]
-    fn test_arg_specs() {
-        let func = RemoteDirFunction;
-        let specs = func.arg_specs();
-        assert_eq!(specs.len(), 4);
-        assert!(specs.iter().any(|s| s.name == "url" && s.required));
-        assert!(specs.iter().any(|s| s.name == "patterns" && !s.required));
-        assert!(specs.iter().any(|s| s.name == "copy" && !s.required));
-        assert!(specs.iter().any(|s| s.name == "key_path" && !s.required));
+        let sig = func.signature();
+        assert_eq!(sig.name, "remote_dir");
+        assert_eq!(sig.arg_specs.len(), 4);
+        assert!(sig.arg_specs.iter().any(|s| s.name == "url" && s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "patterns" && !s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "copy" && !s.required));
+        assert!(sig
+            .arg_specs
+            .iter()
+            .any(|s| s.name == "key_path" && !s.required));
     }
 
     #[test]
@@ -348,19 +292,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_args_missing_url() {
-        let func = RemoteDirFunction;
-        let args = HashMap::new();
-
-        let result = func.validate_args(&args);
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("requires a 'url' argument"));
-    }
-
-    #[test]
     fn test_validate_args_invalid_url() {
         let func = RemoteDirFunction;
         let mut args = HashMap::new();
@@ -368,13 +299,17 @@ mod tests {
 
         let result = func.validate_args(&args);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid URL"));
+        assert!(result
+            .err()
+            .expect("expected error")
+            .to_string()
+            .contains("Invalid URL"));
     }
 
     #[test]
     fn test_relative_path() {
-        let source_url = Url::parse("s3://bucket/data/").unwrap();
-        let file_url = Url::parse("s3://bucket/data/subdir/file.parquet").unwrap();
+        let source_url = Url::parse("s3://bucket/data/").expect("valid url");
+        let file_url = Url::parse("s3://bucket/data/subdir/file.parquet").expect("valid url");
 
         let relative = RemoteDirFunction::relative_path(&source_url, &file_url);
         assert_eq!(relative, "subdir/file.parquet");
@@ -382,8 +317,8 @@ mod tests {
 
     #[test]
     fn test_relative_path_root() {
-        let source_url = Url::parse("s3://bucket/data/").unwrap();
-        let file_url = Url::parse("s3://bucket/data/file.parquet").unwrap();
+        let source_url = Url::parse("s3://bucket/data/").expect("valid url");
+        let file_url = Url::parse("s3://bucket/data/file.parquet").expect("valid url");
 
         let relative = RemoteDirFunction::relative_path(&source_url, &file_url);
         assert_eq!(relative, "file.parquet");
@@ -395,6 +330,7 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
         args.insert("copy".to_string(), "true".to_string());
+        // Note: full validation including copy is done via validate_source_args
         assert!(func.validate_args(&args).is_ok());
     }
 
@@ -408,17 +344,43 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_args_copy_invalid() {
+    fn test_validate_source_args_copy_invalid() {
+        use super::super::source_function::validate_source_args;
         let func = RemoteDirFunction;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
         args.insert("copy".to_string(), "invalid".to_string());
 
-        let result = func.validate_args(&args);
+        let result = validate_source_args(&func, &args);
         assert!(result.is_err());
         assert!(result
-            .unwrap_err()
+            .err()
+            .expect("expected error")
             .to_string()
             .contains("'copy' argument must be 'true' or 'false'"));
+    }
+
+    #[test]
+    fn test_validate_source_args_missing_url() {
+        use super::super::source_function::validate_source_args;
+        let func = RemoteDirFunction;
+        let args = HashMap::new();
+
+        let result = validate_source_args(&func, &args);
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .expect("expected error")
+            .to_string()
+            .contains("requires a 'url' argument"));
+    }
+
+    #[test]
+    fn test_validate_source_args_valid() {
+        use super::super::source_function::validate_source_args;
+        let func = RemoteDirFunction;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/data/".to_string());
+        assert!(validate_source_args(&func, &args).is_ok());
     }
 }
