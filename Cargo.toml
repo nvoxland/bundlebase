@@ -3,6 +3,7 @@ members = [
     "rust/bundlebase",
     "rust/bundlebase-python",
     "rust/bundlebase-cli",
+    "sdk/rust",
 ]
 resolver = "2"
 

@@ -31,6 +31,9 @@ test_data/*.dbc
 *.dcon
 *.dbc
 
+# Go compiled binaries
+rust/bundlebase/tests/fixtures/go_test_source
+
 # OS
 .DS_Store
 *.swp

@@ -55,6 +55,7 @@ struct JsonRpcError {
 ///
 /// Supported formats:
 /// - `python:script.py`    → `["python", "script.py"]`
+/// - `java:my.jar`         → `["java", "-jar", "my.jar"]`
 /// - `docker:image`        → `["docker", "run", "-i", "--rm", "image"]`
 /// - `my-command arg1 arg2` → `["my-command", "arg1", "arg2"]` (whitespace split)
 fn parse_call(call: &str) -> Result<Vec<String>, BundlebaseError> {
@@ -69,6 +70,16 @@ fn parse_call(call: &str) -> Result<Vec<String>, BundlebaseError> {
             return Err("python: call requires a script path".into());
         }
         Ok(vec!["python".to_string(), script.to_string()])
+    } else if let Some(jar) = call.strip_prefix("java:") {
+        let jar = jar.trim();
+        if jar.is_empty() {
+            return Err("java: call requires a JAR path".into());
+        }
+        Ok(vec![
+            "java".to_string(),
+            "-jar".to_string(),
+            jar.to_string(),
+        ])
     } else if let Some(image) = call.strip_prefix("docker:") {
         let image = image.trim();
         if image.is_empty() {
@@ -504,6 +515,18 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_call_java() {
+        let result = parse_call("java:my-source.jar").expect("java: prefix should parse");
+        assert_eq!(result, vec!["java", "-jar", "my-source.jar"]);
+    }
+
+    #[test]
+    fn test_parse_call_java_empty_jar() {
+        let result = parse_call("java:");
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_parse_call_docker_empty_image() {
         let result = parse_call("docker:");
         assert!(result.is_err());
@@ -537,11 +560,25 @@ mod tests {
         path
     }
 
+    fn poetry_python() -> String {
+        // Use poetry's virtualenv python so pyarrow and bundlebase_sdk are available.
+        let output = std::process::Command::new("poetry")
+            .args(["env", "info", "--executable"])
+            .current_dir(env!("CARGO_MANIFEST_DIR").to_string() + "/../..")
+            .output()
+            .expect("poetry should be available");
+        String::from_utf8(output.stdout)
+            .expect("valid utf-8")
+            .trim()
+            .to_string()
+    }
+
     fn make_ipc_args() -> HashMap<String, String> {
+        let python = poetry_python();
         let mut args = HashMap::new();
         args.insert(
             "call".to_string(),
-            format!("python:{}", mock_script_path().display()),
+            format!("{} {}", python, mock_script_path().display()),
         );
         args
     }
@@ -655,11 +692,7 @@ mod tests {
     #[tokio::test]
     async fn test_subprocess_error_handling() {
         let func = IpcSourceFunction::new();
-        let mut args = HashMap::new();
-        args.insert(
-            "call".to_string(),
-            format!("python:{}", mock_script_path().display()),
-        );
+        let args = make_ipc_args();
 
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
 
@@ -678,5 +711,172 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.expect_err("unknown method should return error").to_string();
         assert!(err_msg.contains("Method not found"));
+    }
+
+    // --- Go SDK integration tests ---
+
+    fn go_binary_path() -> PathBuf {
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("tests/fixtures/go_test_source");
+        path
+    }
+
+    fn make_go_ipc_args() -> HashMap<String, String> {
+        let mut args = HashMap::new();
+        args.insert(
+            "call".to_string(),
+            go_binary_path().display().to_string(),
+        );
+        args
+    }
+
+    #[tokio::test]
+    async fn test_discover_via_go_subprocess() {
+        let binary = go_binary_path();
+        if !binary.exists() {
+            eprintln!("Skipping Go integration test: binary not found at {:?}", binary);
+            return;
+        }
+        let func = IpcSourceFunction::new();
+        let args = make_go_ipc_args();
+        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+
+        let locations = func
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .expect("discover should succeed");
+
+        assert_eq!(locations.len(), 2);
+        assert_eq!(locations[0].location, "test_file_1.parquet");
+        assert_eq!(locations[0].format, "parquet");
+        assert_eq!(locations[0].version, "v1");
+        assert!(locations[0].must_copy);
+        assert_eq!(locations[1].location, "test_file_2.parquet");
+    }
+
+    #[tokio::test]
+    async fn test_data_via_go_subprocess() {
+        let binary = go_binary_path();
+        if !binary.exists() {
+            eprintln!("Skipping Go integration test: binary not found at {:?}", binary);
+            return;
+        }
+        use futures::StreamExt;
+
+        let func = IpcSourceFunction::new();
+        let args = make_go_ipc_args();
+        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+
+        let locations = func
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .expect("discover should succeed");
+
+        let data = func
+            .data(&locations[0], &args, &config)
+            .await
+            .expect("data should succeed");
+
+        assert!(data.is_some());
+        match data.expect("data should be Some") {
+            SourceData::Arrow(mut batch_stream) => {
+                let mut total_rows = 0;
+                while let Some(batch_result) = batch_stream.next().await {
+                    let batch = batch_result.expect("batch should be Ok");
+                    total_rows += batch.num_rows();
+                }
+                assert_eq!(total_rows, 3);
+            }
+            SourceData::RawBytes(_) => panic!("Expected Arrow data, got RawBytes"),
+        }
+    }
+
+    // --- Rust SDK integration tests ---
+
+    fn rust_binary_path() -> PathBuf {
+        // The example binary is built in the workspace target directory
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.pop(); // up from rust/bundlebase to rust/
+        path.pop(); // up from rust/ to workspace root
+        path.push("target/debug/examples/test_source");
+        path
+    }
+
+    fn make_rust_ipc_args() -> HashMap<String, String> {
+        let mut args = HashMap::new();
+        args.insert(
+            "call".to_string(),
+            rust_binary_path().display().to_string(),
+        );
+        args
+    }
+
+    #[tokio::test]
+    async fn test_discover_via_rust_subprocess() {
+        let binary = rust_binary_path();
+        if !binary.exists() {
+            eprintln!(
+                "Skipping Rust SDK integration test: binary not found at {:?}. \
+                 Build with: cargo build --example test_source -p bundlebase-sdk",
+                binary
+            );
+            return;
+        }
+        let func = IpcSourceFunction::new();
+        let args = make_rust_ipc_args();
+        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+
+        let locations = func
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .expect("discover should succeed");
+
+        assert_eq!(locations.len(), 2);
+        assert_eq!(locations[0].location, "test_file_1.parquet");
+        assert_eq!(locations[0].format, "parquet");
+        assert_eq!(locations[0].version, "v1");
+        assert!(locations[0].must_copy);
+        assert_eq!(locations[1].location, "test_file_2.parquet");
+    }
+
+    #[tokio::test]
+    async fn test_data_via_rust_subprocess() {
+        let binary = rust_binary_path();
+        if !binary.exists() {
+            eprintln!(
+                "Skipping Rust SDK integration test: binary not found at {:?}. \
+                 Build with: cargo build --example test_source -p bundlebase-sdk",
+                binary
+            );
+            return;
+        }
+        use futures::StreamExt;
+
+        let func = IpcSourceFunction::new();
+        let args = make_rust_ipc_args();
+        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+
+        let locations = func
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .expect("discover should succeed");
+
+        let data = func
+            .data(&locations[0], &args, &config)
+            .await
+            .expect("data should succeed");
+
+        assert!(data.is_some());
+        match data.expect("data should be Some") {
+            SourceData::Arrow(mut batch_stream) => {
+                let mut total_rows = 0;
+                while let Some(batch_result) = batch_stream.next().await {
+                    let batch = batch_result.expect("batch should be Ok");
+                    total_rows += batch.num_rows();
+                }
+                assert_eq!(total_rows, 3);
+            }
+            SourceData::RawBytes(_) => panic!("Expected Arrow data, got RawBytes"),
+        }
     }
 }
