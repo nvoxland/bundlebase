@@ -1,0 +1,17 @@
+[project]
+name = "bundlebase-sdk"
+version = "0.1.0"
+description = "SDK for building Bundlebase custom source functions"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+dependencies = [
+    "pyarrow>=14.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bundlebase_sdk*"]

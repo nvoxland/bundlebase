@@ -285,6 +285,41 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
     CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')
     ```
 
+### ipc (Custom Source Functions)
+
+Delegates data discovery and retrieval to an external subprocess. This lets you write source functions in Python, Go, Java, or any language that speaks the JSON-RPC 2.0 + Arrow IPC protocol.
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `call` | Yes | Command to run (see [call syntax](custom-sources/#call-syntax)) |
+| `copy` | No | `"true"` to copy files into bundle (default), `"false"` to reference in place |
+
+=== "Async API"
+
+    ```python
+    bundle = await bundle.create_source("ipc", {
+        "call": "python:my_source.py"
+    })
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle = bundle.create_source("ipc", {
+        "call": "python:my_source.py"
+    })
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE ipc WITH (call = 'python:my_source.py')
+    ```
+
+See [Custom Source Functions](custom-sources/) for SDKs, full examples, and protocol reference.
+
 ## Fetching Data
 
 ### fetch()
