@@ -1,17 +1,18 @@
-[project]
+[tool.poetry]
 name = "bundlebase-sdk"
 version = "0.1.0"
 description = "SDK for building Bundlebase custom source functions"
 readme = "README.md"
-license = {text = "Apache-2.0"}
-requires-python = ">=3.10"
-dependencies = [
-    "pyarrow>=14.0.0",
-]
+license = "Apache-2.0"
+packages = [{include = "bundlebase_sdk"}]
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+pyarrow = ">=14.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0"
 
 [build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-include = ["bundlebase_sdk*"]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,8 +1,37 @@
 # Custom Source Functions
 
-Custom source functions let you write data providers in any language. Your source runs as a subprocess and communicates with Bundlebase via JSON-RPC 2.0 over stdin/stdout, with Arrow IPC for bulk data transfer.
+Custom source functions let you write data providers in any language. Bundlebase supports two modes for loading custom sources:
+
+| Mode | How It Works | Performance | Languages |
+|------|-------------|-------------|-----------|
+| **[Plugin](plugin.md)** | In-process loading (Python PyO3 or shared library `dlopen`) | Zero-copy Arrow | Python, Rust, Go, Java |
+| **IPC** | Subprocess with JSON-RPC over stdin/stdout | Serialized Arrow IPC | Any language |
+
+**Your source code is the same for both modes** — only the entry point differs. SDKs for Python, Go, Java, and Rust handle the protocol automatically.
+
+## Choosing IPC vs Plugin
+
+**Use plugin when:**
+
+- You need maximum performance (zero-copy, no serialization overhead)
+- Your source is in Python, Rust, Go, or Java
+- Your source is part of the same project
+
+**Use IPC when:**
+
+- You want process isolation (source crashes don't affect Bundlebase)
+- You're packaging your source as a Docker image
+- You're using a language without plugin SDK support
 
 ## How It Works
+
+### Plugin Mode
+
+**Python:** Source objects are called directly in-process via PyO3 — no subprocess, no serialization.
+
+**Compiled languages:** Build a shared library (`.so`/`.dylib`/`.dll`) exporting the [C ABI](plugin.md#c-abi-reference). Bundlebase `dlopen`s it and uses the Arrow C Data Interface.
+
+### IPC Mode
 
 A custom source function runs as a subprocess that Bundlebase launches and communicates with over stdin/stdout:
 
@@ -10,8 +39,6 @@ A custom source function runs as a subprocess that Bundlebase launches and commu
 2. **Data** — For each location, Bundlebase sends a `data` call. Your source returns Arrow record batches.
 3. **Stable URL** (optional) — Bundlebase may send a `stable_url` call to check if a location has a cached URL.
 4. **Shutdown** — Bundlebase sends a `shutdown` call and the subprocess exits.
-
-SDKs for Python, Go, Java, and Rust handle the protocol automatically — you just implement the business logic.
 
 ## Key Concepts
 
@@ -36,7 +63,26 @@ Any extra key-value arguments passed in the source configuration are forwarded t
 
 ## Using a Custom Source
 
-Register your source function with `create_source("ipc", ...)`:
+### Plugin Mode (Recommended for Python)
+
+```python
+import bundlebase.sync as bb
+from my_source import MySource
+
+# Python plugin — zero-copy, in-process
+bundle = bb.create("my/data")
+bundle.create_source_plugin(MySource())
+results = bundle.fetch("base", "add")
+```
+
+### Plugin Mode (Shared Library)
+
+```python
+# Rust, Go, or Java — zero-copy via dlopen
+bundle.create_source("plugin", {"call": "lib:./target/release/libmy_source.so"})
+```
+
+### IPC Mode (Subprocess)
 
 === "Async API"
 
@@ -94,7 +140,7 @@ The container receives JSON-RPC on stdin and writes responses to stdout.
 
 ## SDK Quick Start
 
-Each SDK handles the protocol for you. Implement the source interface, call `serve`, and point Bundlebase at your script or binary.
+Each SDK handles the protocol for you. Implement the source interface and choose your entry point — `serve()` for IPC mode or the plugin export for zero-copy mode.
 
 === "Python"
 

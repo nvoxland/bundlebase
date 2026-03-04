@@ -9,11 +9,13 @@ import shutil
 import tempfile
 
 import maturin_import_hook
+import pyarrow as pa
 import pytest
 
 maturin_import_hook.install()
 
 import bundlebase
+from bundlebase_sdk import SourceFunction, Location, StableUrl
 from conftest import random_bundle
 
 
@@ -107,3 +109,114 @@ async def test_fetch_returns_results():
             assert len(result.removed) == 0
             assert result.total_count() == 1
             assert not result.is_empty()
+
+
+# ---- Plugin source (create_source_plugin) tests ----
+
+class SimplePluginSource(SourceFunction):
+    """A minimal plugin source for testing."""
+
+    def discover(self, attached_locations, **kwargs):
+        return [
+            Location("data1.parquet", must_copy=True, format="parquet", version="v1"),
+            Location("data2.parquet", must_copy=True, format="parquet", version="v1"),
+        ]
+
+    def data(self, location, **kwargs):
+        if location.location == "data1.parquet":
+            return pa.table({"id": [1, 2, 3], "name": ["a", "b", "c"]})
+        elif location.location == "data2.parquet":
+            return pa.table({"id": [4, 5], "name": ["d", "e"]})
+        return None
+
+
+class StableUrlPluginSource(SourceFunction):
+    """Plugin source with stable_url support."""
+
+    def discover(self, attached_locations, **kwargs):
+        return [Location("cached.parquet", version="v1")]
+
+    def data(self, location, **kwargs):
+        return pa.table({"x": [1]})
+
+    def stable_url(self, location, **kwargs):
+        return StableUrl("https://example.com/cached.parquet")
+
+
+class KwargsPluginSource(SourceFunction):
+    """Plugin source that echoes extra kwargs back."""
+
+    def discover(self, attached_locations, **kwargs):
+        name = kwargs.get("custom_key", "missing")
+        return [Location(name, version="v1")]
+
+    def data(self, location, **kwargs):
+        return pa.table({"val": [kwargs.get("custom_key", "none")]})
+
+
+@pytest.mark.asyncio
+async def test_create_source_plugin_binding():
+    """Test that create_source_plugin Python binding works."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.create_source_plugin(SimplePluginSource())
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_create_source_plugin_fetch():
+    """Test that plugin source discovers and attaches data via fetch."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.create_source_plugin(SimplePluginSource())
+    results = await c.fetch("base", "add")
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.source_function == "plugin"
+    assert len(result.added) == 2
+    assert result.total_count() == 2
+
+
+@pytest.mark.asyncio
+async def test_create_source_plugin_data():
+    """Test that data from plugin source is queryable."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.create_source_plugin(SimplePluginSource())
+    await c.fetch("base", "add")
+
+    rows = await c.num_rows()
+    assert rows == 5  # 3 from data1 + 2 from data2
+
+
+@pytest.mark.asyncio
+async def test_create_source_plugin_second_fetch_no_changes():
+    """Test that second fetch detects no new data."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.create_source_plugin(SimplePluginSource())
+
+    results1 = await c.fetch("base", "add")
+    assert results1[0].total_count() == 2
+
+    results2 = await c.fetch("base", "add")
+    assert results2[0].total_count() == 0
+    assert results2[0].is_empty()
+
+
+@pytest.mark.asyncio
+async def test_create_source_plugin_with_kwargs():
+    """Test that extra kwargs are passed to discover and data."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.create_source_plugin(KwargsPluginSource(), custom_key="hello")
+    results = await c.fetch("base", "add")
+
+    assert len(results[0].added) == 1
+    assert results[0].added[0].source_location == "hello"
+
+
+@pytest.mark.asyncio
+async def test_create_source_plugin_with_stable_url():
+    """Test that plugin source with stable_url works."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.create_source_plugin(StableUrlPluginSource())
+    results = await c.fetch("base", "add")
+
+    assert len(results[0].added) == 1

@@ -2,6 +2,7 @@
 
 mod ipc;
 pub(crate) mod kaggle;
+pub mod plugin;
 mod postgres;
 mod remote_dir;
 mod source_function;

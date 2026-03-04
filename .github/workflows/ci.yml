@@ -107,6 +107,97 @@ jobs:
             .pytest_cache/
           retention-days: 7
 
+  rust-sdk:
+    name: Rust SDK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Run Rust SDK tests
+        run: cargo test --verbose --package bundlebase-sdk
+
+  go-sdk:
+    name: Go SDK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: sdk/go/go.sum
+
+      - name: Run Go SDK tests
+        working-directory: sdk/go
+        run: go test -v ./bundlebasesdk/...
+
+  java-sdk:
+    name: Java SDK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '22'
+
+      - name: Run Java SDK tests
+        working-directory: sdk/java
+        run: mvn test -B --add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED
+
+  python-sdk:
+    name: Python SDK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: sdk/python/.venv
+          key: venv-sdk-python-${{ runner.os }}-${{ hashFiles('sdk/python/poetry.lock') }}
+          restore-keys: |
+            venv-sdk-python-${{ runner.os }}-
+
+      - name: Install Python SDK dependencies
+        working-directory: sdk/python
+        run: poetry install --no-interaction
+
+      - name: Run Python SDK tests
+        working-directory: sdk/python
+        run: poetry run pytest -v tests/
+
   build-cli:
     name: Build bundlebase-cli
     runs-on: ubuntu-latest

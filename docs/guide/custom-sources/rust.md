@@ -324,6 +324,74 @@ mod tests {
 }
 ```
 
+## Plugin Mode
+
+Build your source as a shared library for zero-copy in-process loading.
+
+### Setup
+
+Add `crate-type = ["cdylib"]` to your `Cargo.toml`:
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bundlebase-sdk = "0.7"
+arrow = "57"
+serde_json = "1"
+```
+
+### Export the Source
+
+Use the `export_source!` macro to generate the C ABI entry points:
+
+```rust
+use bundlebase_sdk::{SourceFunction, Location, export_source};
+use arrow::record_batch::RecordBatch;
+use std::collections::HashMap;
+
+struct MySource;
+
+impl SourceFunction for MySource {
+    fn discover(&self, _attached: &[String], _args: &HashMap<String, String>)
+        -> Result<Vec<Location>, Box<dyn std::error::Error>> {
+        Ok(vec![Location::new("data.parquet")])
+    }
+
+    fn data(&self, _location: &Location, _args: &HashMap<String, String>)
+        -> Result<Option<Vec<RecordBatch>>, Box<dyn std::error::Error>> {
+        // ... build and return Arrow data
+        Ok(None)
+    }
+}
+
+// Generates bundlebase_discover, bundlebase_data, bundlebase_free, bundlebase_stable_url
+export_source!(MySource);
+```
+
+### Build and Use
+
+```bash
+cargo build --release
+```
+
+```python
+bundle.create_source("plugin", {"call": "lib:target/release/libmy_source.so"})
+```
+
+### How It Works
+
+The `export_source!` macro:
+
+1. Creates a `OnceLock`-backed singleton of your source
+2. Generates `extern "C"` functions matching the [Bundlebase C ABI](plugin.md#c-abi-reference)
+3. Uses Arrow's `FFI_ArrowArrayStream` for zero-copy data export
+
+The same `SourceFunction` trait works for both plugin and IPC — switch between them by changing only the entry point (`export_source!` vs `fn main() { serve(&source) }`).
+
+See [Plugin Source Mode](plugin.md) for the full C ABI reference.
+
 ## Error Handling
 
 Errors returned from your `discover()`, `data()`, or `stable_url()` methods are caught by the SDK and returned as JSON-RPC error responses with code `-32000`. The error message is included:

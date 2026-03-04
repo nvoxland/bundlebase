@@ -270,6 +270,67 @@ public class MySourceTest {
 }
 ```
 
+## Plugin Mode
+
+Build your source as a shared library using Project Panama (Java 22+) for zero-copy in-process loading.
+
+### Requirements
+
+- **Java 22+** — uses the Foreign Function & Memory API (JEP 454)
+- GCC or Clang for compiling the thin C bootstrap
+
+### Setup
+
+Register your source with `PluginExport`:
+
+```java
+import com.bundlebase.sdk.*;
+
+public class MyNativeSource implements SourceFunction {
+    // ... implement discover() and data() as usual ...
+
+    static {
+        PluginExport.register(new MyNativeSource());
+    }
+}
+```
+
+### Build
+
+Build the Panama bridge and your Java code into a shared library:
+
+```bash
+# Build Java classes
+mvn compile
+
+# Build native shim (from sdk/java directory)
+mvn compile -Dnative
+```
+
+This produces `libbundlebase_plugin.so` in `target/`.
+
+### Use
+
+```python
+bundle.create_source("plugin", {"call": "lib:./libbundlebase_plugin.so"})
+```
+
+### How It Works
+
+The native bridge uses Project Panama's Foreign Function & Memory API for high-performance Java↔C interop:
+
+1. A thin C bootstrap (`bundlebase_plugin.c`) starts the JVM once at library load
+2. It calls `PluginExport.initialize()` — a single JNI call that registers Panama upcall stubs
+3. All subsequent `bundlebase_discover`, `bundlebase_data`, and `bundlebase_stable_url` calls route through Panama function pointers — no JNI method dispatch on the hot path
+4. Strings are allocated via `malloc()` in Java (using Panama downcalls) and freed by Bundlebase via `bundlebase_free()`
+5. Arrow data is transferred via the Arrow C Data Interface (`ArrowArrayStream`)
+
+This architecture means JNI is used only for the one-time JVM bootstrap. All data-path calls use Panama upcalls, which avoids JNI overhead (method ID lookups, string conversions in C, etc.).
+
+The same `SourceFunction` interface works for both plugin and IPC — switch between them by changing only the entry point (`PluginExport.register()` + plugin build vs `Serve.run()` + JAR).
+
+See [Plugin Source Mode](plugin.md) for the full C ABI reference.
+
 ## Error Handling
 
 Exceptions thrown in your `discover()`, `data()`, or `stableUrl()` methods are caught by the SDK and returned as JSON-RPC error responses with code `-32000`. The exception message is included:

@@ -520,6 +520,32 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def create_source_plugin(
+        self, source, pack: str = "base", **kwargs
+    ) -> "SyncBundleBuilder":
+        """Create a plugin (in-process) source from a Python SourceFunction object.
+
+        Uses zero-copy Arrow data transfer by calling the source's discover()
+        and data() methods directly in-process, instead of spawning a subprocess.
+
+        Args:
+            source: A SourceFunction instance (must have discover() and data() methods)
+            pack: Which pack to define the source for:
+                - "base" (default): The base pack
+                - A join name: A joined pack by its join name
+            **kwargs: Extra arguments forwarded to discover/data calls
+
+        Returns:
+            Self for fluent chaining
+
+        Example:
+            >>> from my_source import MySource
+            >>> bundle.create_source_plugin(MySource())
+        """
+        coro = _call_original_method(self._async, "create_source_plugin", source, pack, **kwargs)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
     def fetch(self, pack: str = "base", mode: str = "add") -> List["FetchResults"]:
         """Fetch data from sources for a pack.
 

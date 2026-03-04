@@ -30,6 +30,7 @@ parking_lot = { workspace = true }
 futures = { workspace = true }
 glob = "0.3"
 lazy_static = "1.5"
+libloading = "0.8"
 bytes = { workspace = true }
 log = "0.4"
 tracing = { workspace = true }

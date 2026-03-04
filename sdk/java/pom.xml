@@ -13,8 +13,8 @@
     <description>SDK for building Bundlebase custom source functions</description>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>22</maven.compiler.source>
+        <maven.compiler.target>22</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <arrow.version>18.1.0</arrow.version>
         <jackson.version>2.17.0</jackson.version>
@@ -43,5 +43,76 @@
             <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.apache.arrow</groupId>
+            <artifactId>arrow-c-data</artifactId>
+            <version>${arrow.version}</version>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>22</release>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <argLine>
+                        --add-opens=java.base/java.nio=ALL-UNNAMED
+                        --enable-native-access=ALL-UNNAMED
+                    </argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>plugin</id>
+            <activation>
+                <property>
+                    <name>plugin</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <execution>
+                                <id>compile-native</id>
+                                <phase>compile</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>gcc</executable>
+                                    <arguments>
+                                        <argument>-shared</argument>
+                                        <argument>-fPIC</argument>
+                                        <argument>-o</argument>
+                                        <argument>${project.build.directory}/libbundlebase_plugin.so</argument>
+                                        <argument>${project.basedir}/plugin/bundlebase_plugin.c</argument>
+                                        <argument>-I${java.home}/include</argument>
+                                        <argument>-I${java.home}/include/linux</argument>
+                                        <argument>-I${java.home}/include/darwin</argument>
+                                        <argument>-L${java.home}/lib/server</argument>
+                                        <argument>-ljvm</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

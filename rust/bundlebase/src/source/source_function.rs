@@ -17,6 +17,7 @@
 
 use super::ipc::IpcSourceFunction;
 use super::kaggle::KaggleSource;
+use super::plugin::PluginSourceFunction;
 use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
 use super::source_utils;
@@ -467,6 +468,7 @@ impl SourceFunctionRegistry {
         // Register built-in functions
         registry.register(Arc::new(IpcSourceFunction::new()));
         registry.register(Arc::new(KaggleSource));
+        registry.register(Arc::new(PluginSourceFunction::new()));
         registry.register(Arc::new(PostgresFunction));
         registry.register(Arc::new(RemoteDirFunction));
         registry.register(Arc::new(WebScrapeFunction));
@@ -489,8 +491,10 @@ impl SourceFunctionRegistry {
     /// For "ipc", returns a new `IpcSourceFunction` with its own subprocess handle.
     /// For all other functions, returns the shared singleton (same as `get`).
     pub fn create_instance(&self, name: &str) -> Option<Arc<dyn SourceFunction>> {
-        if name == "ipc" {
-            return Some(Arc::new(IpcSourceFunction::new()));
+        match name {
+            "ipc" => return Some(Arc::new(IpcSourceFunction::new())),
+            "plugin" => return Some(Arc::new(PluginSourceFunction::new())),
+            _ => {}
         }
         self.functions.get(name).cloned()
     }
