@@ -311,9 +311,9 @@ mod tests {
         assert!(registry.supports_streaming_read("s3"));
         assert!(registry.supports_streaming_read("memory"));
 
-        // FTP and SFTP do not support true streaming reads
-        assert!(!registry.supports_streaming_read("ftp"));
-        assert!(!registry.supports_streaming_read("sftp"));
+        // FTP and SFTP support streaming reads
+        assert!(registry.supports_streaming_read("ftp"));
+        assert!(registry.supports_streaming_read("sftp"));
 
         // Tar supports streaming reads (via object_store)
         assert!(registry.supports_streaming_read("tar+file"));

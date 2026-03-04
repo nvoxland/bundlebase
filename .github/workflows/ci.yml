@@ -160,7 +160,9 @@ jobs:
 
       - name: Run Java SDK tests
         working-directory: sdk/java
-        run: mvn test -B --add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED
+        env:
+          MAVEN_OPTS: "--add-opens=java.base/java.nio=ALL-UNNAMED --enable-native-access=ALL-UNNAMED"
+        run: mvn test -B
 
   python-sdk:
     name: Python SDK
