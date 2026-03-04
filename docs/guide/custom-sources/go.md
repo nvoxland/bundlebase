@@ -281,6 +281,51 @@ func TestDataReturnsArrow(t *testing.T) {
 }
 ```
 
+## Plugin Mode
+
+Build your source as a C-shared library for zero-copy in-process loading.
+
+### Export the Source
+
+Use `ExportSource()` to register your source, then build with `-buildmode=c-shared`:
+
+```go
+package main
+
+import (
+    "C"
+    sdk "github.com/nvoxland/bundlebase/sdk/go/bundlebasesdk"
+)
+
+type MySource struct{}
+
+// ... implement Discover() and Data() as usual ...
+
+func init() {
+    sdk.ExportSource(&MySource{})
+}
+
+func main() {} // required for c-shared but never called
+```
+
+### Build and Use
+
+```bash
+go build -buildmode=c-shared -o my_source.so .
+```
+
+```python
+bundle.create_source("plugin", {"call": "lib:./my_source.so"})
+```
+
+### How It Works
+
+`ExportSource()` stores your source globally. The package exports `bundlebase_discover`, `bundlebase_data`, `bundlebase_free`, and `bundlebase_stable_url` via cgo. Data is transferred through the [Arrow C Data Interface](https://arrow.apache.org/docs/format/CDataInterface.html) using `arrow/cdata.ExportArrowRecordBatchReader`.
+
+The same `SourceFunction` interface works for both plugin and IPC — switch between them by changing only the entry point (`ExportSource()` + `c-shared` build vs `func main() { Serve(&source) }`).
+
+See [Plugin Source Mode](plugin.md) for the full C ABI reference.
+
 ## Error Handling
 
 Errors returned from your `Discover()` or `Data()` methods are caught by the SDK and returned as JSON-RPC error responses with code `-32000`. The error message is included:

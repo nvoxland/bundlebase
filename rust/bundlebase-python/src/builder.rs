@@ -678,6 +678,68 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Create a native (in-process) source from a Python SourceFunction object.
+    ///
+    /// This provides zero-copy Arrow data transfer by calling the source's
+    /// `discover()` and `data()` methods directly in-process via PyO3,
+    /// instead of spawning a subprocess (like the `ipc` source does).
+    ///
+    /// # Arguments
+    /// * `source` - A Python object implementing the SourceFunction interface
+    ///   (must have `discover()` and `data()` methods)
+    /// * `pack` - Which pack to create the source for ("base" or a join name)
+    /// * `kwargs` - Extra key-value arguments forwarded to discover/data calls
+    #[pyo3(signature = (source, pack="base", **kwargs))]
+    fn create_source_plugin<'py>(
+        slf: PyRef<'_, Self>,
+        source: &Bound<'py, PyAny>,
+        pack: &str,
+        kwargs: Option<&Bound<'py, PyDict>>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        // Extract the module and class name from the Python object
+        let py_type = source.get_type();
+        let module: String = py_type
+            .getattr("__module__")?
+            .extract()?;
+        let qualname: String = py_type
+            .getattr("__qualname__")?
+            .extract()?;
+
+        let call = format!("python:{}:{}", module, qualname);
+
+        let mut args = HashMap::new();
+        args.insert("call".to_string(), call);
+        if let Some(kw) = kwargs {
+            for (k, v) in kw.iter() {
+                let key: String = k.extract()?;
+                let value: String = v.extract().map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        format!("Argument '{}' must be a string", key)
+                    )
+                })?;
+                args.insert(key, value);
+            }
+        }
+
+        let inner = slf.inner.clone();
+        let pack = if pack == "base" {
+            None
+        } else {
+            Some(pack.to_string())
+        };
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .create_source("plugin", args, pack.as_deref())
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to create plugin source", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
     /// Fetch from sources for a pack - discover and attach new files.
     ///
     /// # Arguments

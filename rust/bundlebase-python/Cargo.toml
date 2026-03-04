@@ -32,6 +32,9 @@ arrow-schema = { workspace = true }
 # DataFusion for error types
 datafusion = { workspace = true }
 
+# Serialization
+serde_json = { workspace = true }
+
 # Async runtime and utilities
 tokio = { workspace = true }
 futures = { workspace = true }

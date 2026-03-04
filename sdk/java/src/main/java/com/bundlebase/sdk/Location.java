@@ -1,11 +1,13 @@
 package com.bundlebase.sdk;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 /**
  * A discovered data location returned from discover().
  */
 public record Location(
     String location,
-    boolean mustCopy,
+    @JsonProperty("must_copy") boolean mustCopy,
     String format,
     String version
 ) {

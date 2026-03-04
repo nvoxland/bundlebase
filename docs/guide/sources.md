@@ -285,9 +285,41 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
     CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')
     ```
 
-### ipc (Custom Source Functions)
+### Custom Source Functions
 
-Delegates data discovery and retrieval to an external subprocess. This lets you write source functions in Python, Go, Java, or any language that speaks the JSON-RPC 2.0 + Arrow IPC protocol.
+Bundlebase supports two modes for custom source functions:
+
+#### plugin (In-Process, Zero-Copy)
+
+Loads a source function in-process for zero-copy Arrow data transfer. Best for performance-critical pipelines.
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `call` | Yes | `lib:/path/to/lib.so` (shared library) or `python:module:Class` (Python in-process) |
+| `copy` | No | `"true"` to copy files into bundle (default), `"false"` to reference in place |
+
+=== "Python Plugin"
+
+    ```python
+    # Recommended: pass the source object directly
+    from my_source import MySource
+    bundle = bundle.create_source_plugin(MySource())
+    ```
+
+=== "Shared Library"
+
+    ```python
+    # Rust, Go, or Java compiled as a shared library
+    bundle = bundle.create_source("plugin", {
+        "call": "lib:./target/release/libmy_source.so"
+    })
+    ```
+
+#### ipc (Subprocess)
+
+Delegates data discovery and retrieval to an external subprocess. This lets you write source functions in any language that speaks the JSON-RPC 2.0 + Arrow IPC protocol.
 
 **Arguments:**
 
