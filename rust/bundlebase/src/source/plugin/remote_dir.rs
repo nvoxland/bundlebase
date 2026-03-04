@@ -3,10 +3,10 @@
 //! Lists files from a directory URL using the IO registry to support
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
-use super::source_function::{
+use crate::source::source_function::{
     ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
-use super::source_utils;
+use crate::source::source_utils;
 use crate::io::file::IOReadFile;
 use crate::io::plugin::ftp::FtpFile;
 use crate::io::plugin::object_store::ObjectStoreFile;
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_validate_source_args_copy_invalid() {
-        use super::super::source_function::validate_source_args;
+        use crate::source::source_function::validate_source_args;
         let func = RemoteDirFunction;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn test_validate_source_args_missing_url() {
-        use super::super::source_function::validate_source_args;
+        use crate::source::source_function::validate_source_args;
         let func = RemoteDirFunction;
         let args = HashMap::new();
 
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_validate_source_args_valid() {
-        use super::super::source_function::validate_source_args;
+        use crate::source::source_function::validate_source_args;
         let func = RemoteDirFunction;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());

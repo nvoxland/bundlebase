@@ -4,10 +4,10 @@
 //! with Arrow IPC (length-prefix framed) for bulk data transfer.
 //! This enables users to write source functions in any language.
 
-use super::source_function::{
+use crate::source::source_function::{
     ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
-use super::source_utils;
+use crate::source::source_utils;
 use crate::bundle_config::is_external_code_allowed;
 use crate::{BundleConfig, BundlebaseError};
 use url::Url;

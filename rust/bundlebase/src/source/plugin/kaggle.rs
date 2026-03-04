@@ -3,10 +3,10 @@
 //! Discovers and downloads dataset files from Kaggle via their REST API.
 //! Authentication is read from `~/.kaggle/kaggle.json`.
 
-use super::source_function::{
+use crate::source::source_function::{
     ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
-use super::source_utils;
+use crate::source::source_utils;
 use crate::bundle_config::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::{BundleConfig, BundlebaseError, Scope};
 use async_trait::async_trait;
@@ -569,7 +569,7 @@ impl KaggleSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::source_function::validate_source_args;
+    use crate::source::source_function::validate_source_args;
 
     #[test]
     fn test_signature() {

@@ -8,10 +8,10 @@
 //! - `python:module:Class` — delegates to a `NativePythonBridge` trait object
 //!   registered by the Python bindings at init time (PyO3 + `FromPyArrow`).
 
-use super::source_function::{
+use crate::source::source_function::{
     ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
-use super::source_utils;
+use crate::source::source_utils;
 use crate::bundle_config::is_external_code_allowed;
 use crate::{BundleConfig, BundlebaseError};
 
