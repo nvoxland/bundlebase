@@ -12,6 +12,7 @@ use super::source_function::{
     ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
 use super::source_utils;
+use crate::bundle_config::is_external_code_allowed;
 use crate::{BundleConfig, BundlebaseError};
 
 use arrow::ffi_stream::{ArrowArrayStreamReader, FFI_ArrowArrayStream};
@@ -424,6 +425,9 @@ impl SourceFunction for PluginSourceFunction {
         attached_locations: &HashSet<String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
+        if !is_external_code_allowed(_config)? {
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable plugin sources.".into());
+        }
         let call = source_utils::require_arg(args, "call", "plugin")?;
 
         match parse_plugin_call(call)? {
@@ -450,6 +454,9 @@ impl SourceFunction for PluginSourceFunction {
         args: &HashMap<String, String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
+        if !is_external_code_allowed(_config)? {
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable plugin sources.".into());
+        }
         let call = source_utils::require_arg(args, "call", "plugin")?;
         let loc_json = location_json(location)?;
         let args_json = filtered_args_json(args)?;
@@ -489,6 +496,9 @@ impl SourceFunction for PluginSourceFunction {
         args: &HashMap<String, String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<Url>, BundlebaseError> {
+        if !is_external_code_allowed(_config)? {
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable plugin sources.".into());
+        }
         let call = source_utils::require_arg(args, "call", "plugin")?;
         let loc_json = location_json(location)?;
         let args_json = filtered_args_json(args)?;
@@ -523,6 +533,7 @@ impl SourceFunction for PluginSourceFunction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bundle_config::{PassedBundleConfig, Scope};
 
     #[test]
     fn test_parse_plugin_call_lib() {
@@ -644,5 +655,73 @@ mod tests {
         let mut args = HashMap::new();
         args.insert("call".to_string(), "invalid_call".to_string());
         assert!(func.validate_args(&args).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_discover_blocked_when_external_code_disabled() {
+        let func = PluginSourceFunction::new();
+        let mut args = HashMap::new();
+        args.insert("call".to_string(), "python:mod:Class".to_string());
+        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+
+        let result = func.discover(&args, &HashSet::new(), &config).await;
+        assert!(result.is_err());
+        let err = result.expect_err("should fail");
+        assert!(err.to_string().contains("External code execution is disabled"));
+    }
+
+    #[tokio::test]
+    async fn test_data_blocked_when_external_code_disabled() {
+        let func = PluginSourceFunction::new();
+        let mut args = HashMap::new();
+        args.insert("call".to_string(), "python:mod:Class".to_string());
+        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let location = DiscoveredLocation {
+            location: "test.parquet".to_string(),
+            must_copy: true,
+            format: "parquet".to_string(),
+            version: "v1".to_string(),
+        };
+
+        let result = func.data(&location, &args, &config).await;
+        let err = result.err().expect("should fail");
+        assert!(err.to_string().contains("External code execution is disabled"));
+    }
+
+    #[tokio::test]
+    async fn test_stable_url_blocked_when_external_code_disabled() {
+        let func = PluginSourceFunction::new();
+        let mut args = HashMap::new();
+        args.insert("call".to_string(), "python:mod:Class".to_string());
+        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let location = DiscoveredLocation {
+            location: "test.parquet".to_string(),
+            must_copy: true,
+            format: "parquet".to_string(),
+            version: "v1".to_string(),
+        };
+
+        let result = func.stable_url(&location, &args, &config).await;
+        let err = result.err().expect("should fail");
+        assert!(err.to_string().contains("External code execution is disabled"));
+    }
+
+    #[tokio::test]
+    async fn test_discover_allowed_with_config() {
+        // With allow_external_code=true, discover should pass the config gate
+        // (will still fail because the Python bridge isn't initialized, but the
+        // error should NOT be about external code being disabled)
+        let func = PluginSourceFunction::new();
+        let mut args = HashMap::new();
+        args.insert("call".to_string(), "python:mod:Class".to_string());
+
+        let mut passed = PassedBundleConfig::new();
+        passed.set(&Scope::try_from("system").expect("valid scope"), "allow_external_code", "true");
+        let config = Arc::new(BundleConfig::new(Some(&passed)).expect("test config creation"));
+
+        let result = func.discover(&args, &HashSet::new(), &config).await;
+        assert!(result.is_err());
+        let err = result.expect_err("should fail (no bridge)");
+        assert!(!err.to_string().contains("External code execution is disabled"));
     }
 }

@@ -8,6 +8,7 @@ use super::source_function::{
     ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
 use super::source_utils;
+use crate::bundle_config::is_external_code_allowed;
 use crate::{BundleConfig, BundlebaseError};
 use url::Url;
 use arrow::ipc::reader::StreamReader;
@@ -337,6 +338,9 @@ impl SourceFunction for IpcSourceFunction {
         attached_locations: &HashSet<String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
+        if !is_external_code_allowed(_config)? {
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable IPC sources.".into());
+        }
         self.ensure_spawned(args).await?;
 
         // Build params: pass all args except "call" and "copy",
@@ -409,6 +413,9 @@ impl SourceFunction for IpcSourceFunction {
         args: &HashMap<String, String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
+        if !is_external_code_allowed(_config)? {
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable IPC sources.".into());
+        }
         self.ensure_spawned(args).await?;
 
         let filtered_args: HashMap<String, String> = args
@@ -477,7 +484,15 @@ impl SourceFunction for IpcSourceFunction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bundle_config::{PassedBundleConfig, Scope};
     use std::path::PathBuf;
+
+    /// Create a BundleConfig with allow_external_code=true for tests.
+    fn test_config() -> Arc<BundleConfig> {
+        let mut passed = PassedBundleConfig::new();
+        passed.set(&Scope::try_from("system").expect("valid scope"), "allow_external_code", "true");
+        Arc::new(BundleConfig::new(Some(&passed)).expect("test config creation"))
+    }
 
     // --- parse_call tests ---
 
@@ -552,6 +567,39 @@ mod tests {
         assert!(!sig.arg_specs[1].required);
     }
 
+    // --- External code gate tests ---
+
+    #[tokio::test]
+    async fn test_discover_blocked_when_external_code_disabled() {
+        let func = IpcSourceFunction::new();
+        let mut args = HashMap::new();
+        args.insert("call".to_string(), "echo hello".to_string());
+        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+
+        let result = func.discover(&args, &HashSet::new(), &config).await;
+        assert!(result.is_err());
+        let err = result.expect_err("should fail");
+        assert!(err.to_string().contains("External code execution is disabled"));
+    }
+
+    #[tokio::test]
+    async fn test_data_blocked_when_external_code_disabled() {
+        let func = IpcSourceFunction::new();
+        let mut args = HashMap::new();
+        args.insert("call".to_string(), "echo hello".to_string());
+        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let location = DiscoveredLocation {
+            location: "test.parquet".to_string(),
+            must_copy: true,
+            format: "parquet".to_string(),
+            version: "v1".to_string(),
+        };
+
+        let result = func.data(&location, &args, &config).await;
+        let err = result.err().expect("should fail");
+        assert!(err.to_string().contains("External code execution is disabled"));
+    }
+
     // --- Integration tests with mock subprocess ---
 
     fn mock_script_path() -> PathBuf {
@@ -587,7 +635,7 @@ mod tests {
     async fn test_discover_via_subprocess() {
         let func = IpcSourceFunction::new();
         let args = make_ipc_args();
-        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let config = test_config();
 
         let locations = func
             .discover(&args, &HashSet::new(), &config)
@@ -606,7 +654,7 @@ mod tests {
     async fn test_data_returns_arrow_batches() {
         let func = IpcSourceFunction::new();
         let args = make_ipc_args();
-        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let config = test_config();
 
         // Discover first to spawn the subprocess
         let locations = func
@@ -640,7 +688,7 @@ mod tests {
         // test_file_1 sends 2 batches; verify they're all present
         let func = IpcSourceFunction::new();
         let args = make_ipc_args();
-        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let config = test_config();
 
         let locations = func
             .discover(&args, &HashSet::new(), &config)
@@ -673,7 +721,7 @@ mod tests {
     async fn test_stable_url_none() {
         let func = IpcSourceFunction::new();
         let args = make_ipc_args();
-        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let config = test_config();
 
         // Discover first to spawn the subprocess
         let locations = func
@@ -694,7 +742,7 @@ mod tests {
         let func = IpcSourceFunction::new();
         let args = make_ipc_args();
 
-        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let config = test_config();
 
         // Discover first
         func.discover(&args, &HashSet::new(), &config)
@@ -739,7 +787,7 @@ mod tests {
         }
         let func = IpcSourceFunction::new();
         let args = make_go_ipc_args();
-        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let config = test_config();
 
         let locations = func
             .discover(&args, &HashSet::new(), &config)
@@ -765,7 +813,7 @@ mod tests {
 
         let func = IpcSourceFunction::new();
         let args = make_go_ipc_args();
-        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let config = test_config();
 
         let locations = func
             .discover(&args, &HashSet::new(), &config)
@@ -824,7 +872,7 @@ mod tests {
         }
         let func = IpcSourceFunction::new();
         let args = make_rust_ipc_args();
-        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let config = test_config();
 
         let locations = func
             .discover(&args, &HashSet::new(), &config)
@@ -854,7 +902,7 @@ mod tests {
 
         let func = IpcSourceFunction::new();
         let args = make_rust_ipc_args();
-        let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
+        let config = test_config();
 
         let locations = func
             .discover(&args, &HashSet::new(), &config)
