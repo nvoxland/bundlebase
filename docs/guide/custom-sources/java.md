@@ -270,7 +270,7 @@ public class MySourceTest {
 }
 ```
 
-## Plugin Mode
+## Native Mode
 
 Build your source as a shared library using Project Panama (Java 22+) for zero-copy in-process loading.
 
@@ -312,7 +312,7 @@ This produces `libbundlebase_plugin.so` in `target/`.
 ### Use
 
 ```python
-bundle.create_source("plugin", {"call": "lib:./libbundlebase_plugin.so"})
+bundle.create_source("native", {"call": "lib:./libbundlebase_plugin.so"})
 ```
 
 ### How It Works
@@ -327,9 +327,9 @@ The native bridge uses Project Panama's Foreign Function & Memory API for high-p
 
 This architecture means JNI is used only for the one-time JVM bootstrap. All data-path calls use Panama upcalls, which avoids JNI overhead (method ID lookups, string conversions in C, etc.).
 
-The same `SourceFunction` interface works for both plugin and IPC — switch between them by changing only the entry point (`PluginExport.register()` + plugin build vs `Serve.run()` + JAR).
+The same `SourceFunction` interface works for both native and IPC — switch between them by changing only the entry point (`PluginExport.register()` + native build vs `Serve.run()` + JAR).
 
-See [Plugin Source Mode](plugin.md) for the full C ABI reference.
+See [Native Source Mode](native.md) for the full C ABI reference.
 
 ## Error Handling
 

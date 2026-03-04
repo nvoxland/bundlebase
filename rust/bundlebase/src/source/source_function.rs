@@ -17,7 +17,7 @@
 
 use super::ipc::IpcSourceFunction;
 use super::kaggle::KaggleSource;
-use super::plugin::PluginSourceFunction;
+use super::native::NativeSourceFunction;
 use super::postgres::PostgresFunction;
 use super::remote_dir::RemoteDirFunction;
 use super::source_utils;
@@ -81,6 +81,8 @@ pub struct SourceFunctionSignature {
     pub name: String,
     /// Argument declarations
     pub arg_specs: Vec<ArgSpec>,
+    /// When true, unknown arguments are allowed (forwarded to the bridge).
+    pub accepts_extra_args: bool,
 }
 
 /// A partition of source data discovered during the discovery phase.
@@ -418,15 +420,17 @@ fn validate_args_standard(
         }
     }
 
-    // Check for unknown arguments
-    for key in args.keys() {
-        if !valid_names.contains(key.as_str()) {
-            let valid_args = format_arg_list(specs);
-            return Err(format!(
-                "Function '{}' does not accept argument '{}'. Valid arguments: {}",
-                signature.name, key, valid_args
-            )
-            .into());
+    // Check for unknown arguments (skip if the source accepts extra args)
+    if !signature.accepts_extra_args {
+        for key in args.keys() {
+            if !valid_names.contains(key.as_str()) {
+                let valid_args = format_arg_list(specs);
+                return Err(format!(
+                    "Function '{}' does not accept argument '{}'. Valid arguments: {}",
+                    signature.name, key, valid_args
+                )
+                .into());
+            }
         }
     }
 
@@ -468,7 +472,7 @@ impl SourceFunctionRegistry {
         // Register built-in functions
         registry.register(Arc::new(IpcSourceFunction::new()));
         registry.register(Arc::new(KaggleSource));
-        registry.register(Arc::new(PluginSourceFunction::new()));
+        registry.register(Arc::new(NativeSourceFunction::new()));
         registry.register(Arc::new(PostgresFunction));
         registry.register(Arc::new(RemoteDirFunction));
         registry.register(Arc::new(WebScrapeFunction));
@@ -493,7 +497,7 @@ impl SourceFunctionRegistry {
     pub fn create_instance(&self, name: &str) -> Option<Arc<dyn SourceFunction>> {
         match name {
             "ipc" => return Some(Arc::new(IpcSourceFunction::new())),
-            "plugin" => return Some(Arc::new(PluginSourceFunction::new())),
+            "native" => return Some(Arc::new(NativeSourceFunction::new())),
             _ => {}
         }
         self.functions.get(name).cloned()
@@ -616,6 +620,7 @@ mod tests {
                 required: true,
                 default: None,
             }],
+            accepts_extra_args: false,
         };
         assert_eq!(sig.name, "test");
         assert_eq!(sig.arg_specs.len(), 1);

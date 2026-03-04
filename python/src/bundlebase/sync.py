@@ -520,10 +520,10 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def create_source_plugin(
+    def create_source_native(
         self, source, pack: str = "base", **kwargs
     ) -> "SyncBundleBuilder":
-        """Create a plugin (in-process) source from a Python SourceFunction object.
+        """Create a native (in-process) source from a Python SourceFunction object.
 
         Uses zero-copy Arrow data transfer by calling the source's discover()
         and data() methods directly in-process, instead of spawning a subprocess.
@@ -540,9 +540,9 @@ class SyncBundleBuilder(SyncBundle):
 
         Example:
             >>> from my_source import MySource
-            >>> bundle.create_source_plugin(MySource())
+            >>> bundle.create_source_native(MySource())
         """
-        coro = _call_original_method(self._async, "create_source_plugin", source, pack, **kwargs)
+        coro = _call_original_method(self._async, "create_source_native", source, pack, **kwargs)
         self._async = _loop_manager.run_sync(coro)
         return self
 

@@ -322,6 +322,7 @@ impl SourceFunction for IpcSourceFunction {
                     default: Some("true"),
                 },
             ],
+            accepts_extra_args: false,
         }
     }
 

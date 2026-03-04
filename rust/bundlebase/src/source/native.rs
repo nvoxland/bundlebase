@@ -1,11 +1,11 @@
-//! Built-in "plugin" source function.
+//! Built-in "native" source function.
 //!
 //! Loads user source functions in-process for zero-copy Arrow data transfer.
 //! Two strategies based on the `call` argument:
 //!
 //! - `lib:/path/to/lib.so` — loads a shared library via `dlopen` and uses the
 //!   Arrow C Data Interface (`ArrowArrayStream`) for zero-copy streaming.
-//! - `python:module:Class` — delegates to a `PluginPythonBridge` trait object
+//! - `python:module:Class` — delegates to a `NativePythonBridge` trait object
 //!   registered by the Python bindings at init time (PyO3 + `FromPyArrow`).
 
 use super::source_function::{
@@ -25,12 +25,12 @@ use std::sync::{Arc, OnceLock};
 use url::Url;
 
 // ---------------------------------------------------------------------------
-// PluginPythonBridge — trait for the PyO3 bridge
+// NativePythonBridge — trait for the PyO3 bridge
 // ---------------------------------------------------------------------------
 
 /// Trait that the Python bindings implement to provide in-process access
 /// to Python `SourceFunction` objects.
-pub trait PluginPythonBridge: Send + Sync {
+pub trait NativePythonBridge: Send + Sync {
     /// Call `discover()` on the Python source, returning locations as JSON.
     fn discover(&self, call: &str, args_json: &str) -> Result<String, BundlebaseError>;
 
@@ -52,15 +52,15 @@ pub trait PluginPythonBridge: Send + Sync {
 }
 
 /// Global bridge set by `bundlebase-python` at module init time.
-static PYTHON_BRIDGE: OnceLock<Arc<dyn PluginPythonBridge>> = OnceLock::new();
+static PYTHON_BRIDGE: OnceLock<Arc<dyn NativePythonBridge>> = OnceLock::new();
 
 /// Register the Python bridge. Called once from `bundlebase-python` init.
-pub fn register_python_bridge(bridge: Arc<dyn PluginPythonBridge>) {
+pub fn register_python_bridge(bridge: Arc<dyn NativePythonBridge>) {
     let _ = PYTHON_BRIDGE.set(bridge);
 }
 
 /// Get the registered Python bridge.
-fn get_python_bridge() -> Result<&'static Arc<dyn PluginPythonBridge>, BundlebaseError> {
+fn get_python_bridge() -> Result<&'static Arc<dyn NativePythonBridge>, BundlebaseError> {
     PYTHON_BRIDGE
         .get()
         .ok_or_else(|| "Python plugin bridge not initialized. Are you running from Python?".into())
@@ -244,19 +244,19 @@ impl SharedLibHandle {
 }
 
 // ---------------------------------------------------------------------------
-// PluginSourceFunction
+// NativeSourceFunction
 // ---------------------------------------------------------------------------
 
-/// Built-in "plugin" source function for in-process data loading.
+/// Built-in "native" source function for in-process data loading.
 ///
 /// Supports two call strategies:
 /// - `lib:/path/to/lib.so` — shared library via Arrow C Data Interface
 /// - `python:module:Class` — Python in-process via PyO3
-pub struct PluginSourceFunction {
+pub struct NativeSourceFunction {
     lib_handle: tokio::sync::Mutex<Option<SharedLibHandle>>,
 }
 
-impl PluginSourceFunction {
+impl NativeSourceFunction {
     pub fn new() -> Self {
         Self {
             lib_handle: tokio::sync::Mutex::new(None),
@@ -305,7 +305,7 @@ enum CallStrategy {
     Python(String),
 }
 
-fn parse_plugin_call(call: &str) -> Result<CallStrategy, BundlebaseError> {
+fn parse_native_call(call: &str) -> Result<CallStrategy, BundlebaseError> {
     let call = call.trim();
     if let Some(path) = call.strip_prefix("lib:") {
         let path = path.trim();
@@ -321,7 +321,7 @@ fn parse_plugin_call(call: &str) -> Result<CallStrategy, BundlebaseError> {
         Ok(CallStrategy::Python(call.to_string()))
     } else {
         Err(format!(
-            "Plugin source 'call' must start with 'lib:' or 'python:'. Got: '{}'",
+            "Native source 'call' must start with 'lib:' or 'python:'. Got: '{}'",
             call
         )
         .into())
@@ -392,10 +392,10 @@ fn build_discover_args_json(
 }
 
 #[async_trait]
-impl SourceFunction for PluginSourceFunction {
+impl SourceFunction for NativeSourceFunction {
     fn signature(&self) -> SourceFunctionSignature {
         SourceFunctionSignature {
-            name: "plugin".to_string(),
+            name: "native".to_string(),
             arg_specs: vec![
                 ArgSpec {
                     name: "call",
@@ -410,12 +410,13 @@ impl SourceFunction for PluginSourceFunction {
                     default: Some("true"),
                 },
             ],
+            accepts_extra_args: true,
         }
     }
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        let call = source_utils::require_arg(args, "call", "plugin")?;
-        parse_plugin_call(call)?;
+        let call = source_utils::require_arg(args, "call", "native")?;
+        parse_native_call(call)?;
         Ok(())
     }
 
@@ -426,11 +427,11 @@ impl SourceFunction for PluginSourceFunction {
         _config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
         if !is_external_code_allowed(_config)? {
-            return Err("External code execution is disabled. Set system.allow_external_code=true to enable plugin sources.".into());
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
         }
-        let call = source_utils::require_arg(args, "call", "plugin")?;
+        let call = source_utils::require_arg(args, "call", "native")?;
 
-        match parse_plugin_call(call)? {
+        match parse_native_call(call)? {
             CallStrategy::SharedLib(path) => {
                 self.ensure_lib_loaded(&path).await?;
                 let guard = self.lib_handle.lock().await;
@@ -455,13 +456,13 @@ impl SourceFunction for PluginSourceFunction {
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
         if !is_external_code_allowed(_config)? {
-            return Err("External code execution is disabled. Set system.allow_external_code=true to enable plugin sources.".into());
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
         }
-        let call = source_utils::require_arg(args, "call", "plugin")?;
+        let call = source_utils::require_arg(args, "call", "native")?;
         let loc_json = location_json(location)?;
         let args_json = filtered_args_json(args)?;
 
-        match parse_plugin_call(call)? {
+        match parse_native_call(call)? {
             CallStrategy::SharedLib(_) => {
                 let guard = self.lib_handle.lock().await;
                 let handle = guard.as_ref().ok_or("Shared library not loaded")?;
@@ -497,13 +498,13 @@ impl SourceFunction for PluginSourceFunction {
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<Url>, BundlebaseError> {
         if !is_external_code_allowed(_config)? {
-            return Err("External code execution is disabled. Set system.allow_external_code=true to enable plugin sources.".into());
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
         }
-        let call = source_utils::require_arg(args, "call", "plugin")?;
+        let call = source_utils::require_arg(args, "call", "native")?;
         let loc_json = location_json(location)?;
         let args_json = filtered_args_json(args)?;
 
-        let url_str = match parse_plugin_call(call)? {
+        let url_str = match parse_native_call(call)? {
             CallStrategy::SharedLib(_) => {
                 let guard = self.lib_handle.lock().await;
                 let handle = guard.as_ref().ok_or("Shared library not loaded")?;
@@ -536,46 +537,46 @@ mod tests {
     use crate::bundle_config::{PassedBundleConfig, Scope};
 
     #[test]
-    fn test_parse_plugin_call_lib() {
-        match parse_plugin_call("lib:/path/to/lib.so") {
+    fn test_parse_native_call_lib() {
+        match parse_native_call("lib:/path/to/lib.so") {
             Ok(CallStrategy::SharedLib(path)) => assert_eq!(path, "/path/to/lib.so"),
             _ => panic!("Expected SharedLib"),
         }
     }
 
     #[test]
-    fn test_parse_plugin_call_python() {
-        match parse_plugin_call("python:my_module:MyClass") {
+    fn test_parse_native_call_python() {
+        match parse_native_call("python:my_module:MyClass") {
             Ok(CallStrategy::Python(call)) => assert_eq!(call, "python:my_module:MyClass"),
             _ => panic!("Expected Python"),
         }
     }
 
     #[test]
-    fn test_parse_plugin_call_lib_empty() {
-        assert!(parse_plugin_call("lib:").is_err());
+    fn test_parse_native_call_lib_empty() {
+        assert!(parse_native_call("lib:").is_err());
     }
 
     #[test]
-    fn test_parse_plugin_call_python_empty() {
-        assert!(parse_plugin_call("python:").is_err());
+    fn test_parse_native_call_python_empty() {
+        assert!(parse_native_call("python:").is_err());
     }
 
     #[test]
-    fn test_parse_plugin_call_invalid() {
-        assert!(parse_plugin_call("some_command").is_err());
+    fn test_parse_native_call_invalid() {
+        assert!(parse_native_call("some_command").is_err());
     }
 
     #[test]
-    fn test_parse_plugin_call_empty() {
-        assert!(parse_plugin_call("").is_err());
+    fn test_parse_native_call_empty() {
+        assert!(parse_native_call("").is_err());
     }
 
     #[test]
-    fn test_plugin_signature() {
-        let func = PluginSourceFunction::new();
+    fn test_native_signature() {
+        let func = NativeSourceFunction::new();
         let sig = func.signature();
-        assert_eq!(sig.name, "plugin");
+        assert_eq!(sig.name, "native");
         assert_eq!(sig.arg_specs.len(), 2);
         assert_eq!(sig.arg_specs[0].name, "call");
         assert!(sig.arg_specs[0].required);
@@ -635,7 +636,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_valid_lib() {
-        let func = PluginSourceFunction::new();
+        let func = NativeSourceFunction::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "lib:/path/to/lib.so".to_string());
         assert!(func.validate_args(&args).is_ok());
@@ -643,7 +644,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_valid_python() {
-        let func = PluginSourceFunction::new();
+        let func = NativeSourceFunction::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
         assert!(func.validate_args(&args).is_ok());
@@ -651,7 +652,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_invalid_call() {
-        let func = PluginSourceFunction::new();
+        let func = NativeSourceFunction::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "invalid_call".to_string());
         assert!(func.validate_args(&args).is_err());
@@ -659,7 +660,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_discover_blocked_when_external_code_disabled() {
-        let func = PluginSourceFunction::new();
+        let func = NativeSourceFunction::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -672,7 +673,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_data_blocked_when_external_code_disabled() {
-        let func = PluginSourceFunction::new();
+        let func = NativeSourceFunction::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -690,7 +691,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stable_url_blocked_when_external_code_disabled() {
-        let func = PluginSourceFunction::new();
+        let func = NativeSourceFunction::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -711,7 +712,7 @@ mod tests {
         // With allow_external_code=true, discover should pass the config gate
         // (will still fail because the Python bridge isn't initialized, but the
         // error should NOT be about external code being disabled)
-        let func = PluginSourceFunction::new();
+        let func = NativeSourceFunction::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
 
