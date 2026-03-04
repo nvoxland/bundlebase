@@ -77,6 +77,23 @@ files = [
 ]
 
 [[package]]
+name = "bundlebase-sdk"
+version = "0.1.0"
+description = "SDK for building Bundlebase custom source functions"
+optional = false
+python-versions = ">=3.10"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+pyarrow = ">=14.0.0"
+
+[package.source]
+type = "directory"
+url = "sdk/python"
+
+[[package]]
 name = "certifi"
 version = "2026.1.4"
 description = "Python package for providing Mozilla's CA Bundle."
@@ -1712,7 +1729,7 @@ version = "23.0.1"
 description = "Python library for Apache Arrow"
 optional = false
 python-versions = ">=3.10"
-groups = ["main"]
+groups = ["main", "dev"]
 files = [
     {file = "pyarrow-23.0.1-cp310-cp310-macosx_12_0_arm64.whl", hash = "sha256:3fab8f82571844eb3c460f90a75583801d14ca0cc32b1acc8c361650e006fd56"},
     {file = "pyarrow-23.0.1-cp310-cp310-macosx_12_0_x86_64.whl", hash = "sha256:3f91c038b95f71ddfc865f11d5876c42f343b4495535bd262c7b321b0b94507c"},
@@ -2356,4 +2373,4 @@ jupyter = ["nest-asyncio"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.13"
-content-hash = "1da226bf83e4b5501adb4b4f6d6417a06d651bb05aa405e4bed2f37e8991243b"
+content-hash = "28918f78ba0a3158294e1b6b0e8506dbca8166f94c8a0369cda3d82e6b2dd497"

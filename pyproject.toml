@@ -40,6 +40,7 @@ pytest-timeout = "^2.3.1"
 pytest-benchmark = "^5.1"
 mypy = "^1.18.2"
 snakeviz = "^2.2"
+bundlebase-sdk = { path = "sdk/python", develop = true }
 
 # Keep versions in sync with optional dependencies above
 pandas = ">=2.0.0"
