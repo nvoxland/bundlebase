@@ -3,7 +3,7 @@ mod registry;
 mod system;
 mod scope;
 pub use passed::PassedBundleConfig;
-pub use system::{SYSTEM_SCOPE, MAX_MEMORY_CFG, CATALOG_NAME_CFG};
+pub use system::{SYSTEM_SCOPE, MAX_MEMORY_CFG, CATALOG_NAME_CFG, ALLOW_EXTERNAL_CODE_CFG, is_external_code_allowed};
 pub use scope::Scope;
 use registry::config_registry;
 
