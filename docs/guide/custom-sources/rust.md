@@ -324,7 +324,7 @@ mod tests {
 }
 ```
 
-## Plugin Mode
+## Native Mode
 
 Build your source as a shared library for zero-copy in-process loading.
 
@@ -377,7 +377,7 @@ cargo build --release
 ```
 
 ```python
-bundle.create_source("plugin", {"call": "lib:target/release/libmy_source.so"})
+bundle.create_source("native", {"call": "lib:target/release/libmy_source.so"})
 ```
 
 ### How It Works
@@ -385,12 +385,12 @@ bundle.create_source("plugin", {"call": "lib:target/release/libmy_source.so"})
 The `export_source!` macro:
 
 1. Creates a `OnceLock`-backed singleton of your source
-2. Generates `extern "C"` functions matching the [Bundlebase C ABI](plugin.md#c-abi-reference)
+2. Generates `extern "C"` functions matching the [Bundlebase C ABI](native.md#c-abi-reference)
 3. Uses Arrow's `FFI_ArrowArrayStream` for zero-copy data export
 
-The same `SourceFunction` trait works for both plugin and IPC — switch between them by changing only the entry point (`export_source!` vs `fn main() { serve(&source) }`).
+The same `SourceFunction` trait works for both native and IPC — switch between them by changing only the entry point (`export_source!` vs `fn main() { serve(&source) }`).
 
-See [Plugin Source Mode](plugin.md) for the full C ABI reference.
+See [Native Source Mode](native.md) for the full C ABI reference.
 
 ## Error Handling
 

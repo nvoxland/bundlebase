@@ -581,6 +581,7 @@ impl SourceFunction for PostgresFunction {
                     default: Some("1000000"),
                 },
             ],
+            accepts_extra_args: false,
         }
     }
 

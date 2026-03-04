@@ -226,7 +226,7 @@ def test_data():
     assert table.num_rows == 3
 ```
 
-## Plugin Mode
+## Native Mode
 
 Python sources can run in-process for zero-copy Arrow transfer, eliminating subprocess overhead:
 
@@ -235,15 +235,15 @@ import bundlebase.sync as bb
 from my_source import MySource
 
 bundle = bb.create("my/data")
-bundle.create_source_plugin(MySource())
+bundle.create_source_native(MySource())
 bundle.fetch(mode="add")
 ```
 
-The same `SourceFunction` class works for both plugin and IPC mode — no code changes needed. The only difference is how you register it:
+The same `SourceFunction` class works for both native and IPC mode — no code changes needed. The only difference is how you register it:
 
 | Mode | Registration | Data Transfer |
 |------|-------------|---------------|
-| **Plugin** | `create_source_plugin(MySource())` | Zero-copy via PyO3 |
+| **Native** | `create_source_native(MySource())` | Zero-copy via PyO3 |
 | **IPC** | `create_source("ipc", {"call": "python:my_source.py"})` | Serialized Arrow IPC over pipes |
 
 ### Extra Arguments
@@ -251,14 +251,14 @@ The same `SourceFunction` class works for both plugin and IPC mode — no code c
 Pass extra arguments as keyword arguments:
 
 ```python
-bundle.create_source_plugin(MySource(), db_host="prod.example.com")
+bundle.create_source_native(MySource(), db_host="prod.example.com")
 ```
 
 These are forwarded to your `discover()` and `data()` methods as `**kwargs`, just like in IPC mode.
 
-### When to Use Plugin vs IPC
+### When to Use Native vs IPC
 
-**Use plugin** (`create_source_plugin`) when:
+**Use native** (`create_source_native`) when:
 
 - Your source is part of the same Python project
 - You need maximum performance for large datasets
@@ -270,7 +270,7 @@ These are forwarded to your `discover()` and `data()` methods as `**kwargs`, jus
 - You want process isolation (source crashes don't affect Bundlebase)
 - You're packaging your source as a Docker image
 
-See [Plugin Source Mode](plugin.md) for the full overview.
+See [Native Source Mode](native.md) for the full overview.
 
 ## Error Handling
 

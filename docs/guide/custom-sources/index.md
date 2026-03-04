@@ -4,14 +4,14 @@ Custom source functions let you write data providers in any language. Bundlebase
 
 | Mode | How It Works | Performance | Languages |
 |------|-------------|-------------|-----------|
-| **[Plugin](plugin.md)** | In-process loading (Python PyO3 or shared library `dlopen`) | Zero-copy Arrow | Python, Rust, Go, Java |
+| **[Native](native.md)** | In-process loading (Python PyO3 or shared library `dlopen`) | Zero-copy Arrow | Python, Rust, Go, Java |
 | **IPC** | Subprocess with JSON-RPC over stdin/stdout | Serialized Arrow IPC | Any language |
 
 **Your source code is the same for both modes** — only the entry point differs. SDKs for Python, Go, Java, and Rust handle the protocol automatically.
 
-## Choosing IPC vs Plugin
+## Choosing IPC vs Native
 
-**Use plugin when:**
+**Use native when:**
 
 - You need maximum performance (zero-copy, no serialization overhead)
 - Your source is in Python, Rust, Go, or Java
@@ -21,15 +21,15 @@ Custom source functions let you write data providers in any language. Bundlebase
 
 - You want process isolation (source crashes don't affect Bundlebase)
 - You're packaging your source as a Docker image
-- You're using a language without plugin SDK support
+- You're using a language without native SDK support
 
 ## How It Works
 
-### Plugin Mode
+### Native Mode
 
 **Python:** Source objects are called directly in-process via PyO3 — no subprocess, no serialization.
 
-**Compiled languages:** Build a shared library (`.so`/`.dylib`/`.dll`) exporting the [C ABI](plugin.md#c-abi-reference). Bundlebase `dlopen`s it and uses the Arrow C Data Interface.
+**Compiled languages:** Build a shared library (`.so`/`.dylib`/`.dll`) exporting the [C ABI](native.md#c-abi-reference). Bundlebase `dlopen`s it and uses the Arrow C Data Interface.
 
 ### IPC Mode
 
@@ -63,23 +63,23 @@ Any extra key-value arguments passed in the source configuration are forwarded t
 
 ## Using a Custom Source
 
-### Plugin Mode (Recommended for Python)
+### Native Mode (Recommended for Python)
 
 ```python
 import bundlebase.sync as bb
 from my_source import MySource
 
-# Python plugin — zero-copy, in-process
+# Python native — zero-copy, in-process
 bundle = bb.create("my/data")
-bundle.create_source_plugin(MySource())
+bundle.create_source_native(MySource())
 results = bundle.fetch("base", "add")
 ```
 
-### Plugin Mode (Shared Library)
+### Native Mode (Shared Library)
 
 ```python
 # Rust, Go, or Java — zero-copy via dlopen
-bundle.create_source("plugin", {"call": "lib:./target/release/libmy_source.so"})
+bundle.create_source("native", {"call": "lib:./target/release/libmy_source.so"})
 ```
 
 ### IPC Mode (Subprocess)
@@ -140,7 +140,7 @@ The container receives JSON-RPC on stdin and writes responses to stdout.
 
 ## SDK Quick Start
 
-Each SDK handles the protocol for you. Implement the source interface and choose your entry point — `serve()` for IPC mode or the plugin export for zero-copy mode.
+Each SDK handles the protocol for you. Implement the source interface and choose your entry point — `serve()` for IPC mode or the native export for zero-copy mode.
 
 === "Python"
 

@@ -690,7 +690,7 @@ impl PyBundleBuilder {
     /// * `pack` - Which pack to create the source for ("base" or a join name)
     /// * `kwargs` - Extra key-value arguments forwarded to discover/data calls
     #[pyo3(signature = (source, pack="base", **kwargs))]
-    fn create_source_plugin<'py>(
+    fn create_source_native<'py>(
         slf: PyRef<'_, Self>,
         source: &Bound<'py, PyAny>,
         pack: &str,
@@ -730,9 +730,9 @@ impl PyBundleBuilder {
         };
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .create_source("plugin", args, pack.as_deref())
+                .create_source("native", args, pack.as_deref())
                 .await
-                .map_err(|e| to_py_error_ctx("Failed to create plugin source", e))?;
+                .map_err(|e| to_py_error_ctx("Failed to create native source", e))?;
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })
                     .map_err(|e| to_py_error(e))

@@ -51,6 +51,7 @@ impl SourceFunction for WebScrapeFunction {
                     default: Some("true"),
                 },
             ],
+            accepts_extra_args: false,
         }
     }
 

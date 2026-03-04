@@ -1,20 +1,20 @@
-//! Python plugin source bridge.
+//! Python native source bridge.
 //!
-//! Implements `PluginPythonBridge` to allow Python `SourceFunction` objects
-//! to be used as plugin (in-process) data sources via PyO3.
+//! Implements `NativePythonBridge` to allow Python `SourceFunction` objects
+//! to be used as native (in-process) data sources via PyO3.
 
 use arrow::pyarrow::FromPyArrow;
 use arrow::record_batch::RecordBatch;
-use ::bundlebase::source::plugin::PluginPythonBridge;
+use ::bundlebase::source::native::NativePythonBridge;
 use ::bundlebase::BundlebaseError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use std::collections::HashMap;
 
 /// PyO3-based bridge that calls Python `SourceFunction` methods in-process.
-pub struct PyPluginBridge;
+pub struct PyNativeBridge;
 
-impl PyPluginBridge {
+impl PyNativeBridge {
     /// Parse a `python:module:Class` call string into (module, class_name).
     fn parse_python_call(call: &str) -> Result<(&str, &str), BundlebaseError> {
         let rest = call
@@ -80,7 +80,7 @@ impl PyPluginBridge {
     }
 }
 
-impl PluginPythonBridge for PyPluginBridge {
+impl NativePythonBridge for PyNativeBridge {
     fn discover(&self, call: &str, args_json: &str) -> Result<String, BundlebaseError> {
         let (module, class_name) = Self::parse_python_call(call)?;
         let (args, attached) = Self::parse_args_json(args_json)?;

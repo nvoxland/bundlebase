@@ -281,7 +281,7 @@ func TestDataReturnsArrow(t *testing.T) {
 }
 ```
 
-## Plugin Mode
+## Native Mode
 
 Build your source as a C-shared library for zero-copy in-process loading.
 
@@ -315,16 +315,16 @@ go build -buildmode=c-shared -o my_source.so .
 ```
 
 ```python
-bundle.create_source("plugin", {"call": "lib:./my_source.so"})
+bundle.create_source("native", {"call": "lib:./my_source.so"})
 ```
 
 ### How It Works
 
 `ExportSource()` stores your source globally. The package exports `bundlebase_discover`, `bundlebase_data`, `bundlebase_free`, and `bundlebase_stable_url` via cgo. Data is transferred through the [Arrow C Data Interface](https://arrow.apache.org/docs/format/CDataInterface.html) using `arrow/cdata.ExportArrowRecordBatchReader`.
 
-The same `SourceFunction` interface works for both plugin and IPC — switch between them by changing only the entry point (`ExportSource()` + `c-shared` build vs `func main() { Serve(&source) }`).
+The same `SourceFunction` interface works for both native and IPC — switch between them by changing only the entry point (`ExportSource()` + `c-shared` build vs `func main() { Serve(&source) }`).
 
-See [Plugin Source Mode](plugin.md) for the full C ABI reference.
+See [Native Source Mode](native.md) for the full C ABI reference.
 
 ## Error Handling
 

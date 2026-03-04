@@ -65,6 +65,7 @@ impl SourceFunction for RemoteDirFunction {
                     default: None,
                 },
             ],
+            accepts_extra_args: false,
         }
     }
 

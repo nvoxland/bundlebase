@@ -4,7 +4,7 @@ mod bundle_config;
 mod commit;
 mod data_generator;
 mod function_impl;
-mod plugin_source;
+mod native_source;
 mod operation;
 mod progress;
 mod record_batch_stream;
@@ -107,9 +107,9 @@ fn bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register progress tracking functions
     progress::register_module(m)?;
 
-    // Register the Python plugin source bridge for in-process source loading
-    ::bundlebase::source::plugin::register_python_bridge(
-        std::sync::Arc::new(plugin_source::PyPluginBridge),
+    // Register the Python native source bridge for in-process source loading
+    ::bundlebase::source::native::register_python_bridge(
+        std::sync::Arc::new(native_source::PyNativeBridge),
     );
 
     Ok(())

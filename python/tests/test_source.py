@@ -114,10 +114,10 @@ async def test_fetch_returns_results():
 ALLOW_EXTERNAL_CODE_CONFIG = {"system": {"allow_external_code": "true"}}
 
 
-# ---- Plugin source (create_source_plugin) tests ----
+# ---- Plugin source (create_source_native) tests ----
 
-class SimplePluginSource(SourceFunction):
-    """A minimal plugin source for testing."""
+class SimpleNativeSource(SourceFunction):
+    """A minimal native source for testing."""
 
     def discover(self, attached_locations, **kwargs):
         return [
@@ -133,8 +133,8 @@ class SimplePluginSource(SourceFunction):
         return None
 
 
-class StableUrlPluginSource(SourceFunction):
-    """Plugin source with stable_url support."""
+class StableUrlNativeSource(SourceFunction):
+    """Native source with stable_url support."""
 
     def discover(self, attached_locations, **kwargs):
         return [Location("cached.parquet", version="v1")]
@@ -146,8 +146,8 @@ class StableUrlPluginSource(SourceFunction):
         return StableUrl("https://example.com/cached.parquet")
 
 
-class KwargsPluginSource(SourceFunction):
-    """Plugin source that echoes extra kwargs back."""
+class KwargsNativeSource(SourceFunction):
+    """Native source that echoes extra kwargs back."""
 
     def discover(self, attached_locations, **kwargs):
         name = kwargs.get("custom_key", "missing")
@@ -158,25 +158,25 @@ class KwargsPluginSource(SourceFunction):
 
 
 @pytest.mark.asyncio
-async def test_create_source_plugin_binding():
-    """Test that create_source_plugin Python binding works."""
+async def test_create_source_native_binding():
+    """Test that create_source_native Python binding works."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.create_source_plugin(SimplePluginSource())
+    c = await c.create_source_native(SimpleNativeSource())
     assert c is not None
 
 
 @pytest.mark.asyncio
-async def test_create_source_plugin_fetch():
-    """Test that plugin source discovers and attaches data via fetch."""
+async def test_create_source_native_fetch():
+    """Test that native source discovers and attaches data via fetch."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.create_source_plugin(SimplePluginSource())
+    c = await c.create_source_native(SimpleNativeSource())
 
-    # create_source_plugin auto-fetches, so data is already present.
+    # create_source_native auto-fetches, so data is already present.
     # A subsequent fetch should find no new data.
     results = await c.fetch("base", "add")
     assert len(results) == 1
     result = results[0]
-    assert result.source_function == "plugin"
+    assert result.source_function == "native"
     assert result.total_count() == 0
 
     # But the data should be queryable
@@ -185,10 +185,10 @@ async def test_create_source_plugin_fetch():
 
 
 @pytest.mark.asyncio
-async def test_create_source_plugin_data():
-    """Test that data from plugin source is queryable."""
+async def test_create_source_native_data():
+    """Test that data from native source is queryable."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.create_source_plugin(SimplePluginSource())
+    c = await c.create_source_native(SimpleNativeSource())
     await c.fetch("base", "add")
 
     rows = await c.num_rows()
@@ -196,35 +196,35 @@ async def test_create_source_plugin_data():
 
 
 @pytest.mark.asyncio
-async def test_create_source_plugin_second_fetch_no_changes():
+async def test_create_source_native_second_fetch_no_changes():
     """Test that second fetch detects no new data."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.create_source_plugin(SimplePluginSource())
+    c = await c.create_source_native(SimpleNativeSource())
 
-    # create_source_plugin auto-fetches, so first explicit fetch finds nothing new
+    # create_source_native auto-fetches, so first explicit fetch finds nothing new
     results1 = await c.fetch("base", "add")
     assert results1[0].total_count() == 0
     assert results1[0].is_empty()
 
 
 @pytest.mark.asyncio
-async def test_create_source_plugin_with_kwargs():
+async def test_create_source_native_with_kwargs():
     """Test that extra kwargs are passed to discover and data."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.create_source_plugin(KwargsPluginSource(), custom_key="hello")
+    c = await c.create_source_native(KwargsNativeSource(), custom_key="hello")
 
-    # create_source_plugin auto-fetches, so data is already present
+    # create_source_native auto-fetches, so data is already present
     rows = await c.num_rows()
     assert rows == 1
 
 
 @pytest.mark.asyncio
-async def test_create_source_plugin_with_stable_url():
-    """Test that plugin source with stable_url works."""
+async def test_create_source_native_with_stable_url():
+    """Test that native source with stable_url works."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.create_source_plugin(StableUrlPluginSource())
+    c = await c.create_source_native(StableUrlNativeSource())
 
-    # create_source_plugin auto-fetches, so data is already present
+    # create_source_native auto-fetches, so data is already present
     rows = await c.num_rows()
     assert rows == 1
 
@@ -233,20 +233,20 @@ async def test_create_source_plugin_with_stable_url():
 
 
 @pytest.mark.asyncio
-async def test_plugin_source_blocked_without_allow_external_code():
-    """Test that plugin source fails when allow_external_code is not set."""
+async def test_native_source_blocked_without_allow_external_code():
+    """Test that native source fails when allow_external_code is not set."""
     c = await bundlebase.create(random_bundle())
 
     with pytest.raises(ValueError, match="External code execution is disabled"):
-        await c.create_source_plugin(SimplePluginSource())
+        await c.create_source_native(SimpleNativeSource())
 
 
 @pytest.mark.asyncio
-async def test_plugin_source_allowed_with_config():
-    """Test that plugin source works when allow_external_code=true."""
+async def test_native_source_allowed_with_config():
+    """Test that native source works when allow_external_code=true."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.create_source_plugin(SimplePluginSource())
+    c = await c.create_source_native(SimpleNativeSource())
 
-    # create_source_plugin auto-fetches, so data should already be present
+    # create_source_native auto-fetches, so data should already be present
     rows = await c.num_rows()
     assert rows == 5  # 3 from data1 + 2 from data2

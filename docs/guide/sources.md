@@ -289,7 +289,7 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
 
 Bundlebase supports two modes for custom source functions:
 
-#### plugin (In-Process, Zero-Copy)
+#### native (In-Process, Zero-Copy)
 
 Loads a source function in-process for zero-copy Arrow data transfer. Best for performance-critical pipelines.
 
@@ -300,19 +300,19 @@ Loads a source function in-process for zero-copy Arrow data transfer. Best for p
 | `call` | Yes | `lib:/path/to/lib.so` (shared library) or `python:module:Class` (Python in-process) |
 | `copy` | No | `"true"` to copy files into bundle (default), `"false"` to reference in place |
 
-=== "Python Plugin"
+=== "Python Native"
 
     ```python
     # Recommended: pass the source object directly
     from my_source import MySource
-    bundle = bundle.create_source_plugin(MySource())
+    bundle = bundle.create_source_native(MySource())
     ```
 
 === "Shared Library"
 
     ```python
     # Rust, Go, or Java compiled as a shared library
-    bundle = bundle.create_source("plugin", {
+    bundle = bundle.create_source("native", {
         "call": "lib:./target/release/libmy_source.so"
     })
     ```

@@ -113,6 +113,7 @@ impl SourceFunction for KaggleSource {
                     default: None,
                 },
             ],
+            accepts_extra_args: false,
         }
     }
 
