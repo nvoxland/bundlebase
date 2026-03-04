@@ -1,13 +1,8 @@
 //! Source module for source function definitions and discovery.
 
-mod ipc;
-pub(crate) mod kaggle;
-pub mod native;
-mod postgres;
-mod remote_dir;
-mod source_function;
+pub mod plugin;
+pub(crate) mod source_function;
 pub(crate) mod source_utils;
-mod web_scrape;
 
 use crate::BundlebaseError;
 
@@ -50,13 +45,14 @@ impl std::fmt::Display for SyncMode {
     }
 }
 
-pub use kaggle::KaggleSource;
-pub use postgres::PostgresFunction;
-pub use remote_dir::RemoteDirFunction;
+pub use plugin::kaggle::KaggleSource;
+pub use plugin::native;
+pub use plugin::PostgresFunction;
+pub use plugin::RemoteDirFunction;
+pub use plugin::WebScrapeFunction;
 pub use source_function::{
     format_fetch_summary, validate_source_args, ArgSpec, AttachedFileInfo, DiscoveredLocation,
     FetchAction, FetchedBlock, FetchResults, MaterializedData, SourceData, SourceFunction,
     SourceFunctionRegistry, SourceFunctionSignature,
 };
 pub use source_utils::orchestrate_fetch;
-pub use web_scrape::WebScrapeFunction;

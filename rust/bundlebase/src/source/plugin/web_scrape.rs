@@ -3,10 +3,10 @@
 //! Fetches a webpage, extracts links from `<a href="...">` elements,
 //! and downloads files that match specified glob patterns.
 
-use super::source_function::{
+use crate::source::source_function::{
     ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
-use super::source_utils;
+use crate::source::source_utils;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use scraper::{Html, Selector};
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_missing_url() {
-        use super::super::source_function::validate_source_args;
+        use crate::source::source_function::validate_source_args;
         let func = WebScrapeFunction;
         let args = HashMap::new();
 
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn test_validate_source_args_copy_invalid() {
-        use super::super::source_function::validate_source_args;
+        use crate::source::source_function::validate_source_args;
         let func = WebScrapeFunction;
         let mut args = HashMap::new();
         args.insert(

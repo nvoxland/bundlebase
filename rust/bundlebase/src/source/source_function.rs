@@ -15,13 +15,13 @@
 //! Orchestration (sync mode handling, materialization, file management)
 //! lives in `source_utils::orchestrate_fetch()`.
 
-use super::ipc::IpcSourceFunction;
-use super::kaggle::KaggleSource;
-use super::native::NativeSourceFunction;
-use super::postgres::PostgresFunction;
-use super::remote_dir::RemoteDirFunction;
+use super::plugin::IpcSourceFunction;
+use super::plugin::KaggleSource;
+use super::plugin::NativeSourceFunction;
+use super::plugin::PostgresFunction;
+use super::plugin::RemoteDirFunction;
+use super::plugin::WebScrapeFunction;
 use super::source_utils;
-use super::web_scrape::WebScrapeFunction;
 
 use crate::{BundleConfig, BundlebaseError};
 use arrow::record_batch::RecordBatch;

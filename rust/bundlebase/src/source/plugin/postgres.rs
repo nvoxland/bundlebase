@@ -9,10 +9,10 @@
 //! - `sort_column` (required): Column to ORDER BY and partition on
 //! - `batch_size` (optional): Rows per output file (default: 1000000)
 
-use super::source_function::{
+use crate::source::source_function::{
     ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
 };
-use super::source_utils;
+use crate::source::source_utils;
 use crate::{BundleConfig, BundlebaseError};
 use url::Url;
 use arrow::array::{
@@ -676,7 +676,7 @@ impl SourceFunction for PostgresFunction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::source_function::validate_source_args;
+    use crate::source::source_function::validate_source_args;
 
     #[test]
     fn test_signature() {
