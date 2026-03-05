@@ -410,6 +410,76 @@ impl PyBundle {
         })
     }
 
+    /// Set temporary (runtime-only) connector logic for a connector.
+    ///
+    /// This does NOT persist the logic — it only sets it for the current session.
+    #[pyo3(signature = (name, type_, logic, platform="*/*"))]
+    fn set_temporary_connector_logic<'py>(
+        &self,
+        name: &str,
+        type_: &str,
+        logic: &str,
+        platform: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let name = name.to_string();
+        let source_type = type_.to_string();
+        let logic = logic.to_string();
+        let platform = platform.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let entry = ::bundlebase::bundle::ConnectorLogicEntry {
+                source_type,
+                logic,
+                platform,
+            };
+            inner
+                .set_temporary_connector_logic(&name, entry)
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to set temporary connector logic: {}",
+                        e
+                    ))
+                })?;
+            Ok(format!("Set temporary connector logic for: {}", name))
+        })
+    }
+
+    /// Drop runtime-only connector logic (session-only).
+    ///
+    /// # Arguments
+    /// * `name` - The dotted connector name (e.g., "acme.weather")
+    /// * `platform` - Optional platform filter (e.g., "linux/amd64"). None drops all.
+    ///
+    /// Returns a message describing what was dropped.
+    #[pyo3(signature = (name, platform=None))]
+    fn drop_temporary_connector_logic<'py>(
+        &self,
+        name: &str,
+        platform: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let name = name.to_string();
+        let platform = platform.map(|s| s.to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let count = inner
+                .drop_temporary_connector_logic(&name, platform.as_deref())
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to drop temporary connector logic: {}",
+                        e
+                    ))
+                })?;
+            Ok(format!(
+                "Dropped {} temporary connector logic entries for: {}",
+                count, name
+            ))
+        })
+    }
+
     fn operations(&self) -> Vec<super::operation::PyOperation> {
         self.inner
             .operations()

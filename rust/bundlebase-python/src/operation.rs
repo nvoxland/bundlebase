@@ -36,6 +36,10 @@ impl PyOperation {
             AnyOperation::DetachBlock(_) => "detachBlock".to_string(),
             AnyOperation::ReplaceBlock(_) => "replaceBlock".to_string(),
             AnyOperation::UpdateVersion(_) => "updateVersion".to_string(),
+            AnyOperation::CreateConnector(_) => "createConnector".to_string(),
+            AnyOperation::SetConnectorLogic(_) => "setConnectorLogic".to_string(),
+            AnyOperation::DropConnector(_) => "dropConnector".to_string(),
+            AnyOperation::DropConnectorLogic(_) => "dropConnectorLogic".to_string(),
         }
     }
 

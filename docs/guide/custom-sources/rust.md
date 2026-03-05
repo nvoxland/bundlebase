@@ -22,9 +22,9 @@ use bundlebase_sdk::{Location, SourceFunction};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-struct MySource;
+struct ExampleConnector;
 
-impl SourceFunction for MySource {
+impl SourceFunction for ExampleConnector {
     fn discover(
         &self, _attached: &[String], _args: &HashMap<String, String>,
     ) -> Result<Vec<Location>, Box<dyn std::error::Error>> {
@@ -51,10 +51,16 @@ impl SourceFunction for MySource {
     }
 }
 
-fn main() { bundlebase_sdk::serve(&MySource); }
+fn main() { bundlebase_sdk::serve(&ExampleConnector); }
 ```
 
-Build and use with: `create_source("ipc", {"call": "./target/release/my-source"})`
+Build and use with:
+
+```python
+bundle.create_connector('example.connector')
+bundle.set_connector_logic('example.connector', type_='ipc', logic='./target/release/example-connector')
+bundle.create_source('example.connector')
+```
 
 ## API Reference
 
@@ -283,7 +289,7 @@ mod tests {
 
         let mut output = Vec::new();
         bundlebase_sdk::serve_io(
-            &MySource,
+            &ExampleConnector,
             &mut Cursor::new(input.as_bytes()),
             &mut output,
         );
@@ -307,7 +313,7 @@ mod tests {
 
         let mut output = Vec::new();
         bundlebase_sdk::serve_io(
-            &MySource,
+            &ExampleConnector,
             &mut Cursor::new(input.as_bytes()),
             &mut output,
         );
@@ -351,9 +357,9 @@ use bundlebase_sdk::{SourceFunction, Location, export_source};
 use arrow::record_batch::RecordBatch;
 use std::collections::HashMap;
 
-struct MySource;
+struct ExampleConnector;
 
-impl SourceFunction for MySource {
+impl SourceFunction for ExampleConnector {
     fn discover(&self, _attached: &[String], _args: &HashMap<String, String>)
         -> Result<Vec<Location>, Box<dyn std::error::Error>> {
         Ok(vec![Location::new("data.parquet")])
@@ -367,7 +373,7 @@ impl SourceFunction for MySource {
 }
 
 // Generates bundlebase_discover, bundlebase_data, bundlebase_free, bundlebase_stable_url
-export_source!(MySource);
+export_source!(ExampleConnector);
 ```
 
 ### Build and Use
@@ -377,7 +383,9 @@ cargo build --release
 ```
 
 ```python
-bundle.create_source("native", {"call": "lib:target/release/libmy_source.so"})
+bundle.create_connector('example.connector')
+bundle.set_connector_logic('example.connector', type_='lib', logic='target/release/libexample_connector.so')
+bundle.create_source('example.connector')
 ```
 
 ### How It Works

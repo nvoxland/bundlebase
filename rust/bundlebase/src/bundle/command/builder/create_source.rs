@@ -50,12 +50,20 @@ impl CommandParsing for CreateSourceCommand {
 
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
+                Rule::dotted_identifier => {
+                    if function.is_none() {
+                        function = Some(inner_pair.as_str().to_string());
+                    }
+                }
                 Rule::identifier => {
                     if function.is_none() {
                         // First identifier is the function name
                         function = Some(inner_pair.as_str().to_string());
                     } else if seen_source_args {
                         // Identifier after source_args is the pack name (after ON)
+                        pack = Some(inner_pair.as_str().to_string());
+                    } else {
+                        // Identifier after function but before source_args is the pack name (ON without WITH)
                         pack = Some(inner_pair.as_str().to_string());
                     }
                 }
@@ -90,7 +98,8 @@ impl CommandParsing for CreateSourceCommand {
             "CREATE SOURCE missing function name".into()
         })?;
 
-        if args.is_empty() {
+        // Built-in functions require args; defined sources (dotted names) don't
+        if args.is_empty() && !function.contains('.') {
             return Err("CREATE SOURCE requires at least one argument in WITH clause".into());
         }
 
@@ -99,6 +108,17 @@ impl CommandParsing for CreateSourceCommand {
 
     fn to_statement(&self) -> String {
         use crate::bundle::command::parser::escape_string;
+
+        if self.args.is_empty() {
+            // Defined source with no extra args
+            return match &self.pack {
+                Some(pack) if pack != "base" => {
+                    format!("CREATE SOURCE {} ON {}", self.function, pack)
+                }
+                _ => format!("CREATE SOURCE {}", self.function),
+            };
+        }
+
         let mut args_str: Vec<String> = self
             .args
             .iter()

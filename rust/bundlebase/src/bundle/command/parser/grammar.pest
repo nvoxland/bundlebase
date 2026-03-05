@@ -55,7 +55,13 @@ schema_stmt = {
 
 // Source management statements - operations for data sources
 source_stmt = {
-    create_source_stmt
+    create_connector_stmt
+    | drop_temporary_connector_logic_stmt
+    | drop_connector_logic_stmt
+    | drop_connector_stmt
+    | set_temporary_connector_logic_stmt
+    | set_connector_logic_stmt
+    | create_source_stmt
     | fetch_stmt
 }
 
@@ -162,15 +168,82 @@ reindex_stmt = {
 }
 
 // ============================================================================
+// CREATE CONNECTOR Statement
+// ============================================================================
+// Syntax: CREATE CONNECTOR <dotted_name>
+// Example: CREATE CONNECTOR acme.datasources.weather
+
+create_connector_stmt = {
+    ^"create" ~ ^"connector" ~ dotted_identifier
+}
+
+// ============================================================================
+// SET CONNECTOR LOGIC Statement
+// ============================================================================
+// Syntax: SET CONNECTOR LOGIC <dotted_name> WITH (<args>)
+// Example: SET CONNECTOR LOGIC acme.datasources.weather WITH (type = 'ipc', logic = './my_source', platform = '*/*')
+
+set_connector_logic_stmt = {
+    ^"set" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ ^"with" ~ source_args
+}
+
+// ============================================================================
+// SET TEMPORARY CONNECTOR LOGIC Statement
+// ============================================================================
+// Syntax: SET TEMPORARY CONNECTOR LOGIC <dotted_name> WITH (<args>)
+// Example: SET TEMPORARY CONNECTOR LOGIC acme.weather WITH (type = 'python', logic = 'mod:Class', platform = '*/*')
+
+set_temporary_connector_logic_stmt = {
+    ^"set" ~ ^"temporary" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ ^"with" ~ source_args
+}
+
+// ============================================================================
+// DROP CONNECTOR LOGIC Statement
+// ============================================================================
+// Syntax: DROP CONNECTOR LOGIC <dotted_name> [FOR PLATFORM '<platform>']
+// Examples:
+//   DROP CONNECTOR LOGIC acme.weather
+//   DROP CONNECTOR LOGIC acme.weather FOR PLATFORM 'linux/amd64'
+
+drop_connector_logic_stmt = {
+    ^"drop" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ (^"for" ~ ^"platform" ~ quoted_string)?
+}
+
+// ============================================================================
+// DROP CONNECTOR Statement
+// ============================================================================
+// Syntax: DROP CONNECTOR <dotted_name>
+// Example: DROP CONNECTOR acme.weather
+
+drop_connector_stmt = {
+    ^"drop" ~ ^"connector" ~ dotted_identifier
+}
+
+// ============================================================================
+// DROP TEMPORARY CONNECTOR LOGIC Statement
+// ============================================================================
+// Syntax: DROP TEMPORARY CONNECTOR LOGIC <dotted_name> [FOR PLATFORM '<platform>']
+// Examples:
+//   DROP TEMPORARY CONNECTOR LOGIC acme.weather
+//   DROP TEMPORARY CONNECTOR LOGIC acme.weather FOR PLATFORM 'linux/amd64'
+
+drop_temporary_connector_logic_stmt = {
+    ^"drop" ~ ^"temporary" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ (^"for" ~ ^"platform" ~ quoted_string)?
+}
+
+// ============================================================================
 // CREATE SOURCE Statement
 // ============================================================================
 // Syntax: CREATE SOURCE <function> WITH (<args>) [ON <pack>]
+//         CREATE SOURCE <dotted_name> [WITH (<args>)] [ON <pack>]
 // Examples:
 //   CREATE SOURCE remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')
 //   CREATE SOURCE remote_dir WITH (url = 'file:///data/') ON users
+//   CREATE SOURCE acme.datasources.weather WITH (custom_key = 'hello')
+//   CREATE SOURCE acme.datasources.weather
 
 create_source_stmt = {
-    ^"create" ~ ^"source" ~ identifier ~ ^"with" ~ source_args ~ (^"on" ~ identifier)?
+    ^"create" ~ ^"source" ~ (dotted_identifier | identifier) ~ (^"with" ~ source_args)? ~ (^"on" ~ identifier)?
 }
 
 source_args = {
@@ -244,6 +317,15 @@ rename_view_stmt = {
 // ============================================================================
 // Lexical Elements
 // ============================================================================
+
+dotted_identifier = @{
+    // Dot-separated identifier: at least two segments (e.g., "acme.weather")
+    identifier_segment ~ ("." ~ identifier_segment)+
+}
+
+identifier_segment = @{
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+}
 
 identifier = @{
     // SQL identifier: starts with letter/underscore, contains alphanumeric/underscore

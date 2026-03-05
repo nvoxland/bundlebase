@@ -346,6 +346,48 @@ class SyncBundle:
         return SyncQueryResult(async_result)
 
 
+    def set_temporary_connector_logic(
+        self, name: str, type_: str, logic: str,
+        platform: str = "*/*"
+    ) -> "SyncBundle":
+        """Set temporary (runtime-only) connector logic for a connector definition.
+
+        This does NOT persist the logic — it only sets it for the current session.
+        Use this for Python in-process sources.
+
+        Args:
+            name: The defined connector name
+            type_: The source type: "python", "lib", "java", "docker", or "ipc"
+            logic: The logic string (e.g., "my_source:MySource" for python)
+            platform: Docker-style platform string (default: "*/*")
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(
+            self._async, "set_temporary_connector_logic", name, type_, logic, platform
+        )
+        _loop_manager.run_sync(coro)
+        return self
+
+    def drop_temporary_connector_logic(
+        self, name: str, platform: str = None
+    ) -> str:
+        """Drop temporary (runtime-only) connector logic for a connector definition.
+
+        Args:
+            name: The defined connector name
+            platform: Optional platform filter (e.g., "linux/amd64"). None drops all.
+
+        Returns:
+            Message describing what was dropped
+        """
+        coro = _call_original_method(
+            self._async, "drop_temporary_connector_logic", name, platform
+        )
+        return _loop_manager.run_sync(coro)
+
+
 class SyncBundleBuilder(SyncBundle):
     """Synchronous wrapper for PyBundleBuilder (mutable).
 
@@ -520,31 +562,111 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def create_source_native(
-        self, source, pack: str = "base", **kwargs
-    ) -> "SyncBundleBuilder":
-        """Create a native (in-process) source from a Python SourceFunction object.
-
-        Uses zero-copy Arrow data transfer by calling the source's discover()
-        and data() methods directly in-process, instead of spawning a subprocess.
+    def create_connector(self, name: str) -> "SyncBundleBuilder":
+        """Create a named connector with a dot-separated namespace.
 
         Args:
-            source: A SourceFunction instance (must have discover() and data() methods)
-            pack: Which pack to define the source for:
-                - "base" (default): The base pack
-                - A join name: A joined pack by its join name
-            **kwargs: Extra arguments forwarded to discover/data calls
+            name: Dot-separated connector name (e.g., "acme.datasources.weather")
 
         Returns:
             Self for fluent chaining
-
-        Example:
-            >>> from my_source import MySource
-            >>> bundle.create_source_native(MySource())
         """
-        coro = _call_original_method(self._async, "create_source_native", source, pack, **kwargs)
+        coro = _call_original_method(self._async, "create_connector", name)
         self._async = _loop_manager.run_sync(coro)
         return self
+
+    def set_connector_logic(
+        self, name: str, type_: str, logic: str,
+        platform: str = "*/*"
+    ) -> "SyncBundleBuilder":
+        """Set platform-specific implementation logic for a connector definition (always persisted).
+
+        Args:
+            name: The defined connector name
+            type_: The source type: "lib", "java", "docker", or "ipc"
+            logic: The logic string (path to shared library or binary)
+            platform: Docker-style platform string (default: "*/*")
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(
+            self._async, "set_connector_logic", name, type_, logic, platform
+        )
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def set_temporary_connector_logic(
+        self, name: str, type_: str, logic: str,
+        platform: str = "*/*"
+    ) -> "SyncBundleBuilder":
+        """Set temporary (runtime-only) connector logic for a connector definition.
+
+        This does NOT persist the logic — it only sets it for the current session.
+        Use this for Python in-process sources.
+
+        Args:
+            name: The defined connector name
+            type_: The source type: "python", "lib", "java", "docker", or "ipc"
+            logic: The logic string (e.g., "my_source:MySource" for python)
+            platform: Docker-style platform string (default: "*/*")
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(
+            self._async, "set_temporary_connector_logic", name, type_, logic, platform
+        )
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def drop_connector(self, name: str) -> "SyncBundleBuilder":
+        """Drop a connector definition and all its associated logic and sources.
+
+        Args:
+            name: The dotted connector name (e.g., "acme.weather")
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "drop_connector", name)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def drop_connector_logic(
+        self, name: str, platform: str = None
+    ) -> "SyncBundleBuilder":
+        """Drop persisted connector logic for a connector definition.
+
+        Args:
+            name: The defined connector name
+            platform: Optional platform filter (e.g., "linux/amd64"). None drops all.
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(
+            self._async, "drop_connector_logic", name, platform
+        )
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def drop_temporary_connector_logic(
+        self, name: str, platform: str = None
+    ) -> str:
+        """Drop temporary (runtime-only) connector logic for a connector definition.
+
+        Args:
+            name: The defined connector name
+            platform: Optional platform filter (e.g., "linux/amd64"). None drops all.
+
+        Returns:
+            Message describing what was dropped
+        """
+        coro = _call_original_method(
+            self._async, "drop_temporary_connector_logic", name, platform
+        )
+        return _loop_manager.run_sync(coro)
 
     def fetch(self, pack: str = "base", mode: str = "add") -> List["FetchResults"]:
         """Fetch data from sources for a pack.

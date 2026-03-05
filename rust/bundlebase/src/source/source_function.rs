@@ -464,15 +464,17 @@ pub struct SourceFunctionRegistry {
 
 impl SourceFunctionRegistry {
     /// Create a new registry with built-in functions registered.
+    ///
+    /// Note: "ipc" and "native" are NOT registered here. They are only available
+    /// via connectors (CREATE CONNECTOR + SET CONNECTOR LOGIC). Use `create_instance()`
+    /// to create instances of them when resolving connector logic.
     pub fn new() -> Self {
         let mut registry = Self {
             functions: HashMap::new(),
         };
 
-        // Register built-in functions
-        registry.register(Arc::new(IpcSourceFunction::new()));
+        // Register built-in functions (ipc/native removed — only via defined sources)
         registry.register(Arc::new(KaggleSource));
-        registry.register(Arc::new(NativeSourceFunction::new()));
         registry.register(Arc::new(PostgresFunction));
         registry.register(Arc::new(RemoteDirFunction));
         registry.register(Arc::new(WebScrapeFunction));
@@ -624,5 +626,28 @@ mod tests {
         };
         assert_eq!(sig.name, "test");
         assert_eq!(sig.arg_specs.len(), 1);
+    }
+
+    #[test]
+    fn test_ipc_native_removed_from_registry() {
+        let registry = SourceFunctionRegistry::new();
+        assert!(registry.get("ipc").is_none());
+        assert!(registry.get("native").is_none());
+    }
+
+    #[test]
+    fn test_ipc_native_still_in_create_instance() {
+        let registry = SourceFunctionRegistry::new();
+        assert!(registry.create_instance("ipc").is_some());
+        assert!(registry.create_instance("native").is_some());
+    }
+
+    #[test]
+    fn test_builtins_still_registered() {
+        let registry = SourceFunctionRegistry::new();
+        assert!(registry.get("remote_dir").is_some());
+        assert!(registry.get("kaggle").is_some());
+        assert!(registry.get("web_scrape").is_some());
+        assert!(registry.get("postgres").is_some());
     }
 }

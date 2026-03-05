@@ -678,65 +678,173 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Create a native (in-process) source from a Python SourceFunction object.
-    ///
-    /// This provides zero-copy Arrow data transfer by calling the source's
-    /// `discover()` and `data()` methods directly in-process via PyO3,
-    /// instead of spawning a subprocess (like the `ipc` source does).
+    /// Create a named connector with a dot-separated namespace.
     ///
     /// # Arguments
-    /// * `source` - A Python object implementing the SourceFunction interface
-    ///   (must have `discover()` and `data()` methods)
-    /// * `pack` - Which pack to create the source for ("base" or a join name)
-    /// * `kwargs` - Extra key-value arguments forwarded to discover/data calls
-    #[pyo3(signature = (source, pack="base", **kwargs))]
-    fn create_source_native<'py>(
+    /// * `name` - Dot-separated connector name (e.g., "acme.datasources.weather")
+    #[pyo3(signature = (name))]
+    fn create_connector<'py>(
         slf: PyRef<'_, Self>,
-        source: &Bound<'py, PyAny>,
-        pack: &str,
-        kwargs: Option<&Bound<'py, PyDict>>,
+        name: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        // Extract the module and class name from the Python object
-        let py_type = source.get_type();
-        let module: String = py_type
-            .getattr("__module__")?
-            .extract()?;
-        let qualname: String = py_type
-            .getattr("__qualname__")?
-            .extract()?;
-
-        let call = format!("python:{}:{}", module, qualname);
-
-        let mut args = HashMap::new();
-        args.insert("call".to_string(), call);
-        if let Some(kw) = kwargs {
-            for (k, v) in kw.iter() {
-                let key: String = k.extract()?;
-                let value: String = v.extract().map_err(|_| {
-                    pyo3::exceptions::PyTypeError::new_err(
-                        format!("Argument '{}' must be a string", key)
-                    )
-                })?;
-                args.insert(key, value);
-            }
-        }
-
         let inner = slf.inner.clone();
-        let pack = if pack == "base" {
-            None
-        } else {
-            Some(pack.to_string())
-        };
+        let name = name.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .create_source("native", args, pack.as_deref())
+                .create_connector(&name)
                 .await
-                .map_err(|e| to_py_error_ctx("Failed to create native source", e))?;
+                .map_err(|e| to_py_error_ctx("Failed to create connector", e))?;
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })
                     .map_err(|e| to_py_error(e))
             })
+        })
+    }
+
+    /// Set platform-specific implementation logic for a connector (always persisted).
+    ///
+    /// # Arguments
+    /// * `name` - The connector name
+    /// * `type_` - The source type: "lib", "java", "docker", or "ipc"
+    /// * `logic` - The logic string (path to shared library or binary)
+    /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
+    #[pyo3(signature = (name, type_, logic, platform="*/*"))]
+    fn set_connector_logic<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        type_: &str,
+        logic: &str,
+        platform: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let source_type = type_.to_string();
+        let logic = logic.to_string();
+        let platform = platform.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .set_connector_logic(&name, &source_type, &logic, &platform)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to set connector logic", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    /// Set temporary (runtime-only) connector logic for a connector.
+    ///
+    /// # Arguments
+    /// * `name` - The connector name
+    /// * `type_` - The source type: "python", "lib", "java", "docker", or "ipc"
+    /// * `logic` - The logic string (e.g., "mod:Class" for python)
+    /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
+    #[pyo3(signature = (name, type_, logic, platform="*/*"))]
+    fn set_temporary_connector_logic<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        type_: &str,
+        logic: &str,
+        platform: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let source_type = type_.to_string();
+        let logic = logic.to_string();
+        let platform = platform.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .set_temporary_connector_logic(&name, &source_type, &logic, &platform)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to set temporary connector logic", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    /// Drop a connector and all its associated logic and sources.
+    ///
+    /// # Arguments
+    /// * `name` - The dotted connector name (e.g., "acme.weather")
+    #[pyo3(signature = (name))]
+    fn drop_connector<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .drop_connector(&name)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to drop connector", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    /// Drop persisted connector logic for a connector.
+    ///
+    /// # Arguments
+    /// * `name` - The dotted connector name (e.g., "acme.weather")
+    /// * `platform` - Optional platform filter (e.g., "linux/amd64"). None drops all.
+    #[pyo3(signature = (name, platform=None))]
+    fn drop_connector_logic<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        platform: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let platform = platform.map(|s| s.to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .drop_connector_logic(&name, platform.as_deref())
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to drop connector logic", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    /// Drop runtime-only connector logic (session-only, no operation created).
+    ///
+    /// # Arguments
+    /// * `name` - The dotted connector name (e.g., "acme.weather")
+    /// * `platform` - Optional platform filter (e.g., "linux/amd64"). None drops all.
+    ///
+    /// Returns the number of entries removed.
+    #[pyo3(signature = (name, platform=None))]
+    fn drop_temporary_connector_logic<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        platform: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let platform = platform.map(|s| s.to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let count = inner
+                .drop_temporary_connector_logic(&name, platform.as_deref())
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to drop temporary connector logic", e))?;
+            Ok(format!(
+                "Dropped {} temporary connector logic entries for: {}",
+                count, name
+            ))
         })
     }
 
@@ -1039,7 +1147,7 @@ impl PyBundleBuilder {
 
     #[getter]
     fn version(&self) -> String {
-        self.inner.bundle().version()
+        self.inner.version()
     }
 
     fn history(&self) -> Vec<PyCommit> {

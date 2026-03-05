@@ -61,19 +61,22 @@ pub use parser::Rule;
 // Re-export builder command structs
 pub use builder::{
     AddColumnCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    CreateViewCommand, DetachBlockCommand, DropColumnCommand, DropIndexCommand, DropJoinCommand,
-    DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand, RebuildIndexCommand,
-    ReindexCommand, RenameColumnCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand,
-    ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand,
-    StandardizeColumnNamesCommand, UndoCommand, VerifyDataCommand,
+    CreateConnectorCommand, CreateViewCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand,
+    DropConnectorLogicCommand, DropIndexCommand, DropJoinCommand,
+    DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
+    RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameJoinCommand, RenameViewCommand,
+    ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand,
+    SetConnectorLogicCommand, StandardizeColumnNamesCommand, UndoCommand, VerifyDataCommand,
 };
 
 // Re-export verification result types
 pub use builder::{FileVerificationResult, VerificationResults};
 
 // Re-export facade command structs
+pub use facade::DropTemporaryConnectorLogicCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
+pub use facade::SetTemporaryConnectorLogicCommand;
 
 /// Commands that can be executed on a BundleFacade (read-only).
 ///
@@ -81,10 +84,14 @@ pub use facade::SetConfigCommand;
 /// It's a subset of `BundleCommand` that can be executed on a read-only `Bundle`.
 #[derive(Debug, Clone)]
 pub enum FacadeCommand {
+    /// Drop runtime-only connector logic (not persisted)
+    DropTemporaryConnectorLogic(DropTemporaryConnectorLogicCommand),
     /// Show query execution plan
     ExplainPlan(ExplainPlanCommand),
     /// Set runtime config value (session-only)
     SetConfig(SetConfigCommand),
+    /// Set runtime-only connector logic (not persisted)
+    SetTemporaryConnectorLogic(SetTemporaryConnectorLogicCommand),
 }
 
 impl FacadeCommand {
@@ -94,11 +101,19 @@ impl FacadeCommand {
         facade: &dyn BundleFacade,
     ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         match self {
+            FacadeCommand::DropTemporaryConnectorLogic(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
             FacadeCommand::ExplainPlan(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
             FacadeCommand::SetConfig(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::SetTemporaryConnectorLogic(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
@@ -108,16 +123,20 @@ impl FacadeCommand {
     /// Returns the Arrow schema for this command's output.
     pub fn output_schema(&self) -> SchemaRef {
         match self {
+            FacadeCommand::DropTemporaryConnectorLogic(_) => DropTemporaryConnectorLogicCommand::output_schema(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
+            FacadeCommand::SetTemporaryConnectorLogic(_) => SetTemporaryConnectorLogicCommand::output_schema(),
         }
     }
 
     /// Returns the expected output shape for display formatting.
     pub fn output_shape(&self) -> OutputShape {
         match self {
+            FacadeCommand::DropTemporaryConnectorLogic(_) => DropTemporaryConnectorLogicCommand::output_shape(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
+            FacadeCommand::SetTemporaryConnectorLogic(_) => SetTemporaryConnectorLogicCommand::output_shape(),
         }
     }
 }
@@ -129,8 +148,10 @@ impl BundleCommand {
     /// Returns `Err` with a descriptive error message if this is a mutating command.
     pub fn into_facade_command(self) -> Result<FacadeCommand, BundlebaseError> {
         match self {
+            BundleCommand::DropTemporaryConnectorLogic(cmd) => Ok(FacadeCommand::DropTemporaryConnectorLogic(cmd)),
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
             BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
+            BundleCommand::SetTemporaryConnectorLogic(cmd) => Ok(FacadeCommand::SetTemporaryConnectorLogic(cmd)),
             _ => {
                 // Get the command name for the error message
                 let cmd_name = match &self {
@@ -155,6 +176,10 @@ impl BundleCommand {
                     BundleCommand::SetName(_) => "SET NAME",
                     BundleCommand::SetDescription(_) => "SET DESCRIPTION",
                     BundleCommand::SaveConfig(_) => "SAVE CONFIG",
+                    BundleCommand::CreateConnector(_) => "CREATE CONNECTOR",
+                    BundleCommand::DropConnector(_) => "DROP CONNECTOR",
+                    BundleCommand::DropConnectorLogic(_) => "DROP CONNECTOR LOGIC",
+                    BundleCommand::SetConnectorLogic(_) => "SET CONNECTOR LOGIC",
                     BundleCommand::CreateSource(_) => "CREATE SOURCE",
                     BundleCommand::Reset(_) => "RESET",
                     BundleCommand::Undo(_) => "UNDO",
@@ -162,7 +187,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
+                    BundleCommand::DropTemporaryConnectorLogic(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::SetTemporaryConnectorLogic(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -176,7 +201,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
+        matches!(self, BundleCommand::DropTemporaryConnectorLogic(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::SetTemporaryConnectorLogic(_))
     }
 }
 
@@ -458,6 +483,10 @@ register_commands! {
         SaveConfig(SaveConfigCommand) => Rule::save_config_stmt,
 
         // Source commands
+        CreateConnector(CreateConnectorCommand) => Rule::create_connector_stmt,
+        DropConnector(DropConnectorCommand) => Rule::drop_connector_stmt,
+        DropConnectorLogic(DropConnectorLogicCommand) => Rule::drop_connector_logic_stmt,
+        SetConnectorLogic(SetConnectorLogicCommand) => Rule::set_connector_logic_stmt,
         CreateSource(CreateSourceCommand) => Rule::create_source_stmt,
 
         // Transaction commands
@@ -474,8 +503,10 @@ register_commands! {
         VerifyData(VerifyDataCommand) => Rule::verify_data_stmt,
     }
     facade {
+        DropTemporaryConnectorLogic(DropTemporaryConnectorLogicCommand) => Rule::drop_temporary_connector_logic_stmt,
         ExplainPlan(ExplainPlanCommand) => Rule::explain_stmt,
         SetConfig(SetConfigCommand) => Rule::set_config_stmt,
+        SetTemporaryConnectorLogic(SetTemporaryConnectorLogicCommand) => Rule::set_temporary_connector_logic_stmt,
     }
 }
 

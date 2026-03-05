@@ -22,15 +22,15 @@ import (
     sdk "github.com/nvoxland/bundlebase/sdk/go/bundlebasesdk"
 )
 
-type MySource struct{}
+type ExampleConnector struct{}
 
-func (s *MySource) Discover(attached []string, args map[string]string) ([]sdk.Location, error) {
+func (s *ExampleConnector) Discover(attached []string, args map[string]string) ([]sdk.Location, error) {
     return []sdk.Location{
         {Location: "data.parquet", MustCopy: true, Format: "parquet", Version: "v1"},
     }, nil
 }
 
-func (s *MySource) Data(loc sdk.Location, args map[string]string) ([]arrow.Record, error) {
+func (s *ExampleConnector) Data(loc sdk.Location, args map[string]string) ([]arrow.Record, error) {
     alloc := memory.NewGoAllocator()
     schema := arrow.NewSchema([]arrow.Field{
         {Name: "id", Type: arrow.PrimitiveTypes.Int64},
@@ -43,10 +43,16 @@ func (s *MySource) Data(loc sdk.Location, args map[string]string) ([]arrow.Recor
     return []arrow.Record{b.NewRecord()}, nil
 }
 
-func main() { sdk.Serve(&MySource{}) }
+func main() { sdk.Serve(&ExampleConnector{}) }
 ```
 
-Build and use with: `create_source("ipc", {"call": "./my-source"})`
+Build and use with:
+
+```python
+bundle.create_connector('example.connector')
+bundle.set_connector_logic('example.connector', type_='ipc', logic='./example-connector')
+bundle.create_source('example.connector')
+```
 
 ## API Reference
 
@@ -246,7 +252,7 @@ func TestDiscover(t *testing.T) {
         makeRequest("shutdown", nil, 2)
 
     var out bytes.Buffer
-    sdk.ServeIO(&MySource{}, strings.NewReader(input), &out)
+    sdk.ServeIO(&ExampleConnector{}, strings.NewReader(input), &out)
 
     resp, _ := readResponse(t, out.Bytes(), 0)
     result := resp["result"].(map[string]interface{})
@@ -264,7 +270,7 @@ func TestDataReturnsArrow(t *testing.T) {
     }, 1) + makeRequest("shutdown", nil, 2)
 
     var out bytes.Buffer
-    sdk.ServeIO(&MySource{}, strings.NewReader(input), &out)
+    sdk.ServeIO(&ExampleConnector{}, strings.NewReader(input), &out)
 
     data := out.Bytes()
     resp, offset := readResponse(t, data, 0)
@@ -297,12 +303,12 @@ import (
     sdk "github.com/nvoxland/bundlebase/sdk/go/bundlebasesdk"
 )
 
-type MySource struct{}
+type ExampleConnector struct{}
 
 // ... implement Discover() and Data() as usual ...
 
 func init() {
-    sdk.ExportSource(&MySource{})
+    sdk.ExportSource(&ExampleConnector{})
 }
 
 func main() {} // required for c-shared but never called
@@ -311,11 +317,13 @@ func main() {} // required for c-shared but never called
 ### Build and Use
 
 ```bash
-go build -buildmode=c-shared -o my_source.so .
+go build -buildmode=c-shared -o example_connector.so .
 ```
 
 ```python
-bundle.create_source("native", {"call": "lib:./my_source.so"})
+bundle.create_connector('example.connector')
+bundle.set_connector_logic('example.connector', type_='lib', logic='./example_connector.so')
+bundle.create_source('example.connector')
 ```
 
 ### How It Works
@@ -331,7 +339,7 @@ See [Native Source Mode](native.md) for the full C ABI reference.
 Errors returned from your `Discover()` or `Data()` methods are caught by the SDK and returned as JSON-RPC error responses with code `-32000`. The error message is included:
 
 ```go
-func (s *MySource) Data(location sdk.Location, args map[string]string) ([]arrow.Record, error) {
+func (s *ExampleConnector) Data(location sdk.Location, args map[string]string) ([]arrow.Record, error) {
     return nil, fmt.Errorf("database connection failed")
     // Bundlebase receives: {"error": {"code": -32000, "message": "database connection failed"}}
 }
