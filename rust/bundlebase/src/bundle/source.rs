@@ -45,10 +45,13 @@ impl Source {
         op: &CreateSourceOp,
         registry: &SourceFunctionRegistry,
     ) -> Result<Self, BundlebaseError> {
-        // Validate function exists
-        registry
-            .get(&op.function)
-            .ok_or_else(|| format!("Unknown source function '{}'", op.function))?;
+        if !op.function.contains('.') {
+            // Built-in function: validate it exists in the registry
+            registry
+                .get(&op.function)
+                .ok_or_else(|| format!("Unknown source function '{}'", op.function))?;
+        }
+        // Dotted names are validated at check() time against source_definitions
 
         Ok(Self::new(
             op.id,
@@ -82,23 +85,45 @@ impl Source {
         builder: &BundleBuilder,
         mode: SyncMode,
     ) -> Result<Vec<FetchAction>, BundlebaseError> {
-        let (func, data_dir, config) = {
+        let (func, data_dir, config, resolved_args) = if self.function.contains('.') {
+            // Defined source: resolve logic for current platform
+            let bundle = builder.bundle();
+            let def = bundle.get_connector_definition(&self.function).ok_or_else(|| {
+                format!("Connector '{}' is not defined. Use CREATE CONNECTOR first", self.function)
+            })?;
+            let logic = def.resolve_logic()?;
+
+            let registry_type = crate::bundle::connector_definition::resolve_registry_type(&logic.source_type)?;
+            let registry = bundle.source_function_registry();
+            let reg = registry.read();
+            let func = reg
+                .create_instance(registry_type)
+                .ok_or_else(|| format!("Unknown source type '{}'", registry_type))?;
+
+            // Merge: inject "call" from logic (reconstructed with prefix), then overlay user args
+            let mut merged_args = self.args.clone();
+            let call_string = crate::bundle::connector_definition::build_call_string(&logic.source_type, &logic.logic);
+            merged_args.insert("call".to_string(), call_string);
+
+            (func, bundle.data_dir(), bundle.config(), merged_args)
+        } else {
+            // Built-in function: use directly
             let bundle = builder.bundle();
             let registry = bundle.source_function_registry();
             let reg = registry.read();
             let func = reg
                 .create_instance(&self.function)
                 .ok_or_else(|| format!("Unknown source function '{}'", self.function))?;
-            (func, bundle.data_dir(), bundle.config())
+            (func, bundle.data_dir(), bundle.config(), self.args.clone())
         };
 
         // Get attached files directly from self
         let attached_files = self.attached_files();
-        let should_copy = source_utils::should_copy(&self.args);
+        let should_copy = source_utils::should_copy(&resolved_args);
 
         orchestrate_fetch(
             func.as_ref(),
-            &self.args,
+            &resolved_args,
             mode,
             should_copy,
             data_dir.as_ref(),

@@ -1,27 +1,50 @@
 # Custom Source Functions
 
-Custom source functions let you write data providers in any language. Bundlebase supports two modes for loading custom sources:
+Custom source functions let you write data providers in any language. The `type_` parameter determines how Bundlebase loads and communicates with your source:
 
-| Mode | How It Works | Performance | Languages |
+| Type | How It Works | Performance | Languages |
 |------|-------------|-------------|-----------|
-| **[Native](native.md)** | In-process loading (Python PyO3 or shared library `dlopen`) | Zero-copy Arrow | Python, Rust, Go, Java |
-| **IPC** | Subprocess with JSON-RPC over stdin/stdout | Serialized Arrow IPC | Any language |
+| **`python`** | In-process via PyO3 | Zero-copy Arrow | Python |
+| **`lib`** | In-process via `dlopen` of a shared library | Zero-copy Arrow | Rust, Go, Java |
+| **`java`** | Subprocess via `java -jar` | Serialized Arrow IPC | Java |
+| **`docker`** | Subprocess via `docker run` | Serialized Arrow IPC | Any language |
+| **`ipc`** | Subprocess via direct command execution | Serialized Arrow IPC | Any language |
 
-**Your source code is the same for both modes** — only the entry point differs. SDKs for Python, Go, Java, and Rust handle the protocol automatically.
+Internally, `python` and `lib` run **in-process** (native mode) for zero-copy Arrow transfer. `java`, `docker`, and `ipc` run as **subprocesses** communicating over stdin/stdout.
 
-## Choosing IPC vs Native
+**Your source code is the same regardless of type** — only the entry point differs. SDKs for Python, Go, Java, and Rust handle the protocol automatically.
 
-**Use native when:**
+## Choosing a Type
 
-- You need maximum performance (zero-copy, no serialization overhead)
-- Your source is in Python, Rust, Go, or Java
-- Your source is part of the same project
+**Use `python` when:**
 
-**Use IPC when:**
+- Your source is a Python class in the same project
+- You need maximum performance with zero serialization overhead
+- Note: requires `set_temporary_connector_logic()` since Python code can't be bundled
+
+**Use `lib` when:**
+
+- You have a compiled shared library (`.so`/`.dylib`/`.dll`) from Rust, Go, or Java
+- You need zero-copy performance with a portable, bundled source
+
+**Use `java`, `docker`, or `ipc` when:**
 
 - You want process isolation (source crashes don't affect Bundlebase)
-- You're packaging your source as a Docker image
-- You're using a language without native SDK support
+- You're packaging your source as a Docker image (`docker`)
+- You're running a Java JAR (`java`)
+- You're running any other executable (`ipc`)
+
+## Configuration
+
+!!! warning "External Code Execution"
+    Custom source functions that execute external code (Python native sources, shared libraries, IPC subprocesses) require the `allow_external_code` configuration setting:
+
+    ```python
+    config = {"system": {"allow_external_code": "true"}}
+    bundle = bb.create("my/data", config=config)
+    ```
+
+    Without this, `create_source()` will fail with `"External code execution is disabled"`.
 
 ## How It Works
 
@@ -63,23 +86,34 @@ Any extra key-value arguments passed in the source configuration are forwarded t
 
 ## Using a Custom Source
 
+Custom sources use a three-step API: `create_connector()` declares the connector name, then either `set_connector_logic()` (persisted) or `set_temporary_connector_logic()` (runtime-only) configures how it runs, and `create_source()` activates it with any extra arguments.
+
+- **`set_connector_logic()`** — Persists the logic into the bundle. Use for portable bundles. Rejects `type_='python'` since Python code can't be bundled.
+- **`set_temporary_connector_logic()`** — Sets logic at runtime only. Use for `type_='python'` in-process sources. Works on both `Bundle` and `BundleBuilder`.
+- **`drop_connector()`** — Removes the connector definition and all associated logic and sources.
+- **`drop_connector_logic()`** — Removes persisted logic. Optionally filter by platform with `platform='linux/amd64'`.
+- **`drop_temporary_connector_logic()`** — Removes runtime-only logic. Works on both `Bundle` and `BundleBuilder`.
+
 ### Native Mode (Recommended for Python)
 
 ```python
 import bundlebase.sync as bb
-from my_source import MySource
 
-# Python native — zero-copy, in-process
+# Python native — zero-copy, in-process (runtime-only)
 bundle = bb.create("my/data")
-bundle.create_source_native(MySource())
+bundle.create_connector('example.connector')
+bundle.set_temporary_connector_logic('example.connector', type_='python', logic='example_connector:ExampleConnector')
+bundle.create_source('example.connector')
 results = bundle.fetch("base", "add")
 ```
 
 ### Native Mode (Shared Library)
 
 ```python
-# Rust, Go, or Java — zero-copy via dlopen
-bundle.create_source("native", {"call": "lib:./target/release/libmy_source.so"})
+# Rust, Go, or Java — zero-copy via dlopen (persisted into bundle)
+bundle.create_connector('example.connector')
+bundle.set_connector_logic('example.connector', type_='lib', logic='./target/release/libexample_connector.so')
+bundle.create_source('example.connector')
 ```
 
 ### IPC Mode (Subprocess)
@@ -89,8 +123,10 @@ bundle.create_source("native", {"call": "lib:./target/release/libmy_source.so"})
     ```python
     import bundlebase as bb
 
-    bundle = await (bb.create("my/data")
-        .create_source("ipc", {"call": "python:my_source.py"}))
+    bundle = await bb.create("my/data")
+    bundle = await bundle.create_connector('example.connector')
+    bundle = await bundle.set_connector_logic('example.connector', type_='ipc', logic='./example_connector')
+    bundle = await bundle.create_source('example.connector')
 
     results = await bundle.fetch("base", "add")
     ```
@@ -100,8 +136,10 @@ bundle.create_source("native", {"call": "lib:./target/release/libmy_source.so"})
     ```python
     import bundlebase.sync as bb
 
-    bundle = (bb.create("my/data")
-        .create_source("ipc", {"call": "python:my_source.py"}))
+    bundle = bb.create("my/data")
+    bundle.create_connector('example.connector')
+    bundle.set_connector_logic('example.connector', type_='ipc', logic='./example_connector')
+    bundle.create_source('example.connector')
 
     results = bundle.fetch("base", "add")
     ```
@@ -109,19 +147,25 @@ bundle.create_source("native", {"call": "lib:./target/release/libmy_source.so"})
 === "SQL"
 
     ```sql
-    CREATE SOURCE ipc WITH (call = 'python:my_source.py')
+    CREATE CONNECTOR example.connector
+    SET CONNECTOR LOGIC example.connector WITH (type = 'ipc', logic = './example_connector')
+    CREATE SOURCE example.connector
     ```
 
-## Call Syntax
+## Type Values
 
-The `call` argument specifies how to launch the subprocess:
+The `type_` parameter determines how Bundlebase loads and runs the source:
 
-| Syntax | Expands to | Example |
-|--------|-----------|---------|
-| `python:script.py` | `python script.py` | `python:sources/my_source.py` |
-| `java:my.jar` | `java -jar my.jar` | `java:target/source.jar` |
-| `docker:image` | `docker run -i --rm image` | `docker:myorg/my-source:latest` |
-| `command args` | `command args` (whitespace split) | `./my-binary --config prod` |
+| Type | Mode | `logic` value | What happens |
+|------|------|--------------|--------------|
+| `python` | Native (in-process) | `module:Class` | Imports the Python class via PyO3 and calls it directly |
+| `lib` | Native (in-process) | Path to `.so`/`.dylib`/`.dll` | `dlopen`s the shared library and uses Arrow C Data Interface |
+| `java` | IPC (subprocess) | Path to JAR file | Runs `java -jar <logic>` as a subprocess |
+| `docker` | IPC (subprocess) | Docker image name | Runs `docker run -i --rm <logic>` as a subprocess |
+| `ipc` | IPC (subprocess) | Command to run | Executes `<logic>` directly (whitespace-split) as a subprocess |
+
+!!! note
+    `set_connector_logic()` rejects `type_='python'` because Python code cannot be bundled. Use `set_temporary_connector_logic()` for Python sources.
 
 ## Docker Sources
 
@@ -130,11 +174,17 @@ Package any source as a Docker image:
 ```dockerfile
 FROM python:3.13-slim
 RUN pip install bundlebase-sdk pyarrow
-COPY my_source.py /app/my_source.py
-CMD ["python", "/app/my_source.py"]
+COPY example_connector.py /app/example_connector.py
+CMD ["python", "/app/example_connector.py"]
 ```
 
-Use with: `create_source("ipc", {"call": "docker:myorg/my-source:latest"})`
+Use with:
+
+```python
+bundle.create_connector('example.connector')
+bundle.set_connector_logic('example.connector', type_='docker', logic='myorg/example-connector:latest')
+bundle.create_source('example.connector')
+```
 
 The container receives JSON-RPC on stdin and writes responses to stdout.
 
@@ -148,7 +198,7 @@ Each SDK handles the protocol for you. Implement the source interface and choose
     from bundlebase_sdk import SourceFunction, Location, serve
     import pyarrow as pa
 
-    class MySource(SourceFunction):
+    class ExampleConnector(SourceFunction):
         def discover(self, attached_locations, **kwargs):
             return [Location("data.parquet", format="parquet", version="v1")]
 
@@ -156,7 +206,7 @@ Each SDK handles the protocol for you. Implement the source interface and choose
             return pa.table({"id": [1, 2, 3], "value": ["a", "b", "c"]})
 
     if __name__ == "__main__":
-        serve(MySource())
+        serve(ExampleConnector())
     ```
 
     See the [Python SDK](python.md) reference for full API details.
@@ -164,19 +214,19 @@ Each SDK handles the protocol for you. Implement the source interface and choose
 === "Go"
 
     ```go
-    type MySource struct{}
+    type ExampleConnector struct{}
 
-    func (s *MySource) Discover(attached []string, args map[string]string) ([]sdk.Location, error) {
+    func (s *ExampleConnector) Discover(attached []string, args map[string]string) ([]sdk.Location, error) {
         return []sdk.Location{
             {Location: "data.parquet", MustCopy: true, Format: "parquet", Version: "v1"},
         }, nil
     }
 
-    func (s *MySource) Data(loc sdk.Location, args map[string]string) ([]arrow.Record, error) {
+    func (s *ExampleConnector) Data(loc sdk.Location, args map[string]string) ([]arrow.Record, error) {
         // Build and return Arrow records
     }
 
-    func main() { sdk.Serve(&MySource{}) }
+    func main() { sdk.Serve(&ExampleConnector{}) }
     ```
 
     See the [Go SDK](go.md) reference for full API details.
@@ -184,7 +234,7 @@ Each SDK handles the protocol for you. Implement the source interface and choose
 === "Java"
 
     ```java
-    public class MySource implements SourceFunction {
+    public class ExampleConnector implements SourceFunction {
         public List<Location> discover(List<String> attached, Map<String, String> args) {
             return List.of(new Location("data.parquet", true, "parquet", "v1"));
         }
@@ -193,7 +243,7 @@ Each SDK handles the protocol for you. Implement the source interface and choose
             // Build and return Arrow VectorSchemaRoot
         }
 
-        public static void main(String[] args) { Serve.run(new MySource()); }
+        public static void main(String[] args) { Serve.run(new ExampleConnector()); }
     }
     ```
 
@@ -202,9 +252,9 @@ Each SDK handles the protocol for you. Implement the source interface and choose
 === "Rust"
 
     ```rust
-    struct MySource;
+    struct ExampleConnector;
 
-    impl SourceFunction for MySource {
+    impl SourceFunction for ExampleConnector {
         fn discover(&self, _attached: &[String], _args: &HashMap<String, String>)
             -> Result<Vec<Location>, Box<dyn std::error::Error>> {
             Ok(vec![Location { location: "data.parquet".into(), ..Location::new("data.parquet") }])
@@ -216,7 +266,7 @@ Each SDK handles the protocol for you. Implement the source interface and choose
         }
     }
 
-    fn main() { bundlebase_sdk::serve(&MySource); }
+    fn main() { bundlebase_sdk::serve(&ExampleConnector); }
     ```
 
     See the [Rust SDK](rust.md) reference for full API details.

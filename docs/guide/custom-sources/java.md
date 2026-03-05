@@ -25,7 +25,7 @@ import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.types.pojo.*;
 import java.util.*;
 
-public class MySource implements SourceFunction {
+public class ExampleConnector implements SourceFunction {
     private final RootAllocator allocator = new RootAllocator();
 
     public List<Location> discover(List<String> attached, Map<String, String> args) {
@@ -45,11 +45,17 @@ public class MySource implements SourceFunction {
         return root;
     }
 
-    public static void main(String[] args) { Serve.run(new MySource()); }
+    public static void main(String[] args) { Serve.run(new ExampleConnector()); }
 }
 ```
 
-Build a JAR and use with: `create_source("ipc", {"call": "java:target/my-source.jar"})`
+Build a JAR and use with:
+
+```python
+bundle.create_connector('example.connector')
+bundle.set_connector_logic('example.connector', type_='java', logic='target/example-connector.jar')
+bundle.create_source('example.connector')
+```
 
 ## API Reference
 
@@ -218,7 +224,7 @@ import java.io.*;
 import java.util.*;
 import static org.junit.Assert.*;
 
-public class MySourceTest {
+public class ExampleConnectorTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static byte[] makeRequest(String method, Map<String, Object> params, int id)
@@ -238,7 +244,7 @@ public class MySourceTest {
         input.write(makeRequest("shutdown", null, 2));
 
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        Serve.run(new MySource(), new ByteArrayInputStream(input.toByteArray()), output);
+        Serve.run(new ExampleConnector(), new ByteArrayInputStream(input.toByteArray()), output);
 
         String[] lines = output.toString().split("\n");
         JsonNode resp = MAPPER.readTree(lines[0]);
@@ -257,7 +263,7 @@ public class MySourceTest {
         input.write(makeRequest("shutdown", null, 2));
 
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        Serve.run(new MySource(), new ByteArrayInputStream(input.toByteArray()), output);
+        Serve.run(new ExampleConnector(), new ByteArrayInputStream(input.toByteArray()), output);
 
         byte[] out = output.toByteArray();
         int newlineIdx = 0;
@@ -286,11 +292,11 @@ Register your source with `PluginExport`:
 ```java
 import com.bundlebase.sdk.*;
 
-public class MyNativeSource implements SourceFunction {
+public class ExampleNativeConnector implements SourceFunction {
     // ... implement discover() and data() as usual ...
 
     static {
-        PluginExport.register(new MyNativeSource());
+        PluginExport.register(new ExampleNativeConnector());
     }
 }
 ```
@@ -312,7 +318,9 @@ This produces `libbundlebase_plugin.so` in `target/`.
 ### Use
 
 ```python
-bundle.create_source("native", {"call": "lib:./libbundlebase_plugin.so"})
+bundle.create_connector('example.connector')
+bundle.set_connector_logic('example.connector', type_='lib', logic='./libbundlebase_plugin.so')
+bundle.create_source('example.connector')
 ```
 
 ### How It Works

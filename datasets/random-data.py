@@ -7,9 +7,10 @@ shutil.rmtree("random-data")
 
 bundle = bb.create("random-data")
 
-# Use native (in-process) source - zero-copy Arrow transfer, no subprocess
-from random_source import RandomSource
-bundle.create_source_native(RandomSource())
+# Define a connector and bind it to a Python source class
+bundle.create_connector("example.random_data")
+bundle.set_temporary_connector_logic("example.random_data", "python", "random_source:RandomSource")
+bundle.create_source("example.random_data", {})
 bundle.commit("First commit")
 
 bundle.fetch(mode="add")

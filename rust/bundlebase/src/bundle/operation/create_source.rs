@@ -65,19 +65,32 @@ impl Operation for CreateSourceOp {
             return Err(format!("Pack {} not found", self.pack).into());
         }
 
-        // Verify function exists and validate arguments
-        let registry = bundle.source_function_registry();
-        let registry_guard = registry.read();
-        let func = registry_guard.get(&self.function).ok_or_else(|| {
-            let available = registry_guard.function_names();
-            format!(
-                "Unknown source function '{}'. Available functions: {}",
-                self.function,
-                available.join(", ")
-            )
-        })?;
+        if self.function.contains('.') {
+            // Dotted name: look up in source definitions
+            let def = bundle.get_connector_definition(&self.function).ok_or_else(|| {
+                format!(
+                    "Connector '{}' is not defined. Use CREATE CONNECTOR first.",
+                    self.function
+                )
+            })?;
 
-        validate_source_args(func.as_ref(), &self.args)?;
+            // Verify that at least one logic entry matches the current platform
+            def.resolve_logic()?;
+        } else {
+            // Built-in function: look up in registry
+            let registry = bundle.source_function_registry();
+            let registry_guard = registry.read();
+            let func = registry_guard.get(&self.function).ok_or_else(|| {
+                let available = registry_guard.function_names();
+                format!(
+                    "Unknown source function '{}'. Available functions: {}",
+                    self.function,
+                    available.join(", ")
+                )
+            })?;
+
+            validate_source_args(func.as_ref(), &self.args)?;
+        }
 
         Ok(())
     }

@@ -156,6 +156,140 @@ FETCH [<pack> | ALL]
 
 See [Data Sources](../guide/sources.md) for details.
 
+## Connectors
+
+Commands for managing custom source connectors. Connectors use a three-step workflow: define a connector name, configure its logic, then create a source from it.
+
+See [Custom Source Functions](../guide/custom-sources/) for full details and SDK references.
+
+### CREATE CONNECTOR
+
+Declares a named connector for use with custom source functions.
+
+```sql
+CREATE CONNECTOR <name>
+```
+
+**Example:**
+
+```sql
+CREATE CONNECTOR example.connector
+```
+
+### SET CONNECTOR LOGIC
+
+Configures how a connector runs. The logic is persisted into the bundle's commit history, making the bundle portable across environments.
+
+```sql
+SET CONNECTOR LOGIC <name> WITH (type = '<type>', logic = '<logic>' [, platform = '<platform>'])
+```
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `type` | Yes | Source type: `lib`, `java`, `docker`, or `ipc` |
+| `logic` | Yes | What to run (path to library, JAR, Docker image, or command) |
+| `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
+
+!!! note
+    The `python` type is not allowed with `SET CONNECTOR LOGIC` because Python code cannot be bundled. Use `SET TEMPORARY CONNECTOR LOGIC` instead.
+
+**Examples:**
+
+```sql
+-- Shared library (Rust, Go, Java)
+SET CONNECTOR LOGIC example.connector WITH (type = 'lib', logic = './target/release/libexample_connector.so')
+
+-- Java JAR
+SET CONNECTOR LOGIC example.connector WITH (type = 'java', logic = 'target/example-connector.jar')
+
+-- Docker image
+SET CONNECTOR LOGIC example.connector WITH (type = 'docker', logic = 'myorg/example-connector:latest')
+
+-- IPC subprocess
+SET CONNECTOR LOGIC example.connector WITH (type = 'ipc', logic = './example_connector')
+
+-- Platform-specific
+SET CONNECTOR LOGIC example.connector WITH (type = 'lib', logic = './libexample_connector.so', platform = 'linux/amd64')
+```
+
+### SET TEMPORARY CONNECTOR LOGIC
+
+Configures how a connector runs for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process sources.
+
+```sql
+SET TEMPORARY CONNECTOR LOGIC <name> WITH (type = '<type>', logic = '<logic>' [, platform = '<platform>'])
+```
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `type` | Yes | Source type: `python`, `lib`, `java`, `docker`, or `ipc` |
+| `logic` | Yes | What to run (e.g., `module:Class` for Python, path for others) |
+| `platform` | No | Target platform (default: `*/*`) |
+
+**Examples:**
+
+```sql
+-- Python in-process (most common use case)
+SET TEMPORARY CONNECTOR LOGIC example.connector WITH (type = 'python', logic = 'example_connector:ExampleConnector')
+
+-- Any other type also works as temporary
+SET TEMPORARY CONNECTOR LOGIC example.connector WITH (type = 'ipc', logic = './example_connector')
+```
+
+### DROP CONNECTOR
+
+Removes a connector definition and all associated logic (persisted and temporary) and source instances.
+
+```sql
+DROP CONNECTOR <name>
+```
+
+**Example:**
+
+```sql
+DROP CONNECTOR example.connector
+```
+
+### DROP CONNECTOR LOGIC
+
+Removes persisted connector logic. Optionally filter by platform.
+
+```sql
+DROP CONNECTOR LOGIC <name> [FOR PLATFORM '<platform>']
+```
+
+**Examples:**
+
+```sql
+-- Drop all persisted logic entries
+DROP CONNECTOR LOGIC example.connector
+
+-- Drop logic for a specific platform only
+DROP CONNECTOR LOGIC example.connector FOR PLATFORM 'linux/amd64'
+```
+
+### DROP TEMPORARY CONNECTOR LOGIC
+
+Removes runtime-only connector logic. Optionally filter by platform.
+
+```sql
+DROP TEMPORARY CONNECTOR LOGIC <name> [FOR PLATFORM '<platform>']
+```
+
+**Examples:**
+
+```sql
+-- Drop all temporary logic entries
+DROP TEMPORARY CONNECTOR LOGIC example.connector
+
+-- Drop temporary logic for a specific platform only
+DROP TEMPORARY CONNECTOR LOGIC example.connector FOR PLATFORM 'linux/amd64'
+```
+
 ## Indexes
 
 Commands for managing search indexes.

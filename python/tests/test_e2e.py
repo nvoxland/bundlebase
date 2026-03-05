@@ -212,10 +212,8 @@ async def test_version():
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("userdata.parquet"))
 
-    # Version should be a 12-character hex string
-    assert isinstance(c.version, str)
-    assert len(c.version) == 12
-    assert all(c in '0123456789abcdef' for c in c.version)
+    # Version should be UNCOMMITTED since we have uncommitted changes
+    assert c.version == "UNCOMMITTED"
 
 
 @pytest.mark.asyncio
@@ -1907,10 +1905,7 @@ async def test_version_udf():
     assert "ver" in results
     assert len(results["ver"]) == 1
     assert results["ver"][0] == expected_version
-
-    # Also verify we get a valid 12-char hex version string
-    assert len(results["ver"][0]) == 12
-    assert all(ch in '0123456789abcdef' for ch in results["ver"][0])
+    assert results["ver"][0] == "UNCOMMITTED"
 
 
 @pytest.mark.asyncio

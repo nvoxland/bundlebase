@@ -185,6 +185,8 @@ impl SharedLibHandle {
         let reader = ArrowArrayStreamReader::try_new(ffi_stream)
             .map_err(|e| format!("Failed to create ArrowArrayStreamReader: {}", e))?;
 
+        // TODO: This collects all batches into memory. Consider streaming lazily
+        // from the ArrowArrayStreamReader to avoid materializing large datasets.
         let batches: Result<Vec<RecordBatch>, _> = reader.collect();
         let batches =
             batches.map_err(|e| format!("Failed to read record batches from stream: {}", e))?;
@@ -398,26 +400,15 @@ impl SourceFunction for NativeSourceFunction {
             name: "native".to_string(),
             arg_specs: vec![
                 ArgSpec {
-                    name: "call",
-                    description: "Source to load: 'lib:/path/to/lib.so' for shared library or 'python:module:Class' for Python in-process",
-                    required: true,
-                    default: None,
-                },
-                ArgSpec {
                     name: "copy",
                     description: "Whether to copy data into the bundle (default: true)",
                     required: false,
                     default: Some("true"),
                 },
             ],
+            // call is injected by source definition resolution; user kwargs pass through
             accepts_extra_args: true,
         }
-    }
-
-    fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        let call = source_utils::require_arg(args, "call", "native")?;
-        parse_native_call(call)?;
-        Ok(())
     }
 
     async fn discover(
@@ -577,11 +568,11 @@ mod tests {
         let func = NativeSourceFunction::new();
         let sig = func.signature();
         assert_eq!(sig.name, "native");
-        assert_eq!(sig.arg_specs.len(), 2);
-        assert_eq!(sig.arg_specs[0].name, "call");
-        assert!(sig.arg_specs[0].required);
-        assert_eq!(sig.arg_specs[1].name, "copy");
-        assert!(!sig.arg_specs[1].required);
+        // call is no longer in arg_specs — it's injected by source definition resolution
+        assert_eq!(sig.arg_specs.len(), 1);
+        assert_eq!(sig.arg_specs[0].name, "copy");
+        assert!(!sig.arg_specs[0].required);
+        assert!(sig.accepts_extra_args);
     }
 
     #[test]
@@ -634,29 +625,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_validate_args_valid_lib() {
-        let func = NativeSourceFunction::new();
-        let mut args = HashMap::new();
-        args.insert("call".to_string(), "lib:/path/to/lib.so".to_string());
-        assert!(func.validate_args(&args).is_ok());
-    }
-
-    #[test]
-    fn test_validate_args_valid_python() {
-        let func = NativeSourceFunction::new();
-        let mut args = HashMap::new();
-        args.insert("call".to_string(), "python:mod:Class".to_string());
-        assert!(func.validate_args(&args).is_ok());
-    }
-
-    #[test]
-    fn test_validate_args_invalid_call() {
-        let func = NativeSourceFunction::new();
-        let mut args = HashMap::new();
-        args.insert("call".to_string(), "invalid_call".to_string());
-        assert!(func.validate_args(&args).is_err());
-    }
+    // validate_args tests removed — call format validation now happens at set_connector_logic time
 
     #[tokio::test]
     async fn test_discover_blocked_when_external_code_disabled() {

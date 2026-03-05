@@ -310,27 +310,15 @@ impl SourceFunction for IpcSourceFunction {
             name: "ipc".to_string(),
             arg_specs: vec![
                 ArgSpec {
-                    name: "call",
-                    description: "Command to run (e.g., 'python:script.py', 'docker:image', or 'command arg1 arg2')",
-                    required: true,
-                    default: None,
-                },
-                ArgSpec {
                     name: "copy",
                     description: "Whether to copy data into the bundle (default: true)",
                     required: false,
                     default: Some("true"),
                 },
             ],
-            accepts_extra_args: false,
+            // call is injected by source definition resolution; user kwargs pass through
+            accepts_extra_args: true,
         }
-    }
-
-    fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        // Validate call can be parsed
-        let call = source_utils::require_arg(args, "call", "ipc")?;
-        parse_call(call)?;
-        Ok(())
     }
 
     async fn discover(
@@ -453,6 +441,8 @@ impl SourceFunction for IpcSourceFunction {
         let reader = StreamReader::try_new(cursor, None)
             .map_err(|e| format!("Failed to create Arrow IPC stream reader: {}", e))?;
 
+        // TODO: This collects all batches into memory. The IPC data is already a single
+        // byte buffer from the subprocess, so lazy streaming would require chunked reads.
         let batches: Vec<Result<_, BundlebaseError>> = reader
             .map(|batch_result| {
                 batch_result
@@ -561,11 +551,11 @@ mod tests {
         let func = IpcSourceFunction::new();
         let sig = func.signature();
         assert_eq!(sig.name, "ipc");
-        assert_eq!(sig.arg_specs.len(), 2);
-        assert_eq!(sig.arg_specs[0].name, "call");
-        assert!(sig.arg_specs[0].required);
-        assert_eq!(sig.arg_specs[1].name, "copy");
-        assert!(!sig.arg_specs[1].required);
+        // call is no longer in arg_specs — it's injected by source definition resolution
+        assert_eq!(sig.arg_specs.len(), 1);
+        assert_eq!(sig.arg_specs[0].name, "copy");
+        assert!(!sig.arg_specs[0].required);
+        assert!(sig.accepts_extra_args);
     }
 
     // --- External code gate tests ---

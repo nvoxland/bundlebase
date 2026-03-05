@@ -299,6 +299,31 @@ pub trait BundleFacade: Send + Sync {
     /// Returns the bundle configuration
     fn config(&self) -> Arc<BundleConfig>;
 
+    /// Set runtime-only connector logic for a defined source.
+    ///
+    /// Adds logic to the connector definition without creating a persisted operation.
+    /// Works on both `Bundle` and `BundleBuilder`.
+    ///
+    /// # Arguments
+    /// * `name` - The defined source name
+    /// * `entry` - The connector logic entry to add
+    async fn set_temporary_connector_logic(
+        &self,
+        name: &str,
+        entry: crate::bundle::connector_definition::ConnectorLogicEntry,
+    ) -> Result<(), BundlebaseError>;
+
+    /// Remove runtime-only connector logic for a defined source.
+    ///
+    /// If `platform` is None, removes all logic entries.
+    /// If `platform` is Some, removes only entries matching that platform.
+    /// Returns the number of entries removed.
+    async fn drop_temporary_connector_logic(
+        &self,
+        name: &str,
+        platform: Option<&str>,
+    ) -> Result<usize, BundlebaseError>;
+
     /// Set a runtime config value (session-only, highest priority).
     ///
     /// This modifies the runtime config layer which takes precedence over

@@ -287,70 +287,160 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
 
 ### Custom Source Functions
 
-Bundlebase supports two modes for custom source functions:
+Bundlebase supports two modes for custom source functions. Custom sources use the three-step API: `create_connector()`, `set_connector_logic()` or `set_temporary_connector_logic()`, and `create_source()`.
+
+- **`set_connector_logic()`** — Persists the logic into the bundle (creates an operation in commit history). Use for portable, cross-platform bundles. Rejects `type_='python'` since Python code can't be bundled.
+- **`set_temporary_connector_logic()`** — Sets logic at runtime only (no operation persisted). Use for `type_='python'` in-process sources. Works on both `Bundle` (read-only) and `BundleBuilder`.
 
 #### native (In-Process, Zero-Copy)
 
 Loads a source function in-process for zero-copy Arrow data transfer. Best for performance-critical pipelines.
 
-**Arguments:**
+**Source logic arguments:**
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `call` | Yes | `lib:/path/to/lib.so` (shared library) or `python:module:Class` (Python in-process) |
-| `copy` | No | `"true"` to copy files into bundle (default), `"false"` to reference in place |
+| `type_` | Yes | `'python'` (Python in-process) or `'lib'` (shared library) |
+| `logic` | Yes | `module:Class` (for `python`) or path to shared library (for `lib`) |
+| `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
 
 === "Python Native"
 
     ```python
-    # Recommended: pass the source object directly
-    from my_source import MySource
-    bundle = bundle.create_source_native(MySource())
+    bundle.create_connector('example.connector')
+    bundle.set_temporary_connector_logic('example.connector', type_='python', logic='example_connector:ExampleConnector')
+    bundle.create_source('example.connector')
     ```
 
-=== "Shared Library"
+=== "Shared Library (Persisted)"
 
     ```python
-    # Rust, Go, or Java compiled as a shared library
-    bundle = bundle.create_source("native", {
-        "call": "lib:./target/release/libmy_source.so"
-    })
+    bundle.create_connector('example.connector')
+    bundle.set_connector_logic('example.connector', type_='lib', logic='./target/release/libexample_connector.so')
+    bundle.create_source('example.connector')
+    ```
+
+=== "SQL (Temporary)"
+
+    ```sql
+    CREATE CONNECTOR example.connector
+    SET TEMPORARY CONNECTOR LOGIC example.connector WITH (type = 'python', logic = 'example_connector:ExampleConnector', platform = '*/*')
+    CREATE SOURCE example.connector
+    ```
+
+=== "SQL (Persisted)"
+
+    ```sql
+    CREATE CONNECTOR example.connector
+    SET CONNECTOR LOGIC example.connector WITH (type = 'lib', logic = './target/release/libexample_connector.so', platform = '*/*')
+    CREATE SOURCE example.connector
     ```
 
 #### ipc (Subprocess)
 
 Delegates data discovery and retrieval to an external subprocess. This lets you write source functions in any language that speaks the JSON-RPC 2.0 + Arrow IPC protocol.
 
-**Arguments:**
+**Source logic arguments:**
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `call` | Yes | Command to run (see [call syntax](custom-sources/#call-syntax)) |
-| `copy` | No | `"true"` to copy files into bundle (default), `"false"` to reference in place |
+| `type_` | Yes | `'ipc'`, `'java'`, or `'docker'` |
+| `logic` | Yes | Command or path to run (see [type values](custom-sources/#type-values)) |
+| `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
 
 === "Async API"
 
     ```python
-    bundle = await bundle.create_source("ipc", {
-        "call": "python:my_source.py"
-    })
+    bundle = await bundle.create_connector('example.connector')
+    bundle = await bundle.set_connector_logic('example.connector', type_='ipc', logic='./example_connector')
+    bundle = await bundle.create_source('example.connector')
     ```
 
 === "Sync API"
 
     ```python
-    bundle = bundle.create_source("ipc", {
-        "call": "python:my_source.py"
-    })
+    bundle.create_connector('example.connector')
+    bundle.set_connector_logic('example.connector', type_='ipc', logic='./example_connector')
+    bundle.create_source('example.connector')
     ```
 
 === "SQL"
 
     ```sql
-    CREATE SOURCE ipc WITH (call = 'python:my_source.py')
+    CREATE CONNECTOR example.connector
+    SET CONNECTOR LOGIC example.connector WITH (type = 'ipc', logic = './example_connector')
+    CREATE SOURCE example.connector
     ```
 
 See [Custom Source Functions](custom-sources/) for SDKs, full examples, and protocol reference.
+
+### Dropping a Connector
+
+To completely remove a connector and all its associated logic, use `drop_connector()`.
+
+=== "Async API"
+
+    ```python
+    bundle = await bundle.drop_connector('example.connector')
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle.drop_connector('example.connector')
+    ```
+
+=== "SQL"
+
+    ```sql
+    DROP CONNECTOR example.connector
+    ```
+
+This removes the connector definition, all logic entries (persisted and temporary), and any source instances that reference it.
+
+### Dropping Connector Logic
+
+To remove connector logic from a connector, use `drop_connector_logic()` (persisted) or `drop_temporary_connector_logic()` (runtime-only).
+
+=== "Async API"
+
+    ```python
+    # Drop all logic entries (persisted)
+    bundle = await bundle.drop_connector_logic('example.connector')
+
+    # Drop logic for a specific platform
+    bundle = await bundle.drop_connector_logic('example.connector', platform='linux/amd64')
+
+    # Drop temporary (runtime-only) logic
+    count = await bundle.drop_temporary_connector_logic('example.connector')
+    ```
+
+=== "Sync API"
+
+    ```python
+    # Drop all logic entries (persisted)
+    bundle.drop_connector_logic('example.connector')
+
+    # Drop logic for a specific platform
+    bundle.drop_connector_logic('example.connector', platform='linux/amd64')
+
+    # Drop temporary (runtime-only) logic
+    count = bundle.drop_temporary_connector_logic('example.connector')
+    ```
+
+=== "SQL"
+
+    ```sql
+    -- Drop all logic entries (persisted)
+    DROP CONNECTOR LOGIC example.connector
+
+    -- Drop logic for a specific platform
+    DROP CONNECTOR LOGIC example.connector FOR PLATFORM 'linux/amd64'
+
+    -- Drop temporary (runtime-only) logic
+    DROP TEMPORARY CONNECTOR LOGIC example.connector
+    DROP TEMPORARY CONNECTOR LOGIC example.connector FOR PLATFORM 'linux/amd64'
+    ```
 
 ## Fetching Data
 
@@ -525,7 +615,7 @@ A typical workflow for incrementally loading data:
     # ... time passes, new files appear in S3 ...
 
     # Incremental load (only attaches new files)
-    bundle = await bb.open("sales/data")
+    bundle = (await bb.open("sales/data")).extend()
     results = await bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     if total_added > 0:
@@ -554,7 +644,7 @@ A typical workflow for incrementally loading data:
     # ... time passes, new files appear in S3 ...
 
     # Incremental load (only attaches new files)
-    bundle = bb.open("sales/data")
+    bundle = bb.open("sales/data").extend()
     results = bundle.fetch("base", "add")
     total_added = sum(len(r.added) for r in results)
     if total_added > 0:
