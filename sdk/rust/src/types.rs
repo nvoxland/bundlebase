@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Represents a discovered data location returned from [`SourceFunction::discover`].
+/// Represents a discovered data location returned from [`Connector::discover`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Location {
     pub location: String,

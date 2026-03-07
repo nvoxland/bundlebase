@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 /// Command to drop runtime-only connector logic (not persisted).
 ///
-/// Unlike `DropConnectorLogicCommand` which persists to the bundle,
+/// Unlike `DropConnectorCommand` which persists to the bundle,
 /// this command only removes logic for the current session. It works
 /// on both read-only `Bundle` and `BundleBuilder` via `BundleFacade`.
 #[derive(Debug, Clone)]

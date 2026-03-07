@@ -1,12 +1,12 @@
-//! Built-in "remote_dir" source function.
+//! Built-in "remote_dir" connector.
 //!
 //! Lists files from a directory URL using the IO registry to support
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
-use crate::source::source_function::{
-    ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
+use crate::source::connector::{
+    ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::source_utils;
+use crate::source::connector_utils;
 use crate::io::file::IOReadFile;
 use crate::io::plugin::ftp::FtpFile;
 use crate::io::plugin::object_store::ObjectStoreFile;
@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
 
-/// Built-in "remote_dir" source function.
+/// Built-in "remote_dir" connector.
 ///
 /// Lists files from a directory URL using standard object store listing.
 /// Supports glob patterns for filtering files.
@@ -32,12 +32,12 @@ use url::Url;
 /// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
 ///   "false" to reference files at their original URL
 /// - `key_path` (optional): SSH key path for SFTP sources
-pub struct RemoteDirFunction;
+pub struct RemoteDirConnector;
 
 #[async_trait]
-impl SourceFunction for RemoteDirFunction {
-    fn signature(&self) -> SourceFunctionSignature {
-        SourceFunctionSignature {
+impl Connector for RemoteDirConnector {
+    fn signature(&self) -> ConnectorSignature {
+        ConnectorSignature {
             name: "remote_dir".to_string(),
             arg_specs: vec![
                 ArgSpec {
@@ -71,7 +71,7 @@ impl SourceFunction for RemoteDirFunction {
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
         // Validate URL is parseable
-        source_utils::require_url(args, "remote_dir")?;
+        connector_utils::require_url(args, "remote_dir")?;
         Ok(())
     }
 
@@ -81,8 +81,8 @@ impl SourceFunction for RemoteDirFunction {
         _attached_locations: &HashSet<String>,
         config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let base_url = source_utils::require_url(args, "remote_dir")?;
-        let patterns = source_utils::get_patterns(args)?;
+        let base_url = connector_utils::require_url(args, "remote_dir")?;
+        let patterns = connector_utils::get_patterns(args)?;
         let must_copy = Self::must_copy(&base_url);
 
         // Use IORegistry to create lister for any URL scheme
@@ -130,7 +130,7 @@ impl SourceFunction for RemoteDirFunction {
         args: &HashMap<String, String>,
         config: &Arc<BundleConfig>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
-        let base_url = source_utils::require_url(args, "remote_dir")?;
+        let base_url = connector_utils::require_url(args, "remote_dir")?;
         let scheme = base_url.scheme();
 
         // Only provide data directly for special protocols (SFTP, FTP)
@@ -156,7 +156,7 @@ impl SourceFunction for RemoteDirFunction {
         args: &HashMap<String, String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<Url>, BundlebaseError> {
-        let base_url = source_utils::require_url(args, "remote_dir")?;
+        let base_url = connector_utils::require_url(args, "remote_dir")?;
 
         // No stable URL for special protocols (handled by data())
         if Self::must_copy(&base_url) {
@@ -169,7 +169,7 @@ impl SourceFunction for RemoteDirFunction {
     }
 }
 
-impl RemoteDirFunction {
+impl RemoteDirConnector {
     /// Read the version string from a remote URL.
     ///
     /// Uses IOFile to get version (ETag/S3 version/mtime hash) from the remote file.
@@ -239,7 +239,7 @@ impl RemoteDirFunction {
 
         sftp.close().await?;
 
-        Ok(source_utils::stream_from_temp_file(temp))
+        Ok(connector_utils::stream_from_temp_file(temp))
     }
 
     /// Download a file via FTP to a temp file, returning a byte stream.
@@ -251,7 +251,7 @@ impl RemoteDirFunction {
         let temp = ftp_file.download_to_temp_file().await?.ok_or_else(|| {
             BundlebaseError::from(format!("FTP file not found: {}", url))
         })?;
-        Ok(source_utils::stream_from_temp_file(temp))
+        Ok(connector_utils::stream_from_temp_file(temp))
     }
 
     fn must_copy(base_url: &Url) -> bool {
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_signature() {
-        let func = RemoteDirFunction;
+        let func = RemoteDirConnector;
         let sig = func.signature();
         assert_eq!(sig.name, "remote_dir");
         assert_eq!(sig.arg_specs.len(), 4);
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_with_url() {
-        let func = RemoteDirFunction;
+        let func = RemoteDirConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
         assert!(func.validate_args(&args).is_ok());
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_invalid_url() {
-        let func = RemoteDirFunction;
+        let func = RemoteDirConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "not-a-valid-url".to_string());
 
@@ -312,7 +312,7 @@ mod tests {
         let source_url = Url::parse("s3://bucket/data/").expect("valid url");
         let file_url = Url::parse("s3://bucket/data/subdir/file.parquet").expect("valid url");
 
-        let relative = RemoteDirFunction::relative_path(&source_url, &file_url);
+        let relative = RemoteDirConnector::relative_path(&source_url, &file_url);
         assert_eq!(relative, "subdir/file.parquet");
     }
 
@@ -321,23 +321,23 @@ mod tests {
         let source_url = Url::parse("s3://bucket/data/").expect("valid url");
         let file_url = Url::parse("s3://bucket/data/file.parquet").expect("valid url");
 
-        let relative = RemoteDirFunction::relative_path(&source_url, &file_url);
+        let relative = RemoteDirConnector::relative_path(&source_url, &file_url);
         assert_eq!(relative, "file.parquet");
     }
 
     #[test]
     fn test_validate_args_copy_true() {
-        let func = RemoteDirFunction;
+        let func = RemoteDirConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
         args.insert("copy".to_string(), "true".to_string());
-        // Note: full validation including copy is done via validate_source_args
+        // Note: full validation including copy is done via validate_connector_args
         assert!(func.validate_args(&args).is_ok());
     }
 
     #[test]
     fn test_validate_args_copy_false() {
-        let func = RemoteDirFunction;
+        let func = RemoteDirConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
         args.insert("copy".to_string(), "false".to_string());
@@ -345,14 +345,14 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_source_args_copy_invalid() {
-        use crate::source::source_function::validate_source_args;
-        let func = RemoteDirFunction;
+    fn test_validate_connector_args_copy_invalid() {
+        use crate::source::connector::validate_connector_args;
+        let func = RemoteDirConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
         args.insert("copy".to_string(), "invalid".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
         assert!(result
             .err()
@@ -362,12 +362,12 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_source_args_missing_url() {
-        use crate::source::source_function::validate_source_args;
-        let func = RemoteDirFunction;
+    fn test_validate_connector_args_missing_url() {
+        use crate::source::connector::validate_connector_args;
+        let func = RemoteDirConnector;
         let args = HashMap::new();
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
         assert!(result
             .err()
@@ -377,11 +377,11 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_source_args_valid() {
-        use crate::source::source_function::validate_source_args;
-        let func = RemoteDirFunction;
+    fn test_validate_connector_args_valid() {
+        use crate::source::connector::validate_connector_args;
+        let func = RemoteDirConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
-        assert!(validate_source_args(&func, &args).is_ok());
+        assert!(validate_connector_args(&func, &args).is_ok());
     }
 }

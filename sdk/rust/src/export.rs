@@ -1,4 +1,4 @@
-//! Macro for exporting a `SourceFunction` as a plugin shared library.
+//! Macro for exporting a `Connector` as a plugin shared library.
 //!
 //! Generates the `extern "C"` functions required by the Bundlebase plugin
 //! source ABI:
@@ -13,13 +13,13 @@
 //! In your `lib.rs`:
 //!
 //! ```rust,ignore
-//! use bundlebase_sdk::{SourceFunction, Location, export_source};
+//! use bundlebase_sdk::{Connector, Location, export_source};
 //! use arrow::record_batch::RecordBatch;
 //! use std::collections::HashMap;
 //!
 //! struct MySource;
 //!
-//! impl SourceFunction for MySource {
+//! impl Connector for MySource {
 //!     fn discover(&self, attached: &[String], args: &HashMap<String, String>)
 //!         -> Result<Vec<Location>, Box<dyn std::error::Error>> {
 //!         Ok(vec![Location::new("data.parquet")])
@@ -43,7 +43,7 @@
 
 /// Generate the `extern "C"` entry points for a Bundlebase plugin source.
 ///
-/// Pass an expression that creates a `SourceFunction`. The macro stores it
+/// Pass an expression that creates a `Connector`. The macro stores it
 /// in a `OnceLock`-backed singleton and generates the four C ABI functions.
 ///
 /// # Examples
@@ -70,12 +70,12 @@ macro_rules! export_source {
 
             use ::arrow::ffi_stream::FFI_ArrowArrayStream;
             use ::arrow::record_batch::RecordBatch;
-            use $crate::source::SourceFunction;
+            use $crate::source::Connector;
             use $crate::types::Location;
 
-            static SOURCE: OnceLock<Box<dyn SourceFunction + Send + Sync>> = OnceLock::new();
+            static SOURCE: OnceLock<Box<dyn Connector + Send + Sync>> = OnceLock::new();
 
-            fn get_source() -> &'static (dyn SourceFunction + Send + Sync) {
+            fn get_source() -> &'static (dyn Connector + Send + Sync) {
                 SOURCE
                     .get_or_init(|| Box::new($source_expr))
                     .as_ref()

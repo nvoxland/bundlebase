@@ -1,6 +1,6 @@
 use crate::bundle::operation::Operation;
 use crate::data::ObjectId;
-use crate::source::validate_source_args;
+use crate::source::validate_connector_args;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
@@ -12,7 +12,7 @@ use std::collections::HashMap;
 /// A source specifies where to look for data files and enables the `fetch()`
 /// functionality to discover and auto-attach new files.
 ///
-/// The source function is responsible for file discovery. Each function may require
+/// The connector is responsible for file discovery. Each connector may require
 /// different arguments. For example, "remote_dir" requires:
 /// - "url": Directory URL to list (e.g., "s3://bucket/data/")
 /// - "patterns": Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
@@ -25,10 +25,10 @@ pub struct CreateSourceOp {
     /// The pack this source is associated with
     pub pack: ObjectId,
 
-    /// Source function name (e.g., "remote_dir")
-    pub function: String,
+    /// Connector name (e.g., "remote_dir" for built-in, or "acme.weather" for custom)
+    pub connector: String,
 
-    /// Function-specific configuration arguments.
+    /// Connector-specific configuration arguments.
     /// For "remote_dir":
     /// - "url": Directory URL (required)
     /// - "patterns": Comma-separated glob patterns (optional, defaults to "**/*")
@@ -40,13 +40,13 @@ impl CreateSourceOp {
     pub fn setup(
         id: ObjectId,
         pack: ObjectId,
-        function: String,
+        connector: String,
         args: HashMap<String, String>,
     ) -> Self {
         Self {
             id,
             pack,
-            function,
+            connector,
             args,
         }
     }
@@ -65,12 +65,12 @@ impl Operation for CreateSourceOp {
             return Err(format!("Pack {} not found", self.pack).into());
         }
 
-        if self.function.contains('.') {
+        if self.connector.contains('.') {
             // Dotted name: look up in source definitions
-            let def = bundle.get_connector_definition(&self.function).ok_or_else(|| {
+            let def = bundle.get_connector_definition(&self.connector).ok_or_else(|| {
                 format!(
                     "Connector '{}' is not defined. Use CREATE CONNECTOR first.",
-                    self.function
+                    self.connector
                 )
             })?;
 
@@ -78,18 +78,18 @@ impl Operation for CreateSourceOp {
             def.resolve_logic()?;
         } else {
             // Built-in function: look up in registry
-            let registry = bundle.source_function_registry();
+            let registry = bundle.connector_registry();
             let registry_guard = registry.read();
-            let func = registry_guard.get(&self.function).ok_or_else(|| {
-                let available = registry_guard.function_names();
+            let func = registry_guard.get(&self.connector).ok_or_else(|| {
+                let available = registry_guard.connector_names();
                 format!(
-                    "Unknown source function '{}'. Available functions: {}",
-                    self.function,
+                    "Unknown connector '{}'. Available connectors: {}",
+                    self.connector,
                     available.join(", ")
                 )
             })?;
 
-            validate_source_args(func.as_ref(), &self.args)?;
+            validate_connector_args(func.as_ref(), &self.args)?;
         }
 
         Ok(())
@@ -125,7 +125,7 @@ mod tests {
         let op = CreateSourceOp {
             id,
             pack,
-            function: "remote_dir".to_string(),
+            connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
@@ -142,7 +142,7 @@ mod tests {
         let op = CreateSourceOp {
             id,
             pack,
-            function: "custom_function".to_string(),
+            connector: "custom_function".to_string(),
             args: HashMap::new(),
         };
 
@@ -161,7 +161,7 @@ mod tests {
             make_args("s3://bucket/", None),
         );
 
-        assert_eq!(op.function, "remote_dir");
+        assert_eq!(op.connector, "remote_dir");
         assert_eq!(op.args.get("url"), Some(&"s3://bucket/".to_string()));
     }
 
@@ -174,7 +174,7 @@ mod tests {
             make_args("s3://bucket/", Some("**/*.parquet,**/*.csv")),
         );
 
-        assert_eq!(op.function, "remote_dir");
+        assert_eq!(op.connector, "remote_dir");
         assert_eq!(
             op.args.get("patterns"),
             Some(&"**/*.parquet,**/*.csv".to_string())
@@ -193,7 +193,7 @@ mod tests {
             args.clone(),
         );
 
-        assert_eq!(op.function, "custom_function");
+        assert_eq!(op.connector, "custom_function");
         assert_eq!(op.args, args);
     }
 
@@ -204,7 +204,7 @@ mod tests {
         let op = CreateSourceOp {
             id,
             pack,
-            function: "remote_dir".to_string(),
+            connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
@@ -213,7 +213,7 @@ mod tests {
         let pack_str: String = pack.into();
         assert!(yaml.contains(&id_str));
         assert!(yaml.contains(&pack_str));
-        assert!(yaml.contains("function: remote_dir"));
+        assert!(yaml.contains("connector: remote_dir"));
         assert!(yaml.contains("url: s3://bucket/data/"));
         assert!(yaml.contains("patterns: '**/*.parquet'"));
     }

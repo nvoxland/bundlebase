@@ -31,7 +31,7 @@ import java.util.Map;
  * bundle.create_source("plugin", {"call": "lib:./libbundlebase_plugin.so"})
  * </pre>
  */
-public class TestSourcePlugin implements SourceFunction {
+public class TestSourcePlugin implements Connector {
     private final BufferAllocator allocator = new RootAllocator();
 
     // Register this source when the class is loaded by the JVM.

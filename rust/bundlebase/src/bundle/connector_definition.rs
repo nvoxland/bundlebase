@@ -19,34 +19,34 @@ pub struct ConnectorDefinition {
 /// A single platform-specific implementation for a connector definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectorLogicEntry {
-    /// Source type: "python", "lib", "java", "docker", or "ipc"
-    pub source_type: String,
+    /// Runner: "python", "lib", "java", "docker", or "ipc"
+    pub runner: String,
     /// Logic string (e.g., "mod:Class" for python, "./lib.so" for lib, "./my_source" for ipc)
     pub logic: String,
     /// Platform pattern in Docker-style os/arch (e.g., "linux/amd64", "*/*")
     pub platform: String,
 }
 
-/// Valid source type values for connector logic.
-pub const VALID_SOURCE_TYPES: &[&str] = &["python", "lib", "java", "docker", "ipc"];
+/// Valid runner values for connector logic.
+pub const VALID_RUNNERS: &[&str] = &["python", "lib", "java", "docker", "ipc"];
 
-/// Map a user-facing source type to the internal registry type ("native" or "ipc").
-pub fn resolve_registry_type(source_type: &str) -> Result<&'static str, BundlebaseError> {
-    match source_type {
+/// Map a user-facing runner to the internal registry type ("native" or "ipc").
+pub fn resolve_registry_type(runner: &str) -> Result<&'static str, BundlebaseError> {
+    match runner {
         "python" | "lib" => Ok("native"),
         "java" | "docker" | "ipc" => Ok("ipc"),
         _ => Err(format!(
-            "Invalid source type '{}'. Must be one of: {}.",
-            source_type,
-            VALID_SOURCE_TYPES.join(", ")
+            "Invalid runner '{}'. Must be one of: {}.",
+            runner,
+            VALID_RUNNERS.join(", ")
         )
         .into()),
     }
 }
 
-/// Reconstruct the prefixed call string from source type and logic for the native/ipc plugins.
-pub fn build_call_string(source_type: &str, logic: &str) -> String {
-    match source_type {
+/// Reconstruct the prefixed call string from runner and logic for the native/ipc plugins.
+pub fn build_call_string(runner: &str, logic: &str) -> String {
+    match runner {
         "python" => format!("python:{}", logic),
         "lib" => format!("lib:{}", logic),
         "java" => format!("java:{}", logic),
@@ -226,12 +226,12 @@ mod tests {
     fn test_resolve_last_set_wins() {
         let def = ConnectorDefinition::new("test.source".to_string());
         def.add_logic(ConnectorLogicEntry {
-            source_type: "lib".to_string(),
+            runner: "lib".to_string(),
             logic: "first".to_string(),
             platform: "*/*".to_string(),
         });
         def.add_logic(ConnectorLogicEntry {
-            source_type: "lib".to_string(),
+            runner: "lib".to_string(),
             logic: "second".to_string(),
             platform: "*/*".to_string(),
         });
@@ -244,7 +244,7 @@ mod tests {
     fn test_resolve_no_match() {
         let def = ConnectorDefinition::new("test.source".to_string());
         def.add_logic(ConnectorLogicEntry {
-            source_type: "lib".to_string(),
+            runner: "lib".to_string(),
             logic: "test".to_string(),
             platform: "nonexistent/arch".to_string(),
         });
@@ -279,12 +279,12 @@ mod tests {
     fn test_remove_all_logic() {
         let def = ConnectorDefinition::new("test.source".to_string());
         def.add_logic(ConnectorLogicEntry {
-            source_type: "lib".to_string(),
+            runner: "lib".to_string(),
             logic: "first".to_string(),
             platform: "*/*".to_string(),
         });
         def.add_logic(ConnectorLogicEntry {
-            source_type: "lib".to_string(),
+            runner: "lib".to_string(),
             logic: "second".to_string(),
             platform: "linux/amd64".to_string(),
         });
@@ -298,12 +298,12 @@ mod tests {
     fn test_remove_logic_for_platform() {
         let def = ConnectorDefinition::new("test.source".to_string());
         def.add_logic(ConnectorLogicEntry {
-            source_type: "lib".to_string(),
+            runner: "lib".to_string(),
             logic: "wildcard".to_string(),
             platform: "*/*".to_string(),
         });
         def.add_logic(ConnectorLogicEntry {
-            source_type: "lib".to_string(),
+            runner: "lib".to_string(),
             logic: "linux-only".to_string(),
             platform: "linux/amd64".to_string(),
         });
@@ -319,7 +319,7 @@ mod tests {
     fn test_remove_logic_for_platform_no_match() {
         let def = ConnectorDefinition::new("test.source".to_string());
         def.add_logic(ConnectorLogicEntry {
-            source_type: "lib".to_string(),
+            runner: "lib".to_string(),
             logic: "test".to_string(),
             platform: "*/*".to_string(),
         });

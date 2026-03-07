@@ -9,12 +9,12 @@ import (
 )
 
 // Serve runs the source function as a JSON-RPC subprocess on stdin/stdout.
-func Serve(source SourceFunction) {
+func Serve(source Connector) {
 	ServeIO(source, os.Stdin, os.Stdout)
 }
 
 // ServeIO runs the source function on the given reader/writer (for testing).
-func ServeIO(source SourceFunction, r io.Reader, w io.Writer) {
+func ServeIO(source Connector, r io.Reader, w io.Writer) {
 	scanner := bufio.NewScanner(r)
 	// Allow large lines (up to 16MB)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
@@ -37,7 +37,7 @@ func ServeIO(source SourceFunction, r io.Reader, w io.Writer) {
 	}
 }
 
-func handleRequest(source SourceFunction, req jsonRpcRequest, w io.Writer) bool {
+func handleRequest(source Connector, req jsonRpcRequest, w io.Writer) bool {
 	switch req.Method {
 	case "discover":
 		handleDiscover(source, req, w)
@@ -54,7 +54,7 @@ func handleRequest(source SourceFunction, req jsonRpcRequest, w io.Writer) bool 
 	return false
 }
 
-func handleDiscover(source SourceFunction, req jsonRpcRequest, w io.Writer) {
+func handleDiscover(source Connector, req jsonRpcRequest, w io.Writer) {
 	attached := parseStringSlice(req.Params["attached_locations"])
 	args := parseStringMap(req.Params, "attached_locations")
 
@@ -67,7 +67,7 @@ func handleDiscover(source SourceFunction, req jsonRpcRequest, w io.Writer) {
 	writeResponse(w, req.ID, map[string]interface{}{"locations": locations})
 }
 
-func handleData(source SourceFunction, req jsonRpcRequest, w io.Writer) {
+func handleData(source Connector, req jsonRpcRequest, w io.Writer) {
 	location := parseLocation(req.Params["location"])
 	args := parseStringMap(req.Params, "location")
 
@@ -85,7 +85,7 @@ func handleData(source SourceFunction, req jsonRpcRequest, w io.Writer) {
 	}
 }
 
-func handleStableUrl(source SourceFunction, req jsonRpcRequest, w io.Writer) {
+func handleStableUrl(source Connector, req jsonRpcRequest, w io.Writer) {
 	provider, ok := source.(StableUrlProvider)
 	if !ok {
 		writeResponse(w, req.ID, nil)

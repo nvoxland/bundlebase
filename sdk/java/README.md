@@ -1,6 +1,6 @@
 # Bundlebase Java SDK
 
-Build custom Bundlebase source functions in Java.
+Build custom Bundlebase connectors in Java.
 
 ## Installation
 
@@ -16,7 +16,7 @@ Add the SDK to your Maven project's `pom.xml`:
 
 ## Quick Start
 
-Implement the `SourceFunction` interface:
+Implement the `Connector` interface:
 
 ```java
 import com.bundlebase.sdk.*;
@@ -30,7 +30,7 @@ import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import java.util.*;
 
-public class MySource implements SourceFunction {
+public class MySource implements Connector {
     private final BufferAllocator allocator = new RootAllocator();
 
     @Override
@@ -60,14 +60,14 @@ public class MySource implements SourceFunction {
 
 ## Implementation
 
-Implement the `SourceFunction` interface:
+Implement the `Connector` interface:
 
 - **`discover(attachedLocations, args)`** - Return available data locations as a list of `Location` objects
 - **`data(location, args)`** - Return data for a location as an Arrow `VectorSchemaRoot`
 - **`stableUrl(location, args)`** (optional) - Return a stable URL for a location
 
-Call `Serve.run(instance)` to start the source function server.
+Call `Serve.run(instance)` to start the connector server.
 
 ## Documentation
 
-For complete documentation, including advanced usage and API details, see [Custom Source Functions](../../docs/guide/custom-sources/).
+For complete documentation, including advanced usage and API details, see [Custom Connectors](../../docs/guide/custom-connectors/).

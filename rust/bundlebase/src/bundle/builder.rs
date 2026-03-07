@@ -746,79 +746,64 @@ impl BundleBuilder {
     /// ```
     pub async fn create_source(
         &self,
-        function: &str,
+        connector: &str,
         args: HashMap<String, String>,
         pack: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::CreateSourceCommand;
-        self.execute_command(CreateSourceCommand::new(function, args, pack.map(|s| s.to_string()))).await?;
+        self.execute_command(CreateSourceCommand::new(connector, args, pack.map(|s| s.to_string()))).await?;
         Ok(self)
     }
 
-    /// Define a named connector with a dot-separated namespace.
+    /// Create a named connector with logic (persisted).
     ///
-    /// A defined connector can then have platform-specific logic set via
-    /// `set_connector_logic()`, and be used in `create_source()` by its dotted name.
+    /// Creates the connector if it doesn't exist, then adds/replaces logic
+    /// for the given platform. The operation is persisted into the bundle's
+    /// commit history.
+    ///
+    /// Python runner cannot be bundled — use `create_temporary_connector()` instead.
     ///
     /// # Arguments
     /// * `name` - Dot-separated connector name (e.g., "acme.datasources.weather").
-    ///   Must contain at least one dot (namespace required).
+    /// * `runner` - The runner: "lib", "java", "docker", or "ipc"
+    /// * `logic` - The logic string (e.g., "./binary" for ipc, "./lib.so" for lib)
+    /// * `platform` - Docker-style platform string (e.g., "linux/amd64", "*/*")
     pub async fn create_connector(
         &self,
         name: &str,
+        runner: &str,
+        logic: &str,
+        platform: &str,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::CreateConnectorCommand;
-        self.execute_command(CreateConnectorCommand { name: name.to_string() }).await?;
+        self.execute_command(CreateConnectorCommand::new(name, runner, logic, platform)).await?;
         Ok(self)
     }
 
-    /// Set platform-specific implementation logic for a defined connector.
+    /// Create a temporary connector with runtime-only logic (not persisted).
     ///
-    /// This always persists the logic into the bundle by creating an operation.
-    /// Python `python:` calls cannot be bundled — use `set_temporary_connector_logic()` instead.
-    ///
-    /// # Arguments
-    /// * `name` - The defined connector name (must have been defined via `create_connector()`)
-    /// * `source_type` - The source type: "python", "lib", "java", "docker", or "ipc"
-    /// * `logic` - The logic string (e.g., "mod:Class" for python, "./binary" for ipc). Python type cannot be bundled.
-    /// * `platform` - Docker-style platform string (e.g., "linux/amd64", "darwin/arm64", "*/*")
-    pub async fn set_connector_logic(
-        &self,
-        name: &str,
-        source_type: &str,
-        logic: &str,
-        platform: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::SetConnectorLogicCommand;
-        self.execute_command(SetConnectorLogicCommand {
-            name: name.to_string(),
-            source_type: source_type.to_string(),
-            logic: logic.to_string(),
-            platform: platform.to_string(),
-        }).await?;
-        Ok(self)
-    }
-
-    /// Set temporary (runtime-only) connector logic for a defined connector.
-    ///
-    /// This does NOT persist the logic — it only sets it for the current session.
-    /// Use this for Python sources that cannot be meaningfully bundled.
+    /// Creates the connector if it doesn't exist, then adds runtime-only logic.
+    /// Use this for Python in-process connectors that cannot be bundled.
     ///
     /// # Arguments
-    /// * `name` - The defined connector name
-    /// * `source_type` - The source type: "python", "lib", "java", "docker", or "ipc"
+    /// * `name` - Dot-separated connector name
+    /// * `runner` - The runner: "python", "lib", "java", "docker", or "ipc"
     /// * `logic` - The logic string (e.g., "module:Class" for python)
     /// * `platform` - Docker-style platform string (default: "*/*")
-    pub async fn set_temporary_connector_logic(
+    pub async fn create_temporary_connector(
         &self,
         name: &str,
-        source_type: &str,
+        runner: &str,
         logic: &str,
         platform: &str,
     ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::connector_definition::ConnectorLogicEntry;
+        use crate::bundle::connector_definition::{ConnectorDefinition, ConnectorLogicEntry};
+        // Create connector definition if it doesn't exist
+        if self.bundle().get_connector_definition(name).is_none() {
+            self.bundle().add_connector_definition(ConnectorDefinition::new(name.to_string()));
+        }
         let entry = ConnectorLogicEntry {
-            source_type: source_type.to_string(),
+            runner: runner.to_string(),
             logic: logic.to_string(),
             platform: platform.to_string(),
         };
@@ -828,24 +813,15 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Drop a defined connector and all its associated logic and sources.
+    /// Drop a connector. Without a platform, removes the entire connector definition.
+    /// With a platform, removes only the logic for that platform.
     pub async fn drop_connector(
-        &self,
-        name: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::DropConnectorCommand;
-        self.execute_command(DropConnectorCommand::new(name)).await?;
-        Ok(self)
-    }
-
-    /// Drop persisted connector logic by executing a DropConnectorLogicCommand.
-    pub async fn drop_connector_logic(
         &self,
         name: &str,
         platform: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::DropConnectorLogicCommand;
-        self.execute_command(DropConnectorLogicCommand::new(
+        use crate::bundle::command::DropConnectorCommand;
+        self.execute_command(DropConnectorCommand::new(
             name,
             platform.map(|s| s.to_string()),
         )).await?;
@@ -883,7 +859,7 @@ impl BundleBuilder {
     /// builder.create_source("remote_dir", args, None).await?;
     /// let results = builder.fetch("base", SyncMode::Add).await?;
     /// for result in &results {
-    ///     println!("Source {}: {} added", result.source_function, result.added.len());
+    ///     println!("Source {}: {} added", result.connector, result.added.len());
     /// }
     /// ```
     pub async fn fetch(&self, pack: &str, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
@@ -909,7 +885,7 @@ impl BundleBuilder {
     /// let results = builder.fetch_all(SyncMode::Add).await?;
     /// for result in &results {
     ///     println!("Source {}: {} added, {} replaced, {} removed",
-    ///         result.source_function,
+    ///         result.connector,
     ///         result.added.len(),
     ///         result.replaced.len(),
     ///         result.removed.len());
@@ -1574,11 +1550,17 @@ impl BundleFacade for BundleBuilder {
         self.bundle.config()
     }
 
-    async fn set_temporary_connector_logic(
+    async fn create_temporary_connector(
         &self,
         name: &str,
         entry: crate::bundle::connector_definition::ConnectorLogicEntry,
     ) -> Result<(), BundlebaseError> {
+        // Create connector definition if it doesn't exist
+        if self.bundle.get_connector_definition(name).is_none() {
+            self.bundle.add_connector_definition(
+                crate::bundle::connector_definition::ConnectorDefinition::new(name.to_string()),
+            );
+        }
         self.bundle.add_connector_logic(name, entry)?;
         self.bundle.mark_temporary_logic();
         self.bundle.refresh_version_udf(self.version());
@@ -1848,18 +1830,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_version_temp_with_temporary_logic_only() {
-        use crate::bundle::connector_definition::ConnectorDefinition;
-
+    async fn test_version_temp_with_temporary_connector_only() {
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
 
-        // Add connector definition directly (no operation) to avoid creating changes
-        bundle.bundle().add_connector_definition(ConnectorDefinition::new("test.source".to_string()));
-
         bundle
-            .set_temporary_connector_logic("test.source", "native", "test_call", "*/*")
+            .create_temporary_connector("test.source", "native", "test_call", "*/*")
             .await
             .unwrap();
 
@@ -1867,7 +1844,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_version_uncommitted_temp_with_changes_and_temporary_logic() {
+    async fn test_version_uncommitted_temp_with_changes_and_temporary_connector() {
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
@@ -1876,9 +1853,8 @@ mod tests {
             .await
             .unwrap();
 
-        bundle.create_connector("test.source").await.unwrap();
         bundle
-            .set_temporary_connector_logic("test.source", "native", "test_call", "*/*")
+            .create_temporary_connector("test.source", "native", "test_call", "*/*")
             .await
             .unwrap();
 
@@ -1898,14 +1874,12 @@ mod tests {
             .await
             .unwrap();
 
-        builder.create_connector("test.source").await.unwrap();
-
         let entry = ConnectorLogicEntry {
-            source_type: "python".to_string(),
+            runner: "python".to_string(),
             logic: "test_call".to_string(),
             platform: "*/*".to_string(),
         };
-        BundleFacade::set_temporary_connector_logic(builder.as_ref(), "test.source", entry)
+        BundleFacade::create_temporary_connector(builder.as_ref(), "test.source", entry)
             .await
             .unwrap();
 

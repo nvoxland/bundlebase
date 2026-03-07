@@ -1,6 +1,6 @@
 # Rust SDK
 
-Build custom Bundlebase source functions in Rust.
+Build custom Bundlebase connectors in Rust.
 
 ## Installation
 
@@ -18,13 +18,13 @@ arrow = "57"
 use arrow::array::{Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use bundlebase_sdk::{Location, SourceFunction};
+use bundlebase_sdk::{Location, Connector};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 struct ExampleConnector;
 
-impl SourceFunction for ExampleConnector {
+impl Connector for ExampleConnector {
     fn discover(
         &self, _attached: &[String], _args: &HashMap<String, String>,
     ) -> Result<Vec<Location>, Box<dyn std::error::Error>> {
@@ -57,17 +57,16 @@ fn main() { bundlebase_sdk::serve(&ExampleConnector); }
 Build and use with:
 
 ```python
-bundle.create_connector('example.connector')
-bundle.set_connector_logic('example.connector', type_='ipc', logic='./target/release/example-connector')
+bundle.create_connector('example.connector', runner='ipc', logic='./target/release/example-connector')
 bundle.create_source('example.connector')
 ```
 
 ## API Reference
 
-### SourceFunction Trait
+### Connector Trait
 
 ```rust
-pub trait SourceFunction {
+pub trait Connector {
     fn discover(
         &self, attached_locations: &[String], args: &HashMap<String, String>,
     ) -> Result<Vec<Location>, Box<dyn std::error::Error>>;
@@ -152,18 +151,18 @@ pub struct StableUrl {
 ### serve()
 
 ```rust
-pub fn serve(source: &dyn SourceFunction)
+pub fn serve(source: &dyn Connector)
 ```
 
-Run the source function as a JSON-RPC subprocess on stdin/stdout.
+Run the connector as a JSON-RPC subprocess on stdin/stdout.
 
 ### serve_io()
 
 ```rust
-pub fn serve_io(source: &dyn SourceFunction, r: &mut dyn BufRead, w: &mut dyn Write)
+pub fn serve_io(source: &dyn Connector, r: &mut dyn BufRead, w: &mut dyn Write)
 ```
 
-Run the source function on the given reader/writer. Used for testing.
+Run the connector on the given reader/writer. Used for testing.
 
 ## Complete Example
 
@@ -173,13 +172,13 @@ A source with multiple locations, multi-batch data, stable URLs, and extra argum
 use arrow::array::{Int64Array, StringArray, Float64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use bundlebase_sdk::{Location, SourceFunction, StableUrl};
+use bundlebase_sdk::{Location, Connector, StableUrl};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 struct DatabaseSource;
 
-impl SourceFunction for DatabaseSource {
+impl Connector for DatabaseSource {
     fn discover(
         &self, _attached: &[String], _args: &HashMap<String, String>,
     ) -> Result<Vec<Location>, Box<dyn std::error::Error>> {
@@ -332,7 +331,7 @@ mod tests {
 
 ## Native Mode
 
-Build your source as a shared library for zero-copy in-process loading.
+Build your connector as a shared library for zero-copy in-process loading.
 
 ### Setup
 
@@ -353,13 +352,13 @@ serde_json = "1"
 Use the `export_source!` macro to generate the C ABI entry points:
 
 ```rust
-use bundlebase_sdk::{SourceFunction, Location, export_source};
+use bundlebase_sdk::{Connector, Location, export_source};
 use arrow::record_batch::RecordBatch;
 use std::collections::HashMap;
 
 struct ExampleConnector;
 
-impl SourceFunction for ExampleConnector {
+impl Connector for ExampleConnector {
     fn discover(&self, _attached: &[String], _args: &HashMap<String, String>)
         -> Result<Vec<Location>, Box<dyn std::error::Error>> {
         Ok(vec![Location::new("data.parquet")])
@@ -383,8 +382,7 @@ cargo build --release
 ```
 
 ```python
-bundle.create_connector('example.connector')
-bundle.set_connector_logic('example.connector', type_='lib', logic='target/release/libexample_connector.so')
+bundle.create_connector('example.connector', runner='lib', logic='target/release/libexample_connector.so')
 bundle.create_source('example.connector')
 ```
 
@@ -392,13 +390,13 @@ bundle.create_source('example.connector')
 
 The `export_source!` macro:
 
-1. Creates a `OnceLock`-backed singleton of your source
+1. Creates a `OnceLock`-backed singleton of your connector
 2. Generates `extern "C"` functions matching the [Bundlebase C ABI](native.md#c-abi-reference)
 3. Uses Arrow's `FFI_ArrowArrayStream` for zero-copy data export
 
-The same `SourceFunction` trait works for both native and IPC — switch between them by changing only the entry point (`export_source!` vs `fn main() { serve(&source) }`).
+The same `Connector` trait works for both native and IPC — switch between them by changing only the entry point (`export_source!` vs `fn main() { serve(&source) }`).
 
-See [Native Source Mode](native.md) for the full C ABI reference.
+See [Native Mode](native.md) for the full C ABI reference.
 
 ## Error Handling
 
@@ -415,4 +413,4 @@ fn data(
 
 If a method not recognized by the protocol is called, the SDK returns a `-32601` (method not found) error automatically.
 
-Bundlebase surfaces these errors to the user as source function failures during `fetch()`.
+Bundlebase surfaces these errors to the user as connector failures during `FETCH`.

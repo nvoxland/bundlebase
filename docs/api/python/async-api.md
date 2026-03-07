@@ -30,7 +30,7 @@ Read-only bundle class returned by `open()`.
       show_root_full_path: false
       members:
         - extend
-        - set_temporary_connector_logic
+        - create_temporary_connector
         - drop_temporary_connector_logic
         - schema
         - name
@@ -65,10 +65,8 @@ Mutable bundle class returned by `create()` and transformation methods.
         - create_function
         - create_source
         - create_connector
-        - set_connector_logic
-        - set_temporary_connector_logic
+        - create_temporary_connector
         - drop_connector
-        - drop_connector_logic
         - drop_temporary_connector_logic
         - fetch
         - fetch_all

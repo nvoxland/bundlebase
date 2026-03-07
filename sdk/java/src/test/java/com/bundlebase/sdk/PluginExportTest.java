@@ -29,8 +29,8 @@ public class PluginExportTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private static SourceFunction testSource() {
-        return new SourceFunction() {
+    private static Connector testSource() {
+        return new Connector() {
             private final BufferAllocator allocator = new RootAllocator();
 
             @Override
@@ -150,7 +150,7 @@ public class PluginExportTest {
     @Test
     public void testDiscoverExcludesAttachedFromArgs() throws Exception {
         // Verify that "attached_locations" key is not passed as an extra arg
-        SourceFunction argTracker = new SourceFunction() {
+        Connector argTracker = new Connector() {
             @Override
             public List<Location> discover(List<String> attached, Map<String, String> args) {
                 // If attached_locations leaked into args, this would show it

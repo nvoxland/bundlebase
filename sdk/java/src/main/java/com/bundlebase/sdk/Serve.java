@@ -9,21 +9,21 @@ import java.io.*;
 import java.util.*;
 
 /**
- * Entry point for running a source function as a JSON-RPC subprocess.
+ * Entry point for running a connector as a JSON-RPC subprocess.
  */
 public class Serve {
 
     /**
-     * Run the source function on stdin/stdout.
+     * Run the connector on stdin/stdout.
      */
-    public static void run(SourceFunction source) {
+    public static void run(Connector source) {
         run(source, System.in, System.out);
     }
 
     /**
-     * Run the source function on the given streams (for testing).
+     * Run the connector on the given streams (for testing).
      */
-    public static void run(SourceFunction source, InputStream in, OutputStream out) {
+    public static void run(Connector source, InputStream in, OutputStream out) {
         BufferedReader reader = new BufferedReader(new InputStreamReader(in));
 
         try {
@@ -52,7 +52,7 @@ public class Serve {
     }
 
     private static boolean handleRequest(
-            SourceFunction source, String method, JsonNode id, JsonNode params, OutputStream out)
+            Connector source, String method, JsonNode id, JsonNode params, OutputStream out)
             throws IOException {
 
         switch (method) {
@@ -69,7 +69,7 @@ public class Serve {
     }
 
     private static void handleDiscover(
-            SourceFunction source, JsonNode id, JsonNode params, OutputStream out)
+            Connector source, JsonNode id, JsonNode params, OutputStream out)
             throws IOException {
         List<String> attached = Protocol.parseStringList(
                 params != null ? params.get("attached_locations") : null);
@@ -90,7 +90,7 @@ public class Serve {
     }
 
     private static void handleData(
-            SourceFunction source, JsonNode id, JsonNode params, OutputStream out)
+            Connector source, JsonNode id, JsonNode params, OutputStream out)
             throws IOException {
         Location location = Protocol.parseLocation(params != null ? params.get("location") : null);
         Map<String, String> args = Protocol.parseStringMap(params, "location");
@@ -106,7 +106,7 @@ public class Serve {
     }
 
     private static void handleStableUrl(
-            SourceFunction source, JsonNode id, JsonNode params, OutputStream out)
+            Connector source, JsonNode id, JsonNode params, OutputStream out)
             throws IOException {
         Location location = Protocol.parseLocation(params != null ? params.get("location") : null);
         Map<String, String> args = Protocol.parseStringMap(params, "location");

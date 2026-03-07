@@ -127,27 +127,27 @@ func TestParseSimpleArgs(t *testing.T) {
 	}
 }
 
-func TestExportSourceRegistration(t *testing.T) {
+func TestExportConnectorRegistration(t *testing.T) {
 	src := &testSource{}
 
 	// Before registration
 	exportMu.Lock()
-	exportedSource = nil
+	exportedConnector = nil
 	exportMu.Unlock()
 
-	if getExportedSource() != nil {
+	if getExportedConnector() != nil {
 		t.Error("expected nil before registration")
 	}
 
-	ExportSource(src)
+	ExportConnector(src)
 
-	if getExportedSource() == nil {
+	if getExportedConnector() == nil {
 		t.Error("expected non-nil after registration")
 	}
 
 	// Clean up
 	exportMu.Lock()
-	exportedSource = nil
+	exportedConnector = nil
 	exportMu.Unlock()
 }
 

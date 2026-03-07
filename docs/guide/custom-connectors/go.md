@@ -1,6 +1,6 @@
 # Go SDK
 
-Build custom Bundlebase source functions in Go.
+Build custom Bundlebase connectors in Go.
 
 ## Installation
 
@@ -49,17 +49,16 @@ func main() { sdk.Serve(&ExampleConnector{}) }
 Build and use with:
 
 ```python
-bundle.create_connector('example.connector')
-bundle.set_connector_logic('example.connector', type_='ipc', logic='./example-connector')
+bundle.create_connector('example.connector', runner='ipc', logic='./example-connector')
 bundle.create_source('example.connector')
 ```
 
 ## API Reference
 
-### SourceFunction Interface
+### Connector Interface
 
 ```go
-type SourceFunction interface {
+type Connector interface {
     Discover(attachedLocations []string, args map[string]string) ([]Location, error)
     Data(location Location, args map[string]string) ([]arrow.Record, error)
 }
@@ -97,7 +96,7 @@ type StableUrlProvider interface {
 }
 ```
 
-Implement this interface on your source struct to enable stable URL support. Return `nil` for no stable URL.
+Implement this interface on your connector struct to enable stable URL support. Return `nil` for no stable URL.
 
 ### Location
 
@@ -132,18 +131,18 @@ type StableUrl struct {
 ### Serve()
 
 ```go
-func Serve(source SourceFunction)
+func Serve(source Connector)
 ```
 
-Run the source function as a JSON-RPC subprocess on stdin/stdout.
+Run the connector as a JSON-RPC subprocess on stdin/stdout.
 
 ### ServeIO()
 
 ```go
-func ServeIO(source SourceFunction, r io.Reader, w io.Writer)
+func ServeIO(source Connector, r io.Reader, w io.Writer)
 ```
 
-Run the source function on the given reader/writer. Used for testing.
+Run the connector on the given reader/writer. Used for testing.
 
 ## Complete Example
 
@@ -289,11 +288,11 @@ func TestDataReturnsArrow(t *testing.T) {
 
 ## Native Mode
 
-Build your source as a C-shared library for zero-copy in-process loading.
+Build your connector as a C-shared library for zero-copy in-process loading.
 
 ### Export the Source
 
-Use `ExportSource()` to register your source, then build with `-buildmode=c-shared`:
+Use `ExportConnector()` to register your connector, then build with `-buildmode=c-shared`:
 
 ```go
 package main
@@ -308,7 +307,7 @@ type ExampleConnector struct{}
 // ... implement Discover() and Data() as usual ...
 
 func init() {
-    sdk.ExportSource(&ExampleConnector{})
+    sdk.ExportConnector(&ExampleConnector{})
 }
 
 func main() {} // required for c-shared but never called
@@ -321,18 +320,17 @@ go build -buildmode=c-shared -o example_connector.so .
 ```
 
 ```python
-bundle.create_connector('example.connector')
-bundle.set_connector_logic('example.connector', type_='lib', logic='./example_connector.so')
+bundle.create_connector('example.connector', runner='lib', logic='./example_connector.so')
 bundle.create_source('example.connector')
 ```
 
 ### How It Works
 
-`ExportSource()` stores your source globally. The package exports `bundlebase_discover`, `bundlebase_data`, `bundlebase_free`, and `bundlebase_stable_url` via cgo. Data is transferred through the [Arrow C Data Interface](https://arrow.apache.org/docs/format/CDataInterface.html) using `arrow/cdata.ExportArrowRecordBatchReader`.
+`ExportConnector()` stores your connector globally. The package exports `bundlebase_discover`, `bundlebase_data`, `bundlebase_free`, and `bundlebase_stable_url` via cgo. Data is transferred through the [Arrow C Data Interface](https://arrow.apache.org/docs/format/CDataInterface.html) using `arrow/cdata.ExportArrowRecordBatchReader`.
 
-The same `SourceFunction` interface works for both native and IPC — switch between them by changing only the entry point (`ExportSource()` + `c-shared` build vs `func main() { Serve(&source) }`).
+The same `Connector` interface works for both native and IPC — switch between them by changing only the entry point (`ExportConnector()` + `c-shared` build vs `func main() { Serve(&source) }`).
 
-See [Native Source Mode](native.md) for the full C ABI reference.
+See [Native Mode](native.md) for the full C ABI reference.
 
 ## Error Handling
 
@@ -347,4 +345,4 @@ func (s *ExampleConnector) Data(location sdk.Location, args map[string]string) (
 
 If a method not recognized by the protocol is called, the SDK returns a `-32601` (method not found) error automatically.
 
-Bundlebase surfaces these errors to the user as source function failures during `fetch()`.
+Bundlebase surfaces these errors to the user as connector failures during `FETCH`.

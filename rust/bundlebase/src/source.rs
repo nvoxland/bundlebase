@@ -1,8 +1,9 @@
-//! Source module for source function definitions and discovery.
+//! Source module for connector definitions, data discovery, and fetch orchestration.
 
 pub mod plugin;
-pub(crate) mod source_function;
-pub(crate) mod source_utils;
+pub(crate) mod connector;
+pub(crate) mod connector_utils;
+pub(crate) mod fetch;
 
 use crate::BundlebaseError;
 
@@ -45,14 +46,14 @@ impl std::fmt::Display for SyncMode {
     }
 }
 
-pub use plugin::kaggle::KaggleSource;
+pub use plugin::kaggle::KaggleConnector;
 pub use plugin::native;
-pub use plugin::PostgresFunction;
-pub use plugin::RemoteDirFunction;
-pub use plugin::WebScrapeFunction;
-pub use source_function::{
-    format_fetch_summary, validate_source_args, ArgSpec, AttachedFileInfo, DiscoveredLocation,
-    FetchAction, FetchedBlock, FetchResults, MaterializedData, SourceData, SourceFunction,
-    SourceFunctionRegistry, SourceFunctionSignature,
+pub use plugin::PostgresConnector;
+pub use plugin::RemoteDirConnector;
+pub use plugin::WebScrapeConnector;
+pub use connector::{
+    format_fetch_summary, validate_connector_args, ArgSpec, AttachedFileInfo, DiscoveredLocation,
+    FetchAction, FetchedBlock, FetchResults, MaterializedData, SourceData, Connector,
+    ConnectorRegistry, ConnectorSignature,
 };
-pub use source_utils::orchestrate_fetch;
+pub use fetch::orchestrate_fetch;

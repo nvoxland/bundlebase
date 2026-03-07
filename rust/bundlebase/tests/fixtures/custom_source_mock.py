@@ -6,10 +6,10 @@ Used by integration tests in rust/bundlebase/src/source/ipc.rs.
 
 import pyarrow as pa
 
-from bundlebase_sdk import SourceFunction, Location, serve
+from bundlebase_sdk import Connector, Location, serve
 
 
-class TestSource(SourceFunction):
+class TestConnector(Connector):
     def discover(self, attached_locations, **kwargs):
         return [
             Location("test_file_1.parquet", must_copy=True, format="parquet", version="v1"),
@@ -29,4 +29,4 @@ class TestSource(SourceFunction):
 
 
 if __name__ == "__main__":
-    serve(TestSource())
+    serve(TestConnector())

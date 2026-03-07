@@ -61,7 +61,7 @@ func (s *TestSource) Data(location sdk.Location, args map[string]string) ([]arro
 
 // Register the source when the library is loaded.
 func init() {
-	sdk.ExportSource(&TestSource{})
+	sdk.ExportConnector(&TestSource{})
 }
 
 // main is required for c-shared build mode but never called.

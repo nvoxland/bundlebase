@@ -8,14 +8,14 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::ffi_stream::ArrowArrayStreamReader;
 use arrow::ffi_stream::FFI_ArrowArrayStream;
 use arrow::record_batch::RecordBatch;
-use bundlebase_sdk::{export_source, Location, SourceFunction, StableUrl};
+use bundlebase_sdk::{export_source, Location, Connector, StableUrl};
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::sync::Arc;
 
 struct TestExportSource;
 
-impl SourceFunction for TestExportSource {
+impl Connector for TestExportSource {
     fn discover(
         &self,
         _attached: &[String],

@@ -40,7 +40,7 @@ use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchem
 use crate::udf::{SearchTableFunction, VersionUdf};
 use crate::data::{BlockId, DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::object_id::ColumnId;
-use crate::source::SourceFunctionRegistry;
+use crate::source::ConnectorRegistry;
 use crate::functions::FunctionRegistry;
 use crate::index::IndexDefinition;
 use crate::io::{read_yaml, readable_file_from_url, writable_dir_from_str, writable_dir_from_url, DataStorage, IOReadWriteDir, EMPTY_URL};
@@ -97,7 +97,7 @@ pub struct Bundle {
     storage: Arc<DataStorage>,
     pub(crate) reader_factory: Arc<DataReaderFactory>,
     function_registry: Arc<RwLock<FunctionRegistry>>,
-    source_function_registry: Arc<RwLock<SourceFunctionRegistry>>,
+    connector_registry: Arc<RwLock<ConnectorRegistry>>,
     connector_definitions: Arc<RwLock<HashMap<String, Arc<ConnectorDefinition>>>>,
 
     /// Single, self-contained, internally thread-safe config holder.
@@ -147,7 +147,7 @@ impl Clone for Bundle {
             storage: Arc::clone(&self.storage),
             reader_factory: Arc::clone(&self.reader_factory),
             function_registry: Arc::clone(&self.function_registry),
-            source_function_registry: Arc::clone(&self.source_function_registry),
+            connector_registry: Arc::clone(&self.connector_registry),
             connector_definitions: Arc::clone(&self.connector_definitions),
             config: Arc::clone(&self.config),
             is_view: Arc::clone(&self.is_view),
@@ -166,7 +166,7 @@ impl Bundle {
 
         let storage = Arc::new(DataStorage::new());
         let function_registry = Arc::new(RwLock::new(FunctionRegistry::new()));
-        let source_function_registry = Arc::new(RwLock::new(SourceFunctionRegistry::new()));
+        let connector_registry = Arc::new(RwLock::new(ConnectorRegistry::new()));
 
         let mut config =
             SessionConfig::new().with_default_catalog_and_schema(CATALOG_NAME, "default");
@@ -219,7 +219,7 @@ impl Bundle {
             )
                 .into(),
             function_registry,
-            source_function_registry,
+            connector_registry,
             connector_definitions: Arc::new(RwLock::new(HashMap::new())),
             name,
             description,
@@ -728,7 +728,7 @@ impl Bundle {
 
     /// Add a source definition to the bundle
     pub(crate) fn add_source(&self, op: CreateSourceOp) {
-        let registry = self.source_function_registry.read();
+        let registry = self.connector_registry.read();
         if let Ok(source) = Source::from_op(&op, &registry) {
             self.sources.write().insert(op.id, Arc::new(source));
         }
@@ -784,7 +784,7 @@ impl Bundle {
     pub(crate) fn remove_connector_definition(&self, name: &str) -> Result<(), BundlebaseError> {
         // Remove any Source entries that reference this definition
         let mut sources = self.sources.write();
-        sources.retain(|_, source| source.function() != name);
+        sources.retain(|_, source| source.connector() != name);
         drop(sources);
 
         // Remove the definition itself
@@ -842,9 +842,9 @@ impl Bundle {
         None
     }
 
-    /// Get the source function registry
-    pub(crate) fn source_function_registry(&self) -> Arc<RwLock<SourceFunctionRegistry>> {
-        Arc::clone(&self.source_function_registry)
+    /// Get the connector registry
+    pub(crate) fn connector_registry(&self) -> Arc<RwLock<ConnectorRegistry>> {
+        Arc::clone(&self.connector_registry)
     }
 
     /// Build a map of block IDs to their expected hashes from operations.
@@ -1355,11 +1355,17 @@ impl BundleFacade for Bundle {
         Bundle::config(self)
     }
 
-    async fn set_temporary_connector_logic(
+    async fn create_temporary_connector(
         &self,
         name: &str,
         entry: crate::bundle::connector_definition::ConnectorLogicEntry,
     ) -> Result<(), BundlebaseError> {
+        // Create connector definition if it doesn't exist
+        if self.get_connector_definition(name).is_none() {
+            self.add_connector_definition(
+                crate::bundle::connector_definition::ConnectorDefinition::new(name.to_string()),
+            );
+        }
         self.add_connector_logic(name, entry)?;
         self.mark_temporary_logic();
         self.refresh_version_udf("TEMP".to_string());
@@ -1577,22 +1583,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_set_temporary_connector_logic_changes_version_to_temp() -> Result<(), BundlebaseError> {
+    async fn test_create_temporary_connector_changes_version_to_temp() -> Result<(), BundlebaseError> {
         use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::{ConnectorDefinition, ConnectorLogicEntry};
+        use crate::bundle::connector_definition::ConnectorLogicEntry;
 
         let bundle = Bundle::empty(None).await?;
         assert_eq!(bundle.version(), "empty");
 
-        // Define a source so set_temporary_connector_logic has something to attach to
-        bundle.add_connector_definition(ConnectorDefinition::new("test.source".to_string()));
-
         let entry = ConnectorLogicEntry {
-            source_type: "lib".to_string(),
+            runner: "lib".to_string(),
             logic: "test_call".to_string(),
             platform: "*/*".to_string(),
         };
-        bundle.set_temporary_connector_logic("test.source", entry).await?;
+        bundle.create_temporary_connector("test.source", entry).await?;
 
         assert_eq!(bundle.version(), "TEMP");
 
@@ -1600,20 +1603,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_set_temporary_connector_logic_version_udf_returns_temp() -> Result<(), BundlebaseError> {
+    async fn test_create_temporary_connector_version_udf_returns_temp() -> Result<(), BundlebaseError> {
         use arrow::array::StringArray;
         use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::{ConnectorDefinition, ConnectorLogicEntry};
+        use crate::bundle::connector_definition::ConnectorLogicEntry;
 
         let bundle = Bundle::empty(None).await?;
-        bundle.add_connector_definition(ConnectorDefinition::new("test.source".to_string()));
 
         let entry = ConnectorLogicEntry {
-            source_type: "lib".to_string(),
+            runner: "lib".to_string(),
             logic: "test_call".to_string(),
             platform: "*/*".to_string(),
         };
-        bundle.set_temporary_connector_logic("test.source", entry).await?;
+        bundle.create_temporary_connector("test.source", entry).await?;
 
         let df = bundle.ctx().sql("SELECT version() AS ver").await?;
         let batches = df.collect().await?;

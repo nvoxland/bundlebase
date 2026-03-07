@@ -260,7 +260,7 @@ impl IOReadFile for FtpFile {
     ) -> Result<Option<BoxStream<'static, Result<Bytes, BundlebaseError>>>, BundlebaseError> {
         match self.download_to_temp_file().await? {
             Some(temp) => {
-                let stream = crate::source::source_utils::stream_from_temp_file(temp);
+                let stream = crate::source::connector_utils::stream_from_temp_file(temp);
                 Ok(Some(Box::pin(futures::StreamExt::map(stream, |r| {
                     r.map_err(|e| {
                         BundlebaseError::from(format!("Failed to read temp file: {}", e))

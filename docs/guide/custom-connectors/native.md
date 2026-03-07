@@ -1,6 +1,6 @@
-# Native Source Mode
+# Native Mode
 
-Native sources load your source function in-process for zero-copy Arrow data transfer, eliminating the subprocess and serialization overhead of [IPC mode](index.md).
+Native mode loads your connector in-process for zero-copy Arrow data transfer, eliminating the subprocess and serialization overhead of [IPC mode](index.md).
 
 ## When to Use Native vs IPC
 
@@ -12,30 +12,29 @@ Native sources load your source function in-process for zero-copy Arrow data tra
 | **Setup** | Python: direct object; compiled: build `.so` | Script or binary |
 | **Best for** | Performance-critical pipelines, large datasets | Polyglot environments, simple scripts, Docker |
 
-**Use native when:** You need maximum throughput and your source is in Python, Rust, Go, or Java.
+**Use native when:** You need maximum throughput and your connector is written in Python, Rust, Go, or Java.
 
 **Use IPC when:** You want process isolation, use Docker, or work in a language without an SDK.
 
 !!! warning "Required Configuration"
-    Native sources require the `allow_external_code` configuration setting. See [Configuration](index.md#configuration) for details.
+    Native connectors require the `allow_external_code` configuration setting. See [Configuration](index.md#configuration) for details.
 
 ## How It Works
 
 ### Python (PyO3 In-Process)
 
-Python sources run directly inside the Bundlebase process via PyO3. Arrow data is transferred through shared memory — no serialization.
+Python connectors run directly inside the Bundlebase process via PyO3. Arrow data is transferred through shared memory — no serialization.
 
 ```python
 import bundlebase.sync as bb
 
 bundle = bb.create("my/data")
-bundle.create_connector('example.connector')
-bundle.set_temporary_connector_logic('example.connector', type_='python', logic='example_connector:ExampleConnector')
+bundle.create_temporary_connector('example.connector', runner='python', logic='example_connector:ExampleConnector')
 bundle.create_source('example.connector')
 bundle.fetch("base", "add")
 ```
 
-The `SourceFunction` class is identical whether you use native or IPC mode. The only difference is how you configure the source logic: `type_='python'` with a `module:Class` logic value instead of `type_='ipc'` with a command. Python sources use `set_temporary_connector_logic()` since Python code is runtime-only and cannot be bundled.
+The `Connector` class is identical whether you use native or IPC mode. The only difference is how you create the connector: `runner='python'` with a `module:Class` logic value instead of `runner='ipc'` with a command. Python connectors use `CREATE TEMPORARY CONNECTOR` since Python code is runtime-only and cannot be bundled.
 
 ### Shared Libraries (Rust, Go, Java)
 
@@ -43,8 +42,7 @@ Compiled languages build a shared library (`.so` / `.dylib` / `.dll`) that expor
 
 ```python
 # Load a Rust, Go, or Java shared library
-bundle.create_connector('example.connector')
-bundle.set_connector_logic('example.connector', type_='lib', logic='./target/release/libexample_connector.so')
+bundle.create_connector('example.connector', runner='lib', logic='./target/release/libexample_connector.so')
 bundle.create_source('example.connector')
 ```
 
@@ -54,14 +52,14 @@ Each language has its own approach to generating the C ABI:
 - **Go** — cgo `//export` directives
 - **Java** — Project Panama (Java 22+): a thin C bootstrap starts the JVM once, then all ABI calls route through Panama upcall stubs for minimal overhead
 
-## Type Values for Native Mode
+## Runner Values for Native Mode
 
-The `type_` parameter determines the native loading strategy:
+The `runner` parameter determines the native loading strategy:
 
 | Type | Strategy | Used by |
 |------|----------|---------|
-| `python` | PyO3 in-process (use with `set_temporary_connector_logic()`) | Python |
-| `lib` | `dlopen` + Arrow C Data Interface (use with `set_connector_logic()`) | Rust, Go, Java |
+| `python` | PyO3 in-process (use with `CREATE TEMPORARY CONNECTOR`) | Python |
+| `lib` | `dlopen` + Arrow C Data Interface (use with `CREATE CONNECTOR`) | Rust, Go, Java |
 
 ## C ABI Reference
 
@@ -130,21 +128,21 @@ int32_t bundlebase_stable_url(const char* location_json, const char* args_json,
 
 Each SDK provides helpers that generate the C ABI functions for you:
 
-- **[Python](python.md#native-mode)** — `set_temporary_connector_logic(..., type_='python', logic='module:Class')` (no shared library needed)
+- **[Python](python.md#native-mode)** — `CREATE TEMPORARY CONNECTOR` with `runner='python'`, `logic='module:Class'` (no shared library needed)
 - **[Rust](rust.md#native-mode)** — `export_source!(ExampleConnector::new())`
-- **[Go](go.md#native-mode)** — `ExportSource(&ExampleConnector{})`
+- **[Go](go.md#native-mode)** — `ExportConnector(&ExampleConnector{})`
 - **[Java](java.md#native-mode)** — `PluginExport.register(new ExampleConnector())`
 
-## Source Logic Arguments
+## Connector Logic Arguments
 
-These are passed to `set_connector_logic()` or `set_temporary_connector_logic()`:
+These are passed to `CREATE CONNECTOR` or `CREATE TEMPORARY CONNECTOR`:
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `type_` | Yes | `'python'` or `'lib'` |
+| `runner` | Yes | `'python'` or `'lib'` |
 | `logic` | Yes | Source to load: `module:Class` (for `python`) or path to shared library (for `lib`) |
 | `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
 
-For `type_='python'`, use `set_temporary_connector_logic()` (runtime-only). For `type_='lib'`, use `set_connector_logic()` (persisted into the bundle).
+For `runner='python'`, use `CREATE TEMPORARY CONNECTOR` (runtime-only). For `runner='lib'`, use `CREATE CONNECTOR` (persisted into the bundle).
 
-Extra arguments passed to `create_source()` are forwarded to the source's `discover()` and `data()` methods, just like IPC mode.
+Extra arguments passed to `CREATE SOURCE` are forwarded to the connector's `discover()` and `data()` methods, just like IPC mode.

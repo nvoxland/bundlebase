@@ -55,12 +55,10 @@ schema_stmt = {
 
 // Source management statements - operations for data sources
 source_stmt = {
-    create_connector_stmt
+    create_temporary_connector_stmt
+    | create_connector_stmt
     | drop_temporary_connector_logic_stmt
-    | drop_connector_logic_stmt
     | drop_connector_stmt
-    | set_temporary_connector_logic_stmt
-    | set_connector_logic_stmt
     | create_source_stmt
     | fetch_stmt
 }
@@ -170,53 +168,35 @@ reindex_stmt = {
 // ============================================================================
 // CREATE CONNECTOR Statement
 // ============================================================================
-// Syntax: CREATE CONNECTOR <dotted_name>
-// Example: CREATE CONNECTOR acme.datasources.weather
+// Syntax: CREATE CONNECTOR <dotted_name> WITH (<args>)
+// Examples:
+//   CREATE CONNECTOR acme.weather WITH (runner = 'ipc', logic = './my_source')
+//   CREATE CONNECTOR acme.weather WITH (runner = 'lib', logic = './lib.so', platform = 'linux/amd64')
 
 create_connector_stmt = {
-    ^"create" ~ ^"connector" ~ dotted_identifier
+    ^"create" ~ ^"connector" ~ dotted_identifier ~ ^"with" ~ source_args
 }
 
 // ============================================================================
-// SET CONNECTOR LOGIC Statement
+// CREATE TEMPORARY CONNECTOR Statement
 // ============================================================================
-// Syntax: SET CONNECTOR LOGIC <dotted_name> WITH (<args>)
-// Example: SET CONNECTOR LOGIC acme.datasources.weather WITH (type = 'ipc', logic = './my_source', platform = '*/*')
+// Syntax: CREATE TEMPORARY CONNECTOR <dotted_name> WITH (<args>)
+// Example: CREATE TEMPORARY CONNECTOR acme.weather WITH (runner = 'python', logic = 'mod:Class')
 
-set_connector_logic_stmt = {
-    ^"set" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ ^"with" ~ source_args
-}
-
-// ============================================================================
-// SET TEMPORARY CONNECTOR LOGIC Statement
-// ============================================================================
-// Syntax: SET TEMPORARY CONNECTOR LOGIC <dotted_name> WITH (<args>)
-// Example: SET TEMPORARY CONNECTOR LOGIC acme.weather WITH (type = 'python', logic = 'mod:Class', platform = '*/*')
-
-set_temporary_connector_logic_stmt = {
-    ^"set" ~ ^"temporary" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ ^"with" ~ source_args
-}
-
-// ============================================================================
-// DROP CONNECTOR LOGIC Statement
-// ============================================================================
-// Syntax: DROP CONNECTOR LOGIC <dotted_name> [FOR PLATFORM '<platform>']
-// Examples:
-//   DROP CONNECTOR LOGIC acme.weather
-//   DROP CONNECTOR LOGIC acme.weather FOR PLATFORM 'linux/amd64'
-
-drop_connector_logic_stmt = {
-    ^"drop" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ (^"for" ~ ^"platform" ~ quoted_string)?
+create_temporary_connector_stmt = {
+    ^"create" ~ ^"temporary" ~ ^"connector" ~ dotted_identifier ~ ^"with" ~ source_args
 }
 
 // ============================================================================
 // DROP CONNECTOR Statement
 // ============================================================================
-// Syntax: DROP CONNECTOR <dotted_name>
-// Example: DROP CONNECTOR acme.weather
+// Syntax: DROP CONNECTOR <dotted_name> [FOR PLATFORM '<platform>']
+// Examples:
+//   DROP CONNECTOR acme.weather
+//   DROP CONNECTOR acme.weather FOR PLATFORM 'linux/amd64'
 
 drop_connector_stmt = {
-    ^"drop" ~ ^"connector" ~ dotted_identifier
+    ^"drop" ~ ^"connector" ~ dotted_identifier ~ (^"for" ~ ^"platform" ~ quoted_string)?
 }
 
 // ============================================================================

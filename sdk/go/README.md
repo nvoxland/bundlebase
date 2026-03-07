@@ -1,6 +1,6 @@
 # Bundlebase Go SDK
 
-Build custom Bundlebase source functions in Go.
+Build custom Bundlebase connectors in Go.
 
 ## Installation
 
@@ -12,7 +12,7 @@ go get github.com/nvoxland/bundlebase/sdk/go/bundlebasesdk
 
 ## Quick Start
 
-Implement the `SourceFunction` interface:
+Implement the `Connector` interface:
 
 ```go
 package main
@@ -51,14 +51,14 @@ func main() {
 
 ## Implementation
 
-Implement the `SourceFunction` interface:
+Implement the `Connector` interface:
 
 - **`Discover(attachedLocations []string, args map[string]string)`** - Return available data locations
 - **`Data(location Location, args map[string]string)`** - Return Arrow records for a location
 - **`StableUrlProvider`** (optional) - Implement to provide stable URLs for locations
 
-Call `Serve(instance)` to start the source function server.
+Call `Serve(instance)` to start the connector server.
 
 ## Documentation
 
-For complete documentation, including advanced usage and API details, see [Custom Source Functions](../../docs/guide/custom-sources/).
+For complete documentation, including advanced usage and API details, see [Custom Connectors](../../docs/guide/custom-connectors/).

@@ -1,22 +1,43 @@
 //! CreateConnector command implementation.
 
 use crate::bundle::command::{CommandParsing, Rule};
+use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::operation::CreateConnectorOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
-/// Command to define a named connector.
+/// Command to define a named connector with its logic.
+///
+/// Combines connector creation and logic setting into a single command.
+/// If the connector already exists, adds/replaces logic for the given platform.
 #[derive(Debug, Clone)]
 pub struct CreateConnectorCommand {
     /// Full dotted source name (e.g., "acme.datasources.weather")
     pub name: String,
+    /// Runner: "lib", "java", "docker", or "ipc"
+    pub runner: String,
+    /// Logic string (e.g., path to shared library or binary)
+    pub logic: String,
+    /// Platform in Docker-style os/arch
+    pub platform: String,
 }
 
 impl CreateConnectorCommand {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+    pub fn new(
+        name: impl Into<String>,
+        runner: impl Into<String>,
+        logic: impl Into<String>,
+        platform: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            runner: runner.into(),
+            logic: logic.into(),
+            platform: platform.into(),
+        }
     }
 }
 
@@ -27,22 +48,64 @@ impl CommandParsing for CreateConnectorCommand {
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut name = None;
+        let mut args = HashMap::new();
 
         for inner_pair in pair.into_inner() {
-            if inner_pair.as_rule() == Rule::dotted_identifier {
-                name = Some(inner_pair.as_str().to_string());
+            match inner_pair.as_rule() {
+                Rule::dotted_identifier => {
+                    name = Some(inner_pair.as_str().to_string());
+                }
+                Rule::source_args => {
+                    for arg_pair in inner_pair.into_inner() {
+                        if arg_pair.as_rule() == Rule::source_arg_pair {
+                            let mut key = None;
+                            let mut value = None;
+                            for part in arg_pair.into_inner() {
+                                match part.as_rule() {
+                                    Rule::identifier => {
+                                        key = Some(part.as_str().to_string());
+                                    }
+                                    Rule::quoted_string => {
+                                        value = Some(extract_string_content(part.as_str())?);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if let (Some(k), Some(v)) = (key, value) {
+                                args.insert(k, v);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
         let name = name.ok_or_else(|| -> BundlebaseError {
-            "CREATE CONNECTOR missing source name".into()
+            "CREATE CONNECTOR missing connector name".into()
         })?;
 
-        Ok(CreateConnectorCommand::new(name))
+        let runner = args.remove("runner").ok_or_else(|| -> BundlebaseError {
+            "CREATE CONNECTOR requires 'runner' argument".into()
+        })?;
+
+        let logic = args.remove("logic").ok_or_else(|| -> BundlebaseError {
+            "CREATE CONNECTOR requires 'logic' argument".into()
+        })?;
+
+        let platform = args.remove("platform").unwrap_or_else(|| "*/*".to_string());
+
+        Ok(CreateConnectorCommand::new(name, runner, logic, platform))
     }
 
     fn to_statement(&self) -> String {
-        format!("CREATE CONNECTOR {}", self.name)
+        use crate::bundle::command::parser::escape_string;
+        let parts = vec![
+            format!("runner = {}", escape_string(&self.runner)),
+            format!("logic = {}", escape_string(&self.logic)),
+            format!("platform = {}", escape_string(&self.platform)),
+        ];
+        format!("CREATE CONNECTOR {} WITH ({})", self.name, parts.join(", "))
     }
 }
 
@@ -51,8 +114,14 @@ impl BundleBuilderCommand for CreateConnectorCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let op = CreateConnectorOp::new(self.name.clone());
+        let op = CreateConnectorOp::new(
+            self.name.clone(),
+            self.runner.clone(),
+            self.logic.clone(),
+            self.platform.clone(),
+        );
         builder.apply_operation(op.into()).await?;
+
         Ok(format!("Created connector: {}", self.name))
     }
 }
@@ -65,19 +134,37 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_create_connector() {
-        let input = "CREATE CONNECTOR acme.weather";
+        let input = "CREATE CONNECTOR acme.weather WITH (runner = 'ipc', logic = './my_source')";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::CreateConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
+                assert_eq!(c.runner, "ipc");
+                assert_eq!(c.logic, "./my_source");
+                assert_eq!(c.platform, "*/*");
             }
             _ => panic!("Expected CreateConnector variant"),
         }
     }
 
     #[test]
-    fn test_parse_create_connector_deep() {
-        let input = "CREATE CONNECTOR acme.datasources.weather";
+    fn test_parse_create_connector_with_platform() {
+        let input = "CREATE CONNECTOR acme.weather WITH (runner = 'lib', logic = './lib.so', platform = 'linux/amd64')";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateConnector(c) => {
+                assert_eq!(c.name, "acme.weather");
+                assert_eq!(c.runner, "lib");
+                assert_eq!(c.logic, "./lib.so");
+                assert_eq!(c.platform, "linux/amd64");
+            }
+            _ => panic!("Expected CreateConnector variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_create_connector_deep_name() {
+        let input = "CREATE CONNECTOR acme.datasources.weather WITH (runner = 'ipc', logic = './weather')";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::CreateConnector(c) => {
@@ -89,12 +176,20 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_create_connector_roundtrip() {
-        let cmd = CreateConnectorCommand::new("acme.datasources.weather");
+        let cmd = CreateConnectorCommand::new(
+            "acme.weather",
+            "lib",
+            "/usr/lib/weather.so",
+            "*/*",
+        );
         let statement = cmd.to_statement();
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::CreateConnector(c) => {
-                assert_eq!(c.name, "acme.datasources.weather");
+                assert_eq!(c.name, "acme.weather");
+                assert_eq!(c.runner, "lib");
+                assert_eq!(c.logic, "/usr/lib/weather.so");
+                assert_eq!(c.platform, "*/*");
             }
             _ => panic!("Expected CreateConnector variant"),
         }
@@ -102,11 +197,12 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_create_connector_case_insensitive() {
-        let input = "create connector acme.weather";
+        let input = "create connector acme.weather with (runner = 'ipc', logic = './test')";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::CreateConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
+                assert_eq!(c.runner, "ipc");
             }
             _ => panic!("Expected CreateConnector variant"),
         }
