@@ -1,6 +1,6 @@
 # Java SDK
 
-Build custom Bundlebase source functions in Java.
+Build custom Bundlebase connectors in Java.
 
 ## Installation
 
@@ -25,7 +25,7 @@ import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.types.pojo.*;
 import java.util.*;
 
-public class ExampleConnector implements SourceFunction {
+public class ExampleConnector implements Connector {
     private final RootAllocator allocator = new RootAllocator();
 
     public List<Location> discover(List<String> attached, Map<String, String> args) {
@@ -52,17 +52,16 @@ public class ExampleConnector implements SourceFunction {
 Build a JAR and use with:
 
 ```python
-bundle.create_connector('example.connector')
-bundle.set_connector_logic('example.connector', type_='java', logic='target/example-connector.jar')
+bundle.create_connector('example.connector', runner='java', logic='target/example-connector.jar')
 bundle.create_source('example.connector')
 ```
 
 ## API Reference
 
-### SourceFunction Interface
+### Connector Interface
 
 ```java
-public interface SourceFunction {
+public interface Connector {
     List<Location> discover(List<String> attachedLocations, Map<String, String> args);
     VectorSchemaRoot data(Location location, Map<String, String> args);
     default StableUrl stableUrl(Location location, Map<String, String> args) { return null; }
@@ -133,8 +132,8 @@ public record StableUrl(String url) {}
 
 ```java
 public class Serve {
-    public static void run(SourceFunction source);
-    public static void run(SourceFunction source, InputStream in, OutputStream out);
+    public static void run(Connector source);
+    public static void run(Connector source, InputStream in, OutputStream out);
 }
 ```
 
@@ -152,7 +151,7 @@ import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.types.pojo.*;
 import java.util.*;
 
-public class DatabaseSource implements SourceFunction {
+public class DatabaseSource implements Connector {
     private final BufferAllocator allocator = new RootAllocator();
 
     @Override
@@ -278,7 +277,7 @@ public class ExampleConnectorTest {
 
 ## Native Mode
 
-Build your source as a shared library using Project Panama (Java 22+) for zero-copy in-process loading.
+Build your connector as a shared library using Project Panama (Java 22+) for zero-copy in-process loading.
 
 ### Requirements
 
@@ -287,12 +286,12 @@ Build your source as a shared library using Project Panama (Java 22+) for zero-c
 
 ### Setup
 
-Register your source with `PluginExport`:
+Register your connector with `PluginExport`:
 
 ```java
 import com.bundlebase.sdk.*;
 
-public class ExampleNativeConnector implements SourceFunction {
+public class ExampleNativeConnector implements Connector {
     // ... implement discover() and data() as usual ...
 
     static {
@@ -318,8 +317,7 @@ This produces `libbundlebase_plugin.so` in `target/`.
 ### Use
 
 ```python
-bundle.create_connector('example.connector')
-bundle.set_connector_logic('example.connector', type_='lib', logic='./libbundlebase_plugin.so')
+bundle.create_connector('example.connector', runner='lib', logic='./libbundlebase_plugin.so')
 bundle.create_source('example.connector')
 ```
 
@@ -335,9 +333,9 @@ The native bridge uses Project Panama's Foreign Function & Memory API for high-p
 
 This architecture means JNI is used only for the one-time JVM bootstrap. All data-path calls use Panama upcalls, which avoids JNI overhead (method ID lookups, string conversions in C, etc.).
 
-The same `SourceFunction` interface works for both native and IPC — switch between them by changing only the entry point (`PluginExport.register()` + native build vs `Serve.run()` + JAR).
+The same `Connector` interface works for both native and IPC — switch between them by changing only the entry point (`PluginExport.register()` + native build vs `Serve.run()` + JAR).
 
-See [Native Source Mode](native.md) for the full C ABI reference.
+See [Native Mode](native.md) for the full C ABI reference.
 
 ## Error Handling
 
@@ -352,4 +350,4 @@ public VectorSchemaRoot data(Location location, Map<String, String> args) {
 
 The SDK automatically closes `VectorSchemaRoot` instances after sending the Arrow IPC data.
 
-Bundlebase surfaces these errors to the user as source function failures during `fetch()`.
+Bundlebase surfaces these errors to the user as connector failures during `FETCH`.

@@ -1,13 +1,13 @@
-//! Built-in "ipc" source function.
+//! Built-in "ipc" connector.
 //!
 //! Delegates to an external subprocess via JSON-RPC 2.0 over stdin/stdout,
 //! with Arrow IPC (length-prefix framed) for bulk data transfer.
-//! This enables users to write source functions in any language.
+//! This enables users to write connectors in any language.
 
-use crate::source::source_function::{
-    ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
+use crate::source::connector::{
+    ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::source_utils;
+use crate::source::connector_utils;
 use crate::bundle_config::is_external_code_allowed;
 use crate::{BundleConfig, BundlebaseError};
 use url::Url;
@@ -254,19 +254,19 @@ impl SubprocessHandle {
 
 
 // ---------------------------------------------------------------------------
-// IpcSourceFunction
+// IpcConnector
 // ---------------------------------------------------------------------------
 
-/// Built-in "ipc" source function that delegates to an external subprocess.
+/// Built-in "ipc" connector that delegates to an external subprocess.
 ///
 /// Each instance holds a subprocess handle that stays alive for the full fetch cycle.
 /// The subprocess communicates via JSON-RPC 2.0 over stdin/stdout.
-pub struct IpcSourceFunction {
+pub struct IpcConnector {
     handle: tokio::sync::Mutex<Option<SubprocessHandle>>,
 }
 
-impl IpcSourceFunction {
-    /// Create a new IpcSourceFunction (no subprocess spawned yet).
+impl IpcConnector {
+    /// Create a new IpcConnector (no subprocess spawned yet).
     pub fn new() -> Self {
         Self {
             handle: tokio::sync::Mutex::new(None),
@@ -280,7 +280,7 @@ impl IpcSourceFunction {
     ) -> Result<(), BundlebaseError> {
         let mut guard = self.handle.lock().await;
         if guard.is_none() {
-            let call = source_utils::require_arg(args, "call", "ipc")?;
+            let call = connector_utils::require_arg(args, "call", "ipc")?;
             let command = parse_call(call)?;
             let handle = SubprocessHandle::spawn(&command)?;
             *guard = Some(handle);
@@ -289,7 +289,7 @@ impl IpcSourceFunction {
     }
 }
 
-impl Drop for IpcSourceFunction {
+impl Drop for IpcConnector {
     fn drop(&mut self) {
         // Best-effort kill if the subprocess is still running
         if let Ok(mut guard) = self.handle.try_lock() {
@@ -304,9 +304,9 @@ impl Drop for IpcSourceFunction {
 }
 
 #[async_trait]
-impl SourceFunction for IpcSourceFunction {
-    fn signature(&self) -> SourceFunctionSignature {
-        SourceFunctionSignature {
+impl Connector for IpcConnector {
+    fn signature(&self) -> ConnectorSignature {
+        ConnectorSignature {
             name: "ipc".to_string(),
             arg_specs: vec![
                 ArgSpec {
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn test_ipc_signature() {
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let sig = func.signature();
         assert_eq!(sig.name, "ipc");
         // call is no longer in arg_specs — it's injected by source definition resolution
@@ -562,7 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_discover_blocked_when_external_code_disabled() {
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "echo hello".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -575,7 +575,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_data_blocked_when_external_code_disabled() {
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "echo hello".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -626,7 +626,7 @@ mod tests {
             Some(a) => a,
             None => { eprintln!("Skipping: poetry not available"); return; }
         };
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let config = test_config();
 
         let locations = func
@@ -648,7 +648,7 @@ mod tests {
             Some(a) => a,
             None => { eprintln!("Skipping: poetry not available"); return; }
         };
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let config = test_config();
 
         // Discover first to spawn the subprocess
@@ -667,7 +667,7 @@ mod tests {
         let source_data = data.expect("data should be Some");
         match source_data {
             SourceData::Arrow(batch_stream) => {
-                let bytes = source_utils::record_batch_stream_to_parquet(batch_stream)
+                let bytes = connector_utils::record_batch_stream_to_parquet(batch_stream)
                     .await
                     .expect("parquet conversion should succeed");
                 assert_eq!(&bytes[..4], b"PAR1");
@@ -685,7 +685,7 @@ mod tests {
             None => { eprintln!("Skipping: poetry not available"); return; }
         };
         // test_file_1 sends 2 batches; verify they're all present
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let config = test_config();
 
         let locations = func
@@ -721,7 +721,7 @@ mod tests {
             Some(a) => a,
             None => { eprintln!("Skipping: poetry not available"); return; }
         };
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let config = test_config();
 
         // Discover first to spawn the subprocess
@@ -744,7 +744,7 @@ mod tests {
             Some(a) => a,
             None => { eprintln!("Skipping: poetry not available"); return; }
         };
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let config = test_config();
 
         // Discover first
@@ -788,7 +788,7 @@ mod tests {
             eprintln!("Skipping Go integration test: binary not found at {:?}", binary);
             return;
         }
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let args = make_go_ipc_args();
         let config = test_config();
 
@@ -814,7 +814,7 @@ mod tests {
         }
         use futures::StreamExt;
 
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let args = make_go_ipc_args();
         let config = test_config();
 
@@ -873,7 +873,7 @@ mod tests {
             );
             return;
         }
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let args = make_rust_ipc_args();
         let config = test_config();
 
@@ -903,7 +903,7 @@ mod tests {
         }
         use futures::StreamExt;
 
-        let func = IpcSourceFunction::new();
+        let func = IpcConnector::new();
         let args = make_rust_ipc_args();
         let config = test_config();
 

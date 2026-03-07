@@ -4,9 +4,9 @@ use std::collections::HashMap;
 
 /// Trait for implementing a custom Bundlebase source function.
 ///
-/// Implement [`discover`](SourceFunction::discover) and [`data`](SourceFunction::data).
-/// Optionally override [`stable_url`](SourceFunction::stable_url) for caching.
-pub trait SourceFunction {
+/// Implement [`discover`](Connector::discover) and [`data`](Connector::data).
+/// Optionally override [`stable_url`](Connector::stable_url) for caching.
+pub trait Connector {
     /// Return the available data locations.
     fn discover(
         &self,
@@ -32,3 +32,7 @@ pub trait SourceFunction {
         Ok(None)
     }
 }
+
+/// Backward-compatible alias for [`Connector`].
+#[deprecated(note = "Use `Connector` instead")]
+pub trait SourceFunction: Connector {}

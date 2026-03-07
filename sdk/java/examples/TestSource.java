@@ -17,7 +17,7 @@ import java.util.Map;
 /**
  * Test source function used by Rust integration tests.
  */
-public class TestSource implements SourceFunction {
+public class TestSource implements Connector {
     private final BufferAllocator allocator = new RootAllocator();
 
     @Override

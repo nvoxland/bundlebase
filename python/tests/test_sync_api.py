@@ -631,47 +631,36 @@ class TestSyncSource:
         """Test create_connector synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.create_connector("test.my.source")
+        c.create_connector("test.my.source", "ipc", "/usr/bin/test")
         assert c is not None
 
-    def test_sync_set_connector_logic(self):
-        """Test set_connector_logic synchronously."""
+    def test_sync_create_temporary_connector(self):
+        """Test create_temporary_connector synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.create_connector("test.my.source")
-        c.set_connector_logic("test.my.source", "ipc", "/usr/bin/test")
-        assert c is not None
-
-    def test_sync_set_temporary_connector_logic(self):
-        """Test set_temporary_connector_logic synchronously."""
-        config = {"system": {"allow_external_code": "true"}}
-        c = bb.create(random_bundle(), config=config)
-        c.create_connector("test.my.source")
-        c.set_temporary_connector_logic("test.my.source", "python", "mod:Class")
+        c.create_temporary_connector("test.my.source", "python", "mod:Class")
         assert c is not None
 
     def test_sync_drop_connector(self):
         """Test drop_connector synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.create_connector("test.my.source")
+        c.create_connector("test.my.source", "ipc", "/usr/bin/test")
         c.drop_connector("test.my.source")
         assert c is not None
 
-    def test_sync_drop_connector_logic(self):
-        """Test drop_connector_logic synchronously."""
+    def test_sync_drop_connector_with_platform(self):
+        """Test drop_connector with platform synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.create_connector("test.my.source")
-        c.set_connector_logic("test.my.source", "ipc", "/usr/bin/test")
-        c.drop_connector_logic("test.my.source")
+        c.create_connector("test.my.source", "ipc", "/usr/bin/test", "linux/amd64")
+        c.drop_connector("test.my.source", "linux/amd64")
         assert c is not None
 
     def test_sync_drop_temporary_connector_logic(self):
         """Test drop_temporary_connector_logic synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.create_connector("test.my.source")
-        c.set_temporary_connector_logic("test.my.source", "python", "mod:Class")
+        c.create_temporary_connector("test.my.source", "python", "mod:Class")
         result = c.drop_temporary_connector_logic("test.my.source")
         assert "Dropped 1 temporary connector logic" in result

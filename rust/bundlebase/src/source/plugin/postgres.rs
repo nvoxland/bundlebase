@@ -1,4 +1,4 @@
-//! PostgreSQL source function.
+//! PostgreSQL connector.
 //!
 //! Extracts data from a PostgreSQL database query, partitioning
 //! results into fixed-size chunks based on a sort column.
@@ -9,10 +9,10 @@
 //! - `sort_column` (required): Column to ORDER BY and partition on
 //! - `batch_size` (optional): Rows per output file (default: 1000000)
 
-use crate::source::source_function::{
-    ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
+use crate::source::connector::{
+    ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::source_utils;
+use crate::source::connector_utils;
 use crate::{BundleConfig, BundlebaseError};
 use url::Url;
 use arrow::array::{
@@ -34,10 +34,10 @@ const PAGE_SIZE: usize = 10_000;
 /// Dollar-quote tag for safe SQL value interpolation.
 const DOLLAR_TAG: &str = "$__bb$";
 
-/// PostgreSQL source function.
+/// PostgreSQL connector.
 ///
 /// Extracts data from a PostgreSQL query, partitioned into chunks by row count.
-pub struct PostgresFunction;
+pub struct PostgresConnector;
 
 /// JSON-serializable location identifying a partition by sort column range.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -56,7 +56,7 @@ struct PartitionBoundary {
     version: String,
 }
 
-impl PostgresFunction {
+impl PostgresConnector {
     /// Connect to PostgreSQL database.
     async fn connect(url: &str) -> Result<Client, BundlebaseError> {
         let (client, connection) = tokio_postgres::connect(url, NoTls)
@@ -551,9 +551,9 @@ impl PostgresFunction {
 }
 
 #[async_trait]
-impl SourceFunction for PostgresFunction {
-    fn signature(&self) -> SourceFunctionSignature {
-        SourceFunctionSignature {
+impl Connector for PostgresConnector {
+    fn signature(&self) -> ConnectorSignature {
+        ConnectorSignature {
             name: "postgres".to_string(),
             arg_specs: vec![
                 ArgSpec {
@@ -587,7 +587,7 @@ impl SourceFunction for PostgresFunction {
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
         // Validate URL format
-        let url = source_utils::require_arg(args, "url", "postgres")?;
+        let url = connector_utils::require_arg(args, "url", "postgres")?;
         if !url.starts_with("postgres://") && !url.starts_with("postgresql://") {
             return Err("url must be a PostgreSQL connection URL (postgres://...)".into());
         }
@@ -613,9 +613,9 @@ impl SourceFunction for PostgresFunction {
         attached_locations: &HashSet<String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let url = source_utils::require_arg(args, "url", "postgres")?;
-        let query = source_utils::require_arg(args, "query", "postgres")?;
-        let sort_column = source_utils::require_arg(args, "sort_column", "postgres")?;
+        let url = connector_utils::require_arg(args, "url", "postgres")?;
+        let query = connector_utils::require_arg(args, "query", "postgres")?;
+        let sort_column = connector_utils::require_arg(args, "sort_column", "postgres")?;
         let batch_size = Self::get_batch_size(args)?;
 
         Self::validate_identifier(sort_column)?;
@@ -644,9 +644,9 @@ impl SourceFunction for PostgresFunction {
         args: &HashMap<String, String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
-        let url = source_utils::require_arg(args, "url", "postgres")?;
-        let query = source_utils::require_arg(args, "query", "postgres")?;
-        let sort_column = source_utils::require_arg(args, "sort_column", "postgres")?;
+        let url = connector_utils::require_arg(args, "url", "postgres")?;
+        let query = connector_utils::require_arg(args, "query", "postgres")?;
+        let sort_column = connector_utils::require_arg(args, "sort_column", "postgres")?;
 
         let parsed = Self::parse_location(&location.location)?;
 
@@ -676,11 +676,11 @@ impl SourceFunction for PostgresFunction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::source_function::validate_source_args;
+    use crate::source::connector::validate_connector_args;
 
     #[test]
     fn test_signature() {
-        let func = PostgresFunction;
+        let func = PostgresConnector;
         let sig = func.signature();
         assert_eq!(sig.name, "postgres");
         assert_eq!(sig.arg_specs.len(), 4);
@@ -695,58 +695,58 @@ mod tests {
 
     #[test]
     fn test_validate_args_with_valid_url() {
-        let func = PostgresFunction;
+        let func = PostgresConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "postgres://user:pass@localhost/db".to_string());
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
-        assert!(validate_source_args(&func, &args).is_ok());
+        assert!(validate_connector_args(&func, &args).is_ok());
     }
 
     #[test]
     fn test_validate_args_with_postgresql_url() {
-        let func = PostgresFunction;
+        let func = PostgresConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "postgresql://user:pass@localhost/db".to_string());
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
-        assert!(validate_source_args(&func, &args).is_ok());
+        assert!(validate_connector_args(&func, &args).is_ok());
     }
 
     #[test]
     fn test_validate_args_missing_url() {
-        let func = PostgresFunction;
+        let func = PostgresConnector;
         let mut args = HashMap::new();
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_validate_args_invalid_url() {
-        let func = PostgresFunction;
+        let func = PostgresConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "mysql://user:pass@localhost/db".to_string());
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
         assert!(result.err().expect("expected error").to_string().contains("PostgreSQL"));
     }
 
     #[test]
     fn test_validate_args_invalid_batch_size() {
-        let func = PostgresFunction;
+        let func = PostgresConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "postgres://user:pass@localhost/db".to_string());
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id".to_string());
         args.insert("batch_size".to_string(), "not_a_number".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
     }
 
@@ -754,30 +754,30 @@ mod tests {
 
     #[test]
     fn test_validate_identifier_simple() {
-        assert!(PostgresFunction::validate_identifier("id").is_ok());
-        assert!(PostgresFunction::validate_identifier("created_at").is_ok());
-        assert!(PostgresFunction::validate_identifier("public.users").is_ok());
-        assert!(PostgresFunction::validate_identifier("col123").is_ok());
+        assert!(PostgresConnector::validate_identifier("id").is_ok());
+        assert!(PostgresConnector::validate_identifier("created_at").is_ok());
+        assert!(PostgresConnector::validate_identifier("public.users").is_ok());
+        assert!(PostgresConnector::validate_identifier("col123").is_ok());
     }
 
     #[test]
     fn test_validate_identifier_rejects_special_chars() {
-        assert!(PostgresFunction::validate_identifier("id; DROP TABLE").is_err());
-        assert!(PostgresFunction::validate_identifier("col'name").is_err());
-        assert!(PostgresFunction::validate_identifier("col-name").is_err());
-        assert!(PostgresFunction::validate_identifier("").is_err());
-        assert!(PostgresFunction::validate_identifier("col name").is_err());
+        assert!(PostgresConnector::validate_identifier("id; DROP TABLE").is_err());
+        assert!(PostgresConnector::validate_identifier("col'name").is_err());
+        assert!(PostgresConnector::validate_identifier("col-name").is_err());
+        assert!(PostgresConnector::validate_identifier("").is_err());
+        assert!(PostgresConnector::validate_identifier("col name").is_err());
     }
 
     #[test]
     fn test_validate_args_rejects_unsafe_sort_column() {
-        let func = PostgresFunction;
+        let func = PostgresConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "postgres://user:pass@localhost/db".to_string());
         args.insert("query".to_string(), "SELECT * FROM users".to_string());
         args.insert("sort_column".to_string(), "id; DROP TABLE users".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
     }
 
@@ -786,7 +786,7 @@ mod tests {
     #[test]
     fn test_parse_location_normal() {
         let loc = r#"{"sort_col":"id","min":"1","max":"100"}"#;
-        let parsed = PostgresFunction::parse_location(loc).expect("should parse");
+        let parsed = PostgresConnector::parse_location(loc).expect("should parse");
         assert_eq!(parsed.sort_col, "id");
         assert_eq!(parsed.min, "1");
         assert_eq!(parsed.max, "100");
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn test_parse_location_negative_values() {
         let loc = r#"{"sort_col":"temperature","min":"-50","max":"-10"}"#;
-        let parsed = PostgresFunction::parse_location(loc).expect("should parse");
+        let parsed = PostgresConnector::parse_location(loc).expect("should parse");
         assert_eq!(parsed.sort_col, "temperature");
         assert_eq!(parsed.min, "-50");
         assert_eq!(parsed.max, "-10");
@@ -804,7 +804,7 @@ mod tests {
     #[test]
     fn test_parse_location_timestamps() {
         let loc = r#"{"sort_col":"created_at","min":"2024-01-01T00:00:00","max":"2024-06-30T23:59:59"}"#;
-        let parsed = PostgresFunction::parse_location(loc).expect("should parse");
+        let parsed = PostgresConnector::parse_location(loc).expect("should parse");
         assert_eq!(parsed.sort_col, "created_at");
         assert_eq!(parsed.min, "2024-01-01T00:00:00");
         assert_eq!(parsed.max, "2024-06-30T23:59:59");
@@ -813,7 +813,7 @@ mod tests {
     #[test]
     fn test_parse_location_hyphenated_strings() {
         let loc = r#"{"sort_col":"code","min":"abc-def-123","max":"xyz-789-end"}"#;
-        let parsed = PostgresFunction::parse_location(loc).expect("should parse");
+        let parsed = PostgresConnector::parse_location(loc).expect("should parse");
         assert_eq!(parsed.sort_col, "code");
         assert_eq!(parsed.min, "abc-def-123");
         assert_eq!(parsed.max, "xyz-789-end");
@@ -822,31 +822,31 @@ mod tests {
     #[test]
     fn test_parse_location_missing_sort_col() {
         let loc = r#"{"min":"1","max":"100"}"#;
-        assert!(PostgresFunction::parse_location(loc).is_err());
+        assert!(PostgresConnector::parse_location(loc).is_err());
     }
 
     #[test]
     fn test_parse_location_missing_min() {
         let loc = r#"{"sort_col":"id","max":"100"}"#;
-        assert!(PostgresFunction::parse_location(loc).is_err());
+        assert!(PostgresConnector::parse_location(loc).is_err());
     }
 
     #[test]
     fn test_parse_location_missing_max() {
         let loc = r#"{"sort_col":"id","min":"1"}"#;
-        assert!(PostgresFunction::parse_location(loc).is_err());
+        assert!(PostgresConnector::parse_location(loc).is_err());
     }
 
     #[test]
     fn test_parse_location_invalid_json() {
-        assert!(PostgresFunction::parse_location("not json").is_err());
+        assert!(PostgresConnector::parse_location("not json").is_err());
     }
 
     // --- build_range_query tests ---
 
     #[test]
     fn test_build_range_query() {
-        let query = PostgresFunction::build_range_query(
+        let query = PostgresConnector::build_range_query(
             "SELECT * FROM users",
             "id",
             "1",
@@ -861,7 +861,7 @@ mod tests {
 
     #[test]
     fn test_build_range_query_with_semicolon() {
-        let query = PostgresFunction::build_range_query(
+        let query = PostgresConnector::build_range_query(
             "SELECT * FROM users;",
             "id",
             "1",
@@ -873,7 +873,7 @@ mod tests {
 
     #[test]
     fn test_build_range_query_dollar_quoting_special_values() {
-        let query = PostgresFunction::build_range_query(
+        let query = PostgresConnector::build_range_query(
             "SELECT * FROM data",
             "val",
             "-50",
@@ -892,7 +892,7 @@ mod tests {
         attached.insert(r#"{"sort_col":"id","min":"101","max":"200"}"#.to_string());
         attached.insert(r#"{"sort_col":"other_col","min":"a","max":"z"}"#.to_string());
 
-        let boundaries = PostgresFunction::parse_attached_boundaries(&attached, "id");
+        let boundaries = PostgresConnector::parse_attached_boundaries(&attached, "id");
         assert_eq!(boundaries.len(), 2);
         // Should be sorted
         assert_eq!(boundaries[0], ("1".to_string(), "100".to_string()));
@@ -902,7 +902,7 @@ mod tests {
     #[test]
     fn test_parse_attached_boundaries_empty() {
         let attached = HashSet::new();
-        let boundaries = PostgresFunction::parse_attached_boundaries(&attached, "id");
+        let boundaries = PostgresConnector::parse_attached_boundaries(&attached, "id");
         assert!(boundaries.is_empty());
     }
 
@@ -911,7 +911,7 @@ mod tests {
         let mut attached = HashSet::new();
         attached.insert(r#"{"sort_col":"other","min":"1","max":"100"}"#.to_string());
 
-        let boundaries = PostgresFunction::parse_attached_boundaries(&attached, "id");
+        let boundaries = PostgresConnector::parse_attached_boundaries(&attached, "id");
         assert!(boundaries.is_empty());
     }
 
@@ -919,7 +919,7 @@ mod tests {
 
     #[test]
     fn test_build_location() {
-        let loc = PostgresFunction::build_location("id", "1", "100");
+        let loc = PostgresConnector::build_location("id", "1", "100");
         let parsed: serde_json::Value = serde_json::from_str(&loc).expect("should be valid JSON");
         assert_eq!(parsed["sort_col"], "id");
         assert_eq!(parsed["min"], "1");
@@ -928,8 +928,8 @@ mod tests {
 
     #[test]
     fn test_build_location_roundtrip() {
-        let loc = PostgresFunction::build_location("created_at", "2024-01-01", "2024-12-31");
-        let parsed = PostgresFunction::parse_location(&loc).expect("should roundtrip");
+        let loc = PostgresConnector::build_location("created_at", "2024-01-01", "2024-12-31");
+        let parsed = PostgresConnector::parse_location(&loc).expect("should roundtrip");
         assert_eq!(parsed.sort_col, "created_at");
         assert_eq!(parsed.min, "2024-01-01");
         assert_eq!(parsed.max, "2024-12-31");
@@ -940,13 +940,13 @@ mod tests {
     #[test]
     fn test_default_batch_size() {
         let args = HashMap::new();
-        assert_eq!(PostgresFunction::get_batch_size(&args).expect("should parse"), 1_000_000);
+        assert_eq!(PostgresConnector::get_batch_size(&args).expect("should parse"), 1_000_000);
     }
 
     #[test]
     fn test_custom_batch_size() {
         let mut args = HashMap::new();
         args.insert("batch_size".to_string(), "50000".to_string());
-        assert_eq!(PostgresFunction::get_batch_size(&args).expect("should parse"), 50_000);
+        assert_eq!(PostgresConnector::get_batch_size(&args).expect("should parse"), 50_000);
     }
 }

@@ -20,7 +20,7 @@ use crate::bundle::command::response::single_batch_stream;
 impl CommandResponse for Vec<FetchResults> {
     fn schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
-            Field::new("source_function", DataType::Utf8, false),
+            Field::new("connector", DataType::Utf8, false),
             Field::new("source_url", DataType::Utf8, false),
             Field::new("pack", DataType::Utf8, false),
             Field::new("added_count", DataType::UInt64, false),
@@ -34,9 +34,9 @@ impl CommandResponse for Vec<FetchResults> {
     }
 
     fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        let source_function: ArrayRef = Arc::new(StringArray::from(
+        let connector: ArrayRef = Arc::new(StringArray::from(
             self.iter()
-                .map(|r| r.source_function.as_str())
+                .map(|r| r.connector.as_str())
                 .collect::<Vec<_>>(),
         ));
         let source_url: ArrayRef = Arc::new(StringArray::from(
@@ -60,7 +60,7 @@ impl CommandResponse for Vec<FetchResults> {
         let batch = RecordBatch::try_new(
             Self::schema(),
             vec![
-                source_function,
+                connector,
                 source_url,
                 pack,
                 added_count,
@@ -226,7 +226,7 @@ async fn fetch_from_source(
     mode: SyncMode,
 ) -> Result<FetchResults, BundlebaseError> {
     let source_id = *source.id();
-    let source_function = source.function().to_string();
+    let connector = source.connector().to_string();
     let source_url = source.args().get("url").cloned().unwrap_or_default();
 
     let actions = source.fetch(builder, mode).await?;
@@ -297,7 +297,7 @@ async fn fetch_from_source(
     }
 
     Ok(FetchResults::from_actions(
-        source_function,
+        connector,
         source_url,
         pack_name.to_string(),
         processed_actions,

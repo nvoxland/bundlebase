@@ -1,6 +1,6 @@
 # Python SDK
 
-Build custom Bundlebase source functions in Python.
+Build custom Bundlebase connectors in Python.
 
 ## Installation
 
@@ -11,16 +11,16 @@ pip install bundlebase-sdk
 Requires `pyarrow` as a peer dependency.
 
 !!! warning "Required Configuration"
-    Python source functions require the `allow_external_code` configuration setting. See [Configuration](../custom-sources/index.md#configuration) for details.
+    Python connectors require the `allow_external_code` configuration setting. See [Configuration](../custom-connectors/index.md#configuration) for details.
 
 ## Quick Start
 
 ```python
 # example_connector.py
 import pyarrow as pa
-from bundlebase_sdk import SourceFunction, Location, serve
+from bundlebase_sdk import Connector, Location, serve
 
-class ExampleConnector(SourceFunction):
+class ExampleConnector(Connector):
     def discover(self, attached_locations, **kwargs):
         return [Location("data.parquet", format="parquet", version="v1")]
 
@@ -34,14 +34,13 @@ if __name__ == "__main__":
 Use with:
 
 ```python
-b.create_connector('example.connector')
-b.set_temporary_connector_logic('example.connector', type_='ipc', logic='example_connector.py')
+b.create_temporary_connector('example.connector', runner='ipc', logic='example_connector.py')
 b.create_source('example.connector')
 ```
 
 ## API Reference
 
-### SourceFunction
+### Connector
 
 Abstract base class. Subclass and implement `discover()` and `data()`. Optionally override `stable_url()`.
 
@@ -109,10 +108,10 @@ StableUrl(url="https://example.com/data.parquet")
 ### serve()
 
 ```python
-serve(source: SourceFunction) -> None
+serve(source: Connector) -> None
 ```
 
-Run the source function as a JSON-RPC subprocess. Reads requests from stdin and writes responses to stdout. This is the main entry point for source function scripts.
+Run the connector as a JSON-RPC subprocess. Reads requests from stdin and writes responses to stdout. This is the main entry point for IPC connector scripts.
 
 ## Data Return Types
 
@@ -133,10 +132,10 @@ A source that discovers multiple locations, returns multi-batch data, provides s
 
 ```python
 import pyarrow as pa
-from bundlebase_sdk import SourceFunction, Location, StableUrl, serve
+from bundlebase_sdk import Connector, Location, StableUrl, serve
 
 
-class DatabaseSource(SourceFunction):
+class DatabaseSource(Connector):
     def discover(self, attached_locations, **kwargs):
         db_host = kwargs.get("db_host", "localhost")
         return [
@@ -178,7 +177,7 @@ if __name__ == "__main__":
 
 ## Testing
 
-The SDK exposes `_serve()` which accepts explicit IO streams, letting you test your source without launching a subprocess:
+The SDK exposes `_serve()` which accepts explicit IO streams, letting you test your connector without launching a subprocess:
 
 ```python
 import io
@@ -187,11 +186,11 @@ import struct
 
 import pyarrow as pa
 
-from bundlebase_sdk import SourceFunction, Location
+from bundlebase_sdk import Connector, Location
 from bundlebase_sdk.serve import _serve
 
 
-class ExampleConnector(SourceFunction):
+class ExampleConnector(Connector):
     def discover(self, attached_locations, **kwargs):
         return [Location("test.parquet")]
 
@@ -244,18 +243,17 @@ import bundlebase.sync as bb
 from example_connector import ExampleConnector
 
 bundle = bb.create("my/data")
-bundle.create_connector('example.connector')
-bundle.set_temporary_connector_logic('example.connector', type_='python', logic='example_connector:ExampleConnector')
+bundle.create_temporary_connector('example.connector', runner='python', logic='example_connector:ExampleConnector')
 bundle.create_source('example.connector')
 bundle.fetch("base", "add")
 ```
 
-The same `SourceFunction` class works for both native and IPC mode — no code changes needed. The only difference is how you register the source logic:
+The same `Connector` class works for both native and IPC mode — no code changes needed. The only difference is how you create the connector:
 
 | Mode | Registration | Data Transfer |
 |------|-------------|---------------|
-| **Native** | `set_temporary_connector_logic(..., type_='python', logic='module:Class')` | Zero-copy via PyO3 |
-| **IPC** | `set_temporary_connector_logic(..., type_='ipc', logic='script.py')` | Serialized Arrow IPC over pipes |
+| **Native** | `create_temporary_connector(..., runner='python', logic='module:Class')` | Zero-copy via PyO3 |
+| **IPC** | `create_temporary_connector(..., runner='ipc', logic='script.py')` | Serialized Arrow IPC over pipes |
 
 ### Extra Arguments
 
@@ -269,29 +267,29 @@ These are forwarded to your `discover()` and `data()` methods as `**kwargs`, jus
 
 ### When to Use Native vs IPC
 
-**Use native** (`type_='python'`) when:
+**Use native** (`runner='python'`) when:
 
 - Your source is part of the same Python project
 - You need maximum performance for large datasets
 - You want the simplest possible setup
 
-**Use IPC** (`type_='ipc'`) when:
+**Use IPC** (`runner='ipc'`) when:
 
 - Your source runs as a standalone script
 - You want process isolation (source crashes don't affect Bundlebase)
-- You're packaging your source as a Docker image
+- You're packaging your connector as a Docker image
 
-See [Native Source Mode](native.md) for the full overview.
+See [Native Mode](native.md) for the full overview.
 
 ## Error Handling
 
 Exceptions raised in your `discover()`, `data()`, or `stable_url()` methods are caught by the SDK and returned as JSON-RPC error responses with code `-32000`. The exception message is included in the error:
 
 ```python
-class ExampleConnector(SourceFunction):
+class ExampleConnector(Connector):
     def data(self, location, **kwargs):
         raise ValueError("Database connection failed")
         # Bundlebase receives: {"error": {"code": -32000, "message": "Database connection failed"}}
 ```
 
-Bundlebase surfaces these errors to the user as source function failures during `fetch()`.
+Bundlebase surfaces these errors to the user as connector failures during `FETCH`.

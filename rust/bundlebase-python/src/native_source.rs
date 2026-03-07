@@ -1,6 +1,6 @@
 //! Python native source bridge.
 //!
-//! Implements `NativePythonBridge` to allow Python `SourceFunction` objects
+//! Implements `NativePythonBridge` to allow Python `Connector` objects
 //! to be used as native (in-process) data sources via PyO3.
 
 use arrow::pyarrow::FromPyArrow;
@@ -11,7 +11,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use std::collections::HashMap;
 
-/// PyO3-based bridge that calls Python `SourceFunction` methods in-process.
+/// PyO3-based bridge that calls Python `Connector` methods in-process.
 pub struct PyNativeBridge;
 
 impl PyNativeBridge {

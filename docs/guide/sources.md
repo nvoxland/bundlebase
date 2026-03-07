@@ -1,4 +1,4 @@
-# Data Sources
+# Sources
 
 Sources allow you to define where data files come from and automatically discover and attach new files as they become available. This is useful for working with directories of files that grow over time, such as daily data exports or streaming data partitions.
 
@@ -6,8 +6,8 @@ Sources allow you to define where data files come from and automatically discove
 
 The source workflow has two steps:
 
-1. **Define a source** with `create_source()` - Specifies where to look for files
-2. **Fetch new files** with `fetch()` - Discovers and attaches any new files found
+1. **Define a source** with `CREATE SOURCE` - Specifies where to look for files
+2. **Fetch new files** with `FETCH` - Discovers and attaches any new files found
 
 ## Basic Usage
 
@@ -55,7 +55,11 @@ The source workflow has two steps:
     CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
     ```
 
-## Source Functions
+## Connectors
+
+Connectors contain the logic on how to pull data from an external source into your bundle. 
+
+Bundlebase ships with several common connectors, but custom connectors can also be made and plugged in to support any external data you need.
 
 ### remote_dir
 
@@ -285,162 +289,32 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
     CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')
     ```
 
-### Custom Source Functions
+### Custom Connectors
 
-Bundlebase supports two modes for custom source functions. Custom sources use the three-step API: `create_connector()`, `set_connector_logic()` or `set_temporary_connector_logic()`, and `create_source()`.
-
-- **`set_connector_logic()`** — Persists the logic into the bundle (creates an operation in commit history). Use for portable, cross-platform bundles. Rejects `type_='python'` since Python code can't be bundled.
-- **`set_temporary_connector_logic()`** — Sets logic at runtime only (no operation persisted). Use for `type_='python'` in-process sources. Works on both `Bundle` (read-only) and `BundleBuilder`.
+Bundlebase supports custom connectors in two modes — **native** (in-process, zero-copy) and **IPC** (subprocess). Custom connectors use a two-step workflow: [`CREATE CONNECTOR`](custom-connectors/index.md#create-connector) or [`CREATE TEMPORARY CONNECTOR`](custom-connectors/index.md#create-temporary-connector), then [`CREATE SOURCE`](custom-connectors/index.md#create-source).
 
 #### native (In-Process, Zero-Copy)
 
-Loads a source function in-process for zero-copy Arrow data transfer. Best for performance-critical pipelines.
+```python
+bundle.create_temporary_connector('example.connector', runner='python', logic='example_connector:ExampleConnector')
+bundle.create_source('example.connector')
+```
 
-**Source logic arguments:**
+#### IPC (Subprocess)
 
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `type_` | Yes | `'python'` (Python in-process) or `'lib'` (shared library) |
-| `logic` | Yes | `module:Class` (for `python`) or path to shared library (for `lib`) |
-| `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
+```python
+bundle.create_connector('example.connector', runner='ipc', logic='./example_connector')
+bundle.create_source('example.connector')
+```
 
-=== "Python Native"
+See [Custom Connectors](custom-connectors/index.md) for full command reference, runner values, SDKs, and protocol details.
 
-    ```python
-    bundle.create_connector('example.connector')
-    bundle.set_temporary_connector_logic('example.connector', type_='python', logic='example_connector:ExampleConnector')
-    bundle.create_source('example.connector')
-    ```
+### Dropping Connectors and Logic
 
-=== "Shared Library (Persisted)"
+To remove custom connectors and their logic, see the full command reference:
 
-    ```python
-    bundle.create_connector('example.connector')
-    bundle.set_connector_logic('example.connector', type_='lib', logic='./target/release/libexample_connector.so')
-    bundle.create_source('example.connector')
-    ```
-
-=== "SQL (Temporary)"
-
-    ```sql
-    CREATE CONNECTOR example.connector
-    SET TEMPORARY CONNECTOR LOGIC example.connector WITH (type = 'python', logic = 'example_connector:ExampleConnector', platform = '*/*')
-    CREATE SOURCE example.connector
-    ```
-
-=== "SQL (Persisted)"
-
-    ```sql
-    CREATE CONNECTOR example.connector
-    SET CONNECTOR LOGIC example.connector WITH (type = 'lib', logic = './target/release/libexample_connector.so', platform = '*/*')
-    CREATE SOURCE example.connector
-    ```
-
-#### ipc (Subprocess)
-
-Delegates data discovery and retrieval to an external subprocess. This lets you write source functions in any language that speaks the JSON-RPC 2.0 + Arrow IPC protocol.
-
-**Source logic arguments:**
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `type_` | Yes | `'ipc'`, `'java'`, or `'docker'` |
-| `logic` | Yes | Command or path to run (see [type values](custom-sources/#type-values)) |
-| `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
-
-=== "Async API"
-
-    ```python
-    bundle = await bundle.create_connector('example.connector')
-    bundle = await bundle.set_connector_logic('example.connector', type_='ipc', logic='./example_connector')
-    bundle = await bundle.create_source('example.connector')
-    ```
-
-=== "Sync API"
-
-    ```python
-    bundle.create_connector('example.connector')
-    bundle.set_connector_logic('example.connector', type_='ipc', logic='./example_connector')
-    bundle.create_source('example.connector')
-    ```
-
-=== "SQL"
-
-    ```sql
-    CREATE CONNECTOR example.connector
-    SET CONNECTOR LOGIC example.connector WITH (type = 'ipc', logic = './example_connector')
-    CREATE SOURCE example.connector
-    ```
-
-See [Custom Source Functions](custom-sources/) for SDKs, full examples, and protocol reference.
-
-### Dropping a Connector
-
-To completely remove a connector and all its associated logic, use `drop_connector()`.
-
-=== "Async API"
-
-    ```python
-    bundle = await bundle.drop_connector('example.connector')
-    ```
-
-=== "Sync API"
-
-    ```python
-    bundle.drop_connector('example.connector')
-    ```
-
-=== "SQL"
-
-    ```sql
-    DROP CONNECTOR example.connector
-    ```
-
-This removes the connector definition, all logic entries (persisted and temporary), and any source instances that reference it.
-
-### Dropping Connector Logic
-
-To remove connector logic from a connector, use `drop_connector_logic()` (persisted) or `drop_temporary_connector_logic()` (runtime-only).
-
-=== "Async API"
-
-    ```python
-    # Drop all logic entries (persisted)
-    bundle = await bundle.drop_connector_logic('example.connector')
-
-    # Drop logic for a specific platform
-    bundle = await bundle.drop_connector_logic('example.connector', platform='linux/amd64')
-
-    # Drop temporary (runtime-only) logic
-    count = await bundle.drop_temporary_connector_logic('example.connector')
-    ```
-
-=== "Sync API"
-
-    ```python
-    # Drop all logic entries (persisted)
-    bundle.drop_connector_logic('example.connector')
-
-    # Drop logic for a specific platform
-    bundle.drop_connector_logic('example.connector', platform='linux/amd64')
-
-    # Drop temporary (runtime-only) logic
-    count = bundle.drop_temporary_connector_logic('example.connector')
-    ```
-
-=== "SQL"
-
-    ```sql
-    -- Drop all logic entries (persisted)
-    DROP CONNECTOR LOGIC example.connector
-
-    -- Drop logic for a specific platform
-    DROP CONNECTOR LOGIC example.connector FOR PLATFORM 'linux/amd64'
-
-    -- Drop temporary (runtime-only) logic
-    DROP TEMPORARY CONNECTOR LOGIC example.connector
-    DROP TEMPORARY CONNECTOR LOGIC example.connector FOR PLATFORM 'linux/amd64'
-    ```
+- [`DROP CONNECTOR`](custom-connectors/index.md#drop-connector) — removes the connector (or just a specific platform's logic)
+- [`DROP TEMPORARY CONNECTOR LOGIC`](custom-connectors/index.md#drop-temporary-connector-logic) — removes runtime-only logic entries
 
 ## Fetching Data
 
@@ -454,7 +328,7 @@ Discovers and attaches new files from a specific pack's sources. Returns a list 
     # Fetch from base pack (default)
     results = await bundle.fetch("base", "add")
     for result in results:
-        print(f"{result.source_function}: {len(result.added)} added")
+        print(f"{result.connector}: {len(result.added)} added")
 
     # Fetch from a joined pack
     results = await bundle.fetch("customers", "add")
@@ -466,7 +340,7 @@ Discovers and attaches new files from a specific pack's sources. Returns a list 
     # Fetch from base pack (default)
     results = bundle.fetch("base", "add")
     for result in results:
-        print(f"{result.source_function}: {len(result.added)} added")
+        print(f"{result.connector}: {len(result.added)} added")
 
     # Fetch from a joined pack
     results = bundle.fetch("customers", "add")
@@ -489,7 +363,7 @@ Discovers and attaches new files from all defined sources across all packs. Retu
     ```python
     results = await bundle.fetch_all("add")
     for result in results:
-        print(f"{result.pack}/{result.source_function}: {result.total_count()} changes")
+        print(f"{result.pack}/{result.connector}: {result.total_count()} changes")
     ```
 
 === "Sync API"
@@ -497,7 +371,7 @@ Discovers and attaches new files from all defined sources across all packs. Retu
     ```python
     results = bundle.fetch_all("add")
     for result in results:
-        print(f"{result.pack}/{result.source_function}: {result.total_count()} changes")
+        print(f"{result.pack}/{result.connector}: {result.total_count()} changes")
     ```
 
 === "SQL"
@@ -512,7 +386,7 @@ Each `FetchResults` object contains:
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `source_function` | `str` | Source function name (e.g., "remote_dir") |
+| `connector` | `str` | Connector name (e.g., "remote_dir") |
 | `source_url` | `str` | Source URL |
 | `pack` | `str` | Pack name ("base" or join name) |
 | `added` | `list[FetchedBlock]` | Blocks that were newly added |

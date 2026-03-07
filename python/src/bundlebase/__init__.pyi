@@ -316,8 +316,8 @@ class FetchResults:
     """
 
     @property
-    def source_function(self) -> str:
-        """Source function name (e.g., "remote_dir", "web_scrape")."""
+    def connector(self) -> str:
+        """Connector name (e.g., "remote_dir", "web_scrape")."""
         ...
 
     @property
@@ -927,7 +927,7 @@ class PyBundleBuilder:
         """
         ...
 
-    def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
+    def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
         """
         Create a data source for a pack.
 
@@ -935,7 +935,7 @@ class PyBundleBuilder:
         automatically attached via fetch().
 
         Args:
-            function: Source function name. Available functions:
+            connector: Connector name. Available connectors:
 
                 "remote_dir" - List files from a local or cloud directory:
                     - "url" (required): Directory URL (e.g., "s3://bucket/data/", "file:///path/to/data/")
@@ -954,7 +954,7 @@ class PyBundleBuilder:
                     - "patterns" (optional): Comma-separated glob patterns (defaults to "**/*")
                     Note: Files are always copied into the bundle (remote files cannot be directly referenced)
 
-            args: Function-specific configuration arguments as described above.
+            args: Connector-specific configuration arguments as described above.
             pack: Which pack to define the source for:
                 - "base" (default): The base pack
                 - A join name: A joined pack by its join name
@@ -1001,7 +1001,7 @@ class PyBundleBuilder:
         Example:
             results = await c.fetch("base", "add")
             for result in results:
-                print(f"{result.source_function}: {len(result.added)} added")
+                print(f"{result.connector}: {len(result.added)} added")
         """
         ...
 
@@ -1025,7 +1025,7 @@ class PyBundleBuilder:
         Example:
             results = await c.fetch_all("add")
             for result in results:
-                print(f"{result.source_function}: {result.total_count()} changes")
+                print(f"{result.connector}: {result.total_count()} changes")
         """
         ...
 
@@ -1281,7 +1281,7 @@ class OperationChain:
         """Queue a create_function operation."""
         ...
 
-    def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
+    def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
         """Queue a create_source operation."""
         ...
 
@@ -1415,7 +1415,7 @@ class CreateChain:
         """Queue a create_function operation."""
         ...
 
-    def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "CreateChain":
+    def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "CreateChain":
         """Queue a create_source operation."""
         ...
 
@@ -1549,7 +1549,7 @@ class ExtendChain:
         """Queue a create_function operation."""
         ...
 
-    def create_source(self, function: str, args: Dict[str, str], pack: str = "base") -> "ExtendChain":
+    def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "ExtendChain":
         """Queue a create_source operation."""
         ...
 

@@ -1,12 +1,12 @@
-//! Built-in "kaggle" source function.
+//! Built-in "kaggle" connector.
 //!
 //! Discovers and downloads dataset files from Kaggle via their REST API.
 //! Authentication is read from `~/.kaggle/kaggle.json`.
 
-use crate::source::source_function::{
-    ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
+use crate::source::connector::{
+    ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::source_utils;
+use crate::source::connector_utils;
 use crate::bundle_config::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::{BundleConfig, BundlebaseError, Scope};
 use async_trait::async_trait;
@@ -76,7 +76,7 @@ fn read_kaggle_json_field(field: &str) -> Option<String> {
     json.get(field).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
 
-/// Built-in "kaggle" source function.
+/// Built-in "kaggle" connector.
 ///
 /// Discovers and downloads dataset files from Kaggle using the Kaggle REST API.
 /// Files are always copied into the bundle's data directory.
@@ -86,12 +86,12 @@ fn read_kaggle_json_field(field: &str) -> Option<String> {
 /// - `patterns` (optional): Comma-separated glob patterns to filter files (e.g., "*.csv")
 ///   Defaults to "**/*" (all files)
 /// - `version` (optional): Dataset version number to download (default: latest)
-pub struct KaggleSource;
+pub struct KaggleConnector;
 
 #[async_trait]
-impl SourceFunction for KaggleSource {
-    fn signature(&self) -> SourceFunctionSignature {
-        SourceFunctionSignature {
+impl Connector for KaggleConnector {
+    fn signature(&self) -> ConnectorSignature {
+        ConnectorSignature {
             name: "kaggle".to_string(),
             arg_specs: vec![
                 ArgSpec {
@@ -119,7 +119,7 @@ impl SourceFunction for KaggleSource {
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
         // Validate dataset format: must be exactly "owner/dataset-name"
-        let dataset = source_utils::require_arg(args, "dataset", "kaggle")?;
+        let dataset = connector_utils::require_arg(args, "dataset", "kaggle")?;
         let parts: Vec<&str> = dataset.splitn(3, '/').collect();
         if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
             return Err(BundlebaseError::from(format!(
@@ -156,8 +156,8 @@ impl SourceFunction for KaggleSource {
         _attached_locations: &HashSet<String>,
         config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let dataset = source_utils::require_arg(args, "dataset", "kaggle")?;
-        let patterns = source_utils::get_patterns(args)?;
+        let dataset = connector_utils::require_arg(args, "dataset", "kaggle")?;
+        let patterns = connector_utils::get_patterns(args)?;
         let version = args.get("version").map(|s| s.as_str());
         let client = KaggleClient::from_config(config, dataset)?;
 
@@ -195,7 +195,7 @@ impl SourceFunction for KaggleSource {
         args: &HashMap<String, String>,
         config: &Arc<BundleConfig>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
-        let dataset = source_utils::require_arg(args, "dataset", "kaggle")?;
+        let dataset = connector_utils::require_arg(args, "dataset", "kaggle")?;
         let version = args.get("version").map(|s| s.as_str());
         let client = KaggleClient::from_config(config, dataset)?;
 
@@ -229,7 +229,7 @@ struct KaggleFileInfo {
     filename: String,
 }
 
-impl KaggleSource {
+impl KaggleConnector {
     /// Read the current version number for a Kaggle dataset.
     ///
     /// Searches the datasets list endpoint (`/api/v1/datasets/list`) for the
@@ -489,7 +489,7 @@ impl KaggleSource {
             temp
         };
 
-        Ok(source_utils::stream_from_temp_file(final_temp))
+        Ok(connector_utils::stream_from_temp_file(final_temp))
     }
 
     /// Extract the first file from a ZIP archive on disk to a new temp file.
@@ -569,11 +569,11 @@ impl KaggleSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::source_function::validate_source_args;
+    use crate::source::connector::validate_connector_args;
 
     #[test]
     fn test_signature() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let sig = func.signature();
         assert_eq!(sig.name, "kaggle");
         assert_eq!(sig.arg_specs.len(), 3);
@@ -584,18 +584,18 @@ mod tests {
 
     #[test]
     fn test_validate_args_valid() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
-        assert!(validate_source_args(&func, &args).is_ok());
+        assert!(validate_connector_args(&func, &args).is_ok());
     }
 
     #[test]
     fn test_validate_args_missing_dataset() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let args = HashMap::new();
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("requires a 'dataset' argument"));
@@ -603,11 +603,11 @@ mod tests {
 
     #[test]
     fn test_validate_args_invalid_dataset_format_no_slash() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "just-a-name".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid dataset format"));
@@ -616,11 +616,11 @@ mod tests {
 
     #[test]
     fn test_validate_args_invalid_dataset_format_too_many_slashes() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "a/b/c".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid dataset format"));
@@ -628,45 +628,45 @@ mod tests {
 
     #[test]
     fn test_validate_args_invalid_dataset_format_empty_parts() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "/dataset".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
 
         let mut args2 = HashMap::new();
         args2.insert("dataset".to_string(), "owner/".to_string());
-        let result2 = validate_source_args(&func, &args2);
+        let result2 = validate_connector_args(&func, &args2);
         assert!(result2.is_err());
     }
 
     #[test]
     fn test_validate_args_with_patterns() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("patterns".to_string(), "*.csv".to_string());
-        assert!(validate_source_args(&func, &args).is_ok());
+        assert!(validate_connector_args(&func, &args).is_ok());
     }
 
     #[test]
     fn test_validate_args_with_valid_version() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "3".to_string());
-        assert!(validate_source_args(&func, &args).is_ok());
+        assert!(validate_connector_args(&func, &args).is_ok());
     }
 
     #[test]
     fn test_validate_args_version_zero() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "0".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid version"));
@@ -675,12 +675,12 @@ mod tests {
 
     #[test]
     fn test_validate_args_version_negative() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "-1".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid version"));
@@ -688,12 +688,12 @@ mod tests {
 
     #[test]
     fn test_validate_args_version_non_numeric() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("version".to_string(), "abc".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("Invalid version"));
@@ -702,12 +702,12 @@ mod tests {
 
     #[test]
     fn test_validate_args_unknown_arg() {
-        let func = KaggleSource;
+        let func = KaggleConnector;
         let mut args = HashMap::new();
         args.insert("dataset".to_string(), "zillow/zecon".to_string());
         args.insert("unknown".to_string(), "value".to_string());
 
-        let result = validate_source_args(&func, &args);
+        let result = validate_connector_args(&func, &args);
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("does not accept argument 'unknown'"));
@@ -783,7 +783,7 @@ mod tests {
             zip.finish().expect("finish failed");
         }
 
-        let result_temp = KaggleSource::extract_from_zip_to_file(zip_temp.path(), "hello.txt")
+        let result_temp = KaggleConnector::extract_from_zip_to_file(zip_temp.path(), "hello.txt")
             .expect("extract failed");
         let mut contents = Vec::new();
         std::fs::File::open(result_temp.path())
@@ -804,7 +804,7 @@ mod tests {
         }
         zip_temp.flush().expect("flush failed");
 
-        let result = KaggleSource::extract_from_zip_to_file(zip_temp.path(), "test.csv");
+        let result = KaggleConnector::extract_from_zip_to_file(zip_temp.path(), "test.csv");
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(err.contains("empty"), "Expected 'empty' in: {}", err);
@@ -818,7 +818,7 @@ mod tests {
         garbage_temp.write_all(&[0u8, 1, 2, 3, 4, 5]).expect("write failed");
         garbage_temp.flush().expect("flush failed");
 
-        let result = KaggleSource::extract_from_zip_to_file(garbage_temp.path(), "test.csv");
+        let result = KaggleConnector::extract_from_zip_to_file(garbage_temp.path(), "test.csv");
         assert!(result.is_err());
         let err = result.err().expect("expected error").to_string();
         assert!(
@@ -833,7 +833,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_kaggle_version_with_explicit_version() {
         let client = KaggleClient::new("http://unused", Some("user".into()), Some("key".into())).expect("client creation failed");
-        let result = KaggleSource::read_kaggle_version(
+        let result = KaggleConnector::read_kaggle_version(
             &client,
             "owner/ds",
             Some("5"),
@@ -859,7 +859,7 @@ mod tests {
             .await;
 
         let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
-        let result = KaggleSource::read_kaggle_version(
+        let result = KaggleConnector::read_kaggle_version(
             &client,
             "zillow/zecon",
             None,
@@ -884,7 +884,7 @@ mod tests {
             .await;
 
         let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
-        let result = KaggleSource::read_kaggle_version(
+        let result = KaggleConnector::read_kaggle_version(
             &client,
             "zillow/zecon",
             None,
@@ -905,7 +905,7 @@ mod tests {
             .await;
 
         let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
-        let result = KaggleSource::read_kaggle_version(
+        let result = KaggleConnector::read_kaggle_version(
             &client,
             "zillow/zecon",
             None,
@@ -926,7 +926,7 @@ mod tests {
             .await;
 
         let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
-        let result = KaggleSource::read_kaggle_version(
+        let result = KaggleConnector::read_kaggle_version(
             &client,
             "zillow/zecon",
             None,
@@ -952,7 +952,7 @@ mod tests {
             .await;
 
         let client = KaggleClient::new(&server.uri(), Some("myuser".into()), Some("mykey".into())).expect("client creation failed");
-        let result = KaggleSource::read_kaggle_version(
+        let result = KaggleConnector::read_kaggle_version(
             &client,
             "zillow/zecon",
             None,
@@ -996,7 +996,7 @@ mod tests {
 
         let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
         let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
-        let (files, version) = KaggleSource::list_kaggle_files(
+        let (files, version) = KaggleConnector::list_kaggle_files(
             &client,
             "zillow/zecon",
             &patterns,
@@ -1043,7 +1043,7 @@ mod tests {
 
         let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
         let patterns = vec![glob::Pattern::new("*.csv").expect("pattern creation failed")];
-        let (files, _) = KaggleSource::list_kaggle_files(
+        let (files, _) = KaggleConnector::list_kaggle_files(
             &client,
             "zillow/zecon",
             &patterns,
@@ -1077,7 +1077,7 @@ mod tests {
 
         let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
         let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
-        let (files, version) = KaggleSource::list_kaggle_files(
+        let (files, version) = KaggleConnector::list_kaggle_files(
             &client,
             "zillow/zecon",
             &patterns,
@@ -1104,7 +1104,7 @@ mod tests {
 
         let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
         let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
-        let result = KaggleSource::list_kaggle_files(
+        let result = KaggleConnector::list_kaggle_files(
             &client,
             "zillow/zecon",
             &patterns,
@@ -1141,7 +1141,7 @@ mod tests {
 
         let client = KaggleClient::new(&server.uri(), Some("user".into()), Some("key".into())).expect("client creation failed");
         let patterns = vec![glob::Pattern::new("**/*").expect("pattern creation failed")];
-        let result = KaggleSource::list_kaggle_files(
+        let result = KaggleConnector::list_kaggle_files(
             &client,
             "zillow/zecon",
             &patterns,

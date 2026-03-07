@@ -30,8 +30,8 @@ public class ServeTest {
         return (MAPPER.writeValueAsString(req) + "\n").getBytes();
     }
 
-    private static SourceFunction simpleSource() {
-        return new SourceFunction() {
+    private static Connector simpleSource() {
+        return new Connector() {
             private final BufferAllocator allocator = new RootAllocator();
 
             @Override

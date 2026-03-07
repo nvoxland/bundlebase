@@ -180,7 +180,7 @@ class CreateChain:
                   .drop_column("unwanted"))
     """
 
-    def __init__(self, create_func: Callable, *create_args):
+    def __init__(self, create_func: Callable, *create_args: Any):
         """
         Initialize the creation chain.
 

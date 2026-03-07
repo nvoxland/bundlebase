@@ -52,7 +52,7 @@ import (
 )
 
 var (
-	exportedSource SourceFunction
+	exportedConnector Connector
 	exportMu       sync.Mutex
 )
 
@@ -74,7 +74,7 @@ func newRecordReader(records []arrow.Record) array.RecordReader {
 	return reader
 }
 
-// ExportSource registers a SourceFunction for use as a plugin shared library.
+// ExportConnector registers a Connector for use as a plugin shared library.
 //
 // Call this from your main() or init() before the library is used.
 // The source is stored globally and used by the exported C functions.
@@ -82,18 +82,18 @@ func newRecordReader(records []arrow.Record) array.RecordReader {
 // Example:
 //
 //	func init() {
-//	    bundlebasesdk.ExportSource(&MySource{})
+//	    bundlebasesdk.ExportConnector(&MySource{})
 //	}
-func ExportSource(source SourceFunction) {
+func ExportConnector(source Connector) {
 	exportMu.Lock()
 	defer exportMu.Unlock()
-	exportedSource = source
+	exportedConnector = source
 }
 
-func getExportedSource() SourceFunction {
+func getExportedConnector() Connector {
 	exportMu.Lock()
 	defer exportMu.Unlock()
-	return exportedSource
+	return exportedConnector
 }
 
 // parseExportArgs parses the JSON args string into attached locations and args map.
@@ -154,10 +154,10 @@ func parseSimpleArgs(argsJSON string) (map[string]string, error) {
 
 //export bundlebase_discover
 func bundlebase_discover(argsJSON *C.char, outJSON **C.char) C.int32_t {
-	source := getExportedSource()
+	source := getExportedConnector()
 	if source == nil {
 		if outJSON != nil {
-			*outJSON = C.CString("No source registered. Call ExportSource() first.")
+			*outJSON = C.CString("No source registered. Call ExportConnector() first.")
 		}
 		return -1
 	}
@@ -195,7 +195,7 @@ func bundlebase_discover(argsJSON *C.char, outJSON **C.char) C.int32_t {
 
 //export bundlebase_data
 func bundlebase_data(locationJSON *C.char, argsJSON *C.char, out *C.struct_ArrowArrayStream) C.int32_t {
-	source := getExportedSource()
+	source := getExportedConnector()
 	if source == nil {
 		return -1
 	}
@@ -241,7 +241,7 @@ func bundlebase_free(ptr *C.char) {
 
 //export bundlebase_stable_url
 func bundlebase_stable_url(locationJSON *C.char, argsJSON *C.char, outJSON **C.char) C.int32_t {
-	source := getExportedSource()
+	source := getExportedConnector()
 	if source == nil {
 		return -1
 	}

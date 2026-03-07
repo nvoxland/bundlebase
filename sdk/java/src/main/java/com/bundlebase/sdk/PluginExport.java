@@ -42,7 +42,7 @@ public class PluginExport {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final BufferAllocator ALLOCATOR = new RootAllocator();
     private static final Linker LINKER = Linker.nativeLinker();
-    private static volatile SourceFunction source;
+    private static volatile Connector source;
 
     // Native memory helpers — allocate via C malloc so bundlebase_free (C free) works
     private static final MethodHandle MALLOC;
@@ -70,10 +70,10 @@ public class PluginExport {
     private static MemorySegment stableUrlStub;
 
     /**
-     * Register the source function for plugin export.
+     * Register the connector for plugin export.
      * Call this in a static initializer before the library is loaded.
      */
-    public static void register(SourceFunction src) {
+    public static void register(Connector src) {
         source = src;
     }
 

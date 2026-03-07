@@ -1,9 +1,9 @@
-"""Entry point for running a source function as a subprocess."""
+"""Entry point for running a connector as a subprocess."""
 
 import sys
 from typing import IO
 
-from bundlebase_sdk.source import SourceFunction
+from bundlebase_sdk.source import Connector
 from bundlebase_sdk.types import Location, StableUrl
 from bundlebase_sdk._protocol import (
     read_request,
@@ -14,7 +14,7 @@ from bundlebase_sdk._protocol import (
 )
 
 
-def _serve(source: SourceFunction, stdin: IO[bytes], stdout: IO[bytes]) -> None:
+def _serve(source: Connector, stdin: IO[bytes], stdout: IO[bytes]) -> None:
     """Run the JSON-RPC serve loop with explicit IO streams (for testing)."""
     while True:
         req = read_request(stdin)
@@ -42,7 +42,7 @@ def _serve(source: SourceFunction, stdin: IO[bytes], stdout: IO[bytes]) -> None:
 
 
 def _handle_discover(
-    source: SourceFunction,
+    source: Connector,
     req_id: int,
     params: dict,
     stdout: IO[bytes],
@@ -57,7 +57,7 @@ def _handle_discover(
 
 
 def _handle_data(
-    source: SourceFunction,
+    source: Connector,
     req_id: int,
     params: dict,
     stdout: IO[bytes],
@@ -74,7 +74,7 @@ def _handle_data(
 
 
 def _handle_stable_url(
-    source: SourceFunction,
+    source: Connector,
     req_id: int,
     params: dict,
     stdout: IO[bytes],
@@ -91,10 +91,10 @@ def _handle_stable_url(
         write_response(stdout, req_id, None)
 
 
-def serve(source: SourceFunction) -> None:
-    """Run the source function as a JSON-RPC subprocess.
+def serve(source: Connector) -> None:
+    """Run the connector as a JSON-RPC subprocess.
 
     Reads requests from stdin and writes responses to stdout.
-    This is the main entry point for source function scripts.
+    This is the main entry point for connector scripts.
     """
     _serve(source, sys.stdin.buffer, sys.stdout.buffer)

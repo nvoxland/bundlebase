@@ -9,7 +9,6 @@ mod create_source;
 mod create_connector;
 mod detach_block;
 mod drop_connector;
-mod drop_connector_logic;
 mod drop_index;
 mod drop_join;
 mod drop_view;
@@ -25,7 +24,6 @@ mod serde_util;
 mod save_config;
 mod set_description;
 mod set_name;
-mod set_connector_logic;
 mod update_version;
 
 pub use crate::bundle::operation::add_column::AddColumnOp;
@@ -39,7 +37,6 @@ pub use crate::bundle::operation::create_source::CreateSourceOp;
 pub use crate::bundle::operation::create_connector::CreateConnectorOp;
 pub use crate::bundle::operation::detach_block::DetachBlockOp;
 pub use crate::bundle::operation::drop_connector::DropConnectorOp;
-pub use crate::bundle::operation::drop_connector_logic::DropConnectorLogicOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
 pub use crate::bundle::operation::drop_join::DropJoinOp;
 pub use crate::bundle::operation::drop_view::DropViewOp;
@@ -53,7 +50,6 @@ pub use crate::bundle::operation::rename_view::RenameViewOp;
 pub use crate::bundle::operation::save_config::SaveConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
-pub use crate::bundle::operation::set_connector_logic::SetConnectorLogicOp;
 pub use crate::bundle::operation::update_version::UpdateVersionOp;
 use crate::bundle::column_metadata::ColumnNames;
 use crate::{versioning, Bundle, BundlebaseError};
@@ -222,7 +218,6 @@ define_any_operation! {
     DropColumn(DropColumnOp),
     DropIndex(DropIndexOp),
     DropConnector(DropConnectorOp),
-    DropConnectorLogic(DropConnectorLogicOp),
     DropJoin(DropJoinOp),
     DropView(DropViewOp),
     Filter(FilterOp),
@@ -234,7 +229,6 @@ define_any_operation! {
     SaveConfig(SaveConfigOp),
     SetDescription(SetDescriptionOp),
     SetName(SetNameOp),
-    SetConnectorLogic(SetConnectorLogicOp),
     UpdateVersion(UpdateVersionOp),
 }
 

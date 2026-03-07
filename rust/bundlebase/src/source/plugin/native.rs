@@ -1,6 +1,6 @@
-//! Built-in "native" source function.
+//! Built-in "native" connector.
 //!
-//! Loads user source functions in-process for zero-copy Arrow data transfer.
+//! Loads user connectors in-process for zero-copy Arrow data transfer.
 //! Two strategies based on the `call` argument:
 //!
 //! - `lib:/path/to/lib.so` — loads a shared library via `dlopen` and uses the
@@ -8,10 +8,10 @@
 //! - `python:module:Class` — delegates to a `NativePythonBridge` trait object
 //!   registered by the Python bindings at init time (PyO3 + `FromPyArrow`).
 
-use crate::source::source_function::{
-    ArgSpec, DiscoveredLocation, SourceData, SourceFunction, SourceFunctionSignature,
+use crate::source::connector::{
+    ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::source_utils;
+use crate::source::connector_utils;
 use crate::bundle_config::is_external_code_allowed;
 use crate::{BundleConfig, BundlebaseError};
 
@@ -29,7 +29,7 @@ use url::Url;
 // ---------------------------------------------------------------------------
 
 /// Trait that the Python bindings implement to provide in-process access
-/// to Python `SourceFunction` objects.
+/// to Python `Connector` objects.
 pub trait NativePythonBridge: Send + Sync {
     /// Call `discover()` on the Python source, returning locations as JSON.
     fn discover(&self, call: &str, args_json: &str) -> Result<String, BundlebaseError>;
@@ -101,7 +101,7 @@ unsafe impl Sync for SharedLibHandle {}
 impl SharedLibHandle {
     fn load(path: &str) -> Result<Self, BundlebaseError> {
         // SAFETY: We trust the user-provided shared library to export the correct C ABI.
-        // The library is loaded once and kept alive for the lifetime of the source function.
+        // The library is loaded once and kept alive for the lifetime of the connector.
         let lib = unsafe { libloading::Library::new(path) }
             .map_err(|e| format!("Failed to load shared library '{}': {}", path, e))?;
 
@@ -246,19 +246,19 @@ impl SharedLibHandle {
 }
 
 // ---------------------------------------------------------------------------
-// NativeSourceFunction
+// NativeConnector
 // ---------------------------------------------------------------------------
 
-/// Built-in "native" source function for in-process data loading.
+/// Built-in "native" connector for in-process data loading.
 ///
 /// Supports two call strategies:
 /// - `lib:/path/to/lib.so` — shared library via Arrow C Data Interface
 /// - `python:module:Class` — Python in-process via PyO3
-pub struct NativeSourceFunction {
+pub struct NativeConnector {
     lib_handle: tokio::sync::Mutex<Option<SharedLibHandle>>,
 }
 
-impl NativeSourceFunction {
+impl NativeConnector {
     pub fn new() -> Self {
         Self {
             lib_handle: tokio::sync::Mutex::new(None),
@@ -394,9 +394,9 @@ fn build_discover_args_json(
 }
 
 #[async_trait]
-impl SourceFunction for NativeSourceFunction {
-    fn signature(&self) -> SourceFunctionSignature {
-        SourceFunctionSignature {
+impl Connector for NativeConnector {
+    fn signature(&self) -> ConnectorSignature {
+        ConnectorSignature {
             name: "native".to_string(),
             arg_specs: vec![
                 ArgSpec {
@@ -420,7 +420,7 @@ impl SourceFunction for NativeSourceFunction {
         if !is_external_code_allowed(_config)? {
             return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
         }
-        let call = source_utils::require_arg(args, "call", "native")?;
+        let call = connector_utils::require_arg(args, "call", "native")?;
 
         match parse_native_call(call)? {
             CallStrategy::SharedLib(path) => {
@@ -449,7 +449,7 @@ impl SourceFunction for NativeSourceFunction {
         if !is_external_code_allowed(_config)? {
             return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
         }
-        let call = source_utils::require_arg(args, "call", "native")?;
+        let call = connector_utils::require_arg(args, "call", "native")?;
         let loc_json = location_json(location)?;
         let args_json = filtered_args_json(args)?;
 
@@ -491,7 +491,7 @@ impl SourceFunction for NativeSourceFunction {
         if !is_external_code_allowed(_config)? {
             return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
         }
-        let call = source_utils::require_arg(args, "call", "native")?;
+        let call = connector_utils::require_arg(args, "call", "native")?;
         let loc_json = location_json(location)?;
         let args_json = filtered_args_json(args)?;
 
@@ -565,7 +565,7 @@ mod tests {
 
     #[test]
     fn test_native_signature() {
-        let func = NativeSourceFunction::new();
+        let func = NativeConnector::new();
         let sig = func.signature();
         assert_eq!(sig.name, "native");
         // call is no longer in arg_specs — it's injected by source definition resolution
@@ -625,11 +625,11 @@ mod tests {
         );
     }
 
-    // validate_args tests removed — call format validation now happens at set_connector_logic time
+    // validate_args tests removed — call format validation now happens at create_connector time
 
     #[tokio::test]
     async fn test_discover_blocked_when_external_code_disabled() {
-        let func = NativeSourceFunction::new();
+        let func = NativeConnector::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -642,7 +642,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_data_blocked_when_external_code_disabled() {
-        let func = NativeSourceFunction::new();
+        let func = NativeConnector::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -660,7 +660,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stable_url_blocked_when_external_code_disabled() {
-        let func = NativeSourceFunction::new();
+        let func = NativeConnector::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -681,7 +681,7 @@ mod tests {
         // With allow_external_code=true, discover should pass the config gate
         // (will still fail because the Python bridge isn't initialized, but the
         // error should NOT be about external code being disabled)
-        let func = NativeSourceFunction::new();
+        let func = NativeConnector::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
 

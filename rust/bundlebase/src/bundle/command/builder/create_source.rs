@@ -14,9 +14,9 @@ use crate::bundle::BundleBuilder;
 /// Command to create a data source for a pack.
 #[derive(Debug, Clone)]
 pub struct CreateSourceCommand {
-    /// The source function name (e.g., "remote_dir")
-    pub function: String,
-    /// Function-specific arguments
+    /// The connector name (e.g., "remote_dir" for built-in, "acme.weather" for custom)
+    pub connector: String,
+    /// Connector-specific arguments
     pub args: HashMap<String, String>,
     /// The pack to create the source for (None or "base" for base pack)
     pub pack: Option<String>,
@@ -25,12 +25,12 @@ pub struct CreateSourceCommand {
 impl CreateSourceCommand {
     /// Create a new CreateSourceCommand.
     pub fn new(
-        function: impl Into<String>,
+        connector: impl Into<String>,
         args: HashMap<String, String>,
         pack: Option<String>,
     ) -> Self {
         Self {
-            function: function.into(),
+            connector: connector.into(),
             args,
             pack,
         }
@@ -43,7 +43,7 @@ impl CommandParsing for CreateSourceCommand {
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        let mut function = None;
+        let mut connector = None;
         let mut args = HashMap::new();
         let mut pack = None;
         let mut seen_source_args = false;
@@ -51,19 +51,19 @@ impl CommandParsing for CreateSourceCommand {
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
                 Rule::dotted_identifier => {
-                    if function.is_none() {
-                        function = Some(inner_pair.as_str().to_string());
+                    if connector.is_none() {
+                        connector = Some(inner_pair.as_str().to_string());
                     }
                 }
                 Rule::identifier => {
-                    if function.is_none() {
-                        // First identifier is the function name
-                        function = Some(inner_pair.as_str().to_string());
+                    if connector.is_none() {
+                        // First identifier is the connector name
+                        connector = Some(inner_pair.as_str().to_string());
                     } else if seen_source_args {
                         // Identifier after source_args is the pack name (after ON)
                         pack = Some(inner_pair.as_str().to_string());
                     } else {
-                        // Identifier after function but before source_args is the pack name (ON without WITH)
+                        // Identifier after connector but before source_args is the pack name (ON without WITH)
                         pack = Some(inner_pair.as_str().to_string());
                     }
                 }
@@ -94,16 +94,16 @@ impl CommandParsing for CreateSourceCommand {
             }
         }
 
-        let function = function.ok_or_else(|| -> BundlebaseError {
-            "CREATE SOURCE missing function name".into()
+        let connector = connector.ok_or_else(|| -> BundlebaseError {
+            "CREATE SOURCE missing connector name".into()
         })?;
 
-        // Built-in functions require args; defined sources (dotted names) don't
-        if args.is_empty() && !function.contains('.') {
+        // Built-in connectors require args; custom connectors (dotted names) don't
+        if args.is_empty() && !connector.contains('.') {
             return Err("CREATE SOURCE requires at least one argument in WITH clause".into());
         }
 
-        Ok(CreateSourceCommand::new(function, args, pack))
+        Ok(CreateSourceCommand::new(connector, args, pack))
     }
 
     fn to_statement(&self) -> String {
@@ -113,9 +113,9 @@ impl CommandParsing for CreateSourceCommand {
             // Defined source with no extra args
             return match &self.pack {
                 Some(pack) if pack != "base" => {
-                    format!("CREATE SOURCE {} ON {}", self.function, pack)
+                    format!("CREATE SOURCE {} ON {}", self.connector, pack)
                 }
-                _ => format!("CREATE SOURCE {}", self.function),
+                _ => format!("CREATE SOURCE {}", self.connector),
             };
         }
 
@@ -128,9 +128,9 @@ impl CommandParsing for CreateSourceCommand {
         let args_joined = args_str.join(", ");
         match &self.pack {
             Some(pack) if pack != "base" => {
-                format!("CREATE SOURCE {} WITH ({}) ON {}", self.function, args_joined, pack)
+                format!("CREATE SOURCE {} WITH ({}) ON {}", self.connector, args_joined, pack)
             }
-            _ => format!("CREATE SOURCE {} WITH ({})", self.function, args_joined),
+            _ => format!("CREATE SOURCE {} WITH ({})", self.connector, args_joined),
         }
     }
 }
@@ -142,8 +142,8 @@ impl BundleBuilderCommand for CreateSourceCommand {
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
         let source_id = ObjectId::generate();
-        let function = self.function.clone();
-        let op = CreateSourceOp::setup(source_id, pack_id, self.function.clone(), self.args.clone());
+        let connector_name = self.connector.clone();
+        let op = CreateSourceOp::setup(source_id, pack_id, self.connector.clone(), self.args.clone());
 
         builder.apply_operation(op.into()).await?;
 
@@ -179,7 +179,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
             }
         }
 
-        Ok(format!("Created source: {}", function))
+        Ok(format!("Created source: {}", connector_name))
     }
 }
 
@@ -195,7 +195,7 @@ mod parsing_tests {
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::CreateSource(c) => {
-                assert_eq!(c.function, "remote_dir");
+                assert_eq!(c.connector, "remote_dir");
                 assert_eq!(c.args.get("url"), Some(&"s3://bucket/data/".to_string()));
                 assert_eq!(c.pack, None);
             }
@@ -209,7 +209,7 @@ mod parsing_tests {
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::CreateSource(c) => {
-                assert_eq!(c.function, "remote_dir");
+                assert_eq!(c.connector, "remote_dir");
                 assert_eq!(c.args.get("url"), Some(&"s3://bucket/users/".to_string()));
                 assert_eq!(c.pack, Some("users".to_string()));
             }
@@ -227,7 +227,7 @@ mod parsing_tests {
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::CreateSource(c) => {
-                assert_eq!(c.function, "remote_dir");
+                assert_eq!(c.connector, "remote_dir");
                 assert_eq!(c.args.get("url"), Some(&"file:///data/".to_string()));
             }
             _ => panic!("Expected CreateSource variant"),

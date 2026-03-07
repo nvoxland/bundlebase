@@ -141,7 +141,7 @@ Commands for managing data sources.
 Defines a source for automatic file discovery.
 
 ```sql
-CREATE SOURCE <function> WITH (<key> = '<value>', ...) [ON <pack>]
+CREATE SOURCE <connector> WITH (<key> = '<value>', ...) [ON <pack>]
 ```
 
 See [Data Sources](../guide/sources.md) for details.
@@ -158,75 +158,61 @@ See [Data Sources](../guide/sources.md) for details.
 
 ## Connectors
 
-Commands for managing custom source connectors. Connectors use a three-step workflow: define a connector name, configure its logic, then create a source from it.
+Commands for managing custom connectors. Connectors use a two-step workflow: create a connector with its logic, then create a source from it.
 
-See [Custom Source Functions](../guide/custom-sources/) for full details and SDK references.
+See [Custom Connectors](../guide/custom-connectors/index.md) for full details and SDK references.
 
 ### CREATE CONNECTOR
 
-Declares a named connector for use with custom source functions.
+Creates a named connector with its runner and logic. The connector definition is **persisted** into the bundle's commit history.
 
 ```sql
-CREATE CONNECTOR <name>
-```
-
-**Example:**
-
-```sql
-CREATE CONNECTOR example.connector
-```
-
-### SET CONNECTOR LOGIC
-
-Configures how a connector runs. The logic is persisted into the bundle's commit history, making the bundle portable across environments.
-
-```sql
-SET CONNECTOR LOGIC <name> WITH (type = '<type>', logic = '<logic>' [, platform = '<platform>'])
+CREATE CONNECTOR <name> WITH (runner = '<runner>', logic = '<logic>' [, platform = '<platform>'])
 ```
 
 **Parameters:**
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `type` | Yes | Source type: `lib`, `java`, `docker`, or `ipc` |
+| `runner` | Yes | Connector runner: `lib`, `java`, `docker`, or `ipc` |
 | `logic` | Yes | What to run (path to library, JAR, Docker image, or command) |
 | `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
 
 !!! note
-    The `python` type is not allowed with `SET CONNECTOR LOGIC` because Python code cannot be bundled. Use `SET TEMPORARY CONNECTOR LOGIC` instead.
+    The `python` runner is not allowed with `CREATE CONNECTOR` because Python code cannot be bundled. Use `CREATE TEMPORARY CONNECTOR` instead.
 
 **Examples:**
 
 ```sql
 -- Shared library (Rust, Go, Java)
-SET CONNECTOR LOGIC example.connector WITH (type = 'lib', logic = './target/release/libexample_connector.so')
+CREATE CONNECTOR example.connector WITH (runner = 'lib', logic = './target/release/libexample_connector.so')
 
 -- Java JAR
-SET CONNECTOR LOGIC example.connector WITH (type = 'java', logic = 'target/example-connector.jar')
+CREATE CONNECTOR example.connector WITH (runner = 'java', logic = 'target/example-connector.jar')
 
 -- Docker image
-SET CONNECTOR LOGIC example.connector WITH (type = 'docker', logic = 'myorg/example-connector:latest')
+CREATE CONNECTOR example.connector WITH (runner = 'docker', logic = 'myorg/example-connector:latest')
 
 -- IPC subprocess
-SET CONNECTOR LOGIC example.connector WITH (type = 'ipc', logic = './example_connector')
+CREATE CONNECTOR example.connector WITH (runner = 'ipc', logic = './example_connector')
 
 -- Platform-specific
-SET CONNECTOR LOGIC example.connector WITH (type = 'lib', logic = './libexample_connector.so', platform = 'linux/amd64')
+CREATE CONNECTOR example.connector WITH (runner = 'lib', logic = './libexample_connector.so', platform = 'linux/amd64')
 ```
 
-### SET TEMPORARY CONNECTOR LOGIC
+### CREATE TEMPORARY CONNECTOR
 
-Configures how a connector runs for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process sources.
+Creates a connector for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process sources.
 
 ```sql
-SET TEMPORARY CONNECTOR LOGIC <name> WITH (type = '<type>', logic = '<logic>' [, platform = '<platform>'])
+CREATE TEMPORARY CONNECTOR <name> WITH (runner = '<runner>', logic = '<logic>' [, platform = '<platform>'])
 ```
 
 **Parameters:**
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `type` | Yes | Source type: `python`, `lib`, `java`, `docker`, or `ipc` |
+| `runner` | Yes | Connector runner: `python`, `lib`, `java`, `docker`, or `ipc` |
 | `logic` | Yes | What to run (e.g., `module:Class` for Python, path for others) |
 | `platform` | No | Target platform (default: `*/*`) |
 
@@ -234,42 +220,28 @@ SET TEMPORARY CONNECTOR LOGIC <name> WITH (type = '<type>', logic = '<logic>' [,
 
 ```sql
 -- Python in-process (most common use case)
-SET TEMPORARY CONNECTOR LOGIC example.connector WITH (type = 'python', logic = 'example_connector:ExampleConnector')
+CREATE TEMPORARY CONNECTOR example.connector WITH (runner = 'python', logic = 'example_connector:ExampleConnector')
 
--- Any other type also works as temporary
-SET TEMPORARY CONNECTOR LOGIC example.connector WITH (type = 'ipc', logic = './example_connector')
+-- Any other runner also works as temporary
+CREATE TEMPORARY CONNECTOR example.connector WITH (runner = 'ipc', logic = './example_connector')
 ```
 
 ### DROP CONNECTOR
 
-Removes a connector definition and all associated logic (persisted and temporary) and source instances.
+Removes a connector definition and all associated logic, or removes only logic for a specific platform.
 
 ```sql
-DROP CONNECTOR <name>
-```
-
-**Example:**
-
-```sql
-DROP CONNECTOR example.connector
-```
-
-### DROP CONNECTOR LOGIC
-
-Removes persisted connector logic. Optionally filter by platform.
-
-```sql
-DROP CONNECTOR LOGIC <name> [FOR PLATFORM '<platform>']
+DROP CONNECTOR <name> [FOR PLATFORM '<platform>']
 ```
 
 **Examples:**
 
 ```sql
--- Drop all persisted logic entries
-DROP CONNECTOR LOGIC example.connector
+-- Drop the entire connector
+DROP CONNECTOR example.connector
 
 -- Drop logic for a specific platform only
-DROP CONNECTOR LOGIC example.connector FOR PLATFORM 'linux/amd64'
+DROP CONNECTOR example.connector FOR PLATFORM 'linux/amd64'
 ```
 
 ### DROP TEMPORARY CONNECTOR LOGIC

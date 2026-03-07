@@ -2,8 +2,8 @@
 
 use crate::bundle::{BundleBuilder, CreateSourceOp};
 use crate::data::ObjectId;
-use crate::source::{AttachedFileInfo, FetchAction, SourceFunctionRegistry, SyncMode, orchestrate_fetch};
-use crate::source::source_utils;
+use crate::source::{AttachedFileInfo, FetchAction, ConnectorRegistry, SyncMode, orchestrate_fetch};
+use crate::source::connector_utils;
 use crate::BundlebaseError;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -11,14 +11,14 @@ use std::collections::HashMap;
 /// Represents a data source definition for a pack.
 ///
 /// A source specifies how to discover and list data files.
-/// All configuration is stored in function-specific arguments.
+/// All configuration is stored in connector-specific arguments.
 #[derive(Debug)]
 pub struct Source {
     id: ObjectId,
     pack: ObjectId,
-    /// Source function name (e.g., "remote_dir")
-    function: String,
-    /// Function-specific configuration arguments
+    /// Connector name (e.g., "remote_dir" for built-in, "acme.weather" for custom)
+    connector: String,
+    /// Connector-specific configuration arguments
     /// For "remote_dir": "url" (required), "patterns" (optional)
     args: HashMap<String, String>,
     /// Attached files from this source, keyed by source_location
@@ -29,13 +29,13 @@ impl Source {
     pub fn new(
         id: ObjectId,
         pack: ObjectId,
-        function: String,
+        connector: String,
         args: HashMap<String, String>,
     ) -> Self {
         Self {
             id,
             pack,
-            function,
+            connector,
             args,
             attached_files: RwLock::new(HashMap::new()),
         }
@@ -43,20 +43,20 @@ impl Source {
 
     pub fn from_op(
         op: &CreateSourceOp,
-        registry: &SourceFunctionRegistry,
+        registry: &ConnectorRegistry,
     ) -> Result<Self, BundlebaseError> {
-        if !op.function.contains('.') {
-            // Built-in function: validate it exists in the registry
+        if !op.connector.contains('.') {
+            // Built-in connector: validate it exists in the registry
             registry
-                .get(&op.function)
-                .ok_or_else(|| format!("Unknown source function '{}'", op.function))?;
+                .get(&op.connector)
+                .ok_or_else(|| format!("Unknown connector '{}'", op.connector))?;
         }
         // Dotted names are validated at check() time against source_definitions
 
         Ok(Self::new(
             op.id,
             op.pack,
-            op.function.clone(),
+            op.connector.clone(),
             op.args.clone(),
         ))
     }
@@ -69,8 +69,8 @@ impl Source {
         &self.pack
     }
 
-    pub fn function(&self) -> &str {
-        &self.function
+    pub fn connector(&self) -> &str {
+        &self.connector
     }
 
     pub fn args(&self) -> &HashMap<String, String> {
@@ -85,41 +85,41 @@ impl Source {
         builder: &BundleBuilder,
         mode: SyncMode,
     ) -> Result<Vec<FetchAction>, BundlebaseError> {
-        let (func, data_dir, config, resolved_args) = if self.function.contains('.') {
+        let (func, data_dir, config, resolved_args) = if self.connector.contains('.') {
             // Defined source: resolve logic for current platform
             let bundle = builder.bundle();
-            let def = bundle.get_connector_definition(&self.function).ok_or_else(|| {
-                format!("Connector '{}' is not defined. Use CREATE CONNECTOR first", self.function)
+            let def = bundle.get_connector_definition(&self.connector).ok_or_else(|| {
+                format!("Connector '{}' is not defined. Use CREATE CONNECTOR first", self.connector)
             })?;
             let logic = def.resolve_logic()?;
 
-            let registry_type = crate::bundle::connector_definition::resolve_registry_type(&logic.source_type)?;
-            let registry = bundle.source_function_registry();
+            let registry_type = crate::bundle::connector_definition::resolve_registry_type(&logic.runner)?;
+            let registry = bundle.connector_registry();
             let reg = registry.read();
             let func = reg
                 .create_instance(registry_type)
-                .ok_or_else(|| format!("Unknown source type '{}'", registry_type))?;
+                .ok_or_else(|| format!("Unknown connector type '{}'", registry_type))?;
 
             // Merge: inject "call" from logic (reconstructed with prefix), then overlay user args
             let mut merged_args = self.args.clone();
-            let call_string = crate::bundle::connector_definition::build_call_string(&logic.source_type, &logic.logic);
+            let call_string = crate::bundle::connector_definition::build_call_string(&logic.runner, &logic.logic);
             merged_args.insert("call".to_string(), call_string);
 
             (func, bundle.data_dir(), bundle.config(), merged_args)
         } else {
             // Built-in function: use directly
             let bundle = builder.bundle();
-            let registry = bundle.source_function_registry();
+            let registry = bundle.connector_registry();
             let reg = registry.read();
             let func = reg
-                .create_instance(&self.function)
-                .ok_or_else(|| format!("Unknown source function '{}'", self.function))?;
+                .create_instance(&self.connector)
+                .ok_or_else(|| format!("Unknown connector '{}'", self.connector))?;
             (func, bundle.data_dir(), bundle.config(), self.args.clone())
         };
 
         // Get attached files directly from self
         let attached_files = self.attached_files();
-        let should_copy = source_utils::should_copy(&resolved_args);
+        let should_copy = connector_utils::should_copy(&resolved_args);
 
         orchestrate_fetch(
             func.as_ref(),
@@ -187,19 +187,19 @@ mod tests {
         assert_eq!(source.pack(), &pack);
         assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
         assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*"));
-        assert_eq!(source.function(), "remote_dir");
+        assert_eq!(source.connector(), "remote_dir");
     }
 
     #[test]
     fn test_from_op() {
-        let registry = SourceFunctionRegistry::new();
+        let registry = ConnectorRegistry::new();
 
         let id = ObjectId::generate();
         let pack = ObjectId::generate();
         let op = CreateSourceOp {
             id,
             pack,
-            function: "remote_dir".to_string(),
+            connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
         };
 
@@ -208,20 +208,19 @@ mod tests {
         assert_eq!(source.pack(), &pack);
         assert_eq!(source.args().get("url").map(|s| s.as_str()), Some("s3://bucket/data/"));
         assert_eq!(source.args().get("patterns").map(|s| s.as_str()), Some("**/*.parquet"));
-        assert_eq!(source.function(), "remote_dir");
+        assert_eq!(source.connector(), "remote_dir");
     }
 
     #[test]
     fn test_from_op_with_extra_args() {
-        let registry = SourceFunctionRegistry::new();
-
+        let registry = ConnectorRegistry::new();
         let mut args = make_args("s3://bucket/data/", None);
         args.insert("key".to_string(), "value".to_string());
 
         let op = CreateSourceOp {
             id: ObjectId::generate(),
             pack: ObjectId::generate(),
-            function: "remote_dir".to_string(),
+            connector: "remote_dir".to_string(),
             args: args.clone(),
         };
 
@@ -234,12 +233,12 @@ mod tests {
 
     #[test]
     fn test_from_op_unknown_function() {
-        let registry = SourceFunctionRegistry::new();
+        let registry = ConnectorRegistry::new();
 
         let op = CreateSourceOp {
             id: ObjectId::generate(),
             pack: ObjectId::generate(),
-            function: "unknown_function".to_string(),
+            connector: "unknown_function".to_string(),
             args: HashMap::new(),
         };
 
@@ -248,6 +247,6 @@ mod tests {
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("Unknown source function"));
+            .contains("Unknown connector"));
     }
 }

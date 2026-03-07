@@ -1,4 +1,4 @@
-"""Abstract base class for custom source functions."""
+"""Abstract base class for connectors."""
 
 from abc import ABC, abstractmethod
 from typing import Iterator, Union
@@ -8,8 +8,8 @@ import pyarrow as pa
 from bundlebase_sdk.types import Location, StableUrl
 
 
-class SourceFunction(ABC):
-    """Base class for implementing a custom Bundlebase source function.
+class Connector(ABC):
+    """Base class for implementing a custom Bundlebase connector.
 
     Subclass this and implement discover() and data(). Optionally override
     stable_url() if your source has stable URLs for data locations.
@@ -60,3 +60,7 @@ class SourceFunction(ABC):
         Default returns None.
         """
         return None
+    
+
+# Backward-compatible alias
+SourceFunction = Connector

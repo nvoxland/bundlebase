@@ -4,17 +4,17 @@ use crate::protocol::{
     parse_location, parse_string_map, parse_string_slice, write_arrow_ipc, write_error,
     write_response, JsonRpcRequest,
 };
-use crate::source::SourceFunction;
+use crate::source::Connector;
 
 /// Run the source function as a JSON-RPC subprocess on stdin/stdout.
-pub fn serve(source: &dyn SourceFunction) {
+pub fn serve(source: &dyn Connector) {
     let stdin = std::io::stdin().lock();
     let stdout = std::io::stdout().lock();
     serve_io(source, &mut BufReader::new(stdin), &mut std::io::BufWriter::new(stdout));
 }
 
 /// Run the source function on the given reader/writer (for testing).
-pub fn serve_io(source: &dyn SourceFunction, r: &mut dyn BufRead, w: &mut dyn Write) {
+pub fn serve_io(source: &dyn Connector, r: &mut dyn BufRead, w: &mut dyn Write) {
     let mut line = String::new();
     loop {
         line.clear();
@@ -42,7 +42,7 @@ pub fn serve_io(source: &dyn SourceFunction, r: &mut dyn BufRead, w: &mut dyn Wr
     }
 }
 
-fn handle_request(source: &dyn SourceFunction, req: &JsonRpcRequest, w: &mut dyn Write) -> bool {
+fn handle_request(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn Write) -> bool {
     match req.method.as_str() {
         "discover" => handle_discover(source, req, w),
         "data" => handle_data(source, req, w),
@@ -63,7 +63,7 @@ fn handle_request(source: &dyn SourceFunction, req: &JsonRpcRequest, w: &mut dyn
     false
 }
 
-fn handle_discover(source: &dyn SourceFunction, req: &JsonRpcRequest, w: &mut dyn Write) {
+fn handle_discover(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn Write) {
     let attached = parse_string_slice(req.params.get("attached_locations"));
     let args = parse_string_map(&req.params, &["attached_locations"]);
 
@@ -81,7 +81,7 @@ fn handle_discover(source: &dyn SourceFunction, req: &JsonRpcRequest, w: &mut dy
     }
 }
 
-fn handle_data(source: &dyn SourceFunction, req: &JsonRpcRequest, w: &mut dyn Write) {
+fn handle_data(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn Write) {
     let location = parse_location(req.params.get("location"));
     let args = parse_string_map(&req.params, &["location"]);
 
@@ -98,7 +98,7 @@ fn handle_data(source: &dyn SourceFunction, req: &JsonRpcRequest, w: &mut dyn Wr
     }
 }
 
-fn handle_stable_url(source: &dyn SourceFunction, req: &JsonRpcRequest, w: &mut dyn Write) {
+fn handle_stable_url(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn Write) {
     let location = parse_location(req.params.get("location"));
     let args = parse_string_map(&req.params, &["location"]);
 
@@ -134,7 +134,7 @@ mod tests {
 
     struct TestSource;
 
-    impl SourceFunction for TestSource {
+    impl Connector for TestSource {
         fn discover(
             &self,
             _attached: &[String],
@@ -201,7 +201,7 @@ mod tests {
 
     struct ErrorSource;
 
-    impl SourceFunction for ErrorSource {
+    impl Connector for ErrorSource {
         fn discover(
             &self,
             _attached: &[String],

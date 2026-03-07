@@ -1,13 +1,13 @@
 use arrow::array::{Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use bundlebase_sdk::{Location, SourceFunction};
+use bundlebase_sdk::{Location, Connector};
 use std::collections::HashMap;
 use std::sync::Arc;
 
 struct TestSource;
 
-impl SourceFunction for TestSource {
+impl Connector for TestSource {
     fn discover(
         &self,
         _attached: &[String],

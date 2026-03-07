@@ -412,37 +412,37 @@ impl PyBundle {
 
     /// Set temporary (runtime-only) connector logic for a connector.
     ///
-    /// This does NOT persist the logic — it only sets it for the current session.
-    #[pyo3(signature = (name, type_, logic, platform="*/*"))]
-    fn set_temporary_connector_logic<'py>(
+    /// Create a temporary connector with runtime-only logic (not persisted).
+    #[pyo3(signature = (name, runner, logic, platform="*/*"))]
+    fn create_temporary_connector<'py>(
         &self,
         name: &str,
-        type_: &str,
+        runner: &str,
         logic: &str,
         platform: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let name = name.to_string();
-        let source_type = type_.to_string();
+        let runner = runner.to_string();
         let logic = logic.to_string();
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let entry = ::bundlebase::bundle::ConnectorLogicEntry {
-                source_type,
+                runner,
                 logic,
                 platform,
             };
             inner
-                .set_temporary_connector_logic(&name, entry)
+                .create_temporary_connector(&name, entry)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to set temporary connector logic: {}",
+                        "Failed to create temporary connector: {}",
                         e
                     ))
                 })?;
-            Ok(format!("Set temporary connector logic for: {}", name))
+            Ok(format!("Created temporary connector: {}", name))
         })
     }
 

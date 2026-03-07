@@ -6,11 +6,11 @@ import struct
 
 import pyarrow as pa
 
-from bundlebase_sdk import SourceFunction, Location, StableUrl
+from bundlebase_sdk import Connector, Location, StableUrl
 from bundlebase_sdk.serve import _serve
 
 
-class SimpleSource(SourceFunction):
+class SimpleSource(Connector):
     """A minimal source for testing."""
 
     def discover(self, attached_locations, **kwargs):
@@ -30,7 +30,7 @@ class SimpleSource(SourceFunction):
         return None
 
 
-class MultiReturnSource(SourceFunction):
+class MultiReturnSource(Connector):
     """Source that tests different data return types."""
 
     def discover(self, attached_locations, **kwargs):
@@ -112,7 +112,7 @@ class TestServeDiscover:
     def test_discover_passes_extra_kwargs(self):
         """Extra params (besides attached_locations) are passed as kwargs."""
 
-        class KwargsSource(SourceFunction):
+        class KwargsSource(Connector):
             def discover(self, attached_locations, **kwargs):
                 # Echo back kwargs as a location name
                 name = kwargs.get("custom_arg", "missing")
@@ -221,7 +221,7 @@ class TestServeErrorHandling:
         assert "Method not found" in resp["error"]["message"]
 
     def test_user_exception_wrapped(self):
-        class BrokenSource(SourceFunction):
+        class BrokenSource(Connector):
             def discover(self, attached_locations, **kwargs):
                 raise ValueError("something broke")
 
