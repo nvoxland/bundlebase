@@ -122,9 +122,92 @@ The `data()` method supports several return types:
 | `pa.Table` | PyArrow Table (most common) |
 | `pa.RecordBatch` | Single record batch |
 | `list[pa.RecordBatch]` | Multiple batches (streaming) |
-| `list[dict]` | List of row dicts (auto-converted to Arrow) |
-| `Iterator[dict]` | Lazy iterator of dicts (auto-converted) |
+| `list[dict]` | List of row dicts (requires `schema()`) |
+| `dict[str, list]` | Column-oriented dict (requires `schema()`) |
+| `Iterator[dict]` | Lazy iterator of dicts (requires `schema()`) |
 | `None` | No data for this location |
+
+## Schema-Driven Connectors
+
+Instead of constructing PyArrow objects directly, you can define a `schema()` method with simple Python type strings and return plain Python data structures. The SDK handles Arrow conversion automatically.
+
+### Defining a Schema
+
+Override `schema()` to return a dict mapping column names to type strings:
+
+```python
+class MyConnector(Connector):
+    def schema(self):
+        return {"name": "string", "age": "int32", "score": "float64", "active": "bool"}
+```
+
+Supported type strings:
+
+| Type String | Arrow Type | Aliases |
+|------------|------------|---------|
+| `string` | `pa.string()` | `utf8` |
+| `int64` | `pa.int64()` | `int` |
+| `int8`, `int16`, `int32` | `pa.int8()`, etc. | |
+| `uint8`, `uint16`, `uint32`, `uint64` | `pa.uint8()`, etc. | |
+| `float64` | `pa.float64()` | `float`, `double` |
+| `float16`, `float32` | `pa.float16()`, etc. | |
+| `bool` | `pa.bool_()` | `boolean` |
+| `date32` | `pa.date32()` | `date` |
+| `date64` | `pa.date64()` | |
+| `timestamp` | `pa.timestamp("us")` | |
+| `binary` | `pa.binary()` | `bytes` |
+
+### Returning Column-Oriented Dicts
+
+With a schema defined, you can return data as `dict[str, list]`:
+
+```python
+class MyConnector(Connector):
+    def schema(self):
+        return {"name": "string", "age": "int32"}
+
+    def discover(self, attached_locations, **kwargs):
+        return [Location("people")]
+
+    def data(self, location, **kwargs):
+        return {"name": ["alice", "bob"], "age": [30, 25]}
+```
+
+### Returning Row-Oriented Dicts
+
+You can also return `list[dict]` — the schema ensures correct types:
+
+```python
+def data(self, location, **kwargs):
+    return [{"name": "alice", "age": 30}, {"name": "bob", "age": 25}]
+```
+
+A `schema()` method is required when returning dict data (`list[dict]`, `dict[str, list]`, or iterator of dicts). Returning dict data without a schema raises a `ValueError`.
+
+### Full Schema Example
+
+```python
+from bundlebase_sdk import Connector, Location, serve
+
+
+class SensorConnector(Connector):
+    def schema(self):
+        return {"sensor_id": "string", "temperature": "float32", "reading_count": "int32"}
+
+    def discover(self, attached_locations, **kwargs):
+        return [Location("readings")]
+
+    def data(self, location, **kwargs):
+        return {
+            "sensor_id": ["s1", "s2", "s3"],
+            "temperature": [22.5, 19.8, 25.1],
+            "reading_count": [100, 85, 120],
+        }
+
+
+if __name__ == "__main__":
+    serve(SensorConnector())
+```
 
 ## Complete Example
 

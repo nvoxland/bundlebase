@@ -11,7 +11,10 @@ import java.util.*;
 /**
  * Entry point for running a connector as a JSON-RPC subprocess.
  */
+
 public class Serve {
+
+    private static final BufferAllocator ALLOCATOR = new RootAllocator();
 
     /**
      * Run the connector on stdin/stdout.
@@ -95,7 +98,8 @@ public class Serve {
         Location location = Protocol.parseLocation(params != null ? params.get("location") : null);
         Map<String, String> args = Protocol.parseStringMap(params, "location");
 
-        VectorSchemaRoot root = source.data(location, args);
+        Object data = source.data(location, args);
+        VectorSchemaRoot root = Protocol.normalizeToRoot(data, source.schema(), ALLOCATOR);
 
         Protocol.writeResponse(out, id, Map.of("ok", true));
         Protocol.writeArrowIPC(out, root);

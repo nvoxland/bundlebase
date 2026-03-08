@@ -1,5 +1,6 @@
 //! DropConnector operation — removes a connector definition, or specific platform logic.
 
+use crate::bundle::connector_definition::Platform;
 use crate::bundle::operation::Operation;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
@@ -17,11 +18,11 @@ pub struct DropConnectorOp {
     /// Full dotted connector name (e.g., "acme.datasources.weather")
     pub source_name: String,
     /// Optional platform filter (e.g., "linux/amd64"). None means drop the entire connector.
-    pub platform: Option<String>,
+    pub platform: Option<Platform>,
 }
 
 impl DropConnectorOp {
-    pub fn new(source_name: String, platform: Option<String>) -> Self {
+    pub fn new(source_name: String, platform: Option<Platform>) -> Self {
         Self {
             source_name,
             platform,
@@ -39,23 +40,12 @@ impl Operation for DropConnectorOp {
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        if bundle.get_connector_definition(&self.source_name).is_none() {
+        if !bundle.has_connector_entry(&self.source_name) {
             return Err(format!(
                 "Connector '{}' is not defined. Use CREATE CONNECTOR first.",
                 self.source_name
             )
             .into());
-        }
-
-        // Validate platform format if provided
-        if let Some(ref platform) = self.platform {
-            if !platform.contains('/') {
-                return Err(format!(
-                    "Invalid platform '{}'. Must be in os/arch format (e.g., 'linux/amd64', '*/*').",
-                    platform
-                )
-                .into());
-            }
         }
 
         Ok(())
@@ -68,15 +58,15 @@ impl Operation for DropConnectorOp {
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         match &self.platform {
             None => {
-                // Drop the entire connector definition
+                // Drop the entire connector (all entries + associated sources)
                 bundle
-                    .remove_connector_definition(&self.source_name)
+                    .remove_connector_entries(&self.source_name)
                     .map_err(|e| DataFusionError::Execution(e.to_string()))?;
             }
-            Some(_) => {
-                // Drop only logic for the specified platform
+            Some(ref p) => {
+                // Drop only entries for the specified platform
                 bundle
-                    .remove_connector_logic(&self.source_name, self.platform.as_deref())
+                    .remove_connector_entry(&self.source_name, Some(p), false)
                     .map_err(|e| DataFusionError::Execution(e.to_string()))?;
             }
         }
@@ -87,7 +77,7 @@ impl Operation for DropConnectorOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::connector_definition::{ConnectorDefinition, ConnectorLogicEntry};
+    use crate::bundle::connector_definition::{ConnectorEntry, Platform, Runner};
 
     #[test]
     fn test_describe_without_platform() {
@@ -99,7 +89,7 @@ mod tests {
     fn test_describe_with_platform() {
         let op = DropConnectorOp::new(
             "acme.weather".to_string(),
-            Some("linux/amd64".to_string()),
+            Some("linux/amd64".parse().unwrap()),
         );
         assert_eq!(
             op.describe(),
@@ -119,7 +109,7 @@ mod tests {
     fn test_serialization_with_platform() {
         let op = DropConnectorOp::new(
             "acme.weather".to_string(),
-            Some("linux/amd64".to_string()),
+            Some("linux/amd64".parse().unwrap()),
         );
         let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
         let deser: DropConnectorOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
@@ -138,7 +128,13 @@ mod tests {
     #[tokio::test]
     async fn test_check_source_defined() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        bundle.add_connector_definition(ConnectorDefinition::new("acme.weather".to_string()));
+        bundle.add_connector_entry(ConnectorEntry {
+            name: "acme.weather".to_string(),
+            runner: Runner::Lib,
+            logic: "test".to_string(),
+            platform: Platform::any(),
+            temporary: false,
+        });
 
         let op = DropConnectorOp::new("acme.weather".to_string(), None);
         let result = op.check(&bundle).await;
@@ -146,106 +142,73 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_invalid_platform() {
+    async fn test_apply_removes_entries() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        bundle.add_connector_definition(ConnectorDefinition::new("acme.weather".to_string()));
-
-        let op = DropConnectorOp::new(
-            "acme.weather".to_string(),
-            Some("invalid".to_string()),
-        );
-        let result = op.check(&bundle).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid platform"));
-    }
-
-    #[tokio::test]
-    async fn test_apply_removes_definition() {
-        let bundle = Bundle::empty(None).await.expect("empty bundle");
-        bundle.add_connector_definition(ConnectorDefinition::new("acme.weather".to_string()));
-        bundle
-            .add_connector_logic(
-                "acme.weather",
-                ConnectorLogicEntry {
-                    runner: "lib".to_string(),
-                    logic: "test".to_string(),
-                    platform: "*/*".to_string(),
-                },
-            )
-            .expect("add logic");
+        bundle.add_connector_entry(ConnectorEntry {
+            name: "acme.weather".to_string(),
+            runner: Runner::Lib,
+            logic: "test".to_string(),
+            platform: Platform::any(),
+            temporary: false,
+        });
 
         let op = DropConnectorOp::new("acme.weather".to_string(), None);
         op.apply(&bundle).await.expect("apply");
 
-        assert!(bundle.get_connector_definition("acme.weather").is_none());
+        assert!(!bundle.has_connector_entry("acme.weather"));
     }
 
     #[tokio::test]
-    async fn test_apply_removes_all_logic() {
+    async fn test_apply_removes_all_entries() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        bundle.add_connector_definition(ConnectorDefinition::new("acme.weather".to_string()));
-        bundle
-            .add_connector_logic(
-                "acme.weather",
-                ConnectorLogicEntry {
-                    runner: "lib".to_string(),
-                    logic: "test1".to_string(),
-                    platform: "*/*".to_string(),
-                },
-            )
-            .expect("add logic");
-        bundle
-            .add_connector_logic(
-                "acme.weather",
-                ConnectorLogicEntry {
-                    runner: "lib".to_string(),
-                    logic: "test2".to_string(),
-                    platform: "linux/amd64".to_string(),
-                },
-            )
-            .expect("add logic");
+        bundle.add_connector_entry(ConnectorEntry {
+            name: "acme.weather".to_string(),
+            runner: Runner::Lib,
+            logic: "test1".to_string(),
+            platform: Platform::any(),
+            temporary: false,
+        });
+        bundle.add_connector_entry(ConnectorEntry {
+            name: "acme.weather".to_string(),
+            runner: Runner::Lib,
+            logic: "test2".to_string(),
+            platform: "linux/amd64".parse().unwrap(),
+            temporary: false,
+        });
 
         // Drop entire connector
         let op = DropConnectorOp::new("acme.weather".to_string(), None);
         op.apply(&bundle).await.expect("apply");
 
-        assert!(bundle.get_connector_definition("acme.weather").is_none());
+        assert!(!bundle.has_connector_entry("acme.weather"));
     }
 
     #[tokio::test]
     async fn test_apply_removes_platform_specific() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        bundle.add_connector_definition(ConnectorDefinition::new("acme.weather".to_string()));
-        bundle
-            .add_connector_logic(
-                "acme.weather",
-                ConnectorLogicEntry {
-                    runner: "lib".to_string(),
-                    logic: "wildcard".to_string(),
-                    platform: "*/*".to_string(),
-                },
-            )
-            .expect("add logic");
-        bundle
-            .add_connector_logic(
-                "acme.weather",
-                ConnectorLogicEntry {
-                    runner: "lib".to_string(),
-                    logic: "linux-specific".to_string(),
-                    platform: "linux/amd64".to_string(),
-                },
-            )
-            .expect("add logic");
+        bundle.add_connector_entry(ConnectorEntry {
+            name: "acme.weather".to_string(),
+            runner: Runner::Lib,
+            logic: "wildcard".to_string(),
+            platform: Platform::any(),
+            temporary: false,
+        });
+        bundle.add_connector_entry(ConnectorEntry {
+            name: "acme.weather".to_string(),
+            runner: Runner::Lib,
+            logic: "linux-specific".to_string(),
+            platform: "linux/amd64".parse().unwrap(),
+            temporary: false,
+        });
 
         let op = DropConnectorOp::new(
             "acme.weather".to_string(),
-            Some("linux/amd64".to_string()),
+            Some("linux/amd64".parse().unwrap()),
         );
         op.apply(&bundle).await.expect("apply");
 
         // Wildcard entry should remain
-        let def = bundle.get_connector_definition("acme.weather").expect("def");
-        let resolved = def.resolve_logic().expect("should resolve");
+        let resolved = bundle.resolve_connector("acme.weather").expect("should resolve");
         assert_eq!(resolved.logic, "wildcard");
     }
 }

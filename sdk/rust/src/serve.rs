@@ -6,14 +6,14 @@ use crate::protocol::{
 };
 use crate::source::Connector;
 
-/// Run the source function as a JSON-RPC subprocess on stdin/stdout.
+/// Run the connector as a JSON-RPC subprocess on stdin/stdout.
 pub fn serve(source: &dyn Connector) {
     let stdin = std::io::stdin().lock();
     let stdout = std::io::stdout().lock();
     serve_io(source, &mut BufReader::new(stdin), &mut std::io::BufWriter::new(stdout));
 }
 
-/// Run the source function on the given reader/writer (for testing).
+/// Run the connector on the given reader/writer (for testing).
 pub fn serve_io(source: &dyn Connector, r: &mut dyn BufRead, w: &mut dyn Write) {
     let mut line = String::new();
     loop {

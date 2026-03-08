@@ -428,13 +428,14 @@ impl PyBundle {
         let logic = logic.to_string();
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let entry = ::bundlebase::bundle::ConnectorLogicEntry {
-                runner,
-                logic,
-                platform,
-            };
+            let runner: ::bundlebase::bundle::Runner = runner.parse().map_err(|e: ::bundlebase::BundlebaseError| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+            })?;
+            let platform: ::bundlebase::bundle::Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+            })?;
             inner
-                .create_temporary_connector(&name, entry)
+                .create_temporary_connector(&name, runner, logic, platform)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -462,10 +463,15 @@ impl PyBundle {
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let name = name.to_string();
-        let platform = platform.map(|s| s.to_string());
+        let platform: Option<::bundlebase::bundle::Platform> = platform
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|e: ::bundlebase::BundlebaseError| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+            })?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let count = inner
-                .drop_temporary_connector_logic(&name, platform.as_deref())
+                .drop_temporary_connector_logic(&name, platform.as_ref())
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(

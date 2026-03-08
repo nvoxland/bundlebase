@@ -7,6 +7,7 @@ import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.ipc.ArrowStreamReader;
+import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -126,6 +127,146 @@ public class ServeTest {
 
         int length = ByteBuffer.wrap(out, newlineIdx, 4).getInt();
         assertEquals("Expected zero-length frame for no data", 0, length);
+    }
+
+    // -- Schema-driven connector tests --
+
+    private static Connector schemaSource() {
+        return new Connector() {
+            @Override
+            public Map<String, String> schema() {
+                // Use LinkedHashMap to preserve column order
+                Map<String, String> s = new LinkedHashMap<>();
+                s.put("name", "string");
+                s.put("score", "float32");
+                return s;
+            }
+
+            @Override
+            public List<Location> discover(List<String> attached, Map<String, String> args) {
+                return List.of(new Location("col_dict"), new Location("row_dicts"));
+            }
+
+            @Override
+            public Object data(Location location, Map<String, String> args) {
+                if ("col_dict".equals(location.location())) {
+                    Map<String, List<?>> cols = new LinkedHashMap<>();
+                    cols.put("name", List.of("alice", "bob"));
+                    cols.put("score", List.of(9.5, 8.0));
+                    return cols;
+                } else if ("row_dicts".equals(location.location())) {
+                    return List.of(
+                        Map.of("name", "charlie", "score", 7.5)
+                    );
+                }
+                return null;
+            }
+        };
+    }
+
+    @Test
+    public void testColumnDictWithSchema() throws Exception {
+        ByteArrayOutputStream input = new ByteArrayOutputStream();
+        input.write(makeRequest("data", Map.of("location", Map.of("location", "col_dict")), 1));
+        input.write(makeRequest("shutdown", null, 2));
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        Serve.run(schemaSource(), new ByteArrayInputStream(input.toByteArray()), output);
+
+        byte[] out = output.toByteArray();
+        int newlineIdx = 0;
+        while (newlineIdx < out.length && out[newlineIdx] != '\n') newlineIdx++;
+        newlineIdx++;
+
+        int length = ByteBuffer.wrap(out, newlineIdx, 4).getInt();
+        assertTrue("Expected non-zero Arrow IPC data", length > 0);
+
+        BufferAllocator allocator = new RootAllocator();
+        byte[] ipcData = Arrays.copyOfRange(out, newlineIdx + 4, newlineIdx + 4 + length);
+        ArrowStreamReader reader = new ArrowStreamReader(new ByteArrayInputStream(ipcData), allocator);
+        assertTrue(reader.loadNextBatch());
+
+        VectorSchemaRoot root = reader.getVectorSchemaRoot();
+        assertEquals(2, root.getRowCount());
+
+        // Verify schema types
+        assertEquals(new ArrowType.Utf8(), root.getVector("name").getField().getType());
+        assertEquals(
+            new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE),
+            root.getVector("score").getField().getType());
+
+        reader.close();
+        allocator.close();
+    }
+
+    @Test
+    public void testRowDictsWithSchema() throws Exception {
+        ByteArrayOutputStream input = new ByteArrayOutputStream();
+        input.write(makeRequest("data", Map.of("location", Map.of("location", "row_dicts")), 1));
+        input.write(makeRequest("shutdown", null, 2));
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        Serve.run(schemaSource(), new ByteArrayInputStream(input.toByteArray()), output);
+
+        byte[] out = output.toByteArray();
+        int newlineIdx = 0;
+        while (newlineIdx < out.length && out[newlineIdx] != '\n') newlineIdx++;
+        newlineIdx++;
+
+        int length = ByteBuffer.wrap(out, newlineIdx, 4).getInt();
+        assertTrue("Expected non-zero Arrow IPC data", length > 0);
+
+        BufferAllocator allocator = new RootAllocator();
+        byte[] ipcData = Arrays.copyOfRange(out, newlineIdx + 4, newlineIdx + 4 + length);
+        ArrowStreamReader reader = new ArrowStreamReader(new ByteArrayInputStream(ipcData), allocator);
+        assertTrue(reader.loadNextBatch());
+
+        VectorSchemaRoot root = reader.getVectorSchemaRoot();
+        assertEquals(1, root.getRowCount());
+        assertEquals(
+            new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE),
+            root.getVector("score").getField().getType());
+
+        reader.close();
+        allocator.close();
+    }
+
+    @Test
+    public void testSchemaToArrowUnknownType() {
+        try {
+            TypeMap.schemaToArrow(Map.of("col", "bigint"));
+            fail("Expected IllegalArgumentException");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("Unknown type 'bigint'"));
+        }
+    }
+
+    @Test
+    public void testDictWithoutSchemaRaises() throws Exception {
+        Connector noSchemaSource = new Connector() {
+            @Override
+            public List<Location> discover(List<String> attached, Map<String, String> args) {
+                return List.of(new Location("test"));
+            }
+
+            @Override
+            public Object data(Location location, Map<String, String> args) {
+                return List.of(Map.of("name", "alice"));
+            }
+        };
+
+        ByteArrayOutputStream input = new ByteArrayOutputStream();
+        input.write(makeRequest("data", Map.of("location", Map.of("location", "test")), 1));
+        input.write(makeRequest("shutdown", null, 2));
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        Serve.run(noSchemaSource, new ByteArrayInputStream(input.toByteArray()), output);
+
+        // The error is caught by Serve and returned as a JSON-RPC error
+        String[] lines = output.toString().split("\n");
+        JsonNode resp = MAPPER.readTree(lines[0]);
+        assertEquals(-32000, resp.get("error").get("code").asInt());
+        assertTrue(resp.get("error").get("message").asText().contains("schema() is required"));
     }
 
     @Test

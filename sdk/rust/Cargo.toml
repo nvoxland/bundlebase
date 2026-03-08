@@ -6,7 +6,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "SDK for writing Bundlebase custom source functions"
+description = "SDK for writing Bundlebase custom connectors"
 
 [dependencies]
 arrow = { workspace = true }

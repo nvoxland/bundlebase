@@ -66,16 +66,8 @@ impl Operation for CreateSourceOp {
         }
 
         if self.connector.contains('.') {
-            // Dotted name: look up in source definitions
-            let def = bundle.get_connector_definition(&self.connector).ok_or_else(|| {
-                format!(
-                    "Connector '{}' is not defined. Use CREATE CONNECTOR first.",
-                    self.connector
-                )
-            })?;
-
-            // Verify that at least one logic entry matches the current platform
-            def.resolve_logic()?;
+            // Dotted name: verify connector exists and resolves for current platform
+            bundle.resolve_connector(&self.connector)?;
         } else {
             // Built-in function: look up in registry
             let registry = bundle.connector_registry();

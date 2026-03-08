@@ -69,7 +69,7 @@ def _handle_data(
     data = source.data(location, **kwargs)
 
     write_response(stdout, req_id, {"ok": True})
-    batches = normalize_to_batches(data)
+    batches = normalize_to_batches(data, schema=source.schema())
     write_arrow_ipc(stdout, batches)
 
 

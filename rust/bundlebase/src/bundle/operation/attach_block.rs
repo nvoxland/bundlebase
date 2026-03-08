@@ -23,7 +23,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceInfo {
-    /// The source function ID that fetched this block
+    /// The source ID that fetched this block
     pub id: ObjectId,
     /// The original source location (e.g., remote URL) where data was fetched from
     pub location: String,

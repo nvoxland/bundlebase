@@ -195,7 +195,7 @@ async fn get_data_for_location(
         }
     } else {
         Err(format!(
-            "Source function returned neither data nor stable_url for location '{}'",
+            "Connector returned neither data nor stable_url for location '{}'",
             location.location
         )
         .into())

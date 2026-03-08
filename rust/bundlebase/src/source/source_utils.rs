@@ -1,11 +1,10 @@
-//! Shared utilities for source functions.
+//! Shared utilities for connectors.
 //!
-//! Provides common functionality used by multiple source function implementations,
+//! Provides common functionality used by multiple connector implementations,
 //! and the `orchestrate_fetch` function that handles sync mode logic.
 
-use super::source_function::{
-    AttachedFileInfo, DiscoveredLocation, FetchAction, MaterializedData, SourceData,
-    SourceFunction,
+use super::connector::{
+    AttachedFileInfo, Connector, DiscoveredLocation, FetchAction, MaterializedData, SourceData,
 };
 use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
@@ -345,7 +344,7 @@ struct FetchedData {
 
 /// Get data for a discovered location using data() or stable_url().
 async fn get_data_for_location(
-    func: &dyn SourceFunction,
+    func: &dyn Connector,
     location: &DiscoveredLocation,
     args: &HashMap<String, String>,
     config: &Arc<BundleConfig>,
@@ -406,7 +405,7 @@ async fn get_data_for_location(
         }
     } else {
         Err(format!(
-            "Source function returned neither data nor stable_url for location '{}'",
+            "Connector returned neither data nor stable_url for location '{}'",
             location.location
         )
         .into())
@@ -426,7 +425,7 @@ async fn get_data_for_location(
 /// 3. For Sync mode: emit Remove for attached locations not in discovered set
 /// 4. "Get data" tries `func.data()` first, then `func.stable_url()`
 pub async fn orchestrate_fetch(
-    func: &dyn SourceFunction,
+    func: &dyn Connector,
     args: &HashMap<String, String>,
     mode: SyncMode,
     should_copy: bool,

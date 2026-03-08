@@ -33,6 +33,9 @@ class SimpleSource(Connector):
 class MultiReturnSource(Connector):
     """Source that tests different data return types."""
 
+    def schema(self):
+        return {"x": "int64"}
+
     def discover(self, attached_locations, **kwargs):
         return [
             Location("table"),
@@ -238,6 +241,53 @@ class TestServeErrorHandling:
         resp, _ = _read_response(stdout.getvalue())
         assert resp["error"]["code"] == -32000
         assert "something broke" in resp["error"]["message"]
+
+
+class SchemaSource(Connector):
+    """Source that uses schema() and returns column-oriented dicts."""
+
+    def schema(self):
+        return {"name": "string", "score": "float32"}
+
+    def discover(self, attached_locations, **kwargs):
+        return [Location("col_dict"), Location("row_dicts")]
+
+    def data(self, location, **kwargs):
+        if location.location == "col_dict":
+            return {"name": ["alice", "bob"], "score": [9.5, 8.0]}
+        elif location.location == "row_dicts":
+            return [{"name": "charlie", "score": 7.5}]
+        return None
+
+
+class TestServeSchemaConnector:
+    def _fetch_data(self, location_name):
+        stdin = io.BytesIO(
+            _make_request(
+                "data",
+                {"location": {"location": location_name}},
+                req_id=1,
+            )
+            + _make_request("shutdown", req_id=2)
+        )
+        stdout = io.BytesIO()
+        _serve(SchemaSource(), stdin, stdout)
+        out = stdout.getvalue()
+        _, offset = _read_response(out)
+        table, _ = _read_arrow_frame(out, offset)
+        return table
+
+    def test_column_dict_with_schema(self):
+        table = self._fetch_data("col_dict")
+        assert table.num_rows == 2
+        assert table.schema.field("name").type == pa.string()
+        assert table.schema.field("score").type == pa.float32()
+        assert table.column("name").to_pylist() == ["alice", "bob"]
+
+    def test_row_dicts_with_schema(self):
+        table = self._fetch_data("row_dicts")
+        assert table.num_rows == 1
+        assert table.schema.field("score").type == pa.float32()
 
 
 class TestServeMultiReturnTypes:

@@ -33,7 +33,7 @@ pub use indexed_blocks::IndexedBlocks;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
 pub use source::Source;
-pub use connector_definition::{ConnectorDefinition, ConnectorLogicEntry};
+pub use connector_definition::{ConnectorEntry, Platform, Runner};
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA};
@@ -98,7 +98,7 @@ pub struct Bundle {
     pub(crate) reader_factory: Arc<DataReaderFactory>,
     function_registry: Arc<RwLock<FunctionRegistry>>,
     connector_registry: Arc<RwLock<ConnectorRegistry>>,
-    connector_definitions: Arc<RwLock<HashMap<String, Arc<ConnectorDefinition>>>>,
+    connector_entries: Arc<RwLock<Vec<ConnectorEntry>>>,
 
     /// Single, self-contained, internally thread-safe config holder.
     /// All config sources (stored, env, passed, runtime) live inside BundleConfig.
@@ -148,7 +148,7 @@ impl Clone for Bundle {
             reader_factory: Arc::clone(&self.reader_factory),
             function_registry: Arc::clone(&self.function_registry),
             connector_registry: Arc::clone(&self.connector_registry),
-            connector_definitions: Arc::clone(&self.connector_definitions),
+            connector_entries: Arc::clone(&self.connector_entries),
             config: Arc::clone(&self.config),
             is_view: Arc::clone(&self.is_view),
             has_temporary_logic: Arc::clone(&self.has_temporary_logic),
@@ -220,7 +220,7 @@ impl Bundle {
                 .into(),
             function_registry,
             connector_registry,
-            connector_definitions: Arc::new(RwLock::new(HashMap::new())),
+            connector_entries: Arc::new(RwLock::new(Vec::new())),
             name,
             description,
             operations,
@@ -754,64 +754,59 @@ impl Bundle {
         self.sources.read().clone()
     }
 
-    /// Add a connector definition to the bundle.
-    pub(crate) fn add_connector_definition(&self, definition: ConnectorDefinition) {
-        self.connector_definitions
-            .write()
-            .insert(definition.name.clone(), Arc::new(definition));
+    /// Add a connector entry to the bundle.
+    pub(crate) fn add_connector_entry(&self, entry: ConnectorEntry) {
+        self.connector_entries.write().push(entry);
     }
 
-    /// Get a connector definition by its dotted name.
-    pub(crate) fn get_connector_definition(&self, name: &str) -> Option<Arc<ConnectorDefinition>> {
-        self.connector_definitions.read().get(name).cloned()
+    /// Resolve the best connector entry for the current platform.
+    pub(crate) fn resolve_connector(&self, name: &str) -> Result<ConnectorEntry, BundlebaseError> {
+        let entries = self.connector_entries.read();
+        connector_definition::resolve_connector(&entries, name)
     }
 
-    /// Add logic to an existing connector definition.
-    pub(crate) fn add_connector_logic(
-        &self,
-        name: &str,
-        entry: ConnectorLogicEntry,
-    ) -> Result<(), BundlebaseError> {
-        let defs = self.connector_definitions.read();
-        let def = defs.get(name).ok_or_else(|| {
-            format!("Connector '{}' not defined. Use CREATE CONNECTOR first.", name)
-        })?;
-        def.add_logic(entry);
-        Ok(())
+    /// Check if any connector entry exists for the given name.
+    pub(crate) fn has_connector_entry(&self, name: &str) -> bool {
+        self.connector_entries.read().iter().any(|e| e.name == name)
     }
 
-    /// Remove a connector definition and all associated sources.
-    pub(crate) fn remove_connector_definition(&self, name: &str) -> Result<(), BundlebaseError> {
-        // Remove any Source entries that reference this definition
+    /// Remove all connector entries for a name, plus associated sources.
+    pub(crate) fn remove_connector_entries(&self, name: &str) -> Result<(), BundlebaseError> {
+        // Remove any Source entries that reference this connector
         let mut sources = self.sources.write();
         sources.retain(|_, source| source.connector() != name);
         drop(sources);
 
-        // Remove the definition itself
-        let mut defs = self.connector_definitions.write();
-        defs.remove(name).ok_or_else(|| {
-            format!("Connector '{}' not defined. Use CREATE CONNECTOR first.", name)
-        })?;
+        // Remove all connector entries for this name
+        let mut entries = self.connector_entries.write();
+        entries.retain(|e| e.name != name);
         Ok(())
     }
 
-    /// Remove logic entries from a connector definition.
-    /// If `platform` is None, removes all logic. Otherwise removes only matching platform.
-    /// Returns the number of entries removed.
-    pub(crate) fn remove_connector_logic(
+    /// Remove matching connector entries. Returns the number removed.
+    pub(crate) fn remove_connector_entry(
         &self,
         name: &str,
-        platform: Option<&str>,
+        platform: Option<&connector_definition::Platform>,
+        temporary_only: bool,
     ) -> Result<usize, BundlebaseError> {
-        let defs = self.connector_definitions.read();
-        let def = defs.get(name).ok_or_else(|| {
-            format!("Connector '{}' not defined. Use CREATE CONNECTOR first.", name)
-        })?;
-        let count = match platform {
-            Some(p) => def.remove_logic_for_platform(p),
-            None => def.remove_all_logic(),
-        };
-        Ok(count)
+        let mut entries = self.connector_entries.write();
+        let before = entries.len();
+        entries.retain(|e| {
+            if e.name != name {
+                return true; // keep: different name
+            }
+            if temporary_only && !e.temporary {
+                return true; // keep: not temporary
+            }
+            if let Some(p) = platform {
+                if &e.platform != p {
+                    return true; // keep: different platform
+                }
+            }
+            false // remove
+        });
+        Ok(before - entries.len())
     }
 
     pub(crate) fn has_temporary_logic(&self) -> bool {
@@ -1358,15 +1353,17 @@ impl BundleFacade for Bundle {
     async fn create_temporary_connector(
         &self,
         name: &str,
-        entry: crate::bundle::connector_definition::ConnectorLogicEntry,
+        runner: Runner,
+        logic: String,
+        platform: connector_definition::Platform,
     ) -> Result<(), BundlebaseError> {
-        // Create connector definition if it doesn't exist
-        if self.get_connector_definition(name).is_none() {
-            self.add_connector_definition(
-                crate::bundle::connector_definition::ConnectorDefinition::new(name.to_string()),
-            );
-        }
-        self.add_connector_logic(name, entry)?;
+        self.add_connector_entry(ConnectorEntry {
+            name: name.to_string(),
+            runner,
+            logic,
+            platform,
+            temporary: true,
+        });
         self.mark_temporary_logic();
         self.refresh_version_udf("TEMP".to_string());
         Ok(())
@@ -1375,9 +1372,9 @@ impl BundleFacade for Bundle {
     async fn drop_temporary_connector_logic(
         &self,
         name: &str,
-        platform: Option<&str>,
+        platform: Option<&connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError> {
-        self.remove_connector_logic(name, platform)
+        self.remove_connector_entry(name, platform, true)
     }
 
     async fn set_config(
@@ -1585,17 +1582,17 @@ mod tests {
     #[tokio::test]
     async fn test_create_temporary_connector_changes_version_to_temp() -> Result<(), BundlebaseError> {
         use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::ConnectorLogicEntry;
+        use crate::bundle::connector_definition::Runner;
 
         let bundle = Bundle::empty(None).await?;
         assert_eq!(bundle.version(), "empty");
 
-        let entry = ConnectorLogicEntry {
-            runner: "lib".to_string(),
-            logic: "test_call".to_string(),
-            platform: "*/*".to_string(),
-        };
-        bundle.create_temporary_connector("test.source", entry).await?;
+        bundle.create_temporary_connector(
+            "test.source",
+            Runner::Lib,
+            "test_call".to_string(),
+            connector_definition::Platform::any(),
+        ).await?;
 
         assert_eq!(bundle.version(), "TEMP");
 
@@ -1606,16 +1603,16 @@ mod tests {
     async fn test_create_temporary_connector_version_udf_returns_temp() -> Result<(), BundlebaseError> {
         use arrow::array::StringArray;
         use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::ConnectorLogicEntry;
+        use crate::bundle::connector_definition::Runner;
 
         let bundle = Bundle::empty(None).await?;
 
-        let entry = ConnectorLogicEntry {
-            runner: "lib".to_string(),
-            logic: "test_call".to_string(),
-            platform: "*/*".to_string(),
-        };
-        bundle.create_temporary_connector("test.source", entry).await?;
+        bundle.create_temporary_connector(
+            "test.source",
+            Runner::Lib,
+            "test_call".to_string(),
+            connector_definition::Platform::any(),
+        ).await?;
 
         let df = bundle.ctx().sql("SELECT version() AS ver").await?;
         let batches = df.collect().await?;

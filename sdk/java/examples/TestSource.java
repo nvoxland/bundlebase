@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Test source function used by Rust integration tests.
+ * Test connector used by Rust integration tests.
  */
 public class TestSource implements Connector {
     private final BufferAllocator allocator = new RootAllocator();

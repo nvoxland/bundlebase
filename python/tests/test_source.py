@@ -67,7 +67,7 @@ async def test_create_source_auto_fetch():
 
 @pytest.mark.asyncio
 async def test_create_kaggle_source_invalid_dataset():
-    """Test that kaggle source function validates dataset format."""
+    """Test that kaggle connector validates dataset format."""
     c = await bundlebase.create(random_bundle())
     with pytest.raises(ValueError, match="Invalid dataset format"):
         await c.create_source("kaggle", {"dataset": "invalid-no-slash"})
@@ -75,7 +75,7 @@ async def test_create_kaggle_source_invalid_dataset():
 
 @pytest.mark.asyncio
 async def test_create_kaggle_source_missing_dataset():
-    """Test that kaggle source function requires dataset argument."""
+    """Test that kaggle connector requires dataset argument."""
     c = await bundlebase.create(random_bundle())
     with pytest.raises(ValueError, match="requires a 'dataset' argument"):
         await c.create_source("kaggle", {})
