@@ -8,12 +8,12 @@ import (
 	"os"
 )
 
-// Serve runs the source function as a JSON-RPC subprocess on stdin/stdout.
+// Serve runs the connector as a JSON-RPC subprocess on stdin/stdout.
 func Serve(source Connector) {
 	ServeIO(source, os.Stdin, os.Stdout)
 }
 
-// ServeIO runs the source function on the given reader/writer (for testing).
+// ServeIO runs the connector on the given reader/writer (for testing).
 func ServeIO(source Connector, r io.Reader, w io.Writer) {
 	scanner := bufio.NewScanner(r)
 	// Allow large lines (up to 16MB)

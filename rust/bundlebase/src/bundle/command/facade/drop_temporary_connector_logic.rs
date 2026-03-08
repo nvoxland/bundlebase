@@ -6,6 +6,7 @@
 use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::command::response::OutputShape;
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
+use crate::bundle::connector_definition::Platform;
 use crate::bundle::facade::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -22,11 +23,11 @@ pub struct DropTemporaryConnectorLogicCommand {
     /// Full dotted source name
     pub name: String,
     /// Optional platform filter
-    pub platform: Option<String>,
+    pub platform: Option<Platform>,
 }
 
 impl DropTemporaryConnectorLogicCommand {
-    pub fn new(name: impl Into<String>, platform: Option<String>) -> Self {
+    pub fn new(name: impl Into<String>, platform: Option<Platform>) -> Self {
         Self {
             name: name.into(),
             platform,
@@ -63,7 +64,8 @@ impl CommandParsing for DropTemporaryConnectorLogicCommand {
                     name = Some(inner_pair.as_str().to_string());
                 }
                 Rule::quoted_string => {
-                    platform = Some(extract_string_content(inner_pair.as_str())?);
+                    let s = extract_string_content(inner_pair.as_str())?;
+                    platform = Some(s.parse::<Platform>()?);
                 }
                 _ => {}
             }
@@ -82,7 +84,7 @@ impl CommandParsing for DropTemporaryConnectorLogicCommand {
             Some(p) => format!(
                 "DROP TEMPORARY CONNECTOR LOGIC {} FOR PLATFORM {}",
                 self.name,
-                escape_string(p)
+                escape_string(&p.to_string())
             ),
             None => format!("DROP TEMPORARY CONNECTOR LOGIC {}", self.name),
         }
@@ -98,7 +100,7 @@ impl BundleFacadeCommand for DropTemporaryConnectorLogicCommand {
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
         let count = facade
-            .drop_temporary_connector_logic(&self.name, self.platform.as_deref())
+            .drop_temporary_connector_logic(&self.name, self.platform.as_ref())
             .await?;
 
         match &self.platform {
@@ -140,7 +142,7 @@ mod parsing_tests {
         match cmd {
             BundleCommand::DropTemporaryConnectorLogic(c) => {
                 assert_eq!(c.name, "acme.weather");
-                assert_eq!(c.platform, Some("linux/amd64".to_string()));
+                assert_eq!(c.platform, Some("linux/amd64".parse::<Platform>().unwrap()));
             }
             _ => panic!("Expected DropTemporaryConnectorLogic variant"),
         }
@@ -163,13 +165,13 @@ mod parsing_tests {
     #[test]
     fn test_parse_drop_temporary_connector_logic_roundtrip_with_platform() {
         let cmd =
-            DropTemporaryConnectorLogicCommand::new("acme.weather", Some("linux/amd64".to_string()));
+            DropTemporaryConnectorLogicCommand::new("acme.weather", Some("linux/amd64".parse().unwrap()));
         let statement = cmd.to_statement();
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::DropTemporaryConnectorLogic(c) => {
                 assert_eq!(c.name, "acme.weather");
-                assert_eq!(c.platform, Some("linux/amd64".to_string()));
+                assert_eq!(c.platform, Some("linux/amd64".parse::<Platform>().unwrap()));
             }
             _ => panic!("Expected DropTemporaryConnectorLogic variant"),
         }

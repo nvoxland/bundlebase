@@ -230,8 +230,19 @@ impl NativePythonBridge for PyNativeBridge {
                 .getattr("normalize_to_batches")
                 .map_err(|e| format!("Failed to get normalize_to_batches: {}", e))?;
 
+            // Get optional schema() from the source for dict-to-Arrow conversion
+            let py_schema = source
+                .call_method0("schema")
+                .ok()
+                .filter(|s| !s.is_none());
+
+            let normalize_kwargs = pyo3::types::PyDict::new(py);
+            if let Some(schema) = py_schema {
+                normalize_kwargs.set_item("schema", schema).ok();
+            }
+
             let py_batches = normalize_fn
-                .call1((&result,))
+                .call((&result,), Some(&normalize_kwargs))
                 .map_err(|e| format!("normalize_to_batches failed: {}", e))?;
 
             let py_batch_list = py_batches

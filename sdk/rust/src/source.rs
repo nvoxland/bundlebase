@@ -2,7 +2,7 @@ use crate::types::{Location, StableUrl};
 use arrow::record_batch::RecordBatch;
 use std::collections::HashMap;
 
-/// Trait for implementing a custom Bundlebase source function.
+/// Trait for implementing a custom Bundlebase connector.
 ///
 /// Implement [`discover`](Connector::discover) and [`data`](Connector::data).
 /// Optionally override [`stable_url`](Connector::stable_url) for caching.
@@ -32,7 +32,3 @@ pub trait Connector {
         Ok(None)
     }
 }
-
-/// Backward-compatible alias for [`Connector`].
-#[deprecated(note = "Use `Connector` instead")]
-pub trait SourceFunction: Connector {}

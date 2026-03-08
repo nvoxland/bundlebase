@@ -1,4 +1,4 @@
-"""Data types for the Bundlebase source function protocol."""
+"""Data types for the Bundlebase connector protocol."""
 
 from dataclasses import dataclass, field
 

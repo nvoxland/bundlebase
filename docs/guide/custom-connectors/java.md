@@ -63,7 +63,8 @@ bundle.create_source('example.connector')
 ```java
 public interface Connector {
     List<Location> discover(List<String> attachedLocations, Map<String, String> args);
-    VectorSchemaRoot data(Location location, Map<String, String> args);
+    Object data(Location location, Map<String, String> args);
+    default Map<String, String> schema() { return null; }
     default StableUrl stableUrl(Location location, Map<String, String> args) { return null; }
 }
 ```
@@ -81,14 +82,20 @@ Return the available data locations.
 
 #### `data(location, args)`
 
-Return data for the given location as an Arrow `VectorSchemaRoot`. Return `null` for no data.
+Return data for the given location. Return `null` for no data.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `location` | `Location` | The location to fetch data for |
 | `args` | `Map<String, String>` | Extra arguments from the source configuration |
 
-**Returns:** `VectorSchemaRoot` or `null`
+**Returns:** One of the supported [data return types](#data-return-types).
+
+#### `schema()`
+
+Optional schema for dict-to-Arrow conversion. Required when `data()` returns `List<Map>` or `Map<String, List>`. Return `null` (default) when `data()` returns `VectorSchemaRoot`.
+
+**Returns:** `Map<String, String>` mapping column names to type strings, or `null`
 
 #### `stableUrl(location, args)`
 
@@ -138,6 +145,116 @@ public class Serve {
 ```
 
 `run(source)` reads from stdin and writes to stdout. The two-argument overload accepts explicit streams for testing.
+
+## Data Return Types
+
+The `data()` method supports several return types:
+
+| Return Type | Description |
+|------------|-------------|
+| `VectorSchemaRoot` | Arrow data directly (most control) |
+| `List<Map<String, Object>>` | Row-oriented dicts (requires `schema()`) |
+| `Map<String, List<?>>` | Column-oriented dict (requires `schema()`) |
+| `null` | No data for this location |
+
+A `schema()` method is required when returning dict data (`List<Map>` or `Map<String, List>`). Returning dict data without a schema throws an `IllegalArgumentException`.
+
+## Schema-Driven Connectors
+
+Instead of constructing `VectorSchemaRoot` manually, you can define a `schema()` method with simple type strings and return plain Java collections. The SDK handles Arrow conversion automatically.
+
+### Defining a Schema
+
+Override `schema()` to return a map of column names to type strings:
+
+```java
+@Override
+public Map<String, String> schema() {
+    Map<String, String> s = new LinkedHashMap<>();
+    s.put("name", "string");
+    s.put("age", "int32");
+    s.put("score", "float64");
+    return s;
+}
+```
+
+Supported type strings:
+
+| Type String | Arrow Type | Aliases |
+|------------|------------|---------|
+| `string` | `Utf8` | `utf8` |
+| `int64` | `Int(64, signed)` | `int` |
+| `int8`, `int16`, `int32` | `Int(8/16/32, signed)` | |
+| `uint8`, `uint16`, `uint32`, `uint64` | `Int(8-64, unsigned)` | |
+| `float64` | `FloatingPoint(DOUBLE)` | `float`, `double` |
+| `float16`, `float32` | `FloatingPoint(HALF/SINGLE)` | |
+| `bool` | `Bool` | `boolean` |
+| `date32` | `Date(DAY)` | `date` |
+| `date64` | `Date(MILLISECOND)` | |
+| `timestamp` | `Timestamp(MICROSECOND)` | |
+| `binary` | `Binary` | `bytes` |
+
+### Returning Column-Oriented Data
+
+With a schema defined, return data as `Map<String, List<?>>`:
+
+```java
+@Override
+public Object data(Location location, Map<String, String> args) {
+    Map<String, List<?>> cols = new LinkedHashMap<>();
+    cols.put("name", List.of("alice", "bob"));
+    cols.put("age", List.of(30, 25));
+    return cols;
+}
+```
+
+### Returning Row-Oriented Data
+
+Return `List<Map<String, Object>>`:
+
+```java
+@Override
+public Object data(Location location, Map<String, String> args) {
+    return List.of(
+        Map.of("name", "alice", "age", 30),
+        Map.of("name", "bob", "age", 25)
+    );
+}
+```
+
+### Full Schema Example
+
+```java
+import com.bundlebase.sdk.*;
+import java.util.*;
+
+public class SensorConnector implements Connector {
+    @Override
+    public Map<String, String> schema() {
+        Map<String, String> s = new LinkedHashMap<>();
+        s.put("sensor_id", "string");
+        s.put("temperature", "float32");
+        s.put("reading_count", "int32");
+        return s;
+    }
+
+    @Override
+    public List<Location> discover(List<String> attached, Map<String, String> args) {
+        return List.of(new Location("readings"));
+    }
+
+    @Override
+    public Object data(Location location, Map<String, String> args) {
+        Map<String, List<?>> cols = new LinkedHashMap<>();
+        cols.put("sensor_id", List.of("s1", "s2", "s3"));
+        cols.put("temperature", List.of(22.5, 19.8, 25.1));
+        cols.put("reading_count", List.of(100, 85, 120));
+        return cols;
+    }
+
+    public static void main(String[] args) { Serve.run(new SensorConnector()); }
+}
+```
 
 ## Complete Example
 

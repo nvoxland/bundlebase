@@ -14,7 +14,7 @@ fn total_changes(results: &[bundlebase::source::FetchResults]) -> usize {
     results.iter().map(|r| r.total_count()).sum()
 }
 
-/// Helper to create args for remote_dir source function
+/// Helper to create args for remote_dir connector
 fn make_source_args(url: &str, patterns: Option<&str>) -> HashMap<String, String> {
     let mut args = HashMap::new();
     args.insert("url".to_string(), url.to_string());

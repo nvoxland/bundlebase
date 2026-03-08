@@ -30,6 +30,15 @@ class Connector(ABC):
         """
         ...
 
+    def schema(self) -> dict[str, str] | None:
+        """Optional schema for automatic dict-to-Arrow conversion.
+
+        Return a dict mapping column names to type strings.
+        Supported types: string, int8-64, uint8-64, float16/32/64, bool, date, timestamp, binary.
+        Example: {"name": "string", "age": "int32", "score": "float64"}
+        """
+        return None
+
     @abstractmethod
     def data(
         self, location: Location, **kwargs: str
@@ -39,6 +48,7 @@ class Connector(ABC):
         list[pa.RecordBatch],
         list[dict],
         Iterator[dict],
+        dict[str, list],
         None,
     ]:
         """Return data for the given location.
@@ -61,6 +71,3 @@ class Connector(ABC):
         """
         return None
     
-
-# Backward-compatible alias
-SourceFunction = Connector

@@ -10,7 +10,7 @@
     <packaging>jar</packaging>
 
     <name>Bundlebase SDK</name>
-    <description>SDK for building Bundlebase custom source functions</description>
+    <description>SDK for building Bundlebase custom connectors</description>
 
     <properties>
         <maven.compiler.source>22</maven.compiler.source>

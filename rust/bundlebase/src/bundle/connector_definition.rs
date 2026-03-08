@@ -1,141 +1,216 @@
-//! Connector definition system for named, platform-aware connector logic.
+//! Connector entry system for named, platform-aware connector logic.
 //!
-//! A `ConnectorDefinition` is created via `CREATE CONNECTOR acme.datasources.weather`
-//! and holds one or more `ConnectorLogicEntry` values, each targeting a platform.
-//! `create_source` resolves the definition to the current platform at runtime.
+//! A `ConnectorEntry` is created via `CREATE CONNECTOR acme.datasources.weather`
+//! and represents a single connector logic binding for a name+platform pair.
+//! `resolve_connector` picks the best entry for the current platform at runtime.
 
 use crate::BundlebaseError;
-use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::str::FromStr;
 
-/// A named connector definition that can have multiple platform-specific logic entries.
-#[derive(Debug)]
-pub struct ConnectorDefinition {
-    /// Full dotted name (e.g., "acme.datasources.weather")
-    pub name: String,
-    /// Platform-specific logic entries (last-set wins for overlapping platforms)
-    logic_entries: RwLock<Vec<ConnectorLogicEntry>>,
+/// A Docker-style platform identifier in `os/arch` format.
+///
+/// Supports `*` as a wildcard for either component.
+/// Examples: `"linux/amd64"`, `"darwin/arm64"`, `"*/*"`
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "String", try_from = "String")]
+pub struct Platform {
+    pub os: String,
+    pub arch: String,
 }
 
-/// A single platform-specific implementation for a connector definition.
+impl Platform {
+    /// Returns the wildcard platform `*/*` that matches everything.
+    pub fn any() -> Self {
+        Self {
+            os: "*".to_string(),
+            arch: "*".to_string(),
+        }
+    }
+
+    /// Returns the platform of the current system.
+    ///
+    /// Maps Rust's `std::env::consts` to Docker conventions:
+    /// - `macos` → `darwin`
+    /// - `x86_64` → `amd64`
+    /// - `aarch64` → `arm64`
+    pub fn current() -> Self {
+        let os = match std::env::consts::OS {
+            "macos" => "darwin",
+            other => other,
+        };
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "amd64",
+            "aarch64" => "arm64",
+            other => other,
+        };
+        Self {
+            os: os.to_string(),
+            arch: arch.to_string(),
+        }
+    }
+
+    /// Check if this platform pattern matches a given os/arch pair.
+    ///
+    /// `*` in either component acts as a wildcard.
+    pub fn matches(&self, os: &str, arch: &str) -> bool {
+        (self.os == "*" || self.os == os) && (self.arch == "*" || self.arch == arch)
+    }
+
+    /// Check if this platform pattern matches the current system.
+    pub fn matches_current(&self) -> bool {
+        let current = Self::current();
+        self.matches(&current.os, &current.arch)
+    }
+}
+
+impl fmt::Display for Platform {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.os, self.arch)
+    }
+}
+
+impl FromStr for Platform {
+    type Err = BundlebaseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split('/').collect();
+        if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+            return Err(format!(
+                "Invalid platform '{}'. Must be in os/arch format (e.g., 'linux/amd64', '*/*').",
+                s
+            )
+            .into());
+        }
+        Ok(Self {
+            os: parts[0].to_string(),
+            arch: parts[1].to_string(),
+        })
+    }
+}
+
+impl From<Platform> for String {
+    fn from(p: Platform) -> Self {
+        p.to_string()
+    }
+}
+
+impl TryFrom<String> for Platform {
+    type Error = BundlebaseError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+/// The execution environment for connector logic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Runner {
+    Python,
+    Lib,
+    Java,
+    Docker,
+    Ipc,
+}
+
+impl fmt::Display for Runner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Runner::Python => write!(f, "python"),
+            Runner::Lib => write!(f, "lib"),
+            Runner::Java => write!(f, "java"),
+            Runner::Docker => write!(f, "docker"),
+            Runner::Ipc => write!(f, "ipc"),
+        }
+    }
+}
+
+impl FromStr for Runner {
+    type Err = BundlebaseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "python" => Ok(Runner::Python),
+            "lib" => Ok(Runner::Lib),
+            "java" => Ok(Runner::Java),
+            "docker" => Ok(Runner::Docker),
+            "ipc" => Ok(Runner::Ipc),
+            _ => Err(format!(
+                "Invalid runner '{}'. Must be one of: python, lib, java, docker, ipc.",
+                s
+            )
+            .into()),
+        }
+    }
+}
+
+/// A single connector entry binding a name+platform to runner+logic.
+///
+/// Multiple entries can exist for the same connector name (different platforms
+/// or temporary vs persisted). Resolution picks the best match at runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConnectorLogicEntry {
-    /// Runner: "python", "lib", "java", "docker", or "ipc"
-    pub runner: String,
-    /// Logic string (e.g., "mod:Class" for python, "./lib.so" for lib, "./my_source" for ipc)
+pub struct ConnectorEntry {
+    pub name: String,
+    pub runner: Runner,
     pub logic: String,
-    /// Platform pattern in Docker-style os/arch (e.g., "linux/amd64", "*/*")
-    pub platform: String,
+    pub platform: Platform,
+    pub temporary: bool,
 }
 
-/// Valid runner values for connector logic.
-pub const VALID_RUNNERS: &[&str] = &["python", "lib", "java", "docker", "ipc"];
+/// Resolve the best connector entry for the current platform.
+///
+/// Tries temporary entries first (reverse order, last wins), then persisted entries.
+/// Returns the first entry whose platform matches the current system.
+pub fn resolve_connector(entries: &[ConnectorEntry], name: &str) -> Result<ConnectorEntry, BundlebaseError> {
+    let matching: Vec<&ConnectorEntry> = entries.iter().filter(|e| e.name == name).collect();
+
+    if matching.is_empty() {
+        return Err(format!("Connector '{}' is not defined", name).into());
+    }
+
+    // Try temporary entries first (reverse order, last wins)
+    for entry in matching.iter().rev() {
+        if entry.temporary && entry.platform.matches_current() {
+            return Ok((*entry).clone());
+        }
+    }
+
+    // Then persisted entries (reverse order, last wins)
+    for entry in matching.iter().rev() {
+        if !entry.temporary && entry.platform.matches_current() {
+            return Ok((*entry).clone());
+        }
+    }
+
+    let platforms: Vec<String> = matching.iter().map(|e| e.platform.to_string()).collect();
+    Err(format!(
+        "No connector logic matches current platform '{}' for connector '{}'. Available platforms: {}",
+        Platform::current(),
+        name,
+        platforms.join(", ")
+    )
+    .into())
+}
 
 /// Map a user-facing runner to the internal registry type ("native" or "ipc").
-pub fn resolve_registry_type(runner: &str) -> Result<&'static str, BundlebaseError> {
+pub fn resolve_registry_type(runner: Runner) -> &'static str {
     match runner {
-        "python" | "lib" => Ok("native"),
-        "java" | "docker" | "ipc" => Ok("ipc"),
-        _ => Err(format!(
-            "Invalid runner '{}'. Must be one of: {}.",
-            runner,
-            VALID_RUNNERS.join(", ")
-        )
-        .into()),
+        Runner::Python | Runner::Lib => "native",
+        Runner::Java | Runner::Docker | Runner::Ipc => "ipc",
     }
 }
 
 /// Reconstruct the prefixed call string from runner and logic for the native/ipc plugins.
-pub fn build_call_string(runner: &str, logic: &str) -> String {
+pub fn build_call_string(runner: Runner, logic: &str) -> String {
     match runner {
-        "python" => format!("python:{}", logic),
-        "lib" => format!("lib:{}", logic),
-        "java" => format!("java:{}", logic),
-        "docker" => format!("docker:{}", logic),
-        "ipc" => logic.to_string(),
-        _ => logic.to_string(),
+        Runner::Python => format!("python:{}", logic),
+        Runner::Lib => format!("lib:{}", logic),
+        Runner::Java => format!("java:{}", logic),
+        Runner::Docker => format!("docker:{}", logic),
+        Runner::Ipc => logic.to_string(),
     }
-}
-
-impl ConnectorDefinition {
-    /// Create a new empty connector definition.
-    pub fn new(name: String) -> Self {
-        Self {
-            name,
-            logic_entries: RwLock::new(Vec::new()),
-        }
-    }
-
-    /// Add a logic entry. Last-set wins for overlapping platforms.
-    pub fn add_logic(&self, entry: ConnectorLogicEntry) {
-        self.logic_entries.write().push(entry);
-    }
-
-    /// Remove all logic entries. Returns the number of entries removed.
-    pub fn remove_all_logic(&self) -> usize {
-        let mut entries = self.logic_entries.write();
-        let count = entries.len();
-        entries.clear();
-        count
-    }
-
-    /// Remove logic entries matching a specific platform. Returns the number removed.
-    pub fn remove_logic_for_platform(&self, platform: &str) -> usize {
-        let mut entries = self.logic_entries.write();
-        let before = entries.len();
-        entries.retain(|e| e.platform != platform);
-        before - entries.len()
-    }
-
-    /// Resolve the best logic entry for the current platform.
-    /// Iterates entries in reverse (last-set wins), returns first match.
-    pub fn resolve_logic(&self) -> Result<ConnectorLogicEntry, BundlebaseError> {
-        let (os, arch) = current_platform();
-        let entries = self.logic_entries.read();
-
-        for entry in entries.iter().rev() {
-            if matches_platform(&entry.platform, &os, &arch) {
-                return Ok(entry.clone());
-            }
-        }
-
-        Err(format!(
-            "No connector logic matches current platform '{}/{}' for connector '{}'",
-            os, arch, self.name
-        )
-        .into())
-    }
-}
-
-/// Check if a platform pattern matches a given os/arch pair.
-///
-/// Pattern uses Docker-style `os/arch` with `*` as wildcard.
-/// Examples: `"linux/amd64"`, `"*/amd64"`, `"linux/*"`, `"*/*"`
-pub fn matches_platform(pattern: &str, os: &str, arch: &str) -> bool {
-    let parts: Vec<&str> = pattern.split('/').collect();
-    if parts.len() != 2 {
-        return false;
-    }
-    let (pat_os, pat_arch) = (parts[0], parts[1]);
-    (pat_os == "*" || pat_os == os) && (pat_arch == "*" || pat_arch == arch)
-}
-
-/// Return the current platform as Docker-style (os, arch).
-///
-/// Maps Rust's `std::env::consts` to Docker conventions:
-/// - `macos` → `darwin`
-/// - `x86_64` → `amd64`
-/// - `aarch64` → `arm64`
-pub fn current_platform() -> (String, String) {
-    let os = match std::env::consts::OS {
-        "macos" => "darwin",
-        other => other,
-    };
-    let arch = match std::env::consts::ARCH {
-        "x86_64" => "amd64",
-        "aarch64" => "arm64",
-        other => other,
-    };
-    (os.to_string(), arch.to_string())
 }
 
 /// Parse a dotted connector name into (namespace, name).
@@ -174,84 +249,162 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_matches_platform_exact() {
-        assert!(matches_platform("linux/amd64", "linux", "amd64"));
+    fn test_platform_from_str() {
+        let p: Platform = "linux/amd64".parse().unwrap();
+        assert_eq!(p.os, "linux");
+        assert_eq!(p.arch, "amd64");
     }
 
     #[test]
-    fn test_matches_platform_wildcard_all() {
-        assert!(matches_platform("*/*", "darwin", "arm64"));
-        assert!(matches_platform("*/*", "linux", "amd64"));
+    fn test_platform_from_str_invalid() {
+        assert!("linux".parse::<Platform>().is_err());
+        assert!("".parse::<Platform>().is_err());
+        assert!("/amd64".parse::<Platform>().is_err());
+        assert!("linux/".parse::<Platform>().is_err());
     }
 
     #[test]
-    fn test_matches_platform_wildcard_os() {
-        assert!(matches_platform("*/amd64", "linux", "amd64"));
-        assert!(matches_platform("*/amd64", "darwin", "amd64"));
-        assert!(!matches_platform("*/amd64", "linux", "arm64"));
+    fn test_platform_display() {
+        let p = Platform { os: "linux".to_string(), arch: "amd64".to_string() };
+        assert_eq!(p.to_string(), "linux/amd64");
     }
 
     #[test]
-    fn test_matches_platform_wildcard_arch() {
-        assert!(matches_platform("linux/*", "linux", "amd64"));
-        assert!(matches_platform("linux/*", "linux", "arm64"));
-        assert!(!matches_platform("linux/*", "darwin", "arm64"));
+    fn test_platform_any() {
+        let p = Platform::any();
+        assert_eq!(p.os, "*");
+        assert_eq!(p.arch, "*");
+        assert_eq!(p.to_string(), "*/*");
     }
 
     #[test]
-    fn test_matches_platform_no_match() {
-        assert!(!matches_platform("linux/amd64", "darwin", "arm64"));
+    fn test_platform_matches_exact() {
+        let p: Platform = "linux/amd64".parse().unwrap();
+        assert!(p.matches("linux", "amd64"));
+        assert!(!p.matches("darwin", "arm64"));
     }
 
     #[test]
-    fn test_matches_platform_invalid_format() {
-        assert!(!matches_platform("linux", "linux", "amd64"));
-        assert!(!matches_platform("", "linux", "amd64"));
+    fn test_platform_matches_wildcard_all() {
+        let p = Platform::any();
+        assert!(p.matches("darwin", "arm64"));
+        assert!(p.matches("linux", "amd64"));
     }
 
     #[test]
-    fn test_current_platform() {
-        let (os, arch) = current_platform();
-        assert!(!os.is_empty());
-        assert!(!arch.is_empty());
-        // On macOS ARM, should be "darwin" and "arm64"
+    fn test_platform_matches_wildcard_os() {
+        let p: Platform = "*/amd64".parse().unwrap();
+        assert!(p.matches("linux", "amd64"));
+        assert!(p.matches("darwin", "amd64"));
+        assert!(!p.matches("linux", "arm64"));
+    }
+
+    #[test]
+    fn test_platform_matches_wildcard_arch() {
+        let p: Platform = "linux/*".parse().unwrap();
+        assert!(p.matches("linux", "amd64"));
+        assert!(p.matches("linux", "arm64"));
+        assert!(!p.matches("darwin", "arm64"));
+    }
+
+    #[test]
+    fn test_platform_matches_current() {
+        let p = Platform::any();
+        assert!(p.matches_current());
+
+        let p = Platform::current();
+        assert!(p.matches_current());
+    }
+
+    #[test]
+    fn test_platform_current() {
+        let p = Platform::current();
+        assert!(!p.os.is_empty());
+        assert!(!p.arch.is_empty());
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {
-            assert_eq!(os, "darwin");
-            assert_eq!(arch, "arm64");
+            assert_eq!(p.os, "darwin");
+            assert_eq!(p.arch, "arm64");
         }
     }
 
     #[test]
-    fn test_resolve_last_set_wins() {
-        let def = ConnectorDefinition::new("test.source".to_string());
-        def.add_logic(ConnectorLogicEntry {
-            runner: "lib".to_string(),
-            logic: "first".to_string(),
-            platform: "*/*".to_string(),
-        });
-        def.add_logic(ConnectorLogicEntry {
-            runner: "lib".to_string(),
-            logic: "second".to_string(),
-            platform: "*/*".to_string(),
-        });
+    fn test_platform_serde_roundtrip() {
+        let p: Platform = "linux/amd64".parse().unwrap();
+        let yaml = serde_yaml_ng::to_string(&p).unwrap();
+        assert!(yaml.contains("linux/amd64"));
+        let deser: Platform = serde_yaml_ng::from_str(&yaml).unwrap();
+        assert_eq!(deser, p);
+    }
 
-        let resolved = def.resolve_logic().expect("should resolve");
+    #[test]
+    fn test_resolve_last_set_wins() {
+        let entries = vec![
+            ConnectorEntry {
+                name: "test.source".to_string(),
+                runner: Runner::Lib,
+                logic: "first".to_string(),
+                platform: Platform::any(),
+                temporary: false,
+            },
+            ConnectorEntry {
+                name: "test.source".to_string(),
+                runner: Runner::Lib,
+                logic: "second".to_string(),
+                platform: Platform::any(),
+                temporary: false,
+            },
+        ];
+
+        let resolved = resolve_connector(&entries, "test.source").expect("should resolve");
         assert_eq!(resolved.logic, "second");
     }
 
     #[test]
     fn test_resolve_no_match() {
-        let def = ConnectorDefinition::new("test.source".to_string());
-        def.add_logic(ConnectorLogicEntry {
-            runner: "lib".to_string(),
+        let entries = vec![ConnectorEntry {
+            name: "test.source".to_string(),
+            runner: Runner::Lib,
             logic: "test".to_string(),
-            platform: "nonexistent/arch".to_string(),
-        });
+            platform: "nonexistent/arch".parse().unwrap(),
+            temporary: false,
+        }];
 
-        let result = def.resolve_logic();
+        let result = resolve_connector(&entries, "test.source");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("No connector logic matches"));
+    }
+
+    #[test]
+    fn test_resolve_not_defined() {
+        let entries: Vec<ConnectorEntry> = vec![];
+        let result = resolve_connector(&entries, "test.source");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("is not defined"));
+    }
+
+    #[test]
+    fn test_resolve_temporary_overrides_persisted() {
+        let entries = vec![
+            ConnectorEntry {
+                name: "test.source".to_string(),
+                runner: Runner::Lib,
+                logic: "persisted".to_string(),
+                platform: Platform::any(),
+                temporary: false,
+            },
+            ConnectorEntry {
+                name: "test.source".to_string(),
+                runner: Runner::Python,
+                logic: "temporary".to_string(),
+                platform: Platform::any(),
+                temporary: true,
+            },
+        ];
+
+        let resolved = resolve_connector(&entries, "test.source").expect("should resolve");
+        assert_eq!(resolved.logic, "temporary");
+        assert!(resolved.temporary);
     }
 
     #[test]
@@ -273,58 +426,5 @@ mod tests {
         let (ns, name) = parse_connector_name("acme.weather").unwrap();
         assert_eq!(ns, "acme");
         assert_eq!(name, "weather");
-    }
-
-    #[test]
-    fn test_remove_all_logic() {
-        let def = ConnectorDefinition::new("test.source".to_string());
-        def.add_logic(ConnectorLogicEntry {
-            runner: "lib".to_string(),
-            logic: "first".to_string(),
-            platform: "*/*".to_string(),
-        });
-        def.add_logic(ConnectorLogicEntry {
-            runner: "lib".to_string(),
-            logic: "second".to_string(),
-            platform: "linux/amd64".to_string(),
-        });
-
-        let removed = def.remove_all_logic();
-        assert_eq!(removed, 2);
-        assert!(def.resolve_logic().is_err());
-    }
-
-    #[test]
-    fn test_remove_logic_for_platform() {
-        let def = ConnectorDefinition::new("test.source".to_string());
-        def.add_logic(ConnectorLogicEntry {
-            runner: "lib".to_string(),
-            logic: "wildcard".to_string(),
-            platform: "*/*".to_string(),
-        });
-        def.add_logic(ConnectorLogicEntry {
-            runner: "lib".to_string(),
-            logic: "linux-only".to_string(),
-            platform: "linux/amd64".to_string(),
-        });
-
-        let removed = def.remove_logic_for_platform("linux/amd64");
-        assert_eq!(removed, 1);
-
-        let resolved = def.resolve_logic().expect("should resolve wildcard");
-        assert_eq!(resolved.logic, "wildcard");
-    }
-
-    #[test]
-    fn test_remove_logic_for_platform_no_match() {
-        let def = ConnectorDefinition::new("test.source".to_string());
-        def.add_logic(ConnectorLogicEntry {
-            runner: "lib".to_string(),
-            logic: "test".to_string(),
-            platform: "*/*".to_string(),
-        });
-
-        let removed = def.remove_logic_for_platform("linux/amd64");
-        assert_eq!(removed, 0);
     }
 }

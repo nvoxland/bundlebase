@@ -2,6 +2,7 @@
 
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::extract_string_content;
+use crate::bundle::connector_definition::{Platform, Runner};
 use crate::bundle::operation::CreateConnectorOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -17,26 +18,26 @@ use crate::bundle::BundleBuilder;
 pub struct CreateConnectorCommand {
     /// Full dotted source name (e.g., "acme.datasources.weather")
     pub name: String,
-    /// Runner: "lib", "java", "docker", or "ipc"
-    pub runner: String,
+    /// Runner type
+    pub runner: Runner,
     /// Logic string (e.g., path to shared library or binary)
     pub logic: String,
     /// Platform in Docker-style os/arch
-    pub platform: String,
+    pub platform: Platform,
 }
 
 impl CreateConnectorCommand {
     pub fn new(
         name: impl Into<String>,
-        runner: impl Into<String>,
+        runner: Runner,
         logic: impl Into<String>,
-        platform: impl Into<String>,
+        platform: Platform,
     ) -> Self {
         Self {
             name: name.into(),
-            runner: runner.into(),
+            runner,
             logic: logic.into(),
-            platform: platform.into(),
+            platform,
         }
     }
 }
@@ -85,25 +86,30 @@ impl CommandParsing for CreateConnectorCommand {
             "CREATE CONNECTOR missing connector name".into()
         })?;
 
-        let runner = args.remove("runner").ok_or_else(|| -> BundlebaseError {
+        let runner_str = args.remove("runner").ok_or_else(|| -> BundlebaseError {
             "CREATE CONNECTOR requires 'runner' argument".into()
         })?;
+        let runner: Runner = runner_str.parse()?;
 
         let logic = args.remove("logic").ok_or_else(|| -> BundlebaseError {
             "CREATE CONNECTOR requires 'logic' argument".into()
         })?;
 
-        let platform = args.remove("platform").unwrap_or_else(|| "*/*".to_string());
+        let platform: Platform = match args.remove("platform") {
+            Some(s) => s.parse()?,
+            None => Platform::any(),
+        };
 
         Ok(CreateConnectorCommand::new(name, runner, logic, platform))
     }
 
     fn to_statement(&self) -> String {
         use crate::bundle::command::parser::escape_string;
+        let runner_str = self.runner.to_string();
         let parts = vec![
-            format!("runner = {}", escape_string(&self.runner)),
+            format!("runner = {}", escape_string(&runner_str)),
             format!("logic = {}", escape_string(&self.logic)),
-            format!("platform = {}", escape_string(&self.platform)),
+            format!("platform = {}", escape_string(&self.platform.to_string())),
         ];
         format!("CREATE CONNECTOR {} WITH ({})", self.name, parts.join(", "))
     }
@@ -116,7 +122,7 @@ impl BundleBuilderCommand for CreateConnectorCommand {
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         let op = CreateConnectorOp::new(
             self.name.clone(),
-            self.runner.clone(),
+            self.runner,
             self.logic.clone(),
             self.platform.clone(),
         );
@@ -129,6 +135,7 @@ impl BundleBuilderCommand for CreateConnectorCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
+    use crate::bundle::connector_definition::Platform;
     use crate::bundle::command::parser::parse_command;
     use crate::bundle::command::BundleCommand;
 
@@ -139,9 +146,9 @@ mod parsing_tests {
         match cmd {
             BundleCommand::CreateConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
-                assert_eq!(c.runner, "ipc");
+                assert_eq!(c.runner, Runner::Ipc);
                 assert_eq!(c.logic, "./my_source");
-                assert_eq!(c.platform, "*/*");
+                assert_eq!(c.platform, Platform::any());
             }
             _ => panic!("Expected CreateConnector variant"),
         }
@@ -154,9 +161,9 @@ mod parsing_tests {
         match cmd {
             BundleCommand::CreateConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
-                assert_eq!(c.runner, "lib");
+                assert_eq!(c.runner, Runner::Lib);
                 assert_eq!(c.logic, "./lib.so");
-                assert_eq!(c.platform, "linux/amd64");
+                assert_eq!(c.platform, "linux/amd64".parse::<Platform>().unwrap());
             }
             _ => panic!("Expected CreateConnector variant"),
         }
@@ -178,18 +185,18 @@ mod parsing_tests {
     fn test_parse_create_connector_roundtrip() {
         let cmd = CreateConnectorCommand::new(
             "acme.weather",
-            "lib",
+            Runner::Lib,
             "/usr/lib/weather.so",
-            "*/*",
+            Platform::any(),
         );
         let statement = cmd.to_statement();
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::CreateConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
-                assert_eq!(c.runner, "lib");
+                assert_eq!(c.runner, Runner::Lib);
                 assert_eq!(c.logic, "/usr/lib/weather.so");
-                assert_eq!(c.platform, "*/*");
+                assert_eq!(c.platform, Platform::any());
             }
             _ => panic!("Expected CreateConnector variant"),
         }
@@ -202,7 +209,7 @@ mod parsing_tests {
         match cmd {
             BundleCommand::CreateConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
-                assert_eq!(c.runner, "ipc");
+                assert_eq!(c.runner, Runner::Ipc);
             }
             _ => panic!("Expected CreateConnector variant"),
         }

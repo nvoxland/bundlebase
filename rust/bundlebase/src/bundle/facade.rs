@@ -311,7 +311,9 @@ pub trait BundleFacade: Send + Sync {
     async fn create_temporary_connector(
         &self,
         name: &str,
-        entry: crate::bundle::connector_definition::ConnectorLogicEntry,
+        runner: crate::bundle::connector_definition::Runner,
+        logic: String,
+        platform: crate::bundle::connector_definition::Platform,
     ) -> Result<(), BundlebaseError>;
 
     /// Remove runtime-only connector logic for a defined source.
@@ -322,7 +324,7 @@ pub trait BundleFacade: Send + Sync {
     async fn drop_temporary_connector_logic(
         &self,
         name: &str,
-        platform: Option<&str>,
+        platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError>;
 
     /// Set a runtime config value (session-only, highest priority).

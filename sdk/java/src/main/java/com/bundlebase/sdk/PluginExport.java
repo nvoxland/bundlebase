@@ -224,7 +224,8 @@ public class PluginExport {
             }
         }
 
-        VectorSchemaRoot root = source.data(loc, args);
+        Object data = source.data(loc, args);
+        VectorSchemaRoot root = Protocol.normalizeToRoot(data, source.schema(), ALLOCATOR);
         if (root == null) {
             return; // No data — stream left empty
         }

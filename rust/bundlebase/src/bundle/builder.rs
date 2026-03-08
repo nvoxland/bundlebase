@@ -726,7 +726,7 @@ impl BundleBuilder {
     /// functionality to discover and auto-attach new files.
     ///
     /// # Arguments
-    /// * `function` - Source function name (e.g., "remote_dir")
+    /// * `function` - Connector name (e.g., "remote_dir")
     /// * `args` - Function-specific arguments. For "remote_dir":
     ///   - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
     ///   - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
@@ -776,6 +776,9 @@ impl BundleBuilder {
         platform: &str,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::CreateConnectorCommand;
+        use crate::bundle::connector_definition::{Platform, Runner};
+        let runner: Runner = runner.parse()?;
+        let platform: Platform = platform.parse()?;
         self.execute_command(CreateConnectorCommand::new(name, runner, logic, platform)).await?;
         Ok(self)
     }
@@ -797,17 +800,16 @@ impl BundleBuilder {
         logic: &str,
         platform: &str,
     ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::connector_definition::{ConnectorDefinition, ConnectorLogicEntry};
-        // Create connector definition if it doesn't exist
-        if self.bundle().get_connector_definition(name).is_none() {
-            self.bundle().add_connector_definition(ConnectorDefinition::new(name.to_string()));
-        }
-        let entry = ConnectorLogicEntry {
-            runner: runner.to_string(),
+        use crate::bundle::connector_definition::{ConnectorEntry, Platform, Runner};
+        let runner: Runner = runner.parse()?;
+        let platform: Platform = platform.parse()?;
+        self.bundle().add_connector_entry(ConnectorEntry {
+            name: name.to_string(),
+            runner,
             logic: logic.to_string(),
-            platform: platform.to_string(),
-        };
-        self.bundle().add_connector_logic(name, entry)?;
+            platform,
+            temporary: true,
+        });
         self.bundle().mark_temporary_logic();
         self.bundle().refresh_version_udf(self.version());
         Ok(self)
@@ -821,10 +823,9 @@ impl BundleBuilder {
         platform: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::DropConnectorCommand;
-        self.execute_command(DropConnectorCommand::new(
-            name,
-            platform.map(|s| s.to_string()),
-        )).await?;
+        use crate::bundle::connector_definition::Platform;
+        let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
+        self.execute_command(DropConnectorCommand::new(name, platform)).await?;
         Ok(self)
     }
 
@@ -834,7 +835,9 @@ impl BundleBuilder {
         name: &str,
         platform: Option<&str>,
     ) -> Result<usize, BundlebaseError> {
-        self.bundle().remove_connector_logic(name, platform)
+        use crate::bundle::connector_definition::Platform;
+        let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
+        self.bundle().remove_connector_entry(name, platform.as_ref(), true)
     }
 
     /// Fetch from sources for a pack - discover and attach new files.
@@ -1553,15 +1556,17 @@ impl BundleFacade for BundleBuilder {
     async fn create_temporary_connector(
         &self,
         name: &str,
-        entry: crate::bundle::connector_definition::ConnectorLogicEntry,
+        runner: crate::bundle::connector_definition::Runner,
+        logic: String,
+        platform: crate::bundle::connector_definition::Platform,
     ) -> Result<(), BundlebaseError> {
-        // Create connector definition if it doesn't exist
-        if self.bundle.get_connector_definition(name).is_none() {
-            self.bundle.add_connector_definition(
-                crate::bundle::connector_definition::ConnectorDefinition::new(name.to_string()),
-            );
-        }
-        self.bundle.add_connector_logic(name, entry)?;
+        self.bundle.add_connector_entry(crate::bundle::connector_definition::ConnectorEntry {
+            name: name.to_string(),
+            runner,
+            logic,
+            platform,
+            temporary: true,
+        });
         self.bundle.mark_temporary_logic();
         self.bundle.refresh_version_udf(self.version());
         Ok(())
@@ -1570,9 +1575,9 @@ impl BundleFacade for BundleBuilder {
     async fn drop_temporary_connector_logic(
         &self,
         name: &str,
-        platform: Option<&str>,
+        platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError> {
-        self.bundle.remove_connector_logic(name, platform)
+        self.bundle.remove_connector_entry(name, platform, true)
     }
 
     async fn set_config(
@@ -1836,7 +1841,7 @@ mod tests {
             .unwrap();
 
         bundle
-            .create_temporary_connector("test.source", "native", "test_call", "*/*")
+            .create_temporary_connector("test.source", "lib", "test_call", "*/*")
             .await
             .unwrap();
 
@@ -1854,7 +1859,7 @@ mod tests {
             .unwrap();
 
         bundle
-            .create_temporary_connector("test.source", "native", "test_call", "*/*")
+            .create_temporary_connector("test.source", "lib", "test_call", "*/*")
             .await
             .unwrap();
 
@@ -1864,7 +1869,7 @@ mod tests {
     #[tokio::test]
     async fn test_version_uncommitted_temp_via_facade() {
         use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::ConnectorLogicEntry;
+        use crate::bundle::connector_definition::{Platform, Runner};
 
         let builder = BundleBuilder::create("memory:///test_bundle", None)
             .await
@@ -1874,12 +1879,13 @@ mod tests {
             .await
             .unwrap();
 
-        let entry = ConnectorLogicEntry {
-            runner: "python".to_string(),
-            logic: "test_call".to_string(),
-            platform: "*/*".to_string(),
-        };
-        BundleFacade::create_temporary_connector(builder.as_ref(), "test.source", entry)
+        BundleFacade::create_temporary_connector(
+            builder.as_ref(),
+            "test.source",
+            Runner::Python,
+            "test_call".to_string(),
+            Platform::any(),
+        )
             .await
             .unwrap();
 

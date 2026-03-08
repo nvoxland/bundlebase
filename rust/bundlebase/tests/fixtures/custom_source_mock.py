@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mock subprocess implementing a custom source function using the Bundlebase SDK.
+"""Mock subprocess implementing a custom connector using the Bundlebase SDK.
 
 Used by integration tests in rust/bundlebase/src/source/ipc.rs.
 """

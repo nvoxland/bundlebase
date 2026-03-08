@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "bundlebase-sdk"
 version = "0.1.0"
-description = "SDK for building Bundlebase custom source functions"
+description = "SDK for building Bundlebase custom connectors"
 readme = "README.md"
 license = "Apache-2.0"
 packages = [{include = "bundlebase_sdk"}]

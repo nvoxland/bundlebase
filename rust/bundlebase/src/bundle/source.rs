@@ -86,14 +86,11 @@ impl Source {
         mode: SyncMode,
     ) -> Result<Vec<FetchAction>, BundlebaseError> {
         let (func, data_dir, config, resolved_args) = if self.connector.contains('.') {
-            // Defined source: resolve logic for current platform
+            // Defined source: resolve connector entry for current platform
             let bundle = builder.bundle();
-            let def = bundle.get_connector_definition(&self.connector).ok_or_else(|| {
-                format!("Connector '{}' is not defined. Use CREATE CONNECTOR first", self.connector)
-            })?;
-            let logic = def.resolve_logic()?;
+            let entry = bundle.resolve_connector(&self.connector)?;
 
-            let registry_type = crate::bundle::connector_definition::resolve_registry_type(&logic.runner)?;
+            let registry_type = crate::bundle::connector_definition::resolve_registry_type(entry.runner);
             let registry = bundle.connector_registry();
             let reg = registry.read();
             let func = reg
@@ -102,7 +99,7 @@ impl Source {
 
             // Merge: inject "call" from logic (reconstructed with prefix), then overlay user args
             let mut merged_args = self.args.clone();
-            let call_string = crate::bundle::connector_definition::build_call_string(&logic.runner, &logic.logic);
+            let call_string = crate::bundle::connector_definition::build_call_string(entry.runner, &entry.logic);
             merged_args.insert("call".to_string(), call_string);
 
             (func, bundle.data_dir(), bundle.config(), merged_args)

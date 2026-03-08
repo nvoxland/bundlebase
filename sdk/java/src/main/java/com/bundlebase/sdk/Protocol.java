@@ -3,8 +3,12 @@ package com.bundlebase.sdk;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.ipc.ArrowStreamWriter;
+import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.Schema;
 
 import java.io.*;
 import java.nio.ByteBuffer;
@@ -105,5 +109,131 @@ class Protocol {
             node.has("format") ? node.get("format").asText() : "parquet",
             node.has("version") ? node.get("version").asText() : ""
         );
+    }
+
+    /**
+     * Normalize data returned from {@link Connector#data} into a VectorSchemaRoot.
+     *
+     * Supports VectorSchemaRoot (pass-through), List of Maps (row-oriented),
+     * and Map of Lists (column-oriented).
+     */
+    @SuppressWarnings("unchecked")
+    static VectorSchemaRoot normalizeToRoot(
+            Object data, Map<String, String> schema, BufferAllocator allocator) {
+        if (data == null) {
+            return null;
+        }
+        if (data instanceof VectorSchemaRoot root) {
+            return root;
+        }
+        if (data instanceof List<?> list) {
+            if (list.isEmpty()) {
+                return null;
+            }
+            if (list.getFirst() instanceof Map<?, ?>) {
+                return rowDictsToRoot((List<Map<String, Object>>) list, schema, allocator);
+            }
+            throw new IllegalArgumentException(
+                "Unsupported list element type: " + list.getFirst().getClass().getName());
+        }
+        if (data instanceof Map<?, ?> map) {
+            return columnDictToRoot((Map<String, List<?>>) map, schema, allocator);
+        }
+        throw new IllegalArgumentException("Unsupported data return type: " + data.getClass().getName());
+    }
+
+    private static VectorSchemaRoot columnDictToRoot(
+            Map<String, List<?>> data, Map<String, String> schema, BufferAllocator allocator) {
+        if (data.isEmpty()) {
+            return null;
+        }
+
+        Schema arrowSchema = buildSchema(data.keySet(), schema);
+        VectorSchemaRoot root = VectorSchemaRoot.create(arrowSchema, allocator);
+        root.allocateNew();
+
+        int rowCount = data.values().iterator().next().size();
+        for (Field field : arrowSchema.getFields()) {
+            List<?> values = data.get(field.getName());
+            if (values == null) continue;
+            FieldVector vector = root.getVector(field.getName());
+            populateVector(vector, values);
+        }
+
+        root.setRowCount(rowCount);
+        return root;
+    }
+
+    private static VectorSchemaRoot rowDictsToRoot(
+            List<Map<String, Object>> rows, Map<String, String> schema, BufferAllocator allocator) {
+        if (rows.isEmpty()) {
+            return null;
+        }
+
+        // Collect column names preserving order from the first row
+        Set<String> columnNames = new LinkedHashSet<>(rows.getFirst().keySet());
+        for (Map<String, Object> row : rows) {
+            columnNames.addAll(row.keySet());
+        }
+
+        Schema arrowSchema = buildSchema(columnNames, schema);
+        VectorSchemaRoot root = VectorSchemaRoot.create(arrowSchema, allocator);
+        root.allocateNew();
+
+        for (Field field : arrowSchema.getFields()) {
+            FieldVector vector = root.getVector(field.getName());
+            List<Object> values = new ArrayList<>();
+            for (Map<String, Object> row : rows) {
+                values.add(row.get(field.getName()));
+            }
+            populateVector(vector, values);
+        }
+
+        root.setRowCount(rows.size());
+        return root;
+    }
+
+    private static Schema buildSchema(Collection<String> columnNames, Map<String, String> schema) {
+        if (schema != null) {
+            return TypeMap.schemaToArrow(schema);
+        }
+        throw new IllegalArgumentException(
+            "schema() is required when returning dict data. " +
+            "Define a schema() method on your Connector.");
+    }
+
+    private static void populateVector(FieldVector vector, List<?> values) {
+        for (int i = 0; i < values.size(); i++) {
+            Object val = values.get(i);
+            if (val == null) {
+                continue; // leave as null
+            }
+            switch (vector) {
+                case VarCharVector v -> v.setSafe(i, val.toString().getBytes());
+                case BigIntVector v -> v.setSafe(i, ((Number) val).longValue());
+                case IntVector v -> v.setSafe(i, ((Number) val).intValue());
+                case SmallIntVector v -> v.setSafe(i, (short) ((Number) val).intValue());
+                case TinyIntVector v -> v.setSafe(i, (byte) ((Number) val).intValue());
+                case UInt1Vector v -> v.setSafe(i, (byte) ((Number) val).intValue());
+                case UInt2Vector v -> v.setSafe(i, (char) ((Number) val).intValue());
+                case UInt4Vector v -> v.setSafe(i, ((Number) val).intValue());
+                case UInt8Vector v -> v.setSafe(i, ((Number) val).longValue());
+                case Float4Vector v -> v.setSafe(i, ((Number) val).floatValue());
+                case Float8Vector v -> v.setSafe(i, ((Number) val).doubleValue());
+                case BitVector v -> {
+                    boolean b = val instanceof Boolean ? (Boolean) val : Boolean.parseBoolean(val.toString());
+                    v.setSafe(i, b ? 1 : 0);
+                }
+                case VarBinaryVector v -> {
+                    if (val instanceof byte[] bytes) {
+                        v.setSafe(i, bytes);
+                    } else {
+                        v.setSafe(i, val.toString().getBytes());
+                    }
+                }
+                default -> throw new IllegalArgumentException(
+                    "Unsupported vector type: " + vector.getClass().getName());
+            }
+        }
     }
 }
