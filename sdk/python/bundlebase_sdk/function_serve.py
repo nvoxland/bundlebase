@@ -1,0 +1,122 @@
+"""Entry point for running a function provider as a subprocess."""
+
+import json
+import struct
+import sys
+from typing import IO
+
+import pyarrow as pa
+
+from bundlebase_sdk.function import Function
+from bundlebase_sdk._protocol import (
+    read_request,
+    write_response,
+    write_error,
+    write_arrow_ipc,
+)
+
+
+def _read_arrow_ipc(stdin: IO[bytes]) -> list[pa.RecordBatch]:
+    """Read length-prefixed Arrow IPC stream from stdin.
+
+    Protocol: 4-byte big-endian u32 length, then Arrow IPC stream bytes.
+    """
+    len_bytes = stdin.read(4)
+    if len(len_bytes) < 4:
+        raise IOError("Unexpected EOF reading Arrow IPC length prefix")
+    data_len = struct.unpack(">I", len_bytes)[0]
+
+    if data_len == 0:
+        return []
+
+    data = stdin.read(data_len)
+    if len(data) < data_len:
+        raise IOError(
+            f"Unexpected EOF reading Arrow IPC data: expected {data_len}, got {len(data)}"
+        )
+
+    reader = pa.ipc.open_stream(data)
+    return reader.read_all().to_batches()
+
+
+def _serve_function(func: Function, stdin: IO[bytes], stdout: IO[bytes]) -> None:
+    """Run the JSON-RPC serve loop for functions with explicit IO streams."""
+    while True:
+        req = read_request(stdin)
+        if req is None:
+            break
+
+        method = req.get("method", "")
+        req_id = req.get("id")
+        params = req.get("params", {})
+
+        try:
+            if method == "invoke":
+                _handle_invoke(func, req_id, params, stdin, stdout)
+            elif method == "shutdown":
+                write_response(stdout, req_id, {"ok": True})
+                break
+            else:
+                write_error(stdout, req_id, -32601, f"Method not found: {method}")
+        except Exception as e:
+            write_error(stdout, req_id, -32000, str(e))
+
+
+def _handle_invoke(
+    func: Function,
+    req_id: int,
+    params: dict,
+    stdin: IO[bytes],
+    stdout: IO[bytes],
+) -> None:
+    func_name = params.get("function", "")
+    # Acknowledge the request
+    write_response(stdout, req_id, {"ok": True})
+
+    # Read input Arrow IPC
+    batches = _read_arrow_ipc(stdin)
+    if not batches:
+        # No input data — write empty output
+        write_arrow_ipc(stdout, [])
+        return
+
+    # Invoke the function with the input batch
+    input_batch = batches[0]
+    result_batch = func.invoke(func_name, input_batch)
+
+    # Write output Arrow IPC
+    if isinstance(result_batch, pa.RecordBatch):
+        write_arrow_ipc(stdout, [result_batch])
+    elif isinstance(result_batch, pa.Array):
+        # Wrap single array in a RecordBatch
+        rb = pa.record_batch({"result": result_batch})
+        write_arrow_ipc(stdout, [rb])
+    else:
+        raise TypeError(
+            f"Function '{func_name}' must return pa.RecordBatch or pa.Array, "
+            f"got {type(result_batch)}"
+        )
+
+
+def _build_manifest(func: Function) -> str:
+    """Build JSON manifest from the function provider."""
+    functions = func.functions()
+    return json.dumps({"functions": functions})
+
+
+def serve_function(func: Function) -> None:
+    """Run the function provider as a JSON-RPC subprocess.
+
+    Handles both:
+    - `--bundlebase-functions` CLI flag for manifest discovery
+    - JSON-RPC serve loop for function invocation
+
+    This is the main entry point for function provider scripts.
+    """
+    if "--bundlebase-functions" in sys.argv:
+        manifest = _build_manifest(func)
+        sys.stdout.write(manifest)
+        sys.stdout.flush()
+        return
+
+    _serve_function(func, sys.stdin.buffer, sys.stdout.buffer)

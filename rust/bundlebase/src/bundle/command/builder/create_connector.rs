@@ -16,7 +16,7 @@ use crate::bundle::BundleBuilder;
 /// If the connector already exists, adds/replaces logic for the given platform.
 #[derive(Debug, Clone)]
 pub struct CreateConnectorCommand {
-    /// Full dotted source name (e.g., "acme.datasources.weather")
+    /// Full dotted source name (e.g., "acme.weather")
     pub name: String,
     /// Runner type
     pub runner: Runner,
@@ -170,7 +170,8 @@ mod parsing_tests {
     }
 
     #[test]
-    fn test_parse_create_connector_deep_name() {
+    fn test_parse_create_connector_deep_name_parses_but_check_rejects() {
+        // Multi-level names parse fine at grammar level but are rejected by operation check()
         let input = "CREATE CONNECTOR acme.datasources.weather WITH (runner = 'ipc', logic = './weather')";
         let cmd = parse_command(input).unwrap();
         match cmd {

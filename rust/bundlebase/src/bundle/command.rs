@@ -61,8 +61,8 @@ pub use parser::Rule;
 // Re-export builder command structs
 pub use builder::{
     AddColumnCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    CreateConnectorCommand, CreateViewCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand,
-    DropIndexCommand, DropJoinCommand,
+    CreateConnectorCommand, CreateFunctionCommand, CreateFunctionsFromCommand, CreateViewCommand, DetachBlockCommand,
+    DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameJoinCommand, RenameViewCommand,
     ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand,
@@ -74,7 +74,9 @@ pub use builder::{FileVerificationResult, VerificationResults};
 
 // Re-export facade command structs
 pub use facade::CreateTemporaryConnectorCommand;
+pub use facade::CreateTemporaryFunctionCommand;
 pub use facade::DropTemporaryConnectorLogicCommand;
+pub use facade::DropTemporaryFunctionCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
 
@@ -86,8 +88,12 @@ pub use facade::SetConfigCommand;
 pub enum FacadeCommand {
     /// Create a temporary connector with runtime-only logic (not persisted)
     CreateTemporaryConnector(CreateTemporaryConnectorCommand),
+    /// Create a temporary function with runtime-only logic (not persisted)
+    CreateTemporaryFunction(CreateTemporaryFunctionCommand),
     /// Drop runtime-only connector logic (not persisted)
     DropTemporaryConnectorLogic(DropTemporaryConnectorLogicCommand),
+    /// Drop runtime-only function (not persisted)
+    DropTemporaryFunction(DropTemporaryFunctionCommand),
     /// Show query execution plan
     ExplainPlan(ExplainPlanCommand),
     /// Set runtime config value (session-only)
@@ -105,7 +111,15 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::CreateTemporaryFunction(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
             FacadeCommand::DropTemporaryConnectorLogic(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::DropTemporaryFunction(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
@@ -124,7 +138,9 @@ impl FacadeCommand {
     pub fn output_schema(&self) -> SchemaRef {
         match self {
             FacadeCommand::CreateTemporaryConnector(_) => CreateTemporaryConnectorCommand::output_schema(),
+            FacadeCommand::CreateTemporaryFunction(_) => CreateTemporaryFunctionCommand::output_schema(),
             FacadeCommand::DropTemporaryConnectorLogic(_) => DropTemporaryConnectorLogicCommand::output_schema(),
+            FacadeCommand::DropTemporaryFunction(_) => DropTemporaryFunctionCommand::output_schema(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
         }
@@ -134,7 +150,9 @@ impl FacadeCommand {
     pub fn output_shape(&self) -> OutputShape {
         match self {
             FacadeCommand::CreateTemporaryConnector(_) => CreateTemporaryConnectorCommand::output_shape(),
+            FacadeCommand::CreateTemporaryFunction(_) => CreateTemporaryFunctionCommand::output_shape(),
             FacadeCommand::DropTemporaryConnectorLogic(_) => DropTemporaryConnectorLogicCommand::output_shape(),
+            FacadeCommand::DropTemporaryFunction(_) => DropTemporaryFunctionCommand::output_shape(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
         }
@@ -149,7 +167,9 @@ impl BundleCommand {
     pub fn into_facade_command(self) -> Result<FacadeCommand, BundlebaseError> {
         match self {
             BundleCommand::CreateTemporaryConnector(cmd) => Ok(FacadeCommand::CreateTemporaryConnector(cmd)),
+            BundleCommand::CreateTemporaryFunction(cmd) => Ok(FacadeCommand::CreateTemporaryFunction(cmd)),
             BundleCommand::DropTemporaryConnectorLogic(cmd) => Ok(FacadeCommand::DropTemporaryConnectorLogic(cmd)),
+            BundleCommand::DropTemporaryFunction(cmd) => Ok(FacadeCommand::DropTemporaryFunction(cmd)),
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
             BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
             _ => {
@@ -177,7 +197,10 @@ impl BundleCommand {
                     BundleCommand::SetDescription(_) => "SET DESCRIPTION",
                     BundleCommand::SaveConfig(_) => "SAVE CONFIG",
                     BundleCommand::CreateConnector(_) => "CREATE CONNECTOR",
+                    BundleCommand::CreateFunction(_) => "CREATE FUNCTION",
+                    BundleCommand::CreateFunctionsFrom(_) => "CREATE FUNCTIONS FROM",
                     BundleCommand::DropConnector(_) => "DROP CONNECTOR",
+                    BundleCommand::DropFunction(_) => "DROP FUNCTION",
                     BundleCommand::CreateSource(_) => "CREATE SOURCE",
                     BundleCommand::Reset(_) => "RESET",
                     BundleCommand::Undo(_) => "UNDO",
@@ -185,7 +208,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::CreateTemporaryConnector(_) | BundleCommand::DropTemporaryConnectorLogic(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
+                    BundleCommand::CreateTemporaryConnector(_) | BundleCommand::CreateTemporaryFunction(_) | BundleCommand::DropTemporaryConnectorLogic(_) | BundleCommand::DropTemporaryFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -199,7 +222,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::CreateTemporaryConnector(_) | BundleCommand::DropTemporaryConnectorLogic(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
+        matches!(self, BundleCommand::CreateTemporaryConnector(_) | BundleCommand::CreateTemporaryFunction(_) | BundleCommand::DropTemporaryConnectorLogic(_) | BundleCommand::DropTemporaryFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
     }
 }
 
@@ -482,7 +505,10 @@ register_commands! {
 
         // Source commands
         CreateConnector(CreateConnectorCommand) => Rule::create_connector_stmt,
+        CreateFunction(CreateFunctionCommand) => Rule::create_function_stmt,
+        CreateFunctionsFrom(CreateFunctionsFromCommand) => Rule::create_functions_from_stmt,
         DropConnector(DropConnectorCommand) => Rule::drop_connector_stmt,
+        DropFunction(DropFunctionCommand) => Rule::drop_function_stmt,
         CreateSource(CreateSourceCommand) => Rule::create_source_stmt,
 
         // Transaction commands
@@ -500,7 +526,9 @@ register_commands! {
     }
     facade {
         CreateTemporaryConnector(CreateTemporaryConnectorCommand) => Rule::create_temporary_connector_stmt,
+        CreateTemporaryFunction(CreateTemporaryFunctionCommand) => Rule::create_temporary_function_stmt,
         DropTemporaryConnectorLogic(DropTemporaryConnectorLogicCommand) => Rule::drop_temporary_connector_logic_stmt,
+        DropTemporaryFunction(DropTemporaryFunctionCommand) => Rule::drop_temporary_function_stmt,
         ExplainPlan(ExplainPlanCommand) => Rule::explain_stmt,
         SetConfig(SetConfigCommand) => Rule::set_config_stmt,
     }

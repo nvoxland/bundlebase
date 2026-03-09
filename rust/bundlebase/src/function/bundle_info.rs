@@ -1,6 +1,6 @@
-//! Bundle metadata UDFs for SQL queries
+//! Bundle metadata functions for SQL queries
 //!
-//! This module provides DataFusion scalar UDFs that expose bundle metadata
+//! This module provides DataFusion scalar functions that expose bundle metadata
 //! within SQL queries. Currently supports:
 //!
 //! ```sql
@@ -22,33 +22,33 @@ use datafusion::logical_expr::{
 use std::any::Any;
 use std::sync::Arc;
 
-/// The version() scalar UDF implementation.
+/// The version() scalar function implementation.
 ///
 /// Returns the bundle's version hash for every row in a query result.
 /// This allows queries like `SELECT id, version() FROM bundle` to include
 /// the bundle version alongside data.
 #[derive(Debug)]
-pub struct VersionUdf {
+pub struct VersionFunction {
     version: Arc<String>,
     signature: Signature,
 }
 
-impl PartialEq for VersionUdf {
+impl PartialEq for VersionFunction {
     fn eq(&self, other: &Self) -> bool {
         self.name() == other.name() && self.version == other.version
     }
 }
 
-impl Eq for VersionUdf {}
+impl Eq for VersionFunction {}
 
-impl std::hash::Hash for VersionUdf {
+impl std::hash::Hash for VersionFunction {
     fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
         self.name().hash(hasher);
         self.version.hash(hasher);
     }
 }
 
-impl VersionUdf {
+impl VersionFunction {
     /// Create a new version() UDF with the specified version string
     pub fn new(version: String) -> Self {
         Self {
@@ -60,11 +60,11 @@ impl VersionUdf {
 
     /// Create the UDF as a ScalarUDF
     pub fn create_udf(version: String) -> ScalarUDF {
-        ScalarUDF::new_from_impl(VersionUdf::new(version))
+        ScalarUDF::new_from_impl(VersionFunction::new(version))
     }
 }
 
-impl ScalarUDFImpl for VersionUdf {
+impl ScalarUDFImpl for VersionFunction {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -98,7 +98,7 @@ mod tests {
 
     #[test]
     fn test_version_udf_signature() {
-        let udf = VersionUdf::new("test".to_string());
+        let udf = VersionFunction::new("test".to_string());
 
         assert_eq!(udf.name(), "version");
         assert_eq!(
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn test_version_udf_create() {
-        let udf = VersionUdf::create_udf("v1.2.3".to_string());
+        let udf = VersionFunction::create_udf("v1.2.3".to_string());
         assert_eq!(udf.name(), "version");
     }
 }

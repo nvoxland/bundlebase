@@ -9,8 +9,6 @@ use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::{column_metadata, sql, Bundle};
 use crate::data::{BlockId, ObjectId, VersionedBlockId};
 use crate::source::{FetchResults, SyncMode};
-use crate::functions::FunctionImpl;
-use crate::functions::FunctionSignature;
 use crate::index::{IndexDefinition, IndexType};
 use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
 use crate::bundle_config::Scope;
@@ -764,7 +762,7 @@ impl BundleBuilder {
     /// Python runner cannot be bundled — use `create_temporary_connector()` instead.
     ///
     /// # Arguments
-    /// * `name` - Dot-separated connector name (e.g., "acme.datasources.weather").
+    /// * `name` - Dot-separated connector name (e.g., "acme.weather").
     /// * `runner` - The runner: "lib", "java", "docker", or "ipc"
     /// * `logic` - The logic string (e.g., "./binary" for ipc, "./lib.so" for lib)
     /// * `platform` - Docker-style platform string (e.g., "linux/amd64", "*/*")
@@ -780,38 +778,6 @@ impl BundleBuilder {
         let runner: Runner = runner.parse()?;
         let platform: Platform = platform.parse()?;
         self.execute_command(CreateConnectorCommand::new(name, runner, logic, platform)).await?;
-        Ok(self)
-    }
-
-    /// Create a temporary connector with runtime-only logic (not persisted).
-    ///
-    /// Creates the connector if it doesn't exist, then adds runtime-only logic.
-    /// Use this for Python in-process connectors that cannot be bundled.
-    ///
-    /// # Arguments
-    /// * `name` - Dot-separated connector name
-    /// * `runner` - The runner: "python", "lib", "java", "docker", or "ipc"
-    /// * `logic` - The logic string (e.g., "module:Class" for python)
-    /// * `platform` - Docker-style platform string (default: "*/*")
-    pub async fn create_temporary_connector(
-        &self,
-        name: &str,
-        runner: &str,
-        logic: &str,
-        platform: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::connector_definition::{ConnectorEntry, Platform, Runner};
-        let runner: Runner = runner.parse()?;
-        let platform: Platform = platform.parse()?;
-        self.bundle().add_connector_entry(ConnectorEntry {
-            name: name.to_string(),
-            runner,
-            logic: logic.to_string(),
-            platform,
-            temporary: true,
-        });
-        self.bundle().mark_temporary_logic();
-        self.bundle().refresh_version_udf(self.version());
         Ok(self)
     }
 
@@ -1125,36 +1091,68 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Create a custom function
+    /// Create a persistent function (bundled, not session-only).
+    ///
+    /// Registers the function as a DataFusion UDF and persists the definition
+    /// via an operation. Python runner cannot be bundled — use `create_temporary_function()`.
+    ///
+    /// # Arguments
+    /// * `name` - Dotted function name (e.g., "acme.double_val")
+    /// * `input_types` - Arrow type names for parameters
+    /// * `return_type` - Arrow type name for the return value
+    /// * `runner` - The runner: "lib", "java", "docker", or "ipc"
+    /// * `logic` - The logic string (e.g., "./binary" for ipc)
+    /// * `platform` - Docker-style platform string (e.g., "linux/amd64", "*/*")
     pub async fn create_function(
         &self,
-        signature: FunctionSignature,
+        name: &str,
+        input_types: Vec<String>,
+        return_type: &str,
+        runner: &str,
+        logic: &str,
+        platform: &str,
+        function_type: &str,
     ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::operation::CreateFunctionOp;
-
-        let name = signature.name().to_string();
-
-        self.do_change(&format!("Create function {}", name), |builder| {
-            Box::pin(async move {
-                builder
-                    .apply_operation(CreateFunctionOp::setup(signature).into())
-                    .await?;
-                Ok(())
-            })
-        })
-        .await?;
-
+        use crate::bundle::command::CreateFunctionCommand;
+        use crate::bundle::connector_definition::{Platform, Runner};
+        use crate::bundle::function_definition::FunctionKind;
+        let runner: Runner = runner.parse()?;
+        let platform: Platform = platform.parse()?;
+        let kind: FunctionKind = function_type.parse()?;
+        self.execute_command(CreateFunctionCommand::new(
+            name, input_types, return_type, runner, logic, platform, kind,
+        )).await?;
         Ok(self)
     }
 
-    /// Set the implementation for a function
-    pub async fn set_impl(
+    /// Drop a persistent function.
+    ///
+    /// If `input_types` is provided, only the overload matching that signature is dropped.
+    /// If `input_types` is None, all overloads of the function are dropped.
+    pub async fn drop_function(
         &self,
         name: &str,
-        def: Arc<dyn FunctionImpl>,
+        platform: Option<&str>,
+        input_types: Option<Vec<String>>,
     ) -> Result<&Self, BundlebaseError> {
-        self.bundle.function_registry.write().set_impl(name, def)?;
+        use crate::bundle::command::DropFunctionCommand;
+        use crate::bundle::connector_definition::Platform;
+        let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
+        self.execute_command(DropFunctionCommand::new_with_signature(name, platform, input_types)).await?;
         Ok(self)
+    }
+
+    /// Drop runtime-only function (session-only, no operation created).
+    pub async fn drop_temporary_function(
+        &self,
+        name: &str,
+        platform: Option<&str>,
+    ) -> Result<usize, BundlebaseError> {
+        use crate::bundle::connector_definition::Platform;
+        let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
+        let _ = self.bundle().ctx().deregister_udf(name);
+        let _ = self.bundle().ctx().deregister_udaf(name);
+        self.bundle().remove_function_entry(name, platform.as_ref(), true)
     }
 
     /// Set the bundle's name
@@ -1560,8 +1558,9 @@ impl BundleFacade for BundleBuilder {
         logic: String,
         platform: crate::bundle::connector_definition::Platform,
     ) -> Result<(), BundlebaseError> {
+        let namespaced: crate::NamespacedName = name.parse()?;
         self.bundle.add_connector_entry(crate::bundle::connector_definition::ConnectorEntry {
-            name: name.to_string(),
+            name: namespaced,
             runner,
             logic,
             platform,
@@ -1578,6 +1577,52 @@ impl BundleFacade for BundleBuilder {
         platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError> {
         self.bundle.remove_connector_entry(name, platform, true)
+    }
+
+    async fn create_temporary_function(
+        &self,
+        entry: crate::bundle::function_definition::FunctionEntry,
+    ) -> Result<(), BundlebaseError> {
+        // Validate kind consistency before adding
+        let name = entry.name.to_string();
+        {
+            let existing = self.bundle.function_registry.read().resolve_all(&name);
+            if !existing.is_empty() {
+                let existing_kind = existing[0].kind;
+                if entry.kind != existing_kind {
+                    return Err(format!(
+                        "Function '{}' has overloads with mixed kinds (scalar and aggregate). \
+                         All overloads of a function must be the same kind.",
+                        name
+                    ).into());
+                }
+            }
+        }
+
+        // Add to registry then re-register all overloads for this name
+        self.bundle.add_function_entry(entry);
+        self.bundle.register_functions_for_name(&name)?;
+        self.bundle.mark_temporary_logic();
+        self.bundle.refresh_version_udf(self.version());
+        Ok(())
+    }
+
+    async fn drop_temporary_function(
+        &self,
+        name: &str,
+        platform: Option<&crate::bundle::connector_definition::Platform>,
+    ) -> Result<usize, BundlebaseError> {
+        let _ = self.bundle.ctx().deregister_udf(name);
+        let _ = self.bundle.ctx().deregister_udaf(name);
+        self.bundle.remove_function_entry(name, platform, true)
+    }
+
+    fn function_namespaces(&self) -> Vec<String> {
+        self.bundle.function_namespaces()
+    }
+
+    fn functions(&self) -> Vec<crate::NamespacedName> {
+        self.bundle.functions()
     }
 
     async fn set_config(
@@ -1836,12 +1881,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_version_temp_with_temporary_connector_only() {
+        use crate::bundle::facade::BundleFacade;
+        use crate::bundle::connector_definition::{Platform, Runner};
+
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
 
-        bundle
-            .create_temporary_connector("test.source", "lib", "test_call", "*/*")
+        BundleFacade::create_temporary_connector(
+            bundle.as_ref(),
+            "test.source",
+            Runner::Lib,
+            "test_call".to_string(),
+            Platform::any(),
+        )
             .await
             .unwrap();
 
@@ -1850,6 +1903,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_version_uncommitted_temp_with_changes_and_temporary_connector() {
+        use crate::bundle::facade::BundleFacade;
+        use crate::bundle::connector_definition::{Platform, Runner};
+
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
@@ -1858,8 +1914,13 @@ mod tests {
             .await
             .unwrap();
 
-        bundle
-            .create_temporary_connector("test.source", "lib", "test_call", "*/*")
+        BundleFacade::create_temporary_connector(
+            bundle.as_ref(),
+            "test.source",
+            Runner::Lib,
+            "test_call".to_string(),
+            Platform::any(),
+        )
             .await
             .unwrap();
 

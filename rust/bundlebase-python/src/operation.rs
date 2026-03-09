@@ -38,6 +38,7 @@ impl PyOperation {
             AnyOperation::UpdateVersion(_) => "updateVersion".to_string(),
             AnyOperation::CreateConnector(_) => "createConnector".to_string(),
             AnyOperation::DropConnector(_) => "dropConnector".to_string(),
+            AnyOperation::DropFunction(_) => "dropFunction".to_string(),
         }
     }
 

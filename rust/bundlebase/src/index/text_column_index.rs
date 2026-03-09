@@ -4,6 +4,8 @@
 //! It supports multiple tokenizers for different languages and use cases, and can index
 //! one or more columns in a single index for multi-field search.
 
+pub(crate) mod search_table_fn;
+
 use crate::data::RowId;
 use crate::index::{Index, IndexType, TokenizerConfig};
 use crate::BundlebaseError;

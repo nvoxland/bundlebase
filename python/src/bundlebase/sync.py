@@ -386,6 +386,48 @@ class SyncBundle:
         )
         return _loop_manager.run_sync(coro)
 
+    def create_temporary_function(
+        self, name: str, input_types: List[str], return_type: str,
+        runner: str, logic: str, platform: str = "*/*",
+        function_type: str = "scalar"
+    ) -> "SyncBundle":
+        """Create a temporary SQL function (not persisted).
+
+        Args:
+            name: Dotted function name (e.g., "acme.double_val")
+            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
+            return_type: Arrow type name for output (e.g., "Int64")
+            runner: The runner: "python", "lib", "java", "docker", or "ipc"
+            logic: Logic string (e.g., "my_module:my_function")
+            platform: Platform in os/arch format (default "*/*")
+            function_type: "scalar" or "aggregate" (default "scalar")
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(
+            self._async, "create_temporary_function", name, input_types, return_type, runner, logic, platform, function_type
+        )
+        _loop_manager.run_sync(coro)
+        return self
+
+    def drop_temporary_function(
+        self, name: str, platform: str = None
+    ) -> str:
+        """Drop a temporary function.
+
+        Args:
+            name: The dotted function name (e.g., "acme.double_val")
+            platform: Optional platform filter. None drops all.
+
+        Returns:
+            Message describing what was dropped
+        """
+        coro = _call_original_method(
+            self._async, "drop_temporary_function", name, platform
+        )
+        return _loop_manager.run_sync(coro)
+
 
 class SyncBundleBuilder(SyncBundle):
     """Synchronous wrapper for PyBundleBuilder (mutable).
@@ -750,10 +792,67 @@ class SyncBundleBuilder(SyncBundle):
         return self
 
     def create_function(
-        self, name: str, output: Dict[str, str], func: Any, version: str = "1"
+        self, name: str, input_types: List[str], return_type: str,
+        runner: str, logic: str, platform: str = "*/*",
+        function_type: str = "scalar"
     ) -> "SyncBundleBuilder":
-        """Define a custom Python function as a data source."""
-        coro = _call_original_method(self._async, "create_function", name, output, func, version)
+        """Create a named SQL function (persisted).
+
+        Args:
+            name: Dotted function name (e.g., "acme.double_val")
+            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
+            return_type: Arrow type name for output (e.g., "Int64")
+            runner: The runner: "lib", "java", "docker", or "ipc"
+            logic: Logic string (e.g., path to binary or "module:function")
+            platform: Platform in os/arch format (default "*/*")
+            function_type: "scalar" or "aggregate" (default "scalar")
+
+        Returns:
+            SyncBundleBuilder for chaining
+        """
+        coro = _call_original_method(self._async, "create_function", name, input_types, return_type, runner, logic, platform, function_type)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def create_temporary_function(
+        self, name: str, input_types: List[str], return_type: str,
+        runner: str, logic: str, platform: str = "*/*",
+        function_type: str = "scalar"
+    ) -> "SyncBundleBuilder":
+        """Create a temporary SQL function (not persisted).
+
+        Args:
+            name: Dotted function name (e.g., "acme.double_val")
+            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
+            return_type: Arrow type name for output (e.g., "Int64")
+            runner: The runner: "python", "lib", "java", "docker", or "ipc"
+            logic: Logic string (e.g., "my_module:my_function")
+            platform: Platform in os/arch format (default "*/*")
+            function_type: "scalar" or "aggregate" (default "scalar")
+
+        Returns:
+            SyncBundleBuilder for chaining
+        """
+        coro = _call_original_method(self._async, "create_temporary_function", name, input_types, return_type, runner, logic, platform, function_type)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def drop_function(
+        self, name: str, platform: str = None, input_types: list = None
+    ) -> "SyncBundleBuilder":
+        """Drop a function. Without a platform or input_types, removes the entire definition.
+        With a platform, removes only the logic for that platform.
+        With input_types, removes only the overload matching that signature.
+
+        Args:
+            name: The dotted function name (e.g., "acme.double_val")
+            platform: Optional platform filter (e.g., "linux/amd64"). None drops entire function.
+            input_types: Optional list of Arrow type names to drop a specific overload.
+
+        Returns:
+            SyncBundleBuilder for chaining
+        """
+        coro = _call_original_method(self._async, "drop_function", name, platform, input_types)
         self._async = _loop_manager.run_sync(coro)
         return self
 

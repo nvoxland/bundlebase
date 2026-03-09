@@ -2,11 +2,10 @@ mod builder;
 mod bundle;
 mod bundle_config;
 mod commit;
-mod data_generator;
-mod function_impl;
 mod native_source;
 mod operation;
 mod progress;
+mod python_function;
 mod record_batch_stream;
 mod schema;
 mod session_context;
@@ -110,6 +109,11 @@ fn bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Register the Python native source bridge for in-process source loading
     ::bundlebase::source::native::register_python_bridge(
         std::sync::Arc::new(native_source::PyNativeBridge),
+    );
+
+    // Register the Python function bridge for in-process function invocation
+    ::bundlebase::function::python_bridge::register_python_function_bridge(
+        std::sync::Arc::new(python_function::PyFunctionBridge),
     );
 
     Ok(())

@@ -22,7 +22,7 @@ Bundlebase is a high-performance data processing library written in Rust with Py
 │   ├── bundle/                         # Container implementations
 │   ├── data/                           # Data source plugins
 │   ├── io/                             # Storage abstraction
-│   ├── functions/                      # Function system
+│   ├── udf/                            # User-defined SQL functions
 │   └── python/                         # Python bindings
 ├── python/Bundlebase/                  # Python package
 ├── tests/                              # Rust integration tests
@@ -36,7 +36,7 @@ Bundlebase is a high-performance data processing library written in Rust with Py
 - **Three-Tier Architecture**: Bundlebase trait, Bundlebase (read-only), BundlebaseBuilder (mutable)
 - **Operation Pipeline**: Operations recorded and applied lazily during querying
 - **Adapter System**: Plugin architecture for CSV, JSON, Parquet, and custom functions
-- **Function System**: Custom data generation with paginated output
+- **Function System**: User-defined SQL scalar functions with multi-runner/multi-platform support
 - **Arc-Based Sharing**: Efficient cloning with shared state
 - **Manifest-Based Versioning**: Commit history with 'from' chain support
 
@@ -88,10 +88,9 @@ poetry run pytest         # Python tests
 - ✅ Mutable operations pattern (all operations mutate in place)
 - ✅ Three-phase operation system (check/reconfigure/apply)
 - ✅ Flexible path handling (file://, memory:///, s3://, custom URLs)
-- ✅ Shared FunctionRegistry across container instances
-- ✅ Python function integration via PyO3
+- ✅ User-defined SQL scalar functions (CREATE FUNCTION) with multi-runner support
+- ✅ Connector system for pluggable data sources (CREATE CONNECTOR)
 - ✅ Multi-format file support (CSV, JSON, Parquet)
-- ✅ Custom data generation via function:// URLs
 - ✅ Row indexing system for efficient lookups
 - ✅ Lazy evaluation with DataFusion integration
 - ✅ Schema tracking through operation pipeline

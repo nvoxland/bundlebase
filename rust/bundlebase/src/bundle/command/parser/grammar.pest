@@ -53,11 +53,16 @@ schema_stmt = {
     | rename_view_stmt
 }
 
-// Source management statements - operations for data sources
+// Source management statements - operations for data sources and functions
 source_stmt = {
-    create_temporary_connector_stmt
+    create_temporary_function_stmt
+    | create_temporary_connector_stmt
+    | create_functions_from_stmt
+    | create_function_stmt
     | create_connector_stmt
+    | drop_temporary_function_stmt
     | drop_temporary_connector_logic_stmt
+    | drop_function_stmt
     | drop_connector_stmt
     | create_source_stmt
     | fetch_stmt
@@ -209,6 +214,70 @@ drop_connector_stmt = {
 
 drop_temporary_connector_logic_stmt = {
     ^"drop" ~ ^"temporary" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ (^"for" ~ ^"platform" ~ quoted_string)?
+}
+
+// ============================================================================
+// CREATE FUNCTION Statement
+// ============================================================================
+// Syntax: CREATE FUNCTION <dotted_name>[(<type>, ...) RETURNS <type>] WITH (<args>)
+// Examples:
+//   CREATE FUNCTION acme.double_val(Int64) RETURNS Int64 WITH (runner = 'ipc', logic = './my_func')
+//   CREATE FUNCTION acme.add(Int64, Int64) RETURNS Int64 WITH (runner = 'lib', logic = './add.so', platform = 'linux/amd64')
+//   CREATE FUNCTION acme.double_val WITH (runner = 'ipc', logic = './my_func')
+
+create_function_stmt = {
+    ^"create" ~ ^"function" ~ dotted_identifier ~ (function_params ~ ^"returns" ~ identifier)? ~ ^"with" ~ source_args
+}
+
+// ============================================================================
+// CREATE FUNCTIONS FROM Statement
+// ============================================================================
+// Syntax: CREATE FUNCTIONS FROM '<path>' WITH (<args>)
+// Examples:
+//   CREATE FUNCTIONS FROM './mylib.so' WITH (runner = 'lib', namespace = 'acme')
+//   CREATE FUNCTIONS FROM './my_func' WITH (runner = 'ipc', namespace = 'acme', platform = 'linux/amd64')
+
+create_functions_from_stmt = {
+    ^"create" ~ ^"functions" ~ ^"from" ~ quoted_string ~ ^"with" ~ source_args
+}
+
+// ============================================================================
+// CREATE TEMPORARY FUNCTION Statement
+// ============================================================================
+// Syntax: CREATE TEMPORARY FUNCTION <dotted_name>[(<type>, ...) RETURNS <type>] WITH (<args>)
+// Examples:
+//   CREATE TEMPORARY FUNCTION acme.double_val(Int64) RETURNS Int64 WITH (runner = 'python', logic = 'mod:func')
+//   CREATE TEMPORARY FUNCTION acme.double_val WITH (runner = 'python', logic = 'mod:func')
+
+create_temporary_function_stmt = {
+    ^"create" ~ ^"temporary" ~ ^"function" ~ dotted_identifier ~ (function_params ~ ^"returns" ~ identifier)? ~ ^"with" ~ source_args
+}
+
+// ============================================================================
+// DROP FUNCTION Statement
+// ============================================================================
+// Syntax: DROP FUNCTION <dotted_name> [(<type>, ...)]
+// Example: DROP FUNCTION acme.double_val
+// Example: DROP FUNCTION acme.double_val(Int64)
+
+drop_function_stmt = {
+    ^"drop" ~ ^"function" ~ dotted_identifier ~ function_params?
+}
+
+// ============================================================================
+// DROP TEMPORARY FUNCTION Statement
+// ============================================================================
+// Syntax: DROP TEMPORARY FUNCTION <dotted_name> [(<type>, ...)]
+// Example: DROP TEMPORARY FUNCTION acme.double_val
+// Example: DROP TEMPORARY FUNCTION acme.double_val(Int64)
+
+drop_temporary_function_stmt = {
+    ^"drop" ~ ^"temporary" ~ ^"function" ~ dotted_identifier ~ function_params?
+}
+
+// Function parameter type list: (Type1, Type2, ...)
+function_params = {
+    "(" ~ identifier ~ ("," ~ identifier)* ~ ")"
 }
 
 // ============================================================================

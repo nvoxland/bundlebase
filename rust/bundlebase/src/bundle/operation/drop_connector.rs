@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DropConnectorOp {
-    /// Full dotted connector name (e.g., "acme.datasources.weather")
+    /// Full dotted connector name (e.g., "acme.weather")
     pub source_name: String,
     /// Optional platform filter (e.g., "linux/amd64"). None means drop the entire connector.
     pub platform: Option<Platform>,
@@ -78,6 +78,7 @@ impl Operation for DropConnectorOp {
 mod tests {
     use super::*;
     use crate::bundle::connector_definition::{ConnectorEntry, Platform, Runner};
+    use crate::NamespacedName;
 
     #[test]
     fn test_describe_without_platform() {
@@ -129,7 +130,7 @@ mod tests {
     async fn test_check_source_defined() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         bundle.add_connector_entry(ConnectorEntry {
-            name: "acme.weather".to_string(),
+            name: NamespacedName::new("acme", "weather"),
             runner: Runner::Lib,
             logic: "test".to_string(),
             platform: Platform::any(),
@@ -145,7 +146,7 @@ mod tests {
     async fn test_apply_removes_entries() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         bundle.add_connector_entry(ConnectorEntry {
-            name: "acme.weather".to_string(),
+            name: NamespacedName::new("acme", "weather"),
             runner: Runner::Lib,
             logic: "test".to_string(),
             platform: Platform::any(),
@@ -162,14 +163,14 @@ mod tests {
     async fn test_apply_removes_all_entries() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         bundle.add_connector_entry(ConnectorEntry {
-            name: "acme.weather".to_string(),
+            name: NamespacedName::new("acme", "weather"),
             runner: Runner::Lib,
             logic: "test1".to_string(),
             platform: Platform::any(),
             temporary: false,
         });
         bundle.add_connector_entry(ConnectorEntry {
-            name: "acme.weather".to_string(),
+            name: NamespacedName::new("acme", "weather"),
             runner: Runner::Lib,
             logic: "test2".to_string(),
             platform: "linux/amd64".parse().unwrap(),
@@ -187,14 +188,14 @@ mod tests {
     async fn test_apply_removes_platform_specific() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         bundle.add_connector_entry(ConnectorEntry {
-            name: "acme.weather".to_string(),
+            name: NamespacedName::new("acme", "weather"),
             runner: Runner::Lib,
             logic: "wildcard".to_string(),
             platform: Platform::any(),
             temporary: false,
         });
         bundle.add_connector_entry(ConnectorEntry {
-            name: "acme.weather".to_string(),
+            name: NamespacedName::new("acme", "weather"),
             runner: Runner::Lib,
             logic: "linux-specific".to_string(),
             platform: "linux/amd64".parse().unwrap(),

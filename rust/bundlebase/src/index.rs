@@ -22,3 +22,4 @@ pub use rowid_cache::GLOBAL_ROWID_CACHE;
 pub use rowid_index::RowIdIndex;
 pub use temp_dir::TempDirManager;
 pub use text_column_index::{TextIndex, TextIndexBuilder};
+pub use text_column_index::search_table_fn::SearchTableFunction;

@@ -1,12 +1,9 @@
-use crate::function_impl::PythonFunctionImpl;
 use crate::utils::convert_py_params;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use ::bundlebase::bundle::BundleBuilder;
 use ::bundlebase::bundle::{BundleChange, BundleFacade, BundleStatus};
-use ::bundlebase::functions::FunctionSignature;
 use ::bundlebase::source::{FetchedBlock, FetchResults, SyncMode};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyFunction};
+use pyo3::types::PyDict;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -329,60 +326,109 @@ impl PyBundleBuilder {
         })
     }
 
-    #[pyo3(signature = (name, output, func, version))]
+    #[pyo3(signature = (name, input_types, return_type, runner, logic, platform="*/*", function_type="scalar"))]
     fn create_function<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
-        output: Py<PyDict>,
-        func: Py<PyFunction>,
-        version: &str,
+        input_types: Vec<String>,
+        return_type: &str,
+        runner: &str,
+        logic: &str,
+        platform: &str,
+        function_type: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let name = name.to_string();
-        let version = version.to_string();
+        let return_type = return_type.to_string();
+        let runner = runner.to_string();
+        let logic = logic.to_string();
+        let platform = platform.to_string();
+        let function_type = function_type.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let schema: Vec<Field> = Python::attach(|py| {
-                output
-                    .bind_borrowed(py)
-                    .iter()
-                    .map(|(k, v)| {
-                        let key = k.extract::<String>().map_err(|_| {
-                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                                "Function output schema keys must be strings".to_string(),
-                            )
-                        })?;
-                        let dtype_str = v.extract::<String>().map_err(|_| {
-                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                                "Function output schema values must be strings".to_string(),
-                            )
-                        })?;
-                        let dtype = DataType::from_str(&dtype_str).map_err(|e| {
-                            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                                "Invalid data type '{}': {}",
-                                dtype_str, e
-                            ))
-                        })?;
-                        Ok(Field::new(key, dtype, true))
-                    })
-                    .collect::<PyResult<Vec<Field>>>()
-            })?;
-
             inner
-                .create_function(FunctionSignature::new(
-                    name.as_str(),
-                    SchemaRef::new(Schema::new(schema)),
-                ))
+                .create_function(&name, input_types, &return_type, &runner, &logic, &platform, &function_type)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to create function", e))?;
 
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    #[pyo3(signature = (name, input_types, return_type, runner, logic, platform="*/*", function_type="scalar"))]
+    fn create_temporary_function<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        input_types: Vec<String>,
+        return_type: &str,
+        runner: &str,
+        logic: &str,
+        platform: &str,
+        function_type: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let return_type = return_type.to_string();
+        let runner = runner.to_string();
+        let logic = logic.to_string();
+        let platform = platform.to_string();
+        let function_type = function_type.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            use ::bundlebase::bundle::{Platform, Runner, FunctionEntry, FunctionKind};
+            use ::bundlebase::bundle::parse_arrow_type_name;
+            let runner: Runner = runner.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
+            let platform: Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
+            let kind: FunctionKind = function_type.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
+            let namespaced: ::bundlebase::NamespacedName = name.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
+            let parsed_input_types = input_types.iter()
+                .map(|s| parse_arrow_type_name(s))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| to_py_error(e))?;
+            let parsed_return_type = parse_arrow_type_name(&return_type)
+                .map_err(|e| to_py_error(e))?;
+            let entry = FunctionEntry {
+                name: namespaced,
+                input_types: parsed_input_types,
+                return_type: parsed_return_type,
+                runner,
+                logic,
+                platform,
+                temporary: true,
+                kind,
+            };
             inner
-                .set_impl(
-                    name.as_str(),
-                    Arc::new(PythonFunctionImpl::new(func, version)),
-                )
+                .as_ref()
+                .create_temporary_function(entry)
                 .await
-                .map_err(|e| to_py_error_ctx("Failed to set function implementation", e))?;
+                .map_err(|e| to_py_error_ctx("Failed to create temporary function", e))?;
+
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    #[pyo3(signature = (name, platform=None, input_types=None))]
+    fn drop_function<'py>(
+        slf: PyRef<'_, Self>,
+        name: &str,
+        platform: Option<&str>,
+        input_types: Option<Vec<String>>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let name = name.to_string();
+        let platform = platform.map(|s| s.to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .drop_function(&name, platform.as_deref(), input_types)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to drop function", e))?;
 
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })
@@ -733,8 +779,11 @@ impl PyBundleBuilder {
         let logic = logic.to_string();
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let runner: ::bundlebase::bundle::Runner = runner.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
+            let platform: ::bundlebase::bundle::Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
             inner
-                .create_temporary_connector(&name, &runner, &logic, &platform)
+                .as_ref()
+                .create_temporary_connector(&name, runner, logic, platform)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to create temporary connector", e))?;
             Python::attach(|py| {

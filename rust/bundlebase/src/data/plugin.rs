@@ -1,7 +1,6 @@
 mod bundlebase_reader;
 mod csv_reader;
 mod file_reader;
-mod function_reader;
 mod json_reader;
 mod parquet_reader;
 
@@ -13,8 +12,6 @@ use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 pub use bundlebase_reader::BundlebasePlugin;
 pub use csv_reader::CsvPlugin;
-pub use function_reader::DataGenerator;
-pub use function_reader::FunctionPlugin;
 pub use json_reader::JsonPlugin;
 pub use parquet_reader::ParquetPlugin;
 use std::sync::Arc;

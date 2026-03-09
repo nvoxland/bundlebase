@@ -1,9 +1,10 @@
 //! Connector entry system for named, platform-aware connector logic.
 //!
-//! A `ConnectorEntry` is created via `CREATE CONNECTOR acme.datasources.weather`
+//! A `ConnectorEntry` is created via `CREATE CONNECTOR acme.weather`
 //! and represents a single connector logic binding for a name+platform pair.
 //! `resolve_connector` picks the best entry for the current platform at runtime.
 
+use crate::namespaced_name::NamespacedName;
 use crate::BundlebaseError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -152,7 +153,7 @@ impl FromStr for Runner {
 /// or temporary vs persisted). Resolution picks the best match at runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectorEntry {
-    pub name: String,
+    pub name: NamespacedName,
     pub runner: Runner,
     pub logic: String,
     pub platform: Platform,
@@ -213,35 +214,16 @@ pub fn build_call_string(runner: Runner, logic: &str) -> String {
     }
 }
 
-/// Parse a dotted connector name into (namespace, name).
+/// Parse and validate a dotted connector name.
 ///
-/// The name must contain at least one dot. The last segment is the name,
-/// everything before is the namespace.
+/// Enforces single-level dotted namespace: exactly one dot, both parts alphanumeric.
 ///
 /// # Examples
-/// - `"acme.datasources.weather"` → `("acme.datasources", "weather")`
-/// - `"acme.weather"` → `("acme", "weather")`
-/// - `"weather"` → error
-pub fn parse_connector_name(name: &str) -> Result<(&str, &str), BundlebaseError> {
-    match name.rfind('.') {
-        Some(pos) => {
-            let namespace = &name[..pos];
-            let short_name = &name[pos + 1..];
-            if namespace.is_empty() || short_name.is_empty() {
-                return Err(format!(
-                    "Invalid connector name '{}': namespace and name must not be empty",
-                    name
-                )
-                .into());
-            }
-            Ok((namespace, short_name))
-        }
-        None => Err(format!(
-            "Connector name '{}' must contain at least one dot (e.g., 'acme.weather')",
-            name
-        )
-        .into()),
-    }
+/// - `"acme.weather"` → `Ok(("acme", "weather"))`
+/// - `"acme.datasources.weather"` → error (multi-level)
+/// - `"weather"` → error (no dot)
+pub fn parse_connector_name(name: &str) -> Result<NamespacedName, BundlebaseError> {
+    crate::namespaced_name::NamespacedName::parse(name, "Connector")
 }
 
 #[cfg(test)]
@@ -341,14 +323,14 @@ mod tests {
     fn test_resolve_last_set_wins() {
         let entries = vec![
             ConnectorEntry {
-                name: "test.source".to_string(),
+                name: NamespacedName::new("test", "source"),
                 runner: Runner::Lib,
                 logic: "first".to_string(),
                 platform: Platform::any(),
                 temporary: false,
             },
             ConnectorEntry {
-                name: "test.source".to_string(),
+                name: NamespacedName::new("test", "source"),
                 runner: Runner::Lib,
                 logic: "second".to_string(),
                 platform: Platform::any(),
@@ -363,7 +345,7 @@ mod tests {
     #[test]
     fn test_resolve_no_match() {
         let entries = vec![ConnectorEntry {
-            name: "test.source".to_string(),
+            name: NamespacedName::new("test", "source"),
             runner: Runner::Lib,
             logic: "test".to_string(),
             platform: "nonexistent/arch".parse().unwrap(),
@@ -387,14 +369,14 @@ mod tests {
     fn test_resolve_temporary_overrides_persisted() {
         let entries = vec![
             ConnectorEntry {
-                name: "test.source".to_string(),
+                name: NamespacedName::new("test", "source"),
                 runner: Runner::Lib,
                 logic: "persisted".to_string(),
                 platform: Platform::any(),
                 temporary: false,
             },
             ConnectorEntry {
-                name: "test.source".to_string(),
+                name: NamespacedName::new("test", "source"),
                 runner: Runner::Python,
                 logic: "temporary".to_string(),
                 platform: Platform::any(),
@@ -409,22 +391,27 @@ mod tests {
 
     #[test]
     fn test_parse_connector_name_valid() {
-        let (ns, name) = parse_connector_name("acme.datasources.weather").unwrap();
-        assert_eq!(ns, "acme.datasources");
-        assert_eq!(name, "weather");
+        let nn = parse_connector_name("acme.weather").unwrap();
+        assert_eq!(nn.namespace, "acme");
+        assert_eq!(nn.name, "weather");
     }
 
     #[test]
     fn test_parse_connector_name_no_dot() {
         let result = parse_connector_name("weather");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must contain at least one dot"));
+        assert!(result.unwrap_err().to_string().contains("must contain exactly one dot"));
     }
 
     #[test]
-    fn test_parse_connector_name_single_dot() {
-        let (ns, name) = parse_connector_name("acme.weather").unwrap();
-        assert_eq!(ns, "acme");
-        assert_eq!(name, "weather");
+    fn test_parse_connector_name_multi_level_rejected() {
+        let result = parse_connector_name("acme.datasources.weather");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Multi-level namespaces"));
+    }
+
+    #[test]
+    fn test_parse_connector_name_rejects_non_alphanumeric() {
+        assert!(parse_connector_name("acme.bad-name").is_err());
     }
 }

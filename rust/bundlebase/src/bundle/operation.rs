@@ -4,6 +4,7 @@ mod cast_column;
 mod create_view;
 mod create_function;
 mod create_index;
+mod drop_function;
 mod create_join;
 mod create_source;
 mod create_connector;
@@ -32,6 +33,7 @@ pub use crate::bundle::operation::cast_column::CastColumnOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
 pub use crate::bundle::operation::create_function::CreateFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
+pub use crate::bundle::operation::drop_function::DropFunctionOp;
 pub use crate::bundle::operation::create_join::CreateJoinOp;
 pub use crate::bundle::operation::create_source::CreateSourceOp;
 pub use crate::bundle::operation::create_connector::CreateConnectorOp;
@@ -218,6 +220,7 @@ define_any_operation! {
     DropColumn(DropColumnOp),
     DropIndex(DropIndexOp),
     DropConnector(DropConnectorOp),
+    DropFunction(DropFunctionOp),
     DropJoin(DropJoinOp),
     DropView(DropViewOp),
     Filter(FilterOp),

@@ -12,24 +12,24 @@ c = await Bundlebase.create("memory:///test_container")  # Returns BundlebaseBui
 # Attach data source
 await c.attach("userdata.parquet")
 
-# Define custom function
-def my_data(page: int, schema: pa.Schema) -> pa.RecordBatch | None:
-    if page == 0:
-        return pa.record_batch(
-            data={
-                "id": [1, 2, 3],
-                "name": ["Alice", "Bob", "Charlie"]
-            },
-            schema=schema
-        )
-    return None
-
-await c.create_function(
-    name="my_data",
-    output={"id": "Int64", "name": "Utf8"},  # output not schema
-    func=my_data  # func not function
+# Register a user-defined SQL scalar function (temporary, for Python runner)
+await c.create_temporary_function(
+    name="acme.double_val",
+    input_types=["Int64"],
+    return_type="Int64",
+    runner="python",
+    logic="my_module:double_val"
 )
-await c.attach("function://my_data")
+# Use in SQL: SELECT acme.double_val(id) FROM bundle
+
+# Or register a persistent function (non-Python runners only)
+await c.create_function(
+    name="acme.weather",
+    input_types=["Utf8"],
+    return_type="Utf8",
+    runner="ipc",
+    logic="./weather-binary"
+)
 
 # Transform data (modifies container in place)
 await c.remove_column("title")
@@ -93,7 +93,9 @@ c = await Bundlebase.open("/my/container/dir")
 - `join(url, expression, join_type)` - Join with another source
 - `set_name(name)` - Set container name
 - `set_description(description)` - Set container description
-- `create_function(name, output, func)` - Define custom function
+- `create_function(name, input_types, return_type, runner, logic, platform)` - Define a persistent SQL scalar function
+- `create_temporary_function(name, input_types, return_type, runner, logic, platform)` - Define a session-only SQL scalar function
+- `drop_function(name, platform)` - Drop a function definition
 - `create_view(name, sql)` - Create a named view from a SQL query
 - `query(sql, params)` - Execute a SQL query and return streaming results
 

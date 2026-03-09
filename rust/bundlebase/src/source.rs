@@ -1,6 +1,5 @@
 //! Source module for connector definitions, data discovery, and fetch orchestration.
 
-pub mod plugin;
 pub(crate) mod connector;
 pub(crate) mod connector_utils;
 pub(crate) mod fetch;
@@ -46,11 +45,11 @@ impl std::fmt::Display for SyncMode {
     }
 }
 
-pub use plugin::kaggle::KaggleConnector;
-pub use plugin::native;
-pub use plugin::PostgresConnector;
-pub use plugin::RemoteDirConnector;
-pub use plugin::WebScrapeConnector;
+pub use connector::plugin::kaggle::KaggleConnector;
+pub use connector::plugin::native;
+pub use connector::plugin::PostgresConnector;
+pub use connector::plugin::RemoteDirConnector;
+pub use connector::plugin::WebScrapeConnector;
 pub use connector::{
     format_fetch_summary, validate_connector_args, ArgSpec, AttachedFileInfo, DiscoveredLocation,
     FetchAction, FetchedBlock, FetchResults, MaterializedData, SourceData, Connector,
