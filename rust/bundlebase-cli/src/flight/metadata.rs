@@ -179,7 +179,8 @@ pub fn get_flight_info_schemas(
 }
 
 /// Get schemas data.
-pub fn do_get_schemas() -> Result<Response<DoGetStream>, Status> {
+/// `function_namespaces` contains unique namespace names from registered functions.
+pub fn do_get_schemas(function_namespaces: &[String]) -> Result<Response<DoGetStream>, Status> {
     let schema = Arc::new(Schema::new(vec![
         arrow::datatypes::Field::new("catalog_name", arrow::datatypes::DataType::Utf8, true),
         arrow::datatypes::Field::new(
@@ -189,18 +190,20 @@ pub fn do_get_schemas() -> Result<Response<DoGetStream>, Status> {
         ),
     ]));
 
-    // Return "default" and "bundle_info" schemas
+    // Built-in schemas + function namespace schemas
+    let mut catalog_names: Vec<Option<&str>> = vec![Some(CATALOG_NAME), Some(CATALOG_NAME)];
+    let mut schema_names: Vec<&str> = vec![DEFAULT_SCHEMA, BUNDLE_INFO_SCHEMA];
+
+    for ns in function_namespaces {
+        catalog_names.push(Some(CATALOG_NAME));
+        schema_names.push(ns.as_str());
+    }
+
     let batch = RecordBatch::try_new(
         schema.clone(),
         vec![
-            Arc::new(arrow::array::StringArray::from(vec![
-                Some(CATALOG_NAME),
-                Some(CATALOG_NAME),
-            ])),
-            Arc::new(arrow::array::StringArray::from(vec![
-                DEFAULT_SCHEMA,
-                BUNDLE_INFO_SCHEMA,
-            ])),
+            Arc::new(arrow::array::StringArray::from(catalog_names)),
+            Arc::new(arrow::array::StringArray::from(schema_names)),
         ],
     )
     .map_err(|e| Status::internal(format!("Failed to create batch: {}", e)))?;
@@ -335,20 +338,30 @@ fn serialize_schema_to_ipc(schema: &Schema) -> Result<Vec<u8>, Status> {
 
 /// Get tables data.
 /// If `bundle_schema` is provided, it will be used for the "default.bundle" table schema.
-pub fn do_get_tables(cmd: CommandGetTables, bundle_schema: Option<Arc<Schema>>) -> Result<Response<DoGetStream>, Status> {
+/// `function_entries` contains (namespace, function_name) pairs for registered functions.
+pub fn do_get_tables(
+    cmd: CommandGetTables,
+    bundle_schema: Option<Arc<Schema>>,
+    function_entries: &[bundlebase::NamespacedName],
+) -> Result<Response<DoGetStream>, Status> {
     let response_schema = get_tables_response_schema(cmd.include_schema);
 
     // All available tables: (schema, table_name, table_type)
-    let all_tables = vec![
-        (DEFAULT_SCHEMA, "bundle", "TABLE"),
-        (BUNDLE_INFO_SCHEMA, catalog_tables::HISTORY, "TABLE"),
-        (BUNDLE_INFO_SCHEMA, catalog_tables::STATUS, "TABLE"),
-        (BUNDLE_INFO_SCHEMA, catalog_tables::DETAILS, "TABLE"),
-        (BUNDLE_INFO_SCHEMA, catalog_tables::VIEWS, "TABLE"),
-        (BUNDLE_INFO_SCHEMA, catalog_tables::INDEXES, "TABLE"),
-        (BUNDLE_INFO_SCHEMA, catalog_tables::PACKS, "TABLE"),
-        (BUNDLE_INFO_SCHEMA, catalog_tables::BLOCKS, "TABLE"),
+    let mut all_tables: Vec<(String, String, &str)> = vec![
+        (DEFAULT_SCHEMA.to_string(), "bundle".to_string(), "TABLE"),
+        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::HISTORY.to_string(), "TABLE"),
+        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::STATUS.to_string(), "TABLE"),
+        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::DETAILS.to_string(), "TABLE"),
+        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::VIEWS.to_string(), "TABLE"),
+        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::INDEXES.to_string(), "TABLE"),
+        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::PACKS.to_string(), "TABLE"),
+        (BUNDLE_INFO_SCHEMA.to_string(), catalog_tables::BLOCKS.to_string(), "TABLE"),
     ];
+
+    // Add function entries as FUNCTION type
+    for entry in function_entries {
+        all_tables.push((entry.namespace.clone(), entry.name.clone(), "FUNCTION"));
+    }
 
     // Filter tables based on request parameters
     let filtered_tables: Vec<_> = all_tables
@@ -388,8 +401,8 @@ pub fn do_get_tables(cmd: CommandGetTables, bundle_schema: Option<Arc<Schema>>) 
 
     // Build arrays from filtered results
     let catalogs: Vec<Option<&str>> = filtered_tables.iter().map(|_| Some(CATALOG_NAME)).collect();
-    let schemas: Vec<Option<&str>> = filtered_tables.iter().map(|(s, _, _)| Some(*s)).collect();
-    let tables: Vec<&str> = filtered_tables.iter().map(|(_, t, _)| *t).collect();
+    let schemas: Vec<Option<&str>> = filtered_tables.iter().map(|(s, _, _)| Some(s.as_str())).collect();
+    let tables: Vec<&str> = filtered_tables.iter().map(|(_, t, _)| t.as_str()).collect();
     let types: Vec<&str> = filtered_tables.iter().map(|(_, _, ty)| *ty).collect();
 
     let mut columns: Vec<Arc<dyn arrow::array::Array>> = vec![

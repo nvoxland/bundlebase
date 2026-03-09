@@ -3,9 +3,10 @@ extern crate core;
 
 pub mod bundle;
 pub mod bundle_config;
+pub mod namespaced_name;
 mod catalog;
 mod data;
-pub mod functions;
+
 mod index;
 pub mod io;
 pub mod metrics;
@@ -15,7 +16,7 @@ pub mod row_id;
 pub mod source;
 #[allow(clippy::unwrap_used)]
 pub mod test_utils;
-pub mod udf;
+pub mod function;
 mod versioning;
 
 pub use crate::bundle::{
@@ -23,12 +24,11 @@ pub use crate::bundle::{
     FileVerificationResult, Operation, VerificationResults,
 };
 pub use crate::bundle_config::{BundleConfig, ConfigScope, ConfigValueDetails, ConfigSource, PassedBundleConfig, Scope};
-pub use crate::data::DataGenerator;
 pub use crate::progress::{get_tracker, set_tracker, with_tracker, ProgressId, ProgressTracker};
-pub use functions::{FunctionImpl, FunctionSignature};
 pub use crate::index::{IndexType, IndexTypeConfigError, ParseIndexTypeError, TokenizerConfig};
 use std::error::Error;
 pub use bundle::JoinTypeOption;
+pub use namespaced_name::NamespacedName;
 pub use catalog::{CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA, tables as catalog_tables};
 
 /// Standard error type used throughout the Bundlebase codebase

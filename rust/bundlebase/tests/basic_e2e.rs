@@ -1,10 +1,8 @@
-use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use bundlebase;
 use bundlebase::bundle::{BundleFacade, INIT_FILENAME, META_DIR};
 use bundlebase::io::{readable_file_from_path, readable_file_from_url};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
 use bundlebase::BundleConfig;
-use bundlebase::FunctionSignature;
 use bundlebase::{op_field, AnyOperation};
 use bundlebase::{test_utils, Bundle, BundlebaseError};
 use url::Url;
@@ -305,28 +303,6 @@ changes:
     assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
     assert!(contents.contains("type: dropColumn\n    id:"), "DropColumn should have id");
     assert!(contents.contains("type: renameColumn\n    id:"), "RenameColumn should have id");
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_open_with_function() -> Result<(), BundlebaseError> {
-    let data_dir = random_memory_dir();
-
-    // Create bundle with function definition
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
-    let schema = SchemaRef::new(Schema::new(vec![
-        Field::new("id", DataType::Int64, false),
-        Field::new("value", DataType::Utf8, true),
-    ]));
-    bundle
-        .create_function(FunctionSignature::new("test_func", schema))
-        .await?;
-
-    bundle.commit("Commit changes").await?;
-
-    // Open the saved bundle
-    let _loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;
 
     Ok(())
 }

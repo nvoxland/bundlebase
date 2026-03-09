@@ -1,140 +1,209 @@
+//! CreateFunction operation — registers a named function definition.
+
+use crate::bundle::connector_definition::{Platform, Runner};
+use crate::bundle::function_definition::{arrow_type_serde, parse_function_name, FunctionEntry, FunctionKind};
+use crate::NamespacedName;
 use crate::bundle::operation::Operation;
-use crate::functions::FunctionSignature;
 use crate::{Bundle, BundlebaseError};
+use arrow::datatypes::DataType;
 use async_trait::async_trait;
-use datafusion::common::DataFusionError;
+use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Operation that defines a named function and registers it with DataFusion.
+///
+/// Always persisted — for runtime-only functions, use `create_temporary_function` instead.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateFunctionOp {
-    pub signature: FunctionSignature,
-}
-
-impl PartialEq for CreateFunctionOp {
-    fn eq(&self, other: &Self) -> bool {
-        // Compare only the function names since FunctionSignature contains SchemaRef
-        self.signature.name() == other.signature.name()
-    }
+    /// Full dotted function name (e.g., "acme.double_val")
+    pub name: String,
+    /// Arrow types for input parameters
+    #[serde(with = "arrow_type_serde::vec")]
+    pub input_types: Vec<DataType>,
+    /// Arrow type for the return value
+    #[serde(with = "arrow_type_serde::single")]
+    pub return_type: DataType,
+    /// Runner type
+    pub runner: Runner,
+    /// Logic string (e.g., path to binary or module:function)
+    pub logic: String,
+    /// Platform pattern in Docker-style os/arch
+    pub platform: Platform,
+    /// Scalar or aggregate
+    pub kind: FunctionKind,
 }
 
 impl CreateFunctionOp {
-    pub fn setup(signature: FunctionSignature) -> Self {
-        Self { signature }
+    pub fn new(
+        name: String,
+        input_types: Vec<DataType>,
+        return_type: DataType,
+        runner: Runner,
+        logic: String,
+        platform: Platform,
+        kind: FunctionKind,
+    ) -> Self {
+        Self { name, input_types, return_type, runner, logic, platform, kind }
     }
 }
 
 #[async_trait]
 impl Operation for CreateFunctionOp {
     fn describe(&self) -> String {
-        format!("CREATE FUNCTION: {}", self.signature.name())
+        let input_strs: Vec<String> = self.input_types.iter().map(|dt| dt.to_string()).collect();
+        format!(
+            "CREATE FUNCTION {}({}) RETURNS {} (runner={}, platform={})",
+            self.name,
+            input_strs.join(", "),
+            self.return_type,
+            self.runner,
+            self.platform
+        )
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
+        // Validate name has exactly one dot
+        parse_function_name(&self.name)?;
+
+        // Reject python runner (cannot be bundled)
+        if self.runner == Runner::Python {
+            return Err(
+                "python runner cannot be bundled. Use CREATE TEMPORARY FUNCTION instead.".into(),
+            );
+        }
+
+        // Types are already validated DataType values — no parsing needed
+
         Ok(())
     }
 
+    fn allowed_on_view(&self) -> bool {
+        false
+    }
+
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        bundle
-            .function_registry
-            .write()
-            .register(self.signature.clone())
-            .map_err(|e| DataFusionError::Internal(e.to_string()))
+        let namespaced = self.name.parse::<NamespacedName>()
+            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+        let entry = FunctionEntry {
+            name: namespaced,
+            input_types: self.input_types.clone(),
+            return_type: self.return_type.clone(),
+            runner: self.runner,
+            logic: self.logic.clone(),
+            platform: self.platform.clone(),
+            temporary: false,
+            kind: self.kind,
+        };
+        // Add to registry first so resolve_all can find all overloads
+        bundle.add_function_entry(entry);
+        bundle.register_functions_for_name(&self.name)
+            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::datatypes::{DataType, Field, Schema};
-    use arrow_schema::SchemaRef;
-
-    fn create_test_schema() -> SchemaRef {
-        SchemaRef::new(Schema::new(vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("value", DataType::Utf8, true),
-        ]))
-    }
 
     #[test]
     fn test_describe() {
-        let schema = create_test_schema();
-        let op = CreateFunctionOp::setup(FunctionSignature::new("test_func", schema));
-        assert_eq!(op.describe(), "CREATE FUNCTION: test_func");
-    }
-
-    #[test]
-    fn test_describe_various_names() {
-        let cases = vec!["my_function", "generate_data", "process_records", "f1"];
-
-        for name in cases {
-            let schema = create_test_schema();
-            let op = CreateFunctionOp::setup(FunctionSignature::new(name, schema));
-            assert_eq!(op.describe(), format!("CREATE FUNCTION: {}", name));
-        }
+        let op = CreateFunctionOp::new(
+            "acme.double_val".to_string(),
+            vec![DataType::Int64],
+            DataType::Int64,
+            Runner::Ipc,
+            "./my_func".to_string(),
+            Platform::any(),
+            FunctionKind::Scalar,
+        );
+        assert_eq!(
+            op.describe(),
+            "CREATE FUNCTION acme.double_val(Int64) RETURNS Int64 (runner=ipc, platform=*/*)"
+        );
     }
 
     #[test]
     fn test_serialization() {
-        let schema = create_test_schema();
-        let op = CreateFunctionOp::setup(FunctionSignature::new("test_func", schema));
-
-        // Verify serialization is possible
-        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-
-        // Verify we can deserialize back
-        let _deserialized: CreateFunctionOp =
-            serde_yaml_ng::from_str(&serialized).expect("Failed to deserialize");
+        let op = CreateFunctionOp::new(
+            "acme.double_val".to_string(),
+            vec![DataType::Int64],
+            DataType::Int64,
+            Runner::Ipc,
+            "./my_func".to_string(),
+            "linux/amd64".parse().unwrap(),
+            FunctionKind::Scalar,
+        );
+        let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
+        let deser: CreateFunctionOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        assert_eq!(deser, op);
     }
 
     #[test]
-    fn test_config_serialization_single_field() {
-        let schema = SchemaRef::new(Schema::new(vec![Field::new(
-            "count",
-            DataType::Int32,
-            false,
-        )]));
-        let op = CreateFunctionOp::setup(FunctionSignature::new("count_rows", schema));
-
-        // Verify serialization and deserialization round-trip
-        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        let deserialized: CreateFunctionOp =
-            serde_yaml_ng::from_str(&serialized).expect("Failed to deserialize");
-
-        assert_eq!(deserialized.signature.name(), "count_rows");
-        assert_eq!(deserialized.signature.output().fields().len(), 1);
-        assert_eq!(deserialized.signature.output().field(0).name(), "count");
+    fn test_serialization_aggregate() {
+        let op = CreateFunctionOp::new(
+            "acme.my_sum".to_string(),
+            vec![DataType::Int64],
+            DataType::Int64,
+            Runner::Ipc,
+            "./my_sum".to_string(),
+            Platform::any(),
+            FunctionKind::Aggregate,
+        );
+        let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
+        let deser: CreateFunctionOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        assert_eq!(deser, op);
+        assert_eq!(deser.kind, FunctionKind::Aggregate);
     }
 
-    #[test]
-    fn test_setup_name() {
-        let schema = create_test_schema();
-        let op = CreateFunctionOp::setup(FunctionSignature::new("my_func", schema));
-        assert_eq!(op.signature.name(), "my_func");
+    #[tokio::test]
+    async fn test_check_no_dot() {
+        let bundle = Bundle::empty(None).await.expect("empty bundle");
+        let op = CreateFunctionOp::new(
+            "double_val".to_string(),
+            vec![DataType::Int64],
+            DataType::Int64,
+            Runner::Ipc,
+            "./test".to_string(),
+            Platform::any(),
+            FunctionKind::Scalar,
+        );
+        let result = op.check(&bundle).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must contain exactly one dot"));
     }
 
-    #[test]
-    fn test_setup_schema_fields() {
-        let schema = SchemaRef::new(Schema::new(vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("name", DataType::Utf8, true),
-            Field::new("age", DataType::Int32, false),
-        ]));
-        let op = CreateFunctionOp::setup(FunctionSignature::new("user_data", schema.clone()));
-
-        assert_eq!(op.signature.output().fields().len(), 3);
-        assert_eq!(op.signature.output().field(0).name(), "id");
-        assert_eq!(op.signature.output().field(1).name(), "name");
-        assert_eq!(op.signature.output().field(2).name(), "age");
+    #[tokio::test]
+    async fn test_check_python_rejected() {
+        let bundle = Bundle::empty(None).await.expect("empty bundle");
+        let op = CreateFunctionOp::new(
+            "acme.double_val".to_string(),
+            vec![DataType::Int64],
+            DataType::Int64,
+            Runner::Python,
+            "mod:func".to_string(),
+            Platform::any(),
+            FunctionKind::Scalar,
+        );
+        let result = op.check(&bundle).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("python runner cannot be bundled"));
     }
 
-    #[test]
-    fn test_version() {
-        let schema = create_test_schema();
-        let op = CreateFunctionOp::setup(FunctionSignature::new("my_func", schema));
-        let version = op.version();
-
-        assert_eq!(version, "17d0564af14f");
+    #[tokio::test]
+    async fn test_apply_registers_entry() {
+        let bundle = Bundle::empty(None).await.expect("empty bundle");
+        let op = CreateFunctionOp::new(
+            "acme.double_val".to_string(),
+            vec![DataType::Int64],
+            DataType::Int64,
+            Runner::Ipc,
+            "./my_func".to_string(),
+            Platform::any(),
+            FunctionKind::Scalar,
+        );
+        op.apply(&bundle).await.expect("apply");
+        assert!(bundle.has_function_entry("acme.double_val"));
     }
 }
-//

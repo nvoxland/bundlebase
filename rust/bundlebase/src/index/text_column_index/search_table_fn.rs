@@ -18,7 +18,8 @@
 use crate::bundle::column_metadata;
 use crate::bundle::{AnyOperation, BundleFacade, Operation, Pack};
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId};
-use crate::index::{IndexDefinition, TextIndex};
+use super::TextIndex;
+use crate::index::IndexDefinition;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::IOReadFile;
 use arrow::array::{Float64Array, RecordBatch, UInt64Array};

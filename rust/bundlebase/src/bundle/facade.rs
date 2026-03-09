@@ -327,6 +327,34 @@ pub trait BundleFacade: Send + Sync {
         platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError>;
 
+    /// Create a temporary function with runtime-only logic.
+    ///
+    /// Registers a DataFusion UDF and adds the entry for the current session.
+    async fn create_temporary_function(
+        &self,
+        entry: crate::bundle::function_definition::FunctionEntry,
+    ) -> Result<(), BundlebaseError>;
+
+    /// Remove runtime-only function entries.
+    ///
+    /// If `platform` is None, removes all temporary entries for the name.
+    /// Returns the number of entries removed.
+    async fn drop_temporary_function(
+        &self,
+        name: &str,
+        platform: Option<&crate::bundle::connector_definition::Platform>,
+    ) -> Result<usize, BundlebaseError>;
+
+    /// Returns unique function namespace names from registered functions.
+    ///
+    /// Used by Flight SQL metadata to expose function namespaces as schemas.
+    fn function_namespaces(&self) -> Vec<String>;
+
+    /// Returns the NamespacedName for all registered functions.
+    ///
+    /// Used by Flight SQL metadata to list functions as table entries.
+    fn functions(&self) -> Vec<crate::NamespacedName>;
+
     /// Set a runtime config value (session-only, highest priority).
     ///
     /// This modifies the runtime config layer which takes precedence over

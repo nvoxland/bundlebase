@@ -79,37 +79,6 @@ async def test_chaining():
 
 
 @pytest.mark.asyncio
-async def test_custom_functions():
-    c = await bundlebase.create(random_bundle())
-
-    def my_data(page: int, schema: pa.Schema) -> pa.RecordBatch | None:
-        if page == 0:
-            return pa.record_batch(
-                schema=schema,
-                data={
-                    "id": [1, 2, 3],
-                    "name": ["Alice", "Bob", "Charlie"]
-                }
-            )
-        return None
-
-    c = await c.create_function(
-        name="test_function",
-        output={
-            "id": "Int64",
-            "name": "Utf8",
-        },
-        func=my_data,
-        version="2"
-    )
-
-    c = await c.attach("function://test_function")
-    df = await c.to_pandas()
-    assert df["name"].tolist() == ["Alice", "Bob", "Charlie"]
-    assert df["id"].tolist() == [1, 2, 3]
-
-
-@pytest.mark.asyncio
 async def test_open_save():
     """Test that save/open roundtrip works correctly"""
     import tempfile
@@ -281,67 +250,6 @@ async def test_filter():
 
     results = await c.to_dict()
     assert len(results["id"]) == 798
-
-
-@pytest.mark.asyncio
-async def test_python_function_with_multiple_pages():
-    """Test Python function that returns data across multiple pages"""
-    c = await bundlebase.create(random_bundle())
-
-    def paginated_data(page: int, schema: pa.Schema) -> pa.RecordBatch | None:
-        if page == 0:
-            return pa.record_batch(
-                schema=schema,
-                data={"page_num": [0, 0]}
-            )
-        elif page == 1:
-            return pa.record_batch(
-                schema=schema,
-                data={"page_num": [1, 1]}
-            )
-        return None
-
-    c = await c.create_function(
-        name="paginated_func",
-        output={"page_num": "Int32"},
-        func=paginated_data,
-        version="3",
-    )
-
-    c = await c.attach("function://paginated_func")
-    results = await c.to_dict()
-
-    # Both pages should be combined
-    total_rows = len(list(results.values())[0]) if results else 0
-    assert total_rows == 4, f"Expected 4 total rows, got {total_rows}"
-
-
-@pytest.mark.asyncio
-async def test_python_function_error_handling():
-    """Test error handling for Python functions"""
-    c = await bundlebase.create(random_bundle())
-
-    def error_data(page: int, schema: pa.Schema) -> pa.RecordBatch | None:
-        if page == 0:
-            return pa.record_batch(
-                schema=schema,
-                data={"id": [1]}
-            )
-        return None
-
-    # Define function with mismatched schema should still work (schema validation happens at attach time)
-    c = await c.create_function(
-        name="error_func",
-        output={"id": "Int64"},
-        func=error_data,
-        version="3",
-    )
-
-    # Attach and query should work
-    c = await c.attach("function://error_func")
-    results = await c.to_dict()
-    row_count = len(list(results.values())[0]) if results else 0
-    assert row_count == 1
 
 
 @pytest.mark.asyncio
@@ -1767,41 +1675,6 @@ async def test_verify_data_file_results():
     assert file_result.actual_hash is not None
     assert file_result.expected_hash == file_result.actual_hash
     assert file_result.error is None
-
-
-@pytest.mark.asyncio
-async def test_verify_data_with_function():
-    """Test verify_data skips function:// URLs."""
-    import pyarrow as pa
-
-    c = await bundlebase.create(random_bundle())
-
-    def simple_data(page: int, schema: pa.Schema) -> pa.RecordBatch | None:
-        if page == 0:
-            return pa.record_batch(
-                schema=schema,
-                data={"id": [1, 2, 3]}
-            )
-        return None
-
-    c = await c.create_function(
-        name="test_func",
-        output={"id": "Int64"},
-        func=simple_data,
-        version="1",
-    )
-
-    c = await c.attach("function://test_func")
-
-    # Verify data - should pass and skip function URL
-    results = await c.verify_data()
-
-    assert results.all_passed
-    # Function URLs should be skipped (passed with no hash)
-    func_result = [f for f in results.files if "function://" in f.location]
-    assert len(func_result) == 1
-    assert func_result[0].passed
-    assert func_result[0].expected_hash is None
 
 
 @pytest.mark.asyncio

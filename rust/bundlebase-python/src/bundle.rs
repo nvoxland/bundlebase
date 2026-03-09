@@ -447,6 +447,76 @@ impl PyBundle {
         })
     }
 
+    /// Create a temporary function with runtime-only logic (not persisted).
+    ///
+    /// Registers a DataFusion UDF for the current session only.
+    #[pyo3(signature = (name, input_types, return_type, runner, logic, platform="*/*", function_type="scalar"))]
+    fn create_temporary_function<'py>(
+        &self,
+        name: &str,
+        input_types: Vec<String>,
+        return_type: &str,
+        runner: &str,
+        logic: &str,
+        platform: &str,
+        function_type: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let name = name.to_string();
+        let return_type = return_type.to_string();
+        let runner = runner.to_string();
+        let logic = logic.to_string();
+        let platform = platform.to_string();
+        let function_type = function_type.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            use ::bundlebase::bundle::{Platform, Runner, FunctionEntry, FunctionKind};
+            use ::bundlebase::bundle::parse_arrow_type_name;
+            let runner: Runner = runner.parse().map_err(|e: ::bundlebase::BundlebaseError| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+            })?;
+            let platform: Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+            })?;
+            let kind: FunctionKind = function_type.parse().map_err(|e: ::bundlebase::BundlebaseError| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+            })?;
+            let namespaced: ::bundlebase::NamespacedName = name.parse().map_err(|e: ::bundlebase::BundlebaseError| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+            })?;
+            let parsed_input_types = input_types.iter()
+                .map(|s| parse_arrow_type_name(s))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e: ::bundlebase::BundlebaseError| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+                })?;
+            let parsed_return_type = parse_arrow_type_name(&return_type)
+                .map_err(|e: ::bundlebase::BundlebaseError| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+                })?;
+            let entry = FunctionEntry {
+                name: namespaced,
+                input_types: parsed_input_types,
+                return_type: parsed_return_type,
+                runner,
+                logic,
+                platform,
+                temporary: true,
+                kind,
+            };
+            inner
+                .create_temporary_function(entry)
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to create temporary function: {}",
+                        e
+                    ))
+                })?;
+            Ok(format!("Created temporary function: {}", name))
+        })
+    }
+
     /// Drop runtime-only connector logic (session-only).
     ///
     /// # Arguments

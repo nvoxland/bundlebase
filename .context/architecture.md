@@ -20,7 +20,7 @@ Mutable container for modifications:
 - Wraps an Bundlebase with a working directory
 - Tracks new operations applied since the base container
 - All modification methods mutate in-place and return `&mut self`
-- Methods: `attach()`, `remove_column()`, `rename_column()`, `standardize_column_names()`, `filter()`, `select()`, `join()`, `create_function()`, `set_name()`, `set_description()`
+- Methods: `attach()`, `remove_column()`, `rename_column()`, `standardize_column_names()`, `filter()`, `select()`, `join()`, `create_function()`, `create_connector()`, `set_name()`, `set_description()`
 - Can be committed via `commit(message)` to create a new versioned snapshot
 - Can be re-opened via `open_extending(url)` to load the latest state
 
@@ -30,7 +30,7 @@ Shared state extracted for both container types:
 - Metadata (name, description)
 - Row count tracking
 - SessionContext for DataFusion
-- Function registry
+- Function entries (user-defined SQL functions)
 - Adapter factory
 
 ## Operation Pipeline
@@ -43,7 +43,8 @@ Operations are recorded and applied in sequence when querying:
 - **Select**: Select specific columns
 - **Join**: Join with other data sources
 - **Query**: Execute custom SQL
-- **CreateFunction**: Register custom data generation functions
+- **CreateFunction**: Register a user-defined SQL scalar function
+- **DropFunction**: Remove a user-defined SQL function
 - **SetName**: Set container name
 - **SetDescription**: Set container description
 - **IndexData**: Track row indexing metadata
@@ -54,44 +55,70 @@ Plugin architecture for data sources (`src/data_adapter/`):
 - **CsvPlugin**: CSV file support
 - **JsonPlugin**: Line-delimited JSON support
 - **ParquetPlugin**: Apache Parquet support
-- **FunctionPlugin**: Custom function data sources via `function://` URLs
 - **BundlebasePlugin**: References other committed bundles via `bundle://` (filesystem) or `bundle+<scheme>://` (remote) URLs
 
-## Function System
+## User-Defined SQL Functions
 
-Custom data generation framework (`src/functions/`) with complete lifecycle:
+Custom SQL function system supporting both scalar and aggregate functions.
+
+**Key Files:**
+- `src/bundle/function_definition.rs` — `FunctionEntry`, `FunctionKind`, `FunctionRegistry`
+- `src/function/scalar.rs` — DataFusion `ScalarUDFImpl` bridge
+- `src/function/aggregate.rs` — DataFusion `AggregateUDFImpl` bridge with `PythonAccumulator` and `LibAccumulator`
+- `src/function/python_bridge.rs` — Trait for Python function invocation
+- `src/function/lib_bridge.rs` — FFI layer for native shared library (.so/.dylib) functions
 
 **Core Components:**
-- **FunctionSig**: Function signature (name + output Arrow schema)
-- **FunctionImpl**: Trait for creating data generators
-- **FunctionRegistry**: Shared registry (via `Arc<RwLock>`) for all function definitions
-- **DataGenerator**: Trait for paginated data generation (called with page 0, 1, 2... until returns None)
-- **StaticImpl**: Built-in implementation for static RecordBatch data
-- **PythonFunctionImpl**: Bridge to Python functions (converts Python callables to Rust DataGenerators)
+- **FunctionEntry**: Stores function metadata (name, input/return types, runner, logic, platform, kind)
+- **FunctionKind**: `Scalar` (row → row) or `Aggregate` (many rows → one result per group)
+- **ScalarFunction**: DataFusion `ScalarUDFImpl` bridge for scalar functions
+- **AggregateFunction**: DataFusion `AggregateUDFImpl` bridge for aggregate functions
+- **PythonAccumulator**: `Accumulator` impl that delegates to Python class methods
+- **LibAccumulator**: `Accumulator` impl that delegates to C ABI aggregate symbols via FFI
+- **Runner**: Execution environment — `python`, `lib`, `java`, `docker`, `ipc` (shared with connectors)
+- **Platform**: OS/arch pattern for multi-platform support (e.g., `linux/amd64`, `*/*`)
+
+**Lib Runner (FFI Layer):**
+- `lib_bridge::parse_lib_logic()` — Parses `path:symbol` convention (colon separates library path from symbol name)
+- `lib_bridge::load_library()` — Loads shared libraries with a global `Mutex<HashMap>` cache
+- `lib_bridge::invoke_lib_scalar()` — Converts Arrow arrays to FFI, calls C function, converts back
+- `lib_bridge::LibAccumulator` — Wraps opaque `void*` state, calls `_create_state/_accumulate/_evaluate/_free_state` symbols
+- `lib_bridge::load_lib_manifest()` — Calls `bundlebase_functions()` C symbol for bulk discovery
+- `lib_bridge::load_ipc_manifest()` — Runs `exec --bundlebase-functions` for IPC discovery
+- `CREATE FUNCTIONS FROM` command uses manifests to register multiple functions at once
 
 **Function Lifecycle:**
 
-1. **Define signature**: `container.create_function(FunctionSig::new("my_func", schema))`
-   - Registers function name and output schema in shared FunctionRegistry
-   - Creates CreateFunction operation (stored but doesn't affect DataFrame until attached)
+1. **Create function**: `CREATE FUNCTION acme.double_val(Int64) RETURNS Int64 WITH (runner = 'ipc', logic = './my_func')`
+   - Validates dotted name (exactly one dot, alphanumeric parts)
+   - Validates Arrow type names for inputs and return type
+   - Optional `type = 'aggregate'` in WITH clause (default: `scalar`)
+   - Creates a `FunctionEntry` stored in the bundle's `function_entries` list
+   - Registers with DataFusion via `register_function_with_datafusion()`:
+     - Scalar → `register_udf(ScalarUDF)`
+     - Aggregate → `register_udaf(AggregateUDF)`
 
-2. **Set implementation**: `container.set_impl("my_func", Arc::new(impl))`
-   - Stores the actual implementation in FunctionRegistry
-   - Implementation must match the registered signature
-   - Directly modifies shared registry (no operation created)
+2. **Use in SQL**:
+   - Scalar: `SELECT acme.double_val(id) FROM bundle`
+   - Aggregate: `SELECT acme.my_sum(amount) FROM bundle GROUP BY category`
+   - Window: `SELECT acme.my_sum(amount) OVER (ORDER BY id) FROM bundle`
+   - DataFusion automatically supports any aggregate UDF with `OVER()` clauses
 
-3. **Attach function**: `container.attach("function://my_func")`
-   - FunctionPlugin looks up signature in registry
-   - Creates FunctionDataAdapter linking to the function
-   - AttachBlock operation stores the adapter
+3. **Temporary vs persistent**:
+   - `CREATE TEMPORARY FUNCTION` — session-only, not persisted, allows Python runner
+   - `CREATE FUNCTION` — persisted as operation, rejects Python runner (can't be bundled)
+   - Temporary overrides persistent at resolution time
 
-4. **Query execution**:
-   - AttachBlock reads data via the adapter
-   - Adapter retrieves implementation from registry
-   - Implementation creates a DataGenerator
-   - Generator's `next(page)` method called repeatedly: `next(0)`, `next(1)`, `next(2)`...
-   - Continues until generator returns `None`
-   - Each page returns a RecordBatch of data
+**Python Aggregate Interface:**
+- Class with four methods: `create_state()`, `accumulate(state, values)`, `merge(state1, state2)`, `evaluate(state)`
+- State is a PyArrow scalar (simple types: Int64, Float64, Utf8, etc.)
+- Each accumulator gets its own class instance (stateful per partition)
+- `logic` format: `module:ClassName` (same as scalar `module:function`)
+
+**Naming Convention:**
+- Single-level dotted namespace: `namespace.function_name` (e.g., `acme.double_val`)
+- Same validation shared with connectors via `parse_dotted_name()`
+- Maps to Arrow Flight schemas for database client intellisense
 
 ## Clone Semantics and Arc Usage
 
@@ -99,7 +126,6 @@ Both container types use `Arc` (Atomic Reference Counting) for shared state:
 
 **Bundlebase:**
 - **Cheap cloning**: BundlebaseState is shared via Arc
-- **Shared FunctionRegistry**: All clones access the same global function registry
 - **Immutable snapshots**: Each clone represents the same committed state
 
 **BundlebaseBuilder:**
@@ -111,7 +137,6 @@ Both container types use `Arc` (Atomic Reference Counting) for shared state:
 
 **Key implications:**
 - Cloning containers is fast (just Arc counter increments)
-- All containers share the global FunctionRegistry (intentional for function reuse)
 - `commit()` creates a new Bundlebase snapshot
 - `open_extending(url)` loads the latest BundlebaseBuilder from manifests
 

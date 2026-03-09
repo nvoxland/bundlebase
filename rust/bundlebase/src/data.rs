@@ -15,7 +15,6 @@ use datafusion::logical_expr::Expr;
 pub use datafusion::physical_plan::SendableRecordBatchStream;
 use datafusion::prelude::SessionContext;
 pub use crate::object_id::{BlockId, ObjectId, ObjectIdAlias};
-pub use plugin::DataGenerator;
 pub use reader_factory::DataReaderFactory;
 pub use crate::row_id::{RowId, RowIdBatch, SendableRowIdBatchStream};
 pub use rowid_offset_data_source::{LineOrientedFormat, RowIdOffsetDataSource};

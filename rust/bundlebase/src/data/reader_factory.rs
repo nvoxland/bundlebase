@@ -1,12 +1,10 @@
 use crate::bundle::BundleFacade;
-use crate::data::plugin::{BundlebasePlugin, CsvPlugin, FunctionPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin};
+use crate::data::plugin::{BundlebasePlugin, CsvPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin};
 use crate::data::{BlockId, DataReader};
-use crate::functions::FunctionRegistry;
 use crate::io::DataStorage;
 use crate::BundlebaseError;
 use arrow_schema::SchemaRef;
 use datafusion::common::DataFusionError;
-use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -17,14 +15,12 @@ pub struct DataReaderFactory {
 
 impl DataReaderFactory {
     pub fn new(
-        function_registry: Arc<RwLock<FunctionRegistry>>,
         storage: Arc<DataStorage>,
     ) -> Self {
         Self {
             storage: storage.clone(),
             plugins: vec![
                 Arc::new(CsvPlugin::default()),
-                Arc::new(FunctionPlugin::new(function_registry.clone())),
                 Arc::new(BundlebasePlugin),
                 Arc::new(JsonPlugin::default()),
                 Arc::new(ParquetPlugin::default()),

@@ -1,7 +1,6 @@
 use crate::bundle::Operation;
 /// Test utilities for data adapter tests
 use crate::data::DataReaderFactory;
-use crate::functions::FunctionRegistry;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{writable_dir_with_store, DataStorage, IOReadWriteDir, IOReadWriteFile};
 use crate::{BundleBuilder, BundleConfig, BundleFacade};
@@ -24,7 +23,6 @@ pub fn test_adapter_factory() -> Arc<DataReaderFactory> {
     TEST_FACTORY
         .get_or_init(|| {
             Arc::new(DataReaderFactory::new(
-                Arc::new(RwLock::new(FunctionRegistry::new())),
                 Arc::new(DataStorage::new()),
             ))
         })

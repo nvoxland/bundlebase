@@ -718,9 +718,18 @@ impl FlightSqlService for BundlebaseFlightSqlService {
     async fn do_get_schemas(
         &self,
         _cmd: CommandGetDbSchemas,
-        _request: Request<Ticket>,
+        request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
-        metadata::do_get_schemas()
+        let function_namespaces = self
+            .get_token(&request)
+            .ok()
+            .and_then(|token| {
+                self.sessions.read().get(&token).map(|session| {
+                    session.bundle.function_namespaces()
+                })
+            })
+            .unwrap_or_default();
+        metadata::do_get_schemas(&function_namespaces)
     }
 
     /// Get tables info.
@@ -738,12 +747,18 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         cmd: CommandGetTables,
         request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
-        // Try to get cached bundle schema from session
-        let bundle_schema = self
-            .get_token(&request)
-            .ok()
-            .and_then(|token| self.get_bundle_schema_for_token(&token));
-        metadata::do_get_tables(cmd, bundle_schema)
+        // Try to get cached bundle schema and function entries from session
+        let token = self.get_token(&request).ok();
+        let bundle_schema = token.as_ref()
+            .and_then(|t| self.get_bundle_schema_for_token(t));
+        let function_entries = token.as_ref()
+            .and_then(|t| {
+                self.sessions.read().get(t.as_str()).map(|session| {
+                    session.bundle.functions()
+                })
+            })
+            .unwrap_or_default();
+        metadata::do_get_tables(cmd, bundle_schema, &function_entries)
     }
 
     /// Get table types info.

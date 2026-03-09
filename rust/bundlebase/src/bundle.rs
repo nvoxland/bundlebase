@@ -11,6 +11,7 @@ mod init;
 mod operation;
 mod source;
 pub(crate) mod connector_definition;
+pub(crate) mod function_definition;
 mod sql;
 
 use crate::io::EMPTY_SCHEME;
@@ -34,14 +35,17 @@ pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
 pub use source::Source;
 pub use connector_definition::{ConnectorEntry, Platform, Runner};
+pub use function_definition::{parse_arrow_type_name, validate_kind_consistency, FunctionEntry, FunctionKind, FunctionRegistry};
+use arrow::datatypes::DataType;
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA};
-use crate::udf::{SearchTableFunction, VersionUdf};
+use crate::namespaced_name::NamespacedName;
+use crate::function::VersionFunction;
+use crate::index::SearchTableFunction;
 use crate::data::{BlockId, DataReaderFactory, ObjectId, VersionedBlockId};
 use crate::object_id::ColumnId;
 use crate::source::ConnectorRegistry;
-use crate::functions::FunctionRegistry;
 use crate::index::IndexDefinition;
 use crate::io::{read_yaml, readable_file_from_url, writable_dir_from_str, writable_dir_from_url, DataStorage, IOReadWriteDir, EMPTY_URL};
 use crate::bundle_config::Scope;
@@ -96,9 +100,9 @@ pub struct Bundle {
     ctx: Arc<SessionContext>,
     storage: Arc<DataStorage>,
     pub(crate) reader_factory: Arc<DataReaderFactory>,
-    function_registry: Arc<RwLock<FunctionRegistry>>,
     connector_registry: Arc<RwLock<ConnectorRegistry>>,
     connector_entries: Arc<RwLock<Vec<ConnectorEntry>>>,
+    function_registry: Arc<RwLock<FunctionRegistry>>,
 
     /// Single, self-contained, internally thread-safe config holder.
     /// All config sources (stored, env, passed, runtime) live inside BundleConfig.
@@ -146,9 +150,9 @@ impl Clone for Bundle {
             ctx: Arc::clone(&self.ctx),
             storage: Arc::clone(&self.storage),
             reader_factory: Arc::clone(&self.reader_factory),
-            function_registry: Arc::clone(&self.function_registry),
             connector_registry: Arc::clone(&self.connector_registry),
             connector_entries: Arc::clone(&self.connector_entries),
+            function_registry: Arc::clone(&self.function_registry),
             config: Arc::clone(&self.config),
             is_view: Arc::clone(&self.is_view),
             has_temporary_logic: Arc::clone(&self.has_temporary_logic),
@@ -165,7 +169,6 @@ impl Bundle {
         let url = Url::parse(EMPTY_URL)?;
 
         let storage = Arc::new(DataStorage::new());
-        let function_registry = Arc::new(RwLock::new(FunctionRegistry::new()));
         let connector_registry = Arc::new(RwLock::new(ConnectorRegistry::new()));
 
         let mut config =
@@ -191,7 +194,7 @@ impl Bundle {
         let dataframe = DataFrameHolder::new(Some(empty_dataframe));
 
         // Register version() UDF with initial "empty" version
-        ctx.register_udf(ScalarUDF::new_from_impl(VersionUdf::new("empty".to_string())));
+        ctx.register_udf(ScalarUDF::new_from_impl(VersionFunction::new("empty".to_string())));
 
         ctx.register_object_store(
             ObjectStoreUrl::parse("memory://")?.as_ref(),
@@ -214,13 +217,12 @@ impl Bundle {
             views,
             storage: Arc::clone(&storage),
             reader_factory: DataReaderFactory::new(
-                Arc::clone(&function_registry),
                 Arc::clone(&storage),
             )
                 .into(),
-            function_registry,
             connector_registry,
             connector_entries: Arc::new(RwLock::new(Vec::new())),
+            function_registry: Arc::new(RwLock::new(FunctionRegistry::new())),
             name,
             description,
             operations,
@@ -641,7 +643,7 @@ impl Bundle {
 
         // Re-register version() UDF with the updated version
         self.ctx
-            .register_udf(ScalarUDF::new_from_impl(VersionUdf::new(new_version)));
+            .register_udf(ScalarUDF::new_from_impl(VersionFunction::new(new_version)));
     }
 
     pub(crate) fn add_pack(&self, pack_id: ObjectId, pack: Arc<Pack>) {
@@ -809,6 +811,86 @@ impl Bundle {
         Ok(before - entries.len())
     }
 
+    // ==================== Function entries ====================
+
+    /// Add a function entry to the bundle.
+    pub(crate) fn add_function_entry(&self, entry: FunctionEntry) {
+        self.function_registry.write().add(entry);
+    }
+
+    /// Check if any function entry exists for the given name.
+    pub(crate) fn has_function_entry(&self, name: &str) -> bool {
+        self.function_registry.read().has(name)
+    }
+
+    /// Resolve the best function entry for the current platform.
+    pub(crate) fn resolve_function(&self, name: &str) -> Result<FunctionEntry, BundlebaseError> {
+        self.function_registry.read().resolve(name)
+    }
+
+    /// Remove all function entries for a name.
+    pub(crate) fn remove_function_entries(&self, name: &str) -> Result<(), BundlebaseError> {
+        self.function_registry.write().remove_all(name);
+        Ok(())
+    }
+
+    /// Remove matching function entries. Returns the number removed.
+    pub(crate) fn remove_function_entry(
+        &self,
+        name: &str,
+        platform: Option<&connector_definition::Platform>,
+        temporary_only: bool,
+    ) -> Result<usize, BundlebaseError> {
+        Ok(self.function_registry.write().remove(name, platform, temporary_only))
+    }
+
+    /// Remove function entries matching a specific input type signature.
+    pub(crate) fn remove_function_entries_by_signature(&self, name: &str, input_types: &[DataType]) {
+        self.function_registry.write().remove_by_signature(name, Some(input_types));
+    }
+
+    /// Get a read-only snapshot of all function entries.
+    pub(crate) fn function_entries(&self) -> Vec<FunctionEntry> {
+        self.function_registry.read().entries().to_vec()
+    }
+
+    /// Register all function entries for a given name as a single composite UDF/UDAF.
+    ///
+    /// Collects all resolved overloads for the name, validates kind consistency,
+    /// and registers a single composite UDF (scalar) or UDAF (aggregate) with
+    /// `TypeSignature::OneOf` when there are multiple overloads.
+    pub(crate) fn register_functions_for_name(&self, name: &str) -> Result<(), BundlebaseError> {
+        let overloads = self.function_registry.read().resolve_all(name);
+        if overloads.is_empty() {
+            return Ok(());
+        }
+
+        let kind = validate_kind_consistency(&overloads)?;
+
+        match kind {
+            FunctionKind::Scalar => {
+                use crate::function::scalar::ScalarFunction;
+                let func = ScalarFunction::new_composite(overloads)?;
+                self.ctx.register_udf(ScalarUDF::from(func));
+            }
+            FunctionKind::Aggregate => {
+                use crate::function::aggregate::AggregateFunction;
+                use datafusion::logical_expr::AggregateUDF;
+                let agg = AggregateFunction::new_composite(overloads)?;
+                self.ctx.register_udaf(AggregateUDF::from(agg));
+            }
+        }
+        Ok(())
+    }
+
+    /// Register a single function entry as a DataFusion UDF or UDAF.
+    ///
+    /// This re-registers all overloads for the entry's name, so that overloads
+    /// accumulate correctly under a single composite UDF/UDAF.
+    pub(crate) fn register_function_with_datafusion(&self, entry: &FunctionEntry) -> Result<(), BundlebaseError> {
+        self.register_functions_for_name(&entry.name.to_string())
+    }
+
     pub(crate) fn has_temporary_logic(&self) -> bool {
         *self.has_temporary_logic.read()
     }
@@ -821,7 +903,7 @@ impl Bundle {
     /// Call this after marking temporary logic so SQL queries see the right value.
     pub(crate) fn refresh_version_udf(&self, version: String) {
         self.ctx
-            .register_udf(ScalarUDF::new_from_impl(VersionUdf::new(version)));
+            .register_udf(ScalarUDF::new_from_impl(VersionFunction::new(version)));
     }
 
     /// Find a block by ID across all packs
@@ -906,20 +988,6 @@ impl Bundle {
                 let location = block_locations.get(block_id).cloned().unwrap_or_else(|| {
                     block.reader().url().to_string()
                 });
-
-                // Skip function:// URLs (generated data has no file to verify)
-                if location.starts_with("function://") {
-                    results.push(FileVerificationResult {
-                        location,
-                        file_type: "data".to_string(),
-                        expected_hash: None,
-                        actual_hash: None,
-                        passed: true,
-                        error: None,
-                        version_updated: false,
-                    });
-                    continue;
-                }
 
                 let expected_hash = block_hashes.get(block_id).cloned();
 
@@ -1357,8 +1425,9 @@ impl BundleFacade for Bundle {
         logic: String,
         platform: connector_definition::Platform,
     ) -> Result<(), BundlebaseError> {
+        let namespaced: NamespacedName = name.parse()?;
         self.add_connector_entry(ConnectorEntry {
-            name: name.to_string(),
+            name: namespaced,
             runner,
             logic,
             platform,
@@ -1375,6 +1444,53 @@ impl BundleFacade for Bundle {
         platform: Option<&connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError> {
         self.remove_connector_entry(name, platform, true)
+    }
+
+    async fn create_temporary_function(
+        &self,
+        entry: FunctionEntry,
+    ) -> Result<(), BundlebaseError> {
+        // Validate kind consistency before adding: all overloads must share the same kind
+        let name = entry.name.to_string();
+        {
+            let existing = self.function_registry.read().resolve_all(&name);
+            if !existing.is_empty() {
+                let existing_kind = existing[0].kind;
+                if entry.kind != existing_kind {
+                    return Err(format!(
+                        "Function '{}' has overloads with mixed kinds (scalar and aggregate). \
+                         All overloads of a function must be the same kind.",
+                        name
+                    ).into());
+                }
+            }
+        }
+
+        // Add to registry then re-register all overloads for this name
+        self.add_function_entry(entry);
+        self.register_functions_for_name(&name)?;
+        self.mark_temporary_logic();
+        self.refresh_version_udf("TEMP".to_string());
+        Ok(())
+    }
+
+    async fn drop_temporary_function(
+        &self,
+        name: &str,
+        platform: Option<&connector_definition::Platform>,
+    ) -> Result<usize, BundlebaseError> {
+        // Deregister from DataFusion (try both UDF and UDAF)
+        let _ = self.ctx.deregister_udf(name);
+        let _ = self.ctx.deregister_udaf(name);
+        self.remove_function_entry(name, platform, true)
+    }
+
+    fn function_namespaces(&self) -> Vec<String> {
+        self.function_registry.read().namespaces()
+    }
+
+    fn functions(&self) -> Vec<crate::NamespacedName> {
+        self.function_registry.read().names()
     }
 
     async fn set_config(

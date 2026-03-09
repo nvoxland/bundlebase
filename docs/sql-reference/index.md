@@ -309,7 +309,243 @@ REINDEX
 
 See [Indexing](../guide/indexing.md) for details.
 
-## Functions
+## User-Defined Functions
+
+Commands for creating custom SQL functions that can be used in queries.
+
+### CREATE FUNCTION
+
+Creates a named function with its logic. The function definition is **persisted** into the bundle's commit history.
+
+```sql
+CREATE FUNCTION <namespace.name>(<InputType>, ...) RETURNS <ReturnType>
+  WITH (runner = '<runner>', logic = '<logic>' [, platform = '<platform>'] [, type = '<type>'])
+```
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `runner` | Yes | Function runner: `lib`, `java`, `docker`, or `ipc` |
+| `logic` | Yes | What to run. Use `path:symbol` to specify a symbol in a multi-function library (e.g., `./mylib.so:double_val`). If no `:symbol` suffix, the function's short name is used as the symbol. |
+| `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
+| `type` | No | Function type: `scalar` (default) or `aggregate` |
+
+!!! note
+    The `python` runner is not allowed with `CREATE FUNCTION` because Python code cannot be bundled. Use `CREATE TEMPORARY FUNCTION` instead.
+
+**Scalar function examples:**
+
+```sql
+-- Rust shared library (scalar) — symbol defaults to function name 'double_val'
+CREATE FUNCTION acme.double_val(Int64) RETURNS Int64
+  WITH (runner = 'lib', logic = './target/release/libmy_funcs.so')
+
+-- Explicit symbol in a multi-function library
+CREATE FUNCTION acme.double_val(Int64) RETURNS Int64
+  WITH (runner = 'lib', logic = './target/release/libmy_funcs.so:double_val')
+
+-- Go binary via IPC (scalar)
+CREATE FUNCTION acme.to_upper(Utf8) RETURNS Utf8
+  WITH (runner = 'ipc', logic = './go_funcs')
+
+-- Java JAR (scalar)
+CREATE FUNCTION acme.parse_date(Utf8) RETURNS Date32
+  WITH (runner = 'java', logic = 'target/my-funcs.jar')
+
+-- Docker image (scalar)
+CREATE FUNCTION acme.geocode(Utf8) RETURNS Float64
+  WITH (runner = 'docker', logic = 'myorg/geocoder:latest')
+
+-- Platform-specific (scalar)
+CREATE FUNCTION acme.double_val(Int64) RETURNS Int64
+  WITH (runner = 'lib', logic = './libmy_funcs.so', platform = 'linux/amd64')
+```
+
+**Aggregate function examples:**
+
+```sql
+-- Rust shared library (aggregate)
+CREATE FUNCTION acme.custom_avg(Float64) RETURNS Float64
+  WITH (runner = 'lib', logic = './target/release/libmy_aggs.so', type = 'aggregate')
+
+-- Go binary via IPC (aggregate)
+CREATE FUNCTION acme.median(Int64) RETURNS Float64
+  WITH (runner = 'ipc', logic = './go_aggs', type = 'aggregate')
+
+-- Java JAR (aggregate)
+CREATE FUNCTION acme.string_agg(Utf8) RETURNS Utf8
+  WITH (runner = 'java', logic = 'target/my-aggs.jar', type = 'aggregate')
+
+-- Docker image (aggregate)
+CREATE FUNCTION acme.percentile(Float64) RETURNS Float64
+  WITH (runner = 'docker', logic = 'myorg/stats:latest', type = 'aggregate')
+```
+
+### CREATE TEMPORARY FUNCTION
+
+Creates a function for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process functions.
+
+```sql
+CREATE TEMPORARY FUNCTION <namespace.name>(<InputType>, ...) RETURNS <ReturnType>
+  WITH (runner = '<runner>', logic = '<logic>' [, platform = '<platform>'] [, type = '<type>'])
+```
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `runner` | Yes | Function runner: `python`, `lib`, `java`, `docker`, or `ipc` |
+| `logic` | Yes | What to run (e.g., `module:function` for Python scalars, `module:ClassName` for Python aggregates) |
+| `platform` | No | Target platform (default: `*/*`) |
+| `type` | No | Function type: `scalar` (default) or `aggregate` |
+
+**Scalar function examples:**
+
+```sql
+-- Python scalar function
+CREATE TEMPORARY FUNCTION acme.double_val(Int64) RETURNS Int64
+  WITH (runner = 'python', logic = 'my_module:double_val')
+
+-- IPC subprocess (temporary)
+CREATE TEMPORARY FUNCTION acme.to_upper(Utf8) RETURNS Utf8
+  WITH (runner = 'ipc', logic = './go_funcs')
+```
+
+**Aggregate function examples:**
+
+```sql
+-- Python aggregate function (class-based)
+CREATE TEMPORARY FUNCTION acme.my_sum(Int64) RETURNS Int64
+  WITH (runner = 'python', logic = 'my_module:MySum', type = 'aggregate')
+
+-- Python aggregate with multiple input types
+CREATE TEMPORARY FUNCTION acme.weighted_avg(Float64, Float64) RETURNS Float64
+  WITH (runner = 'python', logic = 'stats:WeightedAvg', type = 'aggregate')
+```
+
+**Python scalar function interface:**
+
+```python
+# my_module.py
+import pyarrow as pa
+import pyarrow.compute as pc
+
+def double_val(col: pa.Array) -> pa.Array:
+    """Receives PyArrow arrays, returns a PyArrow array."""
+    return pc.multiply(col, 2)
+```
+
+**Python aggregate function interface:**
+
+```python
+# my_module.py
+import pyarrow as pa
+import pyarrow.compute as pc
+
+class MySum:
+    def create_state(self):
+        """Return initial accumulator state as a PyArrow scalar."""
+        return pa.scalar(0, type=pa.int64())
+
+    def accumulate(self, state, values):
+        """Accumulate a batch into state. Returns updated state scalar."""
+        return pa.scalar(state.as_py() + pc.sum(values).as_py(), type=pa.int64())
+
+    def merge(self, state1, state2):
+        """Merge two states (for parallel execution)."""
+        return pa.scalar(state1.as_py() + state2.as_py(), type=pa.int64())
+
+    def evaluate(self, state):
+        """Produce final result from state."""
+        return state
+```
+
+**Using aggregate functions in queries:**
+
+```sql
+-- Basic aggregation
+SELECT acme.my_sum(amount) FROM bundle
+
+-- With GROUP BY
+SELECT category, acme.my_sum(amount) FROM bundle GROUP BY category
+
+-- As a window function (any aggregate works with OVER)
+SELECT id, acme.my_sum(amount) OVER (ORDER BY id) as running_total FROM bundle
+
+-- With window partitioning
+SELECT category, id, acme.my_sum(amount) OVER (PARTITION BY category ORDER BY id) FROM bundle
+```
+
+### DROP FUNCTION
+
+Removes a function definition, or removes only logic for a specific platform.
+
+```sql
+DROP FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
+```
+
+**Examples:**
+
+```sql
+-- Drop the entire function
+DROP FUNCTION acme.double_val
+
+-- Drop logic for a specific platform only
+DROP FUNCTION acme.double_val FOR PLATFORM 'linux/amd64'
+```
+
+### DROP TEMPORARY FUNCTION
+
+Removes runtime-only function logic. Optionally filter by platform.
+
+```sql
+DROP TEMPORARY FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
+```
+
+### CREATE FUNCTIONS FROM
+
+Discovers and registers all functions exported by a shared library or IPC executable in a single command. Uses the manifest discovery protocol.
+
+```sql
+CREATE FUNCTIONS FROM '<path>' WITH (runner = '<runner>', namespace = '<namespace>' [, platform = '<platform>'])
+```
+
+**Parameters:**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `runner` | Yes | Discovery method: `lib` (calls `bundlebase_functions()` C symbol) or `ipc` (runs `path --bundlebase-functions`) |
+| `namespace` | Yes | Namespace for registered functions (e.g., `acme`) |
+| `platform` | No | Target platform (default: `*/*`) |
+
+**Examples:**
+
+```sql
+-- Register all functions from a Rust shared library
+CREATE FUNCTIONS FROM './target/release/libmy_funcs.so' WITH (runner = 'lib', namespace = 'acme')
+
+-- Register functions from an IPC executable
+CREATE FUNCTIONS FROM './my_go_funcs' WITH (runner = 'ipc', namespace = 'tools')
+
+-- Platform-specific library
+CREATE FUNCTIONS FROM './libmy_funcs.so' WITH (runner = 'lib', namespace = 'acme', platform = 'linux/amd64')
+```
+
+**Manifest format:** Libraries and executables must return a JSON manifest:
+
+```json
+{"functions": [
+  {"name": "double_val", "symbol": "double_val",
+   "input_types": ["Int64"], "return_type": "Int64", "kind": "scalar"},
+  {"name": "my_sum", "input_types": ["Int64"],
+   "return_type": "Int64", "kind": "aggregate"}
+]}
+```
+
+Each discovered function is registered as if individually created with `CREATE FUNCTION`. Functions from a bulk-created set can be dropped individually with `DROP FUNCTION`.
+
+## Built-in Functions
 
 Functions available in SQL queries.
 

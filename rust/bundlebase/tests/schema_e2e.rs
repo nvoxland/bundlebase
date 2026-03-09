@@ -1,11 +1,7 @@
-use arrow::array::record_batch;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::functions::{FunctionSignature, StaticImpl};
 use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase::BundlebaseError;
-use std::sync::Arc;
 
 mod common;
 
@@ -124,47 +120,6 @@ async fn test_schema_types_preserved() -> Result<(), BundlebaseError> {
         .clone();
 
     assert_eq!(original_type, renamed_type);
-
-    Ok(())
-}
-#[tokio::test]
-async fn test_remove_all_columns() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-
-    // Create a simple function with just 2 columns
-    bundle
-        .create_function(FunctionSignature::new(
-            "simple",
-            SchemaRef::new(Schema::new(vec![
-                Field::new("col1", DataType::Int32, false),
-                Field::new("col2", DataType::Utf8, true),
-            ])),
-        ))
-        .await?;
-    bundle
-        .set_impl(
-            "simple",
-            Arc::new(StaticImpl::new(
-                vec![record_batch!(
-                    ("col1", Int32, [1, 2]),
-                    ("col2", Utf8, ["a", "b"])
-                )?],
-                "v1".to_string(),
-            )),
-        )
-        .await?;
-    bundle.attach("function://simple", None).await?;
-
-    // Remove both columns
-    bundle.drop_column("col1").await?;
-    bundle.drop_column("col2").await?;
-
-    // Schema should be empty
-    assert_eq!(0, bundle.schema().await?.fields().len());
-
-    // DataFrame should have 0 columns but preserve row count
-    let df = bundle.dataframe().await?;
-    assert_eq!(0, df.schema().fields().len());
 
     Ok(())
 }

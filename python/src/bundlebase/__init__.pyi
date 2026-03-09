@@ -255,6 +255,33 @@ class PyBundle:
         """
         ...
 
+    async def create_temporary_function(
+        self,
+        name: str,
+        input_types: List[str],
+        return_type: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+        function_type: str = "scalar",
+    ) -> str:
+        """
+        Create a temporary SQL function (not persisted).
+
+        Args:
+            name: Dotted function name (e.g., "acme.double_val")
+            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
+            return_type: Arrow type name for output (e.g., "Int64")
+            runner: The runner: "python", "lib", "java", "docker", or "ipc"
+            logic: Logic string (e.g., "my_module:my_function")
+            platform: Platform in os/arch format (default "*/*")
+            function_type: "scalar" or "aggregate" (default "scalar")
+
+        Returns:
+            Confirmation message
+        """
+        ...
+
 
 class PyChange:
     """Information about a logical, user-level change."""
@@ -448,31 +475,74 @@ class PyBundleBuilder:
     def create_function(
         self,
         name: str,
-        output: Dict[str, str],
-        func: Callable[[int, Any], Any],
-        version: str = ...,
+        input_types: List[str],
+        return_type: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+        function_type: str = "scalar",
     ) -> "OperationChain":
         """
-        Define a custom data generation function.
-
-        Queues a function definition operation that will be executed when the chain is awaited.
+        Create a named SQL function (persisted).
 
         Args:
-            name: Function name to use in function:// URLs
-            output: Dictionary mapping column names to Arrow data types (e.g., {"id": "Int64", "name": "Utf8"})
-            func: Python callable that takes (page: int, schema: pyarrow.Schema) and returns RecordBatch or None
-            version: Version string for the function implementation
+            name: Dotted function name (e.g., "acme.double_val")
+            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
+            return_type: Arrow type name for output (e.g., "Int64")
+            runner: The runner: "lib", "java", "docker", or "ipc"
+            logic: Logic string (e.g., path to binary or "module:function")
+            platform: Platform in os/arch format (default "*/*")
+            function_type: "scalar" or "aggregate" (default "scalar")
 
         Returns:
             OperationChain for fluent chaining
+        """
+        ...
 
-        Example:
-            def my_data(page: int, schema: pa.Schema) -> pa.RecordBatch | None:
-                if page == 0:
-                    return pa.record_batch([[1, 2, 3], ["a", "b", "c"]], schema=schema)
-                return None
+    def create_temporary_function(
+        self,
+        name: str,
+        input_types: List[str],
+        return_type: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+        function_type: str = "scalar",
+    ) -> "OperationChain":
+        """
+        Create a temporary SQL function (not persisted).
 
-            c = await (c.create_function("my_data", {"id": "Int64", "value": "Utf8"}, my_data))
+        Args:
+            name: Dotted function name (e.g., "acme.double_val")
+            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
+            return_type: Arrow type name for output (e.g., "Int64")
+            runner: The runner: "python", "lib", "java", "docker", or "ipc"
+            logic: Logic string (e.g., "my_module:my_function")
+            platform: Platform in os/arch format (default "*/*")
+            function_type: "scalar" or "aggregate" (default "scalar")
+
+        Returns:
+            OperationChain for fluent chaining
+        """
+        ...
+
+    def drop_function(
+        self,
+        name: str,
+        platform: Optional[str] = None,
+        input_types: Optional[List[str]] = None,
+    ) -> "OperationChain":
+        """
+        Drop a function.
+
+        Args:
+            name: The dotted function name (e.g., "acme.double_val")
+            platform: Optional platform filter. None drops entire function.
+            input_types: Optional list of Arrow type names to drop a specific overload.
+                If None, drops all overloads.
+
+        Returns:
+            OperationChain for fluent chaining
         """
         ...
 
@@ -481,7 +551,7 @@ class PyBundleBuilder:
         Attach data from a file location.
 
         Queues an attach operation that will be executed when the chain is awaited.
-        Supports CSV, JSON, Parquet files, and function:// URLs for custom functions.
+        Supports CSV, JSON, Parquet files.
 
         Args:
             location: Data file location (e.g., "data.csv", "data.parquet", "function://my_data")
@@ -1274,11 +1344,36 @@ class OperationChain:
     def create_function(
         self,
         name: str,
-        output: Dict[str, str],
-        func: Callable[[int, Any], Any],
-        version: str = ...,
+        input_types: List[str],
+        return_type: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+        function_type: str = "scalar",
     ) -> "OperationChain":
         """Queue a create_function operation."""
+        ...
+
+    def create_temporary_function(
+        self,
+        name: str,
+        input_types: List[str],
+        return_type: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+        function_type: str = "scalar",
+    ) -> "OperationChain":
+        """Queue a create_temporary_function operation."""
+        ...
+
+    def drop_function(
+        self,
+        name: str,
+        platform: Optional[str] = None,
+        input_types: Optional[List[str]] = None,
+    ) -> "OperationChain":
+        """Queue a drop_function operation."""
         ...
 
     def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "OperationChain":
@@ -1408,11 +1503,36 @@ class CreateChain:
     def create_function(
         self,
         name: str,
-        output: Dict[str, str],
-        func: Callable[[int, Any], Any],
-        version: str = ...,
+        input_types: List[str],
+        return_type: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+        function_type: str = "scalar",
     ) -> "CreateChain":
         """Queue a create_function operation."""
+        ...
+
+    def create_temporary_function(
+        self,
+        name: str,
+        input_types: List[str],
+        return_type: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+        function_type: str = "scalar",
+    ) -> "CreateChain":
+        """Queue a create_temporary_function operation."""
+        ...
+
+    def drop_function(
+        self,
+        name: str,
+        platform: Optional[str] = None,
+        input_types: Optional[List[str]] = None,
+    ) -> "CreateChain":
+        """Queue a drop_function operation."""
         ...
 
     def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "CreateChain":
@@ -1542,11 +1662,36 @@ class ExtendChain:
     def create_function(
         self,
         name: str,
-        output: Dict[str, str],
-        func: Callable[[int, Any], Any],
-        version: str = ...,
+        input_types: List[str],
+        return_type: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+        function_type: str = "scalar",
     ) -> "ExtendChain":
         """Queue a create_function operation."""
+        ...
+
+    def create_temporary_function(
+        self,
+        name: str,
+        input_types: List[str],
+        return_type: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+        function_type: str = "scalar",
+    ) -> "ExtendChain":
+        """Queue a create_temporary_function operation."""
+        ...
+
+    def drop_function(
+        self,
+        name: str,
+        platform: Optional[str] = None,
+        input_types: Optional[List[str]] = None,
+    ) -> "ExtendChain":
+        """Queue a drop_function operation."""
         ...
 
     def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "ExtendChain":

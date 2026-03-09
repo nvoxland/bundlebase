@@ -1,11 +1,7 @@
-use arrow::array::record_batch;
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::functions::{FunctionSignature, StaticImpl};
 use bundlebase::test_utils::{field_names, random_memory_url, test_datafile};
 use bundlebase::BundlebaseError;
-use std::sync::Arc;
 use url::Url;
 
 mod common;
@@ -172,29 +168,6 @@ async fn test_rename_case_sensitive() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_function_source() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-    bundle
-        .create_function(FunctionSignature::new(
-            "names",
-            SchemaRef::new(Schema::new(vec![Field::new("name", DataType::Utf8, false)])),
-        ))
-        .await?;
-    bundle
-        .set_impl(
-            "names",
-            Arc::new(StaticImpl::new(
-                vec![record_batch!(("name", Utf8, ["Alice", "Bob", "Charlie"]))?],
-                "test_v1".to_string(),
-            )),
-        )
-        .await?;
-    bundle.attach("function://names", None).await?;
-    assert_eq!(3, bundle.num_rows().await?);
-
-    Ok(())
-}
-#[tokio::test]
 async fn test_multi_operation_pipeline() -> Result<(), BundlebaseError> {
     // Test a realistic workflow: attach -> remove -> rename -> query
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
@@ -249,16 +222,6 @@ async fn test_attach_missing_file_error() -> Result<(), BundlebaseError> {
         std::env::current_dir()?.join("../../test_data/nonexistent_file.parquet");
     let nonexistent_url = Url::from_file_path(nonexistent_path).unwrap();
     let result = bundle.attach(nonexistent_url.as_str(), None).await;
-    assert!(result.is_err());
-
-    Ok(())
-}
-#[tokio::test]
-async fn test_attach_invalid_function_error() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
-
-    // Should fail when attaching a function that hasn't been defined
-    let result = bundle.attach("function://undefined_function", None).await;
     assert!(result.is_err());
 
     Ok(())

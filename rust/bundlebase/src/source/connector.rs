@@ -15,12 +15,14 @@
 //! Orchestration (sync mode handling, materialization, file management)
 //! lives in `connector_utils::orchestrate_fetch()`.
 
-use super::plugin::IpcConnector;
-use super::plugin::KaggleConnector;
-use super::plugin::NativeConnector;
-use super::plugin::PostgresConnector;
-use super::plugin::RemoteDirConnector;
-use super::plugin::WebScrapeConnector;
+pub mod plugin;
+
+use plugin::IpcConnector;
+use plugin::KaggleConnector;
+use plugin::NativeConnector;
+use plugin::PostgresConnector;
+use plugin::RemoteDirConnector;
+use plugin::WebScrapeConnector;
 use super::connector_utils;
 
 use crate::{BundleConfig, BundlebaseError};

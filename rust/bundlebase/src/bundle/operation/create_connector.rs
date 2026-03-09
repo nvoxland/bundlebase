@@ -2,6 +2,7 @@
 
 use crate::bundle::operation::Operation;
 use crate::bundle::connector_definition::{parse_connector_name, ConnectorEntry, Platform, Runner};
+use crate::NamespacedName;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
@@ -14,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateConnectorOp {
-    /// Full dotted connector name (e.g., "acme.datasources.weather")
+    /// Full dotted connector name (e.g., "acme.weather")
     pub name: String,
     /// Runner type
     pub runner: Runner,
@@ -58,8 +59,10 @@ impl Operation for CreateConnectorOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
+        let namespaced = self.name.parse::<NamespacedName>()
+            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
         bundle.add_connector_entry(ConnectorEntry {
-            name: self.name.clone(),
+            name: namespaced,
             runner: self.runner,
             logic: self.logic.clone(),
             platform: self.platform.clone(),
@@ -90,7 +93,7 @@ mod tests {
     #[test]
     fn test_serialization() {
         let op = CreateConnectorOp::new(
-            "acme.datasources.weather".to_string(),
+            "acme.weather".to_string(),
             Runner::Ipc,
             "./weather-linux".to_string(),
             "linux/amd64".parse().unwrap(),
@@ -112,7 +115,7 @@ mod tests {
         );
         let result = op.check(&bundle).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must contain at least one dot"));
+        assert!(result.unwrap_err().to_string().contains("must contain exactly one dot"));
     }
 
     #[tokio::test]

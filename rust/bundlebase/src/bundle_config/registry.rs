@@ -59,7 +59,7 @@ fn register_builtin_configs(registry: &mut ConfigRegistry) {
     registry.register_scopes(plugin::sftp::sftp_scopes());
     registry.register_keys(plugin::sftp::sftp_keys());
 
-    use crate::source::plugin::kaggle;
+    use crate::source::connector::plugin::kaggle;
     registry.register_scopes(kaggle::scopes());
     registry.register_keys(kaggle::configs());
 }
