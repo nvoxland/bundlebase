@@ -581,7 +581,10 @@ fn get_or_spawn_subprocess(
 fn acquire_lock(
     handle: &Arc<Mutex<SyncSubprocessHandle>>,
 ) -> std::sync::MutexGuard<'_, SyncSubprocessHandle> {
-    handle.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    handle.lock().unwrap_or_else(|poisoned| {
+        log::warn!("IPC subprocess mutex was poisoned, recovering");
+        poisoned.into_inner()
+    })
 }
 
 // ---------------------------------------------------------------------------

@@ -87,9 +87,9 @@ impl AttachBlockOp {
             None => {
                 progress.update(1, Some("Computing hash"));
 
-                // Check if this is a function:// URL - these don't support file-based hash
+                // Check if this is a non-file URL - these don't support file-based hash
                 //todo: do this right
-                if location.starts_with("function://") || location.starts_with("bundle://") || location.starts_with("bundle+") || location.starts_with("bundlebase://") || location.starts_with("bundlebase+") {
+                if location.starts_with("bundle://") || location.starts_with("bundle+") || location.starts_with("bundlebase://") || location.starts_with("bundlebase+") {
                     let temp_id = BlockId::generate();
                     let adapter_factory = builder.bundle().reader_factory.clone();
                     let adapter = adapter_factory

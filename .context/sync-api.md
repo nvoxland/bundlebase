@@ -109,7 +109,7 @@ All operations work synchronously without `await`:
   ```python
   c.attach("data.parquet")
   c.attach("data.csv")
-  c.attach("function://my_func")  # Custom function
+  c.attach("ipc://./my_connector")  # Custom connector
   ```
 
 - **`remove_column(name: str)`** - Remove column

@@ -59,6 +59,35 @@ Implement the `Connector` interface:
 
 Call `Serve(instance)` to start the connector server.
 
+### MapConnector
+
+For a simpler API, implement `MapConnector` instead. It extends `Connector` with a `Schema()` method that maps column names to type strings, letting you return `[]map[string]interface{}` from `Data()` instead of building Arrow records manually:
+
+```go
+type MySource struct{}
+
+func (s *MySource) Schema() map[string]string {
+	return map[string]string{
+		"id":   "Int64",
+		"name": "Utf8",
+	}
+}
+
+func (s *MySource) Discover(attached []string, args map[string]string) ([]sdk.Location, error) {
+	return []sdk.Location{{Location: "all", Version: "v1"}}, nil
+}
+
+func (s *MySource) Data(loc sdk.Location, args map[string]string) ([]arrow.Record, error) {
+	data := []map[string]interface{}{
+		{"id": int64(1), "name": "Alice"},
+		{"id": int64(2), "name": "Bob"},
+	}
+	return sdk.NormalizeToRecords(data, s.Schema())
+}
+```
+
+The SDK's `NormalizeToRecords` helper converts Go maps to Arrow records using the schema.
+
 ## Documentation
 
 For complete documentation, including advanced usage and API details, see [Custom Connectors](../../docs/guide/custom-connectors/).
