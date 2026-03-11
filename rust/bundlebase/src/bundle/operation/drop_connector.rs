@@ -16,15 +16,16 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct DropConnectorOp {
     /// Full dotted connector name (e.g., "acme.weather")
-    pub source_name: String,
+    #[serde(alias = "sourceName")]
+    pub connector_name: String,
     /// Optional platform filter (e.g., "linux/amd64"). None means drop the entire connector.
     pub platform: Option<Platform>,
 }
 
 impl DropConnectorOp {
-    pub fn new(source_name: String, platform: Option<Platform>) -> Self {
+    pub fn new(connector_name: String, platform: Option<Platform>) -> Self {
         Self {
-            source_name,
+            connector_name,
             platform,
         }
     }
@@ -34,16 +35,16 @@ impl DropConnectorOp {
 impl Operation for DropConnectorOp {
     fn describe(&self) -> String {
         match &self.platform {
-            Some(p) => format!("DROP CONNECTOR {} FOR PLATFORM '{}'", self.source_name, p),
-            None => format!("DROP CONNECTOR {}", self.source_name),
+            Some(p) => format!("DROP CONNECTOR {} FOR PLATFORM '{}'", self.connector_name, p),
+            None => format!("DROP CONNECTOR {}", self.connector_name),
         }
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        if !bundle.has_connector_entry(&self.source_name) {
+        if !bundle.has_connector_entry(&self.connector_name) {
             return Err(format!(
                 "Connector '{}' is not defined. Use IMPORT CONNECTOR first.",
-                self.source_name
+                self.connector_name
             )
             .into());
         }
@@ -60,13 +61,13 @@ impl Operation for DropConnectorOp {
             None => {
                 // Drop the entire connector (all entries + associated sources)
                 bundle
-                    .remove_connector_entries(&self.source_name)
+                    .remove_connector_entries(&self.connector_name)
                     .map_err(|e| DataFusionError::Execution(e.to_string()))?;
             }
             Some(ref p) => {
                 // Drop only entries for the specified platform
                 bundle
-                    .remove_connector_entry(&self.source_name, Some(p), false)
+                    .remove_connector_entry(&self.connector_name, Some(p), false)
                     .map_err(|e| DataFusionError::Execution(e.to_string()))?;
             }
         }

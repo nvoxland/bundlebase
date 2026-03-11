@@ -1,6 +1,6 @@
 """Tests for Python bindings of function definition system.
 
-Tests verify import_function, import_temporary_function, and drop_function
+Tests verify import_function, import_temp_function, and drop_function
 operations via both the Python API and SQL command syntax, as well as
 end-to-end Python UDF execution through the DataFusion bridge.
 """
@@ -72,10 +72,10 @@ async def test_import_function_rejects_python_runner():
 
 
 @pytest.mark.asyncio
-async def test_import_temporary_function():
-    """Test that import_temporary_function does not record a persistent operation."""
+async def test_import_temp_function():
+    """Test that import_temp_function does not record a persistent operation."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "acme.double_val", ["Int64"], "Int64", "python", "test_function:double_val"
     )
     assert c is not None
@@ -151,7 +151,7 @@ async def test_python_udf_scalar():
     """Test that a Python UDF can be invoked in a SQL query."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.attach(datafile("userdata.parquet"))
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "test.double_val",
         ["Int64"],
         "Int64",
@@ -170,7 +170,7 @@ async def test_python_udf_multi_arg():
     """Test a Python UDF with multiple arguments."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.attach(datafile("userdata.parquet"))
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "test.add_vals",
         ["Int64", "Int64"],
         "Int64",
@@ -189,7 +189,7 @@ async def test_python_udf_in_where_clause():
     """Test that a Python UDF works in WHERE clauses, not just SELECT."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.attach(datafile("userdata.parquet"))
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "test.double_val",
         ["Int64"],
         "Int64",
@@ -215,7 +215,7 @@ async def test_python_udaf_sum():
     """Test that a Python aggregate UDF computes a sum correctly."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.attach(datafile("userdata.parquet"))
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "test.my_sum",
         ["Int64"],
         "Int64",
@@ -238,7 +238,7 @@ async def test_python_udaf_in_group_by():
     """Test that a Python aggregate UDF works with GROUP BY."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.attach(datafile("userdata.parquet"))
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "test.my_sum",
         ["Int64"],
         "Int64",
@@ -262,7 +262,7 @@ async def test_python_udaf_as_window():
     """Test that a Python aggregate UDF works with OVER() clause as a window function."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.attach(datafile("userdata.parquet"))
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "test.my_sum",
         ["Int64"],
         "Int64",
@@ -291,7 +291,7 @@ async def test_load_aggregate_function_via_api():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Use the function_type parameter to create an aggregate function
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "test.my_sum",
         ["Int64"],
         "Int64",
@@ -318,7 +318,7 @@ async def test_function_overloading_same_name_different_types():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Register Int64 overload
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "test.double_val",
         ["Int64"],
         "Int64",
@@ -326,7 +326,7 @@ async def test_function_overloading_same_name_different_types():
         "test_function_helpers:double_val",
     )
     # Register Float64 overload (same name, different types)
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "test.double_val",
         ["Float64"],
         "Float64",
@@ -360,7 +360,7 @@ async def test_function_overloading_mixed_kinds_rejected():
     c = await c.attach(datafile("userdata.parquet"))
 
     # Register as scalar
-    c = await c.import_temporary_function(
+    c = await c.import_temp_function(
         "test.mixed_func",
         ["Int64"],
         "Int64",
@@ -369,7 +369,7 @@ async def test_function_overloading_mixed_kinds_rejected():
     )
     # Try to register same name as aggregate — should fail
     with pytest.raises((ValueError, Exception), match="(?i)mixed kinds"):
-        await c.import_temporary_function(
+        await c.import_temp_function(
             "test.mixed_func",
             ["Int64"],
             "Int64",

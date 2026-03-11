@@ -414,7 +414,7 @@ impl PyBundle {
     ///
     /// Load a temporary connector with runtime-only logic (not persisted).
     #[pyo3(signature = (name, runner, logic, platform="*/*"))]
-    fn import_temporary_connector<'py>(
+    fn import_temp_connector<'py>(
         &self,
         name: &str,
         runner: &str,
@@ -435,7 +435,7 @@ impl PyBundle {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
             })?;
             inner
-                .import_temporary_connector(&name, runner, logic, platform)
+                .import_temp_connector(&name, runner, logic, platform)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -451,7 +451,7 @@ impl PyBundle {
     ///
     /// Registers a DataFusion UDF for the current session only.
     #[pyo3(signature = (name, input_types, return_type, runner, logic, platform="*/*", function_type="scalar"))]
-    fn import_temporary_function<'py>(
+    fn import_temp_function<'py>(
         &self,
         name: &str,
         input_types: Vec<String>,
@@ -505,7 +505,7 @@ impl PyBundle {
                 kind,
             };
             inner
-                .import_temporary_function(entry)
+                .import_temp_function(entry)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -525,7 +525,7 @@ impl PyBundle {
     ///
     /// Returns a message describing what was dropped.
     #[pyo3(signature = (name, platform=None))]
-    fn drop_temporary_connector_logic<'py>(
+    fn drop_temp_connector_logic<'py>(
         &self,
         name: &str,
         platform: Option<&str>,
@@ -541,7 +541,7 @@ impl PyBundle {
             })?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let count = inner
-                .drop_temporary_connector_logic(&name, platform.as_ref())
+                .drop_temp_connector_logic(&name, platform.as_ref())
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(

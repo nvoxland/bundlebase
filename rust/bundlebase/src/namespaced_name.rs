@@ -98,7 +98,7 @@ pub fn parse_dotted_name<'a>(name: &'a str, entity_type: &str) -> Result<(&'a st
 
     if parts.len() < 2 {
         return Err(format!(
-            "{} name '{}' must contain exactly one dot (e.g., 'acme.my_func')",
+            "{} name must be in format 'namespace.name' (e.g., 'acme.my_func'), got '{}'",
             entity_type, name
         )
         .into());
@@ -106,7 +106,7 @@ pub fn parse_dotted_name<'a>(name: &'a str, entity_type: &str) -> Result<(&'a st
 
     if parts.len() > 2 {
         return Err(format!(
-            "{} name '{}' must contain exactly one dot (e.g., 'acme.my_func'). Multi-level namespaces are not supported.",
+            "{} name must be in format 'namespace.name' (e.g., 'acme.my_func'), got '{}'. Multi-level namespaces are not supported.",
             entity_type, name
         )
         .into());
@@ -213,7 +213,7 @@ mod tests {
     fn test_parse_dotted_name_rejects_multi_level() {
         let result = parse_dotted_name("a.b.c", "Connector");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Multi-level namespaces"));
+        assert!(result.unwrap_err().to_string().contains("Multi-level namespaces are not supported"));
     }
 
     #[test]

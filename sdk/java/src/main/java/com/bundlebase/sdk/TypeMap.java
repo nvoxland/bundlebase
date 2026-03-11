@@ -16,30 +16,23 @@ import java.util.Map;
  */
 class TypeMap {
     private static final Map<String, ArrowType> TYPE_MAP = Map.ofEntries(
-        Map.entry("string", new ArrowType.Utf8()),
-        Map.entry("utf8", new ArrowType.Utf8()),
-        Map.entry("int8", new ArrowType.Int(8, true)),
-        Map.entry("int16", new ArrowType.Int(16, true)),
-        Map.entry("int32", new ArrowType.Int(32, true)),
-        Map.entry("int64", new ArrowType.Int(64, true)),
-        Map.entry("int", new ArrowType.Int(64, true)),
-        Map.entry("uint8", new ArrowType.Int(8, false)),
-        Map.entry("uint16", new ArrowType.Int(16, false)),
-        Map.entry("uint32", new ArrowType.Int(32, false)),
-        Map.entry("uint64", new ArrowType.Int(64, false)),
-        Map.entry("float16", new ArrowType.FloatingPoint(FloatingPointPrecision.HALF)),
-        Map.entry("float32", new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE)),
-        Map.entry("float64", new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
-        Map.entry("float", new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
-        Map.entry("double", new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
-        Map.entry("bool", new ArrowType.Bool()),
-        Map.entry("boolean", new ArrowType.Bool()),
-        Map.entry("date32", new ArrowType.Date(DateUnit.DAY)),
-        Map.entry("date64", new ArrowType.Date(DateUnit.MILLISECOND)),
-        Map.entry("date", new ArrowType.Date(DateUnit.DAY)),
-        Map.entry("timestamp", new ArrowType.Timestamp(TimeUnit.MICROSECOND, null)),
-        Map.entry("binary", new ArrowType.Binary()),
-        Map.entry("bytes", new ArrowType.Binary())
+        Map.entry("Utf8", new ArrowType.Utf8()),
+        Map.entry("Int8", new ArrowType.Int(8, true)),
+        Map.entry("Int16", new ArrowType.Int(16, true)),
+        Map.entry("Int32", new ArrowType.Int(32, true)),
+        Map.entry("Int64", new ArrowType.Int(64, true)),
+        Map.entry("UInt8", new ArrowType.Int(8, false)),
+        Map.entry("UInt16", new ArrowType.Int(16, false)),
+        Map.entry("UInt32", new ArrowType.Int(32, false)),
+        Map.entry("UInt64", new ArrowType.Int(64, false)),
+        Map.entry("Float16", new ArrowType.FloatingPoint(FloatingPointPrecision.HALF)),
+        Map.entry("Float32", new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE)),
+        Map.entry("Float64", new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
+        Map.entry("Boolean", new ArrowType.Bool()),
+        Map.entry("Date32", new ArrowType.Date(DateUnit.DAY)),
+        Map.entry("Date64", new ArrowType.Date(DateUnit.MILLISECOND)),
+        Map.entry("Timestamp", new ArrowType.Timestamp(TimeUnit.MICROSECOND, null)),
+        Map.entry("Binary", new ArrowType.Binary())
     );
 
     /**

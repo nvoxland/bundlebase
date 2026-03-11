@@ -1,4 +1,4 @@
-//! DropTemporaryFunction command implementation (runtime-only).
+//! DropTempFunction command implementation (runtime-only).
 //!
 //! Removes function entries for the current session only, without creating a persisted
 //! operation. Works on both `Bundle` and `BundleBuilder` via `BundleFacade`.
@@ -15,12 +15,12 @@ use std::sync::Arc;
 ///
 /// Drops all overloads of the named function.
 #[derive(Debug, Clone)]
-pub struct DropTemporaryFunctionCommand {
+pub struct DropTempFunctionCommand {
     /// Full dotted function name
     pub name: String,
 }
 
-impl DropTemporaryFunctionCommand {
+impl DropTempFunctionCommand {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -42,9 +42,9 @@ impl DropTemporaryFunctionCommand {
     }
 }
 
-impl CommandParsing for DropTemporaryFunctionCommand {
+impl CommandParsing for DropTempFunctionCommand {
     fn rule() -> Rule {
-        Rule::drop_temporary_function_stmt
+        Rule::drop_temp_function_stmt
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
@@ -57,19 +57,19 @@ impl CommandParsing for DropTemporaryFunctionCommand {
         }
 
         let name = name.ok_or_else(|| -> BundlebaseError {
-            "DROP TEMPORARY FUNCTION missing function name".into()
+            "DROP TEMP FUNCTION missing function name".into()
         })?;
 
-        Ok(DropTemporaryFunctionCommand::new(name))
+        Ok(DropTempFunctionCommand::new(name))
     }
 
     fn to_statement(&self) -> String {
-        format!("DROP TEMPORARY FUNCTION {}", self.name)
+        format!("DROP TEMP FUNCTION {}", self.name)
     }
 }
 
 #[async_trait]
-impl BundleFacadeCommand for DropTemporaryFunctionCommand {
+impl BundleFacadeCommand for DropTempFunctionCommand {
     type Output = String;
 
     async fn execute(
@@ -77,7 +77,7 @@ impl BundleFacadeCommand for DropTemporaryFunctionCommand {
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
         let count = facade
-            .drop_temporary_function(&self.name, None)
+            .drop_temp_function(&self.name, None)
             .await?;
 
         Ok(format!(
@@ -94,28 +94,28 @@ mod parsing_tests {
     use crate::bundle::command::BundleCommand;
 
     #[test]
-    fn test_parse_drop_temporary_function() {
-        let input = "DROP TEMPORARY FUNCTION acme.double_val";
+    fn test_parse_drop_temp_function() {
+        let input = "DROP TEMP FUNCTION acme.double_val";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::DropTemporaryFunction(c) => {
+            BundleCommand::DropTempFunction(c) => {
                 assert_eq!(c.name, "acme.double_val");
             }
-            _ => panic!("Expected DropTemporaryFunction variant"),
+            _ => panic!("Expected DropTempFunction variant"),
         }
     }
 
     #[test]
-    fn test_parse_drop_temporary_function_roundtrip() {
-        let cmd = DropTemporaryFunctionCommand::new("acme.double_val");
+    fn test_parse_drop_temp_function_roundtrip() {
+        let cmd = DropTempFunctionCommand::new("acme.double_val");
         let statement = cmd.to_statement();
-        assert_eq!(statement, "DROP TEMPORARY FUNCTION acme.double_val");
+        assert_eq!(statement, "DROP TEMP FUNCTION acme.double_val");
         let parsed = parse_command(&statement).unwrap();
         match parsed {
-            BundleCommand::DropTemporaryFunction(c) => {
+            BundleCommand::DropTempFunction(c) => {
                 assert_eq!(c.name, "acme.double_val");
             }
-            _ => panic!("Expected DropTemporaryFunction variant"),
+            _ => panic!("Expected DropTempFunction variant"),
         }
     }
 }

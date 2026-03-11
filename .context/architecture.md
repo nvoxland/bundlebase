@@ -112,7 +112,7 @@ Custom SQL function system supporting both scalar and aggregate functions.
    - DataFusion automatically supports any aggregate UDF with `OVER()` clauses
 
 3. **Temporary vs persistent**:
-   - `IMPORT TEMPORARY FUNCTION` — session-only, not persisted, allows Python runner
+   - `IMPORT TEMP FUNCTION` — session-only, not persisted, allows Python runner
    - `IMPORT FUNCTION` — persisted as operation, rejects Python runner (can't be bundled)
    - Temporary overrides persistent at resolution time
 

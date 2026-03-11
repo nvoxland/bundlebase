@@ -194,13 +194,16 @@ impl AggregateUDFImpl for AggregateFunction {
         &self,
         args: datafusion::logical_expr::function::StateFieldsArgs,
     ) -> DFResult<Vec<Arc<arrow::datatypes::Field>>> {
-        // Find matching overload for state type, or default to first
+        // Find matching overload for state type
         let entry = if self.overloads.len() == 1 {
             &self.overloads[0]
         } else {
             let arg_types: Vec<DataType> = args.input_fields.iter().map(|f| f.data_type().clone()).collect();
             find_matching_overload(&self.overloads, &arg_types)
-                .unwrap_or(&self.overloads[0])
+                .ok_or_else(|| datafusion::common::DataFusionError::Plan(format!(
+                    "No overload of aggregate '{}' matches argument types {:?}",
+                    self.name, arg_types
+                )))?
         };
 
         // IPC accumulators use Utf8 state (opaque state ID), others use return type

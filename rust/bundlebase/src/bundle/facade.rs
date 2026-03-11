@@ -308,7 +308,7 @@ pub trait BundleFacade: Send + Sync {
     /// # Arguments
     /// * `name` - The connector name (dot-separated)
     /// * `entry` - The connector logic entry to add
-    async fn import_temporary_connector(
+    async fn import_temp_connector(
         &self,
         name: &str,
         runner: crate::bundle::connector_definition::Runner,
@@ -321,7 +321,7 @@ pub trait BundleFacade: Send + Sync {
     /// If `platform` is None, removes all logic entries.
     /// If `platform` is Some, removes only entries matching that platform.
     /// Returns the number of entries removed.
-    async fn drop_temporary_connector_logic(
+    async fn drop_temp_connector_logic(
         &self,
         name: &str,
         platform: Option<&crate::bundle::connector_definition::Platform>,
@@ -330,7 +330,7 @@ pub trait BundleFacade: Send + Sync {
     /// Load a temporary function with runtime-only logic.
     ///
     /// Registers a DataFusion UDF and adds the entry for the current session.
-    async fn import_temporary_function(
+    async fn import_temp_function(
         &self,
         entry: crate::bundle::function_definition::FunctionEntry,
     ) -> Result<(), BundlebaseError>;
@@ -339,7 +339,7 @@ pub trait BundleFacade: Send + Sync {
     ///
     /// If `platform` is None, removes all temporary entries for the name.
     /// Returns the number of entries removed.
-    async fn drop_temporary_function(
+    async fn drop_temp_function(
         &self,
         name: &str,
         platform: Option<&crate::bundle::connector_definition::Platform>,

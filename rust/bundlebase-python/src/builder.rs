@@ -359,7 +359,7 @@ impl PyBundleBuilder {
     }
 
     #[pyo3(signature = (name, input_types, return_type, runner, logic, platform="*/*", function_type="scalar"))]
-    fn import_temporary_function<'py>(
+    fn import_temp_function<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         input_types: Vec<String>,
@@ -402,7 +402,7 @@ impl PyBundleBuilder {
             };
             inner
                 .as_ref()
-                .import_temporary_function(entry)
+                .import_temp_function(entry)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to load temporary function", e))?;
 
@@ -764,7 +764,7 @@ impl PyBundleBuilder {
     /// * `logic` - The logic string (e.g., "mod:Class" for python)
     /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
     #[pyo3(signature = (name, runner, logic, platform="*/*"))]
-    fn import_temporary_connector<'py>(
+    fn import_temp_connector<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         runner: &str,
@@ -782,7 +782,7 @@ impl PyBundleBuilder {
             let platform: ::bundlebase::bundle::Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
             inner
                 .as_ref()
-                .import_temporary_connector(&name, runner, logic, platform)
+                .import_temp_connector(&name, runner, logic, platform)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to load temporary connector", e))?;
             Python::attach(|py| {
@@ -828,7 +828,7 @@ impl PyBundleBuilder {
     ///
     /// Returns the number of entries removed.
     #[pyo3(signature = (name, platform=None))]
-    fn drop_temporary_connector_logic<'py>(
+    fn drop_temp_connector_logic<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         platform: Option<&str>,
@@ -839,7 +839,7 @@ impl PyBundleBuilder {
         let platform = platform.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let count = inner
-                .drop_temporary_connector_logic(&name, platform.as_deref())
+                .drop_temp_connector_logic(&name, platform.as_deref())
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to drop temporary connector logic", e))?;
             Ok(format!(

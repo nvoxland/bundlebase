@@ -173,7 +173,7 @@ IMPORT CONNECTOR <name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)
 The `runner://logic` URI specifies both the runner and what to run. An optional `WITH` clause can provide additional parameters like `platform`.
 
 !!! note
-    The `python` runner is not allowed with `IMPORT CONNECTOR` because Python code cannot be bundled. Use `IMPORT TEMPORARY CONNECTOR` instead.
+    The `python` runner is not allowed with `IMPORT CONNECTOR` because Python code cannot be bundled. Use `IMPORT TEMP CONNECTOR` instead.
 
 **Examples:**
 
@@ -194,22 +194,22 @@ IMPORT CONNECTOR example.connector FROM 'ipc://./example_connector'
 IMPORT CONNECTOR example.connector FROM 'lib://./libexample_connector.so' WITH (platform = 'linux/amd64')
 ```
 
-### IMPORT TEMPORARY CONNECTOR
+### IMPORT TEMP CONNECTOR
 
 Creates a connector for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process sources.
 
 ```sql
-IMPORT TEMPORARY CONNECTOR <name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT TEMP CONNECTOR <name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
 ```
 
 **Examples:**
 
 ```sql
 -- Python in-process (most common use case)
-IMPORT TEMPORARY CONNECTOR example.connector FROM 'python://example_connector:ExampleConnector'
+IMPORT TEMP CONNECTOR example.connector FROM 'python://example_connector:ExampleConnector'
 
 -- Any other runner also works as temporary
-IMPORT TEMPORARY CONNECTOR example.connector FROM 'ipc://./example_connector'
+IMPORT TEMP CONNECTOR example.connector FROM 'ipc://./example_connector'
 ```
 
 ### DROP CONNECTOR
@@ -230,22 +230,22 @@ DROP CONNECTOR example.connector
 DROP CONNECTOR example.connector FOR PLATFORM 'linux/amd64'
 ```
 
-### DROP TEMPORARY CONNECTOR LOGIC
+### DROP TEMP CONNECTOR LOGIC
 
 Removes runtime-only connector logic. Optionally filter by platform.
 
 ```sql
-DROP TEMPORARY CONNECTOR LOGIC <name> [FOR PLATFORM '<platform>']
+DROP TEMP CONNECTOR LOGIC <name> [FOR PLATFORM '<platform>']
 ```
 
 **Examples:**
 
 ```sql
 -- Drop all temporary logic entries
-DROP TEMPORARY CONNECTOR LOGIC example.connector
+DROP TEMP CONNECTOR LOGIC example.connector
 
 -- Drop temporary logic for a specific platform only
-DROP TEMPORARY CONNECTOR LOGIC example.connector FOR PLATFORM 'linux/amd64'
+DROP TEMP CONNECTOR LOGIC example.connector FOR PLATFORM 'linux/amd64'
 ```
 
 ## Indexes
@@ -310,7 +310,7 @@ IMPORT FUNCTION <namespace.name> FROM '<runner>://<logic>' [WITH (<key> = '<valu
 An optional `WITH` clause can provide additional parameters like `platform`.
 
 !!! note
-    The `python` runner is not allowed with `IMPORT FUNCTION` because Python code cannot be bundled. Use `IMPORT TEMPORARY FUNCTION` instead.
+    The `python` runner is not allowed with `IMPORT FUNCTION` because Python code cannot be bundled. Use `IMPORT TEMP FUNCTION` instead.
 
 **Scalar function examples:**
 
@@ -350,32 +350,32 @@ IMPORT FUNCTION acme.string_agg FROM 'java://target/my-aggs.jar'
 IMPORT FUNCTION acme.percentile FROM 'docker://myorg/stats:latest'
 ```
 
-### IMPORT TEMPORARY FUNCTION
+### IMPORT TEMP FUNCTION
 
 Creates a function for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process functions. Input types, return type, and function kind are auto-detected.
 
 ```sql
-IMPORT TEMPORARY FUNCTION <namespace.name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT TEMP FUNCTION <namespace.name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
 ```
 
 **Scalar function examples:**
 
 ```sql
 -- Python scalar function
-IMPORT TEMPORARY FUNCTION acme.double_val FROM 'python://my_module:double_val'
+IMPORT TEMP FUNCTION acme.double_val FROM 'python://my_module:double_val'
 
 -- IPC subprocess (temporary)
-IMPORT TEMPORARY FUNCTION acme.to_upper FROM 'ipc://./go_funcs'
+IMPORT TEMP FUNCTION acme.to_upper FROM 'ipc://./go_funcs'
 ```
 
 **Aggregate function examples:**
 
 ```sql
 -- Python aggregate function (class-based)
-IMPORT TEMPORARY FUNCTION acme.my_sum FROM 'python://my_module:MySum'
+IMPORT TEMP FUNCTION acme.my_sum FROM 'python://my_module:MySum'
 
 -- Python aggregate with multiple input types
-IMPORT TEMPORARY FUNCTION acme.weighted_avg FROM 'python://stats:WeightedAvg'
+IMPORT TEMP FUNCTION acme.weighted_avg FROM 'python://stats:WeightedAvg'
 ```
 
 **Python scalar function interface:**
@@ -449,12 +449,12 @@ DROP FUNCTION acme.double_val
 DROP FUNCTION acme.double_val FOR PLATFORM 'linux/amd64'
 ```
 
-### DROP TEMPORARY FUNCTION
+### DROP TEMP FUNCTION
 
 Removes runtime-only function logic. Optionally filter by platform.
 
 ```sql
-DROP TEMPORARY FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
+DROP TEMP FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
 ```
 
 ### Wildcard Function Discovery

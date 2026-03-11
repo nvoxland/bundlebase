@@ -55,12 +55,12 @@ schema_stmt = {
 
 // Source management statements - operations for data sources and functions
 source_stmt = {
-    import_temporary_function_stmt
-    | import_temporary_connector_stmt
+    import_temp_function_stmt
+    | import_temp_connector_stmt
     | import_function_stmt
     | import_connector_stmt
-    | drop_temporary_function_stmt
-    | drop_temporary_connector_logic_stmt
+    | drop_temp_function_stmt
+    | drop_temp_connector_logic_stmt
     | drop_function_stmt
     | drop_connector_stmt
     | create_source_stmt
@@ -178,17 +178,17 @@ reindex_stmt = {
 //   IMPORT CONNECTOR acme.weather FROM 'lib://./lib.so' WITH (platform = 'linux/amd64')
 
 import_connector_stmt = {
-    ^"load" ~ ^"connector" ~ dotted_identifier ~ ^"from" ~ quoted_string ~ (^"with" ~ source_args)?
+    (^"load" | ^"import") ~ ^"connector" ~ dotted_identifier ~ ^"from" ~ quoted_string ~ (^"with" ~ source_args)?
 }
 
 // ============================================================================
-// IMPORT TEMPORARY CONNECTOR Statement
+// IMPORT TEMP CONNECTOR Statement
 // ============================================================================
-// Syntax: IMPORT TEMPORARY CONNECTOR <dotted_name> FROM '<runner://logic>' [WITH (<args>)]
-// Example: IMPORT TEMPORARY CONNECTOR acme.weather FROM 'python://mod:Class'
+// Syntax: IMPORT TEMP CONNECTOR <dotted_name> FROM '<runner://logic>' [WITH (<args>)]
+// Example: IMPORT TEMP CONNECTOR acme.weather FROM 'python://mod:Class'
 
-import_temporary_connector_stmt = {
-    ^"load" ~ ^"temporary" ~ ^"connector" ~ dotted_identifier ~ ^"from" ~ quoted_string ~ (^"with" ~ source_args)?
+import_temp_connector_stmt = {
+    (^"load" | ^"import") ~ ^"temp" ~ ^"connector" ~ dotted_identifier ~ ^"from" ~ quoted_string ~ (^"with" ~ source_args)?
 }
 
 // ============================================================================
@@ -204,15 +204,15 @@ drop_connector_stmt = {
 }
 
 // ============================================================================
-// DROP TEMPORARY CONNECTOR LOGIC Statement
+// DROP TEMP CONNECTOR LOGIC Statement
 // ============================================================================
-// Syntax: DROP TEMPORARY CONNECTOR LOGIC <dotted_name> [FOR PLATFORM '<platform>']
+// Syntax: DROP TEMP CONNECTOR LOGIC <dotted_name> [FOR PLATFORM '<platform>']
 // Examples:
-//   DROP TEMPORARY CONNECTOR LOGIC acme.weather
-//   DROP TEMPORARY CONNECTOR LOGIC acme.weather FOR PLATFORM 'linux/amd64'
+//   DROP TEMP CONNECTOR LOGIC acme.weather
+//   DROP TEMP CONNECTOR LOGIC acme.weather FOR PLATFORM 'linux/amd64'
 
-drop_temporary_connector_logic_stmt = {
-    ^"drop" ~ ^"temporary" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ (^"for" ~ ^"platform" ~ quoted_string)?
+drop_temp_connector_logic_stmt = {
+    ^"drop" ~ ^"temp" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ (^"for" ~ ^"platform" ~ quoted_string)?
 }
 
 // ============================================================================
@@ -225,19 +225,19 @@ drop_temporary_connector_logic_stmt = {
 //   IMPORT FUNCTION acme.double_val FROM 'ipc://./my_func' WITH (platform = 'linux/amd64')
 
 import_function_stmt = {
-    ^"load" ~ ^"function" ~ function_name ~ ^"from" ~ quoted_string ~ (^"with" ~ source_args)?
+    (^"load" | ^"import") ~ ^"function" ~ function_name ~ ^"from" ~ quoted_string ~ (^"with" ~ source_args)?
 }
 
 // ============================================================================
-// IMPORT TEMPORARY FUNCTION Statement
+// IMPORT TEMP FUNCTION Statement
 // ============================================================================
-// Syntax: IMPORT TEMPORARY FUNCTION <function_name> FROM '<runner://logic>' [WITH (<args>)]
+// Syntax: IMPORT TEMP FUNCTION <function_name> FROM '<runner://logic>' [WITH (<args>)]
 // Examples:
-//   IMPORT TEMPORARY FUNCTION acme.double_val FROM 'python://mod:func'
-//   IMPORT TEMPORARY FUNCTION acme.* FROM 'lib://./mylib.so'
+//   IMPORT TEMP FUNCTION acme.double_val FROM 'python://mod:func'
+//   IMPORT TEMP FUNCTION acme.* FROM 'lib://./mylib.so'
 
-import_temporary_function_stmt = {
-    ^"load" ~ ^"temporary" ~ ^"function" ~ function_name ~ ^"from" ~ quoted_string ~ (^"with" ~ source_args)?
+import_temp_function_stmt = {
+    (^"load" | ^"import") ~ ^"temp" ~ ^"function" ~ function_name ~ ^"from" ~ quoted_string ~ (^"with" ~ source_args)?
 }
 
 // ============================================================================
@@ -251,13 +251,13 @@ drop_function_stmt = {
 }
 
 // ============================================================================
-// DROP TEMPORARY FUNCTION Statement
+// DROP TEMP FUNCTION Statement
 // ============================================================================
-// Syntax: DROP TEMPORARY FUNCTION <dotted_name>
-// Example: DROP TEMPORARY FUNCTION acme.double_val
+// Syntax: DROP TEMP FUNCTION <dotted_name>
+// Example: DROP TEMP FUNCTION acme.double_val
 
-drop_temporary_function_stmt = {
-    ^"drop" ~ ^"temporary" ~ ^"function" ~ dotted_identifier
+drop_temp_function_stmt = {
+    ^"drop" ~ ^"temp" ~ ^"function" ~ dotted_identifier
 }
 
 // ============================================================================

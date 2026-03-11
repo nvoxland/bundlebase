@@ -70,7 +70,7 @@ await c.commit("Filtered adults")
 - Metadata (name, description)
 - Row count tracking
 - SessionContext for DataFusion
-- FunctionRegistry (shared across all containers)
+- Function entries (user-defined SQL functions)
 - Adapter factory
 
 **Sharing**: Uses `Arc` for efficient cloning - all clones share the same state
@@ -127,45 +127,21 @@ df = await c.to_pandas()     # NOW both operations EXECUTE
 - **CsvPlugin**: CSV file support
 - **JsonPlugin**: Line-delimited JSON support
 - **ParquetPlugin**: Apache Parquet support
-- **FunctionPlugin**: Custom function data sources via `function://` URLs
-
 **Location**: `rust/bundlebase/src/data/`
 
 **See Also**: [architecture.md](architecture.md)
 
-### FunctionRegistry
+### Function Entries
 
-**Definition**: Shared registry (via `Arc<RwLock>`) that stores all function definitions and implementations.
+**Definition**: The list of function definitions stored in each bundle's state.
 
 **Characteristics**:
-- Global across all container instances
-- Thread-safe with read-write locking
-- Stores both signatures and implementations
-- Enables function reuse across containers
-
-**Methods**:
-- `register(signature)` - Add function definition
-- `set_impl(name, impl)` - Set function implementation
-- `get(name)` - Retrieve function
+- Per-bundle storage of user-defined SQL functions
+- Each entry contains metadata (name, input/return types, runner, logic, platform, kind)
+- Registered with DataFusion's SessionContext for SQL execution
+- Supports both persistent and temporary (session-scoped) entries
 
 **See Also**: [architecture.md](architecture.md)
-
-### DataGenerator
-
-**Definition**: Trait for paginated data generation used by custom functions.
-
-**Interface**:
-```rust
-pub trait DataGenerator {
-    fn next(&mut self, page: u64) -> Result<Option<RecordBatch>>;
-}
-```
-
-**Usage**: Called repeatedly with incrementing page numbers (0, 1, 2...) until returns `None`.
-
-**Implementation**: Custom data sources implement this trait to provide streaming data
-
-**See Also**: [architecture.md](architecture.md), [python-api.md](python-api.md)
 
 ## Versioning
 

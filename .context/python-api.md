@@ -13,7 +13,7 @@ c = await Bundlebase.create("memory:///test_container")  # Returns BundlebaseBui
 await c.attach("userdata.parquet")
 
 # Register a user-defined SQL scalar function (temporary, for Python runner)
-await c.import_temporary_function(
+await c.import_temp_function(
     name="acme.double_val",
     input_types=["Int64"],
     return_type="Int64",
@@ -94,7 +94,7 @@ c = await Bundlebase.open("/my/container/dir")
 - `set_name(name)` - Set container name
 - `set_description(description)` - Set container description
 - `import_function(name, input_types, return_type, runner, logic, platform)` - Define a persistent SQL scalar function
-- `import_temporary_function(name, input_types, return_type, runner, logic, platform)` - Define a session-only SQL scalar function
+- `import_temp_function(name, input_types, return_type, runner, logic, platform)` - Define a session-only SQL scalar function
 - `drop_function(name, platform)` - Drop a function definition (drops **all overloads** for that name)
 - `create_view(name, sql)` - Create a named view from a SQL query
 - `query(sql, params)` - Execute a SQL query and return streaming results

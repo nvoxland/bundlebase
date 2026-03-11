@@ -29,12 +29,12 @@ Python connectors run directly inside the Bundlebase process via PyO3. Arrow dat
 import bundlebase.sync as bb
 
 bundle = bb.create("my/data")
-bundle.import_temporary_connector('example.connector', runner='python', logic='example_connector:ExampleConnector')
+bundle.import_temp_connector('example.connector', runner='python', logic='example_connector:ExampleConnector')
 bundle.create_source('example.connector')
 bundle.fetch("base", "add")
 ```
 
-The `Connector` class is identical whether you use native or IPC mode. The only difference is how you create the connector: `runner='python'` with a `module:Class` logic value instead of `runner='ipc'` with a command. Python connectors use `IMPORT TEMPORARY CONNECTOR` since Python code is runtime-only and cannot be bundled.
+The `Connector` class is identical whether you use native or IPC mode. The only difference is how you create the connector: `runner='python'` with a `module:Class` logic value instead of `runner='ipc'` with a command. Python connectors use `IMPORT TEMP CONNECTOR` since Python code is runtime-only and cannot be bundled.
 
 ### Shared Libraries (Rust, Go, Java)
 
@@ -58,7 +58,7 @@ The `runner` parameter determines the native loading strategy:
 
 | Type | Strategy | Used by |
 |------|----------|---------|
-| `python` | PyO3 in-process (use with `IMPORT TEMPORARY CONNECTOR`) | Python |
+| `python` | PyO3 in-process (use with `IMPORT TEMP CONNECTOR`) | Python |
 | `lib` | `dlopen` + Arrow C Data Interface (use with `IMPORT CONNECTOR`) | Rust, Go, Java |
 
 ## C ABI Reference
@@ -128,14 +128,14 @@ int32_t bundlebase_stable_url(const char* location_json, const char* args_json,
 
 Each SDK provides helpers that generate the C ABI functions for you:
 
-- **[Python](python.md#native-mode)** — `IMPORT TEMPORARY CONNECTOR` with `runner='python'`, `logic='module:Class'` (no shared library needed)
+- **[Python](python.md#native-mode)** — `IMPORT TEMP CONNECTOR` with `runner='python'`, `logic='module:Class'` (no shared library needed)
 - **[Rust](rust.md#native-mode)** — `export_source!(ExampleConnector::new())`
 - **[Go](go.md#native-mode)** — `ExportConnector(&ExampleConnector{})`
 - **[Java](java.md#native-mode)** — `PluginExport.register(new ExampleConnector())`
 
 ## Connector Logic Arguments
 
-These are passed to `IMPORT CONNECTOR` or `IMPORT TEMPORARY CONNECTOR`:
+These are passed to `IMPORT CONNECTOR` or `IMPORT TEMP CONNECTOR`:
 
 | Argument | Required | Description |
 |----------|----------|-------------|
@@ -143,6 +143,6 @@ These are passed to `IMPORT CONNECTOR` or `IMPORT TEMPORARY CONNECTOR`:
 | `logic` | Yes | Source to load: `module:Class` (for `python`) or path to shared library (for `lib`) |
 | `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
 
-For `runner='python'`, use `IMPORT TEMPORARY CONNECTOR` (runtime-only). For `runner='lib'`, use `IMPORT CONNECTOR` (persisted into the bundle).
+For `runner='python'`, use `IMPORT TEMP CONNECTOR` (runtime-only). For `runner='lib'`, use `IMPORT CONNECTOR` (persisted into the bundle).
 
 Extra arguments passed to `CREATE SOURCE` are forwarded to the connector's `discover()` and `data()` methods, just like IPC mode.
