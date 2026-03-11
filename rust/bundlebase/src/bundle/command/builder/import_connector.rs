@@ -16,7 +16,7 @@ use crate::bundle::BundleBuilder;
 /// If the connector already exists, adds/replaces logic for the given platform.
 #[derive(Debug, Clone)]
 pub struct ImportConnectorCommand {
-    /// Full dotted source name (e.g., "acme.weather")
+    /// Full dotted connector name (e.g., "acme.weather")
     pub name: String,
     /// Runner type
     pub runner: Runner,

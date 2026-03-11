@@ -432,12 +432,14 @@ mod tests {
     use super::*;
     use crate::bundle::connector_definition::Platform;
     use crate::bundle::function_definition::FunctionKind;
+    use crate::data::ObjectId;
     use crate::function::ipc_bridge::new_subprocess_cache;
     use crate::NamespacedName;
 
     #[test]
     fn test_signature_construction() {
         let entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
@@ -486,6 +488,7 @@ mod tests {
     #[test]
     fn test_composite_single_overload() {
         let entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
@@ -503,6 +506,7 @@ mod tests {
     #[test]
     fn test_composite_multiple_overloads() {
         let int_entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
@@ -513,6 +517,7 @@ mod tests {
             kind: FunctionKind::Aggregate,
         };
         let float_entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Float64],
             return_type: DataType::Float64,

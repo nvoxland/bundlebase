@@ -495,6 +495,7 @@ impl PyBundle {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
                 })?;
             let entry = FunctionEntry {
+                id: ::bundlebase::io::ObjectId::generate(),
                 name: namespaced,
                 input_types: parsed_input_types,
                 return_type: parsed_return_type,

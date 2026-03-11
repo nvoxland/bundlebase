@@ -2,6 +2,7 @@
 
 use crate::bundle::connector_definition::{Platform, Runner};
 use crate::bundle::function_definition::{arrow_type_serde, parse_function_name, FunctionEntry, FunctionKind};
+use crate::data::ObjectId;
 use crate::NamespacedName;
 use crate::bundle::operation::Operation;
 use crate::{Bundle, BundlebaseError};
@@ -16,6 +17,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportFunctionOp {
+    /// Unique identifier for this function entry
+    pub id: ObjectId,
     /// Full dotted function name (e.g., "acme.double_val")
     pub name: String,
     /// Arrow types for input parameters
@@ -44,7 +47,7 @@ impl ImportFunctionOp {
         platform: Platform,
         kind: FunctionKind,
     ) -> Self {
-        Self { name, input_types, return_type, runner, logic, platform, kind }
+        Self { id: ObjectId::generate(), name, input_types, return_type, runner, logic, platform, kind }
     }
 }
 
@@ -86,6 +89,7 @@ impl Operation for ImportFunctionOp {
         let namespaced = self.name.parse::<NamespacedName>()
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
         let entry = FunctionEntry {
+            id: self.id,
             name: namespaced,
             input_types: self.input_types.clone(),
             return_type: self.return_type.clone(),

@@ -4,6 +4,7 @@
 //! and represents a single connector logic binding for a name+platform pair.
 //! `resolve_connector` picks the best entry for the current platform at runtime.
 
+use crate::data::ObjectId;
 use crate::namespaced_name::NamespacedName;
 use crate::BundlebaseError;
 use serde::{Deserialize, Serialize};
@@ -153,6 +154,7 @@ impl FromStr for Runner {
 /// or temporary vs persisted). Resolution picks the best match at runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectorEntry {
+    pub id: ObjectId,
     pub name: NamespacedName,
     pub runner: Runner,
     pub logic: String,
@@ -359,6 +361,7 @@ mod tests {
     fn test_resolve_last_set_wins() {
         let entries = vec![
             ConnectorEntry {
+                id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
                 runner: Runner::Lib,
                 logic: "first".to_string(),
@@ -366,6 +369,7 @@ mod tests {
                 temporary: false,
             },
             ConnectorEntry {
+                id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
                 runner: Runner::Lib,
                 logic: "second".to_string(),
@@ -381,6 +385,7 @@ mod tests {
     #[test]
     fn test_resolve_no_match() {
         let entries = vec![ConnectorEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("test", "source"),
             runner: Runner::Lib,
             logic: "test".to_string(),
@@ -405,6 +410,7 @@ mod tests {
     fn test_resolve_temporary_overrides_persisted() {
         let entries = vec![
             ConnectorEntry {
+                id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
                 runner: Runner::Lib,
                 logic: "persisted".to_string(),
@@ -412,6 +418,7 @@ mod tests {
                 temporary: false,
             },
             ConnectorEntry {
+                id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
                 runner: Runner::Python,
                 logic: "temporary".to_string(),

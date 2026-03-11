@@ -5,6 +5,7 @@
 //! `resolve_function` picks the best entry for the current platform at runtime.
 
 use crate::bundle::connector_definition::{Platform, Runner};
+use crate::data::ObjectId;
 use crate::namespaced_name::NamespacedName;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Fields};
@@ -112,6 +113,8 @@ pub mod arrow_type_serde {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionEntry {
+    /// Unique identifier for this function entry
+    pub id: ObjectId,
     /// Namespaced function name (e.g., "acme.double_val")
     pub name: NamespacedName,
     /// Arrow types for input parameters (e.g., [DataType::Int64, DataType::Utf8])
@@ -297,6 +300,11 @@ impl FunctionRegistry {
         }
 
         results
+    }
+
+    /// Remove function entries by their IDs.
+    pub fn remove_by_ids(&mut self, ids: &[ObjectId]) {
+        self.entries.retain(|e| !ids.contains(&e.id));
     }
 
     /// Remove entries matching a specific input type signature, or all if None.
@@ -658,6 +666,7 @@ mod tests {
     fn make_entry(name: &str, logic: &str, temporary: bool) -> FunctionEntry {
         let nn = parse_function_name(name).unwrap();
         FunctionEntry {
+            id: ObjectId::generate(),
             name: nn,
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
@@ -779,6 +788,7 @@ mod tests {
     #[test]
     fn test_function_entry_serde_roundtrip() {
         let entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
@@ -796,6 +806,7 @@ mod tests {
     #[test]
     fn test_function_entry_serde_roundtrip_with_multiple_inputs() {
         let entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "add"),
             input_types: vec![DataType::Int64, DataType::Int64],
             return_type: DataType::Int64,
@@ -813,6 +824,7 @@ mod tests {
     #[test]
     fn test_function_entry_serde_roundtrip_aggregate() {
         let entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
@@ -847,6 +859,7 @@ mod tests {
     fn make_entry_with_types(name: &str, input_types: Vec<DataType>, temporary: bool, logic: &str) -> FunctionEntry {
         let nn = parse_function_name(name).unwrap();
         FunctionEntry {
+            id: ObjectId::generate(),
             name: nn,
             input_types,
             return_type: DataType::Int64,

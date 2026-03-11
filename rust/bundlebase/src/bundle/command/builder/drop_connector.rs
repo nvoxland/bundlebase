@@ -11,11 +11,11 @@ use crate::bundle::BundleBuilder;
 
 /// Command to drop a connector definition and all its logic, or drop logic for a specific platform.
 ///
-/// Without a platform, removes the entire connector definition, all logic, and sources.
+/// Without a platform, removes the entire connector definition and all logic entries.
 /// With a platform, removes only the logic entry for that platform.
 #[derive(Debug, Clone)]
 pub struct DropConnectorCommand {
-    /// Full dotted source name
+    /// Full dotted connector name
     pub name: String,
     /// Optional platform filter
     pub platform: Option<Platform>,
@@ -77,7 +77,7 @@ impl BundleBuilderCommand for DropConnectorCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let op = DropConnectorOp::new(self.name.clone(), self.platform.clone());
+        let op = DropConnectorOp::setup(&self.name, self.platform.as_ref(), builder)?;
         builder.apply_operation(op.into()).await?;
 
         match &self.platform {

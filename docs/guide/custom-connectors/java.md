@@ -171,9 +171,9 @@ Override `schema()` to return a map of column names to type strings:
 @Override
 public Map<String, String> schema() {
     Map<String, String> s = new LinkedHashMap<>();
-    s.put("name", "string");
-    s.put("age", "int32");
-    s.put("score", "float64");
+    s.put("name", "Utf8");
+    s.put("age", "Int32");
+    s.put("score", "Float64");
     return s;
 }
 ```
@@ -182,17 +182,17 @@ Supported type strings:
 
 | Type String | Arrow Type | Aliases |
 |------------|------------|---------|
-| `string` | `Utf8` | `utf8` |
-| `int64` | `Int(64, signed)` | `int` |
-| `int8`, `int16`, `int32` | `Int(8/16/32, signed)` | |
-| `uint8`, `uint16`, `uint32`, `uint64` | `Int(8-64, unsigned)` | |
-| `float64` | `FloatingPoint(DOUBLE)` | `float`, `double` |
-| `float16`, `float32` | `FloatingPoint(HALF/SINGLE)` | |
-| `bool` | `Bool` | `boolean` |
-| `date32` | `Date(DAY)` | `date` |
-| `date64` | `Date(MILLISECOND)` | |
-| `timestamp` | `Timestamp(MICROSECOND)` | |
-| `binary` | `Binary` | `bytes` |
+| `Utf8` | `Utf8` | `string` |
+| `Int64` | `Int(64, signed)` | `int` |
+| `Int8`, `Int16`, `Int32` | `Int(8/16/32, signed)` | |
+| `UInt8`, `UInt16`, `UInt32`, `UInt64` | `Int(8-64, unsigned)` | |
+| `Float64` | `FloatingPoint(DOUBLE)` | `float`, `double` |
+| `Float16`, `Float32` | `FloatingPoint(HALF/SINGLE)` | |
+| `Boolean` | `Bool` | `bool` |
+| `Date32` | `Date(DAY)` | `date` |
+| `Date64` | `Date(MILLISECOND)` | |
+| `Timestamp` | `Timestamp(MICROSECOND)` | |
+| `Binary` | `Binary` | `bytes` |
 
 ### Returning Column-Oriented Data
 
@@ -232,9 +232,9 @@ public class SensorConnector implements Connector {
     @Override
     public Map<String, String> schema() {
         Map<String, String> s = new LinkedHashMap<>();
-        s.put("sensor_id", "string");
-        s.put("temperature", "float32");
-        s.put("reading_count", "int32");
+        s.put("sensor_id", "Utf8");
+        s.put("temperature", "Float32");
+        s.put("reading_count", "Int32");
         return s;
     }
 

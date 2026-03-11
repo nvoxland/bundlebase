@@ -138,24 +138,24 @@ Override `schema()` to return a dict mapping column names to type strings:
 ```python
 class MyConnector(Connector):
     def schema(self):
-        return {"name": "string", "age": "int32", "score": "float64", "active": "bool"}
+        return {"name": "Utf8", "age": "Int32", "score": "Float64", "active": "Boolean"}
 ```
 
 Supported type strings:
 
 | Type String | Arrow Type | Aliases |
 |------------|------------|---------|
-| `string` | `pa.string()` | `utf8` |
-| `int64` | `pa.int64()` | `int` |
-| `int8`, `int16`, `int32` | `pa.int8()`, etc. | |
-| `uint8`, `uint16`, `uint32`, `uint64` | `pa.uint8()`, etc. | |
-| `float64` | `pa.float64()` | `float`, `double` |
-| `float16`, `float32` | `pa.float16()`, etc. | |
-| `bool` | `pa.bool_()` | `boolean` |
-| `date32` | `pa.date32()` | `date` |
-| `date64` | `pa.date64()` | |
-| `timestamp` | `pa.timestamp("us")` | |
-| `binary` | `pa.binary()` | `bytes` |
+| `Utf8` | `pa.string()` | `string` |
+| `Int64` | `pa.int64()` | `int` |
+| `Int8`, `Int16`, `Int32` | `pa.int8()`, etc. | |
+| `UInt8`, `UInt16`, `UInt32`, `UInt64` | `pa.uint8()`, etc. | |
+| `Float64` | `pa.float64()` | `float`, `double` |
+| `Float16`, `Float32` | `pa.float16()`, etc. | |
+| `Boolean` | `pa.bool_()` | `bool` |
+| `Date32` | `pa.date32()` | `date` |
+| `Date64` | `pa.date64()` | |
+| `Timestamp` | `pa.timestamp("us")` | |
+| `Binary` | `pa.binary()` | `bytes` |
 
 ### Returning Column-Oriented Dicts
 
@@ -164,7 +164,7 @@ With a schema defined, you can return data as `dict[str, list]`:
 ```python
 class MyConnector(Connector):
     def schema(self):
-        return {"name": "string", "age": "int32"}
+        return {"name": "Utf8", "age": "Int32"}
 
     def discover(self, attached_locations, **kwargs):
         return [Location("people")]
@@ -192,7 +192,7 @@ from bundlebase_sdk import Connector, Location, serve
 
 class SensorConnector(Connector):
     def schema(self):
-        return {"sensor_id": "string", "temperature": "float32", "reading_count": "int32"}
+        return {"sensor_id": "Utf8", "temperature": "Float32", "reading_count": "Int32"}
 
     def discover(self, attached_locations, **kwargs):
         return [Location("readings")]

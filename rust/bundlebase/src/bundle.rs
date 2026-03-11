@@ -852,6 +852,11 @@ impl Bundle {
         self.function_registry.write().remove_by_signature(name, Some(input_types));
     }
 
+    /// Remove function entries by their IDs.
+    pub(crate) fn remove_function_entries_by_ids(&self, ids: &[ObjectId]) {
+        self.function_registry.write().remove_by_ids(ids);
+    }
+
     /// Get a read-only snapshot of all function entries.
     pub(crate) fn function_entries(&self) -> Vec<FunctionEntry> {
         self.function_registry.read().entries().to_vec()
@@ -1438,6 +1443,7 @@ impl BundleFacade for Bundle {
     ) -> Result<(), BundlebaseError> {
         let namespaced: NamespacedName = name.parse()?;
         self.add_connector_entry(ConnectorEntry {
+            id: ObjectId::generate(),
             name: namespaced,
             runner,
             logic,
@@ -1522,6 +1528,10 @@ impl BundleFacade for Bundle {
 
     fn connector_entries(&self) -> Vec<connector_definition::ConnectorEntry> {
         self.connector_entries.read().clone()
+    }
+
+    fn function_entries(&self) -> Vec<function_definition::FunctionEntry> {
+        self.function_registry.read().entries().to_vec()
     }
 
     fn ctx(&self) -> Arc<SessionContext> {

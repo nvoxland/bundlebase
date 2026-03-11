@@ -377,6 +377,11 @@ pub trait BundleFacade: Send + Sync {
     /// Includes both persisted and temporary entries.
     fn connector_entries(&self) -> Vec<crate::bundle::connector_definition::ConnectorEntry>;
 
+    /// Returns all function entries registered in this bundle.
+    ///
+    /// Includes both persisted and temporary entries.
+    fn function_entries(&self) -> Vec<crate::bundle::function_definition::FunctionEntry>;
+
     /// Returns the DataFusion session context
     fn ctx(&self) -> Arc<SessionContext>;
 

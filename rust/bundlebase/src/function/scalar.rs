@@ -280,11 +280,13 @@ mod tests {
     use super::*;
     use crate::bundle::connector_definition::Platform;
     use crate::bundle::function_definition::FunctionKind;
+    use crate::data::ObjectId;
     use crate::function::ipc_bridge::new_subprocess_cache;
 
     #[test]
     fn test_signature_construction() {
         let entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
@@ -306,6 +308,7 @@ mod tests {
     #[test]
     fn test_signature_multi_arg() {
         let entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "add"),
             input_types: vec![DataType::Int64, DataType::Int64],
             return_type: DataType::Int64,
@@ -350,6 +353,7 @@ mod tests {
     #[test]
     fn test_composite_single_overload() {
         let entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
@@ -367,6 +371,7 @@ mod tests {
     #[test]
     fn test_composite_multiple_overloads() {
         let int_entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Utf8,
@@ -377,6 +382,7 @@ mod tests {
             kind: FunctionKind::Scalar,
         };
         let float_entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Float64],
             return_type: DataType::Utf8,
@@ -398,6 +404,7 @@ mod tests {
     #[test]
     fn test_composite_different_return_types() {
         let int_entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "transform"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
@@ -408,6 +415,7 @@ mod tests {
             kind: FunctionKind::Scalar,
         };
         let str_entry = FunctionEntry {
+            id: ObjectId::generate(),
             name: NamespacedName::new("acme", "transform"),
             input_types: vec![DataType::Utf8],
             return_type: DataType::Utf8,
