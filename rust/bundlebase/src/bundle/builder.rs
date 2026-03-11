@@ -753,31 +753,31 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Create a named connector with logic (persisted).
+    /// Load a named connector with logic (persisted).
     ///
     /// Creates the connector if it doesn't exist, then adds/replaces logic
     /// for the given platform. The operation is persisted into the bundle's
     /// commit history.
     ///
-    /// Python runner cannot be bundled — use `create_temporary_connector()` instead.
+    /// Python runner cannot be bundled — use `import_temporary_connector()` instead.
     ///
     /// # Arguments
     /// * `name` - Dot-separated connector name (e.g., "acme.weather").
     /// * `runner` - The runner: "lib", "java", "docker", or "ipc"
     /// * `logic` - The logic string (e.g., "./binary" for ipc, "./lib.so" for lib)
     /// * `platform` - Docker-style platform string (e.g., "linux/amd64", "*/*")
-    pub async fn create_connector(
+    pub async fn import_connector(
         &self,
         name: &str,
         runner: &str,
         logic: &str,
         platform: &str,
     ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::CreateConnectorCommand;
+        use crate::bundle::command::ImportConnectorCommand;
         use crate::bundle::connector_definition::{Platform, Runner};
         let runner: Runner = runner.parse()?;
         let platform: Platform = platform.parse()?;
-        self.execute_command(CreateConnectorCommand::new(name, runner, logic, platform)).await?;
+        self.execute_command(ImportConnectorCommand::new(name, runner, logic, platform)).await?;
         Ok(self)
     }
 
@@ -1091,10 +1091,10 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Create a persistent function (bundled, not session-only).
+    /// Load a persistent function (bundled, not session-only).
     ///
     /// Registers the function as a DataFusion UDF and persists the definition
-    /// via an operation. Python runner cannot be bundled — use `create_temporary_function()`.
+    /// via an operation. Python runner cannot be bundled — use `import_temporary_function()`.
     ///
     /// # Arguments
     /// * `name` - Dotted function name (e.g., "acme.double_val")
@@ -1103,7 +1103,7 @@ impl BundleBuilder {
     /// * `runner` - The runner: "lib", "java", "docker", or "ipc"
     /// * `logic` - The logic string (e.g., "./binary" for ipc)
     /// * `platform` - Docker-style platform string (e.g., "linux/amd64", "*/*")
-    pub async fn create_function(
+    pub async fn import_function(
         &self,
         name: &str,
         input_types: Vec<String>,
@@ -1113,13 +1113,13 @@ impl BundleBuilder {
         platform: &str,
         function_type: &str,
     ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::CreateFunctionCommand;
+        use crate::bundle::command::ImportFunctionCommand;
         use crate::bundle::connector_definition::{Platform, Runner};
         use crate::bundle::function_definition::FunctionKind;
         let runner: Runner = runner.parse()?;
         let platform: Platform = platform.parse()?;
         let kind: FunctionKind = function_type.parse()?;
-        self.execute_command(CreateFunctionCommand::new(
+        self.execute_command(ImportFunctionCommand::new(
             name, input_types, return_type, runner, logic, platform, kind,
         )).await?;
         Ok(self)
@@ -1127,18 +1127,16 @@ impl BundleBuilder {
 
     /// Drop a persistent function.
     ///
-    /// If `input_types` is provided, only the overload matching that signature is dropped.
-    /// If `input_types` is None, all overloads of the function are dropped.
+    /// Drop all overloads of a function by name.
     pub async fn drop_function(
         &self,
         name: &str,
         platform: Option<&str>,
-        input_types: Option<Vec<String>>,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::DropFunctionCommand;
         use crate::bundle::connector_definition::Platform;
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
-        self.execute_command(DropFunctionCommand::new_with_signature(name, platform, input_types)).await?;
+        self.execute_command(DropFunctionCommand::new(name, platform)).await?;
         Ok(self)
     }
 
@@ -1551,7 +1549,7 @@ impl BundleFacade for BundleBuilder {
         self.bundle.config()
     }
 
-    async fn create_temporary_connector(
+    async fn import_temporary_connector(
         &self,
         name: &str,
         runner: crate::bundle::connector_definition::Runner,
@@ -1579,7 +1577,7 @@ impl BundleFacade for BundleBuilder {
         self.bundle.remove_connector_entry(name, platform, true)
     }
 
-    async fn create_temporary_function(
+    async fn import_temporary_function(
         &self,
         entry: crate::bundle::function_definition::FunctionEntry,
     ) -> Result<(), BundlebaseError> {
@@ -1888,7 +1886,7 @@ mod tests {
             .await
             .unwrap();
 
-        BundleFacade::create_temporary_connector(
+        BundleFacade::import_temporary_connector(
             bundle.as_ref(),
             "test.source",
             Runner::Lib,
@@ -1914,7 +1912,7 @@ mod tests {
             .await
             .unwrap();
 
-        BundleFacade::create_temporary_connector(
+        BundleFacade::import_temporary_connector(
             bundle.as_ref(),
             "test.source",
             Runner::Lib,
@@ -1940,7 +1938,7 @@ mod tests {
             .await
             .unwrap();
 
-        BundleFacade::create_temporary_connector(
+        BundleFacade::import_temporary_connector(
             builder.as_ref(),
             "test.source",
             Runner::Python,

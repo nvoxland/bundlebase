@@ -88,8 +88,8 @@ poetry run pytest         # Python tests
 - ✅ Mutable operations pattern (all operations mutate in place)
 - ✅ Three-phase operation system (check/reconfigure/apply)
 - ✅ Flexible path handling (file://, memory:///, s3://, custom URLs)
-- ✅ User-defined SQL scalar functions (CREATE FUNCTION) with multi-runner support
-- ✅ Connector system for pluggable data sources (CREATE CONNECTOR)
+- ✅ User-defined SQL scalar functions (IMPORT FUNCTION) with multi-runner support
+- ✅ Connector system for pluggable data sources (IMPORT CONNECTOR)
 - ✅ Multi-format file support (CSV, JSON, Parquet)
 - ✅ Row indexing system for efficient lookups
 - ✅ Lazy evaluation with DataFusion integration

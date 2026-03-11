@@ -1,10 +1,10 @@
-//! CreateFunctionsFrom command implementation — bulk function discovery and registration.
+//! ImportFunctionsFrom command implementation — bulk function discovery and registration.
 
 use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::connector_definition::{Platform, Runner};
 use crate::bundle::function_definition::{parse_arrow_type_name, FunctionKind};
-use crate::bundle::operation::CreateFunctionOp;
+use crate::bundle::operation::ImportFunctionOp;
 use crate::function::lib_bridge::{load_ipc_manifest, load_lib_manifest};
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -18,7 +18,7 @@ use crate::bundle::BundleBuilder;
 /// - **Lib**: calls `bundlebase_functions()` C symbol
 /// - **IPC**: runs `path --bundlebase-functions`
 #[derive(Debug, Clone)]
-pub struct CreateFunctionsFromCommand {
+pub struct ImportFunctionsFromCommand {
     /// Path to the shared library or IPC executable
     pub path: String,
     /// Runner type (lib or ipc)
@@ -29,7 +29,7 @@ pub struct CreateFunctionsFromCommand {
     pub platform: Platform,
 }
 
-impl CreateFunctionsFromCommand {
+impl ImportFunctionsFromCommand {
     pub fn new(
         path: impl Into<String>,
         runner: Runner,
@@ -45,9 +45,9 @@ impl CreateFunctionsFromCommand {
     }
 }
 
-impl CommandParsing for CreateFunctionsFromCommand {
+impl CommandParsing for ImportFunctionsFromCommand {
     fn rule() -> Rule {
-        Rule::create_functions_from_stmt
+        Rule::import_functions_from_stmt
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
@@ -86,16 +86,16 @@ impl CommandParsing for CreateFunctionsFromCommand {
         }
 
         let path = path.ok_or_else(|| -> BundlebaseError {
-            "CREATE FUNCTIONS FROM missing path".into()
+            "IMPORT FUNCTIONS FROM missing path".into()
         })?;
 
         let runner_str = args.remove("runner").ok_or_else(|| -> BundlebaseError {
-            "CREATE FUNCTIONS FROM requires 'runner' argument".into()
+            "IMPORT FUNCTIONS FROM requires 'runner' argument".into()
         })?;
         let runner: Runner = runner_str.parse()?;
 
         let namespace = args.remove("namespace").ok_or_else(|| -> BundlebaseError {
-            "CREATE FUNCTIONS FROM requires 'namespace' argument".into()
+            "IMPORT FUNCTIONS FROM requires 'namespace' argument".into()
         })?;
 
         let platform: Platform = match args.remove("platform") {
@@ -103,7 +103,7 @@ impl CommandParsing for CreateFunctionsFromCommand {
             None => Platform::any(),
         };
 
-        Ok(CreateFunctionsFromCommand::new(path, runner, namespace, platform))
+        Ok(ImportFunctionsFromCommand::new(path, runner, namespace, platform))
     }
 
     fn to_statement(&self) -> String {
@@ -116,7 +116,7 @@ impl CommandParsing for CreateFunctionsFromCommand {
             parts.push(format!("platform = {}", escape_string(&self.platform.to_string())));
         }
         format!(
-            "CREATE FUNCTIONS FROM {} WITH ({})",
+            "IMPORT FUNCTIONS FROM {} WITH ({})",
             escape_string(&self.path),
             parts.join(", ")
         )
@@ -124,7 +124,7 @@ impl CommandParsing for CreateFunctionsFromCommand {
 }
 
 #[async_trait]
-impl BundleBuilderCommand for CreateFunctionsFromCommand {
+impl BundleBuilderCommand for ImportFunctionsFromCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
@@ -133,7 +133,7 @@ impl BundleBuilderCommand for CreateFunctionsFromCommand {
             Runner::Ipc => load_ipc_manifest(&self.path)?,
             other => {
                 return Err(format!(
-                    "CREATE FUNCTIONS FROM only supports 'lib' and 'ipc' runners, got '{}'",
+                    "IMPORT FUNCTIONS FROM only supports 'lib' and 'ipc' runners, got '{}'",
                     other
                 )
                 .into());
@@ -156,7 +156,7 @@ impl BundleBuilderCommand for CreateFunctionsFromCommand {
 
             let name = format!("{}.{}", self.namespace, entry.name);
 
-            let op = CreateFunctionOp::new(
+            let op = ImportFunctionOp::new(
                 name,
                 input_types,
                 return_type,
@@ -170,7 +170,7 @@ impl BundleBuilderCommand for CreateFunctionsFromCommand {
         }
 
         Ok(format!(
-            "Created {} function(s) from '{}'",
+            "Loaded {} function(s) from '{}'",
             count, self.path
         ))
     }
@@ -183,60 +183,60 @@ mod parsing_tests {
     use crate::bundle::command::BundleCommand;
 
     #[test]
-    fn test_parse_create_functions_from_lib() {
-        let input = "CREATE FUNCTIONS FROM './mylib.so' WITH (runner = 'lib', namespace = 'acme')";
+    fn test_parse_import_functions_from_lib() {
+        let input = "IMPORT FUNCTIONS FROM './mylib.so' WITH (runner = 'lib', namespace = 'acme')";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::CreateFunctionsFrom(c) => {
+            BundleCommand::ImportFunctionsFrom(c) => {
                 assert_eq!(c.path, "./mylib.so");
                 assert_eq!(c.runner, Runner::Lib);
                 assert_eq!(c.namespace, "acme");
                 assert_eq!(c.platform, Platform::any());
             }
-            _ => panic!("Expected CreateFunctionsFrom variant"),
+            _ => panic!("Expected ImportFunctionsFrom variant"),
         }
     }
 
     #[test]
-    fn test_parse_create_functions_from_ipc() {
-        let input = "CREATE FUNCTIONS FROM './my_func' WITH (runner = 'ipc', namespace = 'tools')";
+    fn test_parse_import_functions_from_ipc() {
+        let input = "IMPORT FUNCTIONS FROM './my_func' WITH (runner = 'ipc', namespace = 'tools')";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::CreateFunctionsFrom(c) => {
+            BundleCommand::ImportFunctionsFrom(c) => {
                 assert_eq!(c.path, "./my_func");
                 assert_eq!(c.runner, Runner::Ipc);
                 assert_eq!(c.namespace, "tools");
             }
-            _ => panic!("Expected CreateFunctionsFrom variant"),
+            _ => panic!("Expected ImportFunctionsFrom variant"),
         }
     }
 
     #[test]
-    fn test_parse_create_functions_from_with_platform() {
-        let input = "CREATE FUNCTIONS FROM './mylib.so' WITH (runner = 'lib', namespace = 'acme', platform = 'linux/amd64')";
+    fn test_parse_import_functions_from_with_platform() {
+        let input = "IMPORT FUNCTIONS FROM './mylib.so' WITH (runner = 'lib', namespace = 'acme', platform = 'linux/amd64')";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::CreateFunctionsFrom(c) => {
+            BundleCommand::ImportFunctionsFrom(c) => {
                 assert_eq!(c.platform.os, "linux");
                 assert_eq!(c.platform.arch, "amd64");
             }
-            _ => panic!("Expected CreateFunctionsFrom variant"),
+            _ => panic!("Expected ImportFunctionsFrom variant"),
         }
     }
 
     #[test]
-    fn test_parse_create_functions_from_case_insensitive() {
-        let input = "create functions from './mylib.so' with (runner = 'lib', namespace = 'acme')";
+    fn test_parse_import_functions_from_case_insensitive() {
+        let input = "load functions from './mylib.so' with (runner = 'lib', namespace = 'acme')";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::CreateFunctionsFrom(_) => {}
-            _ => panic!("Expected CreateFunctionsFrom variant"),
+            BundleCommand::ImportFunctionsFrom(_) => {}
+            _ => panic!("Expected ImportFunctionsFrom variant"),
         }
     }
 
     #[test]
-    fn test_parse_create_functions_from_roundtrip() {
-        let cmd = CreateFunctionsFromCommand::new(
+    fn test_parse_import_functions_from_roundtrip() {
+        let cmd = ImportFunctionsFromCommand::new(
             "./mylib.so",
             Runner::Lib,
             "acme",
@@ -245,19 +245,19 @@ mod parsing_tests {
         let statement = cmd.to_statement();
         let parsed = parse_command(&statement).unwrap();
         match parsed {
-            BundleCommand::CreateFunctionsFrom(c) => {
+            BundleCommand::ImportFunctionsFrom(c) => {
                 assert_eq!(c.path, "./mylib.so");
                 assert_eq!(c.runner, Runner::Lib);
                 assert_eq!(c.namespace, "acme");
                 assert_eq!(c.platform, Platform::any());
             }
-            _ => panic!("Expected CreateFunctionsFrom variant"),
+            _ => panic!("Expected ImportFunctionsFrom variant"),
         }
     }
 
     #[test]
-    fn test_parse_create_functions_from_roundtrip_with_platform() {
-        let cmd = CreateFunctionsFromCommand::new(
+    fn test_parse_import_functions_from_roundtrip_with_platform() {
+        let cmd = ImportFunctionsFromCommand::new(
             "./mylib.so",
             Runner::Lib,
             "acme",
@@ -267,11 +267,11 @@ mod parsing_tests {
         assert!(statement.contains("platform = 'linux/amd64'"));
         let parsed = parse_command(&statement).unwrap();
         match parsed {
-            BundleCommand::CreateFunctionsFrom(c) => {
+            BundleCommand::ImportFunctionsFrom(c) => {
                 assert_eq!(c.platform.os, "linux");
                 assert_eq!(c.platform.arch, "amd64");
             }
-            _ => panic!("Expected CreateFunctionsFrom variant"),
+            _ => panic!("Expected ImportFunctionsFrom variant"),
         }
     }
 }

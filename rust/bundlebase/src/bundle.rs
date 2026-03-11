@@ -103,6 +103,7 @@ pub struct Bundle {
     connector_registry: Arc<RwLock<ConnectorRegistry>>,
     connector_entries: Arc<RwLock<Vec<ConnectorEntry>>>,
     function_registry: Arc<RwLock<FunctionRegistry>>,
+    subprocess_cache: crate::function::ipc_bridge::SubprocessCache,
 
     /// Single, self-contained, internally thread-safe config holder.
     /// All config sources (stored, env, passed, runtime) live inside BundleConfig.
@@ -153,6 +154,7 @@ impl Clone for Bundle {
             connector_registry: Arc::clone(&self.connector_registry),
             connector_entries: Arc::clone(&self.connector_entries),
             function_registry: Arc::clone(&self.function_registry),
+            subprocess_cache: Arc::clone(&self.subprocess_cache),
             config: Arc::clone(&self.config),
             is_view: Arc::clone(&self.is_view),
             has_temporary_logic: Arc::clone(&self.has_temporary_logic),
@@ -223,6 +225,7 @@ impl Bundle {
             connector_registry,
             connector_entries: Arc::new(RwLock::new(Vec::new())),
             function_registry: Arc::new(RwLock::new(FunctionRegistry::new())),
+            subprocess_cache: crate::function::ipc_bridge::new_subprocess_cache(),
             name,
             description,
             operations,
@@ -870,13 +873,13 @@ impl Bundle {
         match kind {
             FunctionKind::Scalar => {
                 use crate::function::scalar::ScalarFunction;
-                let func = ScalarFunction::new_composite(overloads)?;
+                let func = ScalarFunction::new_composite(overloads, Arc::clone(&self.subprocess_cache))?;
                 self.ctx.register_udf(ScalarUDF::from(func));
             }
             FunctionKind::Aggregate => {
                 use crate::function::aggregate::AggregateFunction;
                 use datafusion::logical_expr::AggregateUDF;
-                let agg = AggregateFunction::new_composite(overloads)?;
+                let agg = AggregateFunction::new_composite(overloads, Arc::clone(&self.subprocess_cache))?;
                 self.ctx.register_udaf(AggregateUDF::from(agg));
             }
         }
@@ -1418,7 +1421,7 @@ impl BundleFacade for Bundle {
         Bundle::config(self)
     }
 
-    async fn create_temporary_connector(
+    async fn import_temporary_connector(
         &self,
         name: &str,
         runner: Runner,
@@ -1446,7 +1449,7 @@ impl BundleFacade for Bundle {
         self.remove_connector_entry(name, platform, true)
     }
 
-    async fn create_temporary_function(
+    async fn import_temporary_function(
         &self,
         entry: FunctionEntry,
     ) -> Result<(), BundlebaseError> {
@@ -1696,14 +1699,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_temporary_connector_changes_version_to_temp() -> Result<(), BundlebaseError> {
+    async fn test_import_temporary_connector_changes_version_to_temp() -> Result<(), BundlebaseError> {
         use crate::bundle::facade::BundleFacade;
         use crate::bundle::connector_definition::Runner;
 
         let bundle = Bundle::empty(None).await?;
         assert_eq!(bundle.version(), "empty");
 
-        bundle.create_temporary_connector(
+        bundle.import_temporary_connector(
             "test.source",
             Runner::Lib,
             "test_call".to_string(),
@@ -1716,14 +1719,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_temporary_connector_version_udf_returns_temp() -> Result<(), BundlebaseError> {
+    async fn test_import_temporary_connector_version_udf_returns_temp() -> Result<(), BundlebaseError> {
         use arrow::array::StringArray;
         use crate::bundle::facade::BundleFacade;
         use crate::bundle::connector_definition::Runner;
 
         let bundle = Bundle::empty(None).await?;
 
-        bundle.create_temporary_connector(
+        bundle.import_temporary_connector(
             "test.source",
             Runner::Lib,
             "test_call".to_string(),

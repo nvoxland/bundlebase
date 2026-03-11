@@ -4,7 +4,7 @@ Custom functions let you define a Python callable as a data source. Once created
 
 ## Creating a Function
 
-Use `create_function()` with:
+Use `import_function()` with:
 
 - `name` -- a unique name for the function
 - `output` -- a dict mapping column names to Arrow data type strings
@@ -29,7 +29,7 @@ The callable receives a `page` number (starting at 0) and a `schema` (PyArrow Sc
             )
         return None
 
-    await c.create_function(
+    await c.import_function(
         name="my_data",
         output={"id": "Int64", "name": "Utf8"},
         func=my_data,
@@ -54,7 +54,7 @@ The callable receives a `page` number (starting at 0) and a `schema` (PyArrow Sc
             )
         return None
 
-    c.create_function(
+    c.import_function(
         name="my_data",
         output={"id": "Int64", "name": "Utf8"},
         func=my_data,

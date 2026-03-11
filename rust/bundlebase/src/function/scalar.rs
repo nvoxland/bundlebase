@@ -7,7 +7,7 @@
 use crate::bundle::connector_definition::Runner;
 use crate::bundle::function_definition::FunctionEntry;
 use crate::NamespacedName;
-use crate::function::ipc_bridge::invoke_ipc_scalar;
+use crate::function::ipc_bridge::{invoke_ipc_scalar, SubprocessCache};
 use crate::function::lib_bridge::{invoke_lib_scalar, parse_lib_logic};
 use crate::function::python_bridge::get_python_function_bridge;
 use crate::BundlebaseError;
@@ -25,10 +25,11 @@ fn invoke_entry(
     name: &str,
     entry: &FunctionEntry,
     args: &datafusion::logical_expr::ScalarFunctionArgs,
+    subprocess_cache: &SubprocessCache,
 ) -> datafusion::common::Result<ColumnarValue> {
     match entry.runner {
         Runner::Python => invoke_python(name, &entry.logic, args),
-        Runner::Ipc | Runner::Java | Runner::Docker => invoke_ipc(name, entry, args),
+        Runner::Ipc | Runner::Java | Runner::Docker => invoke_ipc(name, entry, args, subprocess_cache),
         Runner::Lib => invoke_lib(name, entry, args),
     }
 }
@@ -51,6 +52,7 @@ pub struct ScalarFunction {
     name: String,
     signature: Signature,
     overloads: Vec<FunctionEntry>,
+    subprocess_cache: SubprocessCache,
 }
 
 impl PartialEq for ScalarFunction {
@@ -69,7 +71,7 @@ impl Hash for ScalarFunction {
 
 impl ScalarFunction {
     /// Create a new scalar function from a single FunctionEntry.
-    pub fn new(entry: FunctionEntry) -> Result<Self, BundlebaseError> {
+    pub fn new(entry: FunctionEntry, subprocess_cache: SubprocessCache) -> Result<Self, BundlebaseError> {
         let name = entry.name.to_string();
         let signature = Signature::new(
             TypeSignature::Exact(entry.input_types.clone()),
@@ -79,6 +81,7 @@ impl ScalarFunction {
             name,
             signature,
             overloads: vec![entry],
+            subprocess_cache,
         })
     }
 
@@ -86,7 +89,7 @@ impl ScalarFunction {
     ///
     /// All entries must share the same name and be scalar kind.
     /// Uses `TypeSignature::OneOf` to advertise all accepted signatures.
-    pub fn new_composite(overloads: Vec<FunctionEntry>) -> Result<Self, BundlebaseError> {
+    pub fn new_composite(overloads: Vec<FunctionEntry>, subprocess_cache: SubprocessCache) -> Result<Self, BundlebaseError> {
         if overloads.is_empty() {
             return Err("Cannot create composite scalar function with no overloads".into());
         }
@@ -104,6 +107,7 @@ impl ScalarFunction {
             name,
             signature,
             overloads,
+            subprocess_cache,
         })
     }
 }
@@ -140,7 +144,7 @@ impl ScalarUDFImpl for ScalarFunction {
         args: datafusion::logical_expr::ScalarFunctionArgs,
     ) -> datafusion::common::Result<ColumnarValue> {
         if self.overloads.len() == 1 {
-            return invoke_entry(&self.name, &self.overloads[0], &args);
+            return invoke_entry(&self.name, &self.overloads[0], &args, &self.subprocess_cache);
         }
         // Determine actual arg types for dispatch
         let arg_types: Vec<DataType> = args.args.iter().map(|cv| cv.data_type()).collect();
@@ -149,7 +153,7 @@ impl ScalarUDFImpl for ScalarFunction {
                 "No overload of function '{}' matches argument types {:?}",
                 self.name, arg_types
             )))?;
-        invoke_entry(&self.name, entry, &args)
+        invoke_entry(&self.name, entry, &args, &self.subprocess_cache)
     }
 
 }
@@ -211,6 +215,7 @@ fn invoke_ipc(
     name: &str,
     entry: &FunctionEntry,
     args: &datafusion::logical_expr::ScalarFunctionArgs,
+    subprocess_cache: &SubprocessCache,
 ) -> datafusion::common::Result<ColumnarValue> {
     // Convert ColumnarValue args to Arrow arrays
     let arrays: Vec<ArrayRef> = args
@@ -224,7 +229,7 @@ fn invoke_ipc(
         })
         .collect::<datafusion::common::Result<Vec<_>>>()?;
 
-    let result = invoke_ipc_scalar(&entry.logic, &entry.name.name, &arrays).map_err(|e| {
+    let result = invoke_ipc_scalar(subprocess_cache, &entry.logic, &entry.name.name, &arrays).map_err(|e| {
         datafusion::common::DataFusionError::Execution(format!(
             "IPC function '{}' ({}) failed: {}",
             name, entry.logic, e
@@ -277,6 +282,7 @@ mod tests {
     use super::*;
     use crate::bundle::connector_definition::Platform;
     use crate::bundle::function_definition::FunctionKind;
+    use crate::function::ipc_bridge::new_subprocess_cache;
 
     #[test]
     fn test_signature_construction() {
@@ -291,7 +297,7 @@ mod tests {
             kind: FunctionKind::Scalar,
         };
 
-        let func = ScalarFunction::new(entry).expect("should create");
+        let func = ScalarFunction::new(entry, new_subprocess_cache()).expect("should create");
         assert_eq!(func.name(), "acme.double_val");
         assert_eq!(
             func.return_type(&[DataType::Int64]).unwrap(),
@@ -312,7 +318,7 @@ mod tests {
             kind: FunctionKind::Scalar,
         };
 
-        let func = ScalarFunction::new(entry).expect("should create");
+        let func = ScalarFunction::new(entry, new_subprocess_cache()).expect("should create");
         assert_eq!(func.name(), "acme.add");
     }
 
@@ -339,7 +345,7 @@ mod tests {
 
     #[test]
     fn test_composite_empty_overloads() {
-        let result = ScalarFunction::new_composite(vec![]);
+        let result = ScalarFunction::new_composite(vec![], new_subprocess_cache());
         assert!(result.is_err());
     }
 
@@ -355,7 +361,7 @@ mod tests {
             temporary: false,
             kind: FunctionKind::Scalar,
         };
-        let func = ScalarFunction::new_composite(vec![entry]).expect("should create");
+        let func = ScalarFunction::new_composite(vec![entry], new_subprocess_cache()).expect("should create");
         assert_eq!(func.name(), "acme.double_val");
         assert_eq!(func.return_type(&[DataType::Int64]).unwrap(), DataType::Int64);
     }
@@ -382,7 +388,7 @@ mod tests {
             temporary: false,
             kind: FunctionKind::Scalar,
         };
-        let func = ScalarFunction::new_composite(vec![int_entry, float_entry]).expect("should create");
+        let func = ScalarFunction::new_composite(vec![int_entry, float_entry], new_subprocess_cache()).expect("should create");
         assert_eq!(func.name(), "acme.convert");
         // return_type should dispatch based on arg types
         assert_eq!(func.return_type(&[DataType::Int64]).unwrap(), DataType::Utf8);
@@ -413,7 +419,7 @@ mod tests {
             temporary: false,
             kind: FunctionKind::Scalar,
         };
-        let func = ScalarFunction::new_composite(vec![int_entry, str_entry]).expect("should create");
+        let func = ScalarFunction::new_composite(vec![int_entry, str_entry], new_subprocess_cache()).expect("should create");
         assert_eq!(func.return_type(&[DataType::Int64]).unwrap(), DataType::Int64);
         assert_eq!(func.return_type(&[DataType::Utf8]).unwrap(), DataType::Utf8);
     }

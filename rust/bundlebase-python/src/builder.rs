@@ -327,7 +327,7 @@ impl PyBundleBuilder {
     }
 
     #[pyo3(signature = (name, input_types, return_type, runner, logic, platform="*/*", function_type="scalar"))]
-    fn create_function<'py>(
+    fn import_function<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         input_types: Vec<String>,
@@ -347,9 +347,9 @@ impl PyBundleBuilder {
         let function_type = function_type.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .create_function(&name, input_types, &return_type, &runner, &logic, &platform, &function_type)
+                .import_function(&name, input_types, &return_type, &runner, &logic, &platform, &function_type)
                 .await
-                .map_err(|e| to_py_error_ctx("Failed to create function", e))?;
+                .map_err(|e| to_py_error_ctx("Failed to load function", e))?;
 
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })
@@ -359,7 +359,7 @@ impl PyBundleBuilder {
     }
 
     #[pyo3(signature = (name, input_types, return_type, runner, logic, platform="*/*", function_type="scalar"))]
-    fn create_temporary_function<'py>(
+    fn import_temporary_function<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         input_types: Vec<String>,
@@ -402,9 +402,9 @@ impl PyBundleBuilder {
             };
             inner
                 .as_ref()
-                .create_temporary_function(entry)
+                .import_temporary_function(entry)
                 .await
-                .map_err(|e| to_py_error_ctx("Failed to create temporary function", e))?;
+                .map_err(|e| to_py_error_ctx("Failed to load temporary function", e))?;
 
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })
@@ -413,12 +413,11 @@ impl PyBundleBuilder {
         })
     }
 
-    #[pyo3(signature = (name, platform=None, input_types=None))]
+    #[pyo3(signature = (name, platform=None))]
     fn drop_function<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         platform: Option<&str>,
-        input_types: Option<Vec<String>>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
@@ -426,7 +425,7 @@ impl PyBundleBuilder {
         let platform = platform.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .drop_function(&name, platform.as_deref(), input_types)
+                .drop_function(&name, platform.as_deref())
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to drop function", e))?;
 
@@ -724,15 +723,15 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Create a named connector with logic (persisted).
+    /// Load a named connector with logic (persisted).
     ///
     /// # Arguments
-    /// * `name` - Dot-separated connector name (e.g., "acme.datasources.weather")
+    /// * `name` - Dot-separated connector name (e.g., "acme.weather")
     /// * `runner` - The runner: "lib", "java", "docker", or "ipc"
     /// * `logic` - The logic string (path to shared library or binary)
     /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
     #[pyo3(signature = (name, runner, logic, platform="*/*"))]
-    fn create_connector<'py>(
+    fn import_connector<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         runner: &str,
@@ -747,9 +746,9 @@ impl PyBundleBuilder {
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .create_connector(&name, &runner, &logic, &platform)
+                .import_connector(&name, &runner, &logic, &platform)
                 .await
-                .map_err(|e| to_py_error_ctx("Failed to create connector", e))?;
+                .map_err(|e| to_py_error_ctx("Failed to load connector", e))?;
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })
                     .map_err(|e| to_py_error(e))
@@ -757,7 +756,7 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Create a temporary connector with runtime-only logic (not persisted).
+    /// Load a temporary connector with runtime-only logic (not persisted).
     ///
     /// # Arguments
     /// * `name` - The connector name
@@ -765,7 +764,7 @@ impl PyBundleBuilder {
     /// * `logic` - The logic string (e.g., "mod:Class" for python)
     /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
     #[pyo3(signature = (name, runner, logic, platform="*/*"))]
-    fn create_temporary_connector<'py>(
+    fn import_temporary_connector<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         runner: &str,
@@ -783,9 +782,9 @@ impl PyBundleBuilder {
             let platform: ::bundlebase::bundle::Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
             inner
                 .as_ref()
-                .create_temporary_connector(&name, runner, logic, platform)
+                .import_temporary_connector(&name, runner, logic, platform)
                 .await
-                .map_err(|e| to_py_error_ctx("Failed to create temporary connector", e))?;
+                .map_err(|e| to_py_error_ctx("Failed to load temporary connector", e))?;
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })
                     .map_err(|e| to_py_error(e))

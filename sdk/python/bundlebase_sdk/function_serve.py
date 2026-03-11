@@ -1,8 +1,13 @@
-"""Entry point for running a function provider as a subprocess."""
+"""Entry point for running a function provider as a subprocess.
+
+Uses JSON-RPC 2.0 + Arrow IPC over stdin/stdout.
+Supports both scalar and aggregate functions with server-side state management.
+"""
 
 import json
 import struct
 import sys
+import threading
 from typing import IO
 
 import pyarrow as pa
@@ -39,8 +44,35 @@ def _read_arrow_ipc(stdin: IO[bytes]) -> list[pa.RecordBatch]:
     return reader.read_all().to_batches()
 
 
+class _AggregateStateStore:
+    """Thread-safe store for aggregate function state held server-side."""
+
+    def __init__(self):
+        self._states: dict[str, object] = {}
+        self._next_id = 0
+        self._lock = threading.Lock()
+
+    def create(self, state: object) -> str:
+        with self._lock:
+            state_id = str(self._next_id)
+            self._next_id += 1
+            self._states[state_id] = state
+            return state_id
+
+    def get(self, state_id: str) -> object:
+        return self._states.get(state_id)
+
+    def put(self, state_id: str, state: object) -> None:
+        self._states[state_id] = state
+
+    def remove(self, state_id: str) -> None:
+        self._states.pop(state_id, None)
+
+
 def _serve_function(func: Function, stdin: IO[bytes], stdout: IO[bytes]) -> None:
     """Run the JSON-RPC serve loop for functions with explicit IO streams."""
+    state_store = _AggregateStateStore()
+
     while True:
         req = read_request(stdin)
         if req is None:
@@ -53,6 +85,14 @@ def _serve_function(func: Function, stdin: IO[bytes], stdout: IO[bytes]) -> None
         try:
             if method == "invoke":
                 _handle_invoke(func, req_id, params, stdin, stdout)
+            elif method == "create_state":
+                _handle_create_state(func, req_id, params, state_store, stdout)
+            elif method == "accumulate":
+                _handle_accumulate(func, req_id, params, state_store, stdin, stdout)
+            elif method == "merge":
+                _handle_merge(func, req_id, params, state_store, stdout)
+            elif method == "evaluate":
+                _handle_evaluate(func, req_id, params, state_store, stdout)
             elif method == "shutdown":
                 write_response(stdout, req_id, {"ok": True})
                 break
@@ -98,6 +138,98 @@ def _handle_invoke(
         )
 
 
+def _handle_create_state(
+    func: Function,
+    req_id: int,
+    params: dict,
+    state_store: _AggregateStateStore,
+    stdout: IO[bytes],
+) -> None:
+    func_name = params.get("function", "")
+    state = func.create_state(func_name)
+    state_id = state_store.create(state)
+    write_response(stdout, req_id, {"state_id": state_id})
+
+
+def _handle_accumulate(
+    func: Function,
+    req_id: int,
+    params: dict,
+    state_store: _AggregateStateStore,
+    stdin: IO[bytes],
+    stdout: IO[bytes],
+) -> None:
+    func_name = params.get("function", "")
+    state_id = params.get("state_id", "")
+
+    # Acknowledge the request
+    write_response(stdout, req_id, {"ok": True})
+
+    # Read input Arrow IPC batch
+    batches = _read_arrow_ipc(stdin)
+    if not batches:
+        return
+
+    state = state_store.get(state_id)
+    if state is None:
+        raise ValueError(f"Unknown state ID '{state_id}' for function '{func_name}'")
+
+    updated_state = func.accumulate(func_name, state, batches[0])
+    state_store.put(state_id, updated_state)
+
+
+def _handle_merge(
+    func: Function,
+    req_id: int,
+    params: dict,
+    state_store: _AggregateStateStore,
+    stdout: IO[bytes],
+) -> None:
+    func_name = params.get("function", "")
+    id1 = params.get("state_id1", "")
+    id2 = params.get("state_id2", "")
+
+    state1 = state_store.get(id1)
+    state2 = state_store.get(id2)
+    if state1 is None or state2 is None:
+        raise ValueError(f"Unknown state ID in merge for '{func_name}'")
+
+    merged = func.merge(func_name, state1, state2)
+    merged_id = state_store.create(merged)
+    write_response(stdout, req_id, {"state_id": merged_id})
+
+
+def _handle_evaluate(
+    func: Function,
+    req_id: int,
+    params: dict,
+    state_store: _AggregateStateStore,
+    stdout: IO[bytes],
+) -> None:
+    func_name = params.get("function", "")
+    state_id = params.get("state_id", "")
+
+    # Acknowledge, then send Arrow IPC result
+    write_response(stdout, req_id, {"ok": True})
+
+    state = state_store.get(state_id)
+    if state is None:
+        raise ValueError(f"Unknown state ID '{state_id}' for evaluate '{func_name}'")
+
+    result = func.evaluate(func_name, state)
+
+    # Encode result as Arrow IPC (single-row, single-column)
+    if isinstance(result, pa.Scalar):
+        arr = pa.array([result.as_py()], type=result.type)
+    else:
+        arr = pa.array([result])
+    rb = pa.record_batch({"result": arr})
+    write_arrow_ipc(stdout, [rb])
+
+    # Clean up state after evaluation
+    state_store.remove(state_id)
+
+
 def _build_manifest(func: Function) -> str:
     """Build JSON manifest from the function provider."""
     functions = func.functions()
@@ -109,7 +241,7 @@ def serve_function(func: Function) -> None:
 
     Handles both:
     - `--bundlebase-functions` CLI flag for manifest discovery
-    - JSON-RPC serve loop for function invocation
+    - JSON-RPC serve loop for scalar and aggregate function invocation
 
     This is the main entry point for function provider scripts.
     """

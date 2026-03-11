@@ -346,16 +346,16 @@ class SyncBundle:
         return SyncQueryResult(async_result)
 
 
-    def create_temporary_connector(
+    def import_temporary_connector(
         self, name: str, runner: str, logic: str,
         platform: str = "*/*"
     ) -> "SyncBundle":
-        """Create a temporary connector with runtime-only logic (not persisted).
+        """Load a temporary connector with runtime-only logic (not persisted).
 
         Use this for Python in-process connectors that cannot be bundled.
 
         Args:
-            name: Dot-separated connector name (e.g., "acme.datasources.weather")
+            name: Dot-separated connector name (e.g., "acme.weather")
             runner: The runner: "python", "lib", "java", "docker", or "ipc"
             logic: The logic string (e.g., "my_source:MySource" for python)
             platform: Docker-style platform string (default: "*/*")
@@ -364,7 +364,7 @@ class SyncBundle:
             Self for fluent chaining
         """
         coro = _call_original_method(
-            self._async, "create_temporary_connector", name, runner, logic, platform
+            self._async, "import_temporary_connector", name, runner, logic, platform
         )
         _loop_manager.run_sync(coro)
         return self
@@ -386,12 +386,12 @@ class SyncBundle:
         )
         return _loop_manager.run_sync(coro)
 
-    def create_temporary_function(
+    def import_temporary_function(
         self, name: str, input_types: List[str], return_type: str,
         runner: str, logic: str, platform: str = "*/*",
         function_type: str = "scalar"
     ) -> "SyncBundle":
-        """Create a temporary SQL function (not persisted).
+        """Load a temporary SQL function (not persisted).
 
         Args:
             name: Dotted function name (e.g., "acme.double_val")
@@ -406,7 +406,7 @@ class SyncBundle:
             Self for fluent chaining
         """
         coro = _call_original_method(
-            self._async, "create_temporary_function", name, input_types, return_type, runner, logic, platform, function_type
+            self._async, "import_temporary_function", name, input_types, return_type, runner, logic, platform, function_type
         )
         _loop_manager.run_sync(coro)
         return self
@@ -603,14 +603,14 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def create_connector(
+    def import_connector(
         self, name: str, runner: str, logic: str,
         platform: str = "*/*"
     ) -> "SyncBundleBuilder":
-        """Create a named connector with logic (persisted).
+        """Load a named connector with logic (persisted).
 
         Args:
-            name: Dot-separated connector name (e.g., "acme.datasources.weather")
+            name: Dot-separated connector name (e.g., "acme.weather")
             runner: The runner: "lib", "java", "docker", or "ipc"
             logic: The logic string (path to shared library or binary)
             platform: Docker-style platform string (default: "*/*")
@@ -619,21 +619,21 @@ class SyncBundleBuilder(SyncBundle):
             Self for fluent chaining
         """
         coro = _call_original_method(
-            self._async, "create_connector", name, runner, logic, platform
+            self._async, "import_connector", name, runner, logic, platform
         )
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def create_temporary_connector(
+    def import_temporary_connector(
         self, name: str, runner: str, logic: str,
         platform: str = "*/*"
     ) -> "SyncBundleBuilder":
-        """Create a temporary connector with runtime-only logic (not persisted).
+        """Load a temporary connector with runtime-only logic (not persisted).
 
         Use this for Python in-process connectors that cannot be bundled.
 
         Args:
-            name: Dot-separated connector name (e.g., "acme.datasources.weather")
+            name: Dot-separated connector name (e.g., "acme.weather")
             runner: The runner: "python", "lib", "java", "docker", or "ipc"
             logic: The logic string (e.g., "my_source:MySource" for python)
             platform: Docker-style platform string (default: "*/*")
@@ -642,7 +642,7 @@ class SyncBundleBuilder(SyncBundle):
             Self for fluent chaining
         """
         coro = _call_original_method(
-            self._async, "create_temporary_connector", name, runner, logic, platform
+            self._async, "import_temporary_connector", name, runner, logic, platform
         )
         self._async = _loop_manager.run_sync(coro)
         return self
@@ -791,12 +791,12 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def create_function(
+    def import_function(
         self, name: str, input_types: List[str], return_type: str,
         runner: str, logic: str, platform: str = "*/*",
         function_type: str = "scalar"
     ) -> "SyncBundleBuilder":
-        """Create a named SQL function (persisted).
+        """Load a named SQL function (persisted).
 
         Args:
             name: Dotted function name (e.g., "acme.double_val")
@@ -810,16 +810,16 @@ class SyncBundleBuilder(SyncBundle):
         Returns:
             SyncBundleBuilder for chaining
         """
-        coro = _call_original_method(self._async, "create_function", name, input_types, return_type, runner, logic, platform, function_type)
+        coro = _call_original_method(self._async, "import_function", name, input_types, return_type, runner, logic, platform, function_type)
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def create_temporary_function(
+    def import_temporary_function(
         self, name: str, input_types: List[str], return_type: str,
         runner: str, logic: str, platform: str = "*/*",
         function_type: str = "scalar"
     ) -> "SyncBundleBuilder":
-        """Create a temporary SQL function (not persisted).
+        """Load a temporary SQL function (not persisted).
 
         Args:
             name: Dotted function name (e.g., "acme.double_val")
@@ -833,7 +833,7 @@ class SyncBundleBuilder(SyncBundle):
         Returns:
             SyncBundleBuilder for chaining
         """
-        coro = _call_original_method(self._async, "create_temporary_function", name, input_types, return_type, runner, logic, platform, function_type)
+        coro = _call_original_method(self._async, "import_temporary_function", name, input_types, return_type, runner, logic, platform, function_type)
         self._async = _loop_manager.run_sync(coro)
         return self
 

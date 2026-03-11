@@ -1,7 +1,17 @@
-//! IPC bridge for invoking scalar functions via external subprocesses.
+//! IPC bridge for invoking functions via external subprocesses.
 //!
-//! Uses the same JSON-RPC 2.0 + Arrow IPC protocol as the connector IPC system.
-//! Supports `ipc`, `java`, and `docker` runners for scalar function invocation.
+//! Uses JSON-RPC 2.0 + Arrow IPC protocol over stdin/stdout pipes.
+//! Supports scalar and aggregate functions via `ipc`, `java`, and `docker` runners.
+//!
+//! Protocol:
+//! - **Scalar invoke**: JSON-RPC `invoke` request, then Arrow IPC input/output.
+//! - **Aggregate create_state**: JSON-RPC `create_state` request → returns state ID.
+//! - **Aggregate accumulate**: JSON-RPC `accumulate` request with state ID, then
+//!   Arrow IPC input batch. State updated server-side.
+//! - **Aggregate merge**: JSON-RPC `merge` request with two state IDs → returns
+//!   merged state ID.
+//! - **Aggregate evaluate**: JSON-RPC `evaluate` request with state ID → returns
+//!   result as Arrow IPC.
 
 use crate::BundlebaseError;
 use arrow::array::ArrayRef;
@@ -9,6 +19,7 @@ use arrow::datatypes::{Field, Schema};
 use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
 use arrow::record_batch::RecordBatch;
+use datafusion::scalar::ScalarValue;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Read as IoRead, Write as IoWrite};
@@ -100,11 +111,19 @@ fn parse_call(call: &str) -> Result<Vec<String>, BundlebaseError> {
 // Synchronous subprocess handle
 // ---------------------------------------------------------------------------
 
-struct SyncSubprocessHandle {
+pub(crate) struct SyncSubprocessHandle {
     child: Child,
     stdin: BufWriter<ChildStdin>,
     stdout: BufReader<ChildStdout>,
     next_id: u64,
+}
+
+impl std::fmt::Debug for SyncSubprocessHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SyncSubprocessHandle")
+            .field("next_id", &self.next_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl SyncSubprocessHandle {
@@ -275,16 +294,25 @@ impl Drop for SyncSubprocessHandle {
 }
 
 // ---------------------------------------------------------------------------
-// Global subprocess cache
+// Per-connection subprocess cache
 // ---------------------------------------------------------------------------
 
-static SUBPROCESS_CACHE: std::sync::LazyLock<Mutex<HashMap<String, Arc<Mutex<SyncSubprocessHandle>>>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Per-connection cache of IPC subprocess handles.
+///
+/// Each `Bundle` owns one of these so that subprocesses are scoped to the
+/// connection/session and cleaned up when the `Bundle` is dropped.
+pub type SubprocessCache = Arc<Mutex<HashMap<String, Arc<Mutex<SyncSubprocessHandle>>>>>;
+
+/// Create a new, empty subprocess cache.
+pub fn new_subprocess_cache() -> SubprocessCache {
+    Arc::new(Mutex::new(HashMap::new()))
+}
 
 fn get_or_spawn_subprocess(
+    cache: &SubprocessCache,
     logic: &str,
 ) -> Result<Arc<Mutex<SyncSubprocessHandle>>, BundlebaseError> {
-    let mut cache = SUBPROCESS_CACHE.lock().map_err(|e| {
+    let mut cache = cache.lock().map_err(|e| {
         BundlebaseError::from(format!("Failed to acquire subprocess cache lock: {}", e))
     })?;
 
@@ -300,7 +328,7 @@ fn get_or_spawn_subprocess(
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Public API — Scalar
 // ---------------------------------------------------------------------------
 
 /// Invoke a scalar function via an IPC subprocess.
@@ -311,11 +339,12 @@ fn get_or_spawn_subprocess(
 /// 3. Read output Arrow IPC (single-column RecordBatch)
 /// 4. Return the single output column
 pub fn invoke_ipc_scalar(
+    cache: &SubprocessCache,
     logic: &str,
     function_name: &str,
     args: &[ArrayRef],
 ) -> Result<ArrayRef, BundlebaseError> {
-    let handle = get_or_spawn_subprocess(logic)?;
+    let handle = get_or_spawn_subprocess(cache, logic)?;
     let mut guard = handle.lock().map_err(|e| {
         BundlebaseError::from(format!("Failed to acquire subprocess lock: {}", e))
     })?;
@@ -380,6 +409,207 @@ pub fn invoke_ipc_scalar(
 
     // Return the first (and only) column from the first batch
     Ok(Arc::clone(batches[0].column(0)))
+}
+
+// ---------------------------------------------------------------------------
+// Public API — Aggregate
+// ---------------------------------------------------------------------------
+
+/// Create initial accumulator state for an aggregate function via IPC.
+///
+/// Protocol:
+/// 1. Send JSON-RPC `create_state` with function name
+/// 2. Response contains an opaque state ID (string)
+///
+/// State is held server-side in the subprocess.
+pub fn ipc_aggregate_create_state(
+    cache: &SubprocessCache,
+    logic: &str,
+    function_name: &str,
+) -> Result<String, BundlebaseError> {
+    let handle = get_or_spawn_subprocess(cache, logic)?;
+    let mut guard = handle.lock().map_err(|e| {
+        BundlebaseError::from(format!("Failed to acquire subprocess lock: {}", e))
+    })?;
+
+    let result = guard.send_request(
+        "create_state",
+        serde_json::json!({
+            "function": function_name,
+        }),
+    )?;
+
+    let state_id = result
+        .get("state_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "IPC create_state for '{}' did not return a state_id",
+                function_name
+            ))
+        })?
+        .to_string();
+
+    Ok(state_id)
+}
+
+/// Accumulate a batch into an aggregate state via IPC.
+///
+/// Protocol:
+/// 1. Send JSON-RPC `accumulate` with function name and state ID
+/// 2. Write Arrow IPC input batch
+/// 3. State is updated server-side (no data returned)
+pub fn ipc_aggregate_accumulate(
+    cache: &SubprocessCache,
+    logic: &str,
+    function_name: &str,
+    state_id: &str,
+    values: &[ArrayRef],
+) -> Result<(), BundlebaseError> {
+    let handle = get_or_spawn_subprocess(cache, logic)?;
+    let mut guard = handle.lock().map_err(|e| {
+        BundlebaseError::from(format!("Failed to acquire subprocess lock: {}", e))
+    })?;
+
+    guard.send_request(
+        "accumulate",
+        serde_json::json!({
+            "function": function_name,
+            "state_id": state_id,
+        }),
+    )?;
+
+    // Build and write the input batch
+    let fields: Vec<Field> = values
+        .iter()
+        .enumerate()
+        .map(|(i, arr)| Field::new(format!("val_{}", i), arr.data_type().clone(), true))
+        .collect();
+    let schema = Arc::new(Schema::new(fields));
+    let batch = RecordBatch::try_new(schema, values.to_vec()).map_err(|e| {
+        format!("Failed to create batch for accumulate: {}", e)
+    })?;
+
+    guard.write_arrow_ipc(&batch)?;
+
+    Ok(())
+}
+
+/// Merge two aggregate states via IPC.
+///
+/// Protocol:
+/// 1. Send JSON-RPC `merge` with function name and two state IDs
+/// 2. Response contains the merged state ID
+pub fn ipc_aggregate_merge(
+    cache: &SubprocessCache,
+    logic: &str,
+    function_name: &str,
+    state_id1: &str,
+    state_id2: &str,
+) -> Result<String, BundlebaseError> {
+    let handle = get_or_spawn_subprocess(cache, logic)?;
+    let mut guard = handle.lock().map_err(|e| {
+        BundlebaseError::from(format!("Failed to acquire subprocess lock: {}", e))
+    })?;
+
+    let result = guard.send_request(
+        "merge",
+        serde_json::json!({
+            "function": function_name,
+            "state_id1": state_id1,
+            "state_id2": state_id2,
+        }),
+    )?;
+
+    let merged_id = result
+        .get("state_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "IPC merge for '{}' did not return a state_id",
+                function_name
+            ))
+        })?
+        .to_string();
+
+    Ok(merged_id)
+}
+
+/// Evaluate an aggregate state to produce the final result via IPC.
+///
+/// Protocol:
+/// 1. Send JSON-RPC `evaluate` with function name and state ID
+/// 2. Read Arrow IPC output (single-row, single-column RecordBatch)
+/// 3. Extract ScalarValue from the result
+pub fn ipc_aggregate_evaluate(
+    cache: &SubprocessCache,
+    logic: &str,
+    function_name: &str,
+    state_id: &str,
+    return_type: &arrow::datatypes::DataType,
+) -> Result<ScalarValue, BundlebaseError> {
+    let handle = get_or_spawn_subprocess(cache, logic)?;
+    let mut guard = handle.lock().map_err(|e| {
+        BundlebaseError::from(format!("Failed to acquire subprocess lock: {}", e))
+    })?;
+
+    guard.send_request(
+        "evaluate",
+        serde_json::json!({
+            "function": function_name,
+            "state_id": state_id,
+        }),
+    )?;
+
+    // Read Arrow IPC result
+    let ipc_data = guard.read_arrow_ipc()?;
+
+    match ipc_data {
+        None => ScalarValue::try_from(return_type).map_err(|e| {
+            format!(
+                "Failed to create null ScalarValue for '{}': {}",
+                function_name, e
+            )
+            .into()
+        }),
+        Some(data) => {
+            let cursor = std::io::Cursor::new(data);
+            let reader = StreamReader::try_new(cursor, None).map_err(|e| {
+                format!(
+                    "Failed to parse Arrow IPC from evaluate for '{}': {}",
+                    function_name, e
+                )
+            })?;
+
+            let batches: Vec<RecordBatch> = reader
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| {
+                    format!(
+                        "Failed to read evaluate result for '{}': {}",
+                        function_name, e
+                    )
+                })?;
+
+            if batches.is_empty() || batches[0].num_columns() == 0 || batches[0].num_rows() == 0 {
+                return ScalarValue::try_from(return_type).map_err(|e| {
+                    format!(
+                        "Failed to create null ScalarValue for '{}': {}",
+                        function_name, e
+                    )
+                    .into()
+                });
+            }
+
+            ScalarValue::try_from_array(batches[0].column(0), 0).map_err(|e| {
+                format!(
+                    "Failed to extract ScalarValue from evaluate for '{}': {}",
+                    function_name, e
+                )
+                .into()
+            })
+        }
+    }
 }
 
 #[cfg(test)]

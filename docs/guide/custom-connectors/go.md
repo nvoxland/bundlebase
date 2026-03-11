@@ -49,7 +49,7 @@ func main() { sdk.Serve(&ExampleConnector{}) }
 Build and use with:
 
 ```python
-bundle.create_connector('example.connector', runner='ipc', logic='./example-connector')
+bundle.import_connector('example.connector', runner='ipc', logic='./example-connector')
 bundle.create_source('example.connector')
 ```
 
@@ -320,7 +320,7 @@ go build -buildmode=c-shared -o example_connector.so .
 ```
 
 ```python
-bundle.create_connector('example.connector', runner='lib', logic='./example_connector.so')
+bundle.import_connector('example.connector', runner='lib', logic='./example_connector.so')
 bundle.create_source('example.connector')
 ```
 

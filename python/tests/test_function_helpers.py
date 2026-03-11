@@ -46,7 +46,7 @@ def bundlebase_metadata():
     """Return metadata for all functions in this module.
 
     This is the standard convention for auto-detecting function signatures.
-    Bundlebase calls this function to discover types when CREATE FUNCTION
+    Bundlebase calls this function to discover types when IMPORT FUNCTION
     is used without explicit type signatures.
     """
     return {

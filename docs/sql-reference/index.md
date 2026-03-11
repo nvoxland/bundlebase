@@ -162,68 +162,54 @@ Commands for managing custom connectors. Connectors use a two-step workflow: cre
 
 See [Custom Connectors](../guide/custom-connectors/index.md) for full details and SDK references.
 
-### CREATE CONNECTOR
+### IMPORT CONNECTOR
 
 Creates a named connector with its runner and logic. The connector definition is **persisted** into the bundle's commit history.
 
 ```sql
-CREATE CONNECTOR <name> WITH (runner = '<runner>', logic = '<logic>' [, platform = '<platform>'])
+IMPORT CONNECTOR <name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
 ```
 
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `runner` | Yes | Connector runner: `lib`, `java`, `docker`, or `ipc` |
-| `logic` | Yes | What to run (path to library, JAR, Docker image, or command) |
-| `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
+The `runner://logic` URI specifies both the runner and what to run. An optional `WITH` clause can provide additional parameters like `platform`.
 
 !!! note
-    The `python` runner is not allowed with `CREATE CONNECTOR` because Python code cannot be bundled. Use `CREATE TEMPORARY CONNECTOR` instead.
+    The `python` runner is not allowed with `IMPORT CONNECTOR` because Python code cannot be bundled. Use `IMPORT TEMPORARY CONNECTOR` instead.
 
 **Examples:**
 
 ```sql
 -- Shared library (Rust, Go, Java)
-CREATE CONNECTOR example.connector WITH (runner = 'lib', logic = './target/release/libexample_connector.so')
+IMPORT CONNECTOR example.connector FROM 'lib://./target/release/libexample_connector.so'
 
 -- Java JAR
-CREATE CONNECTOR example.connector WITH (runner = 'java', logic = 'target/example-connector.jar')
+IMPORT CONNECTOR example.connector FROM 'java://target/example-connector.jar'
 
 -- Docker image
-CREATE CONNECTOR example.connector WITH (runner = 'docker', logic = 'myorg/example-connector:latest')
+IMPORT CONNECTOR example.connector FROM 'docker://myorg/example-connector:latest'
 
 -- IPC subprocess
-CREATE CONNECTOR example.connector WITH (runner = 'ipc', logic = './example_connector')
+IMPORT CONNECTOR example.connector FROM 'ipc://./example_connector'
 
 -- Platform-specific
-CREATE CONNECTOR example.connector WITH (runner = 'lib', logic = './libexample_connector.so', platform = 'linux/amd64')
+IMPORT CONNECTOR example.connector FROM 'lib://./libexample_connector.so' WITH (platform = 'linux/amd64')
 ```
 
-### CREATE TEMPORARY CONNECTOR
+### IMPORT TEMPORARY CONNECTOR
 
 Creates a connector for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process sources.
 
 ```sql
-CREATE TEMPORARY CONNECTOR <name> WITH (runner = '<runner>', logic = '<logic>' [, platform = '<platform>'])
+IMPORT TEMPORARY CONNECTOR <name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
 ```
-
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `runner` | Yes | Connector runner: `python`, `lib`, `java`, `docker`, or `ipc` |
-| `logic` | Yes | What to run (e.g., `module:Class` for Python, path for others) |
-| `platform` | No | Target platform (default: `*/*`) |
 
 **Examples:**
 
 ```sql
 -- Python in-process (most common use case)
-CREATE TEMPORARY CONNECTOR example.connector WITH (runner = 'python', logic = 'example_connector:ExampleConnector')
+IMPORT TEMPORARY CONNECTOR example.connector FROM 'python://example_connector:ExampleConnector'
 
 -- Any other runner also works as temporary
-CREATE TEMPORARY CONNECTOR example.connector WITH (runner = 'ipc', logic = './example_connector')
+IMPORT TEMPORARY CONNECTOR example.connector FROM 'ipc://./example_connector'
 ```
 
 ### DROP CONNECTOR
@@ -313,115 +299,83 @@ See [Indexing](../guide/indexing.md) for details.
 
 Commands for creating custom SQL functions that can be used in queries.
 
-### CREATE FUNCTION
+### IMPORT FUNCTION
 
-Creates a named function with its logic. The function definition is **persisted** into the bundle's commit history.
+Creates a named function with its logic. The function definition is **persisted** into the bundle's commit history. Input types, return type, and function kind (scalar/aggregate) are auto-detected from the runner.
 
 ```sql
-CREATE FUNCTION <namespace.name>(<InputType>, ...) RETURNS <ReturnType>
-  WITH (runner = '<runner>', logic = '<logic>' [, platform = '<platform>'] [, type = '<type>'])
+IMPORT FUNCTION <namespace.name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
 ```
 
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `runner` | Yes | Function runner: `lib`, `java`, `docker`, or `ipc` |
-| `logic` | Yes | What to run. Use `path:symbol` to specify a symbol in a multi-function library (e.g., `./mylib.so:double_val`). If no `:symbol` suffix, the function's short name is used as the symbol. |
-| `platform` | No | Target platform (e.g., `linux/amd64`, `darwin/arm64`, `*/*` default) |
-| `type` | No | Function type: `scalar` (default) or `aggregate` |
+An optional `WITH` clause can provide additional parameters like `platform`.
 
 !!! note
-    The `python` runner is not allowed with `CREATE FUNCTION` because Python code cannot be bundled. Use `CREATE TEMPORARY FUNCTION` instead.
+    The `python` runner is not allowed with `IMPORT FUNCTION` because Python code cannot be bundled. Use `IMPORT TEMPORARY FUNCTION` instead.
 
 **Scalar function examples:**
 
 ```sql
 -- Rust shared library (scalar) — symbol defaults to function name 'double_val'
-CREATE FUNCTION acme.double_val(Int64) RETURNS Int64
-  WITH (runner = 'lib', logic = './target/release/libmy_funcs.so')
+IMPORT FUNCTION acme.double_val FROM 'lib://./target/release/libmy_funcs.so'
 
 -- Explicit symbol in a multi-function library
-CREATE FUNCTION acme.double_val(Int64) RETURNS Int64
-  WITH (runner = 'lib', logic = './target/release/libmy_funcs.so:double_val')
+IMPORT FUNCTION acme.double_val FROM 'lib://./target/release/libmy_funcs.so:double_val'
 
 -- Go binary via IPC (scalar)
-CREATE FUNCTION acme.to_upper(Utf8) RETURNS Utf8
-  WITH (runner = 'ipc', logic = './go_funcs')
+IMPORT FUNCTION acme.to_upper FROM 'ipc://./go_funcs'
 
 -- Java JAR (scalar)
-CREATE FUNCTION acme.parse_date(Utf8) RETURNS Date32
-  WITH (runner = 'java', logic = 'target/my-funcs.jar')
+IMPORT FUNCTION acme.parse_date FROM 'java://target/my-funcs.jar'
 
 -- Docker image (scalar)
-CREATE FUNCTION acme.geocode(Utf8) RETURNS Float64
-  WITH (runner = 'docker', logic = 'myorg/geocoder:latest')
+IMPORT FUNCTION acme.geocode FROM 'docker://myorg/geocoder:latest'
 
 -- Platform-specific (scalar)
-CREATE FUNCTION acme.double_val(Int64) RETURNS Int64
-  WITH (runner = 'lib', logic = './libmy_funcs.so', platform = 'linux/amd64')
+IMPORT FUNCTION acme.double_val FROM 'lib://./libmy_funcs.so' WITH (platform = 'linux/amd64')
 ```
 
 **Aggregate function examples:**
 
 ```sql
 -- Rust shared library (aggregate)
-CREATE FUNCTION acme.custom_avg(Float64) RETURNS Float64
-  WITH (runner = 'lib', logic = './target/release/libmy_aggs.so', type = 'aggregate')
+IMPORT FUNCTION acme.custom_avg FROM 'lib://./target/release/libmy_aggs.so'
 
 -- Go binary via IPC (aggregate)
-CREATE FUNCTION acme.median(Int64) RETURNS Float64
-  WITH (runner = 'ipc', logic = './go_aggs', type = 'aggregate')
+IMPORT FUNCTION acme.median FROM 'ipc://./go_aggs'
 
 -- Java JAR (aggregate)
-CREATE FUNCTION acme.string_agg(Utf8) RETURNS Utf8
-  WITH (runner = 'java', logic = 'target/my-aggs.jar', type = 'aggregate')
+IMPORT FUNCTION acme.string_agg FROM 'java://target/my-aggs.jar'
 
 -- Docker image (aggregate)
-CREATE FUNCTION acme.percentile(Float64) RETURNS Float64
-  WITH (runner = 'docker', logic = 'myorg/stats:latest', type = 'aggregate')
+IMPORT FUNCTION acme.percentile FROM 'docker://myorg/stats:latest'
 ```
 
-### CREATE TEMPORARY FUNCTION
+### IMPORT TEMPORARY FUNCTION
 
-Creates a function for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process functions.
+Creates a function for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process functions. Input types, return type, and function kind are auto-detected.
 
 ```sql
-CREATE TEMPORARY FUNCTION <namespace.name>(<InputType>, ...) RETURNS <ReturnType>
-  WITH (runner = '<runner>', logic = '<logic>' [, platform = '<platform>'] [, type = '<type>'])
+IMPORT TEMPORARY FUNCTION <namespace.name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
 ```
-
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `runner` | Yes | Function runner: `python`, `lib`, `java`, `docker`, or `ipc` |
-| `logic` | Yes | What to run (e.g., `module:function` for Python scalars, `module:ClassName` for Python aggregates) |
-| `platform` | No | Target platform (default: `*/*`) |
-| `type` | No | Function type: `scalar` (default) or `aggregate` |
 
 **Scalar function examples:**
 
 ```sql
 -- Python scalar function
-CREATE TEMPORARY FUNCTION acme.double_val(Int64) RETURNS Int64
-  WITH (runner = 'python', logic = 'my_module:double_val')
+IMPORT TEMPORARY FUNCTION acme.double_val FROM 'python://my_module:double_val'
 
 -- IPC subprocess (temporary)
-CREATE TEMPORARY FUNCTION acme.to_upper(Utf8) RETURNS Utf8
-  WITH (runner = 'ipc', logic = './go_funcs')
+IMPORT TEMPORARY FUNCTION acme.to_upper FROM 'ipc://./go_funcs'
 ```
 
 **Aggregate function examples:**
 
 ```sql
 -- Python aggregate function (class-based)
-CREATE TEMPORARY FUNCTION acme.my_sum(Int64) RETURNS Int64
-  WITH (runner = 'python', logic = 'my_module:MySum', type = 'aggregate')
+IMPORT TEMPORARY FUNCTION acme.my_sum FROM 'python://my_module:MySum'
 
 -- Python aggregate with multiple input types
-CREATE TEMPORARY FUNCTION acme.weighted_avg(Float64, Float64) RETURNS Float64
-  WITH (runner = 'python', logic = 'stats:WeightedAvg', type = 'aggregate')
+IMPORT TEMPORARY FUNCTION acme.weighted_avg FROM 'python://stats:WeightedAvg'
 ```
 
 **Python scalar function interface:**
@@ -503,33 +457,25 @@ Removes runtime-only function logic. Optionally filter by platform.
 DROP TEMPORARY FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
 ```
 
-### CREATE FUNCTIONS FROM
+### Wildcard Function Discovery
 
-Discovers and registers all functions exported by a shared library or IPC executable in a single command. Uses the manifest discovery protocol.
+Discovers and registers all functions exported by a shared library or IPC executable in a single command using the wildcard `namespace.*` syntax. Uses the manifest discovery protocol.
 
 ```sql
-CREATE FUNCTIONS FROM '<path>' WITH (runner = '<runner>', namespace = '<namespace>' [, platform = '<platform>'])
+IMPORT FUNCTION <namespace>.* FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
 ```
-
-**Parameters:**
-
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `runner` | Yes | Discovery method: `lib` (calls `bundlebase_functions()` C symbol) or `ipc` (runs `path --bundlebase-functions`) |
-| `namespace` | Yes | Namespace for registered functions (e.g., `acme`) |
-| `platform` | No | Target platform (default: `*/*`) |
 
 **Examples:**
 
 ```sql
 -- Register all functions from a Rust shared library
-CREATE FUNCTIONS FROM './target/release/libmy_funcs.so' WITH (runner = 'lib', namespace = 'acme')
+IMPORT FUNCTION acme.* FROM 'lib://./target/release/libmy_funcs.so'
 
 -- Register functions from an IPC executable
-CREATE FUNCTIONS FROM './my_go_funcs' WITH (runner = 'ipc', namespace = 'tools')
+IMPORT FUNCTION tools.* FROM 'ipc://./my_go_funcs'
 
 -- Platform-specific library
-CREATE FUNCTIONS FROM './libmy_funcs.so' WITH (runner = 'lib', namespace = 'acme', platform = 'linux/amd64')
+IMPORT FUNCTION acme.* FROM 'lib://./libmy_funcs.so' WITH (platform = 'linux/amd64')
 ```
 
 **Manifest format:** Libraries and executables must return a JSON manifest:
@@ -543,7 +489,7 @@ CREATE FUNCTIONS FROM './libmy_funcs.so' WITH (runner = 'lib', namespace = 'acme
 ]}
 ```
 
-Each discovered function is registered as if individually created with `CREATE FUNCTION`. Functions from a bulk-created set can be dropped individually with `DROP FUNCTION`.
+Each discovered function is registered as if individually created with `IMPORT FUNCTION`. Functions from a bulk-discovered set can be dropped individually with `DROP FUNCTION`.
 
 ## Built-in Functions
 

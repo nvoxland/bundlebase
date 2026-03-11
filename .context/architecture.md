@@ -20,7 +20,7 @@ Mutable container for modifications:
 - Wraps an Bundlebase with a working directory
 - Tracks new operations applied since the base container
 - All modification methods mutate in-place and return `&mut self`
-- Methods: `attach()`, `remove_column()`, `rename_column()`, `standardize_column_names()`, `filter()`, `select()`, `join()`, `create_function()`, `create_connector()`, `set_name()`, `set_description()`
+- Methods: `attach()`, `remove_column()`, `rename_column()`, `standardize_column_names()`, `filter()`, `select()`, `join()`, `import_function()`, `import_connector()`, `set_name()`, `set_description()`
 - Can be committed via `commit(message)` to create a new versioned snapshot
 - Can be re-opened via `open_extending(url)` to load the latest state
 
@@ -43,7 +43,7 @@ Operations are recorded and applied in sequence when querying:
 - **Select**: Select specific columns
 - **Join**: Join with other data sources
 - **Query**: Execute custom SQL
-- **CreateFunction**: Register a user-defined SQL scalar function
+- **ImportFunction**: Register a user-defined SQL scalar function
 - **DropFunction**: Remove a user-defined SQL function
 - **SetName**: Set container name
 - **SetDescription**: Set container description
@@ -75,6 +75,7 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - **AggregateFunction**: DataFusion `AggregateUDFImpl` bridge for aggregate functions
 - **PythonAccumulator**: `Accumulator` impl that delegates to Python class methods
 - **LibAccumulator**: `Accumulator` impl that delegates to C ABI aggregate symbols via FFI
+- **IpcAccumulator**: `Accumulator` impl that delegates to IPC subprocess via JSON-RPC + Arrow IPC; state is opaque (only state IDs cross the wire)
 - **Runner**: Execution environment — `python`, `lib`, `java`, `docker`, `ipc` (shared with connectors)
 - **Platform**: OS/arch pattern for multi-platform support (e.g., `linux/amd64`, `*/*`)
 
@@ -85,14 +86,20 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - `lib_bridge::LibAccumulator` — Wraps opaque `void*` state, calls `_create_state/_accumulate/_evaluate/_free_state` symbols
 - `lib_bridge::load_lib_manifest()` — Calls `bundlebase_functions()` C symbol for bulk discovery
 - `lib_bridge::load_ipc_manifest()` — Runs `exec --bundlebase-functions` for IPC discovery
-- `CREATE FUNCTIONS FROM` command uses manifests to register multiple functions at once
+- `ipc_bridge` module — JSON-RPC + Arrow IPC protocol for scalar invoke and aggregate (`create_state`/`accumulate`/`merge`/`evaluate`)
+- `IMPORT FUNCTION namespace.* FROM 'runner://logic'` command uses manifests to register multiple functions at once
+
+**IPC Subprocess Cache:**
+- Each `Bundle` owns a `SubprocessCache` (`Arc<Mutex<HashMap<String, ...>>>`)
+- IPC subprocesses are cached **per-Bundle**, not globally — each connection/session gets its own processes
+- Subprocesses are spawned on first use and live as long as the Bundle (killed on Drop)
+- Cache key is the logic string (e.g., `python:my_functions.py`)
 
 **Function Lifecycle:**
 
-1. **Create function**: `CREATE FUNCTION acme.double_val(Int64) RETURNS Int64 WITH (runner = 'ipc', logic = './my_func')`
+1. **Load function**: `IMPORT FUNCTION acme.double_val FROM 'ipc://./my_func'`
    - Validates dotted name (exactly one dot, alphanumeric parts)
-   - Validates Arrow type names for inputs and return type
-   - Optional `type = 'aggregate'` in WITH clause (default: `scalar`)
+   - Input types, return type, and function kind (scalar/aggregate) are auto-detected from the runner
    - Creates a `FunctionEntry` stored in the bundle's `function_entries` list
    - Registers with DataFusion via `register_function_with_datafusion()`:
      - Scalar → `register_udf(ScalarUDF)`
@@ -105,8 +112,8 @@ Custom SQL function system supporting both scalar and aggregate functions.
    - DataFusion automatically supports any aggregate UDF with `OVER()` clauses
 
 3. **Temporary vs persistent**:
-   - `CREATE TEMPORARY FUNCTION` — session-only, not persisted, allows Python runner
-   - `CREATE FUNCTION` — persisted as operation, rejects Python runner (can't be bundled)
+   - `IMPORT TEMPORARY FUNCTION` — session-only, not persisted, allows Python runner
+   - `IMPORT FUNCTION` — persisted as operation, rejects Python runner (can't be bundled)
    - Temporary overrides persistent at resolution time
 
 **Python Aggregate Interface:**

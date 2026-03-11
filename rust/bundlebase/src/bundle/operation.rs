@@ -2,12 +2,12 @@ mod add_column;
 mod attach_block;
 mod cast_column;
 mod create_view;
-mod create_function;
+mod import_function;
 mod create_index;
 mod drop_function;
 mod create_join;
 mod create_source;
-mod create_connector;
+mod import_connector;
 mod detach_block;
 mod drop_connector;
 mod drop_index;
@@ -31,12 +31,12 @@ pub use crate::bundle::operation::add_column::AddColumnOp;
 pub use crate::bundle::operation::attach_block::{AttachBlockOp, SourceInfo};
 pub use crate::bundle::operation::cast_column::CastColumnOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
-pub use crate::bundle::operation::create_function::CreateFunctionOp;
+pub use crate::bundle::operation::import_function::ImportFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
 pub use crate::bundle::operation::drop_function::DropFunctionOp;
 pub use crate::bundle::operation::create_join::CreateJoinOp;
 pub use crate::bundle::operation::create_source::CreateSourceOp;
-pub use crate::bundle::operation::create_connector::CreateConnectorOp;
+pub use crate::bundle::operation::import_connector::ImportConnectorOp;
 pub use crate::bundle::operation::detach_block::DetachBlockOp;
 pub use crate::bundle::operation::drop_connector::DropConnectorOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
@@ -210,12 +210,12 @@ define_any_operation! {
     AddColumn(AddColumnOp),
     AttachBlock(AttachBlockOp),
     CastColumn(CastColumnOp),
-    CreateFunction(CreateFunctionOp),
+    ImportFunction(ImportFunctionOp),
     CreateIndex(CreateIndexOp),
     CreateJoin(CreateJoinOp),
     CreateSource(CreateSourceOp),
     CreateView(CreateViewOp),
-    CreateConnector(CreateConnectorOp),
+    ImportConnector(ImportConnectorOp),
     DetachBlock(DetachBlockOp),
     DropColumn(DropColumnOp),
     DropIndex(DropIndexOp),
