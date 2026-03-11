@@ -118,6 +118,8 @@ def _serve_function(func: Function, stdin: IO[bytes], stdout: IO[bytes]) -> None
         try:
             if method == "handshake":
                 write_response(stdout, req_id, {"protocol_version": "1"})
+            elif method == "ping":
+                write_response(stdout, req_id, "pong")
             elif method == "invoke":
                 _handle_invoke(func, req_id, params, stdin, stdout)
             elif method == "create_state":

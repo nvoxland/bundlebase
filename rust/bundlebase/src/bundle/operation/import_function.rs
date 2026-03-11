@@ -95,6 +95,11 @@ impl Operation for ImportFunctionOp {
             temporary: false,
             kind: self.kind,
         };
+        // Warn if overwriting an existing definition
+        if bundle.has_function_entry(&self.name) {
+            tracing::warn!("Overwriting existing function definition for '{}'", self.name);
+        }
+
         // Add to registry first so resolve_all can find all overloads
         bundle.add_function_entry(entry);
         bundle.register_functions_for_name(&self.name)

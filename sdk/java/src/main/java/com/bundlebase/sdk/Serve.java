@@ -66,6 +66,7 @@ public class Serve {
 
         switch (method) {
             case "handshake" -> Protocol.writeResponse(out, id, Map.of("protocol_version", "1"));
+            case "ping" -> Protocol.writeResponse(out, id, "pong");
             case "discover" -> handleDiscover(source, id, params, out);
             case "data" -> handleData(source, id, params, out);
             case "stable_url" -> handleStableUrl(source, id, params, out);

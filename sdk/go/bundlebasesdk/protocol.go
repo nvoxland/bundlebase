@@ -366,7 +366,7 @@ func appendValue(builder array.Builder, dt arrow.DataType, val interface{}) erro
 	case arrow.LARGE_BINARY:
 		switch b := val.(type) {
 		case []byte:
-			builder.(*array.BinaryBuilder).Append(b)
+			builder.(*array.LargeBinaryBuilder).Append(b)
 		default:
 			return fmt.Errorf("expected []byte, got %T", val)
 		}

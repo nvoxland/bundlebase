@@ -1637,6 +1637,10 @@ impl BundleFacade for BundleBuilder {
         self.bundle.set_config(scope, key, value).await
     }
 
+    fn connector_entries(&self) -> Vec<crate::bundle::connector_definition::ConnectorEntry> {
+        self.bundle.connector_entries()
+    }
+
     fn ctx(&self) -> Arc<SessionContext> {
         self.bundle.ctx()
     }

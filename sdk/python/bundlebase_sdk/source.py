@@ -56,6 +56,11 @@ class Connector(ABC):
         Args:
             location: The location to fetch data for.
             **kwargs: Extra arguments passed from the source configuration.
+                Reserved keys (prefixed with ``_``) may be present:
+
+                - ``_columns``: Comma-separated column names the caller wants.
+                  Connectors that support column pushdown can parse this to
+                  return only the requested columns. It is safe to ignore.
 
         Returns:
             Data as a PyArrow Table, RecordBatch, list of RecordBatches,

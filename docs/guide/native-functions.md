@@ -370,6 +370,27 @@ SELECT category, stats.my_avg(amount) FROM bundle GROUP BY category
 - `evaluate` must return a `pa.Scalar` (or a plain Python value that PyArrow can convert)
 - After `evaluate`, the state is automatically cleaned up
 
+### Function Kinds
+
+The `kind` field in a function manifest can be one of:
+
+- `scalar` (default) — row-by-row transformation
+- `aggregate` — many rows to one result per group
+- `table_valued` — returns a table of rows (registration supported; execution is planned for a future release)
+
 ### Supported Arrow Types
 
+**Primitive types:**
+
 `Boolean`, `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `Float16`, `Float32`, `Float64`, `Utf8`, `LargeUtf8`, `Binary`, `LargeBinary`, `Date32`, `Date64`
+
+**Complex types:**
+
+| Type | Syntax | Example |
+|------|--------|---------|
+| List | `List<T>` | `List<Int64>` |
+| Struct | `Struct<name:type,...>` | `Struct<x:Int64,y:Float64>` |
+| Map | `Map<K,V>` | `Map<Utf8,Int64>` |
+| Decimal | `Decimal128(precision,scale)` | `Decimal128(38,10)` |
+
+Complex types can be nested (e.g., `List<Struct<name:Utf8,score:Float64>>`).

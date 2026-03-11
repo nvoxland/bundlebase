@@ -12,6 +12,12 @@
 //! - `data()` - Provide raw data bytes for a location
 //! - `stable_url()` - Provide a stable URL for downloading a location
 //!
+//! ## Reserved args keys
+//!
+//! Keys in the `args` HashMap prefixed with `_` are reserved for system use.
+//! Currently defined:
+//! - `_columns` — Comma-separated column names for optional column pushdown.
+//!
 //! Orchestration (sync mode handling, materialization, file management)
 //! lives in `connector_utils::orchestrate_fetch()`.
 
@@ -364,6 +370,17 @@ pub trait Connector: Send + Sync {
     /// Return `Ok(Some(SourceData::Arrow(batches)))` for structured data (converted to Parquet by orchestrator).
     /// Return `Ok(Some(SourceData::RawBytes(bytes)))` for raw file bytes (written as-is).
     /// Return `Ok(None)` if data should be fetched via `stable_url()` instead.
+    ///
+    /// ## Reserved args keys
+    ///
+    /// The `args` map may contain reserved keys prefixed with `_`. Connectors
+    /// MAY check for these to enable optional optimizations:
+    ///
+    /// - **`_columns`** — A comma-separated list of column names that the caller
+    ///   is interested in (e.g., `"col1,col2,col3"`). Connectors that support
+    ///   column pushdown can use this to fetch only the requested columns,
+    ///   reducing data transfer and processing. Connectors that do not support
+    ///   column pushdown can safely ignore this key.
     async fn data(
         &self,
         location: &DiscoveredLocation,
@@ -422,10 +439,11 @@ fn validate_args_standard(
         }
     }
 
-    // Check for unknown arguments (skip if the source accepts extra args)
+    // Check for unknown arguments (skip if the source accepts extra args).
+    // Keys prefixed with "_" are reserved system keys and always allowed.
     if !signature.accepts_extra_args {
         for key in args.keys() {
-            if !valid_names.contains(key.as_str()) {
+            if !key.starts_with('_') && !valid_names.contains(key.as_str()) {
                 let valid_args = format_arg_list(specs);
                 return Err(format!(
                     "Function '{}' does not accept argument '{}'. Valid arguments: {}",

@@ -151,7 +151,23 @@ See [Data Sources](../guide/sources.md) for details.
 Discovers and attaches new files from defined sources.
 
 ```sql
-FETCH [<pack> | ALL]
+FETCH <pack> <ADD|UPDATE|SYNC> [DRY RUN]
+FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN]
+```
+
+The optional `DRY RUN` modifier shows what would be added, updated, or removed without actually executing any changes. This is useful for previewing the effect of a fetch before committing to it.
+
+**Examples:**
+
+```sql
+-- Preview what a fetch would do
+FETCH base ADD DRY RUN
+
+-- Preview a full sync across all sources
+FETCH ALL SYNC DRY RUN
+
+-- Execute the fetch (no DRY RUN)
+FETCH base ADD
 ```
 
 See [Data Sources](../guide/sources.md) for details.
@@ -246,6 +262,39 @@ DROP TEMP CONNECTOR example.connector
 
 -- Drop temporary logic for a specific platform only
 DROP TEMP CONNECTOR example.connector FOR PLATFORM 'linux/amd64'
+```
+
+### DESCRIBE CONNECTOR
+
+Returns metadata about a registered connector. Shows all entries matching the given name, including runner, logic, platform, and whether the entry is temporary.
+
+```sql
+DESCRIBE CONNECTOR <dotted_name>
+```
+
+The result is a table with the following columns:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `name` | string | Connector name |
+| `runner` | string | Runner type (e.g., `ipc`, `lib`, `python`) |
+| `logic` | string | Logic path or module reference |
+| `platform` | string | Target platform (e.g., `*/*`, `linux/amd64`) |
+| `temporary` | boolean | Whether the entry is runtime-only |
+
+**Example:**
+
+```sql
+DESCRIBE CONNECTOR acme.weather
+```
+
+```
++---------------+--------+---------------------+----------+-----------+
+| name          | runner | logic               | platform | temporary |
++---------------+--------+---------------------+----------+-----------+
+| acme.weather  | ipc    | ./my_connector      | */*      | false     |
+| acme.weather  | python | my_module:MyWeather | */*      | true      |
++---------------+--------+---------------------+----------+-----------+
 ```
 
 ## Indexes

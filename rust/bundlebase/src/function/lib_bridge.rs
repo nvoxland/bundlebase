@@ -63,6 +63,15 @@ pub fn parse_lib_logic(logic: &str) -> Result<(&str, Option<&str>), BundlebaseEr
 static LIB_CACHE: std::sync::LazyLock<Mutex<HashMap<String, Arc<Library>>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Clear the global shared library cache.
+///
+/// Useful for testing or when libraries need to be reloaded.
+pub fn clear_lib_cache() {
+    if let Ok(mut cache) = LIB_CACHE.lock() {
+        cache.clear();
+    }
+}
+
 /// Load a shared library, using a cache to avoid reloading.
 ///
 /// # Safety

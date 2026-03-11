@@ -10,6 +10,12 @@ type Connector interface {
 
 	// Data returns Arrow record batches for the given location.
 	// Return nil for no data.
+	//
+	// The args map may contain reserved keys prefixed with "_".
+	// Currently defined:
+	//   - "_columns": comma-separated column names the caller wants.
+	//     Connectors that support column pushdown can parse this to
+	//     return only the requested columns. It is safe to ignore.
 	Data(location Location, args map[string]string) ([]arrow.Record, error)
 }
 

@@ -9,6 +9,7 @@ use crate::bundle::function_definition::FunctionEntry;
 use crate::NamespacedName;
 use crate::function::ipc_bridge::{invoke_ipc_scalar, SubprocessCache};
 use crate::function::lib_bridge::{invoke_lib_scalar, parse_lib_logic};
+use crate::function::parse_python_logic;
 use crate::function::python_bridge::get_python_function_bridge;
 use crate::BundlebaseError;
 use arrow::array::ArrayRef;
@@ -166,19 +167,6 @@ impl ScalarUDFImpl for ScalarFunction {
         invoke_entry(&self.name, entry, &args, &self.subprocess_cache)
     }
 
-}
-
-/// Parse a Python logic string in `"module:function"` format.
-fn parse_python_logic(logic: &str) -> datafusion::common::Result<(&str, &str)> {
-    let parts: Vec<&str> = logic.rsplitn(2, ':').collect();
-    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
-        return Err(datafusion::common::DataFusionError::Execution(format!(
-            "Invalid Python function logic '{}'. Expected 'module:function' format.",
-            logic
-        )));
-    }
-    // rsplitn reverses order
-    Ok((parts[1], parts[0]))
 }
 
 /// Invoke a Python function via the registered bridge.

@@ -55,6 +55,8 @@ def _serve(source: Connector, stdin: IO[bytes], stdout: IO[bytes]) -> None:
         try:
             if method == "handshake":
                 write_response(stdout, req_id, {"protocol_version": "1"})
+            elif method == "ping":
+                write_response(stdout, req_id, "pong")
             elif method == "discover":
                 _handle_discover(source, req_id, params, stdout)
             elif method == "data":

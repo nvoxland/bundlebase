@@ -120,6 +120,8 @@ func handleFunctionRequest(provider FunctionProvider, store *stateStore, req jso
 	switch req.Method {
 	case "handshake":
 		writeResponse(w, req.ID, map[string]string{"protocol_version": "1"})
+	case "ping":
+		writeResponse(w, req.ID, "pong")
 	case "manifest":
 		manifest := provider.Metadata()
 		writeResponse(w, req.ID, manifest)

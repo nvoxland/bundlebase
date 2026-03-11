@@ -82,12 +82,19 @@ pub struct FetchCommand {
     pub pack: String,
     /// Sync mode for the fetch operation
     pub mode: SyncMode,
+    /// If true, only compute what would change without actually executing
+    pub dry_run: bool,
 }
 
 impl FetchCommand {
     /// Create a new FetchCommand.
     pub fn new(pack: String, mode: SyncMode) -> Self {
-        Self { pack, mode }
+        Self { pack, mode, dry_run: false }
+    }
+
+    /// Create a new FetchCommand with dry_run flag.
+    pub fn new_with_dry_run(pack: String, mode: SyncMode, dry_run: bool) -> Self {
+        Self { pack, mode, dry_run }
     }
 }
 
@@ -99,6 +106,7 @@ impl CommandParsing for FetchCommand {
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut pack = None;
         let mut mode = None;
+        let mut dry_run = false;
 
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
@@ -108,6 +116,9 @@ impl CommandParsing for FetchCommand {
                 Rule::fetch_mode => {
                     mode = Some(SyncMode::from_arg(inner_pair.as_str())?);
                 }
+                Rule::fetch_dry_run => {
+                    dry_run = true;
+                }
                 _ => {}
             }
         }
@@ -115,11 +126,15 @@ impl CommandParsing for FetchCommand {
         let pack = pack.ok_or_else(|| BundlebaseError::from("FETCH statement missing pack name"))?;
         let mode = mode.ok_or_else(|| BundlebaseError::from("FETCH statement missing mode"))?;
 
-        Ok(FetchCommand::new(pack, mode))
+        Ok(FetchCommand::new_with_dry_run(pack, mode, dry_run))
     }
 
     fn to_statement(&self) -> String {
-        format!("FETCH {} {}", self.pack, self.mode)
+        if self.dry_run {
+            format!("FETCH {} {} DRY RUN", self.pack, self.mode)
+        } else {
+            format!("FETCH {} {}", self.pack, self.mode)
+        }
     }
 }
 
@@ -153,12 +168,19 @@ impl BundleBuilderCommand for FetchCommand {
 pub struct FetchAllCommand {
     /// Sync mode for the fetch operation
     pub mode: SyncMode,
+    /// If true, only compute what would change without actually executing
+    pub dry_run: bool,
 }
 
 impl FetchAllCommand {
     /// Create a new FetchAllCommand.
     pub fn new(mode: SyncMode) -> Self {
-        Self { mode }
+        Self { mode, dry_run: false }
+    }
+
+    /// Create a new FetchAllCommand with dry_run flag.
+    pub fn new_with_dry_run(mode: SyncMode, dry_run: bool) -> Self {
+        Self { mode, dry_run }
     }
 }
 
@@ -169,19 +191,30 @@ impl CommandParsing for FetchAllCommand {
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut mode = None;
+        let mut dry_run = false;
         for inner_pair in pair.into_inner() {
-            if inner_pair.as_rule() == Rule::fetch_mode {
-                mode = Some(SyncMode::from_arg(inner_pair.as_str())?);
+            match inner_pair.as_rule() {
+                Rule::fetch_mode => {
+                    mode = Some(SyncMode::from_arg(inner_pair.as_str())?);
+                }
+                Rule::fetch_dry_run => {
+                    dry_run = true;
+                }
+                _ => {}
             }
         }
 
         let mode = mode.ok_or_else(|| BundlebaseError::from("FETCH ALL statement missing mode"))?;
 
-        Ok(FetchAllCommand::new(mode))
+        Ok(FetchAllCommand::new_with_dry_run(mode, dry_run))
     }
 
     fn to_statement(&self) -> String {
-        format!("FETCH ALL {}", self.mode)
+        if self.dry_run {
+            format!("FETCH ALL {} DRY RUN", self.mode)
+        } else {
+            format!("FETCH ALL {}", self.mode)
+        }
     }
 }
 

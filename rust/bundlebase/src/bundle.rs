@@ -882,6 +882,14 @@ impl Bundle {
                 let agg = AggregateFunction::new_composite(overloads, Arc::clone(&self.subprocess_cache))?;
                 self.ctx.register_udaf(AggregateUDF::from(agg));
             }
+            FunctionKind::TableValued => {
+                // Table-valued functions are registered for definition/metadata purposes
+                // but execution is not yet implemented. Log a warning and skip UDF registration.
+                tracing::warn!(
+                    "Table-valued function '{}' registered but execution is not yet supported",
+                    name
+                );
+            }
         }
         Ok(())
     }
@@ -1510,6 +1518,10 @@ impl BundleFacade for Bundle {
         self.config.set(scope, key, value, crate::bundle_config::ConfigSource::Runtime)?;
         self.refresh_data_dir().await?;
         Ok(())
+    }
+
+    fn connector_entries(&self) -> Vec<connector_definition::ConnectorEntry> {
+        self.connector_entries.read().clone()
     }
 
     fn ctx(&self) -> Arc<SessionContext> {
