@@ -61,14 +61,7 @@ impl ReplaceBlockOp {
         let new_version = adapter.read_version().await?;
 
         // Compute hash from the new location
-        // function:// URLs don't support file-based hash, use version-based hash instead
-        // todo: do this right
-        let new_hash = if new_location.starts_with("function://") {
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(new_version.as_bytes());
-            hex::encode(hasher.finalize())
-        } else {
+        let new_hash = {
             let file = readable_file_from_path(new_location, builder.data_dir(), builder.config()).await?;
             file.compute_hash().await?
         };

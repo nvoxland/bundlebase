@@ -218,10 +218,10 @@ class TestAggregateLifecycle:
             # Step 1: create_state
             _make_request("create_state", {"function": "my_sum"}, req_id=1)
             # Step 2: accumulate
-            + _make_request("accumulate", {"function": "my_sum", "state_id": "0"}, req_id=2)
+            + _make_request("accumulate", {"function": "my_sum", "state_id": "state_1"}, req_id=2)
             + arrow_frame
             # Step 3: evaluate
-            + _make_request("evaluate", {"function": "my_sum", "state_id": "0"}, req_id=3)
+            + _make_request("evaluate", {"function": "my_sum", "state_id": "state_1"}, req_id=3)
             + _make_request("shutdown", req_id=4)
         )
         stdout = io.BytesIO()
@@ -232,7 +232,7 @@ class TestAggregateLifecycle:
         # create_state response
         resp, offset = _read_response(out)
         assert resp["id"] == 1
-        assert resp["result"]["state_id"] == "0"
+        assert resp["result"]["state_id"] == "state_1"
 
         # accumulate ack
         resp, offset = _read_response(out, offset)
@@ -261,14 +261,14 @@ class TestAggregateLifecycle:
             _make_request("create_state", {"function": "my_sum"}, req_id=1)
             + _make_request("create_state", {"function": "my_sum"}, req_id=2)
             # Accumulate into each
-            + _make_request("accumulate", {"function": "my_sum", "state_id": "0"}, req_id=3)
+            + _make_request("accumulate", {"function": "my_sum", "state_id": "state_1"}, req_id=3)
             + frame1
-            + _make_request("accumulate", {"function": "my_sum", "state_id": "1"}, req_id=4)
+            + _make_request("accumulate", {"function": "my_sum", "state_id": "state_2"}, req_id=4)
             + frame2
             # Merge
-            + _make_request("merge", {"function": "my_sum", "state_id1": "0", "state_id2": "1"}, req_id=5)
-            # Evaluate merged state (id "2" since it's the third created state)
-            + _make_request("evaluate", {"function": "my_sum", "state_id": "2"}, req_id=6)
+            + _make_request("merge", {"function": "my_sum", "state_id1": "state_1", "state_id2": "state_2"}, req_id=5)
+            # Evaluate merged state (id "state_3" since it's the third created state)
+            + _make_request("evaluate", {"function": "my_sum", "state_id": "state_3"}, req_id=6)
             + _make_request("shutdown", req_id=7)
         )
         stdout = io.BytesIO()
@@ -278,9 +278,9 @@ class TestAggregateLifecycle:
 
         # create_state responses
         resp, offset = _read_response(out)
-        assert resp["result"]["state_id"] == "0"
+        assert resp["result"]["state_id"] == "state_1"
         resp, offset = _read_response(out, offset)
-        assert resp["result"]["state_id"] == "1"
+        assert resp["result"]["state_id"] == "state_2"
 
         # accumulate acks
         resp, offset = _read_response(out, offset)
@@ -292,7 +292,7 @@ class TestAggregateLifecycle:
         resp, offset = _read_response(out, offset)
         assert resp["id"] == 5
         merged_id = resp["result"]["state_id"]
-        assert merged_id == "2"
+        assert merged_id == "state_3"
 
         # evaluate ack
         resp, offset = _read_response(out, offset)
@@ -336,8 +336,12 @@ class TestStateTTLCleanup:
 
 
 class TestErrorHandling:
-    def test_invoke_exception_returns_error(self):
-        """When a function raises, the serve loop returns a JSON-RPC error."""
+    def test_invoke_exception_returns_empty_arrow_ipc(self):
+        """When a function raises after ack, empty Arrow IPC is returned (not JSON error).
+
+        This prevents protocol desync: after the ack, the host expects Arrow IPC,
+        so errors must be written as empty Arrow IPC frames.
+        """
         input_batch = pa.record_batch({"x": pa.array([1], type=pa.int64())})
         arrow_frame = _make_arrow_ipc(input_batch)
 
@@ -355,22 +359,15 @@ class TestErrorHandling:
         assert resp["id"] == 1
         assert resp["result"]["ok"] is True
 
-        # The error is caught at the top level, but since the ack was already sent
-        # and the Arrow read happened, the exception occurs during invoke.
-        # The function_serve loop catches it as a general Exception and writes an error.
-        # However, looking at the code: the invoke ack is sent first, then Arrow is read,
-        # then func.invoke is called. If func.invoke raises, the exception propagates
-        # up to the main try/except which writes an error response.
-        # But wait -- the ack was already written for req_id=1. The error gets written
-        # as a *second* response for the same request. Let's check what actually happens.
-        #
-        # Actually, looking at _handle_invoke: write_response(ack) then read arrow then
-        # func.invoke. If func.invoke raises, it propagates to the except in _serve_function
-        # which calls write_error with the same req_id. So we get TWO responses for req_id=1.
-        resp2, offset = _read_response(out, offset)
-        assert resp2["id"] == 1
-        assert "error" in resp2
-        assert "invoke failed on purpose" in resp2["error"]["message"]
+        # After ack, the error is written as an empty Arrow IPC frame (zero-length prefix)
+        # instead of a JSON error, keeping the protocol in sync.
+        table, offset = _read_arrow_frame(out, offset)
+        assert table is None  # empty Arrow frame
+
+        # The serve loop should continue working — verify shutdown response
+        resp, offset = _read_response(out, offset)
+        assert resp["id"] == 2
+        assert resp["result"]["ok"] is True
 
     def test_unknown_method_returns_error(self):
         stdin = io.BytesIO(
@@ -398,8 +395,12 @@ class TestErrorHandling:
         assert resp["error"]["code"] == -32700
         assert "Parse error" in resp["error"]["message"]
 
-    def test_evaluate_unknown_state_returns_error(self):
-        """Evaluating a non-existent state ID returns an error."""
+    def test_evaluate_unknown_state_returns_empty_arrow_ipc(self):
+        """Evaluating a non-existent state ID returns empty Arrow IPC after ack.
+
+        After the ack, the host expects Arrow IPC, so errors must be written as
+        empty Arrow IPC frames to avoid protocol desync.
+        """
         stdin = io.BytesIO(
             _make_request("evaluate", {"function": "my_sum", "state_id": "999"}, req_id=1)
             + _make_request("shutdown", req_id=2)
@@ -413,10 +414,14 @@ class TestErrorHandling:
         assert resp["id"] == 1
         assert resp["result"]["ok"] is True
 
-        # Then the error for the unknown state
-        resp2, _ = _read_response(out, offset)
-        assert "error" in resp2
-        assert "Unknown state ID" in resp2["error"]["message"]
+        # After ack, empty Arrow IPC frame (not a JSON error)
+        table, offset = _read_arrow_frame(out, offset)
+        assert table is None
+
+        # Serve loop continues working
+        resp, offset = _read_response(out, offset)
+        assert resp["id"] == 2
+        assert resp["result"]["ok"] is True
 
 
 # ======================== Multiple Functions Tests ========================

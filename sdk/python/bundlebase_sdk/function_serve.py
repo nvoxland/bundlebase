@@ -55,8 +55,8 @@ class _AggregateStateStore:
 
     def create(self, state: object) -> str:
         with self._lock:
-            state_id = str(self._next_id)
             self._next_id += 1
+            state_id = f"state_{self._next_id}"
             self._states[state_id] = (state, time.monotonic())
             return state_id
 
@@ -162,34 +162,41 @@ def _handle_invoke(
     # Acknowledge the request
     write_response(stdout, req_id, {"ok": True})
 
-    # Read input Arrow IPC
-    batches = _read_arrow_ipc(stdin)
-    if not batches:
-        # No input data — write empty output
+    # After ack, the host expects Arrow IPC — errors must be written as empty
+    # Arrow IPC, not JSON, to avoid protocol desync.
+    try:
+        # Read input Arrow IPC
+        batches = _read_arrow_ipc(stdin)
+        if not batches:
+            # No input data — write empty output
+            write_arrow_ipc(stdout, [])
+            return
+
+        # Invoke the function with the input batch
+        input_batch = batches[0]
+        result_batch = func.invoke(func_name, input_batch)
+
+        # Write output Arrow IPC
+        if isinstance(result_batch, pa.RecordBatch):
+            write_arrow_ipc(stdout, [result_batch])
+        elif isinstance(result_batch, pa.Array):
+            # Wrap single array in a RecordBatch
+            rb = pa.record_batch({"result": result_batch})
+            write_arrow_ipc(stdout, [rb])
+        elif isinstance(result_batch, dict):
+            # Dict return requires schema() to be defined
+            schema = func.schema()
+            batches = normalize_to_batches(result_batch, schema)
+            write_arrow_ipc(stdout, batches)
+        else:
+            raise TypeError(
+                f"Function '{func_name}' must return pa.RecordBatch, pa.Array, or dict, "
+                f"got {type(result_batch)}"
+            )
+    except Exception as e:
+        import sys as _sys
+        print(f"function '{func_name}' invoke error: {e}", file=_sys.stderr)
         write_arrow_ipc(stdout, [])
-        return
-
-    # Invoke the function with the input batch
-    input_batch = batches[0]
-    result_batch = func.invoke(func_name, input_batch)
-
-    # Write output Arrow IPC
-    if isinstance(result_batch, pa.RecordBatch):
-        write_arrow_ipc(stdout, [result_batch])
-    elif isinstance(result_batch, pa.Array):
-        # Wrap single array in a RecordBatch
-        rb = pa.record_batch({"result": result_batch})
-        write_arrow_ipc(stdout, [rb])
-    elif isinstance(result_batch, dict):
-        # Dict return requires schema() to be defined
-        schema = func.schema()
-        batches = normalize_to_batches(result_batch, schema)
-        write_arrow_ipc(stdout, batches)
-    else:
-        raise TypeError(
-            f"Function '{func_name}' must return pa.RecordBatch, pa.Array, or dict, "
-            f"got {type(result_batch)}"
-        )
 
 
 def _handle_create_state(
@@ -219,17 +226,23 @@ def _handle_accumulate(
     # Acknowledge the request
     write_response(stdout, req_id, {"ok": True})
 
-    # Read input Arrow IPC batch
-    batches = _read_arrow_ipc(stdin)
-    if not batches:
-        return
+    # After ack, the host sends Arrow IPC — errors must not propagate to the
+    # JSON error handler or we'll desync the protocol.
+    try:
+        # Read input Arrow IPC batch
+        batches = _read_arrow_ipc(stdin)
+        if not batches:
+            return
 
-    state = state_store.get(state_id)
-    if state is None:
-        raise ValueError(f"Unknown state ID '{state_id}' for function '{func_name}'")
+        state = state_store.get(state_id)
+        if state is None:
+            raise ValueError(f"Unknown state ID '{state_id}' for function '{func_name}'")
 
-    updated_state = func.accumulate(func_name, state, batches[0])
-    state_store.put(state_id, updated_state)
+        updated_state = func.accumulate(func_name, state, batches[0])
+        state_store.put(state_id, updated_state)
+    except Exception as e:
+        import sys as _sys
+        print(f"function '{func_name}' accumulate error: {e}", file=_sys.stderr)
 
 
 def _handle_merge(
@@ -266,22 +279,29 @@ def _handle_evaluate(
     # Acknowledge, then send Arrow IPC result
     write_response(stdout, req_id, {"ok": True})
 
-    state = state_store.get(state_id)
-    if state is None:
-        raise ValueError(f"Unknown state ID '{state_id}' for evaluate '{func_name}'")
+    # After ack, the host expects Arrow IPC — errors must be written as empty
+    # Arrow IPC, not JSON, to avoid protocol desync.
+    try:
+        state = state_store.get(state_id)
+        if state is None:
+            raise ValueError(f"Unknown state ID '{state_id}' for evaluate '{func_name}'")
 
-    result = func.evaluate(func_name, state)
+        result = func.evaluate(func_name, state)
 
-    # Encode result as Arrow IPC (single-row, single-column)
-    if isinstance(result, pa.Scalar):
-        arr = pa.array([result.as_py()], type=result.type)
-    else:
-        arr = pa.array([result])
-    rb = pa.record_batch({"result": arr})
-    write_arrow_ipc(stdout, [rb])
+        # Encode result as Arrow IPC (single-row, single-column)
+        if isinstance(result, pa.Scalar):
+            arr = pa.array([result.as_py()], type=result.type)
+        else:
+            arr = pa.array([result])
+        rb = pa.record_batch({"result": arr})
+        write_arrow_ipc(stdout, [rb])
 
-    # Clean up state after evaluation
-    state_store.remove(state_id)
+        # Clean up state after evaluation
+        state_store.remove(state_id)
+    except Exception as e:
+        import sys as _sys
+        print(f"function '{func_name}' evaluate error: {e}", file=_sys.stderr)
+        write_arrow_ipc(stdout, [])
 
 
 def _build_manifest(func: Function) -> str:

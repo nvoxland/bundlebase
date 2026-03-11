@@ -266,20 +266,6 @@ impl BundleBuilderCommand for VerifyDataCommand {
 
         // Process each block
         for (block_id, location, expected_hash, current_version) in blocks_to_verify {
-            // Skip function:// URLs (generated data has no file to verify)
-            if location.starts_with("function://") {
-                results.push(FileVerificationResult {
-                    location,
-                    file_type: "data".to_string(),
-                    expected_hash: None,
-                    actual_hash: None,
-                    passed: true,
-                    error: None,
-                    version_updated: false,
-                });
-                continue;
-            }
-
             // Compute the actual hash
             let data_dir = builder.bundle().data_dir();
             let file = match readable_file_from_path(&location, data_dir, config.clone()).await {

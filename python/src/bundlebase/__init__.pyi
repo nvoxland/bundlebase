@@ -631,7 +631,7 @@ class PyBundleBuilder:
         Supports CSV, JSON, Parquet files.
 
         Args:
-            location: Data file location (e.g., "data.csv", "data.parquet", "function://my_data")
+            location: Data file location (e.g., "data.csv", "data.parquet")
             pack: Pack to attach to - "base" for the base pack, or a join name for joined data
 
         Returns:
