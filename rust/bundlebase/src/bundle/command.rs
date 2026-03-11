@@ -74,6 +74,7 @@ pub use builder::{FileVerificationResult, VerificationResults};
 
 // Re-export facade command structs
 pub use facade::DescribeConnectorCommand;
+pub use facade::DescribeFunctionCommand;
 pub use facade::ImportTempConnectorCommand;
 pub use facade::ImportTempFunctionCommand;
 pub use facade::DropTempConnectorCommand;
@@ -89,6 +90,8 @@ pub use facade::SetConfigCommand;
 pub enum FacadeCommand {
     /// Describe a registered connector's metadata
     DescribeConnector(DescribeConnectorCommand),
+    /// Describe a registered function's metadata
+    DescribeFunction(DescribeFunctionCommand),
     /// Load a temporary connector with runtime-only logic (not persisted)
     ImportTempConnector(ImportTempConnectorCommand),
     /// Load a temporary function with runtime-only logic (not persisted)
@@ -111,6 +114,10 @@ impl FacadeCommand {
     ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         match self {
             FacadeCommand::DescribeConnector(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::DescribeFunction(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
@@ -145,6 +152,7 @@ impl FacadeCommand {
     pub fn output_schema(&self) -> SchemaRef {
         match self {
             FacadeCommand::DescribeConnector(_) => DescribeConnectorCommand::output_schema(),
+            FacadeCommand::DescribeFunction(_) => DescribeFunctionCommand::output_schema(),
             FacadeCommand::ImportTempConnector(_) => ImportTempConnectorCommand::output_schema(),
             FacadeCommand::ImportTempFunction(_) => ImportTempFunctionCommand::output_schema(),
             FacadeCommand::DropTempConnector(_) => DropTempConnectorCommand::output_schema(),
@@ -158,6 +166,7 @@ impl FacadeCommand {
     pub fn output_shape(&self) -> OutputShape {
         match self {
             FacadeCommand::DescribeConnector(_) => DescribeConnectorCommand::output_shape(),
+            FacadeCommand::DescribeFunction(_) => DescribeFunctionCommand::output_shape(),
             FacadeCommand::ImportTempConnector(_) => ImportTempConnectorCommand::output_shape(),
             FacadeCommand::ImportTempFunction(_) => ImportTempFunctionCommand::output_shape(),
             FacadeCommand::DropTempConnector(_) => DropTempConnectorCommand::output_shape(),
@@ -176,6 +185,7 @@ impl BundleCommand {
     pub fn into_facade_command(self) -> Result<FacadeCommand, BundlebaseError> {
         match self {
             BundleCommand::DescribeConnector(cmd) => Ok(FacadeCommand::DescribeConnector(cmd)),
+            BundleCommand::DescribeFunction(cmd) => Ok(FacadeCommand::DescribeFunction(cmd)),
             BundleCommand::ImportTempConnector(cmd) => Ok(FacadeCommand::ImportTempConnector(cmd)),
             BundleCommand::ImportTempFunction(cmd) => Ok(FacadeCommand::ImportTempFunction(cmd)),
             BundleCommand::DropTempConnector(cmd) => Ok(FacadeCommand::DropTempConnector(cmd)),
@@ -217,7 +227,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::DescribeConnector(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
+                    BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -231,7 +241,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
+        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
     }
 }
 
@@ -534,6 +544,7 @@ register_commands! {
     }
     facade {
         DescribeConnector(DescribeConnectorCommand) => Rule::describe_connector_stmt,
+        DescribeFunction(DescribeFunctionCommand) => Rule::describe_function_stmt,
         ImportTempConnector(ImportTempConnectorCommand) => Rule::import_temp_connector_stmt,
         ImportTempFunction(ImportTempFunctionCommand) => Rule::import_temp_function_stmt,
         DropTempConnector(DropTempConnectorCommand) => Rule::drop_temp_connector_stmt,

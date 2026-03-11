@@ -30,14 +30,14 @@ public class FunctionServeTest {
 
     static class DoubleVal implements Function.ScalarFunction {
         @Override
-        public FieldVector invoke(List<FieldVector> args) {
-            BigIntVector input = (BigIntVector) args.get(0);
+        public FieldVector invoke(VectorSchemaRoot input) {
+            BigIntVector col = (BigIntVector) input.getVector(0);
             BigIntVector result = new BigIntVector("result", new RootAllocator());
-            result.allocateNew(input.getValueCount());
-            for (int i = 0; i < input.getValueCount(); i++) {
-                result.setSafe(i, input.get(i) * 2);
+            result.allocateNew(col.getValueCount());
+            for (int i = 0; i < col.getValueCount(); i++) {
+                result.setSafe(i, col.get(i) * 2);
             }
-            result.setValueCount(input.getValueCount());
+            result.setValueCount(col.getValueCount());
             return result;
         }
     }
@@ -51,11 +51,11 @@ public class FunctionServeTest {
         }
 
         @Override
-        public Long accumulate(Long state, List<FieldVector> args) {
-            BigIntVector input = (BigIntVector) args.get(0);
+        public Long accumulate(Long state, VectorSchemaRoot input) {
+            BigIntVector col = (BigIntVector) input.getVector(0);
             long sum = state;
-            for (int i = 0; i < input.getValueCount(); i++) {
-                sum += input.get(i);
+            for (int i = 0; i < col.getValueCount(); i++) {
+                sum += col.get(i);
             }
             return sum;
         }
@@ -268,7 +268,7 @@ public class FunctionServeTest {
         input.write(makeRequest("accumulate", Map.of("function", "my_sum", "state_id", "state_2"), 4));
         input.write(ipcData2);
         // Merge state_2 into state_1
-        input.write(makeRequest("merge", Map.of("function", "my_sum", "state_id_a", "state_1", "state_id_b", "state_2"), 5));
+        input.write(makeRequest("merge", Map.of("function", "my_sum", "state_id1", "state_1", "state_id2", "state_2"), 5));
         // Evaluate merged state
         input.write(makeRequest("evaluate", Map.of("function", "my_sum", "state_id", "state_1"), 6));
         input.write(makeRequest("shutdown", null, 7));
@@ -279,11 +279,16 @@ public class FunctionServeTest {
         byte[] out = output.toByteArray();
         String[] lines = output.toString().split("\n");
 
-        // Responses 1-5 should all succeed
-        for (int i = 0; i < 5; i++) {
+        // Responses 1-4 should all succeed
+        for (int i = 0; i < 4; i++) {
             JsonNode resp = MAPPER.readTree(lines[i]);
             assertNull("Response " + i + " should not have error: " + lines[i], resp.get("error"));
         }
+
+        // Response 5: merge should return state_id
+        JsonNode mergeResp = MAPPER.readTree(lines[4]);
+        assertNull("Merge should not have error: " + lines[4], mergeResp.get("error"));
+        assertEquals("state_1", mergeResp.get("result").get("state_id").asText());
 
         // Response 6: evaluate (after merge)
         JsonNode evalResp = MAPPER.readTree(lines[5]);
@@ -372,13 +377,15 @@ public class FunctionServeTest {
     }
 
     @Test
-    public void testStateStoreCleanup() {
+    public void testStateStoreCleanup() throws Exception {
         FunctionServe.StateStore store = new FunctionServe.StateStore();
         String id = store.add("test_state");
         assertNotNull(store.get(id));
 
-        // Cleanup with 0 TTL should remove all entries
-        store.cleanup(0);
+        // Wait a moment so the TTL check can expire with a very short TTL
+        Thread.sleep(10);
+        // Cleanup with 1ms TTL should remove entries older than 1ms
+        store.cleanup(1);
         assertNull(store.get(id));
     }
 }

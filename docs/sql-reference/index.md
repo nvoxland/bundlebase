@@ -506,6 +506,42 @@ Removes runtime-only function logic. Optionally filter by platform.
 DROP TEMP FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
 ```
 
+### DESCRIBE FUNCTION
+
+Returns metadata about a registered function. Shows all entries matching the given name, including kind, input/return types, runner, logic, platform, and whether the entry is temporary.
+
+```sql
+DESCRIBE FUNCTION <dotted_name>
+```
+
+The result is a table with the following columns:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `name` | string | Function name |
+| `kind` | string | Function kind (`scalar`, `aggregate`, `table_valued`) |
+| `input_types` | string | Comma-separated Arrow input types (e.g., `Int64, Utf8`) |
+| `return_type` | string | Arrow return type (e.g., `Int64`) |
+| `runner` | string | Runner type (e.g., `ipc`, `lib`, `python`) |
+| `logic` | string | Logic path or module reference |
+| `platform` | string | Target platform (e.g., `*/*`, `linux/amd64`) |
+| `temporary` | boolean | Whether the entry is runtime-only |
+
+**Example:**
+
+```sql
+DESCRIBE FUNCTION acme.double_val
+```
+
+```
++------------------+--------+-------------+-------------+--------+-------------------------+----------+-----------+
+| name             | kind   | input_types | return_type | runner | logic                   | platform | temporary |
++------------------+--------+-------------+-------------+--------+-------------------------+----------+-----------+
+| acme.double_val  | scalar | Int64       | Int64       | ipc    | ./my_funcs              | */*      | false     |
+| acme.double_val  | scalar | Int64       | Int64       | python | my_module:double_val    | */*      | true      |
++------------------+--------+-------------+-------------+--------+-------------------------+----------+-----------+
+```
+
 ### Wildcard Function Discovery
 
 Discovers and registers all functions exported by a shared library or IPC executable in a single command using the wildcard `namespace.*` syntax. Uses the manifest discovery protocol.

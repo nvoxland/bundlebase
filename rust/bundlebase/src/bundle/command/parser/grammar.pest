@@ -5,12 +5,15 @@
 // recognized by sqlparser-rs. Standard SQL continues to use sqlparser-rs.
 //
 // Operations covered:
-// - FILTER WHERE <condition>
-// - ATTACH '<path>' [AS <name>] [WITH (...)]
-// - [join_type] JOIN AS <name> ON <expression>
-// - REINDEX [ON data(<column>)]
-// - CREATE SOURCE <function> WITH (...) [ON <pack>]
-// - FETCH
+// - Data: FILTER, ATTACH, DETACH, REPLACE
+// - Schema: JOIN, DROP JOIN, RENAME JOIN, ADD/DROP/RENAME/CAST COLUMN,
+//           CREATE/DROP/RENAME VIEW
+// - Sources: IMPORT [TEMP] CONNECTOR/FUNCTION, DROP [TEMP] CONNECTOR/FUNCTION,
+//            CREATE SOURCE, FETCH
+// - Indexes: CREATE/DROP/REBUILD INDEX, REINDEX
+// - Transactions: COMMIT, RESET, UNDO, VERIFY DATA, EXPLAIN
+// - Metadata: DESCRIBE CONNECTOR, DESCRIBE FUNCTION,
+//             SET NAME/DESCRIPTION/CONFIG, SAVE CONFIG
 // ============================================================================
 
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
@@ -87,6 +90,7 @@ transaction_stmt = {
 // Metadata statements - operations for bundle metadata
 metadata_stmt = {
     describe_connector_stmt
+    | describe_function_stmt
     | set_name_stmt
     | set_description_stmt
     | set_config_stmt
@@ -609,4 +613,14 @@ explain_sql = @{
 
 describe_connector_stmt = {
     ^"describe" ~ ^"connector" ~ dotted_identifier
+}
+
+// ============================================================================
+// DESCRIBE FUNCTION Statement
+// ============================================================================
+// Syntax: DESCRIBE FUNCTION <dotted_name>
+// Example: DESCRIBE FUNCTION acme.double_val
+
+describe_function_stmt = {
+    ^"describe" ~ ^"function" ~ dotted_identifier
 }

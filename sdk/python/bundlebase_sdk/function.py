@@ -1,6 +1,7 @@
 """Abstract base class for IPC-based functions."""
 
 from abc import ABC, abstractmethod
+from typing import Union
 
 import pyarrow as pa
 
@@ -19,7 +20,7 @@ class Function(ABC):
     @abstractmethod
     def invoke(
         self, name: str, batch: pa.RecordBatch
-    ) -> pa.RecordBatch:
+    ) -> Union[pa.RecordBatch, pa.Array, dict]:
         """Invoke a scalar function.
 
         Args:
@@ -27,9 +28,21 @@ class Function(ABC):
             batch: Input RecordBatch with one column per argument.
 
         Returns:
-            A single-column RecordBatch with the result.
+            A single-column RecordBatch, a PyArrow Array, or a dict
+            of column-oriented data (requires schema() to be defined).
         """
         ...
+
+    def schema(self) -> dict[str, str] | None:
+        """Optional schema for dict return types.
+
+        If invoke() returns a dict, this method must return a schema
+        mapping column names to Arrow type strings.
+
+        Returns:
+            Dict mapping column names to type strings, or None.
+        """
+        return None
 
     @abstractmethod
     def functions(self) -> list[dict]:

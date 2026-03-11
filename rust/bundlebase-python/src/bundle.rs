@@ -410,6 +410,43 @@ impl PyBundle {
         })
     }
 
+    /// Describe a registered function's metadata.
+    ///
+    /// Returns a record batch stream with columns: name, kind, input_types,
+    /// return_type, runner, logic, platform, temporary.
+    fn describe_function<'py>(
+        &self,
+        name: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let sql = format!("DESCRIBE FUNCTION {}", name);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let stream = inner
+                .query(&sql, vec![])
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to describe function: {}",
+                        e
+                    ))
+                })?;
+            let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    super::record_batch_stream::PyRecordBatchStream::new(stream, schema),
+                )
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Failed to create stream: {}",
+                        e
+                    ))
+                })
+            })
+        })
+    }
+
     /// Set temporary (runtime-only) connector logic for a connector.
     ///
     /// Load a temporary connector with runtime-only logic (not persisted).

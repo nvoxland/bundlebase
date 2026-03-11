@@ -353,6 +353,22 @@ class SyncBundle:
         return SyncQueryResult(async_result)
 
 
+    def describe_function(self, name: str) -> "SyncQueryResult":
+        """Describe a registered function's metadata.
+
+        Returns a table with columns: name, kind, input_types, return_type,
+        runner, logic, platform, temporary.
+
+        Args:
+            name: Dotted function name (e.g., "acme.double_val")
+
+        Returns:
+            SyncQueryResult with function metadata
+        """
+        coro = _call_original_method(self._async, "describe_function", name)
+        async_result = _loop_manager.run_sync(coro)
+        return SyncQueryResult(async_result)
+
     def import_temp_connector(
         self, name: str, runner: str, logic: str,
         platform: str = "*/*"
@@ -385,7 +401,7 @@ class SyncBundle:
 
     def drop_temp_connector(
         self, name: str, platform: str = None
-    ) -> "SyncBundle":
+    ) -> str:
         """Drop temporary (runtime-only) connector for a connector definition.
 
         Args:
@@ -393,13 +409,12 @@ class SyncBundle:
             platform: Optional platform filter (e.g., "linux/amd64"). None drops all.
 
         Returns:
-            Self for fluent chaining
+            Message describing what was dropped
         """
         coro = _call_original_method(
             self._async, "drop_temp_connector", name, platform
         )
-        _loop_manager.run_sync(coro)
-        return self
+        return _loop_manager.run_sync(coro)
 
     def import_temp_function(
         self, name: str, input_types: List[str], return_type: str,
@@ -437,7 +452,7 @@ class SyncBundle:
 
     def drop_temp_function(
         self, name: str, platform: str = None
-    ) -> "SyncBundle":
+    ) -> str:
         """Drop a temporary function.
 
         Args:
@@ -445,13 +460,12 @@ class SyncBundle:
             platform: Optional platform filter. None drops all.
 
         Returns:
-            Self for fluent chaining
+            Message describing what was dropped
         """
         coro = _call_original_method(
             self._async, "drop_temp_function", name, platform
         )
-        _loop_manager.run_sync(coro)
-        return self
+        return _loop_manager.run_sync(coro)
 
 
 class SyncBundleBuilder(SyncBundle):
@@ -673,6 +687,22 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def describe_function(self, name: str) -> "SyncQueryResult":
+        """Describe a registered function's metadata.
+
+        Returns a table with columns: name, kind, input_types, return_type,
+        runner, logic, platform, temporary.
+
+        Args:
+            name: Dotted function name (e.g., "acme.double_val")
+
+        Returns:
+            SyncQueryResult with function metadata
+        """
+        coro = _call_original_method(self._async, "describe_function", name)
+        async_result = _loop_manager.run_sync(coro)
+        return SyncQueryResult(async_result)
+
     def import_temp_connector(
         self, name: str, runner: str, logic: str,
         platform: str = "*/*"
@@ -724,7 +754,7 @@ class SyncBundleBuilder(SyncBundle):
 
     def drop_temp_connector(
         self, name: str, platform: str = None
-    ) -> "SyncBundleBuilder":
+    ) -> str:
         """Drop temporary (runtime-only) connector for a connector definition.
 
         Args:
@@ -732,13 +762,29 @@ class SyncBundleBuilder(SyncBundle):
             platform: Optional platform filter (e.g., "linux/amd64"). None drops all.
 
         Returns:
-            Self for fluent chaining
+            Message describing what was dropped
         """
         coro = _call_original_method(
             self._async, "drop_temp_connector", name, platform
         )
-        _loop_manager.run_sync(coro)
-        return self
+        return _loop_manager.run_sync(coro)
+
+    def drop_temp_function(
+        self, name: str, platform: str = None
+    ) -> str:
+        """Drop a temporary function.
+
+        Args:
+            name: The dotted function name (e.g., "acme.double_val")
+            platform: Optional platform filter. None drops all.
+
+        Returns:
+            Message describing what was dropped
+        """
+        coro = _call_original_method(
+            self._async, "drop_temp_function", name, platform
+        )
+        return _loop_manager.run_sync(coro)
 
     def fetch(self, pack: str = "base", mode: str = "add") -> List["FetchResults"]:
         """Fetch data from sources for a pack.

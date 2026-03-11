@@ -18,6 +18,7 @@ from bundlebase_sdk._protocol import (
     write_response,
     write_error,
     write_arrow_ipc,
+    normalize_to_batches,
 )
 
 
@@ -60,27 +61,30 @@ class _AggregateStateStore:
             return state_id
 
     def get(self, state_id: str) -> object:
-        entry = self._states.get(state_id)
-        if entry is None:
-            return None
-        return entry[0]
+        with self._lock:
+            entry = self._states.get(state_id)
+            if entry is None:
+                return None
+            # Update last-access time for TTL
+            self._states[state_id] = (entry[0], time.monotonic())
+            return entry[0]
 
     def put(self, state_id: str, state: object) -> None:
-        # Preserve original creation timestamp
-        existing = self._states.get(state_id)
-        created_at = existing[1] if existing is not None else time.monotonic()
-        self._states[state_id] = (state, created_at)
+        with self._lock:
+            # Update last-access time on every put for TTL
+            self._states[state_id] = (state, time.monotonic())
 
     def remove(self, state_id: str) -> None:
-        self._states.pop(state_id, None)
+        with self._lock:
+            self._states.pop(state_id, None)
 
     def cleanup(self, ttl_seconds: float = 300.0) -> None:
-        """Remove states older than ttl_seconds."""
+        """Remove states not accessed within ttl_seconds."""
         now = time.monotonic()
         with self._lock:
             expired = [
-                sid for sid, (_, created_at) in self._states.items()
-                if now - created_at > ttl_seconds
+                sid for sid, (_, last_accessed_at) in self._states.items()
+                if now - last_accessed_at > ttl_seconds
             ]
             for sid in expired:
                 del self._states[sid]
@@ -176,9 +180,14 @@ def _handle_invoke(
         # Wrap single array in a RecordBatch
         rb = pa.record_batch({"result": result_batch})
         write_arrow_ipc(stdout, [rb])
+    elif isinstance(result_batch, dict):
+        # Dict return requires schema() to be defined
+        schema = func.schema()
+        batches = normalize_to_batches(result_batch, schema)
+        write_arrow_ipc(stdout, batches)
     else:
         raise TypeError(
-            f"Function '{func_name}' must return pa.RecordBatch or pa.Array, "
+            f"Function '{func_name}' must return pa.RecordBatch, pa.Array, or dict, "
             f"got {type(result_batch)}"
         )
 

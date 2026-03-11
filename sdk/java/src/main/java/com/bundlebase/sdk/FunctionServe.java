@@ -53,15 +53,18 @@ public class FunctionServe {
 
     /**
      * Run the function provider on the given streams (for testing).
+     *
+     * <p>Uses a single {@link DataInputStream} for both JSON line reading
+     * and binary Arrow IPC reading to avoid buffering conflicts.
      */
     public static void run(Function.FunctionProvider provider, InputStream in, OutputStream out) {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(in));
+        DataInputStream dataIn = new DataInputStream(new BufferedInputStream(in, 16 * 1024 * 1024));
         StateStore store = new StateStore();
         long lastCleanup = System.currentTimeMillis();
 
         try {
             String line;
-            while ((line = reader.readLine()) != null) {
+            while ((line = readLine(dataIn)) != null) {
                 if (line.isBlank()) continue;
 
                 // Periodic cleanup of expired aggregate state
@@ -84,7 +87,7 @@ public class FunctionServe {
                 JsonNode params = req.has("params") ? req.get("params") : null;
 
                 try {
-                    boolean shouldStop = handleRequest(provider, store, method, id, params, in, out);
+                    boolean shouldStop = handleRequest(provider, store, method, id, params, dataIn, out);
                     if (shouldStop) {
                         break;
                     }
@@ -97,10 +100,27 @@ public class FunctionServe {
         }
     }
 
+    /**
+     * Read a newline-terminated line from a DataInputStream.
+     * Returns null on EOF.
+     */
+    private static String readLine(DataInputStream in) throws IOException {
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        int b;
+        while ((b = in.read()) != -1) {
+            if (b == '\n') {
+                return buf.toString("UTF-8");
+            }
+            buf.write(b);
+        }
+        // EOF - return remaining data if any
+        return buf.size() > 0 ? buf.toString("UTF-8") : null;
+    }
+
     private static boolean handleRequest(
             Function.FunctionProvider provider, StateStore store,
             String method, JsonNode id, JsonNode params,
-            InputStream in, OutputStream out) throws IOException {
+            DataInputStream in, OutputStream out) throws IOException {
 
         switch (method) {
             case "handshake" -> Protocol.writeResponse(out, id, Map.of("protocol_version", "1"));
@@ -122,7 +142,7 @@ public class FunctionServe {
 
     private static void handleInvoke(
             Function.FunctionProvider provider, JsonNode id, JsonNode params,
-            InputStream in, OutputStream out) throws IOException {
+            DataInputStream in, OutputStream out) throws IOException {
         String funcName = params != null && params.has("function") ? params.get("function").asText() : "";
         Object fn = provider.functions().get(funcName);
         if (fn == null) {
@@ -135,39 +155,33 @@ public class FunctionServe {
             return;
         }
 
+        // Send ack before reading Arrow IPC (host blocks on ack before sending data)
+        Protocol.writeResponse(out, id, Map.of("ok", true));
+
         // Read Arrow IPC input
         VectorSchemaRoot inputRoot = readArrowIPC(in);
-        List<FieldVector> args = new ArrayList<>();
-        if (inputRoot != null) {
-            args.addAll(inputRoot.getFieldVectors());
-        }
 
         FieldVector result;
         try {
-            result = scalar.invoke(args);
+            result = scalar.invoke(inputRoot);
         } catch (Exception e) {
-            Protocol.writeError(out, id, -32000, e.getMessage());
+            // After ack, write empty Arrow IPC (host is reading IPC, not JSON)
+            Protocol.writeArrowIPC(out, null);
             if (inputRoot != null) inputRoot.close();
             return;
         }
 
         // Build a single-column VectorSchemaRoot from the result
-        Schema schema = new Schema(List.of(result.getField()));
         VectorSchemaRoot resultRoot = new VectorSchemaRoot(List.of(result.getField()), List.of(result), result.getValueCount());
 
-        // Buffer Arrow IPC before sending ack
-        ByteArrayOutputStream arrowBuf = new ByteArrayOutputStream();
+        // Write Arrow IPC output
         try {
-            Protocol.writeArrowIPC(arrowBuf, resultRoot);
+            Protocol.writeArrowIPC(out, resultRoot);
         } catch (IOException e) {
-            Protocol.writeError(out, id, -32000, "Failed to serialize Arrow IPC result: " + e.getMessage());
             resultRoot.close();
             if (inputRoot != null) inputRoot.close();
             return;
         }
-
-        Protocol.writeResponse(out, id, Map.of("ok", true));
-        out.write(arrowBuf.toByteArray());
         out.flush();
 
         if (inputRoot != null) inputRoot.close();
@@ -204,7 +218,7 @@ public class FunctionServe {
     @SuppressWarnings("unchecked")
     private static void handleAccumulate(
             Function.FunctionProvider provider, StateStore store,
-            JsonNode id, JsonNode params, InputStream in, OutputStream out) throws IOException {
+            JsonNode id, JsonNode params, DataInputStream in, OutputStream out) throws IOException {
         String funcName = params != null && params.has("function") ? params.get("function").asText() : "";
         String stateId = params != null && params.has("state_id") ? params.get("state_id").asText() : "";
 
@@ -225,24 +239,21 @@ public class FunctionServe {
             return;
         }
 
+        // Send ack before reading Arrow IPC (host blocks on ack before sending data)
+        Protocol.writeResponse(out, id, Map.of("ok", true));
+
         // Read Arrow IPC input
         VectorSchemaRoot inputRoot = readArrowIPC(in);
-        List<FieldVector> args = new ArrayList<>();
-        if (inputRoot != null) {
-            args.addAll(inputRoot.getFieldVectors());
-        }
 
         Object newState;
         try {
-            newState = agg.accumulate(state, args);
+            newState = agg.accumulate(state, inputRoot);
         } catch (Exception e) {
-            Protocol.writeError(out, id, -32000, e.getMessage());
             if (inputRoot != null) inputRoot.close();
             return;
         }
 
         store.set(stateId, newState);
-        Protocol.writeResponse(out, id, Map.of("ok", true));
         if (inputRoot != null) inputRoot.close();
     }
 
@@ -251,8 +262,8 @@ public class FunctionServe {
             Function.FunctionProvider provider, StateStore store,
             JsonNode id, JsonNode params, OutputStream out) throws IOException {
         String funcName = params != null && params.has("function") ? params.get("function").asText() : "";
-        String stateIdA = params != null && params.has("state_id_a") ? params.get("state_id_a").asText() : "";
-        String stateIdB = params != null && params.has("state_id_b") ? params.get("state_id_b").asText() : "";
+        String stateIdA = params != null && params.has("state_id1") ? params.get("state_id1").asText() : "";
+        String stateIdB = params != null && params.has("state_id2") ? params.get("state_id2").asText() : "";
 
         Object fn = provider.functions().get(funcName);
         if (fn == null) {
@@ -286,7 +297,7 @@ public class FunctionServe {
 
         store.set(stateIdA, merged);
         store.remove(stateIdB);
-        Protocol.writeResponse(out, id, Map.of("ok", true));
+        Protocol.writeResponse(out, id, Map.of("state_id", stateIdA));
     }
 
     @SuppressWarnings("unchecked")
@@ -349,7 +360,7 @@ public class FunctionServe {
     /**
      * Read a length-prefixed Arrow IPC stream from the input.
      */
-    private static VectorSchemaRoot readArrowIPC(InputStream in) throws IOException {
+    private static VectorSchemaRoot readArrowIPC(DataInputStream in) throws IOException {
         byte[] lengthBuf = new byte[4];
         int read = in.read(lengthBuf);
         if (read < 4) {
@@ -431,36 +442,43 @@ public class FunctionServe {
      */
     static class StateStore {
         private final ConcurrentHashMap<String, Object> states = new ConcurrentHashMap<>();
-        private final ConcurrentHashMap<String, Long> createdAt = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Long> lastAccess = new ConcurrentHashMap<>();
         private final AtomicLong nextId = new AtomicLong(0);
 
         String add(Object state) {
             long id = nextId.incrementAndGet();
             String key = "state_" + id;
             states.put(key, state);
-            createdAt.put(key, System.currentTimeMillis());
+            lastAccess.put(key, System.currentTimeMillis());
             return key;
         }
 
         Object get(String id) {
-            return states.get(id);
+            Object state = states.get(id);
+            if (state != null) {
+                // Update last-access time for TTL
+                lastAccess.put(id, System.currentTimeMillis());
+            }
+            return state;
         }
 
         void set(String id, Object state) {
             states.put(id, state);
+            // Update last-access time for TTL
+            lastAccess.put(id, System.currentTimeMillis());
         }
 
         void remove(String id) {
             states.remove(id);
-            createdAt.remove(id);
+            lastAccess.remove(id);
         }
 
         void cleanup(long ttlMs) {
             long now = System.currentTimeMillis();
-            for (Map.Entry<String, Long> entry : createdAt.entrySet()) {
+            for (Map.Entry<String, Long> entry : lastAccess.entrySet()) {
                 if (now - entry.getValue() > ttlMs) {
                     states.remove(entry.getKey());
-                    createdAt.remove(entry.getKey());
+                    lastAccess.remove(entry.getKey());
                 }
             }
         }
