@@ -16,7 +16,21 @@ import (
 )
 
 // ServeFunction runs the function provider as a JSON-RPC subprocess on stdin/stdout.
+//
+// If the first command-line argument is --bundlebase-functions,
+// prints the function manifest as JSON and exits.
 func ServeFunction(provider FunctionProvider) {
+	if len(os.Args) > 1 && os.Args[1] == "--bundlebase-functions" {
+		manifest := provider.Metadata()
+		data, err := json.Marshal(manifest)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to serialize manifest: %v\n", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(data)
+		os.Stdout.Write([]byte("\n"))
+		return
+	}
 	ServeFunctionIO(provider, os.Stdin, os.Stdout)
 }
 
@@ -24,8 +38,8 @@ func ServeFunction(provider FunctionProvider) {
 func ServeFunctionIO(provider FunctionProvider, r io.Reader, w io.Writer) {
 	br := bufio.NewReaderSize(r, 16*1024*1024)
 	store := &stateStore{
-		states:    make(map[string]interface{}),
-		createdAt: make(map[string]time.Time),
+		states:     make(map[string]interface{}),
+		lastAccess: make(map[string]time.Time),
 	}
 	lastCleanup := time.Now()
 
@@ -65,10 +79,10 @@ func ServeFunctionIO(provider FunctionProvider, r io.Reader, w io.Writer) {
 }
 
 type stateStore struct {
-	mu        sync.Mutex
-	states    map[string]interface{}
-	createdAt map[string]time.Time
-	nextID    uint64
+	mu         sync.Mutex
+	states     map[string]interface{}
+	lastAccess map[string]time.Time
+	nextID     uint64
 }
 
 func (s *stateStore) add(state interface{}) string {
@@ -77,10 +91,10 @@ func (s *stateStore) add(state interface{}) string {
 	s.nextID++
 	id := fmt.Sprintf("state_%d", s.nextID)
 	s.states[id] = state
-	if s.createdAt == nil {
-		s.createdAt = make(map[string]time.Time)
+	if s.lastAccess == nil {
+		s.lastAccess = make(map[string]time.Time)
 	}
-	s.createdAt[id] = time.Now()
+	s.lastAccess[id] = time.Now()
 	return id
 }
 
@@ -88,6 +102,10 @@ func (s *stateStore) get(id string) (interface{}, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v, ok := s.states[id]
+	if ok {
+		// Update last-access time for TTL
+		s.lastAccess[id] = time.Now()
+	}
 	return v, ok
 }
 
@@ -95,23 +113,25 @@ func (s *stateStore) set(id string, state interface{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.states[id] = state
+	// Update last-access time for TTL
+	s.lastAccess[id] = time.Now()
 }
 
 func (s *stateStore) remove(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.states, id)
-	delete(s.createdAt, id)
+	delete(s.lastAccess, id)
 }
 
 func (s *stateStore) cleanup(ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
-	for id, created := range s.createdAt {
-		if now.Sub(created) > ttl {
+	for id, accessed := range s.lastAccess {
+		if now.Sub(accessed) > ttl {
 			delete(s.states, id)
-			delete(s.createdAt, id)
+			delete(s.lastAccess, id)
 		}
 	}
 }
@@ -147,37 +167,41 @@ func handleFunctionRequest(provider FunctionProvider, store *stateStore, req jso
 func handleInvoke(provider FunctionProvider, req jsonRpcRequest, r io.Reader, w io.Writer) {
 	funcName, _ := req.Params["function"].(string)
 	functions := provider.Functions()
-	fn, ok := functions[funcName]
+	ref, ok := functions[funcName]
 	if !ok {
 		writeError(w, req.ID, -32000, fmt.Sprintf("Function not found: %s", funcName))
 		return
 	}
 
-	scalar, ok := fn.(ScalarFunction)
-	if !ok {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not a scalar function (actual type: %T)", funcName, fn))
+	if ref.Scalar == nil {
+		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not a scalar function", funcName))
 		return
 	}
+
+	// Send ack before reading Arrow IPC (host blocks on ack before sending data)
+	writeResponse(w, req.ID, map[string]bool{"ok": true})
 
 	// Read Arrow IPC input
 	records, err := readArrowIPC(r)
 	if err != nil {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Failed to read input: %v", err))
+		// After ack, errors must be written as empty Arrow IPC (host is reading IPC, not JSON)
+		var emptyBuf bytes.Buffer
+		writeArrowIPC(&emptyBuf, nil)
+		w.Write(emptyBuf.Bytes())
 		return
 	}
 
-	// Extract columns as args (from the first record batch)
-	var args []arrow.Array
+	// Pass the first record batch directly to the function
+	var inputBatch arrow.Record
 	if len(records) > 0 {
-		rec := records[0]
-		for i := 0; i < int(rec.NumCols()); i++ {
-			args = append(args, rec.Column(i))
-		}
+		inputBatch = records[0]
 	}
 
-	result, err := scalar.Invoke(args)
+	result, err := ref.Scalar.Invoke(inputBatch)
 	if err != nil {
-		writeError(w, req.ID, -32000, err.Error())
+		var emptyBuf bytes.Buffer
+		writeArrowIPC(&emptyBuf, nil)
+		w.Write(emptyBuf.Bytes())
 		return
 	}
 
@@ -186,33 +210,30 @@ func handleInvoke(provider FunctionProvider, req jsonRpcRequest, r io.Reader, w 
 	schema := arrow.NewSchema([]arrow.Field{field}, nil)
 	rec := array.NewRecord(schema, []arrow.Array{result}, int64(result.Len()))
 
-	// Buffer Arrow IPC before sending ack
+	// Write Arrow IPC output
 	var arrowBuf bytes.Buffer
 	if err := writeArrowIPC(&arrowBuf, []arrow.Record{rec}); err != nil {
-		writeError(w, req.ID, -32000, fmt.Sprintf("failed to serialize Arrow IPC result: %v", err))
 		return
 	}
 
-	writeResponse(w, req.ID, map[string]bool{"ok": true})
 	w.Write(arrowBuf.Bytes())
 }
 
 func handleCreateState(provider FunctionProvider, store *stateStore, req jsonRpcRequest, w io.Writer) {
 	funcName, _ := req.Params["function"].(string)
 	functions := provider.Functions()
-	fn, ok := functions[funcName]
+	ref, ok := functions[funcName]
 	if !ok {
 		writeError(w, req.ID, -32000, fmt.Sprintf("Function not found: %s", funcName))
 		return
 	}
 
-	agg, ok := fn.(AggregateFunction)
-	if !ok {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function (actual type: %T)", funcName, fn))
+	if ref.Aggregate == nil {
+		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function", funcName))
 		return
 	}
 
-	state, err := agg.CreateState()
+	state, err := ref.Aggregate.CreateState()
 	if err != nil {
 		writeError(w, req.ID, -32000, err.Error())
 		return
@@ -227,15 +248,14 @@ func handleAccumulate(provider FunctionProvider, store *stateStore, req jsonRpcR
 	stateID, _ := req.Params["state_id"].(string)
 
 	functions := provider.Functions()
-	fn, ok := functions[funcName]
+	ref, ok := functions[funcName]
 	if !ok {
 		writeError(w, req.ID, -32000, fmt.Sprintf("Function not found: %s", funcName))
 		return
 	}
 
-	agg, ok := fn.(AggregateFunction)
-	if !ok {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function (actual type: %T)", funcName, fn))
+	if ref.Aggregate == nil {
+		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function", funcName))
 		return
 	}
 
@@ -245,46 +265,43 @@ func handleAccumulate(provider FunctionProvider, store *stateStore, req jsonRpcR
 		return
 	}
 
+	// Send ack before reading Arrow IPC (host blocks on ack before sending data)
+	writeResponse(w, req.ID, map[string]bool{"ok": true})
+
 	// Read Arrow IPC input
 	records, err := readArrowIPC(r)
 	if err != nil {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Failed to read input: %v", err))
 		return
 	}
 
-	var args []arrow.Array
+	// Pass the first record batch directly to the function
+	var inputBatch arrow.Record
 	if len(records) > 0 {
-		rec := records[0]
-		for i := 0; i < int(rec.NumCols()); i++ {
-			args = append(args, rec.Column(i))
-		}
+		inputBatch = records[0]
 	}
 
-	newState, err := agg.Accumulate(state, args)
+	newState, err := ref.Aggregate.Accumulate(state, inputBatch)
 	if err != nil {
-		writeError(w, req.ID, -32000, err.Error())
 		return
 	}
 
 	store.set(stateID, newState)
-	writeResponse(w, req.ID, map[string]bool{"ok": true})
 }
 
 func handleMerge(provider FunctionProvider, store *stateStore, req jsonRpcRequest, w io.Writer) {
 	funcName, _ := req.Params["function"].(string)
-	stateIDA, _ := req.Params["state_id_a"].(string)
-	stateIDB, _ := req.Params["state_id_b"].(string)
+	stateIDA, _ := req.Params["state_id1"].(string)
+	stateIDB, _ := req.Params["state_id2"].(string)
 
 	functions := provider.Functions()
-	fn, ok := functions[funcName]
+	ref, ok := functions[funcName]
 	if !ok {
 		writeError(w, req.ID, -32000, fmt.Sprintf("Function not found: %s", funcName))
 		return
 	}
 
-	agg, ok := fn.(AggregateFunction)
-	if !ok {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function (actual type: %T)", funcName, fn))
+	if ref.Aggregate == nil {
+		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function", funcName))
 		return
 	}
 
@@ -300,7 +317,7 @@ func handleMerge(provider FunctionProvider, store *stateStore, req jsonRpcReques
 		return
 	}
 
-	merged, err := agg.Merge(stateA, stateB)
+	merged, err := ref.Aggregate.Merge(stateA, stateB)
 	if err != nil {
 		writeError(w, req.ID, -32000, err.Error())
 		return
@@ -308,7 +325,7 @@ func handleMerge(provider FunctionProvider, store *stateStore, req jsonRpcReques
 
 	store.set(stateIDA, merged)
 	store.remove(stateIDB)
-	writeResponse(w, req.ID, map[string]bool{"ok": true})
+	writeResponse(w, req.ID, map[string]string{"state_id": stateIDA})
 }
 
 func handleEvaluate(provider FunctionProvider, store *stateStore, req jsonRpcRequest, w io.Writer) {
@@ -316,15 +333,14 @@ func handleEvaluate(provider FunctionProvider, store *stateStore, req jsonRpcReq
 	stateID, _ := req.Params["state_id"].(string)
 
 	functions := provider.Functions()
-	fn, ok := functions[funcName]
+	ref, ok := functions[funcName]
 	if !ok {
 		writeError(w, req.ID, -32000, fmt.Sprintf("Function not found: %s", funcName))
 		return
 	}
 
-	agg, ok := fn.(AggregateFunction)
-	if !ok {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function (actual type: %T)", funcName, fn))
+	if ref.Aggregate == nil {
+		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function", funcName))
 		return
 	}
 
@@ -334,7 +350,7 @@ func handleEvaluate(provider FunctionProvider, store *stateStore, req jsonRpcReq
 		return
 	}
 
-	result, err := agg.Evaluate(state)
+	result, err := ref.Aggregate.Evaluate(state)
 	if err != nil {
 		writeError(w, req.ID, -32000, err.Error())
 		return

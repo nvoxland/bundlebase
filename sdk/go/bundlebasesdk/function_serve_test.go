@@ -15,8 +15,8 @@ import (
 // doubleVal is a scalar function that doubles int64 values.
 type doubleVal struct{}
 
-func (d *doubleVal) Invoke(args []arrow.Array) (arrow.Array, error) {
-	input := args[0].(*array.Int64)
+func (d *doubleVal) Invoke(batch arrow.Record) (arrow.Array, error) {
+	input := batch.Column(0).(*array.Int64)
 	alloc := memory.NewGoAllocator()
 	b := array.NewInt64Builder(alloc)
 	for i := 0; i < input.Len(); i++ {
@@ -32,9 +32,9 @@ func (s *sumAgg) CreateState() (interface{}, error) {
 	return int64(0), nil
 }
 
-func (s *sumAgg) Accumulate(state interface{}, args []arrow.Array) (interface{}, error) {
+func (s *sumAgg) Accumulate(state interface{}, batch arrow.Record) (interface{}, error) {
 	sum := state.(int64)
-	input := args[0].(*array.Int64)
+	input := batch.Column(0).(*array.Int64)
 	for i := 0; i < input.Len(); i++ {
 		sum += input.Value(i)
 	}
@@ -52,10 +52,10 @@ func (s *sumAgg) Evaluate(state interface{}) (interface{}, error) {
 // testProvider groups the test functions.
 type testProvider struct{}
 
-func (p *testProvider) Functions() map[string]interface{} {
-	return map[string]interface{}{
-		"double_val": &doubleVal{},
-		"my_sum":     &sumAgg{},
+func (p *testProvider) Functions() map[string]FunctionRef {
+	return map[string]FunctionRef{
+		"double_val": {Scalar: &doubleVal{}},
+		"my_sum":     {Aggregate: &sumAgg{}},
 	}
 }
 

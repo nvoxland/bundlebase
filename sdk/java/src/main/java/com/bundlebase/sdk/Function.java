@@ -16,16 +16,16 @@ public class Function {
     private Function() {} // namespace only
 
     /**
-     * A scalar function that transforms input columns into an output column.
+     * A scalar function that transforms an input record batch into an output column.
      */
     public interface ScalarFunction {
         /**
-         * Apply the function to the given input columns, returning a single output column.
+         * Apply the function to the given input record batch, returning a single output column.
          *
-         * @param args input columns from the record batch
+         * @param input input record batch (may be null if no input data)
          * @return the result column
          */
-        FieldVector invoke(List<FieldVector> args) throws Exception;
+        FieldVector invoke(VectorSchemaRoot input) throws Exception;
     }
 
     /**
@@ -40,13 +40,13 @@ public class Function {
         S createState() throws Exception;
 
         /**
-         * Add data from input columns into the accumulator state.
+         * Add data from an input record batch into the accumulator state.
          *
          * @param state the current accumulator state
-         * @param args input columns from the record batch
+         * @param input input record batch (may be null if no input data)
          * @return the updated accumulator state
          */
-        S accumulate(S state, List<FieldVector> args) throws Exception;
+        S accumulate(S state, VectorSchemaRoot input) throws Exception;
 
         /**
          * Merge two accumulator states into one.
