@@ -377,8 +377,9 @@ async def test_function_overloading_dispatch_correct_overload():
     )
 
     # Int64 input should invoke the Int64 overload
+    # Note: id column is Int32 in userdata.parquet, so cast to BIGINT (Int64)
     result = await c.query(
-        "SELECT test.double_val(id) as d FROM bundle LIMIT 3"
+        "SELECT test.double_val(CAST(id AS BIGINT)) as d FROM bundle LIMIT 3"
     )
     df = await result.to_pandas()
     assert df["d"].dtype in ("int64", "Int64")
