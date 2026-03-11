@@ -34,8 +34,8 @@ class Connector(ABC):
         """Optional schema for automatic dict-to-Arrow conversion.
 
         Return a dict mapping column names to type strings.
-        Supported types: string, int8-64, uint8-64, float16/32/64, bool, date, timestamp, binary.
-        Example: {"name": "string", "age": "int32", "score": "float64"}
+        Supported types: Boolean, Int8-64, UInt8-64, Float16/32/64, Utf8, LargeUtf8, Binary, LargeBinary, Date32, Date64, Timestamp.
+        Example: {"name": "Utf8", "age": "Int32", "score": "Float64"}
         """
         return None
 

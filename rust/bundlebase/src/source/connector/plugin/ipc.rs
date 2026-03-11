@@ -151,6 +151,69 @@ impl SubprocessHandle {
         })
     }
 
+    /// Perform protocol version handshake with the subprocess.
+    ///
+    /// If the server responds with protocol_version, logs it at info level.
+    /// If the server returns method_not_found (-32601), logs a warning and proceeds.
+    async fn perform_handshake(&mut self) -> Result<(), BundlebaseError> {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0",
+            id,
+            method: "handshake".to_string(),
+            params: serde_json::json!({"protocol_version": "1"}),
+        };
+
+        let mut line = serde_json::to_string(&request)
+            .map_err(|e| format!("Failed to serialize handshake request: {}", e))?;
+        line.push('\n');
+
+        self.stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| format!("Failed to write handshake request: {}", e))?;
+        self.stdin
+            .flush()
+            .await
+            .map_err(|e| format!("Failed to flush handshake request: {}", e))?;
+
+        let mut response_line = String::new();
+        let bytes_read = self
+            .stdout
+            .read_line(&mut response_line)
+            .await
+            .map_err(|e| format!("Failed to read handshake response: {}", e))?;
+
+        if bytes_read == 0 {
+            log::warn!("IPC source process closed stdout during handshake, proceeding without version check");
+            return Ok(());
+        }
+
+        let response: JsonRpcResponse =
+            serde_json::from_str(response_line.trim()).map_err(|e| {
+                format!("Failed to parse handshake response: {} (raw: {})", e, response_line.trim())
+            })?;
+
+        if let Some(err) = response.error {
+            if err.code == -32601 {
+                log::warn!("IPC source subprocess does not support handshake (method_not_found), proceeding without version check");
+            } else {
+                log::warn!("IPC source subprocess handshake returned error (code {}): {}", err.code, err.message);
+            }
+            return Ok(());
+        }
+
+        if let Some(result) = response.result {
+            if let Some(version) = result.get("protocol_version").and_then(|v| v.as_str()) {
+                log::info!("IPC source subprocess handshake successful, protocol_version={}", version);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Send a JSON-RPC request and read the response.
     async fn send_request(
         &mut self,
@@ -282,7 +345,8 @@ impl IpcConnector {
         if guard.is_none() {
             let call = connector_utils::require_arg(args, "call", "ipc")?;
             let command = parse_call(call)?;
-            let handle = SubprocessHandle::spawn(&command)?;
+            let mut handle = SubprocessHandle::spawn(&command)?;
+            handle.perform_handshake().await?;
             *guard = Some(handle);
         }
         Ok(())

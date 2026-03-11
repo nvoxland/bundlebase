@@ -1441,7 +1441,7 @@ impl BundleFacade for Bundle {
         Ok(())
     }
 
-    async fn drop_temp_connector_logic(
+    async fn drop_temp_connector(
         &self,
         name: &str,
         platform: Option<&connector_definition::Platform>,

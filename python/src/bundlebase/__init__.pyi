@@ -606,13 +606,13 @@ class PyBundleBuilder:
         """
         ...
 
-    def drop_temp_connector_logic(
+    def drop_temp_connector(
         self,
         name: str,
         platform: Optional[str] = None,
     ) -> "OperationChain":
         """
-        Drop runtime-only connector logic (session-only, no operation created).
+        Drop runtime-only connector (session-only, no operation created).
 
         Args:
             name: The dotted connector name (e.g., "acme.weather")

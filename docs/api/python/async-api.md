@@ -31,7 +31,7 @@ Read-only bundle class returned by `open()`.
       members:
         - extend
         - import_temp_connector
-        - drop_temp_connector_logic
+        - drop_temp_connector
         - schema
         - name
         - description
@@ -67,7 +67,7 @@ Mutable bundle class returned by `create()` and transformation methods.
         - import_connector
         - import_temp_connector
         - drop_connector
-        - drop_temp_connector_logic
+        - drop_temp_connector
         - fetch
         - fetch_all
         - create_index

@@ -132,10 +132,15 @@ impl ScalarUDFImpl for ScalarFunction {
         // Find matching overload by arg types
         match find_matching_overload(&self.overloads, arg_types) {
             Some(entry) => Ok(entry.return_type.clone()),
-            None => Err(datafusion::common::DataFusionError::Plan(format!(
-                "No overload of function '{}' matches argument types {:?}",
-                self.name, arg_types
-            ))),
+            None => {
+                let available: Vec<String> = self.overloads.iter()
+                    .map(|e| format!("({}) -> {}", e.input_types.iter().map(|t| format!("{}", t)).collect::<Vec<_>>().join(", "), e.return_type))
+                    .collect();
+                Err(datafusion::common::DataFusionError::Plan(format!(
+                    "No overload of function '{}' matches argument types {:?}. Available signatures: {}",
+                    self.name, arg_types, available.join("; ")
+                )))
+            }
         }
     }
 
@@ -149,10 +154,15 @@ impl ScalarUDFImpl for ScalarFunction {
         // Determine actual arg types for dispatch
         let arg_types: Vec<DataType> = args.args.iter().map(|cv| cv.data_type()).collect();
         let entry = find_matching_overload(&self.overloads, &arg_types)
-            .ok_or_else(|| datafusion::common::DataFusionError::Execution(format!(
-                "No overload of function '{}' matches argument types {:?}",
-                self.name, arg_types
-            )))?;
+            .ok_or_else(|| {
+                let available: Vec<String> = self.overloads.iter()
+                    .map(|e| format!("({}) -> {}", e.input_types.iter().map(|t| format!("{}", t)).collect::<Vec<_>>().join(", "), e.return_type))
+                    .collect();
+                datafusion::common::DataFusionError::Execution(format!(
+                    "No overload of function '{}' matches argument types {:?}. Available signatures: {}",
+                    self.name, arg_types, available.join("; ")
+                ))
+            })?;
         invoke_entry(&self.name, entry, &args, &self.subprocess_cache)
     }
 

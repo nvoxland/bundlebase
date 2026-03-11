@@ -75,7 +75,7 @@ pub use builder::{FileVerificationResult, VerificationResults};
 // Re-export facade command structs
 pub use facade::ImportTempConnectorCommand;
 pub use facade::ImportTempFunctionCommand;
-pub use facade::DropTempConnectorLogicCommand;
+pub use facade::DropTempConnectorCommand;
 pub use facade::DropTempFunctionCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
@@ -91,7 +91,7 @@ pub enum FacadeCommand {
     /// Load a temporary function with runtime-only logic (not persisted)
     ImportTempFunction(ImportTempFunctionCommand),
     /// Drop runtime-only connector logic (not persisted)
-    DropTempConnectorLogic(DropTempConnectorLogicCommand),
+    DropTempConnector(DropTempConnectorCommand),
     /// Drop runtime-only function (not persisted)
     DropTempFunction(DropTempFunctionCommand),
     /// Show query execution plan
@@ -115,7 +115,7 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
-            FacadeCommand::DropTempConnectorLogic(cmd) => {
+            FacadeCommand::DropTempConnector(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
@@ -139,7 +139,7 @@ impl FacadeCommand {
         match self {
             FacadeCommand::ImportTempConnector(_) => ImportTempConnectorCommand::output_schema(),
             FacadeCommand::ImportTempFunction(_) => ImportTempFunctionCommand::output_schema(),
-            FacadeCommand::DropTempConnectorLogic(_) => DropTempConnectorLogicCommand::output_schema(),
+            FacadeCommand::DropTempConnector(_) => DropTempConnectorCommand::output_schema(),
             FacadeCommand::DropTempFunction(_) => DropTempFunctionCommand::output_schema(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
@@ -151,7 +151,7 @@ impl FacadeCommand {
         match self {
             FacadeCommand::ImportTempConnector(_) => ImportTempConnectorCommand::output_shape(),
             FacadeCommand::ImportTempFunction(_) => ImportTempFunctionCommand::output_shape(),
-            FacadeCommand::DropTempConnectorLogic(_) => DropTempConnectorLogicCommand::output_shape(),
+            FacadeCommand::DropTempConnector(_) => DropTempConnectorCommand::output_shape(),
             FacadeCommand::DropTempFunction(_) => DropTempFunctionCommand::output_shape(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
@@ -168,7 +168,7 @@ impl BundleCommand {
         match self {
             BundleCommand::ImportTempConnector(cmd) => Ok(FacadeCommand::ImportTempConnector(cmd)),
             BundleCommand::ImportTempFunction(cmd) => Ok(FacadeCommand::ImportTempFunction(cmd)),
-            BundleCommand::DropTempConnectorLogic(cmd) => Ok(FacadeCommand::DropTempConnectorLogic(cmd)),
+            BundleCommand::DropTempConnector(cmd) => Ok(FacadeCommand::DropTempConnector(cmd)),
             BundleCommand::DropTempFunction(cmd) => Ok(FacadeCommand::DropTempFunction(cmd)),
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
             BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
@@ -207,7 +207,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnectorLogic(_) | BundleCommand::DropTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
+                    BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -221,7 +221,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnectorLogic(_) | BundleCommand::DropTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
+        matches!(self, BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
     }
 }
 
@@ -525,7 +525,7 @@ register_commands! {
     facade {
         ImportTempConnector(ImportTempConnectorCommand) => Rule::import_temp_connector_stmt,
         ImportTempFunction(ImportTempFunctionCommand) => Rule::import_temp_function_stmt,
-        DropTempConnectorLogic(DropTempConnectorLogicCommand) => Rule::drop_temp_connector_logic_stmt,
+        DropTempConnector(DropTempConnectorCommand) => Rule::drop_temp_connector_stmt,
         DropTempFunction(DropTempFunctionCommand) => Rule::drop_temp_function_stmt,
         ExplainPlan(ExplainPlanCommand) => Rule::explain_stmt,
         SetConfig(SetConfigCommand) => Rule::set_config_stmt,

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Cursor, Write};
+use std::time::Instant;
 
 use arrow::datatypes::{Field, Schema};
 use arrow::ipc::reader::StreamReader;
@@ -22,10 +23,28 @@ pub fn serve_functions(provider: &dyn FunctionProvider) {
 /// Run the function provider on the given reader/writer (for testing).
 pub fn serve_functions_io(provider: &dyn FunctionProvider, r: &mut dyn BufRead, w: &mut dyn Write) {
     let mut states: HashMap<String, Box<dyn std::any::Any + Send>> = HashMap::new();
+    let mut state_created_at: HashMap<String, Instant> = HashMap::new();
     let mut next_state_id: u64 = 1;
     let mut line = String::new();
+    let mut last_cleanup = Instant::now();
+    let ttl = std::time::Duration::from_secs(300);
+    let cleanup_interval = std::time::Duration::from_secs(60);
 
     loop {
+        // Periodically clean up expired aggregate state
+        let now = Instant::now();
+        if now.duration_since(last_cleanup) >= cleanup_interval {
+            state_created_at.retain(|id, created| {
+                if now.duration_since(*created) > ttl {
+                    states.remove(id);
+                    false
+                } else {
+                    true
+                }
+            });
+            last_cleanup = now;
+        }
+
         line.clear();
         match r.read_line(&mut line) {
             Ok(0) => return, // EOF
@@ -40,11 +59,15 @@ pub fn serve_functions_io(provider: &dyn FunctionProvider, r: &mut dyn BufRead, 
 
         let req: JsonRpcRequest = match serde_json::from_str(trimmed) {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(e) => {
+                let _ = write_error(w, &serde_json::Value::Null, -32700, &format!("Parse error: {}", e));
+                let _ = w.flush();
+                continue;
+            }
         };
 
         let should_stop =
-            handle_request(provider, &req, r, w, &mut states, &mut next_state_id);
+            handle_request(provider, &req, r, w, &mut states, &mut state_created_at, &mut next_state_id);
         let _ = w.flush();
         if should_stop {
             return;
@@ -58,15 +81,19 @@ fn handle_request(
     r: &mut dyn BufRead,
     w: &mut dyn Write,
     states: &mut HashMap<String, Box<dyn std::any::Any + Send>>,
+    state_created_at: &mut HashMap<String, Instant>,
     next_state_id: &mut u64,
 ) -> bool {
     match req.method.as_str() {
+        "handshake" => {
+            let _ = write_response(w, &req.id, serde_json::json!({"protocol_version": "1"}));
+        }
         "manifest" => handle_manifest(provider, req, w),
         "invoke" => handle_invoke(provider, req, r, w),
-        "create_state" => handle_create_state(provider, req, w, states, next_state_id),
+        "create_state" => handle_create_state(provider, req, w, states, state_created_at, next_state_id),
         "accumulate" => handle_accumulate(provider, req, r, w, states),
-        "merge" => handle_merge(provider, req, w, states),
-        "evaluate" => handle_evaluate(provider, req, w, states),
+        "merge" => handle_merge(provider, req, w, states, state_created_at),
+        "evaluate" => handle_evaluate(provider, req, w, states, state_created_at),
         "shutdown" => {
             let _ = write_response(w, &req.id, serde_json::json!({"ok": true}));
             return true;
@@ -220,6 +247,7 @@ fn handle_create_state(
     req: &JsonRpcRequest,
     w: &mut dyn Write,
     states: &mut HashMap<String, Box<dyn std::any::Any + Send>>,
+    state_created_at: &mut HashMap<String, Instant>,
     next_state_id: &mut u64,
 ) {
     let function_name = req
@@ -259,6 +287,7 @@ fn handle_create_state(
             let state_id = format!("state_{}", *next_state_id);
             *next_state_id += 1;
             states.insert(state_id.clone(), state);
+            state_created_at.insert(state_id.clone(), Instant::now());
             let _ = write_response(w, &req.id, serde_json::json!({"state_id": state_id}));
         }
         Err(e) => {
@@ -352,6 +381,7 @@ fn handle_merge(
     req: &JsonRpcRequest,
     w: &mut dyn Write,
     states: &mut HashMap<String, Box<dyn std::any::Any + Send>>,
+    state_created_at: &mut HashMap<String, Instant>,
 ) {
     let function_name = req
         .params
@@ -428,6 +458,7 @@ fn handle_merge(
 
     match agg.merge_dyn(state_a, state_b) {
         Ok(()) => {
+            state_created_at.remove(state_id2);
             let _ = write_response(
                 w,
                 &req.id,
@@ -450,6 +481,7 @@ fn handle_evaluate(
     req: &JsonRpcRequest,
     w: &mut dyn Write,
     states: &mut HashMap<String, Box<dyn std::any::Any + Send>>,
+    state_created_at: &mut HashMap<String, Instant>,
 ) {
     let function_name = req
         .params

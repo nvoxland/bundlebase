@@ -8,13 +8,13 @@ import json
 import struct
 import sys
 import threading
+import time
 from typing import IO
 
 import pyarrow as pa
 
 from bundlebase_sdk.function import Function
 from bundlebase_sdk._protocol import (
-    read_request,
     write_response,
     write_error,
     write_arrow_ipc,
@@ -48,7 +48,7 @@ class _AggregateStateStore:
     """Thread-safe store for aggregate function state held server-side."""
 
     def __init__(self):
-        self._states: dict[str, object] = {}
+        self._states: dict[str, tuple[object, float]] = {}
         self._next_id = 0
         self._lock = threading.Lock()
 
@@ -56,34 +56,69 @@ class _AggregateStateStore:
         with self._lock:
             state_id = str(self._next_id)
             self._next_id += 1
-            self._states[state_id] = state
+            self._states[state_id] = (state, time.monotonic())
             return state_id
 
     def get(self, state_id: str) -> object:
-        return self._states.get(state_id)
+        entry = self._states.get(state_id)
+        if entry is None:
+            return None
+        return entry[0]
 
     def put(self, state_id: str, state: object) -> None:
-        self._states[state_id] = state
+        # Preserve original creation timestamp
+        existing = self._states.get(state_id)
+        created_at = existing[1] if existing is not None else time.monotonic()
+        self._states[state_id] = (state, created_at)
 
     def remove(self, state_id: str) -> None:
         self._states.pop(state_id, None)
+
+    def cleanup(self, ttl_seconds: float = 300.0) -> None:
+        """Remove states older than ttl_seconds."""
+        now = time.monotonic()
+        with self._lock:
+            expired = [
+                sid for sid, (_, created_at) in self._states.items()
+                if now - created_at > ttl_seconds
+            ]
+            for sid in expired:
+                del self._states[sid]
 
 
 def _serve_function(func: Function, stdin: IO[bytes], stdout: IO[bytes]) -> None:
     """Run the JSON-RPC serve loop for functions with explicit IO streams."""
     state_store = _AggregateStateStore()
+    last_cleanup = time.monotonic()
 
     while True:
-        req = read_request(stdin)
-        if req is None:
+        # Periodically clean up expired aggregate state
+        now = time.monotonic()
+        if now - last_cleanup >= 60.0:
+            state_store.cleanup()
+            last_cleanup = now
+
+        line = stdin.readline()
+        if not line:
             break
+        line = line.strip()
+        if not line:
+            continue
+
+        try:
+            req = json.loads(line)
+        except json.JSONDecodeError as e:
+            write_error(stdout, None, -32700, f"Parse error: {e}")
+            continue
 
         method = req.get("method", "")
         req_id = req.get("id")
         params = req.get("params", {})
 
         try:
-            if method == "invoke":
+            if method == "handshake":
+                write_response(stdout, req_id, {"protocol_version": "1"})
+            elif method == "invoke":
                 _handle_invoke(func, req_id, params, stdin, stdout)
             elif method == "create_state":
                 _handle_create_state(func, req_id, params, state_store, stdout)

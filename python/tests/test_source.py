@@ -421,27 +421,91 @@ async def test_drop_connector_with_platform():
     assert c is not None
 
 
+class ErrorDiscoverSource(Connector):
+    """Source whose discover() returns invalid Location objects."""
+
+    def discover(self, attached_locations, **kwargs):
+        # Return something that isn't a Location
+        return [{"not": "a location"}]
+
+    def data(self, location, **kwargs):
+        return None
+
+
+class ErrorDataSource(Connector):
+    """Source whose data() raises an exception."""
+
+    def discover(self, attached_locations, **kwargs):
+        return [Location("file.parquet", version="v1")]
+
+    def data(self, location, **kwargs):
+        raise RuntimeError("data source exploded")
+
+
 @pytest.mark.asyncio
-async def test_drop_temp_connector_logic_binding():
-    """Test that drop_temp_connector_logic Python binding works on builder."""
+async def test_connector_name_no_dot_fails():
+    """Test that connector name without a dot fails."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    with pytest.raises((ValueError, Exception)):
+        await c.import_connector("no_dot_name", "ipc", "/usr/bin/test")
+
+
+@pytest.mark.asyncio
+async def test_connector_name_too_many_dots_fails():
+    """Test that connector name with too many dots fails."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    with pytest.raises((ValueError, Exception)):
+        await c.import_connector("a.b.c", "ipc", "/usr/bin/test")
+
+
+@pytest.mark.asyncio
+async def test_native_source_data_exception():
+    """Test that data() raising an exception surfaces the error."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    module = ErrorDataSource.__module__
+    qualname = ErrorDataSource.__qualname__
+    c = await c.import_temp_connector("test.error_data", "python", f"{module}:{qualname}")
+
+    with pytest.raises(Exception, match="exploded"):
+        await c.create_source("test.error_data", {})
+
+
+@pytest.mark.asyncio
+async def test_drop_connector_with_platform_filter():
+    """Test that drop_connector with platform filter only removes matching entry."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    # Import for two platforms
+    c = await c.import_connector("test.multi_plat", "ipc", "/usr/bin/linux", "linux/amd64")
+    c = await c.import_connector("test.multi_plat", "ipc", "/usr/bin/darwin", "darwin/arm64")
+    # Drop only linux
+    c = await c.drop_connector("test.multi_plat", "linux/amd64")
+    # The connector should still exist (darwin entry remains)
+    # Re-adding linux should work
+    c = await c.import_connector("test.multi_plat", "ipc", "/usr/bin/linux2", "linux/amd64")
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_drop_temp_connector_binding():
+    """Test that drop_temp_connector Python binding works on builder."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.import_temp_connector("test.my_source", "python", "mod:Class")
-    result = await c.drop_temp_connector_logic("test.my_source")
-    assert "Dropped 1 temporary connector logic" in result
+    result = await c.drop_temp_connector("test.my_source")
+    assert "Dropped 1 temporary connector" in result
 
 
 @pytest.mark.asyncio
-async def test_drop_temp_connector_logic_with_platform():
-    """Test that drop_temp_connector_logic with platform filter works."""
+async def test_drop_temp_connector_with_platform():
+    """Test that drop_temp_connector with platform filter works."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.import_temp_connector("test.my_source", "python", "mod:Class", "linux/amd64")
-    result = await c.drop_temp_connector_logic("test.my_source", "linux/amd64")
-    assert "Dropped 1 temporary connector logic" in result
+    result = await c.drop_temp_connector("test.my_source", "linux/amd64")
+    assert "Dropped 1 temporary connector" in result
 
 
 @pytest.mark.asyncio
-async def test_drop_temp_connector_logic_on_bundle():
-    """Test that drop_temp_connector_logic works on read-only bundle."""
+async def test_drop_temp_connector_on_bundle():
+    """Test that drop_temp_connector works on read-only bundle."""
     with tempfile.TemporaryDirectory() as path:
         c = await bundlebase.create(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
         c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
@@ -449,5 +513,5 @@ async def test_drop_temp_connector_logic_on_bundle():
 
         bundle = await bundlebase.open(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
         await bundle.import_temp_connector("test.my_source", "python", "mod:Class")
-        result = await bundle.drop_temp_connector_logic("test.my_source")
-        assert "Dropped 1 temporary connector logic" in result
+        result = await bundle.drop_temp_connector("test.my_source")
+        assert "Dropped 1 temporary connector" in result

@@ -314,7 +314,7 @@ See [Custom Connectors](custom-connectors/index.md) for full command reference, 
 To remove custom connectors and their logic, see the full command reference:
 
 - [`DROP CONNECTOR`](custom-connectors/index.md#drop-connector) — removes the connector (or just a specific platform's logic)
-- [`DROP TEMP CONNECTOR LOGIC`](custom-connectors/index.md#drop-temp-connector-logic) — removes runtime-only logic entries
+- [`DROP TEMP CONNECTOR`](custom-connectors/index.md#drop-temp-connector) — removes runtime-only logic entries
 
 ## Fetching Data
 

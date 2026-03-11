@@ -360,10 +360,11 @@ pub fn parse_arrow_type_name(type_name: &str) -> Result<DataType, BundlebaseErro
         "LargeBinary" => Ok(DataType::LargeBinary),
         "Date32" => Ok(DataType::Date32),
         "Date64" => Ok(DataType::Date64),
+        "Timestamp" => Ok(DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None)),
         _ => Err(format!(
             "Unknown Arrow type name '{}'. Supported types: Boolean, Int8, Int16, Int32, Int64, \
              UInt8, UInt16, UInt32, UInt64, Float16, Float32, Float64, Utf8, LargeUtf8, \
-             Binary, LargeBinary, Date32, Date64",
+             Binary, LargeBinary, Date32, Date64, Timestamp",
             type_name
         )
         .into()),

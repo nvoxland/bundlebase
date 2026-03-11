@@ -2,11 +2,13 @@ package bundlebasesdk
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -21,9 +23,19 @@ func ServeFunction(provider FunctionProvider) {
 // ServeFunctionIO runs the function provider on the given reader/writer (for testing).
 func ServeFunctionIO(provider FunctionProvider, r io.Reader, w io.Writer) {
 	br := bufio.NewReaderSize(r, 16*1024*1024)
-	store := &stateStore{states: make(map[string]interface{})}
+	store := &stateStore{
+		states:    make(map[string]interface{}),
+		createdAt: make(map[string]time.Time),
+	}
+	lastCleanup := time.Now()
 
 	for {
+		// Periodically clean up expired aggregate state
+		if now := time.Now(); now.Sub(lastCleanup) >= 60*time.Second {
+			store.cleanup(5 * time.Minute)
+			lastCleanup = now
+		}
+
 		line, err := br.ReadBytes('\n')
 		if len(line) > 0 {
 			// Trim the trailing newline
@@ -37,6 +49,7 @@ func ServeFunctionIO(provider FunctionProvider, r io.Reader, w io.Writer) {
 
 			var req jsonRpcRequest
 			if jsonErr := json.Unmarshal(trimmed, &req); jsonErr != nil {
+				writeError(w, nil, -32700, fmt.Sprintf("Parse error: %v", jsonErr))
 				continue
 			}
 
@@ -52,9 +65,10 @@ func ServeFunctionIO(provider FunctionProvider, r io.Reader, w io.Writer) {
 }
 
 type stateStore struct {
-	mu     sync.Mutex
-	states map[string]interface{}
-	nextID uint64
+	mu        sync.Mutex
+	states    map[string]interface{}
+	createdAt map[string]time.Time
+	nextID    uint64
 }
 
 func (s *stateStore) add(state interface{}) string {
@@ -63,6 +77,10 @@ func (s *stateStore) add(state interface{}) string {
 	s.nextID++
 	id := fmt.Sprintf("state_%d", s.nextID)
 	s.states[id] = state
+	if s.createdAt == nil {
+		s.createdAt = make(map[string]time.Time)
+	}
+	s.createdAt[id] = time.Now()
 	return id
 }
 
@@ -83,10 +101,25 @@ func (s *stateStore) remove(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.states, id)
+	delete(s.createdAt, id)
+}
+
+func (s *stateStore) cleanup(ttl time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for id, created := range s.createdAt {
+		if now.Sub(created) > ttl {
+			delete(s.states, id)
+			delete(s.createdAt, id)
+		}
+	}
 }
 
 func handleFunctionRequest(provider FunctionProvider, store *stateStore, req jsonRpcRequest, r io.Reader, w io.Writer) bool {
 	switch req.Method {
+	case "handshake":
+		writeResponse(w, req.ID, map[string]string{"protocol_version": "1"})
 	case "manifest":
 		manifest := provider.Metadata()
 		writeResponse(w, req.ID, manifest)
@@ -120,7 +153,7 @@ func handleInvoke(provider FunctionProvider, req jsonRpcRequest, r io.Reader, w 
 
 	scalar, ok := fn.(ScalarFunction)
 	if !ok {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not a scalar function", funcName))
+		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not a scalar function (actual type: %T)", funcName, fn))
 		return
 	}
 
@@ -151,8 +184,15 @@ func handleInvoke(provider FunctionProvider, req jsonRpcRequest, r io.Reader, w 
 	schema := arrow.NewSchema([]arrow.Field{field}, nil)
 	rec := array.NewRecord(schema, []arrow.Array{result}, int64(result.Len()))
 
+	// Buffer Arrow IPC before sending ack
+	var arrowBuf bytes.Buffer
+	if err := writeArrowIPC(&arrowBuf, []arrow.Record{rec}); err != nil {
+		writeError(w, req.ID, -32000, fmt.Sprintf("failed to serialize Arrow IPC result: %v", err))
+		return
+	}
+
 	writeResponse(w, req.ID, map[string]bool{"ok": true})
-	writeArrowIPC(w, []arrow.Record{rec})
+	w.Write(arrowBuf.Bytes())
 }
 
 func handleCreateState(provider FunctionProvider, store *stateStore, req jsonRpcRequest, w io.Writer) {
@@ -166,7 +206,7 @@ func handleCreateState(provider FunctionProvider, store *stateStore, req jsonRpc
 
 	agg, ok := fn.(AggregateFunction)
 	if !ok {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function", funcName))
+		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function (actual type: %T)", funcName, fn))
 		return
 	}
 
@@ -193,7 +233,7 @@ func handleAccumulate(provider FunctionProvider, store *stateStore, req jsonRpcR
 
 	agg, ok := fn.(AggregateFunction)
 	if !ok {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function", funcName))
+		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function (actual type: %T)", funcName, fn))
 		return
 	}
 
@@ -242,7 +282,7 @@ func handleMerge(provider FunctionProvider, store *stateStore, req jsonRpcReques
 
 	agg, ok := fn.(AggregateFunction)
 	if !ok {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function", funcName))
+		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function (actual type: %T)", funcName, fn))
 		return
 	}
 
@@ -282,7 +322,7 @@ func handleEvaluate(provider FunctionProvider, store *stateStore, req jsonRpcReq
 
 	agg, ok := fn.(AggregateFunction)
 	if !ok {
-		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function", funcName))
+		writeError(w, req.ID, -32000, fmt.Sprintf("Function '%s' is not an aggregate function (actual type: %T)", funcName, fn))
 		return
 	}
 
@@ -328,8 +368,15 @@ func handleEvaluate(provider FunctionProvider, store *stateStore, req jsonRpcReq
 	schema := arrow.NewSchema([]arrow.Field{field}, nil)
 	rec := array.NewRecord(schema, []arrow.Array{resultArr}, 1)
 
+	// Buffer Arrow IPC before sending ack
+	var arrowBuf bytes.Buffer
+	if err := writeArrowIPC(&arrowBuf, []arrow.Record{rec}); err != nil {
+		writeError(w, req.ID, -32000, fmt.Sprintf("failed to serialize Arrow IPC result: %v", err))
+		return
+	}
+
 	writeResponse(w, req.ID, map[string]bool{"ok": true})
-	writeArrowIPC(w, []arrow.Record{rec})
+	w.Write(arrowBuf.Bytes())
 
 	store.remove(stateID)
 }

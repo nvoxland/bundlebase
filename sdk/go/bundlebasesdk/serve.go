@@ -2,6 +2,7 @@ package bundlebasesdk
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ func ServeIO(source Connector, r io.Reader, w io.Writer) {
 
 		var req jsonRpcRequest
 		if err := json.Unmarshal(line, &req); err != nil {
+			writeError(w, nil, -32700, fmt.Sprintf("Parse error: %v", err))
 			continue
 		}
 
@@ -39,6 +41,8 @@ func ServeIO(source Connector, r io.Reader, w io.Writer) {
 
 func handleRequest(source Connector, req jsonRpcRequest, w io.Writer) bool {
 	switch req.Method {
+	case "handshake":
+		writeResponse(w, req.ID, map[string]string{"protocol_version": "1"})
 	case "discover":
 		handleDiscover(source, req, w)
 	case "data":
@@ -71,18 +75,33 @@ func handleData(source Connector, req jsonRpcRequest, w io.Writer) {
 	location := parseLocation(req.Params["location"])
 	args := parseStringMap(req.Params, "location")
 
-	records, err := source.Data(location, args)
+	rawData, err := source.Data(location, args)
 	if err != nil {
 		writeError(w, req.ID, -32000, err.Error())
 		return
 	}
 
-	writeResponse(w, req.ID, map[string]bool{"ok": true})
-
-	if err := writeArrowIPC(w, records); err != nil {
-		// Can't send JSON-RPC error after we've already sent the ack
-		fmt.Fprintf(os.Stderr, "failed to write Arrow IPC data: %v\n", err)
+	// If the source implements MapConnector, normalize the data through the
+	// type-mapping layer so connectors can return plain Go maps/slices.
+	records := rawData
+	if mc, ok := source.(MapConnector); ok && records != nil {
+		records, err = NormalizeToRecords(rawData, mc.Schema())
+		if err != nil {
+			writeError(w, req.ID, -32000, fmt.Sprintf("failed to normalize data: %v", err))
+			return
+		}
 	}
+
+	// Buffer the Arrow IPC data first so we can send an error instead of an ack
+	// if serialization fails.
+	var arrowBuf bytes.Buffer
+	if err := writeArrowIPC(&arrowBuf, records); err != nil {
+		writeError(w, req.ID, -32000, fmt.Sprintf("failed to serialize Arrow IPC data: %v", err))
+		return
+	}
+
+	writeResponse(w, req.ID, map[string]bool{"ok": true})
+	w.Write(arrowBuf.Bytes())
 }
 
 func handleStableUrl(source Connector, req jsonRpcRequest, w io.Writer) {

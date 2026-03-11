@@ -376,10 +376,10 @@ class SyncBundle:
         _loop_manager.run_sync(coro)
         return self
 
-    def drop_temp_connector_logic(
+    def drop_temp_connector(
         self, name: str, platform: str = None
     ) -> str:
-        """Drop temporary (runtime-only) connector logic for a connector definition.
+        """Drop temporary (runtime-only) connector for a connector definition.
 
         Args:
             name: The defined connector name
@@ -389,7 +389,7 @@ class SyncBundle:
             Message describing what was dropped
         """
         coro = _call_original_method(
-            self._async, "drop_temp_connector_logic", name, platform
+            self._async, "drop_temp_connector", name, platform
         )
         return _loop_manager.run_sync(coro)
 
@@ -713,10 +713,10 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def drop_temp_connector_logic(
+    def drop_temp_connector(
         self, name: str, platform: str = None
     ) -> str:
-        """Drop temporary (runtime-only) connector logic for a connector definition.
+        """Drop temporary (runtime-only) connector for a connector definition.
 
         Args:
             name: The defined connector name
@@ -726,7 +726,7 @@ class SyncBundleBuilder(SyncBundle):
             Message describing what was dropped
         """
         coro = _call_original_method(
-            self._async, "drop_temp_connector_logic", name, platform
+            self._async, "drop_temp_connector", name, platform
         )
         return _loop_manager.run_sync(coro)
 

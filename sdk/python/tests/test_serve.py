@@ -34,7 +34,7 @@ class MultiReturnSource(Connector):
     """Source that tests different data return types."""
 
     def schema(self):
-        return {"x": "int64"}
+        return {"x": "Int64"}
 
     def discover(self, attached_locations, **kwargs):
         return [
@@ -247,7 +247,7 @@ class SchemaSource(Connector):
     """Source that uses schema() and returns column-oriented dicts."""
 
     def schema(self):
-        return {"name": "string", "score": "float32"}
+        return {"name": "Utf8", "score": "Float32"}
 
     def discover(self, attached_locations, **kwargs):
         return [Location("col_dict"), Location("row_dicts")]

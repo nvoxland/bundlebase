@@ -354,6 +354,82 @@ async def test_function_overloading_same_name_different_types():
 
 
 @pytest.mark.asyncio
+async def test_function_overloading_dispatch_correct_overload():
+    """Test that overload dispatch picks the right overload based on input types."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Register Int64 overload (doubles)
+    c = await c.import_temp_function(
+        "test.double_val",
+        ["Int64"],
+        "Int64",
+        "python",
+        "test_function_helpers:double_val",
+    )
+    # Register Float64 overload
+    c = await c.import_temp_function(
+        "test.double_val",
+        ["Float64"],
+        "Float64",
+        "python",
+        "test_function_helpers:double_val_float",
+    )
+
+    # Int64 input should invoke the Int64 overload
+    result = await c.query(
+        "SELECT test.double_val(id) as d FROM bundle LIMIT 3"
+    )
+    df = await result.to_pandas()
+    assert df["d"].dtype in ("int64", "Int64")
+
+    # Float64 input should invoke the Float64 overload
+    result = await c.query(
+        "SELECT test.double_val(CAST(id AS DOUBLE)) as d FROM bundle LIMIT 3"
+    )
+    df = await result.to_pandas()
+    assert df["d"].dtype == "float64"
+
+
+@pytest.mark.asyncio
+async def test_function_overloading_drop_with_platform():
+    """Test dropping a function overload with platform filter."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Import function with platform
+    c = await c.import_function(
+        "test.platform_fn", ["Int64"], "Int64", "ipc", "./my_func", "linux/amd64"
+    )
+    # Drop only the linux/amd64 platform entry
+    c = await c.drop_function("test.platform_fn", "linux/amd64")
+    assert c is not None
+
+
+@pytest.mark.asyncio
+async def test_function_overloading_error_unsupported_types():
+    """Test that calling a function with unsupported input types gives a clear error."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Register only Int64 overload
+    c = await c.import_temp_function(
+        "test.int_only",
+        ["Int64"],
+        "Int64",
+        "python",
+        "test_function_helpers:double_val",
+    )
+
+    # Calling with Utf8 should fail
+    with pytest.raises(Exception):
+        result = await c.query(
+            "SELECT test.int_only(first_name) FROM bundle LIMIT 1"
+        )
+        await result.to_pandas()
+
+
+@pytest.mark.asyncio
 async def test_function_overloading_mixed_kinds_rejected():
     """Test that registering scalar and aggregate under the same name fails."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)

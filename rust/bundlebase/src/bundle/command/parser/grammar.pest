@@ -60,7 +60,7 @@ source_stmt = {
     | import_function_stmt
     | import_connector_stmt
     | drop_temp_function_stmt
-    | drop_temp_connector_logic_stmt
+    | drop_temp_connector_stmt
     | drop_function_stmt
     | drop_connector_stmt
     | create_source_stmt
@@ -204,15 +204,15 @@ drop_connector_stmt = {
 }
 
 // ============================================================================
-// DROP TEMP CONNECTOR LOGIC Statement
+// DROP TEMP CONNECTOR Statement
 // ============================================================================
-// Syntax: DROP TEMP CONNECTOR LOGIC <dotted_name> [FOR PLATFORM '<platform>']
+// Syntax: DROP TEMP CONNECTOR <dotted_name> [FOR PLATFORM '<platform>']
 // Examples:
-//   DROP TEMP CONNECTOR LOGIC acme.weather
-//   DROP TEMP CONNECTOR LOGIC acme.weather FOR PLATFORM 'linux/amd64'
+//   DROP TEMP CONNECTOR acme.weather
+//   DROP TEMP CONNECTOR acme.weather FOR PLATFORM 'linux/amd64'
 
-drop_temp_connector_logic_stmt = {
-    ^"drop" ~ ^"temp" ~ ^"connector" ~ ^"logic" ~ dotted_identifier ~ (^"for" ~ ^"platform" ~ quoted_string)?
+drop_temp_connector_stmt = {
+    ^"drop" ~ ^"temp" ~ ^"connector" ~ dotted_identifier ~ (^"for" ~ ^"platform" ~ quoted_string)?
 }
 
 // ============================================================================

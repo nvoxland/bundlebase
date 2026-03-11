@@ -194,6 +194,23 @@ func TestUnknownMethod(t *testing.T) {
 	}
 }
 
+func TestMalformedJsonReturnsParseError(t *testing.T) {
+	input := "this is not json\n" +
+		makeRequest("shutdown", nil, 2)
+
+	var out bytes.Buffer
+	ServeIO(&testSource{}, strings.NewReader(input), &out)
+
+	resp, _ := readResponse(t, out.Bytes(), 0)
+	errObj := resp["error"].(map[string]interface{})
+	if int(errObj["code"].(float64)) != -32700 {
+		t.Errorf("expected error code -32700, got %v", errObj["code"])
+	}
+	if !strings.Contains(errObj["message"].(string), "Parse error") {
+		t.Errorf("expected 'Parse error' in message, got %s", errObj["message"])
+	}
+}
+
 func TestUserErrorWrapped(t *testing.T) {
 	input := makeRequest("discover", map[string]interface{}{"attached_locations": []string{}}, 1) +
 		makeRequest("shutdown", nil, 2)

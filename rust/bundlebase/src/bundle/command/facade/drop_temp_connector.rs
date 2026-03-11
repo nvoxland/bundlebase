@@ -1,4 +1,4 @@
-//! DropTempConnectorLogic command implementation (runtime-only).
+//! DropTempConnector command implementation (runtime-only).
 //!
 //! Removes connector logic for the current session only, without creating a persisted
 //! operation. Works on both `Bundle` and `BundleBuilder` via `BundleFacade`.
@@ -19,14 +19,14 @@ use std::sync::Arc;
 /// this command only removes logic for the current session. It works
 /// on both read-only `Bundle` and `BundleBuilder` via `BundleFacade`.
 #[derive(Debug, Clone)]
-pub struct DropTempConnectorLogicCommand {
+pub struct DropTempConnectorCommand {
     /// Full dotted source name
     pub name: String,
     /// Optional platform filter
     pub platform: Option<Platform>,
 }
 
-impl DropTempConnectorLogicCommand {
+impl DropTempConnectorCommand {
     pub fn new(name: impl Into<String>, platform: Option<Platform>) -> Self {
         Self {
             name: name.into(),
@@ -34,7 +34,7 @@ impl DropTempConnectorLogicCommand {
         }
     }
 
-    /// Returns the Arrow schema for drop temporary connector logic output.
+    /// Returns the Arrow schema for drop temporary connector output.
     pub fn output_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![Field::new(
             "message",
@@ -49,9 +49,9 @@ impl DropTempConnectorLogicCommand {
     }
 }
 
-impl CommandParsing for DropTempConnectorLogicCommand {
+impl CommandParsing for DropTempConnectorCommand {
     fn rule() -> Rule {
-        Rule::drop_temp_connector_logic_stmt
+        Rule::drop_temp_connector_stmt
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
@@ -72,27 +72,27 @@ impl CommandParsing for DropTempConnectorLogicCommand {
         }
 
         let name = name.ok_or_else(|| -> BundlebaseError {
-            "DROP TEMP CONNECTOR LOGIC missing source name".into()
+            "DROP TEMP CONNECTOR missing source name".into()
         })?;
 
-        Ok(DropTempConnectorLogicCommand::new(name, platform))
+        Ok(DropTempConnectorCommand::new(name, platform))
     }
 
     fn to_statement(&self) -> String {
         use crate::bundle::command::parser::escape_string;
         match &self.platform {
             Some(p) => format!(
-                "DROP TEMP CONNECTOR LOGIC {} FOR PLATFORM {}",
+                "DROP TEMP CONNECTOR {} FOR PLATFORM {}",
                 self.name,
                 escape_string(&p.to_string())
             ),
-            None => format!("DROP TEMP CONNECTOR LOGIC {}", self.name),
+            None => format!("DROP TEMP CONNECTOR {}", self.name),
         }
     }
 }
 
 #[async_trait]
-impl BundleFacadeCommand for DropTempConnectorLogicCommand {
+impl BundleFacadeCommand for DropTempConnectorCommand {
     type Output = String;
 
     async fn execute(
@@ -100,7 +100,7 @@ impl BundleFacadeCommand for DropTempConnectorLogicCommand {
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
         let count = facade
-            .drop_temp_connector_logic(&self.name, self.platform.as_ref())
+            .drop_temp_connector(&self.name, self.platform.as_ref())
             .await?;
 
         match &self.platform {
@@ -123,57 +123,57 @@ mod parsing_tests {
     use crate::bundle::command::BundleCommand;
 
     #[test]
-    fn test_parse_drop_temp_connector_logic() {
-        let input = "DROP TEMP CONNECTOR LOGIC acme.weather";
+    fn test_parse_drop_temp_connector() {
+        let input = "DROP TEMP CONNECTOR acme.weather";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::DropTempConnectorLogic(c) => {
+            BundleCommand::DropTempConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
                 assert_eq!(c.platform, None);
             }
-            _ => panic!("Expected DropTempConnectorLogic variant"),
+            _ => panic!("Expected DropTempConnector variant"),
         }
     }
 
     #[test]
-    fn test_parse_drop_temp_connector_logic_with_platform() {
-        let input = "DROP TEMP CONNECTOR LOGIC acme.weather FOR PLATFORM 'linux/amd64'";
+    fn test_parse_drop_temp_connector_with_platform() {
+        let input = "DROP TEMP CONNECTOR acme.weather FOR PLATFORM 'linux/amd64'";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::DropTempConnectorLogic(c) => {
+            BundleCommand::DropTempConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
                 assert_eq!(c.platform, Some("linux/amd64".parse::<Platform>().unwrap()));
             }
-            _ => panic!("Expected DropTempConnectorLogic variant"),
+            _ => panic!("Expected DropTempConnector variant"),
         }
     }
 
     #[test]
-    fn test_parse_drop_temp_connector_logic_roundtrip() {
-        let cmd = DropTempConnectorLogicCommand::new("acme.weather", None);
+    fn test_parse_drop_temp_connector_roundtrip() {
+        let cmd = DropTempConnectorCommand::new("acme.weather", None);
         let statement = cmd.to_statement();
         let parsed = parse_command(&statement).unwrap();
         match parsed {
-            BundleCommand::DropTempConnectorLogic(c) => {
+            BundleCommand::DropTempConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
                 assert_eq!(c.platform, None);
             }
-            _ => panic!("Expected DropTempConnectorLogic variant"),
+            _ => panic!("Expected DropTempConnector variant"),
         }
     }
 
     #[test]
-    fn test_parse_drop_temp_connector_logic_roundtrip_with_platform() {
+    fn test_parse_drop_temp_connector_roundtrip_with_platform() {
         let cmd =
-            DropTempConnectorLogicCommand::new("acme.weather", Some("linux/amd64".parse().unwrap()));
+            DropTempConnectorCommand::new("acme.weather", Some("linux/amd64".parse().unwrap()));
         let statement = cmd.to_statement();
         let parsed = parse_command(&statement).unwrap();
         match parsed {
-            BundleCommand::DropTempConnectorLogic(c) => {
+            BundleCommand::DropTempConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
                 assert_eq!(c.platform, Some("linux/amd64".parse::<Platform>().unwrap()));
             }
-            _ => panic!("Expected DropTempConnectorLogic variant"),
+            _ => panic!("Expected DropTempConnector variant"),
         }
     }
 }

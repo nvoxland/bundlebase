@@ -820,7 +820,7 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Drop runtime-only connector logic (session-only, no operation created).
+    /// Drop runtime-only connector (session-only, no operation created).
     ///
     /// # Arguments
     /// * `name` - The dotted connector name (e.g., "acme.weather")
@@ -828,7 +828,7 @@ impl PyBundleBuilder {
     ///
     /// Returns the number of entries removed.
     #[pyo3(signature = (name, platform=None))]
-    fn drop_temp_connector_logic<'py>(
+    fn drop_temp_connector<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
         platform: Option<&str>,
@@ -839,9 +839,9 @@ impl PyBundleBuilder {
         let platform = platform.map(|s| s.to_string());
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let count = inner
-                .drop_temp_connector_logic(&name, platform.as_deref())
+                .drop_temp_connector(&name, platform.as_deref())
                 .await
-                .map_err(|e| to_py_error_ctx("Failed to drop temporary connector logic", e))?;
+                .map_err(|e| to_py_error_ctx("Failed to drop temporary connector", e))?;
             Ok(format!(
                 "Dropped {} temporary connector logic entries for: {}",
                 count, name

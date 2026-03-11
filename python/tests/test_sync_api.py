@@ -657,10 +657,10 @@ class TestSyncSource:
         c.drop_connector("test.my_source", "linux/amd64")
         assert c is not None
 
-    def test_sync_drop_temp_connector_logic(self):
-        """Test drop_temp_connector_logic synchronously."""
+    def test_sync_drop_temp_connector(self):
+        """Test drop_temp_connector synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
         c.import_temp_connector("test.my_source", "python", "mod:Class")
-        result = c.drop_temp_connector_logic("test.my_source")
-        assert "Dropped 1 temporary connector logic" in result
+        result = c.drop_temp_connector("test.my_source")
+        assert "Dropped 1 temporary connector" in result
