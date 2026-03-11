@@ -422,30 +422,29 @@ except ValueError as e:
 
 ## Custom Functions
 
-Define custom data sources:
+Register custom SQL functions:
 
 ```python
 import Bundlebase.sync as dc
-import pyarrow as pa
 
-def my_data_source(page: int, schema: pa.Schema) -> pa.RecordBatch | None:
-    """Generate synthetic data."""
-    if page == 0:
-        return pa.record_batch({
-            "id": [1, 2, 3],
-            "value": [10, 20, 30]
-        }, schema=schema)
-    return None
-
+# Temporary function (session-scoped, supports python runner)
 c = dc.create()
-c.import_function(
-    name="my_func",
-    output={"id": "Int32", "value": "Int32"},
-    func=my_data_source,
-    version="1"
+c.import_temp_function(
+    name="acme.double_val",
+    input_types=["Int64"],
+    return_type="Int64",
+    runner="python",
+    logic="my_module:double_val",
 )
-c.attach("function://my_func")
-df = c.to_pandas()
+
+# Persistent function (bundled, requires serializable runner)
+c.import_function(
+    name="acme.double_val",
+    input_types=["Int64"],
+    return_type="Int64",
+    runner="ipc",
+    logic="python:my_functions.py",
+)
 ```
 
 ## Migration from Async to Sync

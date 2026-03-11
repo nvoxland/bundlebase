@@ -34,7 +34,7 @@ if __name__ == "__main__":
 Use with:
 
 ```python
-b.import_temporary_connector('example.connector', runner='ipc', logic='example_connector.py')
+b.import_temp_connector('example.connector', runner='ipc', logic='example_connector.py')
 b.create_source('example.connector')
 ```
 
@@ -326,7 +326,7 @@ import bundlebase.sync as bb
 from example_connector import ExampleConnector
 
 bundle = bb.create("my/data")
-bundle.import_temporary_connector('example.connector', runner='python', logic='example_connector:ExampleConnector')
+bundle.import_temp_connector('example.connector', runner='python', logic='example_connector:ExampleConnector')
 bundle.create_source('example.connector')
 bundle.fetch("base", "add")
 ```
@@ -335,8 +335,8 @@ The same `Connector` class works for both native and IPC mode — no code change
 
 | Mode | Registration | Data Transfer |
 |------|-------------|---------------|
-| **Native** | `import_temporary_connector(..., runner='python', logic='module:Class')` | Zero-copy via PyO3 |
-| **IPC** | `import_temporary_connector(..., runner='ipc', logic='script.py')` | Serialized Arrow IPC over pipes |
+| **Native** | `import_temp_connector(..., runner='python', logic='module:Class')` | Zero-copy via PyO3 |
+| **IPC** | `import_temp_connector(..., runner='ipc', logic='script.py')` | Serialized Arrow IPC over pipes |
 
 ### Extra Arguments
 

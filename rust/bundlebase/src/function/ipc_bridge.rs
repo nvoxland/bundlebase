@@ -64,7 +64,7 @@ struct JsonRpcError {
 /// - `java:my.jar`          -> `["java", "-jar", "my.jar"]`
 /// - `docker:image`         -> `["docker", "run", "-i", "--rm", "image"]`
 /// - `my-command arg1 arg2` -> `["my-command", "arg1", "arg2"]` (whitespace split)
-fn parse_call(call: &str) -> Result<Vec<String>, BundlebaseError> {
+pub(crate) fn parse_call(call: &str) -> Result<Vec<String>, BundlebaseError> {
     let call = call.trim();
     if call.is_empty() {
         return Err("Function logic/call string must not be empty".into());

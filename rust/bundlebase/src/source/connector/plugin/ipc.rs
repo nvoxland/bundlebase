@@ -436,25 +436,17 @@ impl Connector for IpcConnector {
             None => return Ok(None),
         };
 
-        // Parse batches from the IPC blob and wrap as a lazy stream
+        // Parse batches lazily from the IPC blob and wrap as a stream.
+        // The reader iterates over batches from the in-memory buffer without
+        // collecting them all at once.
         let cursor = std::io::Cursor::new(ipc_data);
         let reader = StreamReader::try_new(cursor, None)
             .map_err(|e| format!("Failed to create Arrow IPC stream reader: {}", e))?;
 
-        // TODO: This collects all batches into memory. The IPC data is already a single
-        // byte buffer from the subprocess, so lazy streaming would require chunked reads.
-        let batches: Vec<Result<_, BundlebaseError>> = reader
-            .map(|batch_result| {
-                batch_result
-                    .map_err(|e| format!("Failed to read Arrow IPC record batch: {}", e).into())
-            })
-            .collect();
-
-        if batches.is_empty() {
-            return Ok(None);
-        }
-
-        let batch_stream = Box::pin(futures::stream::iter(batches));
+        let batch_stream = Box::pin(futures::stream::iter(reader.map(|batch_result| {
+            batch_result
+                .map_err(|e| format!("Failed to read Arrow IPC record batch: {}", e).into())
+        })));
         Ok(Some(SourceData::Arrow(batch_stream)))
     }
 

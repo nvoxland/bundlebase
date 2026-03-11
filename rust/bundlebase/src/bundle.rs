@@ -1421,7 +1421,7 @@ impl BundleFacade for Bundle {
         Bundle::config(self)
     }
 
-    async fn import_temporary_connector(
+    async fn import_temp_connector(
         &self,
         name: &str,
         runner: Runner,
@@ -1441,7 +1441,7 @@ impl BundleFacade for Bundle {
         Ok(())
     }
 
-    async fn drop_temporary_connector_logic(
+    async fn drop_temp_connector_logic(
         &self,
         name: &str,
         platform: Option<&connector_definition::Platform>,
@@ -1449,10 +1449,15 @@ impl BundleFacade for Bundle {
         self.remove_connector_entry(name, platform, true)
     }
 
-    async fn import_temporary_function(
+    async fn import_temp_function(
         &self,
         entry: FunctionEntry,
     ) -> Result<(), BundlebaseError> {
+        // Validate IPC logic string at import time (fail early)
+        if matches!(entry.runner, Runner::Ipc | Runner::Java | Runner::Docker) {
+            crate::function::ipc_bridge::parse_call(&entry.logic)?;
+        }
+
         // Validate kind consistency before adding: all overloads must share the same kind
         let name = entry.name.to_string();
         {
@@ -1477,7 +1482,7 @@ impl BundleFacade for Bundle {
         Ok(())
     }
 
-    async fn drop_temporary_function(
+    async fn drop_temp_function(
         &self,
         name: &str,
         platform: Option<&connector_definition::Platform>,
@@ -1699,14 +1704,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_import_temporary_connector_changes_version_to_temp() -> Result<(), BundlebaseError> {
+    async fn test_import_temp_connector_changes_version_to_temp() -> Result<(), BundlebaseError> {
         use crate::bundle::facade::BundleFacade;
         use crate::bundle::connector_definition::Runner;
 
         let bundle = Bundle::empty(None).await?;
         assert_eq!(bundle.version(), "empty");
 
-        bundle.import_temporary_connector(
+        bundle.import_temp_connector(
             "test.source",
             Runner::Lib,
             "test_call".to_string(),
@@ -1719,14 +1724,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_import_temporary_connector_version_udf_returns_temp() -> Result<(), BundlebaseError> {
+    async fn test_import_temp_connector_version_udf_returns_temp() -> Result<(), BundlebaseError> {
         use arrow::array::StringArray;
         use crate::bundle::facade::BundleFacade;
         use crate::bundle::connector_definition::Runner;
 
         let bundle = Bundle::empty(None).await?;
 
-        bundle.import_temporary_connector(
+        bundle.import_temp_connector(
             "test.source",
             Runner::Lib,
             "test_call".to_string(),

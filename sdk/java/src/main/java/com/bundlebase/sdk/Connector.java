@@ -47,11 +47,10 @@ public interface Connector {
      * {@code List<Map>} or {@code Map<String, List>}, this schema controls
      * the Arrow types used.
      *
-     * <p>Supported types: string, int8, int16, int32, int64, uint8, uint16, uint32, uint64,
-     * float16, float32, float64, float, double, int, bool, boolean, date32, date64, date,
-     * timestamp, binary, bytes.
+     * <p>Supported types: Utf8, Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64,
+     * Float16, Float32, Float64, Boolean, Date32, Date64, Timestamp, Binary.
      *
-     * <p>Example: {@code Map.of("name", "string", "age", "int32", "score", "float64")}
+     * <p>Example: {@code Map.of("name", "Utf8", "age", "Int32", "score", "Float64")}
      *
      * @return schema map, or null to use type inference
      */

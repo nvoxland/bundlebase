@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Operation that defines a named connector and sets its logic.
 ///
 /// Loads the connector if it doesn't exist, then adds/replaces logic for the given platform.
-/// Always persisted — for runtime-only logic, use `import_temporary_connector` instead.
+/// Always persisted — for runtime-only logic, use `import_temp_connector` instead.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportConnectorOp {
@@ -47,7 +47,7 @@ impl Operation for ImportConnectorOp {
         // Reject python runner (cannot be bundled)
         if self.runner == Runner::Python {
             return Err(
-                "python runner cannot be bundled. Use IMPORT TEMPORARY CONNECTOR instead.".into(),
+                "python runner cannot be bundled. Use IMPORT TEMP CONNECTOR instead.".into(),
             );
         }
 
@@ -115,7 +115,7 @@ mod tests {
         );
         let result = op.check(&bundle).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must contain exactly one dot"));
+        assert!(result.unwrap_err().to_string().contains("must be in format 'namespace.name'"));
     }
 
     #[tokio::test]

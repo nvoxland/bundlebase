@@ -157,13 +157,13 @@ class KwargsNativeSource(Connector):
         return pa.table({"val": [kwargs.get("custom_key", "none")]})
 
 
-# Helper to set up a native source via import_temporary_connector + create_source
+# Helper to set up a native source via import_temp_connector + create_source
 async def _setup_native_source(c, source_class, source_name="test.native_source", **kwargs):
     """Define temporary connector and create a native source."""
     module = source_class.__module__
     qualname = source_class.__qualname__
 
-    c = await c.import_temporary_connector(source_name, "python", f"{module}:{qualname}")
+    c = await c.import_temp_connector(source_name, "python", f"{module}:{qualname}")
     args = {k: str(v) for k, v in kwargs.items()}
     c = await c.create_source(source_name, args)
     return c
@@ -178,29 +178,29 @@ async def test_import_connector_binding():
 
 
 @pytest.mark.asyncio
-async def test_import_temporary_connector_binding():
-    """Test that import_temporary_connector Python binding works."""
+async def test_import_temp_connector_binding():
+    """Test that import_temp_connector Python binding works."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_temporary_connector("test.my_source", "python", "mod:Class")
+    c = await c.import_temp_connector("test.my_source", "python", "mod:Class")
     assert c is not None
 
 
 @pytest.mark.asyncio
-async def test_import_temporary_connector_builder_version_uncommitted_temp():
-    """Test that import_temporary_connector on builder with changes sets version to UNCOMMITTED+TEMP."""
+async def test_import_temp_connector_builder_version_uncommitted_temp():
+    """Test that import_temp_connector on builder with changes sets version to UNCOMMITTED+TEMP."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     assert c.version != "UNCOMMITTED+TEMP"
     # Add a persistent change so version becomes UNCOMMITTED
     c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
     assert c.version == "UNCOMMITTED"
     # Now add a temporary connector to get UNCOMMITTED+TEMP
-    c = await c.import_temporary_connector("test.temp_source", "python", "mod:Class")
+    c = await c.import_temp_connector("test.temp_source", "python", "mod:Class")
     assert c.version == "UNCOMMITTED+TEMP"
 
 
 @pytest.mark.asyncio
-async def test_import_temporary_connector_bundle_version_temp():
-    """Test that import_temporary_connector on read-only bundle sets version to TEMP."""
+async def test_import_temp_connector_bundle_version_temp():
+    """Test that import_temp_connector on read-only bundle sets version to TEMP."""
     with tempfile.TemporaryDirectory() as path:
         c = await bundlebase.create(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
         c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
@@ -208,7 +208,7 @@ async def test_import_temporary_connector_bundle_version_temp():
 
         bundle = await bundlebase.open(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
         assert bundle.version != "TEMP"
-        await bundle.import_temporary_connector("test.my_source", "python", "mod:Class")
+        await bundle.import_temp_connector("test.my_source", "python", "mod:Class")
         assert bundle.version == "TEMP"
 
 
@@ -325,7 +325,7 @@ async def test_import_connector_survives_commit_reopen():
 async def test_native_source_blocked_without_allow_external_code():
     """Test that native source fails when allow_external_code is not set."""
     c = await bundlebase.create(random_bundle())
-    c = await c.import_temporary_connector("test.blocked_source", "python", "mod:Class")
+    c = await c.import_temp_connector("test.blocked_source", "python", "mod:Class")
 
     with pytest.raises(ValueError, match="External code execution is disabled"):
         await c.create_source("test.blocked_source", {})
@@ -422,32 +422,32 @@ async def test_drop_connector_with_platform():
 
 
 @pytest.mark.asyncio
-async def test_drop_temporary_connector_logic_binding():
-    """Test that drop_temporary_connector_logic Python binding works on builder."""
+async def test_drop_temp_connector_logic_binding():
+    """Test that drop_temp_connector_logic Python binding works on builder."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_temporary_connector("test.my_source", "python", "mod:Class")
-    result = await c.drop_temporary_connector_logic("test.my_source")
+    c = await c.import_temp_connector("test.my_source", "python", "mod:Class")
+    result = await c.drop_temp_connector_logic("test.my_source")
     assert "Dropped 1 temporary connector logic" in result
 
 
 @pytest.mark.asyncio
-async def test_drop_temporary_connector_logic_with_platform():
-    """Test that drop_temporary_connector_logic with platform filter works."""
+async def test_drop_temp_connector_logic_with_platform():
+    """Test that drop_temp_connector_logic with platform filter works."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_temporary_connector("test.my_source", "python", "mod:Class", "linux/amd64")
-    result = await c.drop_temporary_connector_logic("test.my_source", "linux/amd64")
+    c = await c.import_temp_connector("test.my_source", "python", "mod:Class", "linux/amd64")
+    result = await c.drop_temp_connector_logic("test.my_source", "linux/amd64")
     assert "Dropped 1 temporary connector logic" in result
 
 
 @pytest.mark.asyncio
-async def test_drop_temporary_connector_logic_on_bundle():
-    """Test that drop_temporary_connector_logic works on read-only bundle."""
+async def test_drop_temp_connector_logic_on_bundle():
+    """Test that drop_temp_connector_logic works on read-only bundle."""
     with tempfile.TemporaryDirectory() as path:
         c = await bundlebase.create(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
         c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
         await c.commit("Initial commit")
 
         bundle = await bundlebase.open(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
-        await bundle.import_temporary_connector("test.my_source", "python", "mod:Class")
-        result = await bundle.drop_temporary_connector_logic("test.my_source")
+        await bundle.import_temp_connector("test.my_source", "python", "mod:Class")
+        result = await bundle.drop_temp_connector_logic("test.my_source")
         assert "Dropped 1 temporary connector logic" in result

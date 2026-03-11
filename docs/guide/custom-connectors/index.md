@@ -14,6 +14,21 @@ Internally, `python` and `lib` run **in-process** (native mode) for zero-copy Ar
 
 **Your source code is the same regardless of type** — only the entry point differs. SDKs for Python, Go, Java, and Rust handle the protocol automatically.
 
+## Built-in Connectors
+
+Bundlebase includes several built-in connectors that don't need to be imported:
+
+| Connector | Description |
+|-----------|-------------|
+| `remote_dir` | Files from a remote directory (S3, HTTP, etc.) |
+| `ftp_directory` | Files from an FTP server |
+| `sftp_directory` | Files from an SFTP server |
+| `kaggle` | Datasets from Kaggle |
+| `web_scrape` | Data scraped from web pages |
+| `postgres` | Data from a PostgreSQL database |
+
+Use these directly with `CREATE SOURCE` — no `IMPORT CONNECTOR` step needed.
+
 ## Overview
 
 Custom connectors use a simple workflow:
@@ -25,7 +40,7 @@ Custom connectors use a simple workflow:
 To remove connectors:
 
 - [**Drop connector**](#drop-connector) — removes the connector (or just a specific platform's logic)
-- [**Drop temporary connector logic**](#drop-temporary-connector-logic) — removes runtime-only logic entries
+- [**Drop temp connector logic**](#drop-temp-connector-logic) — removes runtime-only logic entries
 
 ## Choosing a Runner
 
@@ -33,7 +48,7 @@ To remove connectors:
 
 - Your source is a Python class in the same project
 - You need maximum performance with zero serialization overhead
-- Note: requires [`IMPORT TEMPORARY CONNECTOR`](#load-temporary-connector) since Python code can't be bundled
+- Note: requires [`IMPORT TEMP CONNECTOR`](#load-temp-connector) since Python code can't be bundled
 
 **Use `lib` when:**
 
@@ -101,7 +116,7 @@ Creates a named connector with its runner and logic. The connector definition an
 | `platform` | `str` | `"*/*"` | Target platform (e.g., `"linux/amd64"`, `"darwin/arm64"`, `"*/*"` for all) |
 
 !!! note
-    `IMPORT CONNECTOR` rejects `runner='python'` because Python code cannot be serialized into the bundle. Use [`IMPORT TEMPORARY CONNECTOR`](#load-temporary-connector) for Python connectors.
+    `IMPORT CONNECTOR` rejects `runner='python'` because Python code cannot be serialized into the bundle. Use [`IMPORT TEMP CONNECTOR`](#load-temp-connector) for Python connectors.
 
 Connector names use a **dot-separated namespace** format. The part before the first dot is the **namespace** (e.g., `acme` in `acme.weather`). Choose a namespace that is unique to you or your organization — this prevents naming collisions when sharing bundles. For example:
 
@@ -115,14 +130,14 @@ You can call `IMPORT CONNECTOR` multiple times for different platforms on the sa
 
 ---
 
-### IMPORT TEMPORARY CONNECTOR
+### IMPORT TEMP CONNECTOR
 
 Creates a connector with logic at **runtime only** — nothing is persisted into the bundle. Use this for `runner='python'` in-process connectors. Works on both `Bundle` (read-only) and `BundleBuilder`.
 
 === "Async API"
 
     ```python
-    bundle = await bundle.import_temporary_connector(
+    bundle = await bundle.import_temp_connector(
         'acme.weather',
         runner='python',
         logic='my_module:MyConnector'
@@ -132,7 +147,7 @@ Creates a connector with logic at **runtime only** — nothing is persisted into
 === "Sync API"
 
     ```python
-    bundle.import_temporary_connector(
+    bundle.import_temp_connector(
         'acme.weather',
         runner='python',
         logic='my_module:MyConnector'
@@ -142,7 +157,7 @@ Creates a connector with logic at **runtime only** — nothing is persisted into
 === "SQL"
 
     ```sql
-    IMPORT TEMPORARY CONNECTOR acme.weather FROM 'python://my_module:MyConnector'
+    IMPORT TEMP CONNECTOR acme.weather FROM 'python://my_module:MyConnector'
     ```
 
 **Parameters:** Same as [`IMPORT CONNECTOR`](#load-connector), but accepts all runners including `python`.
@@ -153,7 +168,7 @@ Temporary logic takes precedence over persisted logic when both exist for the sa
 
 ### CREATE SOURCE
 
-Creates a source instance from a connector. For built-in connectors (`remote_dir`, `kaggle`, etc.), this is a single step. For custom connectors, you must first [`IMPORT CONNECTOR`](#load-connector) or [`IMPORT TEMPORARY CONNECTOR`](#load-temporary-connector).
+Creates a source instance from a connector. For built-in connectors (`remote_dir`, `kaggle`, etc.), this is a single step. For custom connectors, you must first [`IMPORT CONNECTOR`](#load-connector) or [`IMPORT TEMP CONNECTOR`](#load-temp-connector).
 
 === "Async API"
 
@@ -310,7 +325,7 @@ Like other drop operations, the bundled artifacts are not deleted — a `DropCon
 
 ---
 
-### DROP TEMPORARY CONNECTOR LOGIC
+### DROP TEMP CONNECTOR LOGIC
 
 Removes **runtime-only** logic entries from a connector. Works on both `Bundle` and `BundleBuilder`.
 
@@ -318,30 +333,30 @@ Removes **runtime-only** logic entries from a connector. Works on both `Bundle` 
 
     ```python
     # Drop all temporary logic
-    count = await bundle.drop_temporary_connector_logic('acme.weather')
+    count = await bundle.drop_temp_connector_logic('acme.weather')
 
     # Drop temporary logic for a specific platform
-    count = await bundle.drop_temporary_connector_logic('acme.weather', platform='*/*')
+    count = await bundle.drop_temp_connector_logic('acme.weather', platform='*/*')
     ```
 
 === "Sync API"
 
     ```python
     # Drop all temporary logic
-    count = bundle.drop_temporary_connector_logic('acme.weather')
+    count = bundle.drop_temp_connector_logic('acme.weather')
 
     # Drop temporary logic for a specific platform
-    count = bundle.drop_temporary_connector_logic('acme.weather', platform='*/*')
+    count = bundle.drop_temp_connector_logic('acme.weather', platform='*/*')
     ```
 
 === "SQL"
 
     ```sql
     -- Drop all temporary logic
-    DROP TEMPORARY CONNECTOR LOGIC acme.weather
+    DROP TEMP CONNECTOR LOGIC acme.weather
 
     -- Drop temporary logic for a specific platform
-    DROP TEMPORARY CONNECTOR LOGIC acme.weather FOR PLATFORM '*/*'
+    DROP TEMP CONNECTOR LOGIC acme.weather FOR PLATFORM '*/*'
     ```
 
 **Parameters:**

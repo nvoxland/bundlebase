@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// Operation that defines a named function and registers it with DataFusion.
 ///
-/// Always persisted — for runtime-only functions, use `import_temporary_function` instead.
+/// Always persisted — for runtime-only functions, use `import_temp_function` instead.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportFunctionOp {
@@ -69,7 +69,7 @@ impl Operation for ImportFunctionOp {
         // Reject python runner (cannot be bundled)
         if self.runner == Runner::Python {
             return Err(
-                "python runner cannot be bundled. Use IMPORT TEMPORARY FUNCTION instead.".into(),
+                "python runner cannot be bundled. Use IMPORT TEMP FUNCTION instead.".into(),
             );
         }
 
@@ -171,7 +171,7 @@ mod tests {
         );
         let result = op.check(&bundle).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must contain exactly one dot"));
+        assert!(result.unwrap_err().to_string().contains("must be in format 'namespace.name'"));
     }
 
     #[tokio::test]

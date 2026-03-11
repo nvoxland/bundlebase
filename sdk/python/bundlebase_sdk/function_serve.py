@@ -98,8 +98,16 @@ def _serve_function(func: Function, stdin: IO[bytes], stdout: IO[bytes]) -> None
                 break
             else:
                 write_error(stdout, req_id, -32601, f"Method not found: {method}")
+        except json.JSONDecodeError as e:
+            write_error(stdout, req_id, -32700, f"JSON parse error: {e}")
+        except KeyError as e:
+            write_error(stdout, req_id, -32602, f"Missing required param: {e}")
+        except (TypeError, ValueError) as e:
+            write_error(stdout, req_id, -32602, f"Invalid params: {e}")
+        except pa.ArrowInvalid as e:
+            write_error(stdout, req_id, -32000, f"Arrow error: {e}")
         except Exception as e:
-            write_error(stdout, req_id, -32000, str(e))
+            write_error(stdout, req_id, -32000, f"Internal error: {e}")
 
 
 def _handle_invoke(

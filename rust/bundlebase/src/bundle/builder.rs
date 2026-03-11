@@ -759,7 +759,7 @@ impl BundleBuilder {
     /// for the given platform. The operation is persisted into the bundle's
     /// commit history.
     ///
-    /// Python runner cannot be bundled — use `import_temporary_connector()` instead.
+    /// Python runner cannot be bundled — use `import_temp_connector()` instead.
     ///
     /// # Arguments
     /// * `name` - Dot-separated connector name (e.g., "acme.weather").
@@ -796,7 +796,7 @@ impl BundleBuilder {
     }
 
     /// Drop runtime-only connector logic (session-only, no operation created).
-    pub async fn drop_temporary_connector_logic(
+    pub async fn drop_temp_connector_logic(
         &self,
         name: &str,
         platform: Option<&str>,
@@ -1094,7 +1094,7 @@ impl BundleBuilder {
     /// Load a persistent function (bundled, not session-only).
     ///
     /// Registers the function as a DataFusion UDF and persists the definition
-    /// via an operation. Python runner cannot be bundled — use `import_temporary_function()`.
+    /// via an operation. Python runner cannot be bundled — use `import_temp_function()`.
     ///
     /// # Arguments
     /// * `name` - Dotted function name (e.g., "acme.double_val")
@@ -1141,7 +1141,7 @@ impl BundleBuilder {
     }
 
     /// Drop runtime-only function (session-only, no operation created).
-    pub async fn drop_temporary_function(
+    pub async fn drop_temp_function(
         &self,
         name: &str,
         platform: Option<&str>,
@@ -1549,7 +1549,7 @@ impl BundleFacade for BundleBuilder {
         self.bundle.config()
     }
 
-    async fn import_temporary_connector(
+    async fn import_temp_connector(
         &self,
         name: &str,
         runner: crate::bundle::connector_definition::Runner,
@@ -1569,7 +1569,7 @@ impl BundleFacade for BundleBuilder {
         Ok(())
     }
 
-    async fn drop_temporary_connector_logic(
+    async fn drop_temp_connector_logic(
         &self,
         name: &str,
         platform: Option<&crate::bundle::connector_definition::Platform>,
@@ -1577,10 +1577,15 @@ impl BundleFacade for BundleBuilder {
         self.bundle.remove_connector_entry(name, platform, true)
     }
 
-    async fn import_temporary_function(
+    async fn import_temp_function(
         &self,
         entry: crate::bundle::function_definition::FunctionEntry,
     ) -> Result<(), BundlebaseError> {
+        // Validate IPC logic string at import time (fail early)
+        if matches!(entry.runner, crate::bundle::connector_definition::Runner::Ipc | crate::bundle::connector_definition::Runner::Java | crate::bundle::connector_definition::Runner::Docker) {
+            crate::function::ipc_bridge::parse_call(&entry.logic)?;
+        }
+
         // Validate kind consistency before adding
         let name = entry.name.to_string();
         {
@@ -1605,7 +1610,7 @@ impl BundleFacade for BundleBuilder {
         Ok(())
     }
 
-    async fn drop_temporary_function(
+    async fn drop_temp_function(
         &self,
         name: &str,
         platform: Option<&crate::bundle::connector_definition::Platform>,
@@ -1886,7 +1891,7 @@ mod tests {
             .await
             .unwrap();
 
-        BundleFacade::import_temporary_connector(
+        BundleFacade::import_temp_connector(
             bundle.as_ref(),
             "test.source",
             Runner::Lib,
@@ -1912,7 +1917,7 @@ mod tests {
             .await
             .unwrap();
 
-        BundleFacade::import_temporary_connector(
+        BundleFacade::import_temp_connector(
             bundle.as_ref(),
             "test.source",
             Runner::Lib,
@@ -1938,7 +1943,7 @@ mod tests {
             .await
             .unwrap();
 
-        BundleFacade::import_temporary_connector(
+        BundleFacade::import_temp_connector(
             builder.as_ref(),
             "test.source",
             Runner::Python,

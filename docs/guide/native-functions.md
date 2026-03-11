@@ -4,10 +4,55 @@ Native functions let you extend bundlebase's SQL with high-performance scalar an
 
 ## Runners
 
-| Runner | How it works | Best for |
-|--------|-------------|----------|
-| `lib` | Loads a shared library (.so/.dylib) via FFI | Rust, C, C++ — zero IPC overhead |
-| `ipc` | Launches an executable, communicates via Arrow IPC | Go, Python, any language |
+| Runner | How it works | Best for | Persistent? |
+|--------|-------------|----------|-------------|
+| `python` | In-process via PyO3 | Prototyping, scripts | Temp only |
+| `ipc` | Subprocess via SDK, communicates via Arrow IPC | Go, Python, any language | Yes |
+| `lib` | Loads a shared library (.so/.dylib) via FFI | Rust, C, C++ — zero IPC overhead | Yes |
+| `java` | JVM subprocess via `java -jar` | Java | Yes |
+| `docker` | Containerized subprocess | Any language, most isolated | Yes |
+
+### Persistent vs Temporary
+
+- **Temporary** (`IMPORT TEMP FUNCTION`): Session-scoped, supports all runners including `python`. Great for iterative development.
+- **Persistent** (`IMPORT FUNCTION`): Bundled into the data package, survives commits. Requires a serializable runner (`ipc`, `lib`, `java`, `docker` — not `python`).
+
+**Development workflow:** Start temporary for fast iteration, then promote to persistent when ready:
+
+```python
+# 1. Develop interactively with temporary
+c.import_temp_function("acme.transform", ["Utf8"], "Utf8", "python", "my_module:transform")
+c.query("SELECT acme.transform(col) FROM data")  # test it
+
+# 2. When ready, package as IPC and make persistent
+c.import_function("acme.transform", ["Utf8"], "Utf8", "ipc", "python:my_module_server.py")
+```
+
+### Auto-Detection
+
+Functions can declare their signatures via a `bundlebase_metadata()` convention, eliminating the need to specify types manually:
+
+```python
+def bundlebase_metadata():
+    return {
+        "functions": [
+            {"name": "double_val", "input_types": ["Int64"], "return_type": "Int64", "kind": "scalar"},
+            {"name": "my_sum", "input_types": ["Int64"], "return_type": "Int64", "kind": "aggregate"},
+        ]
+    }
+```
+
+With auto-detection, you can import without specifying types:
+
+```sql
+-- Import a single function (types auto-detected from metadata)
+IMPORT TEMP FUNCTION acme.double_val FROM 'ipc://python:my_module_server.py'
+
+-- Import all functions in a namespace
+IMPORT TEMP FUNCTION acme.* FROM 'ipc://python:my_module_server.py'
+```
+
+This is the **recommended approach** for registering functions.
 
 ## Writing a Lib Function (Rust/C)
 

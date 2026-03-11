@@ -124,6 +124,36 @@ func parseStringMap(params map[string]interface{}, exclude ...string) map[string
 	return result
 }
 
+// readArrowIPC reads a length-prefixed Arrow IPC stream from the reader.
+func readArrowIPC(r io.Reader) ([]arrow.Record, error) {
+	var length uint32
+	if err := binary.Read(r, binary.BigEndian, &length); err != nil {
+		return nil, fmt.Errorf("failed to read IPC length prefix: %w", err)
+	}
+	if length == 0 {
+		return nil, nil
+	}
+
+	data := make([]byte, length)
+	if _, err := io.ReadFull(r, data); err != nil {
+		return nil, fmt.Errorf("failed to read IPC data: %w", err)
+	}
+
+	reader, err := ipc.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Arrow reader: %w", err)
+	}
+	defer reader.Release()
+
+	var records []arrow.Record
+	for reader.Next() {
+		rec := reader.Record()
+		rec.Retain()
+		records = append(records, rec)
+	}
+	return records, nil
+}
+
 // parseLocation extracts a Location from a params["location"] value.
 func parseLocation(v interface{}) Location {
 	loc := Location{Format: "parquet"}

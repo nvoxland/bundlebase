@@ -4,16 +4,16 @@
 //! that work with `&dyn BundleFacade`.
 
 // Facade command implementations
-mod import_temporary_connector;
-mod import_temporary_function;
+mod import_temp_connector;
+mod import_temp_function;
 mod explain;
-mod drop_temporary_connector_logic;
-mod drop_temporary_function;
+mod drop_temp_connector_logic;
+mod drop_temp_function;
 mod set_config;
 
-pub use import_temporary_connector::ImportTemporaryConnectorCommand;
-pub use import_temporary_function::ImportTemporaryFunctionCommand;
-pub use drop_temporary_connector_logic::DropTemporaryConnectorLogicCommand;
-pub use drop_temporary_function::DropTemporaryFunctionCommand;
+pub use import_temp_connector::ImportTempConnectorCommand;
+pub use import_temp_function::ImportTempFunctionCommand;
+pub use drop_temp_connector_logic::DropTempConnectorLogicCommand;
+pub use drop_temp_function::DropTempFunctionCommand;
 pub use explain::ExplainPlanCommand;
 pub use set_config::SetConfigCommand;

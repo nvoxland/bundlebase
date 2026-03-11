@@ -255,7 +255,7 @@ class PyBundle:
         """
         ...
 
-    async def import_temporary_function(
+    async def import_temp_function(
         self,
         name: str,
         input_types: List[str],
@@ -499,7 +499,7 @@ class PyBundleBuilder:
         """
         ...
 
-    def import_temporary_function(
+    def import_temp_function(
         self,
         name: str,
         input_types: List[str],
@@ -540,6 +540,83 @@ class PyBundleBuilder:
             platform: Optional platform filter. None drops entire function.
             input_types: Optional list of Arrow type names to drop a specific overload.
                 If None, drops all overloads.
+
+        Returns:
+            OperationChain for fluent chaining
+        """
+        ...
+
+    def import_connector(
+        self,
+        name: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+    ) -> "OperationChain":
+        """
+        Load a named connector with logic (persisted).
+
+        Args:
+            name: Dot-separated connector name (e.g., "acme.weather")
+            runner: The runner: "lib", "java", "docker", or "ipc"
+            logic: The logic string (path to shared library or binary)
+            platform: Docker-style platform string (default: "*/*")
+
+        Returns:
+            OperationChain for fluent chaining
+        """
+        ...
+
+    def import_temp_connector(
+        self,
+        name: str,
+        runner: str,
+        logic: str,
+        platform: str = "*/*",
+    ) -> "OperationChain":
+        """
+        Load a temporary connector with runtime-only logic (not persisted).
+
+        Args:
+            name: Dot-separated connector name (e.g., "acme.weather")
+            runner: The runner: "python", "lib", "java", "docker", or "ipc"
+            logic: The logic string (e.g., "mod:Class" for python)
+            platform: Docker-style platform string (default: "*/*")
+
+        Returns:
+            OperationChain for fluent chaining
+        """
+        ...
+
+    def drop_connector(
+        self,
+        name: str,
+        platform: Optional[str] = None,
+    ) -> "OperationChain":
+        """
+        Drop a connector. Without a platform, removes the entire definition.
+        With a platform, removes only the logic for that platform.
+
+        Args:
+            name: The dotted connector name (e.g., "acme.weather")
+            platform: Optional platform filter (e.g., "linux/amd64"). None drops entire connector.
+
+        Returns:
+            OperationChain for fluent chaining
+        """
+        ...
+
+    def drop_temp_connector_logic(
+        self,
+        name: str,
+        platform: Optional[str] = None,
+    ) -> "OperationChain":
+        """
+        Drop runtime-only connector logic (session-only, no operation created).
+
+        Args:
+            name: The dotted connector name (e.g., "acme.weather")
+            platform: Optional platform filter. None drops all.
 
         Returns:
             OperationChain for fluent chaining
@@ -1354,7 +1431,7 @@ class OperationChain:
         """Queue a import_function operation."""
         ...
 
-    def import_temporary_function(
+    def import_temp_function(
         self,
         name: str,
         input_types: List[str],
@@ -1364,7 +1441,7 @@ class OperationChain:
         platform: str = "*/*",
         function_type: str = "scalar",
     ) -> "OperationChain":
-        """Queue a import_temporary_function operation."""
+        """Queue a import_temp_function operation."""
         ...
 
     def drop_function(
@@ -1513,7 +1590,7 @@ class CreateChain:
         """Queue a import_function operation."""
         ...
 
-    def import_temporary_function(
+    def import_temp_function(
         self,
         name: str,
         input_types: List[str],
@@ -1523,7 +1600,7 @@ class CreateChain:
         platform: str = "*/*",
         function_type: str = "scalar",
     ) -> "CreateChain":
-        """Queue a import_temporary_function operation."""
+        """Queue a import_temp_function operation."""
         ...
 
     def drop_function(
@@ -1672,7 +1749,7 @@ class ExtendChain:
         """Queue a import_function operation."""
         ...
 
-    def import_temporary_function(
+    def import_temp_function(
         self,
         name: str,
         input_types: List[str],
@@ -1682,7 +1759,7 @@ class ExtendChain:
         platform: str = "*/*",
         function_type: str = "scalar",
     ) -> "ExtendChain":
-        """Queue a import_temporary_function operation."""
+        """Queue a import_temp_function operation."""
         ...
 
     def drop_function(

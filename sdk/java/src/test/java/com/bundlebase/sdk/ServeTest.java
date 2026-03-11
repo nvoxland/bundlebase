@@ -137,8 +137,8 @@ public class ServeTest {
             public Map<String, String> schema() {
                 // Use LinkedHashMap to preserve column order
                 Map<String, String> s = new LinkedHashMap<>();
-                s.put("name", "string");
-                s.put("score", "float32");
+                s.put("name", "Utf8");
+                s.put("score", "Float32");
                 return s;
             }
 

@@ -1,4 +1,4 @@
-//! ImportTemporaryFunction command implementation (runtime-only).
+//! ImportTempFunction command implementation (runtime-only).
 //!
 //! Loads a function with runtime-only logic, without persisting an operation.
 //! Works on both `Bundle` and `BundleBuilder` via `BundleFacade`.
@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 /// Command to load a function with runtime-only logic (not persisted).
 #[derive(Debug, Clone)]
-pub struct ImportTemporaryFunctionCommand {
+pub struct ImportTempFunctionCommand {
     /// Full dotted function name, or `namespace.*` for wildcard mode
     pub name: String,
     /// Arrow type names for input parameters (None = auto-detect from manifest)
@@ -38,7 +38,7 @@ pub struct ImportTemporaryFunctionCommand {
     pub kind: FunctionKind,
 }
 
-impl ImportTemporaryFunctionCommand {
+impl ImportTempFunctionCommand {
     pub fn new(
         name: impl Into<String>,
         input_types: Vec<String>,
@@ -102,9 +102,9 @@ impl ImportTemporaryFunctionCommand {
     }
 }
 
-impl CommandParsing for ImportTemporaryFunctionCommand {
+impl CommandParsing for ImportTempFunctionCommand {
     fn rule() -> Rule {
-        Rule::import_temporary_function_stmt
+        Rule::import_temp_function_stmt
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
@@ -147,11 +147,11 @@ impl CommandParsing for ImportTemporaryFunctionCommand {
         }
 
         let name = name.ok_or_else(|| -> BundlebaseError {
-            "IMPORT TEMPORARY FUNCTION missing function name".into()
+            "IMPORT TEMP FUNCTION missing function name".into()
         })?;
 
         let from_url = from_url.ok_or_else(|| -> BundlebaseError {
-            "IMPORT TEMPORARY FUNCTION missing FROM clause".into()
+            "IMPORT TEMP FUNCTION missing FROM clause".into()
         })?;
 
         let (runner, logic) = parse_from_url(&from_url)?;
@@ -166,7 +166,7 @@ impl CommandParsing for ImportTemporaryFunctionCommand {
             None => FunctionKind::Scalar,
         };
 
-        Ok(ImportTemporaryFunctionCommand::new_auto_detect(name, runner, logic, platform, kind))
+        Ok(ImportTempFunctionCommand::new_auto_detect(name, runner, logic, platform, kind))
     }
 
     fn to_statement(&self) -> String {
@@ -181,13 +181,13 @@ impl CommandParsing for ImportTemporaryFunctionCommand {
 
         if with_parts.is_empty() {
             format!(
-                "IMPORT TEMPORARY FUNCTION {} FROM {}",
+                "IMPORT TEMP FUNCTION {} FROM {}",
                 self.name,
                 escape_string(&from_url)
             )
         } else {
             format!(
-                "IMPORT TEMPORARY FUNCTION {} FROM {} WITH ({})",
+                "IMPORT TEMP FUNCTION {} FROM {} WITH ({})",
                 self.name,
                 escape_string(&from_url),
                 with_parts.join(", ")
@@ -197,7 +197,7 @@ impl CommandParsing for ImportTemporaryFunctionCommand {
 }
 
 #[async_trait]
-impl BundleFacadeCommand for ImportTemporaryFunctionCommand {
+impl BundleFacadeCommand for ImportTempFunctionCommand {
     type Output = String;
 
     async fn execute(
@@ -245,7 +245,7 @@ impl BundleFacadeCommand for ImportTemporaryFunctionCommand {
                     temporary: true,
                     kind,
                 };
-                facade.import_temporary_function(entry).await?;
+                facade.import_temp_function(entry).await?;
                 count += 1;
             }
 
@@ -288,7 +288,7 @@ impl BundleFacadeCommand for ImportTemporaryFunctionCommand {
                 temporary: true,
                 kind,
             };
-            facade.import_temporary_function(entry).await?;
+            facade.import_temp_function(entry).await?;
             Ok(format!("Loaded temporary function: {}", self.name))
         }
     }
@@ -301,11 +301,11 @@ mod parsing_tests {
     use crate::bundle::command::BundleCommand;
 
     #[test]
-    fn test_parse_import_temporary_function() {
-        let input = "IMPORT TEMPORARY FUNCTION acme.double_val FROM 'python://mod:func'";
+    fn test_parse_import_temp_function() {
+        let input = "IMPORT TEMP FUNCTION acme.double_val FROM 'python://mod:func'";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::ImportTemporaryFunction(c) => {
+            BundleCommand::ImportTempFunction(c) => {
                 assert_eq!(c.name, "acme.double_val");
                 assert!(c.input_types.is_none());
                 assert!(c.return_type.is_none());
@@ -314,28 +314,28 @@ mod parsing_tests {
                 assert_eq!(c.platform, Platform::any());
                 assert_eq!(c.kind, FunctionKind::Scalar);
             }
-            _ => panic!("Expected ImportTemporaryFunction variant"),
+            _ => panic!("Expected ImportTempFunction variant"),
         }
     }
 
     #[test]
-    fn test_parse_import_temporary_function_wildcard() {
-        let input = "IMPORT TEMPORARY FUNCTION acme.* FROM 'lib://./mylib.so'";
+    fn test_parse_import_temp_function_wildcard() {
+        let input = "IMPORT TEMP FUNCTION acme.* FROM 'lib://./mylib.so'";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::ImportTemporaryFunction(c) => {
+            BundleCommand::ImportTempFunction(c) => {
                 assert_eq!(c.name, "acme.*");
                 assert!(c.is_wildcard());
                 assert_eq!(c.runner, Runner::Lib);
                 assert_eq!(c.logic, "./mylib.so");
             }
-            _ => panic!("Expected ImportTemporaryFunction variant"),
+            _ => panic!("Expected ImportTempFunction variant"),
         }
     }
 
     #[test]
-    fn test_parse_import_temporary_function_roundtrip() {
-        let cmd = ImportTemporaryFunctionCommand::new_auto_detect(
+    fn test_parse_import_temp_function_roundtrip() {
+        let cmd = ImportTempFunctionCommand::new_auto_detect(
             "acme.double_val",
             Runner::Python,
             "mod:func",
@@ -343,23 +343,23 @@ mod parsing_tests {
             FunctionKind::Scalar,
         );
         let statement = cmd.to_statement();
-        assert_eq!(statement, "IMPORT TEMPORARY FUNCTION acme.double_val FROM 'python://mod:func'");
+        assert_eq!(statement, "IMPORT TEMP FUNCTION acme.double_val FROM 'python://mod:func'");
         let parsed = parse_command(&statement).unwrap();
         match parsed {
-            BundleCommand::ImportTemporaryFunction(c) => {
+            BundleCommand::ImportTempFunction(c) => {
                 assert_eq!(c.name, "acme.double_val");
                 assert_eq!(c.runner, Runner::Python);
                 assert_eq!(c.logic, "mod:func");
                 assert_eq!(c.platform, Platform::any());
                 assert_eq!(c.kind, FunctionKind::Scalar);
             }
-            _ => panic!("Expected ImportTemporaryFunction variant"),
+            _ => panic!("Expected ImportTempFunction variant"),
         }
     }
 
     #[test]
-    fn test_parse_import_temporary_function_roundtrip_aggregate() {
-        let cmd = ImportTemporaryFunctionCommand::new_auto_detect(
+    fn test_parse_import_temp_function_roundtrip_aggregate() {
+        let cmd = ImportTempFunctionCommand::new_auto_detect(
             "acme.my_sum",
             Runner::Python,
             "mod:MySum",
@@ -370,22 +370,22 @@ mod parsing_tests {
         assert!(statement.contains("type = 'aggregate'"));
         let parsed = parse_command(&statement).unwrap();
         match parsed {
-            BundleCommand::ImportTemporaryFunction(c) => {
+            BundleCommand::ImportTempFunction(c) => {
                 assert_eq!(c.kind, FunctionKind::Aggregate);
             }
-            _ => panic!("Expected ImportTemporaryFunction variant"),
+            _ => panic!("Expected ImportTempFunction variant"),
         }
     }
 
     #[test]
     fn test_parse_default_platform() {
-        let input = "IMPORT TEMPORARY FUNCTION acme.double_val FROM 'python://mod:func'";
+        let input = "IMPORT TEMP FUNCTION acme.double_val FROM 'python://mod:func'";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::ImportTemporaryFunction(c) => {
+            BundleCommand::ImportTempFunction(c) => {
                 assert_eq!(c.platform, Platform::any());
             }
-            _ => panic!("Expected ImportTemporaryFunction variant"),
+            _ => panic!("Expected ImportTempFunction variant"),
         }
     }
 }
