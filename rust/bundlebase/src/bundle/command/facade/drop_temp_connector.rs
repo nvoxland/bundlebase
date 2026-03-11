@@ -20,7 +20,7 @@ use std::sync::Arc;
 /// on both read-only `Bundle` and `BundleBuilder` via `BundleFacade`.
 #[derive(Debug, Clone)]
 pub struct DropTempConnectorCommand {
-    /// Full dotted source name
+    /// Full dotted connector name
     pub name: String,
     /// Optional platform filter
     pub platform: Option<Platform>,
@@ -72,7 +72,7 @@ impl CommandParsing for DropTempConnectorCommand {
         }
 
         let name = name.ok_or_else(|| -> BundlebaseError {
-            "DROP TEMP CONNECTOR missing source name".into()
+            "DROP TEMP CONNECTOR missing connector name".into()
         })?;
 
         Ok(DropTempConnectorCommand::new(name, platform))

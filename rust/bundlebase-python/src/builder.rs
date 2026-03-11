@@ -391,6 +391,7 @@ impl PyBundleBuilder {
             let parsed_return_type = parse_arrow_type_name(&return_type)
                 .map_err(|e| to_py_error(e))?;
             let entry = FunctionEntry {
+                id: ::bundlebase::io::ObjectId::generate(),
                 name: namespaced,
                 input_types: parsed_input_types,
                 return_type: parsed_return_type,

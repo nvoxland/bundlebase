@@ -236,6 +236,7 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
                 let namespaced: NamespacedName = name.parse()?;
 
                 let entry = FunctionEntry {
+                    id: crate::data::ObjectId::generate(),
                     name: namespaced,
                     input_types,
                     return_type,
@@ -279,6 +280,7 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
                 .collect::<Result<Vec<_>, _>>()?;
             let return_type = parse_arrow_type_name(&return_type_name)?;
             let entry = FunctionEntry {
+                id: crate::data::ObjectId::generate(),
                 name: namespaced,
                 input_types,
                 return_type,

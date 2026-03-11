@@ -1558,6 +1558,7 @@ impl BundleFacade for BundleBuilder {
     ) -> Result<(), BundlebaseError> {
         let namespaced: crate::NamespacedName = name.parse()?;
         self.bundle.add_connector_entry(crate::bundle::connector_definition::ConnectorEntry {
+            id: crate::data::ObjectId::generate(),
             name: namespaced,
             runner,
             logic,
@@ -1639,6 +1640,10 @@ impl BundleFacade for BundleBuilder {
 
     fn connector_entries(&self) -> Vec<crate::bundle::connector_definition::ConnectorEntry> {
         self.bundle.connector_entries()
+    }
+
+    fn function_entries(&self) -> Vec<crate::bundle::function_definition::FunctionEntry> {
+        self.bundle.function_entries()
     }
 
     fn ctx(&self) -> Arc<SessionContext> {

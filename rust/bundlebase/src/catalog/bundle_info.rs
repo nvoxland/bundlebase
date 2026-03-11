@@ -1,6 +1,8 @@
 mod blocks_table;
 mod config_table;
+mod connectors_table;
 mod details_table;
+mod functions_table;
 mod history_table;
 mod indexes_table;
 mod packs_table;
@@ -13,8 +15,10 @@ use crate::bundle::BundleFacade;
 use async_trait::async_trait;
 use blocks_table::BundleBlocksTable;
 use config_table::BundleConfigTable;
+use connectors_table::BundleConnectorsTable;
 use datafusion::catalog::{SchemaProvider, TableProvider};
 use details_table::BundleDetailsTable;
+use functions_table::BundleFunctionsTable;
 use history_table::BundleHistoryTable;
 use indexes_table::BundleIndexesTable;
 use packs_table::BundlePacksTable;
@@ -51,7 +55,9 @@ impl BundleInfoSchemaProvider {
         tables.insert(tables::INDEXES, Arc::new(BundleIndexesTable::new(bundle.clone())));
         tables.insert(tables::PACKS, Arc::new(BundlePacksTable::new(bundle.clone())));
         tables.insert(tables::CONFIG, Arc::new(BundleConfigTable::new(bundle.clone())));
-        tables.insert(tables::BLOCKS, Arc::new(BundleBlocksTable::new(bundle)));
+        tables.insert(tables::BLOCKS, Arc::new(BundleBlocksTable::new(bundle.clone())));
+        tables.insert(tables::CONNECTORS, Arc::new(BundleConnectorsTable::new(bundle.clone())));
+        tables.insert(tables::FUNCTIONS, Arc::new(BundleFunctionsTable::new(bundle)));
         Self { tables }
     }
 }

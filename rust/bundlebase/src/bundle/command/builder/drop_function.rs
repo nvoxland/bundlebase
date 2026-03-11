@@ -57,11 +57,7 @@ impl BundleBuilderCommand for DropFunctionCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let op = DropFunctionOp::new_with_signature(
-            self.name.clone(),
-            self.platform.clone(),
-            None,
-        );
+        let op = DropFunctionOp::setup(&self.name, self.platform.as_ref(), None, builder)?;
         builder.apply_operation(op.into()).await?;
 
         Ok(format!("Dropped function: {}", self.name))

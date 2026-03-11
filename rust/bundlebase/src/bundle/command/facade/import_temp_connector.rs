@@ -22,7 +22,7 @@ use std::sync::Arc;
 /// on both read-only `Bundle` and `BundleBuilder` via `BundleFacade`.
 #[derive(Debug, Clone)]
 pub struct ImportTempConnectorCommand {
-    /// Full dotted source name
+    /// Full dotted connector name
     pub name: String,
     /// Runner type
     pub runner: Runner,

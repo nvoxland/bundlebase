@@ -2,6 +2,7 @@
 
 use crate::bundle::operation::Operation;
 use crate::bundle::connector_definition::{parse_connector_name, ConnectorEntry, Platform, Runner};
+use crate::data::ObjectId;
 use crate::NamespacedName;
 use crate::{Bundle, BundlebaseError};
 use async_trait::async_trait;
@@ -15,6 +16,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportConnectorOp {
+    /// Unique identifier for this connector entry
+    pub id: ObjectId,
     /// Full dotted connector name (e.g., "acme.weather")
     pub name: String,
     /// Runner type
@@ -27,7 +30,7 @@ pub struct ImportConnectorOp {
 
 impl ImportConnectorOp {
     pub fn new(name: String, runner: Runner, logic: String, platform: Platform) -> Self {
-        Self { name, runner, logic, platform }
+        Self { id: ObjectId::generate(), name, runner, logic, platform }
     }
 }
 
@@ -67,6 +70,7 @@ impl Operation for ImportConnectorOp {
         }
 
         bundle.add_connector_entry(ConnectorEntry {
+            id: self.id,
             name: namespaced,
             runner: self.runner,
             logic: self.logic.clone(),
