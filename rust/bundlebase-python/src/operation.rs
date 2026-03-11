@@ -22,7 +22,7 @@ impl PyOperation {
             AnyOperation::RenameJoin(_) => "renameJoin".to_string(),
             AnyOperation::RenameView(_) => "renameView".to_string(),
             AnyOperation::Filter(_) => "filter".to_string(),
-            AnyOperation::CreateFunction(_) => "createFunction".to_string(),
+            AnyOperation::ImportFunction(_) => "loadFunction".to_string(),
             AnyOperation::SaveConfig(_) => "saveConfig".to_string(),
             AnyOperation::SetName(_) => "setName".to_string(),
             AnyOperation::SetDescription(_) => "setDescription".to_string(),
@@ -36,7 +36,7 @@ impl PyOperation {
             AnyOperation::DetachBlock(_) => "detachBlock".to_string(),
             AnyOperation::ReplaceBlock(_) => "replaceBlock".to_string(),
             AnyOperation::UpdateVersion(_) => "updateVersion".to_string(),
-            AnyOperation::CreateConnector(_) => "createConnector".to_string(),
+            AnyOperation::ImportConnector(_) => "loadConnector".to_string(),
             AnyOperation::DropConnector(_) => "dropConnector".to_string(),
             AnyOperation::DropFunction(_) => "dropFunction".to_string(),
         }

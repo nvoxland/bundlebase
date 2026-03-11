@@ -1,4 +1,4 @@
-//! CreateFunction operation — registers a named function definition.
+//! ImportFunction operation — registers a named function definition.
 
 use crate::bundle::connector_definition::{Platform, Runner};
 use crate::bundle::function_definition::{arrow_type_serde, parse_function_name, FunctionEntry, FunctionKind};
@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 
 /// Operation that defines a named function and registers it with DataFusion.
 ///
-/// Always persisted — for runtime-only functions, use `create_temporary_function` instead.
+/// Always persisted — for runtime-only functions, use `import_temporary_function` instead.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateFunctionOp {
+pub struct ImportFunctionOp {
     /// Full dotted function name (e.g., "acme.double_val")
     pub name: String,
     /// Arrow types for input parameters
@@ -34,7 +34,7 @@ pub struct CreateFunctionOp {
     pub kind: FunctionKind,
 }
 
-impl CreateFunctionOp {
+impl ImportFunctionOp {
     pub fn new(
         name: String,
         input_types: Vec<DataType>,
@@ -49,11 +49,11 @@ impl CreateFunctionOp {
 }
 
 #[async_trait]
-impl Operation for CreateFunctionOp {
+impl Operation for ImportFunctionOp {
     fn describe(&self) -> String {
         let input_strs: Vec<String> = self.input_types.iter().map(|dt| dt.to_string()).collect();
         format!(
-            "CREATE FUNCTION {}({}) RETURNS {} (runner={}, platform={})",
+            "IMPORT FUNCTION {}({}) RETURNS {} (runner={}, platform={})",
             self.name,
             input_strs.join(", "),
             self.return_type,
@@ -69,7 +69,7 @@ impl Operation for CreateFunctionOp {
         // Reject python runner (cannot be bundled)
         if self.runner == Runner::Python {
             return Err(
-                "python runner cannot be bundled. Use CREATE TEMPORARY FUNCTION instead.".into(),
+                "python runner cannot be bundled. Use IMPORT TEMPORARY FUNCTION instead.".into(),
             );
         }
 
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = CreateFunctionOp::new(
+        let op = ImportFunctionOp::new(
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
@@ -120,13 +120,13 @@ mod tests {
         );
         assert_eq!(
             op.describe(),
-            "CREATE FUNCTION acme.double_val(Int64) RETURNS Int64 (runner=ipc, platform=*/*)"
+            "IMPORT FUNCTION acme.double_val(Int64) RETURNS Int64 (runner=ipc, platform=*/*)"
         );
     }
 
     #[test]
     fn test_serialization() {
-        let op = CreateFunctionOp::new(
+        let op = ImportFunctionOp::new(
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
@@ -136,13 +136,13 @@ mod tests {
             FunctionKind::Scalar,
         );
         let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
-        let deser: CreateFunctionOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        let deser: ImportFunctionOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
         assert_eq!(deser, op);
     }
 
     #[test]
     fn test_serialization_aggregate() {
-        let op = CreateFunctionOp::new(
+        let op = ImportFunctionOp::new(
             "acme.my_sum".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
@@ -152,7 +152,7 @@ mod tests {
             FunctionKind::Aggregate,
         );
         let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
-        let deser: CreateFunctionOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        let deser: ImportFunctionOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
         assert_eq!(deser, op);
         assert_eq!(deser.kind, FunctionKind::Aggregate);
     }
@@ -160,7 +160,7 @@ mod tests {
     #[tokio::test]
     async fn test_check_no_dot() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        let op = CreateFunctionOp::new(
+        let op = ImportFunctionOp::new(
             "double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
@@ -177,7 +177,7 @@ mod tests {
     #[tokio::test]
     async fn test_check_python_rejected() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        let op = CreateFunctionOp::new(
+        let op = ImportFunctionOp::new(
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
@@ -194,7 +194,7 @@ mod tests {
     #[tokio::test]
     async fn test_apply_registers_entry() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        let op = CreateFunctionOp::new(
+        let op = ImportFunctionOp::new(
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,

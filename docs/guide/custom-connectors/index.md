@@ -18,7 +18,7 @@ Internally, `python` and `lib` run **in-process** (native mode) for zero-copy Ar
 
 Custom connectors use a simple workflow:
 
-1. [**Create the connector**](#create-connector) — defines a named connector with its runner and logic
+1. [**Load the connector**](#load-connector) — defines a named connector with its runner and logic
 2. [**Create a source**](#create-source) — creates a source instance from the connector
 3. [**Fetch data**](#fetch) — discovers and attaches data from the source
 
@@ -33,7 +33,7 @@ To remove connectors:
 
 - Your source is a Python class in the same project
 - You need maximum performance with zero serialization overhead
-- Note: requires [`CREATE TEMPORARY CONNECTOR`](#create-temporary-connector) since Python code can't be bundled
+- Note: requires [`IMPORT TEMPORARY CONNECTOR`](#load-temporary-connector) since Python code can't be bundled
 
 **Use `lib` when:**
 
@@ -61,15 +61,15 @@ To remove connectors:
 
 ## Commands
 
-### CREATE CONNECTOR
+### IMPORT CONNECTOR
 
 Creates a named connector with its runner and logic. The connector definition and logic are **persisted** into the bundle's commit history, making the bundle portable.
 
 === "Async API"
 
     ```python
-    bundle = await bundle.create_connector(
-        'acme.datasources.weather',
+    bundle = await bundle.import_connector(
+        'acme.weather',
         runner='ipc',
         logic='./my_connector'
     )
@@ -78,8 +78,8 @@ Creates a named connector with its runner and logic. The connector definition an
 === "Sync API"
 
     ```python
-    bundle.create_connector(
-        'acme.datasources.weather',
+    bundle.import_connector(
+        'acme.weather',
         runner='ipc',
         logic='./my_connector'
     )
@@ -88,45 +88,42 @@ Creates a named connector with its runner and logic. The connector definition an
 === "SQL"
 
     ```sql
-    CREATE CONNECTOR acme.datasources.weather WITH (
-        runner = 'ipc',
-        logic = './my_connector'
-    )
+    IMPORT CONNECTOR acme.weather FROM 'ipc://my_connector'
     ```
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | `str` | *(required)* | Dot-separated connector name (e.g., `"acme.datasources.weather"`) |
+| `name` | `str` | *(required)* | Dot-separated connector name (e.g., `"acme.weather"`) |
 | `runner` | `str` | *(required)* | How to run the connector (see [Runner Values](#runner-values)) |
 | `logic` | `str` | *(required)* | What to run — depends on the runner (see [Runner Values](#runner-values)) |
 | `platform` | `str` | `"*/*"` | Target platform (e.g., `"linux/amd64"`, `"darwin/arm64"`, `"*/*"` for all) |
 
 !!! note
-    `CREATE CONNECTOR` rejects `runner='python'` because Python code cannot be serialized into the bundle. Use [`CREATE TEMPORARY CONNECTOR`](#create-temporary-connector) for Python connectors.
+    `IMPORT CONNECTOR` rejects `runner='python'` because Python code cannot be serialized into the bundle. Use [`IMPORT TEMPORARY CONNECTOR`](#load-temporary-connector) for Python connectors.
 
-Connector names use a **dot-separated namespace** format. The part before the first dot is the **namespace** (e.g., `acme` in `acme.datasources.weather`). Choose a namespace that is unique to you or your organization — this prevents naming collisions when sharing bundles. For example:
+Connector names use a **dot-separated namespace** format. The part before the first dot is the **namespace** (e.g., `acme` in `acme.weather`). Choose a namespace that is unique to you or your organization — this prevents naming collisions when sharing bundles. For example:
 
 - `mycompany.sales.crm` — "mycompany" namespace
 - `jdoe.weather.noaa` — personal namespace
-- `acme.datasources.weather` — organization namespace
+- `acme.weather` — organization namespace
 
-The name must contain at least one dot.
+The name must contain exactly one dot.
 
-You can call `CREATE CONNECTOR` multiple times for different platforms on the same connector — the last call for a given platform wins. At runtime, Bundlebase selects the best match for the current OS/architecture.
+You can call `IMPORT CONNECTOR` multiple times for different platforms on the same connector — the last call for a given platform wins. At runtime, Bundlebase selects the best match for the current OS/architecture.
 
 ---
 
-### CREATE TEMPORARY CONNECTOR
+### IMPORT TEMPORARY CONNECTOR
 
 Creates a connector with logic at **runtime only** — nothing is persisted into the bundle. Use this for `runner='python'` in-process connectors. Works on both `Bundle` (read-only) and `BundleBuilder`.
 
 === "Async API"
 
     ```python
-    bundle = await bundle.create_temporary_connector(
-        'acme.datasources.weather',
+    bundle = await bundle.import_temporary_connector(
+        'acme.weather',
         runner='python',
         logic='my_module:MyConnector'
     )
@@ -135,8 +132,8 @@ Creates a connector with logic at **runtime only** — nothing is persisted into
 === "Sync API"
 
     ```python
-    bundle.create_temporary_connector(
-        'acme.datasources.weather',
+    bundle.import_temporary_connector(
+        'acme.weather',
         runner='python',
         logic='my_module:MyConnector'
     )
@@ -145,13 +142,10 @@ Creates a connector with logic at **runtime only** — nothing is persisted into
 === "SQL"
 
     ```sql
-    CREATE TEMPORARY CONNECTOR acme.datasources.weather WITH (
-        runner = 'python',
-        logic = 'my_module:MyConnector'
-    )
+    IMPORT TEMPORARY CONNECTOR acme.weather FROM 'python://my_module:MyConnector'
     ```
 
-**Parameters:** Same as [`CREATE CONNECTOR`](#create-connector), but accepts all runners including `python`.
+**Parameters:** Same as [`IMPORT CONNECTOR`](#load-connector), but accepts all runners including `python`.
 
 Temporary logic takes precedence over persisted logic when both exist for the same platform. This is useful for development workflows where you want to test a Python connector locally before packaging it as a shared library or Docker image.
 
@@ -159,16 +153,16 @@ Temporary logic takes precedence over persisted logic when both exist for the sa
 
 ### CREATE SOURCE
 
-Creates a source instance from a connector. For built-in connectors (`remote_dir`, `kaggle`, etc.), this is a single step. For custom connectors, you must first [`CREATE CONNECTOR`](#create-connector) or [`CREATE TEMPORARY CONNECTOR`](#create-temporary-connector).
+Creates a source instance from a connector. For built-in connectors (`remote_dir`, `kaggle`, etc.), this is a single step. For custom connectors, you must first [`IMPORT CONNECTOR`](#load-connector) or [`IMPORT TEMPORARY CONNECTOR`](#load-temporary-connector).
 
 === "Async API"
 
     ```python
     # Custom connector (no extra args)
-    bundle = await bundle.create_source('acme.datasources.weather')
+    bundle = await bundle.create_source('acme.weather')
 
     # Custom connector with extra args forwarded to discover/data
-    bundle = await bundle.create_source('acme.datasources.weather', {
+    bundle = await bundle.create_source('acme.weather', {
         'region': 'us-east'
     })
 
@@ -188,10 +182,10 @@ Creates a source instance from a connector. For built-in connectors (`remote_dir
 
     ```python
     # Custom connector (no extra args)
-    bundle.create_source('acme.datasources.weather')
+    bundle.create_source('acme.weather')
 
     # Custom connector with extra args forwarded to discover/data
-    bundle.create_source('acme.datasources.weather', {
+    bundle.create_source('acme.weather', {
         'region': 'us-east'
     })
 
@@ -211,10 +205,10 @@ Creates a source instance from a connector. For built-in connectors (`remote_dir
 
     ```sql
     -- Custom connector (no extra args)
-    CREATE SOURCE acme.datasources.weather
+    CREATE SOURCE acme.weather
 
     -- Custom connector with extra args
-    CREATE SOURCE acme.datasources.weather WITH (region = 'us-east')
+    CREATE SOURCE acme.weather WITH (region = 'us-east')
 
     -- Built-in connector
     CREATE SOURCE remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')
@@ -281,30 +275,30 @@ Like other drop operations, the bundled artifacts are not deleted — a `DropCon
 
     ```python
     # Drop the entire connector
-    bundle = await bundle.drop_connector('acme.datasources.weather')
+    bundle = await bundle.drop_connector('acme.weather')
 
     # Drop logic for a specific platform only
-    bundle = await bundle.drop_connector('acme.datasources.weather', platform='linux/amd64')
+    bundle = await bundle.drop_connector('acme.weather', platform='linux/amd64')
     ```
 
 === "Sync API"
 
     ```python
     # Drop the entire connector
-    bundle.drop_connector('acme.datasources.weather')
+    bundle.drop_connector('acme.weather')
 
     # Drop logic for a specific platform only
-    bundle.drop_connector('acme.datasources.weather', platform='linux/amd64')
+    bundle.drop_connector('acme.weather', platform='linux/amd64')
     ```
 
 === "SQL"
 
     ```sql
     -- Drop the entire connector
-    DROP CONNECTOR acme.datasources.weather
+    DROP CONNECTOR acme.weather
 
     -- Drop logic for a specific platform only
-    DROP CONNECTOR acme.datasources.weather FOR PLATFORM 'linux/amd64'
+    DROP CONNECTOR acme.weather FOR PLATFORM 'linux/amd64'
     ```
 
 **Parameters:**
@@ -324,30 +318,30 @@ Removes **runtime-only** logic entries from a connector. Works on both `Bundle` 
 
     ```python
     # Drop all temporary logic
-    count = await bundle.drop_temporary_connector_logic('acme.datasources.weather')
+    count = await bundle.drop_temporary_connector_logic('acme.weather')
 
     # Drop temporary logic for a specific platform
-    count = await bundle.drop_temporary_connector_logic('acme.datasources.weather', platform='*/*')
+    count = await bundle.drop_temporary_connector_logic('acme.weather', platform='*/*')
     ```
 
 === "Sync API"
 
     ```python
     # Drop all temporary logic
-    count = bundle.drop_temporary_connector_logic('acme.datasources.weather')
+    count = bundle.drop_temporary_connector_logic('acme.weather')
 
     # Drop temporary logic for a specific platform
-    count = bundle.drop_temporary_connector_logic('acme.datasources.weather', platform='*/*')
+    count = bundle.drop_temporary_connector_logic('acme.weather', platform='*/*')
     ```
 
 === "SQL"
 
     ```sql
     -- Drop all temporary logic
-    DROP TEMPORARY CONNECTOR LOGIC acme.datasources.weather
+    DROP TEMPORARY CONNECTOR LOGIC acme.weather
 
     -- Drop temporary logic for a specific platform
-    DROP TEMPORARY CONNECTOR LOGIC acme.datasources.weather FOR PLATFORM '*/*'
+    DROP TEMPORARY CONNECTOR LOGIC acme.weather FOR PLATFORM '*/*'
     ```
 
 **Parameters:**
@@ -420,10 +414,10 @@ COPY example_connector.py /app/example_connector.py
 CMD ["python", "/app/example_connector.py"]
 ```
 
-Use with [`CREATE CONNECTOR`](#create-connector):
+Use with [`IMPORT CONNECTOR`](#load-connector):
 
 ```python
-bundle.create_connector('example.connector', runner='docker', logic='myorg/example-connector:latest')
+bundle.import_connector('example.connector', runner='docker', logic='myorg/example-connector:latest')
 bundle.create_source('example.connector')
 ```
 

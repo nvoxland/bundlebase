@@ -1,6 +1,6 @@
 //! Connector entry system for named, platform-aware connector logic.
 //!
-//! A `ConnectorEntry` is created via `CREATE CONNECTOR acme.weather`
+//! A `ConnectorEntry` is created via `IMPORT CONNECTOR acme.weather`
 //! and represents a single connector logic binding for a name+platform pair.
 //! `resolve_connector` picks the best entry for the current platform at runtime.
 
@@ -214,6 +214,42 @@ pub fn build_call_string(runner: Runner, logic: &str) -> String {
     }
 }
 
+/// Parse a FROM URL string like `runner://logic` into (Runner, logic).
+///
+/// The scheme (before `://`) is parsed as a Runner, and everything after `://` is the logic string.
+///
+/// # Examples
+/// - `"ipc://./my_func"` → `(Runner::Ipc, "./my_func")`
+/// - `"lib://./mylib.so"` → `(Runner::Lib, "./mylib.so")`
+/// - `"ipc:///usr/bin/func"` → `(Runner::Ipc, "/usr/bin/func")`
+/// - `"python://mod:func"` → `(Runner::Python, "mod:func")`
+pub fn parse_from_url(from: &str) -> Result<(Runner, String), BundlebaseError> {
+    let separator = "://";
+    let pos = from.find(separator).ok_or_else(|| -> BundlebaseError {
+        format!(
+            "Invalid FROM URL '{}'. Expected format: 'runner://logic' (e.g., 'ipc://./my_func').",
+            from
+        )
+        .into()
+    })?;
+    let scheme = &from[..pos];
+    let logic = &from[pos + separator.len()..];
+    if logic.is_empty() {
+        return Err(format!(
+            "Invalid FROM URL '{}'. Logic part after '://' cannot be empty.",
+            from
+        )
+        .into());
+    }
+    let runner: Runner = scheme.parse()?;
+    Ok((runner, logic.to_string()))
+}
+
+/// Format a runner and logic string into a FROM URL: `runner://logic`.
+pub fn to_from_url(runner: Runner, logic: &str) -> String {
+    format!("{}://{}", runner, logic)
+}
+
 /// Parse and validate a dotted connector name.
 ///
 /// Enforces single-level dotted namespace: exactly one dot, both parts alphanumeric.
@@ -413,5 +449,77 @@ mod tests {
     #[test]
     fn test_parse_connector_name_rejects_non_alphanumeric() {
         assert!(parse_connector_name("acme.bad-name").is_err());
+    }
+
+    #[test]
+    fn test_parse_from_url_ipc_relative() {
+        let (runner, logic) = parse_from_url("ipc://./my_func").unwrap();
+        assert_eq!(runner, Runner::Ipc);
+        assert_eq!(logic, "./my_func");
+    }
+
+    #[test]
+    fn test_parse_from_url_ipc_absolute() {
+        let (runner, logic) = parse_from_url("ipc:///usr/bin/func").unwrap();
+        assert_eq!(runner, Runner::Ipc);
+        assert_eq!(logic, "/usr/bin/func");
+    }
+
+    #[test]
+    fn test_parse_from_url_lib() {
+        let (runner, logic) = parse_from_url("lib://./mylib.so").unwrap();
+        assert_eq!(runner, Runner::Lib);
+        assert_eq!(logic, "./mylib.so");
+    }
+
+    #[test]
+    fn test_parse_from_url_python() {
+        let (runner, logic) = parse_from_url("python://mod:func").unwrap();
+        assert_eq!(runner, Runner::Python);
+        assert_eq!(logic, "mod:func");
+    }
+
+    #[test]
+    fn test_parse_from_url_docker() {
+        let (runner, logic) = parse_from_url("docker://my-image").unwrap();
+        assert_eq!(runner, Runner::Docker);
+        assert_eq!(logic, "my-image");
+    }
+
+    #[test]
+    fn test_parse_from_url_java() {
+        let (runner, logic) = parse_from_url("java://com.example.MyClass").unwrap();
+        assert_eq!(runner, Runner::Java);
+        assert_eq!(logic, "com.example.MyClass");
+    }
+
+    #[test]
+    fn test_parse_from_url_invalid_no_separator() {
+        assert!(parse_from_url("ipc:./my_func").is_err());
+    }
+
+    #[test]
+    fn test_parse_from_url_invalid_empty_logic() {
+        assert!(parse_from_url("ipc://").is_err());
+    }
+
+    #[test]
+    fn test_parse_from_url_invalid_runner() {
+        assert!(parse_from_url("unknown://./func").is_err());
+    }
+
+    #[test]
+    fn test_to_from_url() {
+        assert_eq!(to_from_url(Runner::Ipc, "./my_func"), "ipc://./my_func");
+        assert_eq!(to_from_url(Runner::Lib, "./mylib.so"), "lib://./mylib.so");
+        assert_eq!(to_from_url(Runner::Python, "mod:func"), "python://mod:func");
+        assert_eq!(to_from_url(Runner::Ipc, "/usr/bin/func"), "ipc:///usr/bin/func");
+    }
+
+    #[test]
+    fn test_from_url_roundtrip() {
+        let url = "ipc://./my_func";
+        let (runner, logic) = parse_from_url(url).unwrap();
+        assert_eq!(to_from_url(runner, &logic), url);
     }
 }

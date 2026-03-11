@@ -114,8 +114,7 @@ cargo build --release
 ```
 
 ```sql
-CREATE FUNCTION acme.double_val(Int64) RETURNS Int64
-  WITH (runner = 'lib', logic = './target/release/libmy_funcs.dylib:double_val')
+IMPORT FUNCTION acme.double_val FROM 'lib://target/release/libmy_funcs.dylib:double_val'
 ```
 
 ### Manifest Function (Bulk Discovery)
@@ -148,8 +147,7 @@ pub unsafe extern "C" fn bundlebase_free_manifest(ptr: *const c_char) {
 Then register all functions at once:
 
 ```sql
-CREATE FUNCTIONS FROM './target/release/libmy_funcs.dylib'
-  WITH (runner = 'lib', namespace = 'acme')
+IMPORT FUNCTION acme.* FROM 'lib://./target/release/libmy_funcs.dylib'
 ```
 
 ## IPC Functions
@@ -170,8 +168,7 @@ $ ./my_func --bundlebase-functions
 Register all discovered functions:
 
 ```sql
-CREATE FUNCTIONS FROM './my_func'
-  WITH (runner = 'ipc', namespace = 'tools')
+IMPORT FUNCTION tools.* FROM 'ipc://./my_func'
 ```
 
 ## Manifest JSON Format
@@ -205,6 +202,128 @@ Both Lib and IPC runners use the same JSON manifest format:
 | `input_types` | Yes | Arrow type names for parameters |
 | `return_type` | Yes | Arrow type name for return value |
 | `kind` | No | `scalar` (default) or `aggregate` |
+
+### IPC Scalar Protocol
+
+When Bundlebase invokes a scalar IPC function, the exchange is:
+
+1. **JSON-RPC request** — `invoke` method with the function name
+2. **Arrow IPC input** — length-prefixed (4-byte big-endian u32) Arrow IPC stream containing one RecordBatch with one column per argument
+3. **Arrow IPC output** — length-prefixed Arrow IPC stream containing a single-column RecordBatch with the result
+
+### IPC Aggregate Protocol
+
+IPC aggregate functions use four JSON-RPC methods. Aggregate state is **opaque and server-side** — only string state IDs cross the wire.
+
+| Step | Method | Params | Arrow IPC | Response |
+|------|--------|--------|-----------|----------|
+| 1 | `create_state` | `function` | — | `{"state_id": "0"}` |
+| 2 | `accumulate` | `function`, `state_id` | Input batch (one column per arg) | `{"ok": true}` (ack) |
+| 3 | `merge` | `function`, `state_id1`, `state_id2` | — | `{"state_id": "2"}` |
+| 4 | `evaluate` | `function`, `state_id` | — | `{"ok": true}` (ack), then Arrow IPC output (single-row, single-column) |
+
+**Lifecycle:**
+
+1. `create_state` — allocates a fresh accumulator on the server, returns an opaque state ID.
+2. `accumulate` — called once per batch. After the JSON-RPC ack, Bundlebase sends a length-prefixed Arrow IPC stream with the batch data. The server updates its internal state; nothing is returned.
+3. `merge` — combines two states (used during parallel/partitioned execution). Returns the merged state ID.
+4. `evaluate` — finalizes the aggregate. After the JSON-RPC ack, the server sends a length-prefixed Arrow IPC stream containing a single-row, single-column RecordBatch with the result.
+
+To declare an aggregate function in the manifest, set `"kind": "aggregate"`:
+
+```json
+{"name": "my_avg", "input_types": ["Float64"], "return_type": "Float64", "kind": "aggregate"}
+```
+
+## Python SDK Functions
+
+The Python SDK provides a `Function` base class (`bundlebase_sdk.function`) for writing IPC function providers. Call `serve_function(instance)` to start the JSON-RPC serve loop.
+
+### Scalar Example
+
+```python
+from bundlebase_sdk.function import Function
+from bundlebase_sdk.function_serve import serve_function
+import pyarrow as pa
+
+class MyFunctions(Function):
+    def functions(self):
+        return [
+            {"name": "double_val", "input_types": ["Int64"], "return_type": "Int64", "kind": "scalar"},
+        ]
+
+    def invoke(self, name, batch):
+        if name == "double_val":
+            col = batch.column(0)
+            result = pa.compute.multiply(col, 2)
+            return pa.record_batch({"result": result})
+
+if __name__ == "__main__":
+    serve_function(MyFunctions())
+```
+
+Register and use:
+
+```sql
+IMPORT FUNCTION tools.* FROM 'ipc://python:my_functions.py'
+SELECT tools.double_val(id) FROM bundle
+```
+
+### Aggregate Example
+
+For aggregate functions, implement four additional methods: `create_state`, `accumulate`, `merge`, and `evaluate`. The SDK's `_AggregateStateStore` manages state lifecycle automatically — your methods just work with plain Python objects.
+
+```python
+from bundlebase_sdk.function import Function
+from bundlebase_sdk.function_serve import serve_function
+import pyarrow as pa
+
+class MyFunctions(Function):
+    def functions(self):
+        return [
+            {"name": "my_avg", "input_types": ["Float64"], "return_type": "Float64", "kind": "aggregate"},
+        ]
+
+    def invoke(self, name, batch):
+        raise NotImplementedError("No scalar functions")
+
+    def create_state(self, name):
+        # Return any Python object — it stays server-side
+        return {"sum": 0.0, "count": 0}
+
+    def accumulate(self, name, state, batch):
+        col = batch.column(0)
+        state["sum"] += pa.compute.sum(col).as_py()
+        state["count"] += len(col)
+        return state
+
+    def merge(self, name, state1, state2):
+        return {
+            "sum": state1["sum"] + state2["sum"],
+            "count": state1["count"] + state2["count"],
+        }
+
+    def evaluate(self, name, state):
+        if state["count"] == 0:
+            return pa.scalar(None, type=pa.float64())
+        return pa.scalar(state["sum"] / state["count"], type=pa.float64())
+
+if __name__ == "__main__":
+    serve_function(MyFunctions())
+```
+
+Register and use:
+
+```sql
+IMPORT FUNCTION stats.* FROM 'ipc://python:my_functions.py'
+SELECT category, stats.my_avg(amount) FROM bundle GROUP BY category
+```
+
+**Key points:**
+- State objects are arbitrary Python objects — they never cross the wire
+- `accumulate` receives a `pa.RecordBatch` with one column per function argument
+- `evaluate` must return a `pa.Scalar` (or a plain Python value that PyArrow can convert)
+- After `evaluate`, the state is automatically cleaned up
 
 ### Supported Arrow Types
 

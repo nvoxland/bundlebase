@@ -1,27 +1,27 @@
-//! CreateTemporaryConnector command implementation (runtime-only).
+//! ImportTemporaryConnector command implementation (runtime-only).
 //!
-//! Creates a connector with runtime-only logic, without persisting an operation.
+//! Loads a connector with runtime-only logic, without persisting an operation.
 //! Works on both `Bundle` and `BundleBuilder` via `BundleFacade`.
 //! This is the right choice for `python:mod:Class` calls that cannot be bundled.
 
 use crate::bundle::command::response::OutputShape;
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
-use crate::bundle::command::parser::extract_string_content;
+use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::facade::BundleFacade;
-use crate::bundle::connector_definition::{Platform, Runner};
+use crate::bundle::connector_definition::{parse_from_url, to_from_url, Platform, Runner};
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Command to create a connector with runtime-only logic (not persisted).
+/// Command to load a connector with runtime-only logic (not persisted).
 ///
-/// Unlike `CreateConnectorCommand` which persists to the bundle,
+/// Unlike `ImportConnectorCommand` which persists to the bundle,
 /// this command only sets logic for the current session. It works
 /// on both read-only `Bundle` and `BundleBuilder` via `BundleFacade`.
 #[derive(Debug, Clone)]
-pub struct CreateTemporaryConnectorCommand {
+pub struct ImportTemporaryConnectorCommand {
     /// Full dotted source name
     pub name: String,
     /// Runner type
@@ -32,7 +32,7 @@ pub struct CreateTemporaryConnectorCommand {
     pub platform: Platform,
 }
 
-impl CreateTemporaryConnectorCommand {
+impl ImportTemporaryConnectorCommand {
     pub fn new(
         name: impl Into<String>,
         runner: Runner,
@@ -47,7 +47,7 @@ impl CreateTemporaryConnectorCommand {
         }
     }
 
-    /// Returns the Arrow schema for create temporary connector output.
+    /// Returns the Arrow schema for load temporary connector output.
     pub fn output_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![Field::new(
             "message",
@@ -62,19 +62,23 @@ impl CreateTemporaryConnectorCommand {
     }
 }
 
-impl CommandParsing for CreateTemporaryConnectorCommand {
+impl CommandParsing for ImportTemporaryConnectorCommand {
     fn rule() -> Rule {
-        Rule::create_temporary_connector_stmt
+        Rule::import_temporary_connector_stmt
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut name = None;
+        let mut from_url = None;
         let mut args = HashMap::new();
 
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
                 Rule::dotted_identifier => {
                     name = Some(inner_pair.as_str().to_string());
+                }
+                Rule::quoted_string => {
+                    from_url = Some(extract_string_content(inner_pair.as_str())?);
                 }
                 Rule::source_args => {
                     for arg_pair in inner_pair.into_inner() {
@@ -103,52 +107,57 @@ impl CommandParsing for CreateTemporaryConnectorCommand {
         }
 
         let name = name.ok_or_else(|| -> BundlebaseError {
-            "CREATE TEMPORARY CONNECTOR missing connector name".into()
+            "IMPORT TEMPORARY CONNECTOR missing connector name".into()
         })?;
 
-        let runner_str = args.remove("runner").ok_or_else(|| -> BundlebaseError {
-            "CREATE TEMPORARY CONNECTOR requires 'runner' argument".into()
+        let from_url = from_url.ok_or_else(|| -> BundlebaseError {
+            "IMPORT TEMPORARY CONNECTOR missing FROM clause".into()
         })?;
-        let runner: Runner = runner_str.parse()?;
 
-        let logic = args.remove("logic").ok_or_else(|| -> BundlebaseError {
-            "CREATE TEMPORARY CONNECTOR requires 'logic' argument".into()
-        })?;
+        let (runner, logic) = parse_from_url(&from_url)?;
 
         let platform: Platform = match args.remove("platform") {
             Some(s) => s.parse()?,
             None => Platform::any(),
         };
 
-        Ok(CreateTemporaryConnectorCommand::new(name, runner, logic, platform))
+        Ok(ImportTemporaryConnectorCommand::new(name, runner, logic, platform))
     }
 
     fn to_statement(&self) -> String {
-        use crate::bundle::command::parser::escape_string;
-        let runner_str = self.runner.to_string();
-        let parts = vec![
-            format!("runner = {}", escape_string(&runner_str)),
-            format!("logic = {}", escape_string(&self.logic)),
-            format!("platform = {}", escape_string(&self.platform.to_string())),
-        ];
-        format!(
-            "CREATE TEMPORARY CONNECTOR {} WITH ({})",
-            self.name,
-            parts.join(", ")
-        )
+        let from_url = to_from_url(self.runner, &self.logic);
+        let mut with_parts = Vec::new();
+        if self.platform != Platform::any() {
+            with_parts.push(format!("platform = {}", escape_string(&self.platform.to_string())));
+        }
+
+        if with_parts.is_empty() {
+            format!(
+                "IMPORT TEMPORARY CONNECTOR {} FROM {}",
+                self.name,
+                escape_string(&from_url)
+            )
+        } else {
+            format!(
+                "IMPORT TEMPORARY CONNECTOR {} FROM {} WITH ({})",
+                self.name,
+                escape_string(&from_url),
+                with_parts.join(", ")
+            )
+        }
     }
 }
 
 #[async_trait]
-impl BundleFacadeCommand for CreateTemporaryConnectorCommand {
+impl BundleFacadeCommand for ImportTemporaryConnectorCommand {
     type Output = String;
 
     async fn execute(
         self: Box<Self>,
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
-        facade.create_temporary_connector(&self.name, self.runner, self.logic.clone(), self.platform).await?;
-        Ok(format!("Created temporary connector: {}", self.name))
+        facade.import_temporary_connector(&self.name, self.runner, self.logic.clone(), self.platform).await?;
+        Ok(format!("Loaded temporary connector: {}", self.name))
     }
 }
 
@@ -159,38 +168,55 @@ mod parsing_tests {
     use crate::bundle::command::BundleCommand;
 
     #[test]
-    fn test_parse_create_temporary_connector() {
-        let input = "CREATE TEMPORARY CONNECTOR acme.weather WITH (runner = 'python', logic = 'mod:Class')";
+    fn test_parse_import_temporary_connector() {
+        let input = "IMPORT TEMPORARY CONNECTOR acme.weather FROM 'python://mod:Class'";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::CreateTemporaryConnector(c) => {
+            BundleCommand::ImportTemporaryConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
                 assert_eq!(c.runner, Runner::Python);
                 assert_eq!(c.logic, "mod:Class");
                 assert_eq!(c.platform, Platform::any());
             }
-            _ => panic!("Expected CreateTemporaryConnector variant"),
+            _ => panic!("Expected ImportTemporaryConnector variant"),
         }
     }
 
     #[test]
-    fn test_parse_create_temporary_connector_roundtrip() {
-        let cmd = CreateTemporaryConnectorCommand::new(
+    fn test_parse_import_temporary_connector_roundtrip() {
+        let cmd = ImportTemporaryConnectorCommand::new(
             "acme.weather",
             Runner::Python,
             "mod:Class",
             Platform::any(),
         );
         let statement = cmd.to_statement();
+        assert_eq!(statement, "IMPORT TEMPORARY CONNECTOR acme.weather FROM 'python://mod:Class'");
         let parsed = parse_command(&statement).unwrap();
         match parsed {
-            BundleCommand::CreateTemporaryConnector(c) => {
+            BundleCommand::ImportTemporaryConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
                 assert_eq!(c.runner, Runner::Python);
                 assert_eq!(c.logic, "mod:Class");
                 assert_eq!(c.platform, Platform::any());
             }
-            _ => panic!("Expected CreateTemporaryConnector variant"),
+            _ => panic!("Expected ImportTemporaryConnector variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_import_temporary_connector_with_platform() {
+        let input = "IMPORT TEMPORARY CONNECTOR acme.weather FROM 'ipc://./source' WITH (platform = 'linux/amd64')";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::ImportTemporaryConnector(c) => {
+                assert_eq!(c.name, "acme.weather");
+                assert_eq!(c.runner, Runner::Ipc);
+                assert_eq!(c.logic, "./source");
+                assert_eq!(c.platform.os, "linux");
+                assert_eq!(c.platform.arch, "amd64");
+            }
+            _ => panic!("Expected ImportTemporaryConnector variant"),
         }
     }
 }

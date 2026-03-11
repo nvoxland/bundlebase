@@ -412,9 +412,9 @@ impl PyBundle {
 
     /// Set temporary (runtime-only) connector logic for a connector.
     ///
-    /// Create a temporary connector with runtime-only logic (not persisted).
+    /// Load a temporary connector with runtime-only logic (not persisted).
     #[pyo3(signature = (name, runner, logic, platform="*/*"))]
-    fn create_temporary_connector<'py>(
+    fn import_temporary_connector<'py>(
         &self,
         name: &str,
         runner: &str,
@@ -435,23 +435,23 @@ impl PyBundle {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
             })?;
             inner
-                .create_temporary_connector(&name, runner, logic, platform)
+                .import_temporary_connector(&name, runner, logic, platform)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to create temporary connector: {}",
+                        "Failed to load temporary connector: {}",
                         e
                     ))
                 })?;
-            Ok(format!("Created temporary connector: {}", name))
+            Ok(format!("Loaded temporary connector: {}", name))
         })
     }
 
-    /// Create a temporary function with runtime-only logic (not persisted).
+    /// Load a temporary function with runtime-only logic (not persisted).
     ///
     /// Registers a DataFusion UDF for the current session only.
     #[pyo3(signature = (name, input_types, return_type, runner, logic, platform="*/*", function_type="scalar"))]
-    fn create_temporary_function<'py>(
+    fn import_temporary_function<'py>(
         &self,
         name: &str,
         input_types: Vec<String>,
@@ -505,15 +505,15 @@ impl PyBundle {
                 kind,
             };
             inner
-                .create_temporary_function(entry)
+                .import_temporary_function(entry)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to create temporary function: {}",
+                        "Failed to load temporary function: {}",
                         e
                     ))
                 })?;
-            Ok(format!("Created temporary function: {}", name))
+            Ok(format!("Loaded temporary function: {}", name))
         })
     }
 

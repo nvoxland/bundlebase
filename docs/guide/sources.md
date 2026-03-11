@@ -291,19 +291,19 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
 
 ### Custom Connectors
 
-Bundlebase supports custom connectors in two modes — **native** (in-process, zero-copy) and **IPC** (subprocess). Custom connectors use a two-step workflow: [`CREATE CONNECTOR`](custom-connectors/index.md#create-connector) or [`CREATE TEMPORARY CONNECTOR`](custom-connectors/index.md#create-temporary-connector), then [`CREATE SOURCE`](custom-connectors/index.md#create-source).
+Bundlebase supports custom connectors in two modes — **native** (in-process, zero-copy) and **IPC** (subprocess). Custom connectors use a two-step workflow: [`IMPORT CONNECTOR`](custom-connectors/index.md#load-connector) or [`IMPORT TEMPORARY CONNECTOR`](custom-connectors/index.md#load-temporary-connector), then [`CREATE SOURCE`](custom-connectors/index.md#create-source).
 
 #### native (In-Process, Zero-Copy)
 
 ```python
-bundle.create_temporary_connector('example.connector', runner='python', logic='example_connector:ExampleConnector')
+bundle.import_temporary_connector('example.connector', runner='python', logic='example_connector:ExampleConnector')
 bundle.create_source('example.connector')
 ```
 
 #### IPC (Subprocess)
 
 ```python
-bundle.create_connector('example.connector', runner='ipc', logic='./example_connector')
+bundle.import_connector('example.connector', runner='ipc', logic='./example_connector')
 bundle.create_source('example.connector')
 ```
 

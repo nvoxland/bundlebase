@@ -5,6 +5,7 @@
 
 use crate::bundle::connector_definition::Runner;
 use crate::bundle::function_definition::FunctionEntry;
+use crate::function::ipc_bridge::{self, SubprocessCache};
 use crate::function::lib_bridge::{parse_lib_logic, LibAccumulator};
 use crate::function::python_bridge::get_python_function_bridge;
 use crate::BundlebaseError;
@@ -23,6 +24,7 @@ use std::sync::Arc;
 fn create_accumulator_for_entry(
     name: &str,
     entry: &FunctionEntry,
+    subprocess_cache: &SubprocessCache,
 ) -> DFResult<Box<dyn Accumulator>> {
     match entry.runner {
         Runner::Python => {
@@ -69,12 +71,25 @@ fn create_accumulator_for_entry(
                 })?;
             Ok(Box::new(acc))
         }
-        _ => Err(datafusion::common::DataFusionError::NotImplemented(format!(
-            "Aggregate functions with runner '{}' are not yet supported for '{}'. \
-             IPC/Java/Docker aggregate functions require in-process state management. \
-             Use the 'python' or 'lib' runner for aggregate functions.",
-            entry.runner, name
-        ))),
+        Runner::Ipc | Runner::Java | Runner::Docker => {
+            let state_id =
+                ipc_bridge::ipc_aggregate_create_state(subprocess_cache, &entry.logic, &entry.name.name)
+                    .map_err(|e| {
+                        datafusion::common::DataFusionError::Execution(format!(
+                            "Failed to create IPC aggregate state for '{}': {}",
+                            name, e
+                        ))
+                    })?;
+
+            Ok(Box::new(IpcAccumulator {
+                logic: entry.logic.clone(),
+                function_name: entry.name.name.clone(),
+                display_name: name.to_string(),
+                state_id,
+                return_type: entry.return_type.clone(),
+                subprocess_cache: Arc::clone(subprocess_cache),
+            }))
+        }
     }
 }
 
@@ -92,6 +107,7 @@ pub struct AggregateFunction {
     name: String,
     signature: Signature,
     overloads: Vec<FunctionEntry>,
+    subprocess_cache: SubprocessCache,
 }
 
 impl PartialEq for AggregateFunction {
@@ -110,7 +126,7 @@ impl Hash for AggregateFunction {
 
 impl AggregateFunction {
     /// Create a new aggregate function from a single FunctionEntry.
-    pub fn new(entry: FunctionEntry) -> Result<Self, BundlebaseError> {
+    pub fn new(entry: FunctionEntry, subprocess_cache: SubprocessCache) -> Result<Self, BundlebaseError> {
         let name = entry.name.to_string();
         let signature = Signature::new(
             TypeSignature::Exact(entry.input_types.clone()),
@@ -120,11 +136,12 @@ impl AggregateFunction {
             name,
             signature,
             overloads: vec![entry],
+            subprocess_cache,
         })
     }
 
     /// Create a composite aggregate function from multiple overloads.
-    pub fn new_composite(overloads: Vec<FunctionEntry>) -> Result<Self, BundlebaseError> {
+    pub fn new_composite(overloads: Vec<FunctionEntry>, subprocess_cache: SubprocessCache) -> Result<Self, BundlebaseError> {
         if overloads.is_empty() {
             return Err("Cannot create composite aggregate function with no overloads".into());
         }
@@ -142,6 +159,7 @@ impl AggregateFunction {
             name,
             signature,
             overloads,
+            subprocess_cache,
         })
     }
 }
@@ -184,9 +202,16 @@ impl AggregateUDFImpl for AggregateFunction {
             find_matching_overload(&self.overloads, &arg_types)
                 .unwrap_or(&self.overloads[0])
         };
+
+        // IPC accumulators use Utf8 state (opaque state ID), others use return type
+        let state_type = match entry.runner {
+            Runner::Ipc | Runner::Java | Runner::Docker => DataType::Utf8,
+            _ => entry.return_type.clone(),
+        };
+
         Ok(vec![Arc::new(arrow::datatypes::Field::new(
             "state",
-            entry.return_type.clone(),
+            state_type,
             true,
         ))])
     }
@@ -205,7 +230,7 @@ impl AggregateUDFImpl for AggregateFunction {
                     self.name, arg_types
                 )))?
         };
-        create_accumulator_for_entry(&self.name, entry)
+        create_accumulator_for_entry(&self.name, entry, &self.subprocess_cache)
     }
 }
 
@@ -314,11 +339,109 @@ impl Accumulator for PythonAccumulator {
     }
 }
 
+/// Accumulator that delegates to an IPC subprocess via JSON-RPC + Arrow IPC.
+///
+/// State is held server-side in the subprocess; the accumulator only holds an opaque state ID.
+#[derive(Debug)]
+struct IpcAccumulator {
+    logic: String,
+    function_name: String,
+    display_name: String,
+    state_id: String,
+    return_type: DataType,
+    subprocess_cache: SubprocessCache,
+}
+
+impl Accumulator for IpcAccumulator {
+    fn update_batch(
+        &mut self,
+        values: &[arrow::array::ArrayRef],
+    ) -> DFResult<()> {
+        ipc_bridge::ipc_aggregate_accumulate(
+            &self.subprocess_cache,
+            &self.logic,
+            &self.function_name,
+            &self.state_id,
+            values,
+        )
+        .map_err(|e| {
+            datafusion::common::DataFusionError::Execution(format!(
+                "IPC accumulate for '{}' failed: {}",
+                self.display_name, e
+            ))
+        })
+    }
+
+    fn merge_batch(
+        &mut self,
+        states: &[arrow::array::ArrayRef],
+    ) -> DFResult<()> {
+        if states.is_empty() {
+            return Ok(());
+        }
+
+        // Each element in the state array is an opaque state ID (as Utf8).
+        // We need to merge them one by one into our current state.
+        let state_array = &states[0];
+        for i in 0..state_array.len() {
+            let other_state = ScalarValue::try_from_array(state_array, i)?;
+            if let ScalarValue::Utf8(Some(other_id)) = &other_state {
+                let merged_id = ipc_bridge::ipc_aggregate_merge(
+                    &self.subprocess_cache,
+                    &self.logic,
+                    &self.function_name,
+                    &self.state_id,
+                    other_id,
+                )
+                .map_err(|e| {
+                    datafusion::common::DataFusionError::Execution(format!(
+                        "IPC merge for '{}' failed: {}",
+                        self.display_name, e
+                    ))
+                })?;
+                self.state_id = merged_id;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn evaluate(&mut self) -> DFResult<ScalarValue> {
+        ipc_bridge::ipc_aggregate_evaluate(
+            &self.subprocess_cache,
+            &self.logic,
+            &self.function_name,
+            &self.state_id,
+            &self.return_type,
+        )
+        .map_err(|e| {
+            datafusion::common::DataFusionError::Execution(format!(
+                "IPC evaluate for '{}' failed: {}",
+                self.display_name, e
+            ))
+        })
+    }
+
+    fn state(&mut self) -> DFResult<Vec<ScalarValue>> {
+        // Return the state ID as a Utf8 scalar so DataFusion can serialize/merge it
+        Ok(vec![ScalarValue::Utf8(Some(self.state_id.clone()))])
+    }
+
+    fn size(&self) -> usize {
+        std::mem::size_of_val(self)
+            + self.logic.len()
+            + self.function_name.len()
+            + self.display_name.len()
+            + self.state_id.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::bundle::connector_definition::Platform;
     use crate::bundle::function_definition::FunctionKind;
+    use crate::function::ipc_bridge::new_subprocess_cache;
     use crate::NamespacedName;
 
     #[test]
@@ -334,7 +457,7 @@ mod tests {
             kind: FunctionKind::Aggregate,
         };
 
-        let agg = AggregateFunction::new(entry).expect("should create");
+        let agg = AggregateFunction::new(entry, new_subprocess_cache()).expect("should create");
         assert_eq!(agg.name(), "acme.my_sum");
         assert_eq!(
             agg.return_type(&[DataType::Int64]).unwrap(),
@@ -365,7 +488,7 @@ mod tests {
 
     #[test]
     fn test_composite_empty_overloads() {
-        let result = AggregateFunction::new_composite(vec![]);
+        let result = AggregateFunction::new_composite(vec![], new_subprocess_cache());
         assert!(result.is_err());
     }
 
@@ -381,7 +504,7 @@ mod tests {
             temporary: true,
             kind: FunctionKind::Aggregate,
         };
-        let agg = AggregateFunction::new_composite(vec![entry]).expect("should create");
+        let agg = AggregateFunction::new_composite(vec![entry], new_subprocess_cache()).expect("should create");
         assert_eq!(agg.name(), "acme.my_sum");
         assert_eq!(agg.return_type(&[DataType::Int64]).unwrap(), DataType::Int64);
     }
@@ -408,7 +531,7 @@ mod tests {
             temporary: true,
             kind: FunctionKind::Aggregate,
         };
-        let agg = AggregateFunction::new_composite(vec![int_entry, float_entry]).expect("should create");
+        let agg = AggregateFunction::new_composite(vec![int_entry, float_entry], new_subprocess_cache()).expect("should create");
         assert_eq!(agg.name(), "acme.my_sum");
         assert_eq!(agg.return_type(&[DataType::Int64]).unwrap(), DataType::Int64);
         assert_eq!(agg.return_type(&[DataType::Float64]).unwrap(), DataType::Float64);

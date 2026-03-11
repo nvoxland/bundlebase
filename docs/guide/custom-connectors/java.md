@@ -52,7 +52,7 @@ public class ExampleConnector implements Connector {
 Build a JAR and use with:
 
 ```python
-bundle.create_connector('example.connector', runner='java', logic='target/example-connector.jar')
+bundle.import_connector('example.connector', runner='java', logic='target/example-connector.jar')
 bundle.create_source('example.connector')
 ```
 
@@ -434,7 +434,7 @@ This produces `libbundlebase_plugin.so` in `target/`.
 ### Use
 
 ```python
-bundle.create_connector('example.connector', runner='lib', logic='./libbundlebase_plugin.so')
+bundle.import_connector('example.connector', runner='lib', logic='./libbundlebase_plugin.so')
 bundle.create_source('example.connector')
 ```
 

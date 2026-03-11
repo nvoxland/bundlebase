@@ -97,7 +97,7 @@ _original_methods = {
     "set_config": _PyBundleBuilder.set_config,
 
     # Custom function operations
-    "create_function": _PyBundleBuilder.create_function,
+    "import_function": _PyBundleBuilder.import_function,
 
     # Index operations
     "create_index": _PyBundleBuilder.create_index,
@@ -157,7 +157,7 @@ mutation_methods = [
     "attach", "detach_block", "replace_block", "create_source",
     "add_column", "cast_column", "drop_column", "rename_column", "filter", "join",
     "create_view", "rename_view", "drop_view", "drop_join", "rename_join",
-    "set_name", "set_description", "save_config", "set_config", "create_function",
+    "set_name", "set_description", "save_config", "set_config", "import_function",
     "create_index", "drop_index", "rebuild_index", "reindex",
     "reset", "undo"
 ]

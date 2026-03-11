@@ -42,7 +42,7 @@ impl Operation for DropConnectorOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         if !bundle.has_connector_entry(&self.source_name) {
             return Err(format!(
-                "Connector '{}' is not defined. Use CREATE CONNECTOR first.",
+                "Connector '{}' is not defined. Use IMPORT CONNECTOR first.",
                 self.source_name
             )
             .into());

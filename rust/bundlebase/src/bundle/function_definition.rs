@@ -1,6 +1,6 @@
 //! User-defined function entry system for named, platform-aware SQL functions.
 //!
-//! A `FunctionEntry` is created via `CREATE FUNCTION acme.double_val(Int64) RETURNS Int64`
+//! A `FunctionEntry` is created via `IMPORT FUNCTION acme.double_val(Int64) RETURNS Int64`
 //! and represents a single function binding for a name+platform pair.
 //! `resolve_function` picks the best entry for the current platform at runtime.
 

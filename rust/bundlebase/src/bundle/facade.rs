@@ -299,7 +299,7 @@ pub trait BundleFacade: Send + Sync {
     /// Returns the bundle configuration
     fn config(&self) -> Arc<BundleConfig>;
 
-    /// Create a temporary connector with runtime-only logic.
+    /// Load a temporary connector with runtime-only logic.
     ///
     /// Creates the connector definition if it doesn't exist, then adds
     /// runtime-only logic without creating a persisted operation.
@@ -308,7 +308,7 @@ pub trait BundleFacade: Send + Sync {
     /// # Arguments
     /// * `name` - The connector name (dot-separated)
     /// * `entry` - The connector logic entry to add
-    async fn create_temporary_connector(
+    async fn import_temporary_connector(
         &self,
         name: &str,
         runner: crate::bundle::connector_definition::Runner,
@@ -327,10 +327,10 @@ pub trait BundleFacade: Send + Sync {
         platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError>;
 
-    /// Create a temporary function with runtime-only logic.
+    /// Load a temporary function with runtime-only logic.
     ///
     /// Registers a DataFusion UDF and adds the entry for the current session.
-    async fn create_temporary_function(
+    async fn import_temporary_function(
         &self,
         entry: crate::bundle::function_definition::FunctionEntry,
     ) -> Result<(), BundlebaseError>;

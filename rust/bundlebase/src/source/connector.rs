@@ -468,7 +468,7 @@ impl ConnectorRegistry {
     /// Create a new registry with built-in connectors registered.
     ///
     /// Note: "ipc" and "native" are NOT registered here. They are only available
-    /// via connectors (CREATE CONNECTOR + SET CONNECTOR LOGIC). Use `create_instance()`
+    /// via connectors (IMPORT CONNECTOR + SET CONNECTOR LOGIC). Use `create_instance()`
     /// to create instances of them when resolving connector logic.
     pub fn new() -> Self {
         let mut registry = Self {

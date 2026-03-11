@@ -85,7 +85,7 @@ impl Operation for DropFunctionOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         if !bundle.has_function_entry(&self.name) {
             return Err(format!(
-                "Function '{}' is not defined. Use CREATE FUNCTION first.",
+                "Function '{}' is not defined. Use IMPORT FUNCTION first.",
                 self.name
             )
             .into());

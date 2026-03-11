@@ -1,4 +1,4 @@
-//! CreateConnector operation — registers a named connector definition with logic.
+//! ImportConnector operation — registers a named connector definition with logic.
 
 use crate::bundle::operation::Operation;
 use crate::bundle::connector_definition::{parse_connector_name, ConnectorEntry, Platform, Runner};
@@ -10,11 +10,11 @@ use serde::{Deserialize, Serialize};
 
 /// Operation that defines a named connector and sets its logic.
 ///
-/// Creates the connector if it doesn't exist, then adds/replaces logic for the given platform.
-/// Always persisted — for runtime-only logic, use `create_temporary_connector` instead.
+/// Loads the connector if it doesn't exist, then adds/replaces logic for the given platform.
+/// Always persisted — for runtime-only logic, use `import_temporary_connector` instead.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateConnectorOp {
+pub struct ImportConnectorOp {
     /// Full dotted connector name (e.g., "acme.weather")
     pub name: String,
     /// Runner type
@@ -25,17 +25,17 @@ pub struct CreateConnectorOp {
     pub platform: Platform,
 }
 
-impl CreateConnectorOp {
+impl ImportConnectorOp {
     pub fn new(name: String, runner: Runner, logic: String, platform: Platform) -> Self {
         Self { name, runner, logic, platform }
     }
 }
 
 #[async_trait]
-impl Operation for CreateConnectorOp {
+impl Operation for ImportConnectorOp {
     fn describe(&self) -> String {
         format!(
-            "CREATE CONNECTOR {} (runner={}, platform={})",
+            "IMPORT CONNECTOR {} (runner={}, platform={})",
             self.name, self.runner, self.platform
         )
     }
@@ -47,7 +47,7 @@ impl Operation for CreateConnectorOp {
         // Reject python runner (cannot be bundled)
         if self.runner == Runner::Python {
             return Err(
-                "python runner cannot be bundled. Use CREATE TEMPORARY CONNECTOR instead.".into(),
+                "python runner cannot be bundled. Use IMPORT TEMPORARY CONNECTOR instead.".into(),
             );
         }
 
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = CreateConnectorOp::new(
+        let op = ImportConnectorOp::new(
             "acme.weather".to_string(),
             Runner::Ipc,
             "./weather".to_string(),
@@ -86,13 +86,13 @@ mod tests {
         );
         assert_eq!(
             op.describe(),
-            "CREATE CONNECTOR acme.weather (runner=ipc, platform=*/*)"
+            "IMPORT CONNECTOR acme.weather (runner=ipc, platform=*/*)"
         );
     }
 
     #[test]
     fn test_serialization() {
-        let op = CreateConnectorOp::new(
+        let op = ImportConnectorOp::new(
             "acme.weather".to_string(),
             Runner::Ipc,
             "./weather-linux".to_string(),
@@ -100,14 +100,14 @@ mod tests {
         );
         let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
         assert!(yaml.contains("linux/amd64"));
-        let deser: CreateConnectorOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
+        let deser: ImportConnectorOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
         assert_eq!(deser, op);
     }
 
     #[tokio::test]
     async fn test_check_no_dot() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        let op = CreateConnectorOp::new(
+        let op = ImportConnectorOp::new(
             "weather".to_string(),
             Runner::Ipc,
             "./test".to_string(),
@@ -121,7 +121,7 @@ mod tests {
     #[tokio::test]
     async fn test_check_python_rejected() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
-        let op = CreateConnectorOp::new(
+        let op = ImportConnectorOp::new(
             "acme.weather".to_string(),
             Runner::Python,
             "mod:Class".to_string(),

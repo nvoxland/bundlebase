@@ -255,7 +255,7 @@ class PyBundle:
         """
         ...
 
-    async def create_temporary_function(
+    async def import_temporary_function(
         self,
         name: str,
         input_types: List[str],
@@ -266,7 +266,7 @@ class PyBundle:
         function_type: str = "scalar",
     ) -> str:
         """
-        Create a temporary SQL function (not persisted).
+        Load a temporary SQL function (not persisted).
 
         Args:
             name: Dotted function name (e.g., "acme.double_val")
@@ -472,7 +472,7 @@ class PyBundleBuilder:
         """
         ...
 
-    def create_function(
+    def import_function(
         self,
         name: str,
         input_types: List[str],
@@ -483,7 +483,7 @@ class PyBundleBuilder:
         function_type: str = "scalar",
     ) -> "OperationChain":
         """
-        Create a named SQL function (persisted).
+        Load a named SQL function (persisted).
 
         Args:
             name: Dotted function name (e.g., "acme.double_val")
@@ -499,7 +499,7 @@ class PyBundleBuilder:
         """
         ...
 
-    def create_temporary_function(
+    def import_temporary_function(
         self,
         name: str,
         input_types: List[str],
@@ -510,7 +510,7 @@ class PyBundleBuilder:
         function_type: str = "scalar",
     ) -> "OperationChain":
         """
-        Create a temporary SQL function (not persisted).
+        Load a temporary SQL function (not persisted).
 
         Args:
             name: Dotted function name (e.g., "acme.double_val")
@@ -1341,7 +1341,7 @@ class OperationChain:
         """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 
-    def create_function(
+    def import_function(
         self,
         name: str,
         input_types: List[str],
@@ -1351,10 +1351,10 @@ class OperationChain:
         platform: str = "*/*",
         function_type: str = "scalar",
     ) -> "OperationChain":
-        """Queue a create_function operation."""
+        """Queue a import_function operation."""
         ...
 
-    def create_temporary_function(
+    def import_temporary_function(
         self,
         name: str,
         input_types: List[str],
@@ -1364,7 +1364,7 @@ class OperationChain:
         platform: str = "*/*",
         function_type: str = "scalar",
     ) -> "OperationChain":
-        """Queue a create_temporary_function operation."""
+        """Queue a import_temporary_function operation."""
         ...
 
     def drop_function(
@@ -1500,7 +1500,7 @@ class CreateChain:
         """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 
-    def create_function(
+    def import_function(
         self,
         name: str,
         input_types: List[str],
@@ -1510,10 +1510,10 @@ class CreateChain:
         platform: str = "*/*",
         function_type: str = "scalar",
     ) -> "CreateChain":
-        """Queue a create_function operation."""
+        """Queue a import_function operation."""
         ...
 
-    def create_temporary_function(
+    def import_temporary_function(
         self,
         name: str,
         input_types: List[str],
@@ -1523,7 +1523,7 @@ class CreateChain:
         platform: str = "*/*",
         function_type: str = "scalar",
     ) -> "CreateChain":
-        """Queue a create_temporary_function operation."""
+        """Queue a import_temporary_function operation."""
         ...
 
     def drop_function(
@@ -1659,7 +1659,7 @@ class ExtendChain:
         """Queue a set_config operation (runtime-only, highest priority)."""
         ...
 
-    def create_function(
+    def import_function(
         self,
         name: str,
         input_types: List[str],
@@ -1669,10 +1669,10 @@ class ExtendChain:
         platform: str = "*/*",
         function_type: str = "scalar",
     ) -> "ExtendChain":
-        """Queue a create_function operation."""
+        """Queue a import_function operation."""
         ...
 
-    def create_temporary_function(
+    def import_temporary_function(
         self,
         name: str,
         input_types: List[str],
@@ -1682,7 +1682,7 @@ class ExtendChain:
         platform: str = "*/*",
         function_type: str = "scalar",
     ) -> "ExtendChain":
-        """Queue a create_temporary_function operation."""
+        """Queue a import_temporary_function operation."""
         ...
 
     def drop_function(

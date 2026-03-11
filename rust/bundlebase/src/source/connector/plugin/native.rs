@@ -625,7 +625,7 @@ mod tests {
         );
     }
 
-    // validate_args tests removed — call format validation now happens at create_connector time
+    // validate_args tests removed — call format validation now happens at import_connector time
 
     #[tokio::test]
     async fn test_discover_blocked_when_external_code_disabled() {
