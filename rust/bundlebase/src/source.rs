@@ -3,6 +3,8 @@
 pub(crate) mod connector;
 pub(crate) mod connector_utils;
 pub(crate) mod fetch;
+pub(crate) mod shared_utils;
+pub(crate) mod source_utils;
 
 use crate::BundlebaseError;
 

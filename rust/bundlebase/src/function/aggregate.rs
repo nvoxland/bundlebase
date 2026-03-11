@@ -7,6 +7,7 @@ use crate::bundle::connector_definition::Runner;
 use crate::bundle::function_definition::FunctionEntry;
 use crate::function::ipc_bridge::{self, SubprocessCache};
 use crate::function::lib_bridge::{parse_lib_logic, LibAccumulator};
+use crate::function::parse_python_logic;
 use crate::function::python_bridge::get_python_function_bridge;
 use crate::BundlebaseError;
 use arrow::datatypes::DataType;
@@ -235,19 +236,6 @@ impl AggregateUDFImpl for AggregateFunction {
         };
         create_accumulator_for_entry(&self.name, entry, &self.subprocess_cache)
     }
-}
-
-/// Parse a Python logic string in `"module:class"` format.
-fn parse_python_logic(logic: &str) -> DFResult<(&str, &str)> {
-    let parts: Vec<&str> = logic.rsplitn(2, ':').collect();
-    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
-        return Err(datafusion::common::DataFusionError::Execution(format!(
-            "Invalid Python logic '{}'. Expected 'module:class_name' format.",
-            logic
-        )));
-    }
-    // rsplitn reverses order
-    Ok((parts[1], parts[0]))
 }
 
 /// Accumulator that delegates to Python aggregate class methods.

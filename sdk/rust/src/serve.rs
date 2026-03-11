@@ -51,6 +51,9 @@ fn handle_request(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn Writ
         "handshake" => {
             let _ = write_response(w, &req.id, serde_json::json!({"protocol_version": "1"}));
         }
+        "ping" => {
+            let _ = write_response(w, &req.id, serde_json::json!("pong"));
+        }
         "discover" => handle_discover(source, req, w),
         "data" => handle_data(source, req, w),
         "stable_url" => handle_stable_url(source, req, w),

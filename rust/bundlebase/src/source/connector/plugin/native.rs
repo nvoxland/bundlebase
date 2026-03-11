@@ -164,7 +164,7 @@ impl SharedLibHandle {
         &self,
         location_json: &str,
         args_json: &str,
-    ) -> Result<Option<Vec<RecordBatch>>, BundlebaseError> {
+    ) -> Result<Option<ArrowArrayStreamReader>, BundlebaseError> {
         let c_location = CString::new(location_json)
             .map_err(|_| BundlebaseError::from("location_json contains null byte"))?;
         let c_args = CString::new(args_json)
@@ -185,17 +185,7 @@ impl SharedLibHandle {
         let reader = ArrowArrayStreamReader::try_new(ffi_stream)
             .map_err(|e| format!("Failed to create ArrowArrayStreamReader: {}", e))?;
 
-        // TODO: This collects all batches into memory. Consider streaming lazily
-        // from the ArrowArrayStreamReader to avoid materializing large datasets.
-        let batches: Result<Vec<RecordBatch>, _> = reader.collect();
-        let batches =
-            batches.map_err(|e| format!("Failed to read record batches from stream: {}", e))?;
-
-        if batches.is_empty() {
-            return Ok(None);
-        }
-
-        Ok(Some(batches))
+        Ok(Some(reader))
     }
 
     fn call_stable_url(
@@ -458,10 +448,21 @@ impl Connector for NativeConnector {
                 let guard = self.lib_handle.lock().await;
                 let handle = guard.as_ref().ok_or("Shared library not loaded")?;
                 match handle.call_data(&loc_json, &args_json)? {
-                    Some(batches) => {
-                        let batch_stream = Box::pin(futures::stream::iter(
-                            batches.into_iter().map(Ok),
-                        ));
+                    Some(reader) => {
+                        // Stream batches lazily from the ArrowArrayStreamReader
+                        // instead of collecting all into memory.
+                        let batch_stream = Box::pin(futures::stream::unfold(reader, |mut reader| async move {
+                            match reader.next() {
+                                Some(Ok(batch)) => Some((Ok(batch), reader)),
+                                Some(Err(e)) => Some((
+                                    Err(BundlebaseError::from(format!(
+                                        "Failed to read record batch from stream: {}", e
+                                    ))),
+                                    reader,
+                                )),
+                                None => None,
+                            }
+                        }));
                         Ok(Some(SourceData::Arrow(batch_stream)))
                     }
                     None => Ok(None),

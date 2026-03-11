@@ -86,7 +86,8 @@ transaction_stmt = {
 
 // Metadata statements - operations for bundle metadata
 metadata_stmt = {
-    set_name_stmt
+    describe_connector_stmt
+    | set_name_stmt
     | set_description_stmt
     | set_config_stmt
     | save_config_stmt
@@ -286,18 +287,22 @@ source_arg_pair = {
 // ============================================================================
 // FETCH Statement
 // ============================================================================
-// Syntax: FETCH ALL <mode> | FETCH <pack> <mode>
+// Syntax: FETCH ALL <mode> [DRY RUN] | FETCH <pack> <mode> [DRY RUN]
 // Examples:
 //   FETCH base ADD            -- fetch from base pack sources (add mode)
 //   FETCH users ADD           -- fetch from 'users' pack sources
 //   FETCH ALL ADD             -- fetch from all sources
 //   FETCH ALL UPDATE          -- fetch all with update mode
 //   FETCH users SYNC          -- fetch from 'users' with sync mode
+//   FETCH base ADD DRY RUN    -- dry run: show what would change without executing
+//   FETCH ALL SYNC DRY RUN   -- dry run for all sources in sync mode
 fetch_stmt = {
-    ^"fetch" ~ (^"all" ~ fetch_mode | identifier ~ fetch_mode)
+    ^"fetch" ~ (^"all" ~ fetch_mode | identifier ~ fetch_mode) ~ fetch_dry_run?
 }
 
 fetch_mode = { ^"add" | ^"update" | ^"sync" }
+
+fetch_dry_run = { ^"dry" ~ ^"run" }
 
 // ============================================================================
 // DROP JOIN Statement
@@ -594,4 +599,14 @@ explain_format = { ^"indent" | ^"tree" | ^"graphviz" }
 
 explain_sql = @{
     (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// DESCRIBE CONNECTOR Statement
+// ============================================================================
+// Syntax: DESCRIBE CONNECTOR <dotted_name>
+// Example: DESCRIBE CONNECTOR acme.weather
+
+describe_connector_stmt = {
+    ^"describe" ~ ^"connector" ~ dotted_identifier
 }

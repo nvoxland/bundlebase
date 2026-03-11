@@ -43,6 +43,8 @@ func handleRequest(source Connector, req jsonRpcRequest, w io.Writer) bool {
 	switch req.Method {
 	case "handshake":
 		writeResponse(w, req.ID, map[string]string{"protocol_version": "1"})
+	case "ping":
+		writeResponse(w, req.ID, "pong")
 	case "discover":
 		handleDiscover(source, req, w)
 	case "data":

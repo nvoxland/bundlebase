@@ -32,7 +32,9 @@ class TypeMap {
         Map.entry("Date32", new ArrowType.Date(DateUnit.DAY)),
         Map.entry("Date64", new ArrowType.Date(DateUnit.MILLISECOND)),
         Map.entry("Timestamp", new ArrowType.Timestamp(TimeUnit.MICROSECOND, null)),
-        Map.entry("Binary", new ArrowType.Binary())
+        Map.entry("Binary", new ArrowType.Binary()),
+        Map.entry("LargeUtf8", new ArrowType.LargeUtf8()),
+        Map.entry("LargeBinary", new ArrowType.LargeBinary())
     );
 
     /**

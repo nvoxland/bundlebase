@@ -48,6 +48,7 @@ Operations are recorded and applied in sequence when querying:
 - **SetName**: Set container name
 - **SetDescription**: Set container description
 - **IndexData**: Track row indexing metadata
+- **DescribeConnector**: Returns metadata table (name, runner, logic, platform, temporary) for a registered connector
 
 ## Adapter System
 
@@ -70,7 +71,7 @@ Custom SQL function system supporting both scalar and aggregate functions.
 
 **Core Components:**
 - **FunctionEntry**: Stores function metadata (name, input/return types, runner, logic, platform, kind)
-- **FunctionKind**: `Scalar` (row → row) or `Aggregate` (many rows → one result per group)
+- **FunctionKind**: `Scalar` (row → row), `Aggregate` (many rows → one result per group), or `TableValued` (returns a table; registration only, execution not yet implemented)
 - **ScalarFunction**: DataFusion `ScalarUDFImpl` bridge for scalar functions
 - **AggregateFunction**: DataFusion `AggregateUDFImpl` bridge for aggregate functions
 - **PythonAccumulator**: `Accumulator` impl that delegates to Python class methods
@@ -88,6 +89,15 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - `lib_bridge::load_ipc_manifest()` — Runs `exec --bundlebase-functions` for IPC discovery
 - `ipc_bridge` module — JSON-RPC + Arrow IPC protocol for scalar invoke and aggregate (`create_state`/`accumulate`/`merge`/`evaluate`)
 - `IMPORT FUNCTION namespace.* FROM 'runner://logic'` command uses manifests to register multiple functions at once
+
+**IPC Health Check:**
+- All SDKs respond to a `ping` method with `"pong"`, used by Bundlebase to verify subprocess liveness.
+
+**Complex Arrow Types:**
+- The type system supports `List<T>`, `Struct<name:type,...>`, `Map<K,V>`, `Decimal128(precision,scale)`, `LargeUtf8`, and `LargeBinary` in addition to primitive types.
+
+**FETCH DRY RUN:**
+- `FETCH` and `FETCH ALL` commands support an optional `DRY RUN` modifier that previews changes without executing them.
 
 **IPC Subprocess Cache:**
 - Each `Bundle` owns a `SubprocessCache` (`Arc<Mutex<HashMap<String, ...>>>`)

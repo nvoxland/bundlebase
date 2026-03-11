@@ -25,6 +25,10 @@ use dashmap::DashMap;
 use std::io::{BufRead, BufReader, BufWriter, Read as IoRead, Write as IoWrite};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// Default timeout for IPC function operations, in seconds.
+pub const DEFAULT_FUNCTION_TIMEOUT_SECS: u64 = 30;
 
 // ---------------------------------------------------------------------------
 // JSON-RPC types (sync, for use in DataFusion's invoke path)
@@ -116,18 +120,20 @@ pub(crate) struct SyncSubprocessHandle {
     stdin: BufWriter<ChildStdin>,
     stdout: BufReader<ChildStdout>,
     next_id: u64,
+    timeout: Duration,
 }
 
 impl std::fmt::Debug for SyncSubprocessHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SyncSubprocessHandle")
             .field("next_id", &self.next_id)
+            .field("timeout", &self.timeout)
             .finish_non_exhaustive()
     }
 }
 
 impl SyncSubprocessHandle {
-    fn spawn(command: &[String]) -> Result<Self, BundlebaseError> {
+    fn spawn(command: &[String], timeout: Duration) -> Result<Self, BundlebaseError> {
         if command.is_empty() {
             return Err("Cannot spawn subprocess with empty command".into());
         }
@@ -161,6 +167,7 @@ impl SyncSubprocessHandle {
             stdin: BufWriter::new(stdin),
             stdout: BufReader::new(stdout),
             next_id: 1,
+            timeout,
         };
 
         handle.perform_handshake()?;
@@ -196,8 +203,7 @@ impl SyncSubprocessHandle {
 
         let mut response_line = String::new();
         let bytes_read = self
-            .stdout
-            .read_line(&mut response_line)
+            .read_line_with_timeout(&mut response_line)
             .map_err(|e| format!("Failed to read handshake response: {}", e))?;
 
         if bytes_read == 0 {
@@ -228,6 +234,114 @@ impl SyncSubprocessHandle {
         Ok(())
     }
 
+    /// Read a line from stdout with a timeout.
+    ///
+    /// Spawns a watchdog thread that kills the subprocess if the read does not
+    /// complete within the configured timeout. Returns the number of bytes read.
+    fn read_line_with_timeout(&mut self, buf: &mut String) -> Result<usize, BundlebaseError> {
+        let timeout = self.timeout;
+        let child_id = self.child.id();
+
+        // The done flag lets the watchdog know the read completed in time.
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done_clone = Arc::clone(&done);
+
+        let watchdog = std::thread::spawn(move || {
+            std::thread::sleep(timeout);
+            if !done_clone.load(std::sync::atomic::Ordering::Acquire) {
+                log::warn!(
+                    "IPC subprocess (pid {}) timed out after {} seconds, sending kill signal",
+                    child_id,
+                    timeout.as_secs()
+                );
+                // Safety: send SIGKILL to the subprocess. This is safe because we
+                // only target our own child process identified by its PID.
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(child_id as i32, libc::SIGKILL);
+                }
+                #[cfg(not(unix))]
+                {
+                    // On non-Unix platforms, there is no portable async kill;
+                    // the blocking read will fail when the process eventually exits.
+                    let _ = child_id;
+                }
+            }
+        });
+
+        let result = self.stdout.read_line(buf);
+
+        // Signal the watchdog that the read completed.
+        done.store(true, std::sync::atomic::Ordering::Release);
+
+        // Detach the watchdog — it will exit on its own after the sleep.
+        drop(watchdog);
+
+        let bytes_read = result.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::UnexpectedEof
+                || e.kind() == std::io::ErrorKind::BrokenPipe
+                || e.to_string().contains("kill")
+            {
+                BundlebaseError::from(format!(
+                    "IPC subprocess timed out after {} seconds. The subprocess may be stuck.",
+                    timeout.as_secs()
+                ))
+            } else {
+                BundlebaseError::from(format!("Failed to read from IPC subprocess stdout: {}", e))
+            }
+        })?;
+
+        Ok(bytes_read)
+    }
+
+    /// Read exact bytes from stdout with a timeout.
+    ///
+    /// Uses the same watchdog pattern as `read_line_with_timeout`.
+    fn read_exact_with_timeout(&mut self, buf: &mut [u8]) -> Result<(), BundlebaseError> {
+        let timeout = self.timeout;
+        let child_id = self.child.id();
+
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done_clone = Arc::clone(&done);
+
+        let watchdog = std::thread::spawn(move || {
+            std::thread::sleep(timeout);
+            if !done_clone.load(std::sync::atomic::Ordering::Acquire) {
+                log::warn!(
+                    "IPC subprocess (pid {}) timed out after {} seconds during binary read, sending kill signal",
+                    child_id,
+                    timeout.as_secs()
+                );
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(child_id as i32, libc::SIGKILL);
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = child_id;
+                }
+            }
+        });
+
+        let result = self.stdout.read_exact(buf);
+
+        done.store(true, std::sync::atomic::Ordering::Release);
+        drop(watchdog);
+
+        result.map_err(|e| {
+            if e.kind() == std::io::ErrorKind::UnexpectedEof
+                || e.kind() == std::io::ErrorKind::BrokenPipe
+            {
+                BundlebaseError::from(format!(
+                    "IPC subprocess timed out after {} seconds. The subprocess may be stuck.",
+                    timeout.as_secs()
+                ))
+            } else {
+                BundlebaseError::from(format!("Failed to read from IPC subprocess stdout: {}", e))
+            }
+        })
+    }
+
     fn send_request(
         &mut self,
         method: &str,
@@ -256,9 +370,13 @@ impl SyncSubprocessHandle {
 
         let mut response_line = String::new();
         let bytes_read = self
-            .stdout
-            .read_line(&mut response_line)
-            .map_err(|e| format!("Failed to read from IPC function process stdout: {}", e))?;
+            .read_line_with_timeout(&mut response_line)
+            .map_err(|e| {
+                BundlebaseError::from(format!(
+                    "Failed to read from IPC function process stdout: {}",
+                    e
+                ))
+            })?;
 
         if bytes_read == 0 {
             return Err("IPC function process closed stdout unexpectedly".into());
@@ -323,8 +441,7 @@ impl SyncSubprocessHandle {
 
     fn read_arrow_ipc(&mut self) -> Result<Option<Vec<u8>>, BundlebaseError> {
         let mut len_buf = [0u8; 4];
-        self.stdout
-            .read_exact(&mut len_buf)
+        self.read_exact_with_timeout(&mut len_buf)
             .map_err(|e| format!("Failed to read Arrow IPC length prefix: {}", e))?;
         let data_len = u32::from_be_bytes(len_buf) as usize;
 
@@ -342,8 +459,7 @@ impl SyncSubprocessHandle {
         }
 
         let mut data = vec![0u8; data_len];
-        self.stdout
-            .read_exact(&mut data)
+        self.read_exact_with_timeout(&mut data)
             .map_err(|e| format!("Failed to read Arrow IPC data ({} bytes): {}", data_len, e))?;
 
         Ok(Some(data))
@@ -375,27 +491,136 @@ pub fn new_subprocess_cache() -> SubprocessCache {
     Arc::new(DashMap::new())
 }
 
+/// Normalize a logic string for use as a cache key.
+///
+/// Extracts the command portion (before any whitespace arguments), attempts to
+/// canonicalize it as a filesystem path, and reconstructs the full string.
+/// Falls back to the raw logic string if canonicalization fails.
+fn normalize_cache_key(logic: &str) -> String {
+    let trimmed = logic.trim();
+    // Split into command and arguments at the first whitespace
+    let (cmd_part, args_part) = match trimmed.split_once(char::is_whitespace) {
+        Some((cmd, args)) => (cmd, Some(args)),
+        None => (trimmed, None),
+    };
+
+    // Try to canonicalize the command path
+    match std::fs::canonicalize(cmd_part) {
+        Ok(canonical) => {
+            let canonical_str = canonical.to_string_lossy();
+            match args_part {
+                Some(args) => format!("{} {}", canonical_str, args),
+                None => canonical_str.into_owned(),
+            }
+        }
+        Err(_) => logic.to_string(),
+    }
+}
+
 fn get_or_spawn_subprocess(
     cache: &SubprocessCache,
     logic: &str,
+    timeout: Duration,
 ) -> Result<Arc<Mutex<SyncSubprocessHandle>>, BundlebaseError> {
+    let cache_key = normalize_cache_key(logic);
+
     // Fast path: return existing handle without blocking other keys.
-    if let Some(entry) = cache.get(logic) {
-        return Ok(Arc::clone(entry.value()));
+    if let Some(entry) = cache.get(&cache_key) {
+        let handle = Arc::clone(entry.value());
+        // Check if the subprocess has exited (crashed). If so, remove the
+        // stale entry and fall through to re-spawn below.
+        let mut guard = acquire_lock(&handle);
+        match guard.child.try_wait() {
+            Ok(Some(status)) => {
+                log::warn!(
+                    "IPC subprocess for '{}' exited with status {}, will re-spawn",
+                    logic,
+                    status
+                );
+                drop(guard);
+                drop(entry);
+                cache.remove(&cache_key);
+                // Fall through to spawn a new subprocess
+            }
+            Ok(None) => {
+                // Still running — return it.
+                drop(guard);
+                return Ok(handle);
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to check IPC subprocess status for '{}': {}, assuming alive",
+                    logic,
+                    e
+                );
+                drop(guard);
+                return Ok(handle);
+            }
+        }
     }
 
     // Slow path: spawn subprocess and insert.
     // DashMap's entry API ensures only one thread spawns per key.
     let handle = cache
-        .entry(logic.to_string())
+        .entry(cache_key)
         .or_try_insert_with(|| {
             let command = parse_call(logic)?;
-            let h = SyncSubprocessHandle::spawn(&command)?;
+            let h = SyncSubprocessHandle::spawn(&command, timeout)?;
             Ok::<_, BundlebaseError>(Arc::new(Mutex::new(h)))
         })
         .map_err(|e: BundlebaseError| e)?;
 
     Ok(Arc::clone(handle.value()))
+}
+
+/// Acquire the subprocess lock, recovering from poisoning.
+///
+/// Lock poisoning occurs when a thread panics while holding the lock. Since the
+/// protected data is just I/O handles (stdin/stdout pipes), it is safe to recover
+/// by taking ownership of the inner data via `into_inner()`.
+fn acquire_lock(
+    handle: &Arc<Mutex<SyncSubprocessHandle>>,
+) -> std::sync::MutexGuard<'_, SyncSubprocessHandle> {
+    handle.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+// ---------------------------------------------------------------------------
+// Public API — Health Check
+// ---------------------------------------------------------------------------
+
+/// Timeout for health check ping/pong, in seconds.
+const HEALTH_CHECK_TIMEOUT_SECS: u64 = 5;
+
+/// Perform a health check on the IPC subprocess by sending a ping request.
+///
+/// Gets or spawns the subprocess, sends a JSON-RPC `ping` request, and expects
+/// a response with result `"pong"`. Returns `Ok(())` if healthy, or an error
+/// if the subprocess is unreachable or responds incorrectly.
+pub fn ipc_health_check(
+    cache: &SubprocessCache,
+    logic: &str,
+) -> Result<(), BundlebaseError> {
+    let timeout = Duration::from_secs(HEALTH_CHECK_TIMEOUT_SECS);
+    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let mut guard = acquire_lock(&handle);
+
+    let result = guard
+        .send_request("ping", serde_json::json!({}))
+        .map_err(|e| {
+            BundlebaseError::from(format!(
+                "IPC health check failed for '{}': {}",
+                logic, e
+            ))
+        })?;
+
+    if result.as_str() == Some("pong") {
+        Ok(())
+    } else {
+        Err(BundlebaseError::from(format!(
+            "IPC health check for '{}' returned unexpected result: {}",
+            logic, result
+        )))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -415,10 +640,9 @@ pub fn invoke_ipc_scalar(
     function_name: &str,
     args: &[ArrayRef],
 ) -> Result<ArrayRef, BundlebaseError> {
-    let handle = get_or_spawn_subprocess(cache, logic)?;
-    let mut guard = handle.lock().map_err(|e| {
-        BundlebaseError::from(format!("Failed to acquire subprocess lock: {}", e))
-    })?;
+    let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
+    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let mut guard = acquire_lock(&handle);
 
     // Send invoke request
     guard.send_request(
@@ -427,7 +651,7 @@ pub fn invoke_ipc_scalar(
             "function": function_name,
             "kind": "scalar",
         }),
-    )?;
+    ).map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     // Build input RecordBatch from args
     let fields: Vec<Field> = args
@@ -444,12 +668,14 @@ pub fn invoke_ipc_scalar(
     guard.write_arrow_ipc(&input_batch)?;
 
     // Read output Arrow IPC
-    let ipc_data = guard.read_arrow_ipc()?.ok_or_else(|| {
-        BundlebaseError::from(format!(
-            "IPC function '{}' returned empty output",
-            function_name
-        ))
-    })?;
+    let ipc_data = guard.read_arrow_ipc()
+        .map_err(|e| timeout_context_error(function_name, timeout, e))?
+        .ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "IPC function '{}' returned empty output",
+                function_name
+            ))
+        })?;
 
     // Parse output RecordBatch
     let cursor = std::io::Cursor::new(ipc_data);
@@ -498,17 +724,16 @@ pub fn ipc_aggregate_create_state(
     logic: &str,
     function_name: &str,
 ) -> Result<String, BundlebaseError> {
-    let handle = get_or_spawn_subprocess(cache, logic)?;
-    let mut guard = handle.lock().map_err(|e| {
-        BundlebaseError::from(format!("Failed to acquire subprocess lock: {}", e))
-    })?;
+    let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
+    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let mut guard = acquire_lock(&handle);
 
     let result = guard.send_request(
         "create_state",
         serde_json::json!({
             "function": function_name,
         }),
-    )?;
+    ).map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     let state_id = result
         .get("state_id")
@@ -537,10 +762,9 @@ pub fn ipc_aggregate_accumulate(
     state_id: &str,
     values: &[ArrayRef],
 ) -> Result<(), BundlebaseError> {
-    let handle = get_or_spawn_subprocess(cache, logic)?;
-    let mut guard = handle.lock().map_err(|e| {
-        BundlebaseError::from(format!("Failed to acquire subprocess lock: {}", e))
-    })?;
+    let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
+    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let mut guard = acquire_lock(&handle);
 
     guard.send_request(
         "accumulate",
@@ -548,7 +772,7 @@ pub fn ipc_aggregate_accumulate(
             "function": function_name,
             "state_id": state_id,
         }),
-    )?;
+    ).map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     // Build and write the input batch
     let fields: Vec<Field> = values
@@ -578,10 +802,9 @@ pub fn ipc_aggregate_merge(
     state_id1: &str,
     state_id2: &str,
 ) -> Result<String, BundlebaseError> {
-    let handle = get_or_spawn_subprocess(cache, logic)?;
-    let mut guard = handle.lock().map_err(|e| {
-        BundlebaseError::from(format!("Failed to acquire subprocess lock: {}", e))
-    })?;
+    let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
+    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let mut guard = acquire_lock(&handle);
 
     let result = guard.send_request(
         "merge",
@@ -590,7 +813,7 @@ pub fn ipc_aggregate_merge(
             "state_id1": state_id1,
             "state_id2": state_id2,
         }),
-    )?;
+    ).map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     let merged_id = result
         .get("state_id")
@@ -619,10 +842,9 @@ pub fn ipc_aggregate_evaluate(
     state_id: &str,
     return_type: &arrow::datatypes::DataType,
 ) -> Result<ScalarValue, BundlebaseError> {
-    let handle = get_or_spawn_subprocess(cache, logic)?;
-    let mut guard = handle.lock().map_err(|e| {
-        BundlebaseError::from(format!("Failed to acquire subprocess lock: {}", e))
-    })?;
+    let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
+    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let mut guard = acquire_lock(&handle);
 
     guard.send_request(
         "evaluate",
@@ -630,10 +852,11 @@ pub fn ipc_aggregate_evaluate(
             "function": function_name,
             "state_id": state_id,
         }),
-    )?;
+    ).map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     // Read Arrow IPC result
-    let ipc_data = guard.read_arrow_ipc()?;
+    let ipc_data = guard.read_arrow_ipc()
+        .map_err(|e| timeout_context_error(function_name, timeout, e))?;
 
     match ipc_data {
         None => ScalarValue::try_from(return_type).map_err(|e| {
@@ -683,6 +906,27 @@ pub fn ipc_aggregate_evaluate(
     }
 }
 
+/// Add function name and timeout context to timeout-related errors.
+///
+/// If the error message already mentions "timed out", rewrites it to include
+/// the function name. Otherwise returns the original error unchanged.
+fn timeout_context_error(
+    function_name: &str,
+    timeout: Duration,
+    error: BundlebaseError,
+) -> BundlebaseError {
+    let msg = error.to_string();
+    if msg.contains("timed out") {
+        BundlebaseError::from(format!(
+            "Function '{}' timed out after {} seconds. The subprocess may be stuck.",
+            function_name,
+            timeout.as_secs()
+        ))
+    } else {
+        error
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -722,5 +966,30 @@ mod tests {
     #[test]
     fn test_parse_call_whitespace_only() {
         assert!(parse_call("   ").is_err());
+    }
+
+    #[test]
+    fn test_default_timeout_constant() {
+        assert_eq!(DEFAULT_FUNCTION_TIMEOUT_SECS, 30);
+    }
+
+    #[test]
+    fn test_timeout_context_error_with_timeout_message() {
+        let timeout = Duration::from_secs(30);
+        let err = BundlebaseError::from("IPC subprocess timed out after 30 seconds. The subprocess may be stuck.".to_string());
+        let result = timeout_context_error("my_func", timeout, err);
+        let msg = result.to_string();
+        assert!(msg.contains("my_func"), "should contain function name: {}", msg);
+        assert!(msg.contains("30 seconds"), "should contain timeout: {}", msg);
+    }
+
+    #[test]
+    fn test_timeout_context_error_without_timeout_message() {
+        let timeout = Duration::from_secs(30);
+        let err = BundlebaseError::from("some other error".to_string());
+        let result = timeout_context_error("my_func", timeout, err);
+        let msg = result.to_string();
+        assert!(msg.contains("some other error"), "should preserve original message: {}", msg);
+        assert!(!msg.contains("my_func"), "should not add function name: {}", msg);
     }
 }

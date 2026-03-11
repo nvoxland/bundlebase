@@ -61,6 +61,11 @@ impl Operation for ImportConnectorOp {
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         let namespaced = self.name.parse::<NamespacedName>()
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+        // Warn if overwriting an existing definition
+        if bundle.has_connector_entry(&self.name) {
+            tracing::warn!("Overwriting existing connector definition for '{}'", self.name);
+        }
+
         bundle.add_connector_entry(ConnectorEntry {
             name: namespaced,
             runner: self.runner,

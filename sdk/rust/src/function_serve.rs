@@ -88,6 +88,9 @@ fn handle_request(
         "handshake" => {
             let _ = write_response(w, &req.id, serde_json::json!({"protocol_version": "1"}));
         }
+        "ping" => {
+            let _ = write_response(w, &req.id, serde_json::json!("pong"));
+        }
         "manifest" => handle_manifest(provider, req, w),
         "invoke" => handle_invoke(provider, req, r, w),
         "create_state" => handle_create_state(provider, req, w, states, state_created_at, next_state_id),

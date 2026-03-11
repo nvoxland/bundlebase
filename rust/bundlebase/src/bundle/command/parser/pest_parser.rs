@@ -153,6 +153,7 @@ pub fn available_commands() -> std::collections::HashMap<&'static str, &'static 
     map.insert("SET DESCRIPTION", "SET DESCRIPTION '<description>'");
     map.insert("VERIFY DATA", "VERIFY DATA [UPDATE]");
     map.insert("EXPLAIN", "EXPLAIN [ANALYZE] [VERBOSE] [FORMAT <format>] [<sql>]");
+    map.insert("DESCRIBE CONNECTOR", "DESCRIBE CONNECTOR <dotted_name>");
     map
 }
 

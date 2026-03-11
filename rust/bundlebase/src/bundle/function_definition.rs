@@ -7,16 +7,21 @@
 use crate::bundle::connector_definition::{Platform, Runner};
 use crate::namespaced_name::NamespacedName;
 use crate::BundlebaseError;
-use arrow::datatypes::DataType;
+use arrow::datatypes::{DataType, Field, Fields};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 
-/// Whether a function is scalar (row → row) or aggregate (many rows → one result).
+/// Whether a function is scalar (row → row), aggregate (many rows → one result),
+/// or table-valued (returns a table).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FunctionKind {
     Scalar,
     Aggregate,
+    /// Table-valued function that returns a table of rows.
+    /// Infrastructure only — execution path is not yet implemented.
+    TableValued,
 }
 
 impl fmt::Display for FunctionKind {
@@ -24,6 +29,7 @@ impl fmt::Display for FunctionKind {
         match self {
             FunctionKind::Scalar => write!(f, "scalar"),
             FunctionKind::Aggregate => write!(f, "aggregate"),
+            FunctionKind::TableValued => write!(f, "table_valued"),
         }
     }
 }
@@ -35,8 +41,9 @@ impl std::str::FromStr for FunctionKind {
         match s.to_lowercase().as_str() {
             "scalar" => Ok(FunctionKind::Scalar),
             "aggregate" => Ok(FunctionKind::Aggregate),
+            "table_valued" | "tablevalued" => Ok(FunctionKind::TableValued),
             _ => Err(format!(
-                "Unknown function type '{}'. Expected 'scalar' or 'aggregate'.",
+                "Unknown function type '{}'. Expected 'scalar', 'aggregate', or 'table_valued'.",
                 s
             )
             .into()),
@@ -46,7 +53,7 @@ impl std::str::FromStr for FunctionKind {
 
 /// Custom serde for Arrow `DataType` ↔ string (e.g., `"Int64"` in YAML).
 pub mod arrow_type_serde {
-    use super::{parse_arrow_type_name, DataType};
+    use super::{arrow_type_to_name, parse_arrow_type_name, DataType};
     use serde::{self, Deserialize, Deserializer, Serializer};
 
     /// Serde helpers for a single `DataType` field.
@@ -57,7 +64,7 @@ pub mod arrow_type_serde {
         where
             S: Serializer,
         {
-            serializer.serialize_str(&dt.to_string())
+            serializer.serialize_str(&arrow_type_to_name(dt))
         }
 
         pub fn deserialize<'de, D>(deserializer: D) -> Result<DataType, D::Error>
@@ -80,7 +87,7 @@ pub mod arrow_type_serde {
         {
             let mut seq = serializer.serialize_seq(Some(types.len()))?;
             for dt in types {
-                seq.serialize_element(&dt.to_string())?;
+                seq.serialize_element(&arrow_type_to_name(dt))?;
             }
             seq.end()
         }
@@ -334,14 +341,86 @@ pub fn validate_kind_consistency(entries: &[FunctionEntry]) -> Result<FunctionKi
 
 /// Parse an Arrow type name string into a DataFusion `DataType`.
 ///
-/// Supports common Arrow type names used in function signatures.
+/// Supports common Arrow type names used in function signatures,
+/// including complex/nested types.
 ///
 /// # Examples
 /// - `"Int64"` → `DataType::Int64`
 /// - `"Utf8"` → `DataType::Utf8`
-/// - `"Float64"` → `DataType::Float64`
+/// - `"List<Int64>"` → `DataType::List(Field::new("item", DataType::Int64, true))`
+/// - `"Struct<x:Int64,y:Float64>"` → `DataType::Struct(...)`
+/// - `"Map<Utf8,Int64>"` → `DataType::Map(...)`
+/// - `"Decimal128(38,10)"` → `DataType::Decimal128(38, 10)`
 pub fn parse_arrow_type_name(type_name: &str) -> Result<DataType, BundlebaseError> {
-    match type_name {
+    let trimmed = type_name.trim();
+
+    // Check for parameterized types first
+    if let Some(inner) = trimmed.strip_prefix("List<").and_then(|s| s.strip_suffix('>')) {
+        let element_type = parse_arrow_type_name(inner)?;
+        return Ok(DataType::List(Arc::new(Field::new(
+            "item",
+            element_type,
+            true,
+        ))));
+    }
+
+    if let Some(inner) = trimmed
+        .strip_prefix("Struct<")
+        .and_then(|s| s.strip_suffix('>'))
+    {
+        let fields = parse_struct_fields(inner)?;
+        return Ok(DataType::Struct(fields));
+    }
+
+    if let Some(inner) = trimmed.strip_prefix("Map<").and_then(|s| s.strip_suffix('>')) {
+        let (key_str, value_str) = split_top_level_comma(inner).ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "Invalid Map type '{}'. Expected format: Map<KeyType,ValueType>",
+                trimmed
+            ))
+        })?;
+        let key_type = parse_arrow_type_name(key_str.trim())?;
+        let value_type = parse_arrow_type_name(value_str.trim())?;
+        let entries_field = Field::new(
+            "entries",
+            DataType::Struct(Fields::from(vec![
+                Field::new("key", key_type, false),
+                Field::new("value", value_type, true),
+            ])),
+            false,
+        );
+        return Ok(DataType::Map(Arc::new(entries_field), false));
+    }
+
+    if let Some(inner) = trimmed
+        .strip_prefix("Decimal128(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        let parts: Vec<&str> = inner.split(',').collect();
+        if parts.len() != 2 {
+            return Err(format!(
+                "Invalid Decimal128 type '{}'. Expected format: Decimal128(precision,scale)",
+                trimmed
+            )
+            .into());
+        }
+        let precision: u8 = parts[0].trim().parse().map_err(|_| {
+            BundlebaseError::from(format!(
+                "Invalid Decimal128 precision '{}'. Must be a number 1-38.",
+                parts[0].trim()
+            ))
+        })?;
+        let scale: i8 = parts[1].trim().parse().map_err(|_| {
+            BundlebaseError::from(format!(
+                "Invalid Decimal128 scale '{}'. Must be a number.",
+                parts[1].trim()
+            ))
+        })?;
+        return Ok(DataType::Decimal128(precision, scale));
+    }
+
+    // Simple types
+    match trimmed {
         "Boolean" => Ok(DataType::Boolean),
         "Int8" => Ok(DataType::Int8),
         "Int16" => Ok(DataType::Int16),
@@ -360,14 +439,122 @@ pub fn parse_arrow_type_name(type_name: &str) -> Result<DataType, BundlebaseErro
         "LargeBinary" => Ok(DataType::LargeBinary),
         "Date32" => Ok(DataType::Date32),
         "Date64" => Ok(DataType::Date64),
-        "Timestamp" => Ok(DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None)),
+        "Timestamp" => Ok(DataType::Timestamp(
+            arrow::datatypes::TimeUnit::Microsecond,
+            None,
+        )),
         _ => Err(format!(
             "Unknown Arrow type name '{}'. Supported types: Boolean, Int8, Int16, Int32, Int64, \
              UInt8, UInt16, UInt32, UInt64, Float16, Float32, Float64, Utf8, LargeUtf8, \
-             Binary, LargeBinary, Date32, Date64, Timestamp",
-            type_name
+             Binary, LargeBinary, Date32, Date64, Timestamp, List<T>, Struct<name:type,...>, \
+             Map<K,V>, Decimal128(precision,scale)",
+            trimmed
         )
         .into()),
+    }
+}
+
+/// Split a string at the first top-level comma, respecting nested `<>` and `()`.
+///
+/// Returns `None` if no top-level comma is found.
+fn split_top_level_comma(s: &str) -> Option<(&str, &str)> {
+    let mut depth = 0usize;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '<' | '(' => depth += 1,
+            '>' | ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                return Some((&s[..i], &s[i + 1..]));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Parse struct field definitions like `"x:Int64,y:Float64"` into Arrow Fields.
+///
+/// Supports nested types in field definitions (e.g., `"data:List<Int64>,name:Utf8"`).
+fn parse_struct_fields(fields_str: &str) -> Result<Fields, BundlebaseError> {
+    let mut fields = Vec::new();
+    let mut remaining = fields_str;
+
+    while !remaining.is_empty() {
+        // Find the colon separating field name from type
+        let colon_pos = remaining.find(':').ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "Invalid struct field '{}'. Expected format: name:type",
+                remaining
+            ))
+        })?;
+        let field_name = remaining[..colon_pos].trim();
+        let after_colon = &remaining[colon_pos + 1..];
+
+        // Find the end of this field's type (next top-level comma or end of string)
+        let (type_str, rest) = match split_top_level_comma(after_colon) {
+            Some((type_part, remainder)) => (type_part.trim(), remainder.trim()),
+            None => (after_colon.trim(), ""),
+        };
+
+        let field_type = parse_arrow_type_name(type_str)?;
+        fields.push(Field::new(field_name, field_type, true));
+        remaining = rest;
+    }
+
+    Ok(Fields::from(fields))
+}
+
+/// Convert an Arrow `DataType` to its canonical string representation.
+///
+/// This is the inverse of `parse_arrow_type_name` and ensures roundtrip fidelity
+/// for both simple and complex types.
+pub fn arrow_type_to_name(dt: &DataType) -> String {
+    match dt {
+        DataType::Boolean => "Boolean".to_string(),
+        DataType::Int8 => "Int8".to_string(),
+        DataType::Int16 => "Int16".to_string(),
+        DataType::Int32 => "Int32".to_string(),
+        DataType::Int64 => "Int64".to_string(),
+        DataType::UInt8 => "UInt8".to_string(),
+        DataType::UInt16 => "UInt16".to_string(),
+        DataType::UInt32 => "UInt32".to_string(),
+        DataType::UInt64 => "UInt64".to_string(),
+        DataType::Float16 => "Float16".to_string(),
+        DataType::Float32 => "Float32".to_string(),
+        DataType::Float64 => "Float64".to_string(),
+        DataType::Utf8 => "Utf8".to_string(),
+        DataType::LargeUtf8 => "LargeUtf8".to_string(),
+        DataType::Binary => "Binary".to_string(),
+        DataType::LargeBinary => "LargeBinary".to_string(),
+        DataType::Date32 => "Date32".to_string(),
+        DataType::Date64 => "Date64".to_string(),
+        DataType::Timestamp(_, _) => "Timestamp".to_string(),
+        DataType::Decimal128(precision, scale) => {
+            format!("Decimal128({},{})", precision, scale)
+        }
+        DataType::List(field) => {
+            format!("List<{}>", arrow_type_to_name(field.data_type()))
+        }
+        DataType::Struct(fields) => {
+            let field_strs: Vec<String> = fields
+                .iter()
+                .map(|f| format!("{}:{}", f.name(), arrow_type_to_name(f.data_type())))
+                .collect();
+            format!("Struct<{}>", field_strs.join(","))
+        }
+        DataType::Map(field, _) => {
+            // Map entries field is a Struct with "key" and "value" fields
+            if let DataType::Struct(entries) = field.data_type() {
+                if entries.len() == 2 {
+                    let key_type = arrow_type_to_name(entries[0].data_type());
+                    let value_type = arrow_type_to_name(entries[1].data_type());
+                    return format!("Map<{},{}>", key_type, value_type);
+                }
+            }
+            // Fallback for non-standard map shapes
+            format!("Map<{}>", arrow_type_to_name(field.data_type()))
+        }
+        other => other.to_string(),
     }
 }
 

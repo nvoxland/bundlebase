@@ -291,7 +291,7 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
 
 ### Custom Connectors
 
-Bundlebase supports custom connectors in two modes — **native** (in-process, zero-copy) and **IPC** (subprocess). Custom connectors use a two-step workflow: [`IMPORT CONNECTOR`](custom-connectors/index.md#load-connector) or [`IMPORT TEMP CONNECTOR`](custom-connectors/index.md#load-temp-connector), then [`CREATE SOURCE`](custom-connectors/index.md#create-source).
+Bundlebase supports custom connectors in two modes — **native** (in-process, zero-copy) and **IPC** (subprocess). Custom connectors use a two-step workflow: [`IMPORT CONNECTOR`](custom-connectors/index.md#import-connector) or [`IMPORT TEMP CONNECTOR`](custom-connectors/index.md#import-temp-connector), then [`CREATE SOURCE`](custom-connectors/index.md#create-source).
 
 #### native (In-Process, Zero-Copy)
 
@@ -349,9 +349,21 @@ Discovers and attaches new files from a specific pack's sources. Returns a list 
 === "SQL"
 
     ```sql
-    FETCH
+    FETCH base ADD
 
-    FETCH customers
+    FETCH customers ADD
+    ```
+
+#### Dry Run
+
+Use `DRY RUN` (SQL) to preview what a fetch would do without actually attaching or removing any files. The returned `FetchResults` show what would be added, replaced, or removed.
+
+=== "SQL"
+
+    ```sql
+    FETCH base ADD DRY RUN
+
+    FETCH ALL SYNC DRY RUN
     ```
 
 ### fetch_all()
@@ -377,7 +389,7 @@ Discovers and attaches new files from all defined sources across all packs. Retu
 === "SQL"
 
     ```sql
-    FETCH ALL
+    FETCH ALL ADD
     ```
 
 ### FetchResults

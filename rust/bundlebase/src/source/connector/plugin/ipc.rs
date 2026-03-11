@@ -460,6 +460,11 @@ impl Connector for IpcConnector {
         Ok(discovered)
     }
 
+    /// Sends a JSON-RPC `data` request to the subprocess.
+    ///
+    /// All args (except `call` and `copy`) are forwarded, including reserved
+    /// keys like `_columns`. Subprocess connectors that support column pushdown
+    /// can read `_columns` from the request params to limit returned columns.
     async fn data(
         &self,
         location: &DiscoveredLocation,

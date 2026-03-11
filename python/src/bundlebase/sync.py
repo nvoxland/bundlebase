@@ -17,6 +17,7 @@ For Jupyter notebooks, install with:
     poetry install -E jupyter
 """
 
+import warnings
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Iterator, Union
 
 from bundlebase._loop_manager import EventLoopManager
@@ -100,6 +101,12 @@ class SyncQueryResult:
         WARNING: This materializes ALL batches first, then yields.
         For true streaming, use the async API.
         """
+        warnings.warn(
+            "SyncBundle.stream_batches() loads all batches into memory at once. "
+            "For large datasets, use the async API's stream_batches() instead.",
+            stacklevel=2
+        )
+
         async def _collect():
             batches = []
             async for batch in self._async.stream_batches():
@@ -378,7 +385,7 @@ class SyncBundle:
 
     def drop_temp_connector(
         self, name: str, platform: str = None
-    ) -> str:
+    ) -> "SyncBundle":
         """Drop temporary (runtime-only) connector for a connector definition.
 
         Args:
@@ -386,12 +393,13 @@ class SyncBundle:
             platform: Optional platform filter (e.g., "linux/amd64"). None drops all.
 
         Returns:
-            Message describing what was dropped
+            Self for fluent chaining
         """
         coro = _call_original_method(
             self._async, "drop_temp_connector", name, platform
         )
-        return _loop_manager.run_sync(coro)
+        _loop_manager.run_sync(coro)
+        return self
 
     def import_temp_function(
         self, name: str, input_types: List[str], return_type: str,
@@ -429,7 +437,7 @@ class SyncBundle:
 
     def drop_temp_function(
         self, name: str, platform: str = None
-    ) -> str:
+    ) -> "SyncBundle":
         """Drop a temporary function.
 
         Args:
@@ -437,12 +445,13 @@ class SyncBundle:
             platform: Optional platform filter. None drops all.
 
         Returns:
-            Message describing what was dropped
+            Self for fluent chaining
         """
         coro = _call_original_method(
             self._async, "drop_temp_function", name, platform
         )
-        return _loop_manager.run_sync(coro)
+        _loop_manager.run_sync(coro)
+        return self
 
 
 class SyncBundleBuilder(SyncBundle):
@@ -715,7 +724,7 @@ class SyncBundleBuilder(SyncBundle):
 
     def drop_temp_connector(
         self, name: str, platform: str = None
-    ) -> str:
+    ) -> "SyncBundleBuilder":
         """Drop temporary (runtime-only) connector for a connector definition.
 
         Args:
@@ -723,12 +732,13 @@ class SyncBundleBuilder(SyncBundle):
             platform: Optional platform filter (e.g., "linux/amd64"). None drops all.
 
         Returns:
-            Message describing what was dropped
+            Self for fluent chaining
         """
         coro = _call_original_method(
             self._async, "drop_temp_connector", name, platform
         )
-        return _loop_manager.run_sync(coro)
+        _loop_manager.run_sync(coro)
+        return self
 
     def fetch(self, pack: str = "base", mode: str = "add") -> List["FetchResults"]:
         """Fetch data from sources for a pack.
@@ -1073,6 +1083,12 @@ def stream_batches(bundle: SyncBundle) -> Any:
         ValueError: If streaming fails
     """
     import bundlebase
+
+    warnings.warn(
+        "SyncBundle.stream_batches() loads all batches into memory at once. "
+        "For large datasets, use the async API's stream_batches() instead.",
+        stacklevel=2
+    )
 
     async def _collect() -> List[Any]:
         """Collect all batches from async stream.

@@ -93,6 +93,10 @@ c = await Bundlebase.open("/my/container/dir")
 - `join(url, expression, join_type)` - Join with another source
 - `set_name(name)` - Set container name
 - `set_description(description)` - Set container description
+- `import_connector(name, runner, logic, platform)` - Define a persistent custom connector
+- `import_temp_connector(name, runner, logic, platform)` - Define a session-only custom connector (required for Python runner)
+- `drop_connector(name, platform)` - Drop a connector definition
+- `drop_temp_connector(name, platform)` - Drop runtime-only connector logic
 - `import_function(name, input_types, return_type, runner, logic, platform)` - Define a persistent SQL scalar function
 - `import_temp_function(name, input_types, return_type, runner, logic, platform)` - Define a session-only SQL scalar function
 - `drop_function(name, platform)` - Drop a function definition (drops **all overloads** for that name)
@@ -364,6 +368,71 @@ await c.filter(
     ["Alice", 25, True]
 )
 ```
+
+## Custom Connectors
+
+### import_connector()
+
+Defines a persistent custom connector. The connector definition and logic are stored in the bundle's commit history.
+
+```python
+# IPC connector (subprocess)
+await c.import_connector('acme.weather', runner='ipc', logic='./my_connector')
+
+# Shared library connector
+await c.import_connector('acme.weather', runner='lib', logic='./libweather.so')
+
+# Platform-specific
+await c.import_connector('acme.weather', runner='lib', logic='./libweather.so', platform='linux/amd64')
+```
+
+**Parameters:**
+- `name` - Dot-separated connector name (e.g., `"acme.weather"`)
+- `runner` - How to run the connector: `"ipc"`, `"lib"`, `"java"`, `"docker"` (not `"python"` — use `import_temp_connector` instead)
+- `logic` - What to run (path, command, or image depending on runner)
+- `platform` (optional) - Target platform (e.g., `"linux/amd64"`, default `"*/*"`)
+
+### import_temp_connector()
+
+Defines a session-only connector. Nothing is persisted — the connector exists only at runtime. Required for Python in-process connectors. Works on both `Bundle` (read-only) and `BundleBuilder`.
+
+```python
+# Python in-process connector (most common)
+await c.import_temp_connector('acme.weather', runner='python', logic='my_module:MyConnector')
+
+# Temporary IPC connector
+await c.import_temp_connector('acme.weather', runner='ipc', logic='./my_connector')
+```
+
+**Parameters:** Same as `import_connector()`, but accepts all runners including `"python"`.
+
+### drop_connector()
+
+Removes a connector definition and all associated logic, or removes only logic for a specific platform.
+
+```python
+# Drop entire connector
+await c.drop_connector('acme.weather')
+
+# Drop logic for a specific platform only
+await c.drop_connector('acme.weather', platform='linux/amd64')
+```
+
+### drop_temp_connector()
+
+Removes runtime-only connector logic.
+
+```python
+# Drop all temporary logic
+count = await c.drop_temp_connector('acme.weather')
+
+# Drop for a specific platform
+count = await c.drop_temp_connector('acme.weather', platform='*/*')
+```
+
+**Returns:** The number of logic entries removed.
+
+See [Custom Connectors](../docs/guide/custom-connectors/index.md) for full details on runners, SDKs, and protocol.
 
 ## Views
 

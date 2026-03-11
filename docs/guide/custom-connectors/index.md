@@ -14,6 +14,18 @@ Internally, `python` and `lib` run **in-process** (native mode) for zero-copy Ar
 
 **Your source code is the same regardless of type** — only the entry point differs. SDKs for Python, Go, Java, and Rust handle the protocol automatically.
 
+## Runner URI Format Reference
+
+When importing a connector, the `FROM` clause uses a `runner://logic` URI. This table shows the format for each runner:
+
+| Runner | URI Format | Example |
+|--------|-----------|---------|
+| `ipc` | `ipc://command` | `ipc://python my_module.py` |
+| `lib` | `lib://path[:symbol]` | `lib://./libexample.so:my_func` |
+| `python` | `python://module:Class` | `python://my_source:MyConnector` |
+| `java` | `java://path.jar` | `java://./connectors/my.jar` |
+| `docker` | `docker://image:tag` | `docker://myorg/myconnector:latest` |
+
 ## Built-in Connectors
 
 Bundlebase includes several built-in connectors that don't need to be imported:
@@ -33,7 +45,7 @@ Use these directly with `CREATE SOURCE` — no `IMPORT CONNECTOR` step needed.
 
 Custom connectors use a simple workflow:
 
-1. [**Load the connector**](#load-connector) — defines a named connector with its runner and logic
+1. [**Load the connector**](#import-connector) — defines a named connector with its runner and logic
 2. [**Create a source**](#create-source) — creates a source instance from the connector
 3. [**Fetch data**](#fetch) — discovers and attaches data from the source
 
@@ -48,7 +60,7 @@ To remove connectors:
 
 - Your source is a Python class in the same project
 - You need maximum performance with zero serialization overhead
-- Note: requires [`IMPORT TEMP CONNECTOR`](#load-temp-connector) since Python code can't be bundled
+- Note: requires [`IMPORT TEMP CONNECTOR`](#import-temp-connector) since Python code can't be bundled
 
 **Use `lib` when:**
 
@@ -116,7 +128,7 @@ Creates a named connector with its runner and logic. The connector definition an
 | `platform` | `str` | `"*/*"` | Target platform (e.g., `"linux/amd64"`, `"darwin/arm64"`, `"*/*"` for all) |
 
 !!! note
-    `IMPORT CONNECTOR` rejects `runner='python'` because Python code cannot be serialized into the bundle. Use [`IMPORT TEMP CONNECTOR`](#load-temp-connector) for Python connectors.
+    `IMPORT CONNECTOR` rejects `runner='python'` because Python code cannot be serialized into the bundle. Use [`IMPORT TEMP CONNECTOR`](#import-temp-connector) for Python connectors.
 
 Connector names use a **dot-separated namespace** format. The part before the first dot is the **namespace** (e.g., `acme` in `acme.weather`). Choose a namespace that is unique to you or your organization — this prevents naming collisions when sharing bundles. For example:
 
@@ -160,7 +172,7 @@ Creates a connector with logic at **runtime only** — nothing is persisted into
     IMPORT TEMP CONNECTOR acme.weather FROM 'python://my_module:MyConnector'
     ```
 
-**Parameters:** Same as [`IMPORT CONNECTOR`](#load-connector), but accepts all runners including `python`.
+**Parameters:** Same as [`IMPORT CONNECTOR`](#import-connector), but accepts all runners including `python`.
 
 Temporary logic takes precedence over persisted logic when both exist for the same platform. This is useful for development workflows where you want to test a Python connector locally before packaging it as a shared library or Docker image.
 
@@ -168,7 +180,7 @@ Temporary logic takes precedence over persisted logic when both exist for the sa
 
 ### CREATE SOURCE
 
-Creates a source instance from a connector. For built-in connectors (`remote_dir`, `kaggle`, etc.), this is a single step. For custom connectors, you must first [`IMPORT CONNECTOR`](#load-connector) or [`IMPORT TEMP CONNECTOR`](#load-temp-connector).
+Creates a source instance from a connector. For built-in connectors (`remote_dir`, `kaggle`, etc.), this is a single step. For custom connectors, you must first [`IMPORT CONNECTOR`](#import-connector) or [`IMPORT TEMP CONNECTOR`](#import-temp-connector).
 
 === "Async API"
 
@@ -429,7 +441,7 @@ COPY example_connector.py /app/example_connector.py
 CMD ["python", "/app/example_connector.py"]
 ```
 
-Use with [`IMPORT CONNECTOR`](#load-connector):
+Use with [`IMPORT CONNECTOR`](#import-connector):
 
 ```python
 bundle.import_connector('example.connector', runner='docker', logic='myorg/example-connector:latest')
@@ -437,6 +449,24 @@ bundle.create_source('example.connector')
 ```
 
 The container receives JSON-RPC on stdin and writes responses to stdout.
+
+## Getting Started
+
+!!! tip "Scaffold a new project"
+    Use the `bundlebase init-sdk` command to generate a new connector or function project with all the boilerplate:
+
+    ```bash
+    # Scaffold a Python connector project
+    bundlebase init-sdk python my_connector --type connector
+
+    # Scaffold a Go function project
+    bundlebase init-sdk go my_functions --type function
+
+    # Scaffold both connector and function
+    bundlebase init-sdk rust my_project --type both
+    ```
+
+    Supported languages: `python`, `go`, `java`, `rust`.
 
 ## SDK Quick Start
 
@@ -526,6 +556,16 @@ Each SDK handles the protocol for you. Implement the connector interface and cho
 For implementing connectors in languages without an SDK.
 
 **Transport**: Line-delimited JSON-RPC 2.0 on stdin/stdout.
+
+### Health Check
+
+**`ping`** — Returns `"pong"`. Used by Bundlebase to verify the subprocess is alive and responsive. All SDKs handle this automatically.
+
+### Reserved Argument Keys
+
+The `args` map passed to `discover`, `data`, and `stable_url` may contain reserved keys prefixed with `_`:
+
+- **`_columns`** — A comma-separated list of column names that the caller wants. Connectors that support column pushdown can parse this key to return only the requested columns, reducing data transfer. It is safe to ignore this key.
 
 ### Methods
 
