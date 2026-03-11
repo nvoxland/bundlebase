@@ -40,7 +40,7 @@ Custom connectors use a simple workflow:
 To remove connectors:
 
 - [**Drop connector**](#drop-connector) — removes the connector (or just a specific platform's logic)
-- [**Drop temp connector logic**](#drop-temp-connector-logic) — removes runtime-only logic entries
+- [**Drop temp connector**](#drop-temp-connector) — removes runtime-only logic entries
 
 ## Choosing a Runner
 
@@ -325,7 +325,7 @@ Like other drop operations, the bundled artifacts are not deleted — a `DropCon
 
 ---
 
-### DROP TEMP CONNECTOR LOGIC
+### DROP TEMP CONNECTOR
 
 Removes **runtime-only** logic entries from a connector. Works on both `Bundle` and `BundleBuilder`.
 
@@ -333,30 +333,30 @@ Removes **runtime-only** logic entries from a connector. Works on both `Bundle` 
 
     ```python
     # Drop all temporary logic
-    count = await bundle.drop_temp_connector_logic('acme.weather')
+    count = await bundle.drop_temp_connector('acme.weather')
 
     # Drop temporary logic for a specific platform
-    count = await bundle.drop_temp_connector_logic('acme.weather', platform='*/*')
+    count = await bundle.drop_temp_connector('acme.weather', platform='*/*')
     ```
 
 === "Sync API"
 
     ```python
     # Drop all temporary logic
-    count = bundle.drop_temp_connector_logic('acme.weather')
+    count = bundle.drop_temp_connector('acme.weather')
 
     # Drop temporary logic for a specific platform
-    count = bundle.drop_temp_connector_logic('acme.weather', platform='*/*')
+    count = bundle.drop_temp_connector('acme.weather', platform='*/*')
     ```
 
 === "SQL"
 
     ```sql
     -- Drop all temporary logic
-    DROP TEMP CONNECTOR LOGIC acme.weather
+    DROP TEMP CONNECTOR acme.weather
 
     -- Drop temporary logic for a specific platform
-    DROP TEMP CONNECTOR LOGIC acme.weather FOR PLATFORM '*/*'
+    DROP TEMP CONNECTOR acme.weather FOR PLATFORM '*/*'
     ```
 
 **Parameters:**

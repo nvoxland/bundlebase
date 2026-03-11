@@ -21,7 +21,7 @@ use arrow::ipc::writer::StreamWriter;
 use arrow::record_batch::RecordBatch;
 use datafusion::scalar::ScalarValue;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use dashmap::DashMap;
 use std::io::{BufRead, BufReader, BufWriter, Read as IoRead, Write as IoWrite};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -156,12 +156,76 @@ impl SyncSubprocessHandle {
             .take()
             .ok_or("Failed to capture stdout of IPC function process")?;
 
-        Ok(Self {
+        let mut handle = Self {
             child,
             stdin: BufWriter::new(stdin),
             stdout: BufReader::new(stdout),
             next_id: 1,
-        })
+        };
+
+        handle.perform_handshake()?;
+
+        Ok(handle)
+    }
+
+    /// Perform protocol version handshake with the subprocess.
+    ///
+    /// If the server responds with protocol_version, logs it at info level.
+    /// If the server returns method_not_found (-32601), logs a warning and proceeds.
+    fn perform_handshake(&mut self) -> Result<(), BundlebaseError> {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0",
+            id,
+            method: "handshake".to_string(),
+            params: serde_json::json!({"protocol_version": "1"}),
+        };
+
+        let mut line = serde_json::to_string(&request)
+            .map_err(|e| format!("Failed to serialize handshake request: {}", e))?;
+        line.push('\n');
+
+        self.stdin
+            .write_all(line.as_bytes())
+            .map_err(|e| format!("Failed to write handshake request: {}", e))?;
+        self.stdin
+            .flush()
+            .map_err(|e| format!("Failed to flush handshake request: {}", e))?;
+
+        let mut response_line = String::new();
+        let bytes_read = self
+            .stdout
+            .read_line(&mut response_line)
+            .map_err(|e| format!("Failed to read handshake response: {}", e))?;
+
+        if bytes_read == 0 {
+            log::warn!("IPC function process closed stdout during handshake, proceeding without version check");
+            return Ok(());
+        }
+
+        let response: JsonRpcResponse =
+            serde_json::from_str(response_line.trim()).map_err(|e| {
+                format!("Failed to parse handshake response: {} (raw: {})", e, response_line.trim())
+            })?;
+
+        if let Some(err) = response.error {
+            if err.code == -32601 {
+                log::warn!("IPC function subprocess does not support handshake (method_not_found), proceeding without version check");
+            } else {
+                log::warn!("IPC function subprocess handshake returned error (code {}): {}", err.code, err.message);
+            }
+            return Ok(());
+        }
+
+        if let Some(result) = response.result {
+            if let Some(version) = result.get("protocol_version").and_then(|v| v.as_str()) {
+                log::info!("IPC function subprocess handshake successful, protocol_version={}", version);
+            }
+        }
+
+        Ok(())
     }
 
     fn send_request(
@@ -301,30 +365,37 @@ impl Drop for SyncSubprocessHandle {
 ///
 /// Each `Bundle` owns one of these so that subprocesses are scoped to the
 /// connection/session and cleaned up when the `Bundle` is dropped.
-pub type SubprocessCache = Arc<Mutex<HashMap<String, Arc<Mutex<SyncSubprocessHandle>>>>>;
+///
+/// Uses `DashMap` for lock-free concurrent reads; the inner `Mutex` provides
+/// exclusive I/O access to each subprocess's stdin/stdout.
+pub type SubprocessCache = Arc<DashMap<String, Arc<Mutex<SyncSubprocessHandle>>>>;
 
 /// Create a new, empty subprocess cache.
 pub fn new_subprocess_cache() -> SubprocessCache {
-    Arc::new(Mutex::new(HashMap::new()))
+    Arc::new(DashMap::new())
 }
 
 fn get_or_spawn_subprocess(
     cache: &SubprocessCache,
     logic: &str,
 ) -> Result<Arc<Mutex<SyncSubprocessHandle>>, BundlebaseError> {
-    let mut cache = cache.lock().map_err(|e| {
-        BundlebaseError::from(format!("Failed to acquire subprocess cache lock: {}", e))
-    })?;
-
-    if let Some(handle) = cache.get(logic) {
-        return Ok(Arc::clone(handle));
+    // Fast path: return existing handle without blocking other keys.
+    if let Some(entry) = cache.get(logic) {
+        return Ok(Arc::clone(entry.value()));
     }
 
-    let command = parse_call(logic)?;
-    let handle = SyncSubprocessHandle::spawn(&command)?;
-    let handle = Arc::new(Mutex::new(handle));
-    cache.insert(logic.to_string(), Arc::clone(&handle));
-    Ok(handle)
+    // Slow path: spawn subprocess and insert.
+    // DashMap's entry API ensures only one thread spawns per key.
+    let handle = cache
+        .entry(logic.to_string())
+        .or_try_insert_with(|| {
+            let command = parse_call(logic)?;
+            let h = SyncSubprocessHandle::spawn(&command)?;
+            Ok::<_, BundlebaseError>(Arc::new(Mutex::new(h)))
+        })
+        .map_err(|e: BundlebaseError| e)?;
+
+    Ok(Arc::clone(handle.value()))
 }
 
 // ---------------------------------------------------------------------------

@@ -321,7 +321,7 @@ pub trait BundleFacade: Send + Sync {
     /// If `platform` is None, removes all logic entries.
     /// If `platform` is Some, removes only entries matching that platform.
     /// Returns the number of entries removed.
-    async fn drop_temp_connector_logic(
+    async fn drop_temp_connector(
         &self,
         name: &str,
         platform: Option<&crate::bundle::connector_definition::Platform>,

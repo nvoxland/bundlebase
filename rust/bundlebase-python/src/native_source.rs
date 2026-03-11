@@ -8,8 +8,7 @@ use arrow::record_batch::RecordBatch;
 use ::bundlebase::source::native::NativePythonBridge;
 use ::bundlebase::BundlebaseError;
 use pyo3::prelude::*;
-use pyo3::types::PyList;
-use std::collections::HashMap;
+use pyo3::types::{PyDict, PyList};
 
 /// PyO3-based bridge that calls Python `Connector` methods in-process.
 pub struct PyNativeBridge;
@@ -52,10 +51,10 @@ impl PyNativeBridge {
         py_class.call0()
     }
 
-    /// Parse args JSON into a Python-friendly HashMap, extracting attached_locations.
+    /// Parse args JSON, extracting attached_locations and preserving raw JSON values.
     fn parse_args_json(
         json: &str,
-    ) -> Result<(HashMap<String, String>, Vec<String>), BundlebaseError> {
+    ) -> Result<(serde_json::Value, Vec<String>), BundlebaseError> {
         let value: serde_json::Value = serde_json::from_str(json)
             .map_err(|e| format!("Failed to parse args JSON: {}", e))?;
 
@@ -64,19 +63,67 @@ impl PyNativeBridge {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
-        let mut args = HashMap::new();
-        if let Some(obj) = value.as_object() {
-            for (k, v) in obj {
-                if k == "attached_locations" {
-                    continue;
-                }
-                if let Some(s) = v.as_str() {
-                    args.insert(k.clone(), s.to_string());
-                }
-            }
+        // Remove attached_locations from args, keep everything else as raw JSON
+        let mut args = value;
+        if let Some(obj) = args.as_object_mut() {
+            obj.remove("attached_locations");
         }
 
         Ok((args, attached))
+    }
+
+    /// Convert a serde_json::Value to a Python object, preserving types.
+    fn json_value_to_py<'py>(
+        py: Python<'py>,
+        value: &serde_json::Value,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        match value {
+            serde_json::Value::Null => Ok(py.None().into_bound(py)),
+            serde_json::Value::Bool(b) => Ok(b.into_pyobject(py)?.to_owned().into_any()),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    Ok(i.into_pyobject(py)?.into_any())
+                } else if let Some(f) = n.as_f64() {
+                    Ok(f.into_pyobject(py)?.into_any())
+                } else {
+                    Ok(py.None().into_bound(py))
+                }
+            }
+            serde_json::Value::String(s) => Ok(s.into_pyobject(py)?.into_any()),
+            serde_json::Value::Array(arr) => {
+                let py_list = PyList::empty(py);
+                for item in arr {
+                    py_list.append(Self::json_value_to_py(py, item)?)?;
+                }
+                Ok(py_list.into_any())
+            }
+            serde_json::Value::Object(obj) => {
+                let py_dict = PyDict::new(py);
+                for (k, v) in obj {
+                    py_dict.set_item(k, Self::json_value_to_py(py, v)?)?;
+                }
+                Ok(py_dict.into_any())
+            }
+        }
+    }
+
+    /// Build a Python kwargs dict from a serde_json::Value object,
+    /// preserving original JSON types (strings, numbers, booleans, etc.).
+    fn build_kwargs_from_json<'py>(
+        py: Python<'py>,
+        json_value: &serde_json::Value,
+    ) -> Result<Bound<'py, PyDict>, BundlebaseError> {
+        let kwargs = PyDict::new(py);
+        if let Some(obj) = json_value.as_object() {
+            for (k, v) in obj {
+                let py_val = Self::json_value_to_py(py, v)
+                    .map_err(|e| format!("Failed to convert arg '{}' to Python: {}", k, e))?;
+                kwargs
+                    .set_item(k, py_val)
+                    .map_err(|e| format!("Failed to set kwarg '{}': {}", k, e))?;
+            }
+        }
+        Ok(kwargs)
     }
 }
 
@@ -89,13 +136,8 @@ impl NativePythonBridge for PyNativeBridge {
             let source = Self::instantiate_source(py, module, class_name)
                 .map_err(|e| format!("Failed to instantiate Python source: {}", e))?;
 
-            // Build kwargs from args
-            let kwargs = pyo3::types::PyDict::new(py);
-            for (k, v) in &args {
-                kwargs
-                    .set_item(k, v)
-                    .map_err(|e| format!("Failed to set kwarg: {}", e))?;
-            }
+            // Build kwargs from args, preserving JSON types
+            let kwargs = Self::build_kwargs_from_json(py, &args)?;
 
             // Build attached_locations list
             let py_attached = PyList::new(py, &attached)
@@ -115,7 +157,12 @@ impl NativePythonBridge for PyNativeBridge {
             for loc in locations.iter() {
                 let location: String = loc
                     .getattr("location")
-                    .map_err(|e| format!("Location missing 'location' attr: {}", e))?
+                    .map_err(|e| format!(
+                        "Location missing 'location' attr: {}. \
+                         Expected a Location object with 'location' (str), \
+                         'must_copy' (bool), 'format' (str), 'version' (str) attributes",
+                        e
+                    ))?
                     .extract()
                     .map_err(|e| format!("Location.location is not a string: {}", e))?;
                 let must_copy: bool = loc
@@ -157,17 +204,9 @@ impl NativePythonBridge for PyNativeBridge {
         let loc_value: serde_json::Value = serde_json::from_str(location_json)
             .map_err(|e| format!("Failed to parse location JSON: {}", e))?;
 
-        // Parse args (without attached_locations)
+        // Parse args, preserving all JSON types
         let args_value: serde_json::Value = serde_json::from_str(args_json)
             .map_err(|e| format!("Failed to parse args JSON: {}", e))?;
-        let mut args = HashMap::new();
-        if let Some(obj) = args_value.as_object() {
-            for (k, v) in obj {
-                if let Some(s) = v.as_str() {
-                    args.insert(k.clone(), s.to_string());
-                }
-            }
-        }
 
         Python::attach(|py| {
             let source = Self::instantiate_source(py, module, class_name)
@@ -207,11 +246,8 @@ impl NativePythonBridge for PyNativeBridge {
                 .call((location_str,), Some(&kwargs))
                 .map_err(|e| format!("Failed to create Location object: {}", e))?;
 
-            // Build data kwargs
-            let data_kwargs = pyo3::types::PyDict::new(py);
-            for (k, v) in &args {
-                data_kwargs.set_item(k, v).ok();
-            }
+            // Build data kwargs, preserving JSON types
+            let data_kwargs = Self::build_kwargs_from_json(py, &args_value)?;
 
             // Call data(location, **kwargs)
             let result = source
@@ -320,19 +356,8 @@ impl NativePythonBridge for PyNativeBridge {
                 .call((location_str,), Some(&loc_kwargs))
                 .map_err(|e| format!("Failed to create Location object: {}", e))?;
 
-            let mut args = HashMap::new();
-            if let Some(obj) = args_value.as_object() {
-                for (k, v) in obj {
-                    if let Some(s) = v.as_str() {
-                        args.insert(k.clone(), s.to_string());
-                    }
-                }
-            }
-
-            let data_kwargs = pyo3::types::PyDict::new(py);
-            for (k, v) in &args {
-                data_kwargs.set_item(k, v).ok();
-            }
+            // Build kwargs, preserving JSON types
+            let data_kwargs = Self::build_kwargs_from_json(py, &args_value)?;
 
             let result = source
                 .call_method("stable_url", (&py_location,), Some(&data_kwargs))

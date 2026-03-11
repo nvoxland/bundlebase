@@ -58,6 +58,7 @@ postgres-types = { version = "0.2", features = ["derive"] }
 tantivy = "0.25"
 tempfile = { workspace = true }
 tokio-util = { workspace = true }
+dashmap = "6"
 
 [dev-dependencies]
 rstest = { workspace = true }

@@ -122,7 +122,7 @@ class TestNormalizeToBatches:
         assert len(batches) == 2
 
     def test_list_of_dicts_with_schema(self):
-        batches = normalize_to_batches([{"a": 1}, {"a": 2}], schema={"a": "int64"})
+        batches = normalize_to_batches([{"a": 1}, {"a": 2}], schema={"a": "Int64"})
         assert len(batches) >= 1
         total = sum(b.num_rows for b in batches)
         assert total == 2
@@ -139,7 +139,7 @@ class TestNormalizeToBatches:
             yield {"k": "x"}
             yield {"k": "y"}
 
-        batches = normalize_to_batches(gen(), schema={"k": "string"})
+        batches = normalize_to_batches(gen(), schema={"k": "Utf8"})
         total = sum(b.num_rows for b in batches)
         assert total == 2
 
@@ -153,7 +153,7 @@ class TestNormalizeToBatches:
 
     def test_column_oriented_dict_with_schema(self):
         data = {"name": ["alice", "bob"], "age": [30, 25]}
-        schema = {"name": "string", "age": "int32"}
+        schema = {"name": "Utf8", "age": "Int32"}
         batches = normalize_to_batches(data, schema=schema)
         assert len(batches) >= 1
         total = sum(b.num_rows for b in batches)
@@ -167,7 +167,7 @@ class TestNormalizeToBatches:
 
     def test_list_of_dicts_with_schema(self):
         data = [{"val": 1}, {"val": 2}]
-        schema = {"val": "float64"}
+        schema = {"val": "Float64"}
         batches = normalize_to_batches(data, schema=schema)
         assert len(batches) >= 1
         assert batches[0].schema.field("val").type == pa.float64()
@@ -177,13 +177,13 @@ class TestNormalizeToBatches:
             yield {"k": 1}
             yield {"k": 2}
 
-        batches = normalize_to_batches(gen(), schema={"k": "int32"})
+        batches = normalize_to_batches(gen(), schema={"k": "Int32"})
         assert batches[0].schema.field("k").type == pa.int32()
 
 
 class TestSchemaToArrow:
     def test_valid_mapping(self):
-        schema = schema_to_arrow({"name": "string", "age": "int64", "active": "bool"})
+        schema = schema_to_arrow({"name": "Utf8", "age": "Int64", "active": "Boolean"})
         assert schema.field("name").type == pa.string()
         assert schema.field("age").type == pa.int64()
         assert schema.field("active").type == pa.bool_()
@@ -192,14 +192,14 @@ class TestSchemaToArrow:
         with pytest.raises(ValueError, match="Unknown type 'bigint'"):
             schema_to_arrow({"col": "bigint"})
 
-    def test_aliases(self):
+    def test_all_canonical_types(self):
         schema = schema_to_arrow({
-            "a": "utf8", "b": "int", "c": "float",
-            "d": "double", "e": "boolean", "f": "bytes",
+            "a": "Utf8", "b": "Int64", "c": "Float64",
+            "d": "Boolean", "e": "Binary", "f": "LargeUtf8",
         })
         assert schema.field("a").type == pa.string()
         assert schema.field("b").type == pa.int64()
         assert schema.field("c").type == pa.float64()
-        assert schema.field("d").type == pa.float64()
-        assert schema.field("e").type == pa.bool_()
-        assert schema.field("f").type == pa.binary()
+        assert schema.field("d").type == pa.bool_()
+        assert schema.field("e").type == pa.binary()
+        assert schema.field("f").type == pa.large_string()

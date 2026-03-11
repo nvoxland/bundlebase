@@ -30,10 +30,16 @@ public class Serve {
         BufferedReader reader = new BufferedReader(new InputStreamReader(in));
 
         try {
-            while (true) {
-                JsonNode req = Protocol.readRequest(reader);
-                if (req == null) {
-                    break;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) continue;
+
+                JsonNode req;
+                try {
+                    req = new com.fasterxml.jackson.databind.ObjectMapper().readTree(line);
+                } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                    Protocol.writeError(out, null, -32700, "Parse error: " + e.getMessage());
+                    continue;
                 }
 
                 String method = req.has("method") ? req.get("method").asText() : "";
@@ -59,6 +65,7 @@ public class Serve {
             throws IOException {
 
         switch (method) {
+            case "handshake" -> Protocol.writeResponse(out, id, Map.of("protocol_version", "1"));
             case "discover" -> handleDiscover(source, id, params, out);
             case "data" -> handleData(source, id, params, out);
             case "stable_url" -> handleStableUrl(source, id, params, out);
@@ -101,8 +108,19 @@ public class Serve {
         Object data = source.data(location, args);
         VectorSchemaRoot root = Protocol.normalizeToRoot(data, source.schema(), ALLOCATOR);
 
+        // Buffer Arrow IPC first so we can send an error if serialization fails
+        ByteArrayOutputStream arrowBuf = new ByteArrayOutputStream();
+        try {
+            Protocol.writeArrowIPC(arrowBuf, root);
+        } catch (IOException e) {
+            Protocol.writeError(out, id, -32000, "Failed to serialize Arrow IPC data: " + e.getMessage());
+            if (root != null) root.close();
+            return;
+        }
+
         Protocol.writeResponse(out, id, Map.of("ok", true));
-        Protocol.writeArrowIPC(out, root);
+        out.write(arrowBuf.toByteArray());
+        out.flush();
 
         if (root != null) {
             root.close();

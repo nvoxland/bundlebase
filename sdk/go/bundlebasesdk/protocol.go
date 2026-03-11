@@ -8,7 +8,10 @@ import (
 	"io"
 
 	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/array"
+	"github.com/apache/arrow-go/v18/arrow/float16"
 	"github.com/apache/arrow-go/v18/arrow/ipc"
+	"github.com/apache/arrow-go/v18/arrow/memory"
 )
 
 // jsonRpcRequest represents an incoming JSON-RPC 2.0 request.
@@ -152,6 +155,317 @@ func readArrowIPC(r io.Reader) ([]arrow.Record, error) {
 		records = append(records, rec)
 	}
 	return records, nil
+}
+
+// NormalizeToRecords converts Go data structures into Arrow Record batches using
+// the provided schema map (column name -> type name string).
+//
+// Supported input types:
+//   - []arrow.Record: passed through as-is (schema is ignored).
+//   - []map[string]interface{}: row-oriented data; each map is one row.
+//   - map[string][]interface{}: column-oriented data; each key is a column.
+func NormalizeToRecords(data interface{}, schema map[string]string) ([]arrow.Record, error) {
+	switch v := data.(type) {
+	case []arrow.Record:
+		return v, nil
+
+	case []map[string]interface{}:
+		return rowMapsToRecords(v, schema)
+
+	case map[string][]interface{}:
+		return columnMapToRecords(v, schema)
+
+	default:
+		return nil, fmt.Errorf("unsupported data type %T; expected []arrow.Record, []map[string]interface{}, or map[string][]interface{}", data)
+	}
+}
+
+// rowMapsToRecords converts row-oriented maps to a single Arrow Record.
+func rowMapsToRecords(rows []map[string]interface{}, schema map[string]string) ([]arrow.Record, error) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	arrowSchema, err := SchemaFromTypes(schema)
+	if err != nil {
+		return nil, err
+	}
+
+	alloc := memory.DefaultAllocator
+	bldr := array.NewRecordBuilder(alloc, arrowSchema)
+	defer bldr.Release()
+
+	for _, row := range rows {
+		for i, field := range arrowSchema.Fields() {
+			val := row[field.Name]
+			if err := appendValue(bldr.Field(i), field.Type, val); err != nil {
+				return nil, fmt.Errorf("column %q row value: %w", field.Name, err)
+			}
+		}
+	}
+
+	rec := bldr.NewRecord()
+	return []arrow.Record{rec}, nil
+}
+
+// columnMapToRecords converts column-oriented maps to a single Arrow Record.
+func columnMapToRecords(cols map[string][]interface{}, schema map[string]string) ([]arrow.Record, error) {
+	if len(cols) == 0 {
+		return nil, nil
+	}
+
+	arrowSchema, err := SchemaFromTypes(schema)
+	if err != nil {
+		return nil, err
+	}
+
+	alloc := memory.DefaultAllocator
+	bldr := array.NewRecordBuilder(alloc, arrowSchema)
+	defer bldr.Release()
+
+	// Determine row count from first column.
+	var nRows int
+	for _, field := range arrowSchema.Fields() {
+		if colData, ok := cols[field.Name]; ok {
+			nRows = len(colData)
+			break
+		}
+	}
+
+	for i, field := range arrowSchema.Fields() {
+		colData := cols[field.Name]
+		for j := 0; j < nRows; j++ {
+			var val interface{}
+			if j < len(colData) {
+				val = colData[j]
+			}
+			if err := appendValue(bldr.Field(i), field.Type, val); err != nil {
+				return nil, fmt.Errorf("column %q index %d: %w", field.Name, j, err)
+			}
+		}
+	}
+
+	rec := bldr.NewRecord()
+	return []arrow.Record{rec}, nil
+}
+
+// appendValue appends a single Go value to the appropriate Arrow array builder.
+func appendValue(builder array.Builder, dt arrow.DataType, val interface{}) error {
+	if val == nil {
+		builder.AppendNull()
+		return nil
+	}
+
+	switch dt.ID() {
+	case arrow.BOOL:
+		b, ok := val.(bool)
+		if !ok {
+			return fmt.Errorf("expected bool, got %T", val)
+		}
+		builder.(*array.BooleanBuilder).Append(b)
+
+	case arrow.INT8:
+		n, err := toInt64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Int8Builder).Append(int8(n))
+
+	case arrow.INT16:
+		n, err := toInt64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Int16Builder).Append(int16(n))
+
+	case arrow.INT32:
+		n, err := toInt64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Int32Builder).Append(int32(n))
+
+	case arrow.INT64:
+		n, err := toInt64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Int64Builder).Append(n)
+
+	case arrow.UINT8:
+		n, err := toUint64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Uint8Builder).Append(uint8(n))
+
+	case arrow.UINT16:
+		n, err := toUint64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Uint16Builder).Append(uint16(n))
+
+	case arrow.UINT32:
+		n, err := toUint64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Uint32Builder).Append(uint32(n))
+
+	case arrow.UINT64:
+		n, err := toUint64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Uint64Builder).Append(n)
+
+	case arrow.FLOAT16:
+		f, err := toFloat64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Float16Builder).Append(float16.New(float32(f)))
+
+	case arrow.FLOAT32:
+		f, err := toFloat64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Float32Builder).Append(float32(f))
+
+	case arrow.FLOAT64:
+		f, err := toFloat64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Float64Builder).Append(f)
+
+	case arrow.STRING:
+		s, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("expected string, got %T", val)
+		}
+		builder.(*array.StringBuilder).Append(s)
+
+	case arrow.LARGE_STRING:
+		s, ok := val.(string)
+		if !ok {
+			return fmt.Errorf("expected string, got %T", val)
+		}
+		builder.(*array.LargeStringBuilder).Append(s)
+
+	case arrow.BINARY:
+		switch b := val.(type) {
+		case []byte:
+			builder.(*array.BinaryBuilder).Append(b)
+		default:
+			return fmt.Errorf("expected []byte, got %T", val)
+		}
+
+	case arrow.LARGE_BINARY:
+		switch b := val.(type) {
+		case []byte:
+			builder.(*array.BinaryBuilder).Append(b)
+		default:
+			return fmt.Errorf("expected []byte, got %T", val)
+		}
+
+	case arrow.DATE32:
+		n, err := toInt64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Date32Builder).Append(arrow.Date32(n))
+
+	case arrow.DATE64:
+		n, err := toInt64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.Date64Builder).Append(arrow.Date64(n))
+
+	case arrow.TIMESTAMP:
+		n, err := toInt64(val)
+		if err != nil {
+			return err
+		}
+		builder.(*array.TimestampBuilder).Append(arrow.Timestamp(n))
+
+	default:
+		return fmt.Errorf("unsupported Arrow type %s", dt)
+	}
+
+	return nil
+}
+
+// toInt64 converts numeric Go values to int64.
+func toInt64(val interface{}) (int64, error) {
+	switch n := val.(type) {
+	case int:
+		return int64(n), nil
+	case int8:
+		return int64(n), nil
+	case int16:
+		return int64(n), nil
+	case int32:
+		return int64(n), nil
+	case int64:
+		return n, nil
+	case float32:
+		return int64(n), nil
+	case float64:
+		return int64(n), nil
+	case json.Number:
+		return n.Int64()
+	default:
+		return 0, fmt.Errorf("expected numeric type, got %T", val)
+	}
+}
+
+// toUint64 converts numeric Go values to uint64.
+func toUint64(val interface{}) (uint64, error) {
+	switch n := val.(type) {
+	case uint:
+		return uint64(n), nil
+	case uint8:
+		return uint64(n), nil
+	case uint16:
+		return uint64(n), nil
+	case uint32:
+		return uint64(n), nil
+	case uint64:
+		return n, nil
+	case int:
+		return uint64(n), nil
+	case int64:
+		return uint64(n), nil
+	case float64:
+		return uint64(n), nil
+	case json.Number:
+		i, err := n.Int64()
+		return uint64(i), err
+	default:
+		return 0, fmt.Errorf("expected numeric type, got %T", val)
+	}
+}
+
+// toFloat64 converts numeric Go values to float64.
+func toFloat64(val interface{}) (float64, error) {
+	switch n := val.(type) {
+	case float32:
+		return float64(n), nil
+	case float64:
+		return n, nil
+	case int:
+		return float64(n), nil
+	case int64:
+		return float64(n), nil
+	case json.Number:
+		return n.Float64()
+	default:
+		return 0, fmt.Errorf("expected numeric type, got %T", val)
+	}
 }
 
 // parseLocation extracts a Location from a params["location"] value.

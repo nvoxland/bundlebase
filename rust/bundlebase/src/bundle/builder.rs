@@ -796,7 +796,7 @@ impl BundleBuilder {
     }
 
     /// Drop runtime-only connector logic (session-only, no operation created).
-    pub async fn drop_temp_connector_logic(
+    pub async fn drop_temp_connector(
         &self,
         name: &str,
         platform: Option<&str>,
@@ -1569,7 +1569,7 @@ impl BundleFacade for BundleBuilder {
         Ok(())
     }
 
-    async fn drop_temp_connector_logic(
+    async fn drop_temp_connector(
         &self,
         name: &str,
         platform: Option<&crate::bundle::connector_definition::Platform>,

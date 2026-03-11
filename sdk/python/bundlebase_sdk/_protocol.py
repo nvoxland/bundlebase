@@ -62,14 +62,14 @@ def write_arrow_ipc(stdout: IO[bytes], batches: list[pa.RecordBatch]) -> None:
 
 
 TYPE_MAP: dict[str, pa.DataType] = {
-    "string": pa.string(), "utf8": pa.string(),
-    "int8": pa.int8(), "int16": pa.int16(), "int32": pa.int32(), "int64": pa.int64(),
-    "uint8": pa.uint8(), "uint16": pa.uint16(), "uint32": pa.uint32(), "uint64": pa.uint64(),
-    "float16": pa.float16(), "float32": pa.float32(), "float64": pa.float64(),
-    "float": pa.float64(), "double": pa.float64(), "int": pa.int64(),
-    "bool": pa.bool_(), "boolean": pa.bool_(),
-    "date32": pa.date32(), "date64": pa.date64(), "date": pa.date32(),
-    "timestamp": pa.timestamp("us"), "binary": pa.binary(), "bytes": pa.binary(),
+    "Boolean": pa.bool_(),
+    "Int8": pa.int8(), "Int16": pa.int16(), "Int32": pa.int32(), "Int64": pa.int64(),
+    "UInt8": pa.uint8(), "UInt16": pa.uint16(), "UInt32": pa.uint32(), "UInt64": pa.uint64(),
+    "Float16": pa.float16(), "Float32": pa.float32(), "Float64": pa.float64(),
+    "Utf8": pa.string(), "LargeUtf8": pa.large_string(),
+    "Binary": pa.binary(), "LargeBinary": pa.large_binary(),
+    "Date32": pa.date32(), "Date64": pa.date64(),
+    "Timestamp": pa.timestamp("us"),
 }
 
 

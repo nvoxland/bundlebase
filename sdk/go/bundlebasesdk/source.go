@@ -13,6 +13,17 @@ type Connector interface {
 	Data(location Location, args map[string]string) ([]arrow.Record, error)
 }
 
+// MapConnector is an optional interface for connectors that return data as Go
+// maps/slices instead of Arrow records. Implementations provide a Schema() that
+// maps column names to type name strings (see TypeMap), and Data() returns a
+// generic value that NormalizeToRecords converts into Arrow records.
+type MapConnector interface {
+	Connector
+
+	// Schema returns a map of column names to type name strings.
+	Schema() map[string]string
+}
+
 // StableUrlProvider is an optional interface for sources that provide stable URLs.
 type StableUrlProvider interface {
 	StableUrl(location Location, args map[string]string) (*StableUrl, error)

@@ -119,7 +119,7 @@ impl PyFunctionBridge {
                     .map_err(|e| format!("Failed to extract float32: {}", e))?;
                 Ok(ScalarValue::Float32(Some(val)))
             }
-            "string" | "utf8" | "large_string" | "large_utf8" => {
+            "string" | "utf8" => {
                 let val: String = as_py
                     .extract()
                     .map_err(|e| format!("Failed to extract utf8: {}", e))?;
@@ -131,8 +131,140 @@ impl PyFunctionBridge {
                     .map_err(|e| format!("Failed to extract bool: {}", e))?;
                 Ok(ScalarValue::Boolean(Some(val)))
             }
+            s if s.starts_with("timestamp") => {
+                // PyArrow timestamp as_py() returns a datetime.datetime
+                // Extract as microseconds since epoch
+                let py = as_py.py();
+                let datetime_mod = py
+                    .import("datetime")
+                    .map_err(|e| format!("Failed to import datetime module: {}", e))?;
+                let epoch = datetime_mod
+                    .getattr("datetime")
+                    .and_then(|dt| dt.call_method1("fromisoformat", ("1970-01-01T00:00:00+00:00",)))
+                    .map_err(|e| format!("Failed to create epoch datetime: {}", e))?;
+                // If the value is timezone-naive, use a naive epoch
+                let has_tz = as_py
+                    .getattr("tzinfo")
+                    .map(|tz| !tz.is_none())
+                    .unwrap_or(false);
+                let epoch = if !has_tz {
+                    datetime_mod
+                        .getattr("datetime")
+                        .and_then(|dt| dt.call_method1("fromisoformat", ("1970-01-01T00:00:00",)))
+                        .map_err(|e| format!("Failed to create naive epoch: {}", e))?
+                } else {
+                    epoch
+                };
+                let delta = as_py
+                    .call_method1("__sub__", (&epoch,))
+                    .map_err(|e| format!("Failed to compute timedelta: {}", e))?;
+                let total_seconds: f64 = delta
+                    .call_method0("total_seconds")
+                    .and_then(|v| v.extract())
+                    .map_err(|e| format!("Failed to extract total_seconds: {}", e))?;
+                let micros = (total_seconds * 1_000_000.0) as i64;
+                Ok(ScalarValue::TimestampMicrosecond(Some(micros), None))
+            }
+            "date32" => {
+                // PyArrow date32 as_py() returns a datetime.date
+                // Convert to days since epoch
+                let py = as_py.py();
+                let datetime_mod = py
+                    .import("datetime")
+                    .map_err(|e| format!("Failed to import datetime module: {}", e))?;
+                let epoch_date = datetime_mod
+                    .getattr("date")
+                    .and_then(|d| d.call1((1970, 1, 1)))
+                    .map_err(|e| format!("Failed to create epoch date: {}", e))?;
+                let delta = as_py
+                    .call_method1("__sub__", (&epoch_date,))
+                    .map_err(|e| format!("Failed to compute date delta: {}", e))?;
+                let days: i32 = delta
+                    .getattr("days")
+                    .and_then(|v| v.extract())
+                    .map_err(|e| format!("Failed to extract days: {}", e))?;
+                Ok(ScalarValue::Date32(Some(days)))
+            }
+            "date64" => {
+                // PyArrow date64 as_py() returns a datetime.date
+                // Convert to milliseconds since epoch
+                let py = as_py.py();
+                let datetime_mod = py
+                    .import("datetime")
+                    .map_err(|e| format!("Failed to import datetime module: {}", e))?;
+                let epoch_date = datetime_mod
+                    .getattr("date")
+                    .and_then(|d| d.call1((1970, 1, 1)))
+                    .map_err(|e| format!("Failed to create epoch date: {}", e))?;
+                let delta = as_py
+                    .call_method1("__sub__", (&epoch_date,))
+                    .map_err(|e| format!("Failed to compute date delta: {}", e))?;
+                let days: i64 = delta
+                    .getattr("days")
+                    .and_then(|v| v.extract())
+                    .map_err(|e| format!("Failed to extract days: {}", e))?;
+                let millis = days * 86_400_000;
+                Ok(ScalarValue::Date64(Some(millis)))
+            }
+            s if s.starts_with("decimal128") => {
+                // PyArrow decimal128 as_py() returns a decimal.Decimal
+                // Parse precision and scale from type string like "decimal128(38, 10)"
+                let inner = s.trim_start_matches("decimal128(").trim_end_matches(')');
+                let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+                let precision: u8 = parts.first()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(38);
+                let scale: i8 = parts.get(1)
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(0);
+                // Multiply the decimal by 10^scale to get the unscaled integer,
+                // then extract as an i128
+                let py = as_py.py();
+                let decimal_mod = py
+                    .import("decimal")
+                    .map_err(|e| format!("Failed to import decimal module: {}", e))?;
+                let decimal_cls = decimal_mod
+                    .getattr("Decimal")
+                    .map_err(|e| format!("Failed to get Decimal class: {}", e))?;
+                let multiplier = decimal_cls
+                    .call1((10i64.pow(scale.unsigned_abs() as u32),))
+                    .map_err(|e| format!("Failed to create decimal multiplier: {}", e))?;
+                let unscaled = if scale >= 0 {
+                    as_py.call_method1("__mul__", (&multiplier,))
+                } else {
+                    as_py.call_method1("__truediv__", (&multiplier,))
+                }.map_err(|e| format!("Failed to compute unscaled decimal: {}", e))?;
+                let unscaled_int = unscaled
+                    .call_method0("__int__")
+                    .map_err(|e| format!("Failed to convert decimal to int: {}", e))?;
+                let val: i128 = unscaled_int
+                    .extract()
+                    .map_err(|e| format!("Failed to extract decimal i128: {}", e))?;
+                Ok(ScalarValue::Decimal128(Some(val), precision, scale))
+            }
+            "binary" => {
+                let val: Vec<u8> = as_py
+                    .extract()
+                    .map_err(|e| format!("Failed to extract binary: {}", e))?;
+                Ok(ScalarValue::Binary(Some(val)))
+            }
+            "large_string" | "large_utf8" => {
+                let val: String = as_py
+                    .extract()
+                    .map_err(|e| format!("Failed to extract large_utf8: {}", e))?;
+                Ok(ScalarValue::LargeUtf8(Some(val)))
+            }
+            "large_binary" => {
+                let val: Vec<u8> = as_py
+                    .extract()
+                    .map_err(|e| format!("Failed to extract large_binary: {}", e))?;
+                Ok(ScalarValue::LargeBinary(Some(val)))
+            }
             other => Err(format!(
-                "Unsupported PyArrow scalar type '{}' in aggregate function result",
+                "Unsupported PyArrow scalar type '{}' in aggregate function result. \
+                 Supported types: int32, int64, float32/float, float64/double, \
+                 string/utf8/large_string/large_utf8, bool/boolean, \
+                 timestamp, date32, date64, decimal128, binary, large_binary",
                 other
             )
             .into()),

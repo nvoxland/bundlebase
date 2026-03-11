@@ -31,7 +31,11 @@ pub fn serve_io(source: &dyn Connector, r: &mut dyn BufRead, w: &mut dyn Write) 
 
         let req: JsonRpcRequest = match serde_json::from_str(trimmed) {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(e) => {
+                let _ = write_error(w, &serde_json::Value::Null, -32700, &format!("Parse error: {}", e));
+                let _ = w.flush();
+                continue;
+            }
         };
 
         let should_stop = handle_request(source, &req, w);
@@ -44,6 +48,9 @@ pub fn serve_io(source: &dyn Connector, r: &mut dyn BufRead, w: &mut dyn Write) 
 
 fn handle_request(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn Write) -> bool {
     match req.method.as_str() {
+        "handshake" => {
+            let _ = write_response(w, &req.id, serde_json::json!({"protocol_version": "1"}));
+        }
         "discover" => handle_discover(source, req, w),
         "data" => handle_data(source, req, w),
         "stable_url" => handle_stable_url(source, req, w),
@@ -87,10 +94,15 @@ fn handle_data(source: &dyn Connector, req: &JsonRpcRequest, w: &mut dyn Write) 
 
     match source.data(&location, &args) {
         Ok(batches) => {
-            let _ = write_response(w, &req.id, serde_json::json!({"ok": true}));
-            if let Err(e) = write_arrow_ipc(w, batches.as_deref()) {
-                eprintln!("failed to write Arrow IPC data: {e}");
+            // Buffer Arrow IPC first so we can send an error if serialization fails
+            let mut buf = Vec::new();
+            if let Err(e) = write_arrow_ipc(&mut buf, batches.as_deref()) {
+                let msg = format!("failed to serialize Arrow IPC data: {e}");
+                let _ = write_error(w, &req.id, -32000, &msg);
+                return;
             }
+            let _ = write_response(w, &req.id, serde_json::json!({"ok": true}));
+            let _ = w.write_all(&buf);
         }
         Err(e) => {
             let _ = write_error(w, &req.id, -32000, &e.to_string());

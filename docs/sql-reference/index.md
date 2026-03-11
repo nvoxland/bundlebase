@@ -230,22 +230,22 @@ DROP CONNECTOR example.connector
 DROP CONNECTOR example.connector FOR PLATFORM 'linux/amd64'
 ```
 
-### DROP TEMP CONNECTOR LOGIC
+### DROP TEMP CONNECTOR
 
 Removes runtime-only connector logic. Optionally filter by platform.
 
 ```sql
-DROP TEMP CONNECTOR LOGIC <name> [FOR PLATFORM '<platform>']
+DROP TEMP CONNECTOR <name> [FOR PLATFORM '<platform>']
 ```
 
 **Examples:**
 
 ```sql
 -- Drop all temporary logic entries
-DROP TEMP CONNECTOR LOGIC example.connector
+DROP TEMP CONNECTOR example.connector
 
 -- Drop temporary logic for a specific platform only
-DROP TEMP CONNECTOR LOGIC example.connector FOR PLATFORM 'linux/amd64'
+DROP TEMP CONNECTOR example.connector FOR PLATFORM 'linux/amd64'
 ```
 
 ## Indexes
