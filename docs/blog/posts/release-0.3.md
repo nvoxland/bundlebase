@@ -23,7 +23,7 @@ await c.create_source("inventory",
 await c.fetch("inventory")
 ```
 
-There are three built-in connectors so far:
+There are three built-in source functions so far:
 
 - **Remote directory** Pull files from FTP, SFTP, or object storage (S3, GCS, Azure) by path and glob pattern
 - **Web scraper** Fetch data from web pages

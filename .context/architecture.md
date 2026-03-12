@@ -30,7 +30,7 @@ Shared state extracted for both container types:
 - Metadata (name, description)
 - Row count tracking
 - SessionContext for DataFusion
-- Function entries (user-defined SQL functions)
+- Function registry
 - Adapter factory
 
 ## Operation Pipeline
