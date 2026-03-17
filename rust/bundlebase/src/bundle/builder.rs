@@ -759,7 +759,7 @@ impl BundleBuilder {
     /// for the given platform. The operation is persisted into the bundle's
     /// commit history.
     ///
-    /// Python runner cannot be bundled — use `import_temp_connector()` instead.
+    /// Python runtime cannot be bundled — use `import_temp_connector()` instead.
     ///
     /// # Arguments
     /// * `name` - Dot-separated connector name (e.g., "acme.weather").
@@ -769,15 +769,13 @@ impl BundleBuilder {
     pub async fn import_connector(
         &self,
         name: &str,
-        runner: &str,
-        logic: &str,
+        from: &str,
         platform: &str,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::ImportConnectorCommand;
-        use crate::bundle::connector_definition::{Platform, Runner};
-        let runner: Runner = runner.parse()?;
+        use crate::bundle::connector_definition::Platform;
         let platform: Platform = platform.parse()?;
-        self.execute_command(ImportConnectorCommand::new(name, runner, logic, platform)).await?;
+        self.execute_command(ImportConnectorCommand::new(name, from, platform)).await?;
         Ok(self)
     }
 
@@ -1094,33 +1092,23 @@ impl BundleBuilder {
     /// Load a persistent function (bundled, not session-only).
     ///
     /// Registers the function as a DataFusion UDF and persists the definition
-    /// via an operation. Python runner cannot be bundled — use `import_temp_function()`.
+    /// via an operation. Python runtime cannot be bundled — use `import_temp_function()`.
     ///
     /// # Arguments
     /// * `name` - Dotted function name (e.g., "acme.double_val")
-    /// * `input_types` - Arrow type names for parameters
-    /// * `return_type` - Arrow type name for the return value
-    /// * `runner` - The runner: "lib", "java", "docker", or "ipc"
-    /// * `logic` - The logic string (e.g., "./binary" for ipc)
+    /// * `from` - String identifying the function implementation (e.g., "ipc::./my_func")
     /// * `platform` - Docker-style platform string (e.g., "linux/amd64", "*/*")
     pub async fn import_function(
         &self,
         name: &str,
-        input_types: Vec<String>,
-        return_type: &str,
-        runner: &str,
-        logic: &str,
+        from: &str,
         platform: &str,
-        function_type: &str,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::ImportFunctionCommand;
-        use crate::bundle::connector_definition::{Platform, Runner};
-        use crate::bundle::function_definition::FunctionKind;
-        let runner: Runner = runner.parse()?;
+        use crate::bundle::connector_definition::Platform;
         let platform: Platform = platform.parse()?;
-        let kind: FunctionKind = function_type.parse()?;
         self.execute_command(ImportFunctionCommand::new(
-            name, input_types, return_type, runner, logic, platform, kind,
+            name, from, platform,
         )).await?;
         Ok(self)
     }
@@ -1551,20 +1539,9 @@ impl BundleFacade for BundleBuilder {
 
     async fn import_temp_connector(
         &self,
-        name: &str,
-        runner: crate::bundle::connector_definition::Runner,
-        logic: String,
-        platform: crate::bundle::connector_definition::Platform,
+        entry: crate::bundle::connector_definition::ConnectorEntry,
     ) -> Result<(), BundlebaseError> {
-        let namespaced: crate::NamespacedName = name.parse()?;
-        self.bundle.add_connector_entry(crate::bundle::connector_definition::ConnectorEntry {
-            id: crate::data::ObjectId::generate(),
-            name: namespaced,
-            runner,
-            logic,
-            platform,
-            temporary: true,
-        });
+        self.bundle.add_connector_entry(entry);
         self.bundle.mark_temporary_logic();
         self.bundle.refresh_version_udf(self.version());
         Ok(())
@@ -1583,8 +1560,8 @@ impl BundleFacade for BundleBuilder {
         entry: crate::bundle::function_definition::FunctionEntry,
     ) -> Result<(), BundlebaseError> {
         // Validate IPC logic string at import time (fail early)
-        if matches!(entry.runner, crate::bundle::connector_definition::Runner::Ipc | crate::bundle::connector_definition::Runner::Java | crate::bundle::connector_definition::Runner::Docker) {
-            crate::function::ipc_bridge::parse_call(&entry.logic)?;
+        if entry.from.runtime_type() == crate::bundle::logic_runtime::RuntimeType::Ipc {
+            crate::function::ipc_bridge::parse_call(&entry.from.build_call_string())?;
         }
 
         // Validate kind consistency before adding
@@ -1894,7 +1871,8 @@ mod tests {
     #[tokio::test]
     async fn test_version_temp_with_temporary_connector_only() {
         use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::{Platform, Runner};
+        use crate::bundle::connector_definition::{ConnectorEntry, Platform};
+        use crate::bundle::logic_runtime::LogicRuntime;
 
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
@@ -1902,10 +1880,13 @@ mod tests {
 
         BundleFacade::import_temp_connector(
             bundle.as_ref(),
-            "test.source",
-            Runner::Lib,
-            "test_call".to_string(),
-            Platform::any(),
+            ConnectorEntry {
+                id: crate::data::ObjectId::generate(),
+                name: "test.source".parse().unwrap(),
+                from: LogicRuntime::parse_from("ffi::test_call").unwrap(),
+                platform: Platform::any(),
+                temporary: true,
+            },
         )
             .await
             .unwrap();
@@ -1916,7 +1897,8 @@ mod tests {
     #[tokio::test]
     async fn test_version_uncommitted_temp_with_changes_and_temporary_connector() {
         use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::{Platform, Runner};
+        use crate::bundle::connector_definition::{ConnectorEntry, Platform};
+        use crate::bundle::logic_runtime::LogicRuntime;
 
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
@@ -1928,10 +1910,13 @@ mod tests {
 
         BundleFacade::import_temp_connector(
             bundle.as_ref(),
-            "test.source",
-            Runner::Lib,
-            "test_call".to_string(),
-            Platform::any(),
+            ConnectorEntry {
+                id: crate::data::ObjectId::generate(),
+                name: "test.source".parse().unwrap(),
+                from: LogicRuntime::parse_from("ffi::test_call").unwrap(),
+                platform: Platform::any(),
+                temporary: true,
+            },
         )
             .await
             .unwrap();
@@ -1942,7 +1927,8 @@ mod tests {
     #[tokio::test]
     async fn test_version_uncommitted_temp_via_facade() {
         use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::{Platform, Runner};
+        use crate::bundle::connector_definition::{ConnectorEntry, Platform};
+        use crate::bundle::logic_runtime::LogicRuntime;
 
         let builder = BundleBuilder::create("memory:///test_bundle", None)
             .await
@@ -1954,10 +1940,13 @@ mod tests {
 
         BundleFacade::import_temp_connector(
             builder.as_ref(),
-            "test.source",
-            Runner::Python,
-            "test_call".to_string(),
-            Platform::any(),
+            ConnectorEntry {
+                id: crate::data::ObjectId::generate(),
+                name: "test.source".parse().unwrap(),
+                from: LogicRuntime::parse_from("python::test:call").unwrap(),
+                platform: Platform::any(),
+                temporary: true,
+            },
         )
             .await
             .unwrap();

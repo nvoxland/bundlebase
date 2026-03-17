@@ -57,7 +57,7 @@ fn main() { bundlebase_sdk::serve(&ExampleConnector); }
 Build and use with:
 
 ```python
-bundle.import_connector('example.connector', runner='ipc', logic='./target/release/example-connector')
+bundle.import_connector('example.connector', 'ipc::./target/release/example-connector')
 bundle.create_source('example.connector')
 ```
 
@@ -382,7 +382,7 @@ cargo build --release
 ```
 
 ```python
-bundle.import_connector('example.connector', runner='lib', logic='target/release/libexample_connector.so')
+bundle.import_connector('example.connector', 'ffi::target/release/libexample_connector.so')
 bundle.create_source('example.connector')
 ```
 

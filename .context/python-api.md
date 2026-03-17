@@ -12,23 +12,17 @@ c = await Bundlebase.create("memory:///test_container")  # Returns BundlebaseBui
 # Attach data source
 await c.attach("userdata.parquet")
 
-# Register a user-defined SQL scalar function (temporary, for Python runner)
+# Register a user-defined SQL scalar function (temporary, for Python runtime)
 await c.import_temp_function(
     name="acme.double_val",
-    input_types=["Int64"],
-    return_type="Int64",
-    runner="python",
-    logic="my_module:double_val"
+    from_="python::my_module:double_val"
 )
 # Use in SQL: SELECT acme.double_val(id) FROM bundle
 
-# Or register a persistent function (non-Python runners only)
+# Or register a persistent function (non-Python runtimes only)
 await c.import_function(
     name="acme.weather",
-    input_types=["Utf8"],
-    return_type="Utf8",
-    runner="ipc",
-    logic="./weather-binary"
+    from_="ipc::weather-binary"
 )
 
 # Transform data (modifies container in place)
@@ -93,12 +87,12 @@ c = await Bundlebase.open("/my/container/dir")
 - `join(url, expression, join_type)` - Join with another source
 - `set_name(name)` - Set container name
 - `set_description(description)` - Set container description
-- `import_connector(name, runner, logic, platform)` - Define a persistent custom connector
-- `import_temp_connector(name, runner, logic, platform)` - Define a session-only custom connector (required for Python runner)
+- `import_connector(name, from_, platform)` - Define a persistent custom connector
+- `import_temp_connector(name, from_, platform)` - Define a session-only custom connector (required for Python runtime)
 - `drop_connector(name, platform)` - Drop a connector definition
 - `drop_temp_connector(name, platform)` - Drop runtime-only connector logic
-- `import_function(name, input_types, return_type, runner, logic, platform)` - Define a persistent SQL scalar function
-- `import_temp_function(name, input_types, return_type, runner, logic, platform)` - Define a session-only SQL scalar function
+- `import_function(name, from_, platform)` - Define a persistent SQL function (types auto-detected from manifest)
+- `import_temp_function(name, from_, platform)` - Define a session-only SQL function (types auto-detected from manifest)
 - `drop_function(name, platform)` - Drop a function definition (drops **all overloads** for that name)
 - `create_view(name, sql)` - Create a named view from a SQL query
 - `query(sql, params)` - Execute a SQL query and return streaming results
@@ -377,19 +371,18 @@ Defines a persistent custom connector. The connector definition and logic are st
 
 ```python
 # IPC connector (subprocess)
-await c.import_connector('acme.weather', runner='ipc', logic='./my_connector')
+await c.import_connector('acme.weather', 'ipc::my_connector')
 
 # Shared library connector
-await c.import_connector('acme.weather', runner='lib', logic='./libweather.so')
+await c.import_connector('acme.weather', 'ffi::libweather.so')
 
 # Platform-specific
-await c.import_connector('acme.weather', runner='lib', logic='./libweather.so', platform='linux/amd64')
+await c.import_connector('acme.weather', 'ffi::libweather.so', platform='linux/amd64')
 ```
 
 **Parameters:**
 - `name` - Dot-separated connector name (e.g., `"acme.weather"`)
-- `runner` - How to run the connector: `"ipc"`, `"lib"`, `"java"`, `"docker"` (not `"python"` — use `import_temp_connector` instead)
-- `logic` - What to run (path, command, or image depending on runner)
+- `from_` - URI in `runtime::logic` format (e.g., `"ipc::my_connector"`); supported runtimes: `"ipc"`, `"ffi"`, `"java"`, `"docker"` (not `"python"` — use `import_temp_connector` instead)
 - `platform` (optional) - Target platform (e.g., `"linux/amd64"`, default `"*/*"`)
 
 ### import_temp_connector()
@@ -398,13 +391,13 @@ Defines a session-only connector. Nothing is persisted — the connector exists 
 
 ```python
 # Python in-process connector (most common)
-await c.import_temp_connector('acme.weather', runner='python', logic='my_module:MyConnector')
+await c.import_temp_connector('acme.weather', 'python::my_module:MyConnector')
 
 # Temporary IPC connector
-await c.import_temp_connector('acme.weather', runner='ipc', logic='./my_connector')
+await c.import_temp_connector('acme.weather', 'ipc::my_connector')
 ```
 
-**Parameters:** Same as `import_connector()`, but accepts all runners including `"python"`.
+**Parameters:** Same as `import_connector()`, but the `from_` parameter accepts all runtimes including `"python"`.
 
 ### drop_connector()
 
@@ -432,7 +425,7 @@ count = await c.drop_temp_connector('acme.weather', platform='*/*')
 
 **Returns:** The number of logic entries removed.
 
-See [Custom Connectors](../docs/guide/custom-connectors/index.md) for full details on runners, SDKs, and protocol.
+See [Custom Connectors](../docs/guide/custom-connectors/index.md) for full details on runtimes, SDKs, and protocol.
 
 ## Views
 

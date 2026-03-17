@@ -326,28 +326,21 @@ impl PyBundleBuilder {
         })
     }
 
-    #[pyo3(signature = (name, input_types, return_type, runner, logic, platform="*/*", function_type="scalar"))]
+    #[pyo3(signature = (name, from_, platform="*/*"))]
     fn import_function<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
-        input_types: Vec<String>,
-        return_type: &str,
-        runner: &str,
-        logic: &str,
+        from_: &str,
         platform: &str,
-        function_type: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let name = name.to_string();
-        let return_type = return_type.to_string();
-        let runner = runner.to_string();
-        let logic = logic.to_string();
+        let from_ = from_.to_string();
         let platform = platform.to_string();
-        let function_type = function_type.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .import_function(&name, input_types, &return_type, &runner, &logic, &platform, &function_type)
+                .import_function(&name, &from_, &platform)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to load function", e))?;
 
@@ -358,52 +351,25 @@ impl PyBundleBuilder {
         })
     }
 
-    #[pyo3(signature = (name, input_types, return_type, runner, logic, platform="*/*", function_type="scalar"))]
+    #[pyo3(signature = (name, from_, platform="*/*"))]
     fn import_temp_function<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
-        input_types: Vec<String>,
-        return_type: &str,
-        runner: &str,
-        logic: &str,
+        from_: &str,
         platform: &str,
-        function_type: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let name = name.to_string();
-        let return_type = return_type.to_string();
-        let runner = runner.to_string();
-        let logic = logic.to_string();
+        let from_ = from_.to_string();
         let platform = platform.to_string();
-        let function_type = function_type.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            use ::bundlebase::bundle::{Platform, Runner, FunctionEntry, FunctionKind};
-            use ::bundlebase::bundle::parse_arrow_type_name;
-            let runner: Runner = runner.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
+            use ::bundlebase::bundle::{Platform, ImportTempFunctionCommand};
+            use ::bundlebase::bundle::BundleFacadeCommand;
             let platform: Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
-            let kind: FunctionKind = function_type.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
-            let namespaced: ::bundlebase::NamespacedName = name.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
-            let parsed_input_types = input_types.iter()
-                .map(|s| parse_arrow_type_name(s))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| to_py_error(e))?;
-            let parsed_return_type = parse_arrow_type_name(&return_type)
-                .map_err(|e| to_py_error(e))?;
-            let entry = FunctionEntry {
-                id: ::bundlebase::io::ObjectId::generate(),
-                name: namespaced,
-                input_types: parsed_input_types,
-                return_type: parsed_return_type,
-                runner,
-                logic,
-                platform,
-                temporary: true,
-                kind,
-            };
-            inner
-                .as_ref()
-                .import_temp_function(entry)
+            let cmd = ImportTempFunctionCommand::new(&name, &from_, platform);
+            Box::new(cmd)
+                .execute(inner.as_ref())
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to load temporary function", e))?;
 
@@ -731,23 +697,21 @@ impl PyBundleBuilder {
     /// * `runner` - The runner: "lib", "java", "docker", or "ipc"
     /// * `logic` - The logic string (path to shared library or binary)
     /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
-    #[pyo3(signature = (name, runner, logic, platform="*/*"))]
+    #[pyo3(signature = (name, from_, platform="*/*"))]
     fn import_connector<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
-        runner: &str,
-        logic: &str,
+        from_: &str,
         platform: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let name = name.to_string();
-        let runner = runner.to_string();
-        let logic = logic.to_string();
+        let from_ = from_.to_string();
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .import_connector(&name, &runner, &logic, &platform)
+                .import_connector(&name, &from_, &platform)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to load connector", e))?;
             Python::attach(|py| {
@@ -764,26 +728,32 @@ impl PyBundleBuilder {
     /// * `runner` - The runner: "python", "lib", "java", "docker", or "ipc"
     /// * `logic` - The logic string (e.g., "mod:Class" for python)
     /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
-    #[pyo3(signature = (name, runner, logic, platform="*/*"))]
+    #[pyo3(signature = (name, from_, platform="*/*"))]
     fn import_temp_connector<'py>(
         slf: PyRef<'_, Self>,
         name: &str,
-        runner: &str,
-        logic: &str,
+        from_: &str,
         platform: &str,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         let name = name.to_string();
-        let runner = runner.to_string();
-        let logic = logic.to_string();
+        let from_ = from_.to_string();
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let runner: ::bundlebase::bundle::Runner = runner.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
+            let from = ::bundlebase::bundle::LogicRuntime::parse_from(&from_).map_err(|e| to_py_error(e))?;
             let platform: ::bundlebase::bundle::Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
+            let namespaced: ::bundlebase::NamespacedName = name.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
+            let entry = ::bundlebase::bundle::ConnectorEntry {
+                id: ::bundlebase::io::ObjectId::generate(),
+                name: namespaced,
+                from,
+                platform,
+                temporary: true,
+            };
             inner
                 .as_ref()
-                .import_temp_connector(&name, runner, logic, platform)
+                .import_temp_connector(entry)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to load temporary connector", e))?;
             Python::attach(|py| {

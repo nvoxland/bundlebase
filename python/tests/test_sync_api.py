@@ -631,21 +631,21 @@ class TestSyncSource:
         """Test import_connector synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.import_connector("test.my_source", "ipc", "/usr/bin/test")
+        c.import_connector("test.my_source", "docker::test-connector-image")
         assert c is not None
 
     def test_sync_import_temp_connector(self):
         """Test import_temp_connector synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.import_temp_connector("test.my_source", "python", "mod:Class")
+        c.import_temp_connector("test.my_source", "python::mod:Class")
         assert c is not None
 
     def test_sync_drop_connector(self):
         """Test drop_connector synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.import_connector("test.my_source", "ipc", "/usr/bin/test")
+        c.import_connector("test.my_source", "docker::test-connector-image")
         c.drop_connector("test.my_source")
         assert c is not None
 
@@ -653,7 +653,7 @@ class TestSyncSource:
         """Test drop_connector with platform synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.import_connector("test.my_source", "ipc", "/usr/bin/test", "linux/amd64")
+        c.import_connector("test.my_source", "docker::test-connector-image", "linux/amd64")
         c.drop_connector("test.my_source", "linux/amd64")
         assert c is not None
 
@@ -661,6 +661,6 @@ class TestSyncSource:
         """Test drop_temp_connector synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.import_temp_connector("test.my_source", "python", "mod:Class")
+        c.import_temp_connector("test.my_source", "python::mod:Class")
         result = c.drop_temp_connector("test.my_source")
         assert "Dropped 1 temporary connector" in result

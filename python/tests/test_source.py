@@ -163,7 +163,7 @@ async def _setup_native_source(c, source_class, source_name="test.native_source"
     module = source_class.__module__
     qualname = source_class.__qualname__
 
-    c = await c.import_temp_connector(source_name, "python", f"{module}:{qualname}")
+    c = await c.import_temp_connector(source_name, f"python::{module}:{qualname}")
     args = {k: str(v) for k, v in kwargs.items()}
     c = await c.create_source(source_name, args)
     return c
@@ -173,7 +173,7 @@ async def _setup_native_source(c, source_class, source_name="test.native_source"
 async def test_import_connector_binding():
     """Test that import_connector Python binding works."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
+    c = await c.import_connector("test.my_source", "docker::test-connector-image")
     assert c is not None
 
 
@@ -181,7 +181,7 @@ async def test_import_connector_binding():
 async def test_import_temp_connector_binding():
     """Test that import_temp_connector Python binding works."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_temp_connector("test.my_source", "python", "mod:Class")
+    c = await c.import_temp_connector("test.my_source", "python::mod:Class")
     assert c is not None
 
 
@@ -191,10 +191,10 @@ async def test_import_temp_connector_builder_version_uncommitted_temp():
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     assert c.version != "UNCOMMITTED+TEMP"
     # Add a persistent change so version becomes UNCOMMITTED
-    c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
+    c = await c.import_connector("test.my_source", "docker::test-connector-image")
     assert c.version == "UNCOMMITTED"
     # Now add a temporary connector to get UNCOMMITTED+TEMP
-    c = await c.import_temp_connector("test.temp_source", "python", "mod:Class")
+    c = await c.import_temp_connector("test.temp_source", "python::mod:Class")
     assert c.version == "UNCOMMITTED+TEMP"
 
 
@@ -203,28 +203,28 @@ async def test_import_temp_connector_bundle_version_temp():
     """Test that import_temp_connector on read-only bundle sets version to TEMP."""
     with tempfile.TemporaryDirectory() as path:
         c = await bundlebase.create(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
-        c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
+        c = await c.import_connector("test.my_source", "docker::test-connector-image")
         await c.commit("Initial commit")
 
         bundle = await bundlebase.open(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
         assert bundle.version != "TEMP"
-        await bundle.import_temp_connector("test.my_source", "python", "mod:Class")
+        await bundle.import_temp_connector("test.my_source", "python::mod:Class")
         assert bundle.version == "TEMP"
 
 
 @pytest.mark.asyncio
 async def test_import_connector_rejects_python_calls():
-    """Test that import_connector rejects python runner."""
+    """Test that import_connector rejects python runtime."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    with pytest.raises(ValueError, match="python runner cannot be bundled"):
-        await c.import_connector("test.my_source", "python", "mod:Class")
+    with pytest.raises(ValueError, match="'python' runtime cannot be bundled"):
+        await c.import_connector("test.my_source", "python::mod:Class")
 
 
 @pytest.mark.asyncio
 async def test_import_connector_success_with_ipc():
     """Test that import_connector succeeds with ipc runner."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
+    c = await c.import_connector("test.my_source", "docker::test-connector-image")
     assert c is not None
 
 
@@ -307,7 +307,7 @@ async def test_import_connector_survives_commit_reopen():
     """Test that import_connector persists through commit and reopen."""
     with tempfile.TemporaryDirectory() as path:
         c = await bundlebase.create(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
-        c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
+        c = await c.import_connector("test.my_source", "docker::test-connector-image")
         await c.commit("Add source definition")
 
         # Reopen and verify the source definition survived
@@ -325,7 +325,7 @@ async def test_import_connector_survives_commit_reopen():
 async def test_native_source_blocked_without_allow_external_code():
     """Test that native source fails when allow_external_code is not set."""
     c = await bundlebase.create(random_bundle())
-    c = await c.import_temp_connector("test.blocked_source", "python", "mod:Class")
+    c = await c.import_temp_connector("test.blocked_source", "python::mod:Class")
 
     with pytest.raises(ValueError, match="External code execution is disabled"):
         await c.create_source("test.blocked_source", {})
@@ -383,7 +383,7 @@ async def test_create_source_builtin_still_works():
 async def test_drop_connector_binding():
     """Test that drop_connector Python binding works."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
+    c = await c.import_connector("test.my_source", "docker::test-connector-image")
     c = await c.drop_connector("test.my_source")
     assert c is not None
 
@@ -392,11 +392,11 @@ async def test_drop_connector_binding():
 async def test_drop_connector_removes_logic():
     """Test that drop_connector removes all logic entries."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test", "*/*")
+    c = await c.import_connector("test.my_source", "docker::test-connector-image", "*/*")
     c = await c.drop_connector("test.my_source")
 
     # Re-defining the same connector should work (it was fully removed)
-    c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
+    c = await c.import_connector("test.my_source", "docker::test-connector-image")
     assert c is not None
 
 
@@ -416,7 +416,7 @@ async def test_drop_connector_undefined_fails():
 async def test_drop_connector_with_platform():
     """Test that drop_connector with platform filter removes only that platform's logic."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test", "linux/amd64")
+    c = await c.import_connector("test.my_source", "docker::test-connector-image", "linux/amd64")
     c = await c.drop_connector("test.my_source", "linux/amd64")
     assert c is not None
 
@@ -447,7 +447,7 @@ async def test_connector_name_no_dot_fails():
     """Test that connector name without a dot fails."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     with pytest.raises((ValueError, Exception)):
-        await c.import_connector("no_dot_name", "ipc", "/usr/bin/test")
+        await c.import_connector("no_dot_name", "docker::test-connector-image")
 
 
 @pytest.mark.asyncio
@@ -455,7 +455,7 @@ async def test_connector_name_too_many_dots_fails():
     """Test that connector name with too many dots fails."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     with pytest.raises((ValueError, Exception)):
-        await c.import_connector("a.b.c", "ipc", "/usr/bin/test")
+        await c.import_connector("a.b.c", "docker::test-connector-image")
 
 
 @pytest.mark.asyncio
@@ -464,7 +464,7 @@ async def test_native_source_data_exception():
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     module = ErrorDataSource.__module__
     qualname = ErrorDataSource.__qualname__
-    c = await c.import_temp_connector("test.error_data", "python", f"{module}:{qualname}")
+    c = await c.import_temp_connector("test.error_data", f"python::{module}:{qualname}")
 
     with pytest.raises(Exception, match="exploded"):
         await c.create_source("test.error_data", {})
@@ -475,13 +475,13 @@ async def test_drop_connector_with_platform_filter():
     """Test that drop_connector with platform filter only removes matching entry."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     # Import for two platforms
-    c = await c.import_connector("test.multi_plat", "ipc", "/usr/bin/linux", "linux/amd64")
-    c = await c.import_connector("test.multi_plat", "ipc", "/usr/bin/darwin", "darwin/arm64")
+    c = await c.import_connector("test.multi_plat", "docker::test-linux-image", "linux/amd64")
+    c = await c.import_connector("test.multi_plat", "docker::test-darwin-image", "darwin/arm64")
     # Drop only linux
     c = await c.drop_connector("test.multi_plat", "linux/amd64")
     # The connector should still exist (darwin entry remains)
     # Re-adding linux should work
-    c = await c.import_connector("test.multi_plat", "ipc", "/usr/bin/linux2", "linux/amd64")
+    c = await c.import_connector("test.multi_plat", "docker::test-linux-image2", "linux/amd64")
     assert c is not None
 
 
@@ -489,7 +489,7 @@ async def test_drop_connector_with_platform_filter():
 async def test_drop_temp_connector_binding():
     """Test that drop_temp_connector Python binding works on builder."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_temp_connector("test.my_source", "python", "mod:Class")
+    c = await c.import_temp_connector("test.my_source", "python::mod:Class")
     result = await c.drop_temp_connector("test.my_source")
     assert "Dropped 1 temporary connector" in result
 
@@ -498,7 +498,7 @@ async def test_drop_temp_connector_binding():
 async def test_drop_temp_connector_with_platform():
     """Test that drop_temp_connector with platform filter works."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_temp_connector("test.my_source", "python", "mod:Class", "linux/amd64")
+    c = await c.import_temp_connector("test.my_source", "python::mod:Class", "linux/amd64")
     result = await c.drop_temp_connector("test.my_source", "linux/amd64")
     assert "Dropped 1 temporary connector" in result
 
@@ -508,10 +508,10 @@ async def test_drop_temp_connector_on_bundle():
     """Test that drop_temp_connector works on read-only bundle."""
     with tempfile.TemporaryDirectory() as path:
         c = await bundlebase.create(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
-        c = await c.import_connector("test.my_source", "ipc", "/usr/bin/test")
+        c = await c.import_connector("test.my_source", "docker::test-connector-image")
         await c.commit("Initial commit")
 
         bundle = await bundlebase.open(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
-        await bundle.import_temp_connector("test.my_source", "python", "mod:Class")
+        await bundle.import_temp_connector("test.my_source", "python::mod:Class")
         result = await bundle.drop_temp_connector("test.my_source")
         assert "Dropped 1 temporary connector" in result

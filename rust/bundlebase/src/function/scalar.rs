@@ -4,22 +4,15 @@
 //! Dispatches by runner: Python (via PyArrow), IPC/Java/Docker (via Arrow IPC),
 //! Lib (via FFI).
 
-use crate::bundle::connector_definition::Runner;
 use crate::bundle::function_definition::FunctionEntry;
-use crate::NamespacedName;
-use crate::function::ipc_bridge::{invoke_ipc_scalar, SubprocessCache};
-use crate::function::lib_bridge::{invoke_lib_scalar, parse_lib_logic};
-use crate::function::parse_python_logic;
-use crate::function::python_bridge::get_python_function_bridge;
+use crate::function::ipc_bridge::SubprocessCache;
 use crate::BundlebaseError;
-use arrow::array::ArrayRef;
 use arrow::datatypes::DataType;
 use datafusion::logical_expr::{
     ColumnarValue, ScalarUDFImpl, Signature, TypeSignature, Volatility,
 };
 use std::any::Any;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 
 /// Invoke a scalar function entry with the given args.
 fn invoke_entry(
@@ -28,11 +21,7 @@ fn invoke_entry(
     args: &datafusion::logical_expr::ScalarFunctionArgs,
     subprocess_cache: &SubprocessCache,
 ) -> datafusion::common::Result<ColumnarValue> {
-    match entry.runner {
-        Runner::Python => invoke_python(name, &entry.logic, args),
-        Runner::Ipc | Runner::Java | Runner::Docker => invoke_ipc(name, entry, args, subprocess_cache),
-        Runner::Lib => invoke_lib(name, entry, args),
-    }
+    entry.from.invoke_scalar(name, &entry.name.name, args, subprocess_cache)
 }
 
 /// Find the overload whose input_types match the actual argument types.
@@ -169,119 +158,17 @@ impl ScalarUDFImpl for ScalarFunction {
 
 }
 
-/// Invoke a Python function via the registered bridge.
-fn invoke_python(
-    name: &str,
-    logic: &str,
-    args: &datafusion::logical_expr::ScalarFunctionArgs,
-) -> datafusion::common::Result<ColumnarValue> {
-    let bridge = get_python_function_bridge().map_err(|e| {
-        datafusion::common::DataFusionError::Execution(format!(
-            "Cannot invoke Python function '{}': {}",
-            name, e
-        ))
-    })?;
-
-    let (module, function) = parse_python_logic(logic)?;
-
-    // Convert ColumnarValue args to Arrow arrays
-    let arrays: Vec<ArrayRef> = args
-        .args
-        .iter()
-        .map(|cv| match cv {
-            ColumnarValue::Array(arr) => Ok(Arc::clone(arr)),
-            ColumnarValue::Scalar(scalar) => scalar
-                .to_array_of_size(args.number_rows)
-                .map_err(|e| datafusion::common::DataFusionError::Execution(e.to_string())),
-        })
-        .collect::<datafusion::common::Result<Vec<_>>>()?;
-
-    let result = bridge
-        .invoke(module, function, &arrays, args.number_rows)
-        .map_err(|e| {
-            datafusion::common::DataFusionError::Execution(format!(
-                "Python function '{}' ({}:{}) failed: {}",
-                name, module, function, e
-            ))
-        })?;
-
-    Ok(ColumnarValue::Array(result))
-}
-
-/// Invoke an IPC/Java/Docker function via the subprocess bridge.
-fn invoke_ipc(
-    name: &str,
-    entry: &FunctionEntry,
-    args: &datafusion::logical_expr::ScalarFunctionArgs,
-    subprocess_cache: &SubprocessCache,
-) -> datafusion::common::Result<ColumnarValue> {
-    // Convert ColumnarValue args to Arrow arrays
-    let arrays: Vec<ArrayRef> = args
-        .args
-        .iter()
-        .map(|cv| match cv {
-            ColumnarValue::Array(arr) => Ok(Arc::clone(arr)),
-            ColumnarValue::Scalar(scalar) => scalar
-                .to_array_of_size(args.number_rows)
-                .map_err(|e| datafusion::common::DataFusionError::Execution(e.to_string())),
-        })
-        .collect::<datafusion::common::Result<Vec<_>>>()?;
-
-    let result = invoke_ipc_scalar(subprocess_cache, &entry.logic, &entry.name.name, &arrays).map_err(|e| {
-        datafusion::common::DataFusionError::Execution(format!(
-            "IPC function '{}' ({}) failed: {}",
-            name, entry.logic, e
-        ))
-    })?;
-
-    Ok(ColumnarValue::Array(result))
-}
-
-/// Invoke a native lib function via the FFI bridge.
-fn invoke_lib(
-    name: &str,
-    entry: &FunctionEntry,
-    args: &datafusion::logical_expr::ScalarFunctionArgs,
-) -> datafusion::common::Result<ColumnarValue> {
-    let (lib_path, symbol_opt) = parse_lib_logic(&entry.logic).map_err(|e| {
-        datafusion::common::DataFusionError::Execution(format!(
-            "Invalid lib logic for function '{}': {}",
-            name, e
-        ))
-    })?;
-
-    // Default symbol to the short name from NamespacedName
-    let symbol = symbol_opt.unwrap_or(&entry.name.name);
-
-    // Convert ColumnarValue args to Arrow arrays
-    let arrays: Vec<ArrayRef> = args
-        .args
-        .iter()
-        .map(|cv| match cv {
-            ColumnarValue::Array(arr) => Ok(Arc::clone(arr)),
-            ColumnarValue::Scalar(scalar) => scalar
-                .to_array_of_size(args.number_rows)
-                .map_err(|e| datafusion::common::DataFusionError::Execution(e.to_string())),
-        })
-        .collect::<datafusion::common::Result<Vec<_>>>()?;
-
-    let result = invoke_lib_scalar(lib_path, symbol, &arrays).map_err(|e| {
-        datafusion::common::DataFusionError::Execution(format!(
-            "Lib function '{}' ({}:{}) failed: {}",
-            name, lib_path, symbol, e
-        ))
-    })?;
-
-    Ok(ColumnarValue::Array(result))
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::bundle::connector_definition::Platform;
+        use crate::bundle::logic_runtime::LogicRuntime;
     use crate::bundle::function_definition::FunctionKind;
     use crate::data::ObjectId;
     use crate::function::ipc_bridge::new_subprocess_cache;
+    use crate::function::parse_python_logic;
+    use crate::NamespacedName;
 
     #[test]
     fn test_signature_construction() {
@@ -290,8 +177,7 @@ mod tests {
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            runner: Runner::Ipc,
-            logic: "./my_func".to_string(),
+            from: LogicRuntime::parse_from("ipc::./my_func").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -312,8 +198,7 @@ mod tests {
             name: NamespacedName::new("acme", "add"),
             input_types: vec![DataType::Int64, DataType::Int64],
             return_type: DataType::Int64,
-            runner: Runner::Ipc,
-            logic: "./add_func".to_string(),
+            from: LogicRuntime::parse_from("ipc::./add_func").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -357,8 +242,7 @@ mod tests {
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            runner: Runner::Ipc,
-            logic: "./my_func".to_string(),
+            from: LogicRuntime::parse_from("ipc::./my_func").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -375,8 +259,7 @@ mod tests {
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Utf8,
-            runner: Runner::Ipc,
-            logic: "./int_convert".to_string(),
+            from: LogicRuntime::parse_from("ipc::./int_convert").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -386,8 +269,7 @@ mod tests {
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Float64],
             return_type: DataType::Utf8,
-            runner: Runner::Ipc,
-            logic: "./float_convert".to_string(),
+            from: LogicRuntime::parse_from("ipc::./float_convert").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -408,8 +290,7 @@ mod tests {
             name: NamespacedName::new("acme", "transform"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            runner: Runner::Ipc,
-            logic: "./int_transform".to_string(),
+            from: LogicRuntime::parse_from("ipc::./int_transform").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -419,8 +300,7 @@ mod tests {
             name: NamespacedName::new("acme", "transform"),
             input_types: vec![DataType::Utf8],
             return_type: DataType::Utf8,
-            runner: Runner::Ipc,
-            logic: "./str_transform".to_string(),
+            from: LogicRuntime::parse_from("ipc::./str_transform").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,

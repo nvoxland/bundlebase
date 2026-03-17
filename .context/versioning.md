@@ -93,7 +93,7 @@ The `attach()` method handles paths flexibly:
 ```rust
 pub async fn attach(&mut self, path: &str) -> Result<&mut Self> {
     let url = if path.contains(":") {
-        Url::parse(path)?  // Already a URL (file://, ipc://, etc.)
+        Url::parse(path)?  // Already a URL (file://, ipc::, etc.)
     } else {
         // Convert relative/absolute file path to file:// URL
         Url::from_file_path(std::fs::canonicalize(path)?).unwrap()
@@ -107,7 +107,7 @@ pub async fn attach(&mut self, path: &str) -> Result<&mut Self> {
 - Relative paths: `"test_data/file.parquet"` → resolves to absolute file:// URL
 - Absolute paths: `"/full/path/to/file.csv"` → converts to file:// URL
 - File URLs: `"file:///full/path/to/file.json"` → used as-is
-- IPC URLs: `"ipc://./my_connector"` → handled by IPC subprocess connector
+- IPC URLs: `"ipc::./my_connector"` → handled by IPC subprocess connector
 
 **Path resolution:**
 - Relative paths resolved using `std::fs::canonicalize()` (resolves from current working directory)

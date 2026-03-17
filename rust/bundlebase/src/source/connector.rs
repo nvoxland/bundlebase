@@ -514,15 +514,13 @@ impl ConnectorRegistry {
 
     /// Create a fresh instance for connectors that hold per-fetch state.
     ///
-    /// For "ipc", returns a new `IpcConnector` with its own subprocess handle.
-    /// For all other connectors, returns the shared singleton (same as `get`).
-    pub fn create_instance(&self, name: &str) -> Option<Arc<dyn Connector>> {
-        match name {
-            "ipc" => return Some(Arc::new(IpcConnector::new())),
-            "native" => return Some(Arc::new(NativeConnector::new())),
-            _ => {}
+    /// For `Ipc`, returns a new `IpcConnector` with its own subprocess handle.
+    /// For `Native`, returns a new `NativeConnector`.
+    pub fn create_instance(&self, runtime_type: crate::bundle::logic_runtime::RuntimeType) -> Option<Arc<dyn Connector>> {
+        match runtime_type {
+            crate::bundle::logic_runtime::RuntimeType::Ipc => Some(Arc::new(IpcConnector::new())),
+            crate::bundle::logic_runtime::RuntimeType::Native => Some(Arc::new(NativeConnector::new())),
         }
-        self.functions.get(name).cloned()
     }
 
     /// Get all registered connector names.
@@ -657,9 +655,10 @@ mod tests {
 
     #[test]
     fn test_ipc_native_still_in_create_instance() {
+        use crate::bundle::logic_runtime::RuntimeType;
         let registry = ConnectorRegistry::new();
-        assert!(registry.create_instance("ipc").is_some());
-        assert!(registry.create_instance("native").is_some());
+        assert!(registry.create_instance(RuntimeType::Ipc).is_some());
+        assert!(registry.create_instance(RuntimeType::Native).is_some());
     }
 
     #[test]

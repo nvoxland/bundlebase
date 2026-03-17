@@ -90,16 +90,19 @@ impl Source {
             let bundle = builder.bundle();
             let entry = bundle.resolve_connector(&self.connector)?;
 
-            let registry_type = crate::bundle::connector_definition::resolve_registry_type(entry.runner);
+            let runtime_type = entry.from.runtime_type();
             let registry = bundle.connector_registry();
             let reg = registry.read();
             let func = reg
-                .create_instance(registry_type)
-                .ok_or_else(|| format!("Unknown connector type '{}'", registry_type))?;
+                .create_instance(runtime_type)
+                .ok_or_else(|| format!("Unknown connector type '{:?}'", runtime_type))?;
+
+            // Resolve bundle-relative logic paths against the data directory
+            let resolved_from = entry.from.resolve_path(&bundle.data_dir());
 
             // Merge: inject "call" from logic (reconstructed with prefix), then overlay user args
             let mut merged_args = self.args.clone();
-            let call_string = crate::bundle::connector_definition::build_call_string(entry.runner, &entry.logic);
+            let call_string = resolved_from.build_call_string();
             merged_args.insert("call".to_string(), call_string);
 
             (func, bundle.data_dir(), bundle.config(), merged_args)
@@ -109,7 +112,7 @@ impl Source {
             let registry = bundle.connector_registry();
             let reg = registry.read();
             let func = reg
-                .create_instance(&self.connector)
+                .get(&self.connector)
                 .ok_or_else(|| format!("Unknown connector '{}'", self.connector))?;
             (func, bundle.data_dir(), bundle.config(), self.args.clone())
         };

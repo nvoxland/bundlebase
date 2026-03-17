@@ -296,14 +296,14 @@ Bundlebase supports custom connectors in two modes — **native** (in-process, z
 #### native (In-Process, Zero-Copy)
 
 ```python
-bundle.import_temp_connector('example.connector', runner='python', logic='example_connector:ExampleConnector')
+bundle.import_temp_connector('example.connector', 'python::example_connector:ExampleConnector')
 bundle.create_source('example.connector')
 ```
 
 #### IPC (Subprocess)
 
 ```python
-bundle.import_connector('example.connector', runner='ipc', logic='./example_connector')
+bundle.import_connector('example.connector', 'ipc::./example_connector')
 bundle.create_source('example.connector')
 ```
 

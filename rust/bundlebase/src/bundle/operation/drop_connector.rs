@@ -112,7 +112,8 @@ impl Operation for DropConnectorOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::connector_definition::{ConnectorEntry, Platform, Runner};
+    use crate::bundle::connector_definition::{ConnectorEntry, Platform};
+            use crate::bundle::logic_runtime::LogicRuntime;
     use crate::NamespacedName;
 
     #[test]
@@ -182,8 +183,7 @@ mod tests {
         bundle.add_connector_entry(ConnectorEntry {
             id,
             name: NamespacedName::new("acme", "weather"),
-            runner: Runner::Lib,
-            logic: "test".to_string(),
+            from: LogicRuntime::parse_from("ffi::test").unwrap(),
             platform: Platform::any(),
             temporary: false,
         });
@@ -204,8 +204,7 @@ mod tests {
         bundle.add_connector_entry(ConnectorEntry {
             id,
             name: NamespacedName::new("acme", "weather"),
-            runner: Runner::Lib,
-            logic: "test".to_string(),
+            from: LogicRuntime::parse_from("ffi::test").unwrap(),
             platform: Platform::any(),
             temporary: false,
         });
@@ -228,16 +227,14 @@ mod tests {
         bundle.add_connector_entry(ConnectorEntry {
             id: id1,
             name: NamespacedName::new("acme", "weather"),
-            runner: Runner::Lib,
-            logic: "test1".to_string(),
+            from: LogicRuntime::parse_from("ffi::test1").unwrap(),
             platform: Platform::any(),
             temporary: false,
         });
         bundle.add_connector_entry(ConnectorEntry {
             id: id2,
             name: NamespacedName::new("acme", "weather"),
-            runner: Runner::Lib,
-            logic: "test2".to_string(),
+            from: LogicRuntime::parse_from("ffi::test2").unwrap(),
             platform: "linux/amd64".parse().unwrap(),
             temporary: false,
         });
@@ -261,16 +258,14 @@ mod tests {
         bundle.add_connector_entry(ConnectorEntry {
             id: id1,
             name: NamespacedName::new("acme", "weather"),
-            runner: Runner::Lib,
-            logic: "wildcard".to_string(),
+            from: LogicRuntime::parse_from("ffi::wildcard").unwrap(),
             platform: Platform::any(),
             temporary: false,
         });
         bundle.add_connector_entry(ConnectorEntry {
             id: id2,
             name: NamespacedName::new("acme", "weather"),
-            runner: Runner::Lib,
-            logic: "linux-specific".to_string(),
+            from: LogicRuntime::parse_from("ffi::linux-specific").unwrap(),
             platform: "linux/amd64".parse().unwrap(),
             temporary: false,
         });
@@ -284,6 +279,6 @@ mod tests {
 
         // Wildcard entry should remain
         let resolved = bundle.resolve_connector("acme.weather").expect("should resolve");
-        assert_eq!(resolved.logic, "wildcard");
+        assert_eq!(resolved.from.to_logic_string(), "wildcard");
     }
 }

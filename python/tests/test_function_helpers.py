@@ -58,6 +58,12 @@ def bundlebase_metadata():
                 "kind": "scalar",
             },
             {
+                "name": "double_val_float",
+                "input_types": ["Float64"],
+                "return_type": "Float64",
+                "kind": "scalar",
+            },
+            {
                 "name": "add_vals",
                 "input_types": ["Int64", "Int64"],
                 "return_type": "Int64",
