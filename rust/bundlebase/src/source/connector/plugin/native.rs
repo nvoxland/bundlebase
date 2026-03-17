@@ -3,7 +3,7 @@
 //! Loads user connectors in-process for zero-copy Arrow data transfer.
 //! Two strategies based on the `call` argument:
 //!
-//! - `lib:/path/to/lib.so` — loads a shared library via `dlopen` and uses the
+//! - `ffi:/path/to/lib.so` — loads a shared library via `dlopen` and uses the
 //!   Arrow C Data Interface (`ArrowArrayStream`) for zero-copy streaming.
 //! - `python:module:Class` — delegates to a `NativePythonBridge` trait object
 //!   registered by the Python bindings at init time (PyO3 + `FromPyArrow`).
@@ -242,7 +242,7 @@ impl SharedLibHandle {
 /// Built-in "native" connector for in-process data loading.
 ///
 /// Supports two call strategies:
-/// - `lib:/path/to/lib.so` — shared library via Arrow C Data Interface
+/// - `ffi:/path/to/lib.so` — shared library via Arrow C Data Interface
 /// - `python:module:Class` — Python in-process via PyO3
 pub struct NativeConnector {
     lib_handle: tokio::sync::Mutex<Option<SharedLibHandle>>,
@@ -255,7 +255,7 @@ impl NativeConnector {
         }
     }
 
-    /// Ensure the shared library is loaded (only for `lib:` calls).
+    /// Ensure the shared library is loaded (only for `ffi:` calls).
     async fn ensure_lib_loaded(
         &self,
         path: &str,
@@ -299,10 +299,10 @@ enum CallStrategy {
 
 fn parse_native_call(call: &str) -> Result<CallStrategy, BundlebaseError> {
     let call = call.trim();
-    if let Some(path) = call.strip_prefix("lib:") {
+    if let Some(path) = call.strip_prefix("ffi:") {
         let path = path.trim();
         if path.is_empty() {
-            return Err("lib: call requires a library path".into());
+            return Err("ffi: call requires a library path".into());
         }
         Ok(CallStrategy::SharedLib(path.to_string()))
     } else if let Some(rest) = call.strip_prefix("python:") {
@@ -313,7 +313,7 @@ fn parse_native_call(call: &str) -> Result<CallStrategy, BundlebaseError> {
         Ok(CallStrategy::Python(call.to_string()))
     } else {
         Err(format!(
-            "Native source 'call' must start with 'lib:' or 'python:'. Got: '{}'",
+            "Native source 'call' must start with 'ffi:' or 'python:'. Got: '{}'",
             call
         )
         .into())
@@ -530,7 +530,7 @@ mod tests {
 
     #[test]
     fn test_parse_native_call_lib() {
-        match parse_native_call("lib:/path/to/lib.so") {
+        match parse_native_call("ffi:/path/to/lib.so") {
             Ok(CallStrategy::SharedLib(path)) => assert_eq!(path, "/path/to/lib.so"),
             _ => panic!("Expected SharedLib"),
         }
@@ -546,7 +546,7 @@ mod tests {
 
     #[test]
     fn test_parse_native_call_lib_empty() {
-        assert!(parse_native_call("lib:").is_err());
+        assert!(parse_native_call("ffi:").is_err());
     }
 
     #[test]
@@ -597,7 +597,7 @@ mod tests {
     #[test]
     fn test_filtered_args_json() {
         let mut args = HashMap::new();
-        args.insert("call".to_string(), "lib:test.so".to_string());
+        args.insert("call".to_string(), "ffi:test.so".to_string());
         args.insert("copy".to_string(), "true".to_string());
         args.insert("custom".to_string(), "value".to_string());
 

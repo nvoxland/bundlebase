@@ -60,8 +60,8 @@ impl BundleConnectorsTable {
 
         let ids: Vec<String> = entries.iter().map(|e| e.id.to_string()).collect();
         let names: Vec<String> = entries.iter().map(|e| e.name.to_string()).collect();
-        let runners: Vec<String> = entries.iter().map(|e| e.runner.to_string()).collect();
-        let logics: Vec<String> = entries.iter().map(|e| e.logic.clone()).collect();
+        let runners: Vec<String> = entries.iter().map(|e| e.from.runtime_name().to_string()).collect();
+        let logics: Vec<String> = entries.iter().map(|e| e.from.to_logic_string()).collect();
         let platforms: Vec<String> = entries.iter().map(|e| e.platform.to_string()).collect();
         let temporaries: Vec<bool> = entries.iter().map(|e| e.temporary).collect();
 

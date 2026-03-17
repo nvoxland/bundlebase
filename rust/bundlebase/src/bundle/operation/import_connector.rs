@@ -1,7 +1,8 @@
 //! ImportConnector operation — registers a named connector definition with logic.
 
 use crate::bundle::operation::Operation;
-use crate::bundle::connector_definition::{parse_connector_name, ConnectorEntry, Platform, Runner};
+use crate::bundle::connector_definition::{parse_connector_name, ConnectorEntry, Platform};
+use crate::bundle::logic_runtime::LogicRuntime;
 use crate::data::ObjectId;
 use crate::NamespacedName;
 use crate::{Bundle, BundlebaseError};
@@ -20,17 +21,15 @@ pub struct ImportConnectorOp {
     pub id: ObjectId,
     /// Full dotted connector name (e.g., "acme.weather")
     pub name: String,
-    /// Runner type
-    pub runner: Runner,
-    /// Logic string (e.g., path to shared library or binary)
-    pub logic: String,
+    /// Runtime and logic source (e.g., ipc::./my_connector)
+    pub from: LogicRuntime,
     /// Platform pattern in Docker-style os/arch (e.g., "linux/amd64", "*/*")
     pub platform: Platform,
 }
 
 impl ImportConnectorOp {
-    pub fn new(name: String, runner: Runner, logic: String, platform: Platform) -> Self {
-        Self { id: ObjectId::generate(), name, runner, logic, platform }
+    pub fn new(name: String, from: LogicRuntime, platform: Platform) -> Self {
+        Self { id: ObjectId::generate(), name, from, platform }
     }
 }
 
@@ -38,22 +37,12 @@ impl ImportConnectorOp {
 impl Operation for ImportConnectorOp {
     fn describe(&self) -> String {
         format!(
-            "IMPORT CONNECTOR {} (runner={}, platform={})",
-            self.name, self.runner, self.platform
+            "IMPORT CONNECTOR {} (runtime={}, platform={})",
+            self.name, self.from.runtime_name(), self.platform
         )
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
-        // Validate name has at least one dot
-        parse_connector_name(&self.name)?;
-
-        // Reject python runner (cannot be bundled)
-        if self.runner == Runner::Python {
-            return Err(
-                "python runner cannot be bundled. Use IMPORT TEMP CONNECTOR instead.".into(),
-            );
-        }
-
         Ok(())
     }
 
@@ -72,8 +61,7 @@ impl Operation for ImportConnectorOp {
         bundle.add_connector_entry(ConnectorEntry {
             id: self.id,
             name: namespaced,
-            runner: self.runner,
-            logic: self.logic.clone(),
+            from: self.from.clone(),
             platform: self.platform.clone(),
             temporary: false,
         });
@@ -89,13 +77,12 @@ mod tests {
     fn test_describe() {
         let op = ImportConnectorOp::new(
             "acme.weather".to_string(),
-            Runner::Ipc,
-            "./weather".to_string(),
+            LogicRuntime::parse_from("ipc::./weather").unwrap(),
             Platform::any(),
         );
         assert_eq!(
             op.describe(),
-            "IMPORT CONNECTOR acme.weather (runner=ipc, platform=*/*)"
+            "IMPORT CONNECTOR acme.weather (runtime=ipc, platform=*/*)"
         );
     }
 
@@ -103,8 +90,7 @@ mod tests {
     fn test_serialization() {
         let op = ImportConnectorOp::new(
             "acme.weather".to_string(),
-            Runner::Ipc,
-            "./weather-linux".to_string(),
+            LogicRuntime::parse_from("ipc::./weather-linux").unwrap(),
             "linux/amd64".parse().unwrap(),
         );
         let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
@@ -118,8 +104,7 @@ mod tests {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let op = ImportConnectorOp::new(
             "weather".to_string(),
-            Runner::Ipc,
-            "./test".to_string(),
+            LogicRuntime::parse_from("ipc::./test").unwrap(),
             Platform::any(),
         );
         let result = op.check(&bundle).await;
@@ -132,12 +117,11 @@ mod tests {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let op = ImportConnectorOp::new(
             "acme.weather".to_string(),
-            Runner::Python,
-            "mod:Class".to_string(),
+            LogicRuntime::parse_from("python::mod:Class").unwrap(),
             Platform::any(),
         );
         let result = op.check(&bundle).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("python runner cannot be bundled"));
+        assert!(result.unwrap_err().to_string().contains("'python' runtime cannot be bundled"));
     }
 }

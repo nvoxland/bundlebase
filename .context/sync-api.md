@@ -109,7 +109,7 @@ All operations work synchronously without `await`:
   ```python
   c.attach("data.parquet")
   c.attach("data.csv")
-  c.attach("ipc://./my_connector")  # Custom connector
+  c.attach("ipc::./my_connector")  # Custom connector
   ```
 
 - **`remove_column(name: str)`** - Remove column
@@ -431,19 +431,13 @@ import Bundlebase.sync as dc
 c = dc.create()
 c.import_temp_function(
     name="acme.double_val",
-    input_types=["Int64"],
-    return_type="Int64",
-    runner="python",
-    logic="my_module:double_val",
+    from_="python::my_module:double_val",
 )
 
 # Persistent function (bundled, requires serializable runner)
 c.import_function(
     name="acme.double_val",
-    input_types=["Int64"],
-    return_type="Int64",
-    runner="ipc",
-    logic="python:my_functions.py",
+    from_="ipc::python:my_functions.py",
 )
 ```
 

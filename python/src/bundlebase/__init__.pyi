@@ -258,24 +258,19 @@ class PyBundle:
     async def import_temp_function(
         self,
         name: str,
-        input_types: List[str],
-        return_type: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
-        function_type: str = "scalar",
     ) -> str:
         """
         Load a temporary SQL function (not persisted).
 
+        Types and kind are auto-detected from the function's manifest
+        (``bundlebase_metadata()``).
+
         Args:
             name: Dotted function name (e.g., "acme.double_val")
-            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
-            return_type: Arrow type name for output (e.g., "Int64")
-            runner: The runner: "python", "lib", "java", "docker", or "ipc"
-            logic: Logic string (e.g., "my_module:my_function")
+            from_: Runtime and logic string (e.g., "python::mod:func")
             platform: Platform in os/arch format (default "*/*")
-            function_type: "scalar" or "aggregate" (default "scalar")
 
         Returns:
             Confirmation message
@@ -475,24 +470,18 @@ class PyBundleBuilder:
     def import_function(
         self,
         name: str,
-        input_types: List[str],
-        return_type: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
-        function_type: str = "scalar",
     ) -> "OperationChain":
         """
         Load a named SQL function (persisted).
 
+        Types and kind are auto-detected from the function's manifest.
+
         Args:
-            name: Dotted function name (e.g., "acme.double_val")
-            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
-            return_type: Arrow type name for output (e.g., "Int64")
-            runner: The runner: "lib", "java", "docker", or "ipc"
-            logic: Logic string (e.g., path to binary or "module:function")
+            name: Dotted function name (e.g., "acme.double_val") or wildcard (e.g., "acme.*")
+            from_: Runtime and logic string (e.g., "python::mod:func")
             platform: Platform in os/arch format (default "*/*")
-            function_type: "scalar" or "aggregate" (default "scalar")
 
         Returns:
             OperationChain for fluent chaining
@@ -502,24 +491,18 @@ class PyBundleBuilder:
     def import_temp_function(
         self,
         name: str,
-        input_types: List[str],
-        return_type: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
-        function_type: str = "scalar",
     ) -> "OperationChain":
         """
         Load a temporary SQL function (not persisted).
 
+        Types and kind are auto-detected from the function's manifest.
+
         Args:
             name: Dotted function name (e.g., "acme.double_val")
-            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
-            return_type: Arrow type name for output (e.g., "Int64")
-            runner: The runner: "python", "lib", "java", "docker", or "ipc"
-            logic: Logic string (e.g., "my_module:my_function")
+            from_: Runtime and logic string (e.g., "python::mod:func")
             platform: Platform in os/arch format (default "*/*")
-            function_type: "scalar" or "aggregate" (default "scalar")
 
         Returns:
             OperationChain for fluent chaining
@@ -549,8 +532,7 @@ class PyBundleBuilder:
     def import_connector(
         self,
         name: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
     ) -> "OperationChain":
         """
@@ -558,8 +540,7 @@ class PyBundleBuilder:
 
         Args:
             name: Dot-separated connector name (e.g., "acme.weather")
-            runner: The runner: "lib", "java", "docker", or "ipc"
-            logic: The logic string (path to shared library or binary)
+            from_: Runtime and logic string (e.g., "python::mod:Class")
             platform: Docker-style platform string (default: "*/*")
 
         Returns:
@@ -570,8 +551,7 @@ class PyBundleBuilder:
     def import_temp_connector(
         self,
         name: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
     ) -> "OperationChain":
         """
@@ -579,8 +559,7 @@ class PyBundleBuilder:
 
         Args:
             name: Dot-separated connector name (e.g., "acme.weather")
-            runner: The runner: "python", "lib", "java", "docker", or "ipc"
-            logic: The logic string (e.g., "mod:Class" for python)
+            from_: Runtime and logic string (e.g., "python::mod:Class")
             platform: Docker-style platform string (default: "*/*")
 
         Returns:
@@ -1421,12 +1400,8 @@ class OperationChain:
     def import_function(
         self,
         name: str,
-        input_types: List[str],
-        return_type: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
-        function_type: str = "scalar",
     ) -> "OperationChain":
         """Queue a import_function operation."""
         ...
@@ -1434,12 +1409,8 @@ class OperationChain:
     def import_temp_function(
         self,
         name: str,
-        input_types: List[str],
-        return_type: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
-        function_type: str = "scalar",
     ) -> "OperationChain":
         """Queue a import_temp_function operation."""
         ...
@@ -1580,12 +1551,8 @@ class CreateChain:
     def import_function(
         self,
         name: str,
-        input_types: List[str],
-        return_type: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
-        function_type: str = "scalar",
     ) -> "CreateChain":
         """Queue a import_function operation."""
         ...
@@ -1593,12 +1560,8 @@ class CreateChain:
     def import_temp_function(
         self,
         name: str,
-        input_types: List[str],
-        return_type: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
-        function_type: str = "scalar",
     ) -> "CreateChain":
         """Queue a import_temp_function operation."""
         ...
@@ -1739,12 +1702,8 @@ class ExtendChain:
     def import_function(
         self,
         name: str,
-        input_types: List[str],
-        return_type: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
-        function_type: str = "scalar",
     ) -> "ExtendChain":
         """Queue a import_function operation."""
         ...
@@ -1752,12 +1711,8 @@ class ExtendChain:
     def import_temp_function(
         self,
         name: str,
-        input_types: List[str],
-        return_type: str,
-        runner: str,
-        logic: str,
+        from_: str,
         platform: str = "*/*",
-        function_type: str = "scalar",
     ) -> "ExtendChain":
         """Queue a import_temp_function operation."""
         ...

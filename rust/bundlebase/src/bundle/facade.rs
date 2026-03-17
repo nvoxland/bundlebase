@@ -306,14 +306,10 @@ pub trait BundleFacade: Send + Sync {
     /// Works on both `Bundle` and `BundleBuilder`.
     ///
     /// # Arguments
-    /// * `name` - The connector name (dot-separated)
-    /// * `entry` - The connector logic entry to add
+    /// * `entry` - The connector entry to add
     async fn import_temp_connector(
         &self,
-        name: &str,
-        runner: crate::bundle::connector_definition::Runner,
-        logic: String,
-        platform: crate::bundle::connector_definition::Platform,
+        entry: crate::bundle::connector_definition::ConnectorEntry,
     ) -> Result<(), BundlebaseError>;
 
     /// Remove runtime-only connector logic for a defined source.

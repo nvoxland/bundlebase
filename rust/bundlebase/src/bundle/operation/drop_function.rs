@@ -159,7 +159,8 @@ impl Operation for DropFunctionOp {
 mod tests {
     use super::*;
     use arrow::datatypes::DataType;
-    use crate::bundle::connector_definition::{Platform, Runner};
+    use crate::bundle::connector_definition::Platform;
+            use crate::bundle::logic_runtime::LogicRuntime;
     use crate::bundle::function_definition::{FunctionEntry, FunctionKind};
     use crate::NamespacedName;
 
@@ -248,8 +249,7 @@ mod tests {
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            runner: Runner::Ipc,
-            logic: "./test".to_string(),
+            from: LogicRuntime::parse_from("ipc::./test").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -274,8 +274,7 @@ mod tests {
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            runner: Runner::Ipc,
-            logic: "./test".to_string(),
+            from: LogicRuntime::parse_from("ipc::./test").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -302,8 +301,7 @@ mod tests {
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Utf8,
-            runner: Runner::Ipc,
-            logic: "./int_convert".to_string(),
+            from: LogicRuntime::parse_from("ipc::./int_convert").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -313,8 +311,7 @@ mod tests {
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Float64],
             return_type: DataType::Utf8,
-            runner: Runner::Ipc,
-            logic: "./float_convert".to_string(),
+            from: LogicRuntime::parse_from("ipc::./float_convert").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,

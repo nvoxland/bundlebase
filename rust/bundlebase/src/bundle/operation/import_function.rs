@@ -1,6 +1,7 @@
 //! ImportFunction operation — registers a named function definition.
 
-use crate::bundle::connector_definition::{Platform, Runner};
+use crate::bundle::connector_definition::Platform;
+use crate::bundle::logic_runtime::LogicRuntime;
 use crate::bundle::function_definition::{arrow_type_serde, parse_function_name, FunctionEntry, FunctionKind};
 use crate::data::ObjectId;
 use crate::NamespacedName;
@@ -27,10 +28,8 @@ pub struct ImportFunctionOp {
     /// Arrow type for the return value
     #[serde(with = "arrow_type_serde::single")]
     pub return_type: DataType,
-    /// Runner type
-    pub runner: Runner,
-    /// Logic string (e.g., path to binary or module:function)
-    pub logic: String,
+    /// Runtime with parsed logic (e.g., `ipc::./my_func`)
+    pub from: LogicRuntime,
     /// Platform pattern in Docker-style os/arch
     pub platform: Platform,
     /// Scalar or aggregate
@@ -42,12 +41,11 @@ impl ImportFunctionOp {
         name: String,
         input_types: Vec<DataType>,
         return_type: DataType,
-        runner: Runner,
-        logic: String,
+        from: LogicRuntime,
         platform: Platform,
         kind: FunctionKind,
     ) -> Self {
-        Self { id: ObjectId::generate(), name, input_types, return_type, runner, logic, platform, kind }
+        Self { id: ObjectId::generate(), name, input_types, return_type, from, platform, kind }
     }
 }
 
@@ -60,24 +58,12 @@ impl Operation for ImportFunctionOp {
             self.name,
             input_strs.join(", "),
             self.return_type,
-            self.runner,
+            self.from.runtime_name(),
             self.platform
         )
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
-        // Validate name has exactly one dot
-        parse_function_name(&self.name)?;
-
-        // Reject python runner (cannot be bundled)
-        if self.runner == Runner::Python {
-            return Err(
-                "python runner cannot be bundled. Use IMPORT TEMP FUNCTION instead.".into(),
-            );
-        }
-
-        // Types are already validated DataType values — no parsing needed
-
         Ok(())
     }
 
@@ -93,8 +79,7 @@ impl Operation for ImportFunctionOp {
             name: namespaced,
             input_types: self.input_types.clone(),
             return_type: self.return_type.clone(),
-            runner: self.runner,
-            logic: self.logic.clone(),
+            from: self.from.clone(),
             platform: self.platform.clone(),
             temporary: false,
             kind: self.kind,
@@ -122,8 +107,7 @@ mod tests {
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            Runner::Ipc,
-            "./my_func".to_string(),
+            LogicRuntime::parse_from("ipc::./my_func").unwrap(),
             Platform::any(),
             FunctionKind::Scalar,
         );
@@ -139,8 +123,7 @@ mod tests {
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            Runner::Ipc,
-            "./my_func".to_string(),
+            LogicRuntime::parse_from("ipc::./my_func").unwrap(),
             "linux/amd64".parse().unwrap(),
             FunctionKind::Scalar,
         );
@@ -155,8 +138,7 @@ mod tests {
             "acme.my_sum".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            Runner::Ipc,
-            "./my_sum".to_string(),
+            LogicRuntime::parse_from("ipc::./my_sum").unwrap(),
             Platform::any(),
             FunctionKind::Aggregate,
         );
@@ -173,8 +155,7 @@ mod tests {
             "double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            Runner::Ipc,
-            "./test".to_string(),
+            LogicRuntime::parse_from("ipc::./test").unwrap(),
             Platform::any(),
             FunctionKind::Scalar,
         );
@@ -190,14 +171,13 @@ mod tests {
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            Runner::Python,
-            "mod:func".to_string(),
+            LogicRuntime::parse_from("python::mod:func").unwrap(),
             Platform::any(),
             FunctionKind::Scalar,
         );
         let result = op.check(&bundle).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("python runner cannot be bundled"));
+        assert!(result.unwrap_err().to_string().contains("'python' runtime cannot be bundled"));
     }
 
     #[tokio::test]
@@ -207,8 +187,7 @@ mod tests {
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            Runner::Ipc,
-            "./my_func".to_string(),
+            LogicRuntime::parse_from("ipc::./my_func").unwrap(),
             Platform::any(),
             FunctionKind::Scalar,
         );

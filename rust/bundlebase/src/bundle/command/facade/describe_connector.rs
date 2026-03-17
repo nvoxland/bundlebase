@@ -6,6 +6,7 @@
 use crate::bundle::command::response::{single_batch_stream, OutputShape};
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::facade::BundleFacade;
+use crate::namespaced_name::NamespacedName;
 use crate::BundlebaseError;
 use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -20,12 +21,15 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct DescribeConnectorCommand {
     /// Full dotted connector name (e.g., "acme.weather")
-    pub name: String,
+    pub name: NamespacedName,
 }
 
 impl DescribeConnectorCommand {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+    pub fn new(name: impl Into<String>) -> Result<Self, BundlebaseError> {
+        let name_str: String = name.into();
+        Ok(Self {
+            name: NamespacedName::parse(&name_str, "Connector")?,
+        })
     }
 
     /// Returns the Arrow schema for describe connector output.
@@ -63,7 +67,7 @@ impl CommandParsing for DescribeConnectorCommand {
             "DESCRIBE CONNECTOR missing connector name".into()
         })?;
 
-        Ok(DescribeConnectorCommand::new(name))
+        DescribeConnectorCommand::new(name)
     }
 
     fn to_statement(&self) -> String {
@@ -82,7 +86,7 @@ impl BundleFacadeCommand for DescribeConnectorCommand {
         let all_entries = facade.connector_entries();
         let matching: Vec<_> = all_entries
             .into_iter()
-            .filter(|e| e.name == self.name.as_str())
+            .filter(|e| e.name == self.name)
             .collect();
 
         if matching.is_empty() {
@@ -92,8 +96,8 @@ impl BundleFacadeCommand for DescribeConnectorCommand {
         let schema = Self::output_schema();
 
         let names: Vec<String> = matching.iter().map(|e| e.name.to_string()).collect();
-        let runners: Vec<String> = matching.iter().map(|e| e.runner.to_string()).collect();
-        let logics: Vec<&str> = matching.iter().map(|e| e.logic.as_str()).collect();
+        let runners: Vec<String> = matching.iter().map(|e| e.from.runtime_name().to_string()).collect();
+        let logics: Vec<String> = matching.iter().map(|e| e.from.to_logic_string()).collect();
         let platforms: Vec<String> = matching.iter().map(|e| e.platform.to_string()).collect();
         let temporaries: Vec<bool> = matching.iter().map(|e| e.temporary).collect();
 
@@ -145,7 +149,7 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_describe_connector_roundtrip() {
-        let cmd = DescribeConnectorCommand::new("acme.weather");
+        let cmd = DescribeConnectorCommand::new("acme.weather").unwrap();
         let statement = cmd.to_statement();
         assert_eq!(statement, "DESCRIBE CONNECTOR acme.weather");
         let parsed = parse_command(&statement).expect("Failed to re-parse");

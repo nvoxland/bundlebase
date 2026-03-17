@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+use super::logic_runtime::LogicRuntime;
+
 /// A Docker-style platform identifier in `os/arch` format.
 ///
 /// Supports `*` as a wildcard for either component.
@@ -106,49 +108,7 @@ impl TryFrom<String> for Platform {
     }
 }
 
-/// The execution environment for connector logic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Runner {
-    Python,
-    Lib,
-    Java,
-    Docker,
-    Ipc,
-}
-
-impl fmt::Display for Runner {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Runner::Python => write!(f, "python"),
-            Runner::Lib => write!(f, "lib"),
-            Runner::Java => write!(f, "java"),
-            Runner::Docker => write!(f, "docker"),
-            Runner::Ipc => write!(f, "ipc"),
-        }
-    }
-}
-
-impl FromStr for Runner {
-    type Err = BundlebaseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "python" => Ok(Runner::Python),
-            "lib" => Ok(Runner::Lib),
-            "java" => Ok(Runner::Java),
-            "docker" => Ok(Runner::Docker),
-            "ipc" => Ok(Runner::Ipc),
-            _ => Err(format!(
-                "Invalid runner '{}'. Must be one of: python, lib, java, docker, ipc.",
-                s
-            )
-            .into()),
-        }
-    }
-}
-
-/// A single connector entry binding a name+platform to runner+logic.
+/// A single connector entry binding a name+platform to runtime+logic.
 ///
 /// Multiple entries can exist for the same connector name (different platforms
 /// or temporary vs persisted). Resolution picks the best match at runtime.
@@ -156,8 +116,7 @@ impl FromStr for Runner {
 pub struct ConnectorEntry {
     pub id: ObjectId,
     pub name: NamespacedName,
-    pub runner: Runner,
-    pub logic: String,
+    pub from: LogicRuntime,
     pub platform: Platform,
     pub temporary: bool,
 }
@@ -195,61 +154,6 @@ pub fn resolve_connector(entries: &[ConnectorEntry], name: &str) -> Result<Conne
         platforms.join(", ")
     )
     .into())
-}
-
-/// Map a user-facing runner to the internal registry type ("native" or "ipc").
-pub fn resolve_registry_type(runner: Runner) -> &'static str {
-    match runner {
-        Runner::Python | Runner::Lib => "native",
-        Runner::Java | Runner::Docker | Runner::Ipc => "ipc",
-    }
-}
-
-/// Reconstruct the prefixed call string from runner and logic for the native/ipc plugins.
-pub fn build_call_string(runner: Runner, logic: &str) -> String {
-    match runner {
-        Runner::Python => format!("python:{}", logic),
-        Runner::Lib => format!("lib:{}", logic),
-        Runner::Java => format!("java:{}", logic),
-        Runner::Docker => format!("docker:{}", logic),
-        Runner::Ipc => logic.to_string(),
-    }
-}
-
-/// Parse a FROM URL string like `runner://logic` into (Runner, logic).
-///
-/// The scheme (before `://`) is parsed as a Runner, and everything after `://` is the logic string.
-///
-/// # Examples
-/// - `"ipc://./my_func"` → `(Runner::Ipc, "./my_func")`
-/// - `"lib://./mylib.so"` → `(Runner::Lib, "./mylib.so")`
-/// - `"ipc:///usr/bin/func"` → `(Runner::Ipc, "/usr/bin/func")`
-/// - `"python://mod:func"` → `(Runner::Python, "mod:func")`
-pub fn parse_from_url(from: &str) -> Result<(Runner, String), BundlebaseError> {
-    let separator = "://";
-    let pos = from.find(separator).ok_or_else(|| -> BundlebaseError {
-        format!(
-            "Invalid FROM URL '{}'. Expected format: 'runner://logic' (e.g., 'ipc://./my_func').",
-            from
-        )
-        .into()
-    })?;
-    let scheme = &from[..pos];
-    let logic = &from[pos + separator.len()..];
-    if logic.is_empty() {
-        return Err(format!(
-            "Invalid FROM URL '{}'. Logic part after '://' cannot be empty.",
-            from
-        )
-        .into());
-    }
-    let runner: Runner = scheme.parse()?;
-    Ok((runner, logic.to_string()))
-}
-
-/// Format a runner and logic string into a FROM URL: `runner://logic`.
-pub fn to_from_url(runner: Runner, logic: &str) -> String {
-    format!("{}://{}", runner, logic)
 }
 
 /// Parse and validate a dotted connector name.
@@ -363,23 +267,21 @@ mod tests {
             ConnectorEntry {
                 id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
-                runner: Runner::Lib,
-                logic: "first".to_string(),
+                from: LogicRuntime::parse_from("ffi::first").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             },
             ConnectorEntry {
                 id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
-                runner: Runner::Lib,
-                logic: "second".to_string(),
+                from: LogicRuntime::parse_from("ffi::second").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             },
         ];
 
         let resolved = resolve_connector(&entries, "test.source").expect("should resolve");
-        assert_eq!(resolved.logic, "second");
+        assert_eq!(resolved.from.to_logic_string(), "second");
     }
 
     #[test]
@@ -387,8 +289,7 @@ mod tests {
         let entries = vec![ConnectorEntry {
             id: ObjectId::generate(),
             name: NamespacedName::new("test", "source"),
-            runner: Runner::Lib,
-            logic: "test".to_string(),
+            from: LogicRuntime::parse_from("ffi::test").unwrap(),
             platform: "nonexistent/arch".parse().unwrap(),
             temporary: false,
         }];
@@ -412,23 +313,21 @@ mod tests {
             ConnectorEntry {
                 id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
-                runner: Runner::Lib,
-                logic: "persisted".to_string(),
+                from: LogicRuntime::parse_from("ffi::persisted").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             },
             ConnectorEntry {
                 id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
-                runner: Runner::Python,
-                logic: "temporary".to_string(),
+                from: LogicRuntime::parse_from("python::temp:source").unwrap(),
                 platform: Platform::any(),
                 temporary: true,
             },
         ];
 
         let resolved = resolve_connector(&entries, "test.source").expect("should resolve");
-        assert_eq!(resolved.logic, "temporary");
+        assert_eq!(resolved.from.to_logic_string(), "temp:source");
         assert!(resolved.temporary);
     }
 
@@ -458,75 +357,4 @@ mod tests {
         assert!(parse_connector_name("acme.bad-name").is_err());
     }
 
-    #[test]
-    fn test_parse_from_url_ipc_relative() {
-        let (runner, logic) = parse_from_url("ipc://./my_func").unwrap();
-        assert_eq!(runner, Runner::Ipc);
-        assert_eq!(logic, "./my_func");
-    }
-
-    #[test]
-    fn test_parse_from_url_ipc_absolute() {
-        let (runner, logic) = parse_from_url("ipc:///usr/bin/func").unwrap();
-        assert_eq!(runner, Runner::Ipc);
-        assert_eq!(logic, "/usr/bin/func");
-    }
-
-    #[test]
-    fn test_parse_from_url_lib() {
-        let (runner, logic) = parse_from_url("lib://./mylib.so").unwrap();
-        assert_eq!(runner, Runner::Lib);
-        assert_eq!(logic, "./mylib.so");
-    }
-
-    #[test]
-    fn test_parse_from_url_python() {
-        let (runner, logic) = parse_from_url("python://mod:func").unwrap();
-        assert_eq!(runner, Runner::Python);
-        assert_eq!(logic, "mod:func");
-    }
-
-    #[test]
-    fn test_parse_from_url_docker() {
-        let (runner, logic) = parse_from_url("docker://my-image").unwrap();
-        assert_eq!(runner, Runner::Docker);
-        assert_eq!(logic, "my-image");
-    }
-
-    #[test]
-    fn test_parse_from_url_java() {
-        let (runner, logic) = parse_from_url("java://com.example.MyClass").unwrap();
-        assert_eq!(runner, Runner::Java);
-        assert_eq!(logic, "com.example.MyClass");
-    }
-
-    #[test]
-    fn test_parse_from_url_invalid_no_separator() {
-        assert!(parse_from_url("ipc:./my_func").is_err());
-    }
-
-    #[test]
-    fn test_parse_from_url_invalid_empty_logic() {
-        assert!(parse_from_url("ipc://").is_err());
-    }
-
-    #[test]
-    fn test_parse_from_url_invalid_runner() {
-        assert!(parse_from_url("unknown://./func").is_err());
-    }
-
-    #[test]
-    fn test_to_from_url() {
-        assert_eq!(to_from_url(Runner::Ipc, "./my_func"), "ipc://./my_func");
-        assert_eq!(to_from_url(Runner::Lib, "./mylib.so"), "lib://./mylib.so");
-        assert_eq!(to_from_url(Runner::Python, "mod:func"), "python://mod:func");
-        assert_eq!(to_from_url(Runner::Ipc, "/usr/bin/func"), "ipc:///usr/bin/func");
-    }
-
-    #[test]
-    fn test_from_url_roundtrip() {
-        let url = "ipc://./my_func";
-        let (runner, logic) = parse_from_url(url).unwrap();
-        assert_eq!(to_from_url(runner, &logic), url);
-    }
 }

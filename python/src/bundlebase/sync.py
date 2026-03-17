@@ -370,7 +370,7 @@ class SyncBundle:
         return SyncQueryResult(async_result)
 
     def import_temp_connector(
-        self, name: str, runner: str, logic: str,
+        self, name: str, from_: str,
         platform: str = "*/*"
     ) -> "SyncBundle":
         """Load a temporary connector with runtime-only logic (not persisted).
@@ -381,20 +381,14 @@ class SyncBundle:
 
         Args:
             name: Dot-separated connector name (e.g., "acme.weather")
-            runner: Execution environment for the connector:
-                - "python" -- in-process, easiest, temp only, best for prototyping
-                - "ipc" -- subprocess via SDK, any language, persistent or temp
-                - "lib" -- precompiled .so/.dylib, fastest, C ABI required
-                - "java" -- JVM subprocess, persistent or temp
-                - "docker" -- containerized, most isolated
-            logic: The logic string (e.g., "my_source:MySource" for python)
+            from_: Runtime and logic string (e.g., "python::mod:Class")
             platform: Docker-style platform string (default: "*/*")
 
         Returns:
             Self for fluent chaining
         """
         coro = _call_original_method(
-            self._async, "import_temp_connector", name, runner, logic, platform
+            self._async, "import_temp_connector", name, from_, platform
         )
         _loop_manager.run_sync(coro)
         return self
@@ -417,35 +411,23 @@ class SyncBundle:
         return _loop_manager.run_sync(coro)
 
     def import_temp_function(
-        self, name: str, input_types: List[str], return_type: str,
-        runner: str, logic: str, platform: str = "*/*",
-        function_type: str = "scalar"
+        self, name: str, from_: str, platform: str = "*/*"
     ) -> "SyncBundle":
         """Load a temporary SQL function (not persisted).
 
-        Temporary functions are session-scoped and support all runners
-        including ``python``.  They are not saved on commit and must be
-        re-registered each session.
+        Types and kind are auto-detected from the function's manifest
+        (``bundlebase_metadata()``).
 
         Args:
             name: Dotted function name (e.g., "acme.double_val")
-            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
-            return_type: Arrow type name for output (e.g., "Int64")
-            runner: Execution environment for the function:
-                - "python" -- in-process, easiest, temp only, best for prototyping
-                - "ipc" -- subprocess via SDK, any language, persistent or temp
-                - "lib" -- precompiled .so/.dylib, fastest, C ABI required
-                - "java" -- JVM subprocess, persistent or temp
-                - "docker" -- containerized, most isolated
-            logic: Logic string (e.g., "my_module:my_function")
+            from_: Runtime and logic string (e.g., "python::mod:func")
             platform: Platform in os/arch format (default "*/*")
-            function_type: "scalar" or "aggregate" (default "scalar")
 
         Returns:
             Self for fluent chaining
         """
         coro = _call_original_method(
-            self._async, "import_temp_function", name, input_types, return_type, runner, logic, platform, function_type
+            self._async, "import_temp_function", name, from_, platform
         )
         _loop_manager.run_sync(coro)
         return self
@@ -659,7 +641,7 @@ class SyncBundleBuilder(SyncBundle):
         return self
 
     def import_connector(
-        self, name: str, runner: str, logic: str,
+        self, name: str, from_: str,
         platform: str = "*/*"
     ) -> "SyncBundleBuilder":
         """Load a named connector with logic (persisted).
@@ -670,19 +652,14 @@ class SyncBundleBuilder(SyncBundle):
 
         Args:
             name: Dot-separated connector name (e.g., "acme.weather")
-            runner: Execution environment for the connector:
-                - "ipc" -- subprocess via SDK, any language, persistent or temp
-                - "lib" -- precompiled .so/.dylib, fastest, C ABI required
-                - "java" -- JVM subprocess, persistent or temp
-                - "docker" -- containerized, most isolated
-            logic: The logic string (path to shared library or binary)
+            from_: Runtime and logic string (e.g., "python::mod:Class")
             platform: Docker-style platform string (default: "*/*")
 
         Returns:
             Self for fluent chaining
         """
         coro = _call_original_method(
-            self._async, "import_connector", name, runner, logic, platform
+            self._async, "import_connector", name, from_, platform
         )
         self._async = _loop_manager.run_sync(coro)
         return self
@@ -704,7 +681,7 @@ class SyncBundleBuilder(SyncBundle):
         return SyncQueryResult(async_result)
 
     def import_temp_connector(
-        self, name: str, runner: str, logic: str,
+        self, name: str, from_: str,
         platform: str = "*/*"
     ) -> "SyncBundleBuilder":
         """Load a temporary connector with runtime-only logic (not persisted).
@@ -715,20 +692,14 @@ class SyncBundleBuilder(SyncBundle):
 
         Args:
             name: Dot-separated connector name (e.g., "acme.weather")
-            runner: Execution environment for the connector:
-                - "python" -- in-process, easiest, temp only, best for prototyping
-                - "ipc" -- subprocess via SDK, any language, persistent or temp
-                - "lib" -- precompiled .so/.dylib, fastest, C ABI required
-                - "java" -- JVM subprocess, persistent or temp
-                - "docker" -- containerized, most isolated
-            logic: The logic string (e.g., "my_source:MySource" for python)
+            from_: Runtime and logic string (e.g., "python::mod:Class")
             platform: Docker-style platform string (default: "*/*")
 
         Returns:
             Self for fluent chaining
         """
         coro = _call_original_method(
-            self._async, "import_temp_connector", name, runner, logic, platform
+            self._async, "import_temp_connector", name, from_, platform
         )
         self._async = _loop_manager.run_sync(coro)
         return self
@@ -895,9 +866,7 @@ class SyncBundleBuilder(SyncBundle):
         return self
 
     def import_function(
-        self, name: str, input_types: List[str], return_type: str,
-        runner: str, logic: str, platform: str = "*/*",
-        function_type: str = "scalar"
+        self, name: str, from_: str, platform: str = "*/*",
     ) -> "SyncBundleBuilder":
         """Load a named SQL function (persisted).
 
@@ -905,55 +874,37 @@ class SyncBundleBuilder(SyncBundle):
         open.  The ``python`` runner cannot be persisted -- use
         ``import_temp_function`` for in-process Python functions.
 
+        Types and kind are auto-detected from the function's manifest.
+
         Args:
-            name: Dotted function name (e.g., "acme.double_val")
-            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
-            return_type: Arrow type name for output (e.g., "Int64")
-            runner: Execution environment for the function:
-                - "ipc" -- subprocess via SDK, any language, persistent or temp
-                - "lib" -- precompiled .so/.dylib, fastest, C ABI required
-                - "java" -- JVM subprocess, persistent or temp
-                - "docker" -- containerized, most isolated
-            logic: Logic string (e.g., path to binary or "module:function")
+            name: Dotted function name (e.g., "acme.double_val") or wildcard (e.g., "acme.*")
+            from_: Runtime and logic string (e.g., "python::mod:func")
             platform: Platform in os/arch format (default "*/*")
-            function_type: "scalar" or "aggregate" (default "scalar")
 
         Returns:
             SyncBundleBuilder for chaining
         """
-        coro = _call_original_method(self._async, "import_function", name, input_types, return_type, runner, logic, platform, function_type)
+        coro = _call_original_method(self._async, "import_function", name, from_, platform)
         self._async = _loop_manager.run_sync(coro)
         return self
 
     def import_temp_function(
-        self, name: str, input_types: List[str], return_type: str,
-        runner: str, logic: str, platform: str = "*/*",
-        function_type: str = "scalar"
+        self, name: str, from_: str, platform: str = "*/*"
     ) -> "SyncBundleBuilder":
         """Load a temporary SQL function (not persisted).
 
-        Temporary functions are session-scoped and support all runners
-        including ``python``.  They are not saved on commit and must be
-        re-registered each session.
+        Types and kind are auto-detected from the function's manifest
+        (``bundlebase_metadata()``).
 
         Args:
             name: Dotted function name (e.g., "acme.double_val")
-            input_types: Arrow type names for inputs (e.g., ["Int64", "Utf8"])
-            return_type: Arrow type name for output (e.g., "Int64")
-            runner: Execution environment for the function:
-                - "python" -- in-process, easiest, temp only, best for prototyping
-                - "ipc" -- subprocess via SDK, any language, persistent or temp
-                - "lib" -- precompiled .so/.dylib, fastest, C ABI required
-                - "java" -- JVM subprocess, persistent or temp
-                - "docker" -- containerized, most isolated
-            logic: Logic string (e.g., "my_module:my_function")
+            from_: Runtime and logic string (e.g., "python::mod:func")
             platform: Platform in os/arch format (default "*/*")
-            function_type: "scalar" or "aggregate" (default "scalar")
 
         Returns:
             SyncBundleBuilder for chaining
         """
-        coro = _call_original_method(self._async, "import_temp_function", name, input_types, return_type, runner, logic, platform, function_type)
+        coro = _call_original_method(self._async, "import_temp_function", name, from_, platform)
         self._async = _loop_manager.run_sync(coro)
         return self
 

@@ -48,7 +48,7 @@ Operations are recorded and applied in sequence when querying:
 - **SetName**: Set container name
 - **SetDescription**: Set container description
 - **IndexData**: Track row indexing metadata
-- **DescribeConnector**: Returns metadata table (name, runner, logic, platform, temporary) for a registered connector
+- **DescribeConnector**: Returns metadata table (name, runtime, logic, platform, temporary) for a registered connector
 
 ## Adapter System
 
@@ -70,17 +70,17 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - `src/function/lib_bridge.rs` — FFI layer for native shared library (.so/.dylib) functions
 
 **Core Components:**
-- **FunctionEntry**: Stores function metadata (name, input/return types, runner, logic, platform, kind)
+- **FunctionEntry**: Stores function metadata (name, input/return types, runtime, logic, platform, kind)
 - **FunctionKind**: `Scalar` (row → row), `Aggregate` (many rows → one result per group), or `TableValued` (returns a table; registration only, execution not yet implemented)
 - **ScalarFunction**: DataFusion `ScalarUDFImpl` bridge for scalar functions
 - **AggregateFunction**: DataFusion `AggregateUDFImpl` bridge for aggregate functions
 - **PythonAccumulator**: `Accumulator` impl that delegates to Python class methods
 - **LibAccumulator**: `Accumulator` impl that delegates to C ABI aggregate symbols via FFI
 - **IpcAccumulator**: `Accumulator` impl that delegates to IPC subprocess via JSON-RPC + Arrow IPC; state is opaque (only state IDs cross the wire)
-- **Runner**: Execution environment — `python`, `lib`, `java`, `docker`, `ipc` (shared with connectors)
+- **Runtime**: Execution environment — `python`, `lib`, `java`, `docker`, `ipc` (shared with connectors)
 - **Platform**: OS/arch pattern for multi-platform support (e.g., `linux/amd64`, `*/*`)
 
-**Lib Runner (FFI Layer):**
+**FFI Runtime (FFI Layer):**
 - `lib_bridge::parse_lib_logic()` — Parses `path:symbol` convention (colon separates library path from symbol name)
 - `lib_bridge::load_library()` — Loads shared libraries with a global `Mutex<HashMap>` cache
 - `lib_bridge::invoke_lib_scalar()` — Converts Arrow arrays to FFI, calls C function, converts back
@@ -88,7 +88,7 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - `lib_bridge::load_lib_manifest()` — Calls `bundlebase_functions()` C symbol for bulk discovery
 - `lib_bridge::load_ipc_manifest()` — Runs `exec --bundlebase-functions` for IPC discovery
 - `ipc_bridge` module — JSON-RPC + Arrow IPC protocol for scalar invoke and aggregate (`create_state`/`accumulate`/`merge`/`evaluate`)
-- `IMPORT FUNCTION namespace.* FROM 'runner://logic'` command uses manifests to register multiple functions at once
+- `IMPORT FUNCTION namespace.* FROM 'runtime::logic'` command uses manifests to register multiple functions at once
 
 **IPC Health Check:**
 - All SDKs respond to a `ping` method with `"pong"`, used by Bundlebase to verify subprocess liveness.
@@ -107,9 +107,9 @@ Custom SQL function system supporting both scalar and aggregate functions.
 
 **Function Lifecycle:**
 
-1. **Load function**: `IMPORT FUNCTION acme.double_val FROM 'ipc://./my_func'`
+1. **Load function**: `IMPORT FUNCTION acme.double_val FROM 'ipc::./my_func'`
    - Validates dotted name (exactly one dot, alphanumeric parts)
-   - Input types, return type, and function kind (scalar/aggregate) are auto-detected from the runner
+   - Input types, return type, and function kind (scalar/aggregate) are auto-detected from the runtime
    - Creates a `FunctionEntry` stored in the bundle's `function_entries` list
    - Registers with DataFusion via `register_function_with_datafusion()`:
      - Scalar → `register_udf(ScalarUDF)`
@@ -122,8 +122,8 @@ Custom SQL function system supporting both scalar and aggregate functions.
    - DataFusion automatically supports any aggregate UDF with `OVER()` clauses
 
 3. **Temporary vs persistent**:
-   - `IMPORT TEMP FUNCTION` — session-only, not persisted, allows Python runner
-   - `IMPORT FUNCTION` — persisted as operation, rejects Python runner (can't be bundled)
+   - `IMPORT TEMP FUNCTION` — session-only, not persisted, allows Python runtime
+   - `IMPORT FUNCTION` — persisted as operation, rejects Python runtime (can't be bundled)
    - Temporary overrides persistent at resolution time
 
 **Python Aggregate Interface:**

@@ -7,6 +7,7 @@
 use crate::bundle::command::response::{single_batch_stream, OutputShape};
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::facade::BundleFacade;
+use crate::namespaced_name::NamespacedName;
 use crate::BundlebaseError;
 use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -22,12 +23,15 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct DescribeFunctionCommand {
     /// Full dotted function name (e.g., "acme.double_val")
-    pub name: String,
+    pub name: NamespacedName,
 }
 
 impl DescribeFunctionCommand {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+    pub fn new(name: impl Into<String>) -> Result<Self, BundlebaseError> {
+        let name_str: String = name.into();
+        Ok(Self {
+            name: NamespacedName::parse(&name_str, "Function")?,
+        })
     }
 
     /// Returns the Arrow schema for describe function output.
@@ -68,7 +72,7 @@ impl CommandParsing for DescribeFunctionCommand {
             "DESCRIBE FUNCTION missing function name".into()
         })?;
 
-        Ok(DescribeFunctionCommand::new(name))
+        DescribeFunctionCommand::new(name)
     }
 
     fn to_statement(&self) -> String {
@@ -87,7 +91,7 @@ impl BundleFacadeCommand for DescribeFunctionCommand {
         let all_entries = facade.function_entries();
         let matching: Vec<_> = all_entries
             .into_iter()
-            .filter(|e| e.name.to_string() == self.name)
+            .filter(|e| e.name == self.name)
             .collect();
 
         if matching.is_empty() {
@@ -106,8 +110,8 @@ impl BundleFacadeCommand for DescribeFunctionCommand {
             })
             .collect();
         let return_types: Vec<String> = matching.iter().map(|e| e.return_type.to_string()).collect();
-        let runners: Vec<String> = matching.iter().map(|e| e.runner.to_string()).collect();
-        let logics: Vec<&str> = matching.iter().map(|e| e.logic.as_str()).collect();
+        let runners: Vec<String> = matching.iter().map(|e| e.from.runtime_name().to_string()).collect();
+        let logics: Vec<String> = matching.iter().map(|e| e.from.to_logic_string()).collect();
         let platforms: Vec<String> = matching.iter().map(|e| e.platform.to_string()).collect();
         let temporaries: Vec<bool> = matching.iter().map(|e| e.temporary).collect();
 
@@ -162,7 +166,7 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_describe_function_roundtrip() {
-        let cmd = DescribeFunctionCommand::new("acme.double_val");
+        let cmd = DescribeFunctionCommand::new("acme.double_val").unwrap();
         let statement = cmd.to_statement();
         assert_eq!(statement, "DESCRIBE FUNCTION acme.double_val");
         let parsed = parse_command(&statement).expect("Failed to re-parse");

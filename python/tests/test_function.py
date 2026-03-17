@@ -19,30 +19,32 @@ ALLOW_EXTERNAL_CODE_CONFIG = {"system": {"allow_external_code": "true"}}
 
 
 @pytest.mark.asyncio
-async def test_import_function_persistent_ipc():
-    """Test that import_function with ipc runner records a persistent operation."""
-    with tempfile.TemporaryDirectory() as path:
-        c = await bundlebase.create(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
-        c = await c.import_function(
-            "acme.double_val", ["Int64"], "Int64", "ipc", "./my_func"
-        )
-        assert c is not None
-
-        # Verify the operation was recorded
-        status = c.status()
-        assert not status.is_empty()
-        assert any(
-            "IMPORT FUNCTION" in change.description for change in status.changes
+async def test_import_function_rejects_fake_binary():
+    """Test that import_function fails gracefully when the binary doesn't exist."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    with pytest.raises((ValueError, Exception)):
+        await c.import_function(
+            "acme.double_val", "ipc::nonexistent_binary"
         )
 
-        # Commit and reopen to verify persistence
-        await c.commit("Add function")
-        reopened = await bundlebase.open(path, config=ALLOW_EXTERNAL_CODE_CONFIG)
 
-        # Extend so we can inspect operations, then verify loadFunction is present
-        builder = await reopened.extend()
-        ops = builder.operations()
-        assert any(op.op_type == "loadFunction" for op in ops)
+@pytest.mark.asyncio
+async def test_import_function_rejects_non_executable():
+    """Test that import_function with a non-executable file fails at verification."""
+    import os
+
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
+        f.write(b"not a real executable")
+        fake_path = f.name
+
+    try:
+        c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+        with pytest.raises((ValueError, Exception)):
+            await c.import_function(
+                "acme.double_val", f"ipc::{fake_path}"
+            )
+    finally:
+        os.unlink(fake_path)
 
 
 @pytest.mark.asyncio
@@ -52,22 +54,22 @@ async def test_function_name_validation():
 
     # Name without a dot should fail
     with pytest.raises((ValueError, Exception)):
-        await c.import_function("double_val", ["Int64"], "Int64", "ipc", "./my_func")
+        await c.import_function("double_val", "ipc::/my_func")
 
     # Multi-level name (more than one dot) should fail
     with pytest.raises((ValueError, Exception)):
         await c.import_function(
-            "acme.math.double_val", ["Int64"], "Int64", "ipc", "./my_func"
+            "acme.math.double_val", "ipc::/my_func"
         )
 
 
 @pytest.mark.asyncio
-async def test_import_function_rejects_python_runner():
-    """Test that persistent import_function rejects the python runner."""
+async def test_import_function_rejects_python_runtime():
+    """Test that persistent import_function rejects the python runtime."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    with pytest.raises(ValueError, match="python runner cannot be bundled"):
+    with pytest.raises(ValueError, match="'python' runtime cannot be bundled"):
         await c.import_function(
-            "acme.double_val", ["Int64"], "Int64", "python", "test_function:double_val"
+            "acme.double_val", "python::test_function:double_val"
         )
 
 
@@ -76,7 +78,7 @@ async def test_import_temp_function():
     """Test that import_temp_function does not record a persistent operation."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.import_temp_function(
-        "acme.double_val", ["Int64"], "Int64", "python", "test_function:double_val"
+        "acme.double_val", "python::test_function_helpers:double_val"
     )
     assert c is not None
 
@@ -91,58 +93,43 @@ async def test_import_temp_function():
 
 
 @pytest.mark.asyncio
-async def test_drop_function():
-    """Test that drop_function records the drop operation."""
+async def test_drop_temp_function():
+    """Test that drop_temp_function removes a temporary function."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_function(
-        "acme.double_val", ["Int64"], "Int64", "ipc", "./my_func"
+    c = await c.import_temp_function(
+        "acme.double_val", "python::test_function_helpers:double_val"
     )
     c = await c.drop_function("acme.double_val")
     assert c is not None
 
-    # Verify both create and drop operations are recorded
-    status = c.status()
-    descriptions = [change.description for change in status.changes]
-    assert any("IMPORT FUNCTION" in d for d in descriptions)
-    assert any("DROP FUNCTION" in d for d in descriptions)
-
 
 @pytest.mark.asyncio
 async def test_import_function_with_platform():
-    """Test IMPORT FUNCTION with explicit platform."""
+    """Test IMPORT FUNCTION with explicit platform rejects fake binary."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_function(
-        "acme.double_val", ["Int64"], "Int64", "ipc", "./my_func", "linux/amd64"
-    )
-
-    # Verify the operation was recorded with platform info
-    status = c.status()
-    assert any(
-        "IMPORT FUNCTION" in change.description for change in status.changes
-    )
-
-
-@pytest.mark.asyncio
-async def test_import_function_multiple_input_types():
-    """Test IMPORT FUNCTION with multiple input types."""
-    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    c = await c.import_function(
-        "acme.concat_vals", ["Utf8", "Utf8"], "Utf8", "ipc", "./concat_func"
-    )
-
-    status = c.status()
-    assert any(
-        "IMPORT FUNCTION" in change.description for change in status.changes
-    )
-
-
-@pytest.mark.asyncio
-async def test_function_type_validation_error():
-    """Test that an invalid Arrow type name gives a clear error."""
-    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
-    with pytest.raises((ValueError, Exception), match="(?i)bad.?type|unknown|unsupported|invalid"):
+    with pytest.raises((ValueError, Exception)):
         await c.import_function(
-            "acme.bad_func", ["BadType"], "Int64", "ipc", "./my_func"
+            "acme.double_val", "ipc::/my_func", "linux/amd64"
+        )
+
+
+@pytest.mark.asyncio
+async def test_import_function_rejects_nonexistent_binary():
+    """Test IMPORT FUNCTION fails with non-existent binary."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    with pytest.raises((ValueError, Exception)):
+        await c.import_function(
+            "acme.concat_vals", "ipc::concat_func"
+        )
+
+
+@pytest.mark.asyncio
+async def test_function_not_found_in_manifest():
+    """Test that importing a function not found in the manifest gives a clear error."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    with pytest.raises((ValueError, Exception)):
+        await c.import_function(
+            "acme.bad_func", "ipc::/my_func"
         )
 
 
@@ -153,10 +140,7 @@ async def test_python_udf_scalar():
     c = await c.attach(datafile("userdata.parquet"))
     c = await c.import_temp_function(
         "test.double_val",
-        ["Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:double_val",
+        "python::test_function_helpers:double_val",
     )
     result = await c.query("SELECT id, test.double_val(id) as doubled FROM bundle LIMIT 5")
     df = await result.to_pandas()
@@ -172,10 +156,7 @@ async def test_python_udf_multi_arg():
     c = await c.attach(datafile("userdata.parquet"))
     c = await c.import_temp_function(
         "test.add_vals",
-        ["Int64", "Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:add_vals",
+        "python::test_function_helpers:add_vals",
     )
     result = await c.query("SELECT id, test.add_vals(id, id) as added FROM bundle LIMIT 5")
     df = await result.to_pandas()
@@ -191,10 +172,7 @@ async def test_python_udf_in_where_clause():
     c = await c.attach(datafile("userdata.parquet"))
     c = await c.import_temp_function(
         "test.double_val",
-        ["Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:double_val",
+        "python::test_function_helpers:double_val",
     )
 
     result = await c.query(
@@ -217,11 +195,7 @@ async def test_python_udaf_sum():
     c = await c.attach(datafile("userdata.parquet"))
     c = await c.import_temp_function(
         "test.my_sum",
-        ["Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:MySum",
-        function_type="aggregate",
+        "python::test_function_helpers:MySum",
     )
 
     # Compute the sum via our custom aggregate and compare with SQL SUM
@@ -240,11 +214,7 @@ async def test_python_udaf_in_group_by():
     c = await c.attach(datafile("userdata.parquet"))
     c = await c.import_temp_function(
         "test.my_sum",
-        ["Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:MySum",
-        function_type="aggregate",
+        "python::test_function_helpers:MySum",
     )
 
     result = await c.query(
@@ -264,11 +234,7 @@ async def test_python_udaf_as_window():
     c = await c.attach(datafile("userdata.parquet"))
     c = await c.import_temp_function(
         "test.my_sum",
-        ["Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:MySum",
-        function_type="aggregate",
+        "python::test_function_helpers:MySum",
     )
 
     result = await c.query(
@@ -290,14 +256,10 @@ async def test_load_aggregate_function_via_api():
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.attach(datafile("userdata.parquet"))
 
-    # Use the function_type parameter to create an aggregate function
+    # Aggregate kind is auto-detected from bundlebase_metadata()
     c = await c.import_temp_function(
         "test.my_sum",
-        ["Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:MySum",
-        function_type="aggregate",
+        "python::test_function_helpers:MySum",
     )
 
     result = await c.query(
@@ -320,18 +282,12 @@ async def test_function_overloading_same_name_different_types():
     # Register Int64 overload
     c = await c.import_temp_function(
         "test.double_val",
-        ["Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:double_val",
+        "python::test_function_helpers:double_val",
     )
-    # Register Float64 overload (same name, different types)
+    # Register Float64 overload (same name, different types — auto-detected from manifest)
     c = await c.import_temp_function(
         "test.double_val",
-        ["Float64"],
-        "Float64",
-        "python",
-        "test_function_helpers:double_val_float",
+        "python::test_function_helpers:double_val_float",
     )
 
     # Query with Int64 column
@@ -362,18 +318,12 @@ async def test_function_overloading_dispatch_correct_overload():
     # Register Int64 overload (doubles)
     c = await c.import_temp_function(
         "test.double_val",
-        ["Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:double_val",
+        "python::test_function_helpers:double_val",
     )
     # Register Float64 overload
     c = await c.import_temp_function(
         "test.double_val",
-        ["Float64"],
-        "Float64",
-        "python",
-        "test_function_helpers:double_val_float",
+        "python::test_function_helpers:double_val_float",
     )
 
     # Int64 input should invoke the Int64 overload
@@ -394,13 +344,14 @@ async def test_function_overloading_dispatch_correct_overload():
 
 @pytest.mark.asyncio
 async def test_function_overloading_drop_with_platform():
-    """Test dropping a function overload with platform filter."""
+    """Test dropping a function with platform filter via temp functions."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.attach(datafile("userdata.parquet"))
 
-    # Import function with platform
-    c = await c.import_function(
-        "test.platform_fn", ["Int64"], "Int64", "ipc", "./my_func", "linux/amd64"
+    # Import temp function with platform
+    c = await c.import_temp_function(
+        "test.platform_fn",
+        "python::test_function_helpers:double_val", "linux/amd64"
     )
     # Drop only the linux/amd64 platform entry
     c = await c.drop_function("test.platform_fn", "linux/amd64")
@@ -416,10 +367,7 @@ async def test_function_overloading_error_unsupported_types():
     # Register only Int64 overload
     c = await c.import_temp_function(
         "test.int_only",
-        ["Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:double_val",
+        "python::test_function_helpers:double_val",
     )
 
     # Calling with Utf8 should fail
@@ -436,23 +384,16 @@ async def test_function_overloading_mixed_kinds_rejected():
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     c = await c.attach(datafile("userdata.parquet"))
 
-    # Register as scalar
+    # Register as scalar (auto-detected from manifest)
     c = await c.import_temp_function(
         "test.mixed_func",
-        ["Int64"],
-        "Int64",
-        "python",
-        "test_function_helpers:double_val",
+        "python::test_function_helpers:double_val",
     )
-    # Try to register same name as aggregate — should fail
+    # Try to register same name as aggregate (auto-detected from manifest) — should fail
     with pytest.raises((ValueError, Exception), match="(?i)mixed kinds"):
         await c.import_temp_function(
             "test.mixed_func",
-            ["Int64"],
-            "Int64",
-            "python",
-            "test_function_helpers:MySum",
-            function_type="aggregate",
+            "python::test_function_helpers:MySum",
         )
 
 
@@ -466,7 +407,7 @@ def test_bundlebase_metadata_convention():
     metadata = test_function_helpers.bundlebase_metadata()
     assert "functions" in metadata
     functions = metadata["functions"]
-    assert len(functions) == 3
+    assert len(functions) == 4
 
     # Verify double_val entry
     double_val = next(f for f in functions if f["name"] == "double_val")

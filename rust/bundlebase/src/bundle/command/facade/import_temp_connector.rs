@@ -8,8 +8,10 @@ use crate::bundle::command::response::OutputShape;
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::facade::BundleFacade;
-use crate::bundle::connector_definition::{parse_from_url, to_from_url, Platform, Runner};
+use crate::bundle::connector_definition::{ConnectorEntry, Platform};
+use crate::bundle::logic_runtime::LogicRuntime;
 use crate::BundlebaseError;
+use crate::NamespacedName;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -24,10 +26,8 @@ use std::sync::Arc;
 pub struct ImportTempConnectorCommand {
     /// Full dotted connector name
     pub name: String,
-    /// Runner type
-    pub runner: Runner,
-    /// Logic string (e.g., "mod:Class" for python, path for lib/ipc)
-    pub logic: String,
+    /// Full from string (e.g., "python::mod:Class", "ipc::./source")
+    pub from: String,
     /// Platform in Docker-style os/arch
     pub platform: Platform,
 }
@@ -35,14 +35,12 @@ pub struct ImportTempConnectorCommand {
 impl ImportTempConnectorCommand {
     pub fn new(
         name: impl Into<String>,
-        runner: Runner,
-        logic: impl Into<String>,
+        from: impl Into<String>,
         platform: Platform,
     ) -> Self {
         Self {
             name: name.into(),
-            runner,
-            logic: logic.into(),
+            from: from.into(),
             platform,
         }
     }
@@ -69,7 +67,7 @@ impl CommandParsing for ImportTempConnectorCommand {
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut name = None;
-        let mut from_url = None;
+        let mut from = None;
         let mut args = HashMap::new();
 
         for inner_pair in pair.into_inner() {
@@ -78,7 +76,7 @@ impl CommandParsing for ImportTempConnectorCommand {
                     name = Some(inner_pair.as_str().to_string());
                 }
                 Rule::quoted_string => {
-                    from_url = Some(extract_string_content(inner_pair.as_str())?);
+                    from = Some(extract_string_content(inner_pair.as_str())?);
                 }
                 Rule::source_args => {
                     for arg_pair in inner_pair.into_inner() {
@@ -110,22 +108,19 @@ impl CommandParsing for ImportTempConnectorCommand {
             "IMPORT TEMP CONNECTOR missing connector name".into()
         })?;
 
-        let from_url = from_url.ok_or_else(|| -> BundlebaseError {
+        let from = from.ok_or_else(|| -> BundlebaseError {
             "IMPORT TEMP CONNECTOR missing FROM clause".into()
         })?;
-
-        let (runner, logic) = parse_from_url(&from_url)?;
 
         let platform: Platform = match args.remove("platform") {
             Some(s) => s.parse()?,
             None => Platform::any(),
         };
 
-        Ok(ImportTempConnectorCommand::new(name, runner, logic, platform))
+        Ok(ImportTempConnectorCommand::new(name, from, platform))
     }
 
     fn to_statement(&self) -> String {
-        let from_url = to_from_url(self.runner, &self.logic);
         let mut with_parts = Vec::new();
         if self.platform != Platform::any() {
             with_parts.push(format!("platform = {}", escape_string(&self.platform.to_string())));
@@ -135,13 +130,13 @@ impl CommandParsing for ImportTempConnectorCommand {
             format!(
                 "IMPORT TEMP CONNECTOR {} FROM {}",
                 self.name,
-                escape_string(&from_url)
+                escape_string(&self.from)
             )
         } else {
             format!(
                 "IMPORT TEMP CONNECTOR {} FROM {} WITH ({})",
                 self.name,
-                escape_string(&from_url),
+                escape_string(&self.from),
                 with_parts.join(", ")
             )
         }
@@ -156,7 +151,16 @@ impl BundleFacadeCommand for ImportTempConnectorCommand {
         self: Box<Self>,
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
-        facade.import_temp_connector(&self.name, self.runner, self.logic.clone(), self.platform).await?;
+        let from = LogicRuntime::parse_from(&self.from)?;
+        let namespaced: NamespacedName = self.name.parse()?;
+        let entry = ConnectorEntry {
+            id: crate::data::ObjectId::generate(),
+            name: namespaced,
+            from,
+            platform: self.platform,
+            temporary: true,
+        };
+        facade.import_temp_connector(entry).await?;
         Ok(format!("Loaded temporary connector: {}", self.name))
     }
 }
@@ -169,13 +173,12 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_import_temp_connector() {
-        let input = "IMPORT TEMP CONNECTOR acme.weather FROM 'python://mod:Class'";
+        let input = "IMPORT TEMP CONNECTOR acme.weather FROM 'python::mod:Class'";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::ImportTempConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
-                assert_eq!(c.runner, Runner::Python);
-                assert_eq!(c.logic, "mod:Class");
+                assert_eq!(c.from, "python::mod:Class");
                 assert_eq!(c.platform, Platform::any());
             }
             _ => panic!("Expected ImportTempConnector variant"),
@@ -186,18 +189,16 @@ mod parsing_tests {
     fn test_parse_import_temp_connector_roundtrip() {
         let cmd = ImportTempConnectorCommand::new(
             "acme.weather",
-            Runner::Python,
-            "mod:Class",
+            "python::mod:Class",
             Platform::any(),
         );
         let statement = cmd.to_statement();
-        assert_eq!(statement, "IMPORT TEMP CONNECTOR acme.weather FROM 'python://mod:Class'");
+        assert_eq!(statement, "IMPORT TEMP CONNECTOR acme.weather FROM 'python::mod:Class'");
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::ImportTempConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
-                assert_eq!(c.runner, Runner::Python);
-                assert_eq!(c.logic, "mod:Class");
+                assert_eq!(c.from, "python::mod:Class");
                 assert_eq!(c.platform, Platform::any());
             }
             _ => panic!("Expected ImportTempConnector variant"),
@@ -206,13 +207,12 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_import_temp_connector_with_platform() {
-        let input = "IMPORT TEMP CONNECTOR acme.weather FROM 'ipc://./source' WITH (platform = 'linux/amd64')";
+        let input = "IMPORT TEMP CONNECTOR acme.weather FROM 'ipc::./source' WITH (platform = 'linux/amd64')";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::ImportTempConnector(c) => {
                 assert_eq!(c.name, "acme.weather");
-                assert_eq!(c.runner, Runner::Ipc);
-                assert_eq!(c.logic, "./source");
+                assert_eq!(c.from, "ipc::./source");
                 assert_eq!(c.platform.os, "linux");
                 assert_eq!(c.platform.arch, "amd64");
             }

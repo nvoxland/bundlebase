@@ -5,26 +5,26 @@ Custom connectors let you write data providers in any language. The `runner` par
 | Type | How It Works | Performance | Languages |
 |------|-------------|-------------|-----------|
 | **`python`** | In-process via PyO3 | Zero-copy Arrow | Python |
-| **`lib`** | In-process via `dlopen` of a shared library | Zero-copy Arrow | Rust, Go, Java |
+| **`ffi`** | In-process via `dlopen` of a shared library | Zero-copy Arrow | Rust, Go, Java |
 | **`java`** | Subprocess via `java -jar` | Serialized Arrow IPC | Java |
 | **`docker`** | Subprocess via `docker run` | Serialized Arrow IPC | Any language |
 | **`ipc`** | Subprocess via direct command execution | Serialized Arrow IPC | Any language |
 
-Internally, `python` and `lib` run **in-process** (native mode) for zero-copy Arrow transfer. `java`, `docker`, and `ipc` run as **subprocesses** communicating over stdin/stdout.
+Internally, `python` and `ffi` run **in-process** (native mode) for zero-copy Arrow transfer. `java`, `docker`, and `ipc` run as **subprocesses** communicating over stdin/stdout.
 
 **Your source code is the same regardless of type** — only the entry point differs. SDKs for Python, Go, Java, and Rust handle the protocol automatically.
 
-## Runner URI Format Reference
+## Runtime URI Format Reference
 
-When importing a connector, the `FROM` clause uses a `runner://logic` URI. This table shows the format for each runner:
+When importing a connector, the `FROM` clause uses a `runner::logic` URI. This table shows the format for each runtime:
 
-| Runner | URI Format | Example |
-|--------|-----------|---------|
-| `ipc` | `ipc://command` | `ipc://python my_module.py` |
-| `lib` | `lib://path[:symbol]` | `lib://./libexample.so:my_func` |
-| `python` | `python://module:Class` | `python://my_source:MyConnector` |
-| `java` | `java://path.jar` | `java://./connectors/my.jar` |
-| `docker` | `docker://image:tag` | `docker://myorg/myconnector:latest` |
+| Runtime | URI Format | Example |
+|---------|-----------|---------|
+| `ipc` | `ipc::command` | `ipc::python my_module.py` |
+| `ffi` | `ffi::path[:symbol]` | `ffi::libexample.so:my_func` |
+| `python` | `python::module:Class` | `python::my_source:MyConnector` |
+| `java` | `java::path.jar` | `java::connectors/my.jar` |
+| `docker` | `docker::image:tag` | `docker::myorg/myconnector:latest` |
 
 ## Built-in Connectors
 
@@ -54,7 +54,7 @@ To remove connectors:
 - [**Drop connector**](#drop-connector) — removes the connector (or just a specific platform's logic)
 - [**Drop temp connector**](#drop-temp-connector) — removes runtime-only logic entries
 
-## Choosing a Runner
+## Choosing a Runtime
 
 **Use `python` when:**
 
@@ -62,7 +62,7 @@ To remove connectors:
 - You need maximum performance with zero serialization overhead
 - Note: requires [`IMPORT TEMP CONNECTOR`](#import-temp-connector) since Python code can't be bundled
 
-**Use `lib` when:**
+**Use `ffi` when:**
 
 - You have a compiled shared library (`.so`/`.dylib`/`.dll`) from Rust, Go, or Java
 - You need zero-copy performance with a portable, bundled source
@@ -97,8 +97,7 @@ Creates a named connector with its runner and logic. The connector definition an
     ```python
     bundle = await bundle.import_connector(
         'acme.weather',
-        runner='ipc',
-        logic='./my_connector'
+        'ipc::my_connector'
     )
     ```
 
@@ -107,15 +106,14 @@ Creates a named connector with its runner and logic. The connector definition an
     ```python
     bundle.import_connector(
         'acme.weather',
-        runner='ipc',
-        logic='./my_connector'
+        'ipc::my_connector'
     )
     ```
 
 === "SQL"
 
     ```sql
-    IMPORT CONNECTOR acme.weather FROM 'ipc://my_connector'
+    IMPORT CONNECTOR acme.weather FROM 'ipc::my_connector'
     ```
 
 **Parameters:**
@@ -123,8 +121,7 @@ Creates a named connector with its runner and logic. The connector definition an
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | *(required)* | Dot-separated connector name (e.g., `"acme.weather"`) |
-| `runner` | `str` | *(required)* | How to run the connector (see [Runner Values](#runner-values)) |
-| `logic` | `str` | *(required)* | What to run — depends on the runner (see [Runner Values](#runner-values)) |
+| `from_` | `str` | *(required)* | Runner URI in `runner::logic` format (e.g., `"ipc::my_connector"`, `"python::my_module:MyConnector"`) |
 | `platform` | `str` | `"*/*"` | Target platform (e.g., `"linux/amd64"`, `"darwin/arm64"`, `"*/*"` for all) |
 
 !!! note
@@ -151,8 +148,7 @@ Creates a connector with logic at **runtime only** — nothing is persisted into
     ```python
     bundle = await bundle.import_temp_connector(
         'acme.weather',
-        runner='python',
-        logic='my_module:MyConnector'
+        'python::my_module:MyConnector'
     )
     ```
 
@@ -161,18 +157,17 @@ Creates a connector with logic at **runtime only** — nothing is persisted into
     ```python
     bundle.import_temp_connector(
         'acme.weather',
-        runner='python',
-        logic='my_module:MyConnector'
+        'python::my_module:MyConnector'
     )
     ```
 
 === "SQL"
 
     ```sql
-    IMPORT TEMP CONNECTOR acme.weather FROM 'python://my_module:MyConnector'
+    IMPORT TEMP CONNECTOR acme.weather FROM 'python::my_module:MyConnector'
     ```
 
-**Parameters:** Same as [`IMPORT CONNECTOR`](#import-connector), but accepts all runners including `python`.
+**Parameters:** Same as [`IMPORT CONNECTOR`](#import-connector), but the `from_` parameter accepts all runners including `python`.
 
 Temporary logic takes precedence over persisted logic when both exist for the same platform. This is useful for development workflows where you want to test a Python connector locally before packaging it as a shared library or Docker image.
 
@@ -418,14 +413,14 @@ A `StableUrl` contains a single `url` field. When provided, Bundlebase can cache
 
 Any extra key-value arguments passed in the [`CREATE SOURCE`](#create-source) configuration are forwarded to your `discover`, `data`, and `stable_url` methods. This lets you parameterize your connector without changing code.
 
-## Runner Values
+## Runtime Values
 
 The `runner` parameter determines how Bundlebase loads and runs the connector:
 
-| Runner   | Mode | `logic` value | What happens |
+| Runtime  | Mode | `logic` value | What happens |
 |----------|------|--------------|--------------|
 | `python` | Native (in-process) | `module:Class` | Imports the Python class via PyO3 and calls it directly |
-| `lib`    | Native (in-process) | Path to `.so`/`.dylib`/`.dll` | `dlopen`s the shared library and uses Arrow C Data Interface |
+| `ffi`    | Native (in-process) | Path to `.so`/`.dylib`/`.dll` | `dlopen`s the shared library and uses Arrow C Data Interface |
 | `java`   | IPC (subprocess) | Path to JAR file | Runs `java -jar <logic>` as a subprocess |
 | `docker` | IPC (subprocess) | Docker image name | Runs `docker run -i --rm <logic>` as a subprocess |
 | `ipc`    | IPC (subprocess) | Command to run | Executes `<logic>` directly (whitespace-split) as a subprocess |
@@ -444,7 +439,7 @@ CMD ["python", "/app/example_connector.py"]
 Use with [`IMPORT CONNECTOR`](#import-connector):
 
 ```python
-bundle.import_connector('example.connector', runner='docker', logic='myorg/example-connector:latest')
+bundle.import_connector('example.connector', 'docker::myorg/example-connector:latest')
 bundle.create_source('example.connector')
 ```
 

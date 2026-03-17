@@ -3,11 +3,8 @@
 //! Bridges `FunctionEntry` definitions (with `kind == Aggregate`) to DataFusion's UDAF system.
 //! Dispatches to Python via the `PythonFunctionBridge` aggregate methods.
 
-use crate::bundle::connector_definition::Runner;
 use crate::bundle::function_definition::FunctionEntry;
 use crate::function::ipc_bridge::{self, SubprocessCache};
-use crate::function::lib_bridge::{parse_lib_logic, LibAccumulator};
-use crate::function::parse_python_logic;
 use crate::function::python_bridge::get_python_function_bridge;
 use crate::BundlebaseError;
 use arrow::datatypes::DataType;
@@ -27,71 +24,7 @@ fn create_accumulator_for_entry(
     entry: &FunctionEntry,
     subprocess_cache: &SubprocessCache,
 ) -> DFResult<Box<dyn Accumulator>> {
-    match entry.runner {
-        Runner::Python => {
-            let (module, class_name) = parse_python_logic(&entry.logic)?;
-
-            let bridge = get_python_function_bridge().map_err(|e| {
-                datafusion::common::DataFusionError::Execution(format!(
-                    "Cannot create accumulator for '{}': {}",
-                    name, e
-                ))
-            })?;
-
-            let initial_state = bridge
-                .aggregate_create_state(module, class_name)
-                .map_err(|e| {
-                    datafusion::common::DataFusionError::Execution(format!(
-                        "Failed to create initial state for '{}': {}",
-                        name, e
-                    ))
-                })?;
-
-            Ok(Box::new(PythonAccumulator {
-                module: module.to_string(),
-                class_name: class_name.to_string(),
-                state: initial_state,
-                function_name: name.to_string(),
-            }))
-        }
-        Runner::Lib => {
-            let (lib_path, symbol_opt) = parse_lib_logic(&entry.logic).map_err(|e| {
-                datafusion::common::DataFusionError::Execution(format!(
-                    "Invalid lib logic for aggregate '{}': {}",
-                    name, e
-                ))
-            })?;
-            let symbol = symbol_opt.unwrap_or(&entry.name.name);
-
-            let acc = LibAccumulator::new(lib_path, symbol, entry.return_type.clone())
-                .map_err(|e| {
-                    datafusion::common::DataFusionError::Execution(format!(
-                        "Failed to create lib accumulator for '{}': {}",
-                        name, e
-                    ))
-                })?;
-            Ok(Box::new(acc))
-        }
-        Runner::Ipc | Runner::Java | Runner::Docker => {
-            let state_id =
-                ipc_bridge::ipc_aggregate_create_state(subprocess_cache, &entry.logic, &entry.name.name)
-                    .map_err(|e| {
-                        datafusion::common::DataFusionError::Execution(format!(
-                            "Failed to create IPC aggregate state for '{}': {}",
-                            name, e
-                        ))
-                    })?;
-
-            Ok(Box::new(IpcAccumulator {
-                logic: entry.logic.clone(),
-                function_name: entry.name.name.clone(),
-                display_name: name.to_string(),
-                state_id,
-                return_type: entry.return_type.clone(),
-                subprocess_cache: Arc::clone(subprocess_cache),
-            }))
-        }
-    }
+    entry.from.create_accumulator(name, &entry.name.name, &entry.return_type, subprocess_cache)
 }
 
 /// Find the overload whose input_types match the actual argument types.
@@ -208,10 +141,7 @@ impl AggregateUDFImpl for AggregateFunction {
         };
 
         // IPC accumulators use Utf8 state (opaque state ID), others use return type
-        let state_type = match entry.runner {
-            Runner::Ipc | Runner::Java | Runner::Docker => DataType::Utf8,
-            _ => entry.return_type.clone(),
-        };
+        let state_type = entry.from.aggregate_state_type(&entry.return_type);
 
         Ok(vec![Arc::new(arrow::datatypes::Field::new(
             "state",
@@ -240,11 +170,11 @@ impl AggregateUDFImpl for AggregateFunction {
 
 /// Accumulator that delegates to Python aggregate class methods.
 #[derive(Debug)]
-struct PythonAccumulator {
-    module: String,
-    class_name: String,
-    state: ScalarValue,
-    function_name: String,
+pub(crate) struct PythonAccumulator {
+    pub(crate) module: String,
+    pub(crate) class_name: String,
+    pub(crate) state: ScalarValue,
+    pub(crate) function_name: String,
 }
 
 impl Accumulator for PythonAccumulator {
@@ -334,13 +264,13 @@ impl Accumulator for PythonAccumulator {
 ///
 /// State is held server-side in the subprocess; the accumulator only holds an opaque state ID.
 #[derive(Debug)]
-struct IpcAccumulator {
-    logic: String,
-    function_name: String,
-    display_name: String,
-    state_id: String,
-    return_type: DataType,
-    subprocess_cache: SubprocessCache,
+pub(crate) struct IpcAccumulator {
+    pub(crate) logic: String,
+    pub(crate) function_name: String,
+    pub(crate) display_name: String,
+    pub(crate) state_id: String,
+    pub(crate) return_type: DataType,
+    pub(crate) subprocess_cache: SubprocessCache,
 }
 
 impl Accumulator for IpcAccumulator {
@@ -431,9 +361,11 @@ impl Accumulator for IpcAccumulator {
 mod tests {
     use super::*;
     use crate::bundle::connector_definition::Platform;
+        use crate::bundle::logic_runtime::LogicRuntime;
     use crate::bundle::function_definition::FunctionKind;
     use crate::data::ObjectId;
     use crate::function::ipc_bridge::new_subprocess_cache;
+    use crate::function::parse_python_logic;
     use crate::NamespacedName;
 
     #[test]
@@ -443,8 +375,7 @@ mod tests {
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            runner: Runner::Python,
-            logic: "my_module:MySum".to_string(),
+            from: LogicRuntime::parse_from("python::my_module:MySum").unwrap(),
             platform: Platform::any(),
             temporary: true,
             kind: FunctionKind::Aggregate,
@@ -492,8 +423,7 @@ mod tests {
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            runner: Runner::Python,
-            logic: "my_module:MySum".to_string(),
+            from: LogicRuntime::parse_from("python::my_module:MySum").unwrap(),
             platform: Platform::any(),
             temporary: true,
             kind: FunctionKind::Aggregate,
@@ -510,8 +440,7 @@ mod tests {
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            runner: Runner::Python,
-            logic: "my_module:IntSum".to_string(),
+            from: LogicRuntime::parse_from("python::my_module:IntSum").unwrap(),
             platform: Platform::any(),
             temporary: true,
             kind: FunctionKind::Aggregate,
@@ -521,8 +450,7 @@ mod tests {
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Float64],
             return_type: DataType::Float64,
-            runner: Runner::Python,
-            logic: "my_module:FloatSum".to_string(),
+            from: LogicRuntime::parse_from("python::my_module:FloatSum").unwrap(),
             platform: Platform::any(),
             temporary: true,
             kind: FunctionKind::Aggregate,

@@ -183,10 +183,10 @@ See [Custom Connectors](../guide/custom-connectors/index.md) for full details an
 Creates a named connector with its runner and logic. The connector definition is **persisted** into the bundle's commit history.
 
 ```sql
-IMPORT CONNECTOR <name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT CONNECTOR <name> FROM '<runner>::<logic>' [WITH (<key> = '<value>', ...)]
 ```
 
-The `runner://logic` URI specifies both the runner and what to run. An optional `WITH` clause can provide additional parameters like `platform`.
+The `runner::logic` URI specifies both the runner and what to run. An optional `WITH` clause can provide additional parameters like `platform`.
 
 !!! note
     The `python` runner is not allowed with `IMPORT CONNECTOR` because Python code cannot be bundled. Use `IMPORT TEMP CONNECTOR` instead.
@@ -195,19 +195,19 @@ The `runner://logic` URI specifies both the runner and what to run. An optional 
 
 ```sql
 -- Shared library (Rust, Go, Java)
-IMPORT CONNECTOR example.connector FROM 'lib://./target/release/libexample_connector.so'
+IMPORT CONNECTOR example.connector FROM 'ffi::./target/release/libexample_connector.so'
 
 -- Java JAR
-IMPORT CONNECTOR example.connector FROM 'java://target/example-connector.jar'
+IMPORT CONNECTOR example.connector FROM 'java::target/example-connector.jar'
 
 -- Docker image
-IMPORT CONNECTOR example.connector FROM 'docker://myorg/example-connector:latest'
+IMPORT CONNECTOR example.connector FROM 'docker::myorg/example-connector:latest'
 
 -- IPC subprocess
-IMPORT CONNECTOR example.connector FROM 'ipc://./example_connector'
+IMPORT CONNECTOR example.connector FROM 'ipc::./example_connector'
 
 -- Platform-specific
-IMPORT CONNECTOR example.connector FROM 'lib://./libexample_connector.so' WITH (platform = 'linux/amd64')
+IMPORT CONNECTOR example.connector FROM 'ffi::./libexample_connector.so' WITH (platform = 'linux/amd64')
 ```
 
 ### IMPORT TEMP CONNECTOR
@@ -215,17 +215,17 @@ IMPORT CONNECTOR example.connector FROM 'lib://./libexample_connector.so' WITH (
 Creates a connector for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process sources.
 
 ```sql
-IMPORT TEMP CONNECTOR <name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT TEMP CONNECTOR <name> FROM '<runner>::<logic>' [WITH (<key> = '<value>', ...)]
 ```
 
 **Examples:**
 
 ```sql
 -- Python in-process (most common use case)
-IMPORT TEMP CONNECTOR example.connector FROM 'python://example_connector:ExampleConnector'
+IMPORT TEMP CONNECTOR example.connector FROM 'python::example_connector:ExampleConnector'
 
 -- Any other runner also works as temporary
-IMPORT TEMP CONNECTOR example.connector FROM 'ipc://./example_connector'
+IMPORT TEMP CONNECTOR example.connector FROM 'ipc::./example_connector'
 ```
 
 ### DROP CONNECTOR
@@ -277,7 +277,7 @@ The result is a table with the following columns:
 | Column | Type | Description |
 |--------|------|-------------|
 | `name` | string | Connector name |
-| `runner` | string | Runner type (e.g., `ipc`, `lib`, `python`) |
+| `runner` | string | Runtime type (e.g., `ipc`, `ffi`, `python`) |
 | `logic` | string | Logic path or module reference |
 | `platform` | string | Target platform (e.g., `*/*`, `linux/amd64`) |
 | `temporary` | boolean | Whether the entry is runtime-only |
@@ -353,7 +353,7 @@ Commands for creating custom SQL functions that can be used in queries.
 Creates a named function with its logic. The function definition is **persisted** into the bundle's commit history. Input types, return type, and function kind (scalar/aggregate) are auto-detected from the runner.
 
 ```sql
-IMPORT FUNCTION <namespace.name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT FUNCTION <namespace.name> FROM '<runner>::<logic>' [WITH (<key> = '<value>', ...)]
 ```
 
 An optional `WITH` clause can provide additional parameters like `platform`.
@@ -365,38 +365,38 @@ An optional `WITH` clause can provide additional parameters like `platform`.
 
 ```sql
 -- Rust shared library (scalar) — symbol defaults to function name 'double_val'
-IMPORT FUNCTION acme.double_val FROM 'lib://./target/release/libmy_funcs.so'
+IMPORT FUNCTION acme.double_val FROM 'ffi::./target/release/libmy_funcs.so'
 
 -- Explicit symbol in a multi-function library
-IMPORT FUNCTION acme.double_val FROM 'lib://./target/release/libmy_funcs.so:double_val'
+IMPORT FUNCTION acme.double_val FROM 'ffi::./target/release/libmy_funcs.so:double_val'
 
 -- Go binary via IPC (scalar)
-IMPORT FUNCTION acme.to_upper FROM 'ipc://./go_funcs'
+IMPORT FUNCTION acme.to_upper FROM 'ipc::./go_funcs'
 
 -- Java JAR (scalar)
-IMPORT FUNCTION acme.parse_date FROM 'java://target/my-funcs.jar'
+IMPORT FUNCTION acme.parse_date FROM 'java::target/my-funcs.jar'
 
 -- Docker image (scalar)
-IMPORT FUNCTION acme.geocode FROM 'docker://myorg/geocoder:latest'
+IMPORT FUNCTION acme.geocode FROM 'docker::myorg/geocoder:latest'
 
 -- Platform-specific (scalar)
-IMPORT FUNCTION acme.double_val FROM 'lib://./libmy_funcs.so' WITH (platform = 'linux/amd64')
+IMPORT FUNCTION acme.double_val FROM 'ffi::./libmy_funcs.so' WITH (platform = 'linux/amd64')
 ```
 
 **Aggregate function examples:**
 
 ```sql
 -- Rust shared library (aggregate)
-IMPORT FUNCTION acme.custom_avg FROM 'lib://./target/release/libmy_aggs.so'
+IMPORT FUNCTION acme.custom_avg FROM 'ffi::./target/release/libmy_aggs.so'
 
 -- Go binary via IPC (aggregate)
-IMPORT FUNCTION acme.median FROM 'ipc://./go_aggs'
+IMPORT FUNCTION acme.median FROM 'ipc::./go_aggs'
 
 -- Java JAR (aggregate)
-IMPORT FUNCTION acme.string_agg FROM 'java://target/my-aggs.jar'
+IMPORT FUNCTION acme.string_agg FROM 'java::target/my-aggs.jar'
 
 -- Docker image (aggregate)
-IMPORT FUNCTION acme.percentile FROM 'docker://myorg/stats:latest'
+IMPORT FUNCTION acme.percentile FROM 'docker::myorg/stats:latest'
 ```
 
 ### IMPORT TEMP FUNCTION
@@ -404,27 +404,27 @@ IMPORT FUNCTION acme.percentile FROM 'docker://myorg/stats:latest'
 Creates a function for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process functions. Input types, return type, and function kind are auto-detected.
 
 ```sql
-IMPORT TEMP FUNCTION <namespace.name> FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT TEMP FUNCTION <namespace.name> FROM '<runner>::<logic>' [WITH (<key> = '<value>', ...)]
 ```
 
 **Scalar function examples:**
 
 ```sql
 -- Python scalar function
-IMPORT TEMP FUNCTION acme.double_val FROM 'python://my_module:double_val'
+IMPORT TEMP FUNCTION acme.double_val FROM 'python::my_module:double_val'
 
 -- IPC subprocess (temporary)
-IMPORT TEMP FUNCTION acme.to_upper FROM 'ipc://./go_funcs'
+IMPORT TEMP FUNCTION acme.to_upper FROM 'ipc::./go_funcs'
 ```
 
 **Aggregate function examples:**
 
 ```sql
 -- Python aggregate function (class-based)
-IMPORT TEMP FUNCTION acme.my_sum FROM 'python://my_module:MySum'
+IMPORT TEMP FUNCTION acme.my_sum FROM 'python::my_module:MySum'
 
 -- Python aggregate with multiple input types
-IMPORT TEMP FUNCTION acme.weighted_avg FROM 'python://stats:WeightedAvg'
+IMPORT TEMP FUNCTION acme.weighted_avg FROM 'python::stats:WeightedAvg'
 ```
 
 **Python scalar function interface:**
@@ -522,7 +522,7 @@ The result is a table with the following columns:
 | `kind` | string | Function kind (`scalar`, `aggregate`, `table_valued`) |
 | `input_types` | string | Comma-separated Arrow input types (e.g., `Int64, Utf8`) |
 | `return_type` | string | Arrow return type (e.g., `Int64`) |
-| `runner` | string | Runner type (e.g., `ipc`, `lib`, `python`) |
+| `runner` | string | Runtime type (e.g., `ipc`, `ffi`, `python`) |
 | `logic` | string | Logic path or module reference |
 | `platform` | string | Target platform (e.g., `*/*`, `linux/amd64`) |
 | `temporary` | boolean | Whether the entry is runtime-only |
@@ -547,20 +547,20 @@ DESCRIBE FUNCTION acme.double_val
 Discovers and registers all functions exported by a shared library or IPC executable in a single command using the wildcard `namespace.*` syntax. Uses the manifest discovery protocol.
 
 ```sql
-IMPORT FUNCTION <namespace>.* FROM '<runner>://<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT FUNCTION <namespace>.* FROM '<runner>::<logic>' [WITH (<key> = '<value>', ...)]
 ```
 
 **Examples:**
 
 ```sql
 -- Register all functions from a Rust shared library
-IMPORT FUNCTION acme.* FROM 'lib://./target/release/libmy_funcs.so'
+IMPORT FUNCTION acme.* FROM 'ffi::./target/release/libmy_funcs.so'
 
 -- Register functions from an IPC executable
-IMPORT FUNCTION tools.* FROM 'ipc://./my_go_funcs'
+IMPORT FUNCTION tools.* FROM 'ipc::./my_go_funcs'
 
 -- Platform-specific library
-IMPORT FUNCTION acme.* FROM 'lib://./libmy_funcs.so' WITH (platform = 'linux/amd64')
+IMPORT FUNCTION acme.* FROM 'ffi::./libmy_funcs.so' WITH (platform = 'linux/amd64')
 ```
 
 **Manifest format:** Libraries and executables must return a JSON manifest:
