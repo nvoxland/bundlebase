@@ -58,6 +58,14 @@ pub trait LogicRuntimeImpl: Send + Sync + std::fmt::Debug {
     /// Build the prefixed call string for IPC/native dispatch.
     fn build_call_string(&self) -> String;
 
+    /// Validate that the referenced logic (file, module, etc.) is reachable.
+    ///
+    /// Called at import time to fail fast if the logic doesn't exist.
+    /// Default implementation is a no-op (e.g., Docker images are validated at run time).
+    fn validate_logic(&self) -> Result<(), BundlebaseError> {
+        Ok(())
+    }
+
     /// Verify this runtime's bundled artifact is loadable (e.g., load manifest from shared lib).
     fn verify_loadable(&self) -> Result<(), BundlebaseError> {
         Ok(())
@@ -159,6 +167,30 @@ pub trait LogicRuntimeImpl: Send + Sync + std::fmt::Debug {
 }
 
 // ==================== Shared helpers ====================
+
+/// Check that a file-based logic path exists on disk.
+///
+/// Resolves relative paths against the current working directory.
+/// Returns a descriptive error if the file is not found.
+pub(super) fn validate_file_reachable(path: &str, label: &str) -> Result<(), BundlebaseError> {
+    let abs = if path.starts_with('/') {
+        std::path::PathBuf::from(path)
+    } else {
+        std::env::current_dir()
+            .map_err(|e| BundlebaseError::from(format!("Failed to get current directory: {}", e)))?
+            .join(path)
+    };
+    if !abs.exists() {
+        return Err(format!(
+            "{} not found: '{}' (resolved to '{}')",
+            label,
+            path,
+            abs.display()
+        )
+        .into());
+    }
+    Ok(())
+}
 
 /// Look up a function by name in a manifest, or return a descriptive error.
 pub(super) fn find_in_manifest(
@@ -373,6 +405,11 @@ impl LogicRuntime {
     /// Build the prefixed call string for IPC/native dispatch.
     pub fn build_call_string(&self) -> String {
         self.inner().build_call_string()
+    }
+
+    /// Validate that the referenced logic (file, module, etc.) is reachable.
+    pub fn validate_logic(&self) -> Result<(), BundlebaseError> {
+        self.inner().validate_logic()
     }
 
     /// Verify this runtime's bundled artifact is loadable (e.g., load manifest from shared lib).
@@ -942,6 +979,36 @@ mod tests {
         );
         let path_part = logic.strip_suffix(":com.example.MyClass").unwrap();
         assert!(path_part.ends_with(".jar"));
+    }
+
+    #[test]
+    fn test_validate_logic_ipc_nonexistent() {
+        let rt = LogicRuntime::parse_from("ipc::./nonexistent_binary_xyz").unwrap();
+        let err = rt.validate_logic().unwrap_err().to_string();
+        assert!(err.contains("IPC executable"), "Expected 'IPC executable' in error: {}", err);
+        assert!(err.contains("not found"), "Expected 'not found' in error: {}", err);
+    }
+
+    #[test]
+    fn test_validate_logic_ffi_nonexistent() {
+        let rt = LogicRuntime::parse_from("ffi::./nonexistent_lib_xyz.so").unwrap();
+        let err = rt.validate_logic().unwrap_err().to_string();
+        assert!(err.contains("Shared library"), "Expected 'Shared library' in error: {}", err);
+        assert!(err.contains("not found"), "Expected 'not found' in error: {}", err);
+    }
+
+    #[test]
+    fn test_validate_logic_docker_always_ok() {
+        let rt = LogicRuntime::parse_from("docker::any-image:latest").unwrap();
+        assert!(rt.validate_logic().is_ok());
+    }
+
+    #[test]
+    fn test_validate_logic_java_nonexistent() {
+        let rt = LogicRuntime::parse_from("java::./nonexistent_xyz.jar").unwrap();
+        let err = rt.validate_logic().unwrap_err().to_string();
+        assert!(err.contains("JAR file"), "Expected 'JAR file' in error: {}", err);
+        assert!(err.contains("not found"), "Expected 'not found' in error: {}", err);
     }
 
     #[test]

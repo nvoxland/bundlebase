@@ -466,6 +466,11 @@ impl PyBundle {
             let from = ::bundlebase::bundle::LogicRuntime::parse_from(&from_).map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
             })?;
+            from.validate_logic().map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to load temporary connector: {}", e
+                ))
+            })?;
             let platform: ::bundlebase::bundle::Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
             })?;

@@ -33,6 +33,10 @@ impl IpcRuntime {
 }
 
 impl LogicRuntimeImpl for IpcRuntime {
+    fn validate_logic(&self) -> Result<(), BundlebaseError> {
+        super::validate_file_reachable(&self.path, "IPC executable")
+    }
+
     fn can_bundle(&self) -> bool {
         true
     }

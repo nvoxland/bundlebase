@@ -93,6 +93,26 @@ async def test_import_temp_function():
 
 
 @pytest.mark.asyncio
+async def test_import_temp_function_rejects_nonexistent_ipc():
+    """Test that import_temp_function fails when the IPC binary doesn't exist."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    with pytest.raises((ValueError, Exception), match="not found"):
+        await c.import_temp_function(
+            "acme.double_val", "ipc::./nonexistent_binary_xyz"
+        )
+
+
+@pytest.mark.asyncio
+async def test_import_temp_function_rejects_nonexistent_python_module():
+    """Test that import_temp_function fails when the Python module doesn't exist."""
+    c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
+    with pytest.raises((ValueError, Exception)):
+        await c.import_temp_function(
+            "acme.double_val", "python::nonexistent_module_xyz:func"
+        )
+
+
+@pytest.mark.asyncio
 async def test_drop_temp_function():
     """Test that drop_temp_function removes a temporary function."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)

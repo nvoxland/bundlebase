@@ -638,7 +638,7 @@ class TestSyncSource:
         """Test import_temp_connector synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.import_temp_connector("test.my_source", "python::mod:Class")
+        c.import_temp_connector("test.my_source", "python::test_function_helpers:double_val")
         assert c is not None
 
     def test_sync_drop_connector(self):
@@ -661,6 +661,6 @@ class TestSyncSource:
         """Test drop_temp_connector synchronously."""
         config = {"system": {"allow_external_code": "true"}}
         c = bb.create(random_bundle(), config=config)
-        c.import_temp_connector("test.my_source", "python::mod:Class")
+        c.import_temp_connector("test.my_source", "python::test_function_helpers:double_val")
         result = c.drop_temp_connector("test.my_source")
         assert "Dropped 1 temporary connector" in result
