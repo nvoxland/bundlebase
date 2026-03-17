@@ -152,6 +152,7 @@ impl BundleFacadeCommand for ImportTempConnectorCommand {
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
         let from = LogicRuntime::parse_from(&self.from)?;
+        from.validate_logic()?;
         let namespaced: NamespacedName = self.name.parse()?;
         let entry = ConnectorEntry {
             id: crate::data::ObjectId::generate(),

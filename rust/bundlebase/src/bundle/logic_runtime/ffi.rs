@@ -66,6 +66,10 @@ impl FfiRuntime {
 }
 
 impl LogicRuntimeImpl for FfiRuntime {
+    fn validate_logic(&self) -> Result<(), BundlebaseError> {
+        super::validate_file_reachable(&self.path, "Shared library")
+    }
+
     fn can_bundle(&self) -> bool {
         true
     }

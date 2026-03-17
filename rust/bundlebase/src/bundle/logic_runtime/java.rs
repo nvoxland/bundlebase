@@ -62,6 +62,10 @@ impl JavaRuntime {
 }
 
 impl LogicRuntimeImpl for JavaRuntime {
+    fn validate_logic(&self) -> Result<(), BundlebaseError> {
+        super::validate_file_reachable(&self.jar_path, "JAR file")
+    }
+
     fn can_bundle(&self) -> bool {
         true
     }

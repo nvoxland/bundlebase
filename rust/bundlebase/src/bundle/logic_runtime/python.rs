@@ -55,6 +55,14 @@ impl PythonRuntime {
 }
 
 impl LogicRuntimeImpl for PythonRuntime {
+    fn validate_logic(&self) -> Result<(), BundlebaseError> {
+        let bridge = get_python_function_bridge()?;
+        // If get_function_metadata succeeds (even returning None for no metadata),
+        // the module is importable. An import error will propagate as Err.
+        let _ = bridge.get_function_metadata(&self.module)?;
+        Ok(())
+    }
+
     fn can_bundle(&self) -> bool {
         false
     }

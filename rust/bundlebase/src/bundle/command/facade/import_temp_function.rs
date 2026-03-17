@@ -162,6 +162,7 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
         let from = LogicRuntime::parse_from(&self.from)?;
+        from.validate_logic()?;
 
         if self.is_wildcard() {
             // Wildcard/bulk mode

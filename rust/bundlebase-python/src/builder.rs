@@ -742,6 +742,7 @@ impl PyBundleBuilder {
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let from = ::bundlebase::bundle::LogicRuntime::parse_from(&from_).map_err(|e| to_py_error(e))?;
+            from.validate_logic().map_err(|e| to_py_error_ctx("Failed to load temporary connector", e))?;
             let platform: ::bundlebase::bundle::Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
             let namespaced: ::bundlebase::NamespacedName = name.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
             let entry = ::bundlebase::bundle::ConnectorEntry {
