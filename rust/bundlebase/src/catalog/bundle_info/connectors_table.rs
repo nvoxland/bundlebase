@@ -50,7 +50,7 @@ impl BundleConnectorsTable {
     }
 
     fn build_batch(&self) -> Result<RecordBatch> {
-        let mut entries = self.facade()?.connector_entries();
+        let mut entries = self.facade()?.connector_registry().read().entries().to_vec();
 
         // Sort by name then platform for consistent ordering
         entries.sort_by(|a, b| {

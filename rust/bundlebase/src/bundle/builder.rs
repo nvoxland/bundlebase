@@ -6,7 +6,9 @@ use crate::bundle::init::InitCommit;
 use crate::bundle::operation::AnyOperation;
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
+use crate::bundle::function_definition::FunctionRegistry;
 use crate::bundle::{column_metadata, sql, Bundle};
+use crate::source::ConnectorRegistry;
 use crate::data::{BlockId, ObjectId, VersionedBlockId};
 use crate::source::{FetchResults, SyncMode};
 use crate::index::{IndexDefinition, IndexType};
@@ -575,7 +577,7 @@ impl BundleBuilder {
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
-                        self.bundle.refresh_version_udf(self.version());
+                        self.bundle.function_registry().read().refresh_version_udf(self.version());
                     }
                 }
                 Ok(())
@@ -640,7 +642,7 @@ impl BundleBuilder {
                     if let Some(change) = self.in_progress_change.write().take() {
                         self.status.write().push_change(change);
                         // Re-register version UDF to reflect builder state (e.g., "UNCOMMITTED")
-                        self.bundle.refresh_version_udf(self.version());
+                        self.bundle.function_registry().read().refresh_version_udf(self.version());
                     }
                 }
             }
@@ -801,7 +803,7 @@ impl BundleBuilder {
     ) -> Result<usize, BundlebaseError> {
         use crate::bundle::connector_definition::Platform;
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
-        self.bundle().remove_connector_entry(name, platform.as_ref(), true)
+        Ok(self.bundle().connector_registry().write().remove_entry(name, platform.as_ref(), true))
     }
 
     /// Fetch from sources for a pack - discover and attach new files.
@@ -1138,7 +1140,7 @@ impl BundleBuilder {
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
         let _ = self.bundle().ctx().deregister_udf(name);
         let _ = self.bundle().ctx().deregister_udaf(name);
-        self.bundle().remove_function_entry(name, platform.as_ref(), true)
+        Ok(self.bundle().function_registry().write().remove(name, platform.as_ref(), true))
     }
 
     /// Set the bundle's name
@@ -1541,9 +1543,8 @@ impl BundleFacade for BundleBuilder {
         &self,
         entry: crate::bundle::connector_definition::ConnectorEntry,
     ) -> Result<(), BundlebaseError> {
-        self.bundle.add_connector_entry(entry);
-        self.bundle.mark_temporary_logic();
-        self.bundle.refresh_version_udf(self.version());
+        self.bundle.connector_registry().write().add_entry(entry);
+        self.bundle.function_registry().read().refresh_version_udf(self.version());
         Ok(())
     }
 
@@ -1552,7 +1553,7 @@ impl BundleFacade for BundleBuilder {
         name: &str,
         platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError> {
-        self.bundle.remove_connector_entry(name, platform, true)
+        Ok(self.bundle.connector_registry().write().remove_entry(name, platform, true))
     }
 
     async fn import_temp_function(
@@ -1567,7 +1568,7 @@ impl BundleFacade for BundleBuilder {
         // Validate kind consistency before adding
         let name = entry.name.to_string();
         {
-            let existing = self.bundle.function_registry.read().resolve_all(&name);
+            let existing = self.bundle.function_registry().read().resolve_all(&name);
             if !existing.is_empty() {
                 let existing_kind = existing[0].kind;
                 if entry.kind != existing_kind {
@@ -1581,10 +1582,9 @@ impl BundleFacade for BundleBuilder {
         }
 
         // Add to registry then re-register all overloads for this name
-        self.bundle.add_function_entry(entry);
-        self.bundle.register_functions_for_name(&name)?;
-        self.bundle.mark_temporary_logic();
-        self.bundle.refresh_version_udf(self.version());
+        self.bundle.function_registry().write().add(entry);
+        self.bundle.function_registry().read().register_functions_for_name(&name)?;
+        self.bundle.function_registry().read().refresh_version_udf(self.version());
         Ok(())
     }
 
@@ -1595,15 +1595,7 @@ impl BundleFacade for BundleBuilder {
     ) -> Result<usize, BundlebaseError> {
         let _ = self.bundle.ctx().deregister_udf(name);
         let _ = self.bundle.ctx().deregister_udaf(name);
-        self.bundle.remove_function_entry(name, platform, true)
-    }
-
-    fn function_namespaces(&self) -> Vec<String> {
-        self.bundle.function_namespaces()
-    }
-
-    fn functions(&self) -> Vec<crate::NamespacedName> {
-        self.bundle.functions()
+        Ok(self.bundle.function_registry().write().remove(name, platform, true))
     }
 
     async fn set_config(
@@ -1615,12 +1607,12 @@ impl BundleFacade for BundleBuilder {
         self.bundle.set_config(scope, key, value).await
     }
 
-    fn connector_entries(&self) -> Vec<crate::bundle::connector_definition::ConnectorEntry> {
-        self.bundle.connector_entries()
+    fn connector_registry(&self) -> Arc<RwLock<ConnectorRegistry>> {
+        self.bundle.connector_registry()
     }
 
-    fn function_entries(&self) -> Vec<crate::bundle::function_definition::FunctionEntry> {
-        self.bundle.function_entries()
+    fn function_registry(&self) -> Arc<RwLock<FunctionRegistry>> {
+        self.bundle.function_registry()
     }
 
     fn ctx(&self) -> Arc<SessionContext> {

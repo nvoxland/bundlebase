@@ -67,7 +67,7 @@ impl Operation for CreateSourceOp {
 
         if self.connector.contains('.') {
             // Dotted name: verify connector exists and resolves for current platform
-            bundle.resolve_connector(&self.connector)?;
+            bundle.connector_registry().read().resolve_entry(&self.connector)?;
         } else {
             // Built-in function: look up in registry
             let registry = bundle.connector_registry();

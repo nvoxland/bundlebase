@@ -7,9 +7,15 @@
 use crate::bundle::connector_definition::Platform;
 use crate::bundle::logic_runtime::LogicRuntime;
 use crate::data::ObjectId;
+use crate::function::ipc_bridge::SubprocessCache;
+use crate::function::VersionFunction;
+use crate::io::IOReadWriteDir;
 use crate::namespaced_name::NamespacedName;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Fields};
+use datafusion::logical_expr::ScalarUDF;
+use datafusion::prelude::SessionContext;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -138,15 +144,33 @@ pub struct FunctionEntry {
 ///
 /// Wraps `Vec<FunctionEntry>` with all entry-management methods.
 /// Used by `Bundle` behind an `Arc<RwLock<…>>`.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone)]
 pub struct FunctionRegistry {
     entries: Vec<FunctionEntry>,
+    data_dir: Arc<RwLock<Arc<dyn IOReadWriteDir>>>,
+    ctx: Arc<SessionContext>,
+    subprocess_cache: SubprocessCache,
+}
+
+impl fmt::Debug for FunctionRegistry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FunctionRegistry")
+            .field("entries", &self.entries)
+            .finish()
+    }
 }
 
 impl FunctionRegistry {
-    pub fn new() -> Self {
+    pub fn new(
+        data_dir: Arc<RwLock<Arc<dyn IOReadWriteDir>>>,
+        ctx: Arc<SessionContext>,
+        subprocess_cache: SubprocessCache,
+    ) -> Self {
         Self {
             entries: Vec::new(),
+            data_dir,
+            ctx,
+            subprocess_cache,
         }
     }
 
@@ -228,6 +252,66 @@ impl FunctionRegistry {
     /// Get a read-only view of all function entries.
     pub fn entries(&self) -> &[FunctionEntry] {
         &self.entries
+    }
+
+    /// Check if any temporary function entries exist.
+    pub fn has_temporary(&self) -> bool {
+        self.entries.iter().any(|e| e.temporary)
+    }
+
+    /// Resolve all overloads for a name and register them as a composite
+    /// DataFusion UDF/UDAF/UDTF using the registry's session context.
+    ///
+    /// Uses the registry's `data_dir` to resolve bundle-relative logic paths
+    /// and `subprocess_cache` for IPC-based functions.
+    pub fn register_functions_for_name(
+        &self,
+        name: &str,
+    ) -> Result<(), BundlebaseError> {
+        let overloads = self.resolve_all(name);
+        if overloads.is_empty() {
+            return Ok(());
+        }
+
+        let data_dir = self.data_dir.read().clone();
+
+        // Resolve bundle-relative logic paths against the data directory
+        let overloads: Vec<_> = overloads
+            .into_iter()
+            .map(|mut e| {
+                e.from = e.from.resolve_path(&data_dir);
+                e
+            })
+            .collect();
+
+        let kind = validate_kind_consistency(&overloads)?;
+
+        match kind {
+            FunctionKind::Scalar => {
+                use crate::function::scalar::ScalarFunction;
+                let func = ScalarFunction::new_composite(overloads, Arc::clone(&self.subprocess_cache))?;
+                self.ctx.register_udf(ScalarUDF::from(func));
+            }
+            FunctionKind::Aggregate => {
+                use crate::function::aggregate::AggregateFunction;
+                use datafusion::logical_expr::AggregateUDF;
+                let agg = AggregateFunction::new_composite(overloads, Arc::clone(&self.subprocess_cache))?;
+                self.ctx.register_udaf(AggregateUDF::from(agg));
+            }
+            FunctionKind::TableValued => {
+                tracing::warn!(
+                    "Table-valued function '{}' registered but execution is not yet supported",
+                    name
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Re-register the version() UDF to reflect the current version string.
+    pub fn refresh_version_udf(&self, version: String) {
+        self.ctx
+            .register_udf(ScalarUDF::new_from_impl(VersionFunction::new(version)));
     }
 
     /// Get sorted unique namespaces from all function entries.
@@ -583,6 +667,18 @@ pub fn parse_function_name(name: &str) -> Result<NamespacedName, BundlebaseError
 mod tests {
     use super::*;
 
+    fn test_registry() -> FunctionRegistry {
+        use crate::function::ipc_bridge::new_subprocess_cache;
+        use crate::io::plugin::object_store::ObjectStoreDir;
+        use url::Url;
+        let ctx = Arc::new(SessionContext::new());
+        let url = Url::parse("memory:///test").expect("valid url");
+        let config = Arc::new(crate::BundleConfig::new(None).expect("valid config"));
+        let dir = ObjectStoreDir::from_url(&url, config).expect("valid dir");
+        let data_dir = Arc::new(RwLock::new(Arc::new(dir) as Arc<dyn IOReadWriteDir>));
+        FunctionRegistry::new(data_dir, ctx, new_subprocess_cache())
+    }
+
     // ==================== parse_function_name tests ====================
 
     #[test]
@@ -678,7 +774,7 @@ mod tests {
 
     #[test]
     fn test_registry_add_and_has() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         assert!(!reg.has("test.func"));
         reg.add(make_entry("test.func", "logic", false));
         assert!(reg.has("test.func"));
@@ -687,7 +783,7 @@ mod tests {
 
     #[test]
     fn test_registry_entries() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry("test.func", "a", false));
         reg.add(make_entry("test.func2", "b", false));
         assert_eq!(reg.entries().len(), 2);
@@ -695,7 +791,7 @@ mod tests {
 
     #[test]
     fn test_registry_resolve_not_found() {
-        let reg = FunctionRegistry::new();
+        let reg = test_registry();
         let result = reg.resolve("test.func");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("is not defined"));
@@ -703,7 +799,7 @@ mod tests {
 
     #[test]
     fn test_registry_resolve_last_set_wins() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry("test.func", "first", false));
         reg.add(make_entry("test.func", "second", false));
 
@@ -713,7 +809,7 @@ mod tests {
 
     #[test]
     fn test_registry_resolve_temporary_overrides_persistent() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry("test.func", "persisted", false));
         let mut temp = make_entry("test.func", "temporary", true);
         temp.from = LogicRuntime::parse_from("python::temp:module").unwrap();
@@ -726,7 +822,7 @@ mod tests {
 
     #[test]
     fn test_registry_resolve_no_platform_match() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         let mut entry = make_entry("test.func", "test", false);
         entry.platform = "nonexistent/arch".parse().unwrap();
         reg.add(entry);
@@ -738,7 +834,7 @@ mod tests {
 
     #[test]
     fn test_registry_remove_all() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry("test.func", "a", false));
         reg.add(make_entry("test.func", "b", true));
         reg.add(make_entry("test.other", "c", false));
@@ -750,7 +846,7 @@ mod tests {
 
     #[test]
     fn test_registry_remove_temporary_only() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry("test.func", "persisted", false));
         reg.add(make_entry("test.func", "temp", true));
         let removed = reg.remove("test.func", None, true);
@@ -761,7 +857,7 @@ mod tests {
 
     #[test]
     fn test_registry_namespaces() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry("acme.func1", "a", false));
         reg.add(make_entry("acme.func2", "b", false));
         reg.add(make_entry("other.func3", "c", false));
@@ -771,7 +867,7 @@ mod tests {
 
     #[test]
     fn test_registry_names() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry("acme.func1", "a", false));
         reg.add(make_entry("other.func2", "b", false));
         let names = reg.names();
@@ -867,13 +963,13 @@ mod tests {
 
     #[test]
     fn test_resolve_all_empty() {
-        let reg = FunctionRegistry::new();
+        let reg = test_registry();
         assert!(reg.resolve_all("test.func").is_empty());
     }
 
     #[test]
     fn test_resolve_all_single_entry() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry("test.func", "logic_a", false));
         let resolved = reg.resolve_all("test.func");
         assert_eq!(resolved.len(), 1);
@@ -882,7 +978,7 @@ mod tests {
 
     #[test]
     fn test_resolve_all_two_overloads() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry_with_types("test.func", vec![DataType::Int64], false, "int_logic"));
         reg.add(make_entry_with_types("test.func", vec![DataType::Utf8], false, "str_logic"));
         let resolved = reg.resolve_all("test.func");
@@ -894,7 +990,7 @@ mod tests {
 
     #[test]
     fn test_resolve_all_temp_shadows_persistent_per_signature() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry_with_types("test.func", vec![DataType::Int64], false, "persisted_int"));
         reg.add(make_entry_with_types("test.func", vec![DataType::Int64], true, "temp_int"));
         reg.add(make_entry_with_types("test.func", vec![DataType::Utf8], false, "persisted_str"));
@@ -911,7 +1007,7 @@ mod tests {
 
     #[test]
     fn test_resolve_all_ignores_other_names() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry("test.func", "a", false));
         reg.add(make_entry("test.other", "b", false));
         let resolved = reg.resolve_all("test.func");
@@ -951,7 +1047,7 @@ mod tests {
 
     #[test]
     fn test_remove_by_signature_specific() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry_with_types("test.func", vec![DataType::Int64], false, "int_logic"));
         reg.add(make_entry_with_types("test.func", vec![DataType::Utf8], false, "str_logic"));
         reg.remove_by_signature("test.func", Some(&[DataType::Int64]));
@@ -961,7 +1057,7 @@ mod tests {
 
     #[test]
     fn test_remove_by_signature_none_removes_all() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry_with_types("test.func", vec![DataType::Int64], false, "int_logic"));
         reg.add(make_entry_with_types("test.func", vec![DataType::Utf8], false, "str_logic"));
         reg.remove_by_signature("test.func", None);
@@ -970,7 +1066,7 @@ mod tests {
 
     #[test]
     fn test_remove_by_signature_preserves_other_names() {
-        let mut reg = FunctionRegistry::new();
+        let mut reg = test_registry();
         reg.add(make_entry_with_types("test.func", vec![DataType::Int64], false, "a"));
         reg.add(make_entry_with_types("test.other", vec![DataType::Int64], false, "b"));
         reg.remove_by_signature("test.func", Some(&[DataType::Int64]));

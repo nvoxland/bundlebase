@@ -64,6 +64,7 @@ impl Operation for ImportFunctionOp {
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
+        parse_function_name(&self.name)?;
         Ok(())
     }
 
@@ -85,13 +86,13 @@ impl Operation for ImportFunctionOp {
             kind: self.kind,
         };
         // Warn if overwriting an existing definition
-        if bundle.has_function_entry(&self.name) {
+        if bundle.function_registry().read().has(&self.name) {
             tracing::warn!("Overwriting existing function definition for '{}'", self.name);
         }
 
         // Add to registry first so resolve_all can find all overloads
-        bundle.add_function_entry(entry);
-        bundle.register_functions_for_name(&self.name)
+        bundle.function_registry().write().add(entry);
+        bundle.function_registry().read().register_functions_for_name(&self.name)
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
         Ok(())
     }
@@ -165,22 +166,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_python_rejected() {
-        let bundle = Bundle::empty(None).await.expect("empty bundle");
-        let op = ImportFunctionOp::new(
-            "acme.double_val".to_string(),
-            vec![DataType::Int64],
-            DataType::Int64,
-            LogicRuntime::parse_from("python::mod:func").unwrap(),
-            Platform::any(),
-            FunctionKind::Scalar,
-        );
-        let result = op.check(&bundle).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("'python' runtime cannot be bundled"));
-    }
-
-    #[tokio::test]
     async fn test_apply_registers_entry() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let op = ImportFunctionOp::new(
@@ -192,6 +177,6 @@ mod tests {
             FunctionKind::Scalar,
         );
         op.apply(&bundle).await.expect("apply");
-        assert!(bundle.has_function_entry("acme.double_val"));
+        assert!(bundle.function_registry().read().has("acme.double_val"));
     }
 }

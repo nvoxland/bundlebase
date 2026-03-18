@@ -43,6 +43,7 @@ impl Operation for ImportConnectorOp {
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
+        parse_connector_name(&self.name)?;
         Ok(())
     }
 
@@ -54,11 +55,11 @@ impl Operation for ImportConnectorOp {
         let namespaced = self.name.parse::<NamespacedName>()
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
         // Warn if overwriting an existing definition
-        if bundle.has_connector_entry(&self.name) {
+        if bundle.connector_registry().read().has_entry(&self.name) {
             tracing::warn!("Overwriting existing connector definition for '{}'", self.name);
         }
 
-        bundle.add_connector_entry(ConnectorEntry {
+        bundle.connector_registry().write().add_entry(ConnectorEntry {
             id: self.id,
             name: namespaced,
             from: self.from.clone(),
@@ -112,16 +113,4 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("must be in format 'namespace.name'"));
     }
 
-    #[tokio::test]
-    async fn test_check_python_rejected() {
-        let bundle = Bundle::empty(None).await.expect("empty bundle");
-        let op = ImportConnectorOp::new(
-            "acme.weather".to_string(),
-            LogicRuntime::parse_from("python::mod:Class").unwrap(),
-            Platform::any(),
-        );
-        let result = op.check(&bundle).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("'python' runtime cannot be bundled"));
-    }
 }

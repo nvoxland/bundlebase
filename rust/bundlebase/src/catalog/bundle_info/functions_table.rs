@@ -54,7 +54,7 @@ impl BundleFunctionsTable {
     }
 
     fn build_batch(&self) -> Result<RecordBatch> {
-        let mut entries = self.facade()?.function_entries();
+        let mut entries = self.facade()?.function_registry().read().entries().to_vec();
 
         // Sort by name then input types for consistent ordering
         entries.sort_by(|a, b| {

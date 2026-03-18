@@ -31,6 +31,7 @@ use plugin::RemoteDirConnector;
 use plugin::WebScrapeConnector;
 use super::connector_utils;
 
+use crate::bundle::connector_definition::{self, ConnectorEntry};
 use crate::{BundleConfig, BundlebaseError};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
@@ -476,10 +477,12 @@ fn format_arg_list(specs: &[ArgSpec]) -> String {
 
 /// Registry for connectors.
 ///
-/// Manages available connectors and provides lookup by name.
+/// Manages available connector implementations and connector entry definitions.
 /// Built-in connectors are automatically registered on construction.
+/// Connector entries (from IMPORT CONNECTOR) are managed via `add_entry`, `has_entry`, etc.
 pub struct ConnectorRegistry {
     functions: HashMap<String, Arc<dyn Connector>>,
+    entries: Vec<ConnectorEntry>,
 }
 
 impl ConnectorRegistry {
@@ -491,6 +494,7 @@ impl ConnectorRegistry {
     pub fn new() -> Self {
         let mut registry = Self {
             functions: HashMap::new(),
+            entries: Vec::new(),
         };
 
         // Register built-in connectors (ipc/native removed — only via defined sources)
@@ -526,6 +530,68 @@ impl ConnectorRegistry {
     /// Get all registered connector names.
     pub fn connector_names(&self) -> Vec<String> {
         self.functions.keys().cloned().collect()
+    }
+
+    // ==================== Connector entry management ====================
+
+    /// Add a connector entry to the registry.
+    pub fn add_entry(&mut self, entry: ConnectorEntry) {
+        self.entries.push(entry);
+    }
+
+    /// Check if any connector entry exists for the given name.
+    pub fn has_entry(&self, name: &str) -> bool {
+        self.entries.iter().any(|e| e.name == name)
+    }
+
+    /// Resolve the best connector entry for the current platform.
+    pub fn resolve_entry(&self, name: &str) -> Result<ConnectorEntry, BundlebaseError> {
+        connector_definition::resolve_connector(&self.entries, name)
+    }
+
+    /// Remove all connector entries for a name.
+    pub fn remove_all_entries(&mut self, name: &str) {
+        self.entries.retain(|e| e.name != name);
+    }
+
+    /// Remove matching connector entries. Returns the number removed.
+    pub fn remove_entry(
+        &mut self,
+        name: &str,
+        platform: Option<&connector_definition::Platform>,
+        temporary_only: bool,
+    ) -> usize {
+        let before = self.entries.len();
+        self.entries.retain(|e| {
+            if e.name != name {
+                return true;
+            }
+            if temporary_only && !e.temporary {
+                return true;
+            }
+            if let Some(p) = platform {
+                if &e.platform != p {
+                    return true;
+                }
+            }
+            false
+        });
+        before - self.entries.len()
+    }
+
+    /// Remove connector entries by their IDs.
+    pub fn remove_entries_by_ids(&mut self, ids: &[crate::data::ObjectId]) {
+        self.entries.retain(|e| !ids.contains(&e.id));
+    }
+
+    /// Get a read-only view of all connector entries.
+    pub fn entries(&self) -> &[ConnectorEntry] {
+        &self.entries
+    }
+
+    /// Check if any temporary connector entries exist.
+    pub fn has_temporary(&self) -> bool {
+        self.entries.iter().any(|e| e.temporary)
     }
 }
 
