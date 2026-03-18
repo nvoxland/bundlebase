@@ -390,6 +390,24 @@ impl FunctionRegistry {
         self.entries.retain(|e| !ids.contains(&e.id));
     }
 
+    /// Rename function entries matching the given IDs to a new name.
+    pub fn rename_entries(&mut self, ids: &[ObjectId], new_name: &crate::NamespacedName) {
+        for entry in &mut self.entries {
+            if ids.contains(&entry.id) {
+                entry.name = new_name.clone();
+            }
+        }
+    }
+
+    /// Rename only temporary function entries matching the old name to a new name.
+    pub fn rename_temp_entries(&mut self, old_name: &str, new_name: &crate::NamespacedName) {
+        for entry in &mut self.entries {
+            if entry.temporary && entry.name == old_name {
+                entry.name = new_name.clone();
+            }
+        }
+    }
+
     /// Remove entries matching a specific input type signature, or all if None.
     ///
     /// If `input_types` is `None`, removes all entries for the name (same as `remove_all`).

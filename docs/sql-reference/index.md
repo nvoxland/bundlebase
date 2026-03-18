@@ -264,6 +264,34 @@ DROP TEMP CONNECTOR example.connector
 DROP TEMP CONNECTOR example.connector FOR PLATFORM 'linux/amd64'
 ```
 
+### RENAME CONNECTOR
+
+Rename a connector definition to a new dotted name. All entries (platform variants) are renamed. Sources referencing the old connector name are automatically updated.
+
+**Syntax:**
+```sql
+RENAME CONNECTOR <old_name> TO <new_name>
+```
+
+**Example:**
+```sql
+RENAME CONNECTOR acme.weather TO acme.weather_v2
+```
+
+### RENAME TEMP CONNECTOR
+
+Rename temporary (session-only) connector entries to a new name. Only temporary entries are renamed; persistent entries are not affected.
+
+**Syntax:**
+```sql
+RENAME TEMP CONNECTOR <old_name> TO <new_name>
+```
+
+**Example:**
+```sql
+RENAME TEMP CONNECTOR acme.weather TO acme.weather_v2
+```
+
 ### DESCRIBE CONNECTOR
 
 Returns metadata about a registered connector. Shows all entries matching the given name, including runner, logic, platform, and whether the entry is temporary.
@@ -504,6 +532,34 @@ Removes runtime-only function logic. Optionally filter by platform.
 
 ```sql
 DROP TEMP FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
+```
+
+### RENAME FUNCTION
+
+Rename a function definition to a new dotted name. All overloads are renamed. Old UDFs are deregistered and re-registered under the new name.
+
+**Syntax:**
+```sql
+RENAME FUNCTION <old_name> TO <new_name>
+```
+
+**Example:**
+```sql
+RENAME FUNCTION acme.double_val TO acme.double_val_v2
+```
+
+### RENAME TEMP FUNCTION
+
+Rename temporary (session-only) function entries to a new name. Only temporary entries are renamed; persistent entries are not affected.
+
+**Syntax:**
+```sql
+RENAME TEMP FUNCTION <old_name> TO <new_name>
+```
+
+**Example:**
+```sql
+RENAME TEMP FUNCTION acme.double_val TO acme.double_val_v2
 ```
 
 ### DESCRIBE FUNCTION

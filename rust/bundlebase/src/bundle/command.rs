@@ -64,7 +64,8 @@ pub use builder::{
     ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
     DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
-    RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameJoinCommand, RenameViewCommand,
+    RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
+    RenameFunctionCommand, RenameJoinCommand, RenameViewCommand,
     ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand,
     StandardizeColumnNamesCommand, UndoCommand, VerifyDataCommand,
 };
@@ -79,6 +80,8 @@ pub use facade::ImportTempConnectorCommand;
 pub use facade::ImportTempFunctionCommand;
 pub use facade::DropTempConnectorCommand;
 pub use facade::DropTempFunctionCommand;
+pub use facade::RenameTempConnectorCommand;
+pub use facade::RenameTempFunctionCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
 
@@ -100,6 +103,10 @@ pub enum FacadeCommand {
     DropTempConnector(DropTempConnectorCommand),
     /// Drop runtime-only function (not persisted)
     DropTempFunction(DropTempFunctionCommand),
+    /// Rename runtime-only connector (not persisted)
+    RenameTempConnector(RenameTempConnectorCommand),
+    /// Rename runtime-only function (not persisted)
+    RenameTempFunction(RenameTempFunctionCommand),
     /// Show query execution plan
     ExplainPlan(ExplainPlanCommand),
     /// Set runtime config value (session-only)
@@ -137,6 +144,14 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::RenameTempConnector(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::RenameTempFunction(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
             FacadeCommand::ExplainPlan(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
@@ -157,6 +172,8 @@ impl FacadeCommand {
             FacadeCommand::ImportTempFunction(_) => ImportTempFunctionCommand::output_schema(),
             FacadeCommand::DropTempConnector(_) => DropTempConnectorCommand::output_schema(),
             FacadeCommand::DropTempFunction(_) => DropTempFunctionCommand::output_schema(),
+            FacadeCommand::RenameTempConnector(_) => RenameTempConnectorCommand::output_schema(),
+            FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_schema(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
         }
@@ -171,6 +188,8 @@ impl FacadeCommand {
             FacadeCommand::ImportTempFunction(_) => ImportTempFunctionCommand::output_shape(),
             FacadeCommand::DropTempConnector(_) => DropTempConnectorCommand::output_shape(),
             FacadeCommand::DropTempFunction(_) => DropTempFunctionCommand::output_shape(),
+            FacadeCommand::RenameTempConnector(_) => RenameTempConnectorCommand::output_shape(),
+            FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_shape(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
         }
@@ -190,6 +209,8 @@ impl BundleCommand {
             BundleCommand::ImportTempFunction(cmd) => Ok(FacadeCommand::ImportTempFunction(cmd)),
             BundleCommand::DropTempConnector(cmd) => Ok(FacadeCommand::DropTempConnector(cmd)),
             BundleCommand::DropTempFunction(cmd) => Ok(FacadeCommand::DropTempFunction(cmd)),
+            BundleCommand::RenameTempConnector(cmd) => Ok(FacadeCommand::RenameTempConnector(cmd)),
+            BundleCommand::RenameTempFunction(cmd) => Ok(FacadeCommand::RenameTempFunction(cmd)),
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
             BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
             _ => {
@@ -218,6 +239,8 @@ impl BundleCommand {
                     BundleCommand::SaveConfig(_) => "SAVE CONFIG",
                     BundleCommand::ImportConnector(_) => "IMPORT CONNECTOR",
                     BundleCommand::ImportFunction(_) => "IMPORT FUNCTION",
+                    BundleCommand::RenameConnector(_) => "RENAME CONNECTOR",
+                    BundleCommand::RenameFunction(_) => "RENAME FUNCTION",
                     BundleCommand::DropConnector(_) => "DROP CONNECTOR",
                     BundleCommand::DropFunction(_) => "DROP FUNCTION",
                     BundleCommand::CreateSource(_) => "CREATE SOURCE",
@@ -227,7 +250,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
+                    BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -241,7 +264,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
+        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
     }
 }
 
@@ -525,6 +548,8 @@ register_commands! {
         // Source commands
         ImportConnector(ImportConnectorCommand) => Rule::import_connector_stmt,
         ImportFunction(ImportFunctionCommand) => Rule::import_function_stmt,
+        RenameConnector(RenameConnectorCommand) => Rule::rename_connector_stmt,
+        RenameFunction(RenameFunctionCommand) => Rule::rename_function_stmt,
         DropConnector(DropConnectorCommand) => Rule::drop_connector_stmt,
         DropFunction(DropFunctionCommand) => Rule::drop_function_stmt,
         CreateSource(CreateSourceCommand) => Rule::create_source_stmt,
@@ -549,6 +574,8 @@ register_commands! {
         ImportTempFunction(ImportTempFunctionCommand) => Rule::import_temp_function_stmt,
         DropTempConnector(DropTempConnectorCommand) => Rule::drop_temp_connector_stmt,
         DropTempFunction(DropTempFunctionCommand) => Rule::drop_temp_function_stmt,
+        RenameTempConnector(RenameTempConnectorCommand) => Rule::rename_temp_connector_stmt,
+        RenameTempFunction(RenameTempFunctionCommand) => Rule::rename_temp_function_stmt,
         ExplainPlan(ExplainPlanCommand) => Rule::explain_stmt,
         SetConfig(SetConfigCommand) => Rule::set_config_stmt,
     }

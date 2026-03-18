@@ -39,6 +39,8 @@ impl PyOperation {
             AnyOperation::ImportConnector(_) => "loadConnector".to_string(),
             AnyOperation::DropConnector(_) => "dropConnector".to_string(),
             AnyOperation::DropFunction(_) => "dropFunction".to_string(),
+            AnyOperation::RenameConnector(_) => "renameConnector".to_string(),
+            AnyOperation::RenameFunction(_) => "renameFunction".to_string(),
         }
     }
 

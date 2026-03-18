@@ -1341,6 +1341,84 @@ impl BundleFacade for Bundle {
         Ok(self.function_registry.write().remove(name, platform, true))
     }
 
+    async fn rename_temp_connector(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), BundlebaseError> {
+        let new_namespaced = crate::NamespacedName::parse(new_name, "Connector")?;
+
+        // Validate old name has temporary entries
+        {
+            let registry = self.connector_registry.read();
+            let has_temp = registry.entries().iter().any(|e| e.temporary && e.name == old_name);
+            if !has_temp {
+                return Err(format!(
+                    "No temporary connector entries found for '{}'. Use IMPORT TEMP CONNECTOR first.",
+                    old_name
+                ).into());
+            }
+            // Check new name doesn't conflict
+            if registry.has_entry(new_name) {
+                return Err(format!(
+                    "Connector '{}' already exists. Drop it first or choose a different name.",
+                    new_name
+                ).into());
+            }
+        }
+
+        self.connector_registry.write().rename_temp_entries(old_name, &new_namespaced);
+
+        // Update sources referencing the old connector name
+        let sources = self.sources.read();
+        for (_, source) in sources.iter() {
+            if source.connector() == old_name {
+                source.set_connector_name(new_name.to_string());
+            }
+        }
+
+        self.function_registry.read().refresh_version_udf("TEMP".to_string());
+        Ok(())
+    }
+
+    async fn rename_temp_function(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), BundlebaseError> {
+        let new_namespaced = crate::NamespacedName::parse(new_name, "Function")?;
+
+        // Validate old name has temporary entries
+        {
+            let registry = self.function_registry.read();
+            let has_temp = registry.entries().iter().any(|e| e.temporary && e.name == old_name);
+            if !has_temp {
+                return Err(format!(
+                    "No temporary function entries found for '{}'. Use IMPORT TEMP FUNCTION first.",
+                    old_name
+                ).into());
+            }
+            // Check new name doesn't conflict
+            if registry.has(new_name) {
+                return Err(format!(
+                    "Function '{}' already exists. Drop it first or choose a different name.",
+                    new_name
+                ).into());
+            }
+        }
+
+        // Deregister old UDF/UDAF
+        let _ = self.ctx.deregister_udf(old_name);
+        let _ = self.ctx.deregister_udaf(old_name);
+
+        self.function_registry.write().rename_temp_entries(old_name, &new_namespaced);
+
+        // Re-register under the new name
+        self.function_registry.read().register_functions_for_name(new_name)?;
+        self.function_registry.read().refresh_version_udf("TEMP".to_string());
+        Ok(())
+    }
+
     async fn set_config(
         &self,
         scope: &Scope,

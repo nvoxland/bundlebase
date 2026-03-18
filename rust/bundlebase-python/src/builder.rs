@@ -380,6 +380,34 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Rename a function to a new dotted name.
+    ///
+    /// Renames all entries, deregisters old UDFs, and re-registers under the new name.
+    ///
+    /// # Arguments
+    /// * `old_name` - Current function name (e.g., "acme.double_val")
+    /// * `new_name` - New function name (e.g., "acme.double_val_v2")
+    fn rename_function<'py>(
+        slf: PyRef<'_, Self>,
+        old_name: &str,
+        new_name: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let old_name = old_name.to_string();
+        let new_name = new_name.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .rename_function(&old_name, &new_name)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to rename function", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
     #[pyo3(signature = (name, platform=None))]
     fn drop_function<'py>(
         slf: PyRef<'_, Self>,
@@ -757,6 +785,34 @@ impl PyBundleBuilder {
                 .import_temp_connector(entry)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to load temporary connector", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    /// Rename a connector to a new dotted name.
+    ///
+    /// Renames all entries and updates sources referencing the old connector name.
+    ///
+    /// # Arguments
+    /// * `old_name` - Current connector name (e.g., "acme.weather")
+    /// * `new_name` - New connector name (e.g., "acme.weather_v2")
+    fn rename_connector<'py>(
+        slf: PyRef<'_, Self>,
+        old_name: &str,
+        new_name: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let old_name = old_name.to_string();
+        let new_name = new_name.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .rename_connector(&old_name, &new_name)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to rename connector", e))?;
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })
                     .map_err(|e| to_py_error(e))

@@ -44,7 +44,11 @@ Operations are recorded and applied in sequence when querying:
 - **Join**: Join with other data sources
 - **Query**: Execute custom SQL
 - **ImportFunction**: Register a user-defined SQL scalar function
+- **RenameFunction**: Rename a function definition
 - **DropFunction**: Remove a user-defined SQL function
+- **ImportConnector**: Register a connector definition
+- **RenameConnector**: Rename a connector definition
+- **DropConnector**: Remove a connector definition
 - **SetName**: Set container name
 - **SetDescription**: Set container description
 - **IndexData**: Track row indexing metadata
