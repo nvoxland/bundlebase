@@ -1,10 +1,8 @@
 //! DropFunction operation — removes a function definition.
 
-use crate::bundle::connector_definition::Platform;
 use crate::bundle::operation::Operation;
 use crate::data::ObjectId;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
-use arrow::datatypes::DataType;
 use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
@@ -19,51 +17,14 @@ use serde::{Deserialize, Serialize};
 pub struct DropFunctionOp {
     /// IDs of the function entries to remove
     pub ids: Vec<ObjectId>,
-    /// Function name (for describe/display only, not used for matching)
-    pub name: String,
-    /// Optional platform filter (for describe/display only)
-    pub platform: Option<Platform>,
-    /// Optional input type signature filter (for describe/display only)
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "option_arrow_types")]
-    pub input_types: Option<Vec<DataType>>,
-}
-
-/// Serde helpers for Optional Vec<DataType>.
-mod option_arrow_types {
-    use crate::bundle::function_definition::arrow_type_serde;
-    use arrow::datatypes::DataType;
-    use serde::{Deserializer, Serializer};
-
-    pub fn serialize<S>(value: &Option<Vec<DataType>>, serializer: S) -> Result<S::Ok, S::Error>
-    where S: Serializer {
-        match value {
-            Some(types) => arrow_type_serde::vec::serialize(types, serializer),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<DataType>>, D::Error>
-    where D: Deserializer<'de> {
-        use serde::Deserialize;
-        let opt: Option<Vec<String>> = Option::deserialize(deserializer)?;
-        match opt {
-            None => Ok(None),
-            Some(strings) => {
-                let types = strings.iter()
-                    .map(|s| crate::bundle::function_definition::parse_arrow_type_name(s).map_err(serde::de::Error::custom))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Some(types))
-            }
-        }
-    }
 }
 
 impl DropFunctionOp {
     /// Resolve a function name (and optional filters) to entry IDs, creating the operation.
     pub fn setup(
         name: &str,
-        platform: Option<&Platform>,
-        input_types: Option<&[DataType]>,
+        platform: Option<&crate::bundle::connector_definition::Platform>,
+        input_types: Option<&[arrow::datatypes::DataType]>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         let registry = builder.bundle().function_registry.read();
@@ -97,29 +58,15 @@ impl DropFunctionOp {
         }
 
         let ids = matching.iter().map(|e| e.id).collect();
-        Ok(Self {
-            ids,
-            name: name.to_string(),
-            platform: platform.cloned(),
-            input_types: input_types.map(|t| t.to_vec()),
-        })
+        Ok(Self { ids })
     }
 }
 
 #[async_trait]
 impl Operation for DropFunctionOp {
     fn describe(&self) -> String {
-        let sig = match &self.input_types {
-            Some(types) => {
-                let type_strs: Vec<String> = types.iter().map(|dt| dt.to_string()).collect();
-                format!("({})", type_strs.join(", "))
-            }
-            None => String::new(),
-        };
-        match &self.platform {
-            Some(p) => format!("DROP FUNCTION {}{} FOR PLATFORM '{}'", self.name, sig, p),
-            None => format!("DROP FUNCTION {}{}", self.name, sig),
-        }
+        let id_strs: Vec<String> = self.ids.iter().map(|id| id.to_string()).collect();
+        format!("DROP FUNCTION: {}", id_strs.join(", "))
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -127,11 +74,7 @@ impl Operation for DropFunctionOp {
         let registry = bundle.function_registry.read();
         let found = self.ids.iter().any(|id| registry.entries().iter().any(|e| e.id == *id));
         if !found {
-            return Err(format!(
-                "Function '{}' is not defined. Use IMPORT FUNCTION first.",
-                self.name
-            )
-            .into());
+            return Err("Function entries not found. Use IMPORT FUNCTION first.".into());
         }
         Ok(())
     }
@@ -141,14 +84,25 @@ impl Operation for DropFunctionOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
+        // Look up the function name before removing entries
+        let name = {
+            let registry = bundle.function_registry();
+            let reg = registry.read();
+            reg.entries().iter()
+                .find(|e| self.ids.contains(&e.id))
+                .map(|e| e.name.to_string())
+        };
+
         // Remove entries by ID
         bundle.function_registry().write().remove_by_ids(&self.ids);
 
         // Deregister existing UDF/UDAF and re-register remaining overloads
-        let _ = bundle.ctx().deregister_udf(&self.name);
-        let _ = bundle.ctx().deregister_udaf(&self.name);
-        bundle.function_registry().read().register_functions_for_name(&self.name)
-            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+        if let Some(name) = name {
+            let _ = bundle.ctx().deregister_udf(&name);
+            let _ = bundle.ctx().deregister_udaf(&name);
+            bundle.function_registry().read().register_functions_for_name(&name)
+                .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+        }
 
         Ok(())
     }
@@ -159,66 +113,33 @@ mod tests {
     use super::*;
     use arrow::datatypes::DataType;
     use crate::bundle::connector_definition::Platform;
-            use crate::bundle::logic_runtime::LogicRuntime;
+    use crate::bundle::logic_runtime::LogicRuntime;
     use crate::bundle::function_definition::{FunctionEntry, FunctionKind};
     use crate::NamespacedName;
 
     #[test]
-    fn test_describe_without_platform() {
+    fn test_describe() {
+        let id = ObjectId::generate();
         let op = DropFunctionOp {
-            ids: vec![ObjectId::generate()],
-            name: "acme.double_val".to_string(),
-            platform: None,
-            input_types: None,
+            ids: vec![id],
         };
-        assert_eq!(op.describe(), "DROP FUNCTION acme.double_val");
+        assert_eq!(op.describe(), format!("DROP FUNCTION: {}", id));
     }
 
     #[test]
-    fn test_describe_with_platform() {
+    fn test_describe_multiple_ids() {
+        let id1 = ObjectId::generate();
+        let id2 = ObjectId::generate();
         let op = DropFunctionOp {
-            ids: vec![ObjectId::generate()],
-            name: "acme.double_val".to_string(),
-            platform: Some("linux/amd64".parse().unwrap()),
-            input_types: None,
+            ids: vec![id1, id2],
         };
-        assert_eq!(
-            op.describe(),
-            "DROP FUNCTION acme.double_val FOR PLATFORM 'linux/amd64'"
-        );
-    }
-
-    #[test]
-    fn test_describe_with_input_types() {
-        let op = DropFunctionOp {
-            ids: vec![ObjectId::generate()],
-            name: "acme.double_val".to_string(),
-            platform: None,
-            input_types: Some(vec![DataType::Int64]),
-        };
-        assert_eq!(op.describe(), "DROP FUNCTION acme.double_val(Int64)");
+        assert_eq!(op.describe(), format!("DROP FUNCTION: {}, {}", id1, id2));
     }
 
     #[test]
     fn test_serialization() {
         let op = DropFunctionOp {
             ids: vec![ObjectId::generate()],
-            name: "acme.double_val".to_string(),
-            platform: None,
-            input_types: None,
-        };
-        let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
-        let deser: DropFunctionOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
-        assert_eq!(deser, op);
-    }
-
-    #[test]
-    fn test_serialization_with_input_types() {
-        let op = DropFunctionOp {
-            ids: vec![ObjectId::generate()],
-            name: "acme.add".to_string(),
-            platform: None,
-            input_types: Some(vec![DataType::Int64, DataType::Int64]),
         };
         let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
         let deser: DropFunctionOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
@@ -230,13 +151,10 @@ mod tests {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let op = DropFunctionOp {
             ids: vec![ObjectId::generate()],
-            name: "acme.double_val".to_string(),
-            platform: None,
-            input_types: None,
         };
         let result = op.check(&bundle).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not defined"));
+        assert!(result.unwrap_err().to_string().contains("not found"));
     }
 
     #[tokio::test]
@@ -256,9 +174,6 @@ mod tests {
 
         let op = DropFunctionOp {
             ids: vec![id],
-            name: "acme.double_val".to_string(),
-            platform: None,
-            input_types: None,
         };
         let result = op.check(&bundle).await;
         assert!(result.is_ok());
@@ -281,9 +196,6 @@ mod tests {
 
         let op = DropFunctionOp {
             ids: vec![id],
-            name: "acme.double_val".to_string(),
-            platform: None,
-            input_types: None,
         };
         op.apply(&bundle).await.expect("apply");
 
@@ -319,9 +231,6 @@ mod tests {
         // Drop only the Int64 overload by ID
         let op = DropFunctionOp {
             ids: vec![id1],
-            name: "acme.convert".to_string(),
-            platform: None,
-            input_types: Some(vec![DataType::Int64]),
         };
         op.apply(&bundle).await.expect("apply");
 

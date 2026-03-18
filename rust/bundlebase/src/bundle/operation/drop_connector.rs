@@ -1,6 +1,5 @@
 //! DropConnector operation — removes a connector definition, or specific platform logic.
 
-use crate::bundle::connector_definition::Platform;
 use crate::bundle::operation::Operation;
 use crate::data::ObjectId;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
@@ -18,10 +17,6 @@ use serde::{Deserialize, Serialize};
 pub struct DropConnectorOp {
     /// IDs of the connector entries to remove
     pub ids: Vec<ObjectId>,
-    /// Connector name (for describe/display only, not used for matching)
-    pub connector_name: String,
-    /// Optional platform filter (for describe/display only)
-    pub platform: Option<Platform>,
 }
 
 impl DropConnectorOp {
@@ -31,7 +26,7 @@ impl DropConnectorOp {
     /// the bundle state is available for name→ID resolution.
     pub fn setup(
         connector_name: &str,
-        platform: Option<&Platform>,
+        platform: Option<&crate::bundle::connector_definition::Platform>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         let registry = builder.bundle().connector_registry();
@@ -59,21 +54,15 @@ impl DropConnectorOp {
         }
 
         let ids = matching.iter().map(|e| e.id).collect();
-        Ok(Self {
-            ids,
-            connector_name: connector_name.to_string(),
-            platform: platform.cloned(),
-        })
+        Ok(Self { ids })
     }
 }
 
 #[async_trait]
 impl Operation for DropConnectorOp {
     fn describe(&self) -> String {
-        match &self.platform {
-            Some(p) => format!("DROP CONNECTOR {} FOR PLATFORM '{}'", self.connector_name, p),
-            None => format!("DROP CONNECTOR {}", self.connector_name),
-        }
+        let id_strs: Vec<String> = self.ids.iter().map(|id| id.to_string()).collect();
+        format!("DROP CONNECTOR: {}", id_strs.join(", "))
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -82,11 +71,7 @@ impl Operation for DropConnectorOp {
         let registry_guard = registry.read();
         let found = self.ids.iter().any(|id| registry_guard.entries().iter().any(|e| e.id == *id));
         if !found {
-            return Err(format!(
-                "Connector '{}' is not defined. Use IMPORT CONNECTOR first.",
-                self.connector_name
-            )
-            .into());
+            return Err("Connector entries not found. Use IMPORT CONNECTOR first.".into());
         }
         Ok(())
     }
@@ -96,15 +81,23 @@ impl Operation for DropConnectorOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        // Remove entries by ID
-        {
-            bundle.connector_registry().write().remove_entries_by_ids(&self.ids);
-        }
+        // Look up the connector name before removing entries
+        let name = {
+            let registry = bundle.connector_registry();
+            let reg = registry.read();
+            reg.entries().iter()
+                .find(|e| self.ids.contains(&e.id))
+                .map(|e| e.name.to_string())
+        };
 
-        // Also remove any sources that reference the connector name
-        if self.platform.is_none() {
-            let mut sources = bundle.sources.write();
-            sources.retain(|_, source| source.connector() != self.connector_name);
+        // Remove entries by ID
+        bundle.connector_registry().write().remove_entries_by_ids(&self.ids);
+
+        // Remove sources referencing this connector (only if all entries for the name are gone)
+        if let Some(name) = name {
+            if !bundle.connector_registry().read().has_entry(&name) {
+                bundle.sources.write().retain(|_, source| source.connector() != name);
+            }
         }
 
         Ok(())
@@ -115,50 +108,32 @@ impl Operation for DropConnectorOp {
 mod tests {
     use super::*;
     use crate::bundle::connector_definition::{ConnectorEntry, Platform};
-            use crate::bundle::logic_runtime::LogicRuntime;
+    use crate::bundle::logic_runtime::LogicRuntime;
     use crate::NamespacedName;
 
     #[test]
-    fn test_describe_without_platform() {
+    fn test_describe() {
+        let id = ObjectId::generate();
         let op = DropConnectorOp {
-            ids: vec![ObjectId::generate()],
-            connector_name: "acme.weather".to_string(),
-            platform: None,
+            ids: vec![id],
         };
-        assert_eq!(op.describe(), "DROP CONNECTOR acme.weather");
+        assert_eq!(op.describe(), format!("DROP CONNECTOR: {}", id));
     }
 
     #[test]
-    fn test_describe_with_platform() {
+    fn test_describe_multiple_ids() {
+        let id1 = ObjectId::generate();
+        let id2 = ObjectId::generate();
         let op = DropConnectorOp {
-            ids: vec![ObjectId::generate()],
-            connector_name: "acme.weather".to_string(),
-            platform: Some("linux/amd64".parse().unwrap()),
+            ids: vec![id1, id2],
         };
-        assert_eq!(
-            op.describe(),
-            "DROP CONNECTOR acme.weather FOR PLATFORM 'linux/amd64'"
-        );
+        assert_eq!(op.describe(), format!("DROP CONNECTOR: {}, {}", id1, id2));
     }
 
     #[test]
     fn test_serialization() {
         let op = DropConnectorOp {
             ids: vec![ObjectId::generate()],
-            connector_name: "acme.weather".to_string(),
-            platform: None,
-        };
-        let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
-        let deser: DropConnectorOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
-        assert_eq!(deser, op);
-    }
-
-    #[test]
-    fn test_serialization_with_platform() {
-        let op = DropConnectorOp {
-            ids: vec![ObjectId::generate()],
-            connector_name: "acme.weather".to_string(),
-            platform: Some("linux/amd64".parse().unwrap()),
         };
         let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
         let deser: DropConnectorOp = serde_yaml_ng::from_str(&yaml).expect("deserialize");
@@ -170,12 +145,10 @@ mod tests {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let op = DropConnectorOp {
             ids: vec![ObjectId::generate()],
-            connector_name: "acme.weather".to_string(),
-            platform: None,
         };
         let result = op.check(&bundle).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not defined"));
+        assert!(result.unwrap_err().to_string().contains("not found"));
     }
 
     #[tokio::test]
@@ -192,8 +165,6 @@ mod tests {
 
         let op = DropConnectorOp {
             ids: vec![id],
-            connector_name: "acme.weather".to_string(),
-            platform: None,
         };
         let result = op.check(&bundle).await;
         assert!(result.is_ok());
@@ -213,8 +184,6 @@ mod tests {
 
         let op = DropConnectorOp {
             ids: vec![id],
-            connector_name: "acme.weather".to_string(),
-            platform: None,
         };
         op.apply(&bundle).await.expect("apply");
 
@@ -241,11 +210,8 @@ mod tests {
             temporary: false,
         });
 
-        // Drop entire connector
         let op = DropConnectorOp {
             ids: vec![id1, id2],
-            connector_name: "acme.weather".to_string(),
-            platform: None,
         };
         op.apply(&bundle).await.expect("apply");
 
@@ -274,8 +240,6 @@ mod tests {
 
         let op = DropConnectorOp {
             ids: vec![id2],
-            connector_name: "acme.weather".to_string(),
-            platform: Some("linux/amd64".parse().unwrap()),
         };
         op.apply(&bundle).await.expect("apply");
 
