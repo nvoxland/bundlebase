@@ -413,7 +413,7 @@ impl PyBundle {
     /// Describe a registered function's metadata.
     ///
     /// Returns a record batch stream with columns: name, kind, input_types,
-    /// return_type, runner, logic, platform, temporary.
+    /// return_type, runtime, entrypoint, platform, temporary.
     fn describe_function<'py>(
         &self,
         name: &str,
@@ -447,9 +447,9 @@ impl PyBundle {
         })
     }
 
-    /// Set temporary (runtime-only) connector logic for a connector.
+    /// Set temporary (runtime-only) connector for a source.
     ///
-    /// Load a temporary connector with runtime-only logic (not persisted).
+    /// Load a temporary connector at runtime only (not persisted).
     #[pyo3(signature = (name, from_, platform="*/*"))]
     fn import_temp_connector<'py>(
         &self,
@@ -476,7 +476,7 @@ impl PyBundle {
         })
     }
 
-    /// Load a temporary function with runtime-only logic (not persisted).
+    /// Load a temporary function at runtime only (not persisted).
     ///
     /// Types and kind are auto-detected from the function's manifest.
     #[pyo3(signature = (name, from_, platform="*/*"))]
@@ -538,7 +538,7 @@ impl PyBundle {
                     ))
                 })?;
             Ok(format!(
-                "Dropped {} temporary connector logic entries for: {}",
+                "Dropped {} temporary connector entries for: {}",
                 count, name
             ))
         })

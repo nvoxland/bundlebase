@@ -1,6 +1,6 @@
-//! ImportTempFunction command implementation (runtime-only).
+//! ImportTempFunction command implementation (session-only).
 //!
-//! Loads a function with runtime-only logic, without persisting an operation.
+//! Loads a function at runtime only, without persisting an operation.
 //! Works on both `Bundle` and `BundleBuilder` via `BundleFacade`.
 //!
 //! Supports both single and wildcard/bulk discovery modes.
@@ -9,7 +9,7 @@ use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::command::response::OutputShape;
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::connector_definition::Platform;
-use crate::bundle::logic_runtime::{LogicRuntime, RuntimeType};
+use crate::udf::{UdfRuntime, RuntimeType};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::function_definition::{parse_arrow_type_name, FunctionEntry, FunctionKind};
 use crate::NamespacedName;
@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Command to load a function with runtime-only logic (not persisted).
+/// Command to load a function at runtime only (not persisted).
 ///
 /// Types and kind are always auto-detected from the function's manifest.
 #[derive(Debug, Clone)]
@@ -47,13 +47,13 @@ impl ImportTempFunctionCommand {
 
     /// Validates a function entry and registers it with the facade.
     ///
-    /// Performs IPC call string validation and kind consistency checks,
+    /// Performs IPC entrypoint string validation and kind consistency checks,
     /// then adds to the registry and re-registers UDFs.
     async fn validate_and_register(
         facade: &dyn BundleFacade,
         entry: FunctionEntry,
     ) -> Result<(), BundlebaseError> {
-        // Validate IPC logic string at import time (fail early)
+        // Validate IPC entrypoint string at import time (fail early)
         if entry.from.runtime_type() == RuntimeType::Ipc {
             crate::function::ipc_bridge::parse_call(&entry.from.build_call_string())?;
         }
@@ -197,8 +197,8 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
         self: Box<Self>,
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
-        let from = LogicRuntime::parse_from(&self.from)?;
-        from.validate_logic()?;
+        let from = UdfRuntime::parse_from(&self.from)?;
+        from.validate_entrypoint()?;
 
         if self.is_wildcard() {
             // Wildcard/bulk mode
@@ -207,7 +207,7 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
             let manifest = from.load_manifest()?
                 .ok_or_else(|| -> BundlebaseError {
                     format!(
-                        "Wildcard function discovery not supported for '{}' runner",
+                        "Wildcard function discovery not supported for '{}' runtime",
                         from.runtime_name()
                     )
                     .into()
@@ -224,8 +224,8 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
                 let kind: FunctionKind = manifest_entry.kind.parse()?;
 
                 let symbol = manifest_entry.symbol.as_deref().unwrap_or(&manifest_entry.name);
-                let func_logic = format!("{}:{}", from.to_logic_string(), symbol);
-                let func_from = LogicRuntime::parse_from(&format!("{}::{}", from.runtime_name(), func_logic))?;
+                let entrypoint = format!("{}:{}", from.to_entrypoint_string(), symbol);
+                let func_from = UdfRuntime::parse_from(&format!("{}::{}", from.runtime_name(), entrypoint))?;
                 let name = format!("{}.{}", namespace, manifest_entry.name);
                 let namespaced: NamespacedName = name.parse()?;
 
@@ -245,7 +245,7 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
 
             Ok(format!(
                 "Loaded {} temporary function(s) from '{}'",
-                count, from.to_logic_string()
+                count, from.to_entrypoint_string()
             ))
         } else {
             // Single function mode — auto-detect types from manifest
@@ -254,8 +254,8 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
 
             // Use the symbol from the from string (e.g., "MySum" from "module:MySum")
             // rather than the SQL name, since the SQL name may differ from the manifest entry.
-            let logic_str = from.to_logic_string();
-            let symbol = logic_str.rsplit(':').next().unwrap_or(&logic_str);
+            let entrypoint_str = from.to_entrypoint_string();
+            let symbol = entrypoint_str.rsplit(':').next().unwrap_or(&entrypoint_str);
             let manifest_entry = from.lookup_function_in_manifest(symbol)?;
             let kind: FunctionKind = match manifest_entry.kind.as_str() {
                 "aggregate" => FunctionKind::Aggregate,

@@ -11,7 +11,6 @@ mod init;
 mod operation;
 mod source;
 pub(crate) mod connector_definition;
-pub(crate) mod logic_runtime;
 pub(crate) mod function_definition;
 mod sql;
 
@@ -37,7 +36,7 @@ pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
 pub use source::Source;
 pub use connector_definition::{ConnectorEntry, Platform};
-pub use logic_runtime::LogicRuntime;
+pub use crate::udf::UdfRuntime;
 pub use function_definition::{parse_arrow_type_name, validate_kind_consistency, FunctionEntry, FunctionKind, FunctionRegistry};
 use arrow::datatypes::DataType;
 use std::collections::{HashMap, HashSet};
@@ -758,8 +757,8 @@ impl Bundle {
         self.sources.read().clone()
     }
 
-    /// Check if any temporary logic (connectors or functions) has been added.
-    pub(crate) fn has_temporary_logic(&self) -> bool {
+    /// Check if any temporary connectors or functions has been added.
+    pub(crate) fn has_temporary_udf(&self) -> bool {
         self.function_registry.read().has_temporary()
             || self.connector_registry.read().has_temporary()
     }
@@ -995,7 +994,7 @@ impl BundleFacade for Bundle {
     }
 
     fn version(&self) -> String {
-        if self.has_temporary_logic() {
+        if self.has_temporary_udf() {
             return "TEMP".to_string();
         }
         self.version.read().clone()

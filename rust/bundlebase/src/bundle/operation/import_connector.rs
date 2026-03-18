@@ -1,8 +1,8 @@
-//! ImportConnector operation — registers a named connector definition with logic.
+//! ImportConnector operation — registers a named connector definition.
 
 use crate::bundle::operation::Operation;
 use crate::bundle::connector_definition::{parse_connector_name, ConnectorEntry, Platform};
-use crate::bundle::logic_runtime::LogicRuntime;
+use crate::udf::UdfRuntime;
 use crate::data::ObjectId;
 use crate::NamespacedName;
 use crate::{Bundle, BundlebaseError};
@@ -10,10 +10,10 @@ use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 
-/// Operation that defines a named connector and sets its logic.
+/// Operation that defines a named connector and sets its entrypoint.
 ///
-/// Loads the connector if it doesn't exist, then adds/replaces logic for the given platform.
-/// Always persisted — for runtime-only logic, use `import_temp_connector` instead.
+/// Loads the connector if it doesn't exist, then adds/replaces the entrypoint for the given platform.
+/// Always persisted — for session-only entrypoints, use `import_temp_connector` instead.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportConnectorOp {
@@ -21,14 +21,14 @@ pub struct ImportConnectorOp {
     pub id: ObjectId,
     /// Full dotted connector name (e.g., "acme.weather")
     pub name: String,
-    /// Runtime and logic source (e.g., ipc::./my_connector)
-    pub from: LogicRuntime,
+    /// Runtime and entrypoint source (e.g., ipc::./my_connector)
+    pub from: UdfRuntime,
     /// Platform pattern in Docker-style os/arch (e.g., "linux/amd64", "*/*")
     pub platform: Platform,
 }
 
 impl ImportConnectorOp {
-    pub fn new(name: String, from: LogicRuntime, platform: Platform) -> Self {
+    pub fn new(name: String, from: UdfRuntime, platform: Platform) -> Self {
         Self { id: ObjectId::generate(), name, from, platform }
     }
 }
@@ -78,7 +78,7 @@ mod tests {
     fn test_describe() {
         let op = ImportConnectorOp::new(
             "acme.weather".to_string(),
-            LogicRuntime::parse_from("ipc::./weather").unwrap(),
+            UdfRuntime::parse_from("ipc::./weather").unwrap(),
             Platform::any(),
         );
         assert_eq!(
@@ -91,7 +91,7 @@ mod tests {
     fn test_serialization() {
         let op = ImportConnectorOp::new(
             "acme.weather".to_string(),
-            LogicRuntime::parse_from("ipc::./weather-linux").unwrap(),
+            UdfRuntime::parse_from("ipc::./weather-linux").unwrap(),
             "linux/amd64".parse().unwrap(),
         );
         let yaml = serde_yaml_ng::to_string(&op).expect("serialize");
@@ -105,7 +105,7 @@ mod tests {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let op = ImportConnectorOp::new(
             "weather".to_string(),
-            LogicRuntime::parse_from("ipc::./test").unwrap(),
+            UdfRuntime::parse_from("ipc::./test").unwrap(),
             Platform::any(),
         );
         let result = op.check(&bundle).await;

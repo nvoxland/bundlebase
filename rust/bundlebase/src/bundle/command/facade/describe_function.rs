@@ -2,7 +2,7 @@
 //!
 //! Returns metadata about a registered function: all entries matching
 //! the given dotted name, including kind, input types, return type,
-//! runner, logic, platform, and temporary status.
+//! runtime, entrypoint, platform, and temporary status.
 
 use crate::bundle::command::response::{single_batch_stream, OutputShape};
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
@@ -18,7 +18,7 @@ use std::sync::Arc;
 /// Command to describe a registered function's metadata.
 ///
 /// Returns a table with columns: name, kind, input_types, return_type,
-/// runner, logic, platform, temporary for all entries matching the given
+/// runtime, entrypoint, platform, temporary for all entries matching the given
 /// function name.
 #[derive(Debug, Clone)]
 pub struct DescribeFunctionCommand {
@@ -41,8 +41,8 @@ impl DescribeFunctionCommand {
             Field::new("kind", DataType::Utf8, false),
             Field::new("input_types", DataType::Utf8, false),
             Field::new("return_type", DataType::Utf8, false),
-            Field::new("runner", DataType::Utf8, false),
-            Field::new("logic", DataType::Utf8, false),
+            Field::new("runtime", DataType::Utf8, false),
+            Field::new("entrypoint", DataType::Utf8, false),
             Field::new("platform", DataType::Utf8, false),
             Field::new("temporary", DataType::Boolean, false),
         ]))
@@ -110,8 +110,8 @@ impl BundleFacadeCommand for DescribeFunctionCommand {
             })
             .collect();
         let return_types: Vec<String> = matching.iter().map(|e| e.return_type.to_string()).collect();
-        let runners: Vec<String> = matching.iter().map(|e| e.from.runtime_name().to_string()).collect();
-        let logics: Vec<String> = matching.iter().map(|e| e.from.to_logic_string()).collect();
+        let runtimes: Vec<String> = matching.iter().map(|e| e.from.runtime_name().to_string()).collect();
+        let entrypoints: Vec<String> = matching.iter().map(|e| e.from.to_entrypoint_string()).collect();
         let platforms: Vec<String> = matching.iter().map(|e| e.platform.to_string()).collect();
         let temporaries: Vec<bool> = matching.iter().map(|e| e.temporary).collect();
 
@@ -122,8 +122,8 @@ impl BundleFacadeCommand for DescribeFunctionCommand {
                 Arc::new(StringArray::from(kinds)) as ArrayRef,
                 Arc::new(StringArray::from(input_types)) as ArrayRef,
                 Arc::new(StringArray::from(return_types)) as ArrayRef,
-                Arc::new(StringArray::from(runners)) as ArrayRef,
-                Arc::new(StringArray::from(logics)) as ArrayRef,
+                Arc::new(StringArray::from(runtimes)) as ArrayRef,
+                Arc::new(StringArray::from(entrypoints)) as ArrayRef,
                 Arc::new(StringArray::from(platforms)) as ArrayRef,
                 Arc::new(BooleanArray::from(temporaries)) as ArrayRef,
             ],

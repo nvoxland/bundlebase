@@ -10,7 +10,7 @@ use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 use std::sync::Arc;
 
-use super::{LogicRuntimeImpl, RuntimeType};
+use super::super::entrypoint::{UdfEntrypoint, RuntimeType};
 
 /// Python runtime: holds a module name and function/class name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,30 +20,30 @@ pub struct PythonRuntime {
 }
 
 impl PythonRuntime {
-    /// Parse a Python logic string like `"module:function"`.
+    /// Parse a Python entrypoint string like `"module:function"`.
     ///
     /// Uses the last colon as delimiter so dotted modules work
     /// (e.g., `"pkg.sub.mod:func"` → module=`"pkg.sub.mod"`, function=`"func"`).
-    pub fn parse(logic: &str) -> Result<Self, BundlebaseError> {
-        let colon_pos = logic.rfind(':').ok_or_else(|| {
+    pub fn parse(entrypoint: &str) -> Result<Self, BundlebaseError> {
+        let colon_pos = entrypoint.rfind(':').ok_or_else(|| {
             BundlebaseError::from(format!(
-                "Invalid Python logic '{}'. Expected 'module:function' format.",
-                logic
+                "Invalid Python entrypoint '{}'. Expected 'module:function' format.",
+                entrypoint
             ))
         })?;
-        let module = &logic[..colon_pos];
-        let function = &logic[colon_pos + 1..];
+        let module = &entrypoint[..colon_pos];
+        let function = &entrypoint[colon_pos + 1..];
 
         if module.is_empty() {
             return Err(format!(
-                "Invalid Python logic '{}'. Module before ':' cannot be empty.",
-                logic
+                "Invalid Python entrypoint '{}'. Module before ':' cannot be empty.",
+                entrypoint
             ).into());
         }
         if function.is_empty() {
             return Err(format!(
-                "Invalid Python logic '{}'. Function after ':' cannot be empty.",
-                logic
+                "Invalid Python entrypoint '{}'. Function after ':' cannot be empty.",
+                entrypoint
             ).into());
         }
 
@@ -54,8 +54,8 @@ impl PythonRuntime {
     }
 }
 
-impl LogicRuntimeImpl for PythonRuntime {
-    fn validate_logic(&self) -> Result<(), BundlebaseError> {
+impl UdfEntrypoint for PythonRuntime {
+    fn validate_entrypoint(&self) -> Result<(), BundlebaseError> {
         let bridge = get_python_function_bridge()?;
         // If get_function_metadata succeeds (even returning None for no metadata),
         // the module is importable. An import error will propagate as Err.
@@ -71,7 +71,7 @@ impl LogicRuntimeImpl for PythonRuntime {
         RuntimeType::Native
     }
 
-    fn to_logic_string(&self) -> String {
+    fn to_entrypoint_string(&self) -> String {
         format!("{}:{}", self.module, self.function)
     }
 
@@ -96,7 +96,7 @@ impl LogicRuntimeImpl for PythonRuntime {
                     format!(
                         "Function '{}' not found in manifest from '{}'. \
                          Available functions: check the manifest or provide explicit type signatures.",
-                        function_name, self.to_logic_string()
+                        function_name, self.to_entrypoint_string()
                     )
                     .into()
                 }),

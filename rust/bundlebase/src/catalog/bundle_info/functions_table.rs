@@ -46,8 +46,8 @@ impl BundleFunctionsTable {
             Field::new("kind", DataType::Utf8, false),
             Field::new("input_types", DataType::Utf8, false),
             Field::new("return_type", DataType::Utf8, false),
-            Field::new("runner", DataType::Utf8, false),
-            Field::new("logic", DataType::Utf8, false),
+            Field::new("runtime", DataType::Utf8, false),
+            Field::new("entrypoint", DataType::Utf8, false),
             Field::new("platform", DataType::Utf8, false),
             Field::new("temporary", DataType::Boolean, false),
         ]))
@@ -74,8 +74,8 @@ impl BundleFunctionsTable {
             types.join(", ")
         }).collect();
         let return_types: Vec<String> = entries.iter().map(|e| arrow_type_to_name(&e.return_type)).collect();
-        let runners: Vec<String> = entries.iter().map(|e| e.from.runtime_name().to_string()).collect();
-        let logics: Vec<String> = entries.iter().map(|e| e.from.to_logic_string()).collect();
+        let runtimes: Vec<String> = entries.iter().map(|e| e.from.runtime_name().to_string()).collect();
+        let entrypoints: Vec<String> = entries.iter().map(|e| e.from.to_entrypoint_string()).collect();
         let platforms: Vec<String> = entries.iter().map(|e| e.platform.to_string()).collect();
         let temporaries: Vec<bool> = entries.iter().map(|e| e.temporary).collect();
 
@@ -87,8 +87,8 @@ impl BundleFunctionsTable {
                 Arc::new(StringArray::from(kinds.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
                 Arc::new(StringArray::from(input_types.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
                 Arc::new(StringArray::from(return_types.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(runners.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
-                Arc::new(StringArray::from(logics.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+                Arc::new(StringArray::from(runtimes.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
+                Arc::new(StringArray::from(entrypoints.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
                 Arc::new(StringArray::from(platforms.iter().map(|s| s.as_str()).collect::<Vec<_>>())),
                 Arc::new(BooleanArray::from(temporaries)),
             ],

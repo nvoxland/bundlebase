@@ -3,7 +3,7 @@
 use crate::bundle::{BundleBuilder, CreateSourceOp};
 use crate::data::ObjectId;
 use crate::source::{AttachedFileInfo, FetchAction, ConnectorRegistry, SyncMode, orchestrate_fetch};
-use crate::source::connector_utils;
+use crate::source::shared_utils;
 use crate::BundlebaseError;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -105,10 +105,10 @@ impl Source {
                 .create_instance(runtime_type)
                 .ok_or_else(|| format!("Unknown connector type '{:?}'", runtime_type))?;
 
-            // Resolve bundle-relative logic paths against the data directory
+            // Resolve bundle-relative entrypoint paths against the data directory
             let resolved_from = entry.from.resolve_path(&bundle.data_dir());
 
-            // Merge: inject "call" from logic (reconstructed with prefix), then overlay user args
+            // Merge: inject "call" from entrypoint (reconstructed with prefix), then overlay user args
             let mut merged_args = self.args.clone();
             let call_string = resolved_from.build_call_string();
             merged_args.insert("call".to_string(), call_string);
@@ -127,7 +127,7 @@ impl Source {
 
         // Get attached files directly from self
         let attached_files = self.attached_files();
-        let should_copy = connector_utils::should_copy(&resolved_args);
+        let should_copy = shared_utils::should_copy(&resolved_args);
 
         orchestrate_fetch(
             func.as_ref(),

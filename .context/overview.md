@@ -36,7 +36,7 @@ Bundlebase is a high-performance data processing library written in Rust with Py
 - **Three-Tier Architecture**: Bundlebase trait, Bundlebase (read-only), BundlebaseBuilder (mutable)
 - **Operation Pipeline**: Operations recorded and applied lazily during querying
 - **Adapter System**: Plugin architecture for CSV, JSON, Parquet, and custom functions
-- **Function System**: User-defined SQL scalar functions with multi-runner/multi-platform support
+- **Function System**: User-defined SQL scalar functions with multi-runtime/multi-platform support
 - **Arc-Based Sharing**: Efficient cloning with shared state
 - **Manifest-Based Versioning**: Commit history with 'from' chain support
 
@@ -88,7 +88,7 @@ poetry run pytest         # Python tests
 - ✅ Mutable operations pattern (all operations mutate in place)
 - ✅ Three-phase operation system (check/reconfigure/apply)
 - ✅ Flexible path handling (file://, memory:///, s3://, custom URLs)
-- ✅ User-defined SQL scalar functions (IMPORT FUNCTION) with multi-runner support
+- ✅ User-defined SQL scalar functions (IMPORT FUNCTION) with multi-runtime support
 - ✅ Connector system for pluggable data sources (IMPORT CONNECTOR)
 - ✅ Multi-format file support (CSV, JSON, Parquet)
 - ✅ Row indexing system for efficient lookups

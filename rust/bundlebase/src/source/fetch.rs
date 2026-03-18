@@ -1,9 +1,9 @@
 //! Fetch orchestration for source data discovery and materialization.
 
-use super::connector::{
+use crate::connector::{
     AttachedFileInfo, Connector, DiscoveredLocation, FetchAction, MaterializedData, SourceData,
 };
-use super::connector_utils::{filename_from_url, record_batch_stream_to_parquet, should_copy};
+use super::shared_utils::{filename_from_url, record_batch_stream_to_parquet, should_copy};
 use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};

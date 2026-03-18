@@ -137,7 +137,7 @@ df = await c.to_pandas()     # NOW both operations EXECUTE
 
 **Characteristics**:
 - Per-bundle storage of user-defined SQL functions
-- Each entry contains metadata (name, input/return types, runner, logic, platform, kind)
+- Each entry contains metadata (name, input/return types, runtime, entrypoint, platform, kind)
 - Registered with DataFusion's SessionContext for SQL execution
 - Supports both persistent and temporary (session-scoped) entries
 

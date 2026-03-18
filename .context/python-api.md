@@ -90,7 +90,7 @@ c = await Bundlebase.open("/my/container/dir")
 - `import_connector(name, from_, platform)` - Define a persistent custom connector
 - `import_temp_connector(name, from_, platform)` - Define a session-only custom connector (required for Python runtime)
 - `drop_connector(name, platform)` - Drop a connector definition
-- `drop_temp_connector(name, platform)` - Drop runtime-only connector logic
+- `drop_temp_connector(name, platform)` - Drop runtime-only connector
 - `import_function(name, from_, platform)` - Define a persistent SQL function (types auto-detected from manifest)
 - `import_temp_function(name, from_, platform)` - Define a session-only SQL function (types auto-detected from manifest)
 - `drop_function(name, platform)` - Drop a function definition (drops **all overloads** for that name)
@@ -367,7 +367,7 @@ await c.filter(
 
 ### import_connector()
 
-Defines a persistent custom connector. The connector definition and logic are stored in the bundle's commit history.
+Defines a persistent custom connector. The connector definition and entrypoint are stored in the bundle's commit history.
 
 ```python
 # IPC connector (subprocess)
@@ -382,7 +382,7 @@ await c.import_connector('acme.weather', 'ffi::libweather.so', platform='linux/a
 
 **Parameters:**
 - `name` - Dot-separated connector name (e.g., `"acme.weather"`)
-- `from_` - URI in `runtime::logic` format (e.g., `"ipc::my_connector"`); supported runtimes: `"ipc"`, `"ffi"`, `"java"`, `"docker"` (not `"python"` — use `import_temp_connector` instead)
+- `from_` - URI in `runtime::entrypoint` format (e.g., `"ipc::my_connector"`); supported runtimes: `"ipc"`, `"ffi"`, `"java"`, `"docker"` (not `"python"` — use `import_temp_connector` instead)
 - `platform` (optional) - Target platform (e.g., `"linux/amd64"`, default `"*/*"`)
 
 ### import_temp_connector()
@@ -401,29 +401,29 @@ await c.import_temp_connector('acme.weather', 'ipc::my_connector')
 
 ### drop_connector()
 
-Removes a connector definition and all associated logic, or removes only logic for a specific platform.
+Removes a connector, or removes a connector for a specific platform only.
 
 ```python
 # Drop entire connector
 await c.drop_connector('acme.weather')
 
-# Drop logic for a specific platform only
+# Drop connector for a specific platform only
 await c.drop_connector('acme.weather', platform='linux/amd64')
 ```
 
 ### drop_temp_connector()
 
-Removes runtime-only connector logic.
+Removes runtime-only connector entries.
 
 ```python
-# Drop all temporary logic
+# Drop all temporary connectors
 count = await c.drop_temp_connector('acme.weather')
 
 # Drop for a specific platform
 count = await c.drop_temp_connector('acme.weather', platform='*/*')
 ```
 
-**Returns:** The number of logic entries removed.
+**Returns:** The number of connector entries removed.
 
 See [Custom Connectors](../docs/guide/custom-connectors/index.md) for full details on runtimes, SDKs, and protocol.
 

@@ -113,7 +113,7 @@ mod tests {
     use super::*;
     use arrow::datatypes::DataType;
     use crate::bundle::connector_definition::Platform;
-    use crate::bundle::logic_runtime::LogicRuntime;
+    use crate::udf::UdfRuntime;
     use crate::bundle::function_definition::{FunctionEntry, FunctionKind};
     use crate::NamespacedName;
 
@@ -166,7 +166,7 @@ mod tests {
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("ipc::./test").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./test").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -188,7 +188,7 @@ mod tests {
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("ipc::./test").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./test").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -212,7 +212,7 @@ mod tests {
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Utf8,
-            from: LogicRuntime::parse_from("ipc::./int_convert").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./int_convert").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -222,7 +222,7 @@ mod tests {
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Float64],
             return_type: DataType::Utf8,
-            from: LogicRuntime::parse_from("ipc::./float_convert").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./float_convert").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,

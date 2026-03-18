@@ -1,7 +1,7 @@
 //! FFI bridge for loading and invoking native shared library (.so/.dylib) functions.
 //!
 //! Provides:
-//! - `parse_lib_logic()` — splits `path:symbol` into path + optional symbol
+//! - `parse_lib_entrypoint()` — splits `path:symbol` into path + optional symbol
 //! - `load_library()` — loads and caches shared libraries via `libloading`
 //! - `invoke_lib_scalar()` — calls a C scalar function through Arrow FFI
 //! - `LibAccumulator` — wraps C aggregate function state for DataFusion
@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 use std::sync::{Arc, Mutex};
 
-/// Parse a lib/IPC logic string in `"path:symbol"` format.
+/// Parse a lib/IPC entrypoint string in `"path:symbol"` format.
 ///
 /// The colon convention mirrors Python's `module:function` pattern.
 /// If no colon is present, returns `None` for the symbol (caller uses default).
@@ -26,34 +26,34 @@ use std::sync::{Arc, Mutex};
 /// # Examples
 /// - `"./mylib.so:double_val"` → `("./mylib.so", Some("double_val"))`
 /// - `"./mylib.so"` → `("./mylib.so", None)`
-pub fn parse_lib_logic(logic: &str) -> Result<(&str, Option<&str>), BundlebaseError> {
-    if logic.is_empty() {
-        return Err("Lib function logic string cannot be empty".into());
+pub fn parse_lib_entrypoint(entrypoint: &str) -> Result<(&str, Option<&str>), BundlebaseError> {
+    if entrypoint.is_empty() {
+        return Err("Lib function entrypoint string cannot be empty".into());
     }
 
     // Use rsplit to find the last colon, since paths may contain colons (e.g., Windows)
-    if let Some(colon_pos) = logic.rfind(':') {
-        let path = &logic[..colon_pos];
-        let symbol = &logic[colon_pos + 1..];
+    if let Some(colon_pos) = entrypoint.rfind(':') {
+        let path = &entrypoint[..colon_pos];
+        let symbol = &entrypoint[colon_pos + 1..];
 
         if path.is_empty() {
             return Err(format!(
-                "Invalid lib function logic '{}'. Path before ':' cannot be empty.",
-                logic
+                "Invalid lib function entrypoint '{}'. Path before ':' cannot be empty.",
+                entrypoint
             )
             .into());
         }
         if symbol.is_empty() {
             return Err(format!(
-                "Invalid lib function logic '{}'. Symbol after ':' cannot be empty.",
-                logic
+                "Invalid lib function entrypoint '{}'. Symbol after ':' cannot be empty.",
+                entrypoint
             )
             .into());
         }
 
         Ok((path, Some(symbol)))
     } else {
-        Ok((logic, None))
+        Ok((entrypoint, None))
     }
 }
 
@@ -581,7 +581,7 @@ pub fn load_java_ipc_manifest(jar_path: &str) -> Result<Manifest, BundlebaseErro
 ///
 /// Delegates to `runtime.lookup_function_in_manifest()`.
 pub fn lookup_function_in_manifest(
-    runtime: &crate::bundle::logic_runtime::LogicRuntime,
+    runtime: &crate::udf::UdfRuntime,
     function_name: &str,
 ) -> Result<ManifestEntry, BundlebaseError> {
     runtime.lookup_function_in_manifest(function_name)
@@ -591,44 +591,44 @@ pub fn lookup_function_in_manifest(
 mod tests {
     use super::*;
 
-    // ==================== parse_lib_logic tests ====================
+    // ==================== parse_lib_entrypoint tests ====================
 
     #[test]
-    fn test_parse_lib_logic_with_symbol() {
-        let (path, symbol) = parse_lib_logic("./mylib.so:double_val").unwrap();
+    fn test_parse_lib_entrypoint_with_symbol() {
+        let (path, symbol) = parse_lib_entrypoint("./mylib.so:double_val").unwrap();
         assert_eq!(path, "./mylib.so");
         assert_eq!(symbol, Some("double_val"));
     }
 
     #[test]
-    fn test_parse_lib_logic_without_symbol() {
-        let (path, symbol) = parse_lib_logic("./mylib.so").unwrap();
+    fn test_parse_lib_entrypoint_without_symbol() {
+        let (path, symbol) = parse_lib_entrypoint("./mylib.so").unwrap();
         assert_eq!(path, "./mylib.so");
         assert_eq!(symbol, None);
     }
 
     #[test]
-    fn test_parse_lib_logic_relative_path() {
-        let (path, symbol) = parse_lib_logic("libs/mylib.dylib:func_name").unwrap();
+    fn test_parse_lib_entrypoint_relative_path() {
+        let (path, symbol) = parse_lib_entrypoint("libs/mylib.dylib:func_name").unwrap();
         assert_eq!(path, "libs/mylib.dylib");
         assert_eq!(symbol, Some("func_name"));
     }
 
     #[test]
-    fn test_parse_lib_logic_absolute_path() {
-        let (path, symbol) = parse_lib_logic("/usr/local/lib/mylib.so:my_func").unwrap();
+    fn test_parse_lib_entrypoint_absolute_path() {
+        let (path, symbol) = parse_lib_entrypoint("/usr/local/lib/mylib.so:my_func").unwrap();
         assert_eq!(path, "/usr/local/lib/mylib.so");
         assert_eq!(symbol, Some("my_func"));
     }
 
     #[test]
-    fn test_parse_lib_logic_empty() {
-        assert!(parse_lib_logic("").is_err());
+    fn test_parse_lib_entrypoint_empty() {
+        assert!(parse_lib_entrypoint("").is_err());
     }
 
     #[test]
-    fn test_parse_lib_logic_empty_path() {
-        let result = parse_lib_logic(":symbol");
+    fn test_parse_lib_entrypoint_empty_path() {
+        let result = parse_lib_entrypoint(":symbol");
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -637,8 +637,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_lib_logic_empty_symbol() {
-        let result = parse_lib_logic("./mylib.so:");
+    fn test_parse_lib_entrypoint_empty_symbol() {
+        let result = parse_lib_entrypoint("./mylib.so:");
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -647,8 +647,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_lib_logic_ipc_path() {
-        let (path, symbol) = parse_lib_logic("./my_func:double_val").unwrap();
+    fn test_parse_lib_entrypoint_ipc_path() {
+        let (path, symbol) = parse_lib_entrypoint("./my_func:double_val").unwrap();
         assert_eq!(path, "./my_func");
         assert_eq!(symbol, Some("double_val"));
     }

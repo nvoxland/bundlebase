@@ -1,6 +1,6 @@
 # Custom Connectors
 
-Custom connectors let you write data providers in any language. The `runner` parameter determines how Bundlebase loads and communicates with your connector:
+Custom connectors let you write data providers in any language. The `runtime` parameter determines how Bundlebase loads and communicates with your connector:
 
 | Type | How It Works | Performance | Languages |
 |------|-------------|-------------|-----------|
@@ -16,7 +16,7 @@ Internally, `python` and `ffi` run **in-process** (native mode) for zero-copy Ar
 
 ## Runtime URI Format Reference
 
-When importing a connector, the `FROM` clause uses a `runner::logic` URI. This table shows the format for each runtime:
+When importing a connector, the `FROM` clause uses a `runtime::entrypoint` URI. This table shows the format for each runtime:
 
 | Runtime | URI Format | Example |
 |---------|-----------|---------|
@@ -45,14 +45,14 @@ Use these directly with `CREATE SOURCE` — no `IMPORT CONNECTOR` step needed.
 
 Custom connectors use a simple workflow:
 
-1. [**Load the connector**](#import-connector) — defines a named connector with its runner and logic
+1. [**Load the connector**](#import-connector) — defines a named connector
 2. [**Create a source**](#create-source) — creates a source instance from the connector
 3. [**Fetch data**](#fetch) — discovers and attaches data from the source
 
 To remove or rename connectors:
 
-- [**Drop connector**](#drop-connector) — removes the connector (or just a specific platform's logic)
-- [**Drop temp connector**](#drop-temp-connector) — removes runtime-only logic entries
+- [**Drop connector**](#drop-connector) — removes the connector (or just a specific platform's entry)
+- [**Drop temp connector**](#drop-temp-connector) — removes runtime-only connector entries
 - [**Rename connector**](#rename-connector) — renames a connector and updates associated sources
 - [**Rename temp connector**](#rename-temp-connector) — renames runtime-only connector entries
 
@@ -92,7 +92,7 @@ To remove or rename connectors:
 
 ### IMPORT CONNECTOR
 
-Creates a named connector with its runner and logic. The connector definition and logic are **persisted** into the bundle's commit history, making the bundle portable.
+Creates a named connector. The connector definition is **persisted** into the bundle's commit history, making the bundle portable.
 
 === "Async API"
 
@@ -123,11 +123,11 @@ Creates a named connector with its runner and logic. The connector definition an
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | *(required)* | Dot-separated connector name (e.g., `"acme.weather"`) |
-| `from_` | `str` | *(required)* | Runner URI in `runner::logic` format (e.g., `"ipc::my_connector"`, `"python::my_module:MyConnector"`) |
+| `from_` | `str` | *(required)* | Runtime URI in `runtime::entrypoint` format (e.g., `"ipc::my_connector"`, `"python::my_module:MyConnector"`) |
 | `platform` | `str` | `"*/*"` | Target platform (e.g., `"linux/amd64"`, `"darwin/arm64"`, `"*/*"` for all) |
 
 !!! note
-    `IMPORT CONNECTOR` rejects `runner='python'` because Python code cannot be serialized into the bundle. Use [`IMPORT TEMP CONNECTOR`](#import-temp-connector) for Python connectors.
+    `IMPORT CONNECTOR` rejects `runtime='python'` because Python code cannot be serialized into the bundle. Use [`IMPORT TEMP CONNECTOR`](#import-temp-connector) for Python connectors.
 
 Connector names use a **dot-separated namespace** format. The part before the first dot is the **namespace** (e.g., `acme` in `acme.weather`). Choose a namespace that is unique to you or your organization — this prevents naming collisions when sharing bundles. For example:
 
@@ -143,7 +143,7 @@ You can call `IMPORT CONNECTOR` multiple times for different platforms on the sa
 
 ### IMPORT TEMP CONNECTOR
 
-Creates a connector with logic at **runtime only** — nothing is persisted into the bundle. Use this for `runner='python'` in-process connectors. Works on both `Bundle` (read-only) and `BundleBuilder`.
+Creates a connector at **runtime only** — nothing is persisted into the bundle. Use this for `runtime='python'` in-process connectors. Works on both `Bundle` (read-only) and `BundleBuilder`.
 
 === "Async API"
 
@@ -169,9 +169,9 @@ Creates a connector with logic at **runtime only** — nothing is persisted into
     IMPORT TEMP CONNECTOR acme.weather FROM 'python::my_module:MyConnector'
     ```
 
-**Parameters:** Same as [`IMPORT CONNECTOR`](#import-connector), but the `from_` parameter accepts all runners including `python`.
+**Parameters:** Same as [`IMPORT CONNECTOR`](#import-connector), but the `from_` parameter accepts all runtimes including `python`.
 
-Temporary logic takes precedence over persisted logic when both exist for the same platform. This is useful for development workflows where you want to test a Python connector locally before packaging it as a shared library or Docker image.
+Temporary connectors take precedence over persisted connectors when both exist for the same platform. This is useful for development workflows where you want to test a Python connector locally before packaging it as a shared library or Docker image.
 
 ---
 
@@ -291,7 +291,7 @@ Discovers and attaches new files from sources. Returns a list of `FetchResults`,
 
 ### DROP CONNECTOR
 
-Removes a connector. Without a platform, removes the entire connector definition and **all** its associated logic (persisted and temporary) and source instances. With a platform, removes only the logic entry for that platform.
+Removes a connector. Without a platform, removes the entire connector definition and **all** its entries (persisted and temporary) and source instances. With a platform, removes only the connector for that platform.
 
 Like other drop operations, the bundled artifacts are not deleted — a `DropConnectorOp` is added to the history.
 
@@ -301,7 +301,7 @@ Like other drop operations, the bundled artifacts are not deleted — a `DropCon
     # Drop the entire connector
     bundle = await bundle.drop_connector('acme.weather')
 
-    # Drop logic for a specific platform only
+    # Drop connector for a specific platform only
     bundle = await bundle.drop_connector('acme.weather', platform='linux/amd64')
     ```
 
@@ -311,7 +311,7 @@ Like other drop operations, the bundled artifacts are not deleted — a `DropCon
     # Drop the entire connector
     bundle.drop_connector('acme.weather')
 
-    # Drop logic for a specific platform only
+    # Drop connector for a specific platform only
     bundle.drop_connector('acme.weather', platform='linux/amd64')
     ```
 
@@ -321,7 +321,7 @@ Like other drop operations, the bundled artifacts are not deleted — a `DropCon
     -- Drop the entire connector
     DROP CONNECTOR acme.weather
 
-    -- Drop logic for a specific platform only
+    -- Drop connector for a specific platform only
     DROP CONNECTOR acme.weather FOR PLATFORM 'linux/amd64'
     ```
 
@@ -330,41 +330,41 @@ Like other drop operations, the bundled artifacts are not deleted — a `DropCon
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | *(required)* | Dot-separated connector name |
-| `platform` | `str` | `None` | If specified, only drop logic for this platform. If `None`, drops the entire connector. |
+| `platform` | `str` | `None` | If specified, only drop the connector for this platform. If `None`, drops the entire connector. |
 
 ---
 
 ### DROP TEMP CONNECTOR
 
-Removes **runtime-only** logic entries from a connector. Works on both `Bundle` and `BundleBuilder`.
+Removes **runtime-only** connector entries. Works on both `Bundle` and `BundleBuilder`.
 
 === "Async API"
 
     ```python
-    # Drop all temporary logic
+    # Drop all temporary connectors
     count = await bundle.drop_temp_connector('acme.weather')
 
-    # Drop temporary logic for a specific platform
+    # Drop temporary connector for a specific platform
     count = await bundle.drop_temp_connector('acme.weather', platform='*/*')
     ```
 
 === "Sync API"
 
     ```python
-    # Drop all temporary logic
+    # Drop all temporary connectors
     count = bundle.drop_temp_connector('acme.weather')
 
-    # Drop temporary logic for a specific platform
+    # Drop temporary connector for a specific platform
     count = bundle.drop_temp_connector('acme.weather', platform='*/*')
     ```
 
 === "SQL"
 
     ```sql
-    -- Drop all temporary logic
+    -- Drop all temporary connectors
     DROP TEMP CONNECTOR acme.weather
 
-    -- Drop temporary logic for a specific platform
+    -- Drop temporary connector for a specific platform
     DROP TEMP CONNECTOR acme.weather FOR PLATFORM '*/*'
     ```
 
@@ -373,9 +373,9 @@ Removes **runtime-only** logic entries from a connector. Works on both `Bundle` 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | *(required)* | Dot-separated connector name |
-| `platform` | `str` | `None` | If specified, only drop logic for this platform. If `None`, drops all platforms. |
+| `platform` | `str` | `None` | If specified, only drop the connector for this platform. If `None`, drops all platforms. |
 
-**Returns:** The number of logic entries removed.
+**Returns:** The number of connector entries removed.
 
 ---
 
@@ -467,15 +467,15 @@ Any extra key-value arguments passed in the [`CREATE SOURCE`](#create-source) co
 
 ## Runtime Values
 
-The `runner` parameter determines how Bundlebase loads and runs the connector:
+The `runtime` parameter determines how Bundlebase loads and runs the connector:
 
-| Runtime  | Mode | `logic` value | What happens |
+| Runtime  | Mode | `entrypoint` value | What happens |
 |----------|------|--------------|--------------|
 | `python` | Native (in-process) | `module:Class` | Imports the Python class via PyO3 and calls it directly |
 | `ffi`    | Native (in-process) | Path to `.so`/`.dylib`/`.dll` | `dlopen`s the shared library and uses Arrow C Data Interface |
-| `java`   | IPC (subprocess) | Path to JAR file | Runs `java -jar <logic>` as a subprocess |
-| `docker` | IPC (subprocess) | Docker image name | Runs `docker run -i --rm <logic>` as a subprocess |
-| `ipc`    | IPC (subprocess) | Command to run | Executes `<logic>` directly (whitespace-split) as a subprocess |
+| `java`   | IPC (subprocess) | Path to JAR file | Runs `java -jar <entrypoint>` as a subprocess |
+| `docker` | IPC (subprocess) | Docker image name | Runs `docker run -i --rm <entrypoint>` as a subprocess |
+| `ipc`    | IPC (subprocess) | Command to run | Executes `<entrypoint>` directly (whitespace-split) as a subprocess |
 
 ## Docker Connectors
 

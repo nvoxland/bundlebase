@@ -3,10 +3,10 @@
 //! Discovers and downloads dataset files from Kaggle via their REST API.
 //! Authentication is read from `~/.kaggle/kaggle.json`.
 
-use crate::source::connector::{
+use crate::connector::{
     ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::connector_utils;
+use crate::source::shared_utils;
 use crate::bundle_config::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use crate::{BundleConfig, BundlebaseError, Scope};
 use async_trait::async_trait;
@@ -119,7 +119,7 @@ impl Connector for KaggleConnector {
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
         // Validate dataset format: must be exactly "owner/dataset-name"
-        let dataset = connector_utils::require_arg(args, "dataset", "kaggle")?;
+        let dataset = shared_utils::require_arg(args, "dataset", "kaggle")?;
         let parts: Vec<&str> = dataset.splitn(3, '/').collect();
         if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
             return Err(BundlebaseError::from(format!(
@@ -156,8 +156,8 @@ impl Connector for KaggleConnector {
         _attached_locations: &HashSet<String>,
         config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let dataset = connector_utils::require_arg(args, "dataset", "kaggle")?;
-        let patterns = connector_utils::get_patterns(args)?;
+        let dataset = shared_utils::require_arg(args, "dataset", "kaggle")?;
+        let patterns = shared_utils::get_patterns(args)?;
         let version = args.get("version").map(|s| s.as_str());
         let client = KaggleClient::from_config(config, dataset)?;
 
@@ -195,7 +195,7 @@ impl Connector for KaggleConnector {
         args: &HashMap<String, String>,
         config: &Arc<BundleConfig>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
-        let dataset = connector_utils::require_arg(args, "dataset", "kaggle")?;
+        let dataset = shared_utils::require_arg(args, "dataset", "kaggle")?;
         let version = args.get("version").map(|s| s.as_str());
         let client = KaggleClient::from_config(config, dataset)?;
 
@@ -489,7 +489,7 @@ impl KaggleConnector {
             temp
         };
 
-        Ok(connector_utils::stream_from_temp_file(final_temp))
+        Ok(shared_utils::stream_from_temp_file(final_temp))
     }
 
     /// Extract the first file from a ZIP archive on disk to a new temp file.
@@ -569,7 +569,7 @@ impl KaggleConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::connector::validate_connector_args;
+    use crate::connector::validate_connector_args;
 
     #[test]
     fn test_signature() {

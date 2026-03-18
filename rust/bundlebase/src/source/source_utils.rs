@@ -5,7 +5,7 @@
 //!
 //! Common low-level helpers are re-exported from `shared_utils`.
 
-use super::connector::{
+use crate::connector::{
     AttachedFileInfo, Connector, DiscoveredLocation, FetchAction, MaterializedData, SourceData,
 };
 use super::SyncMode;

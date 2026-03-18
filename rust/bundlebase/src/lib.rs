@@ -17,6 +17,8 @@ pub mod source;
 #[allow(clippy::unwrap_used)]
 pub mod test_utils;
 pub mod function;
+pub(crate) mod connector;
+pub(crate) mod udf;
 mod versioning;
 
 pub use crate::bundle::{

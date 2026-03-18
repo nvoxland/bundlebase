@@ -57,7 +57,7 @@ The source workflow has two steps:
 
 ## Connectors
 
-Connectors contain the logic on how to pull data from an external source into your bundle. 
+Connectors define how to pull data from an external source into your bundle.
 
 Bundlebase ships with several common connectors, but custom connectors can also be made and plugged in to support any external data you need.
 
@@ -307,14 +307,14 @@ bundle.import_connector('example.connector', 'ipc::./example_connector')
 bundle.create_source('example.connector')
 ```
 
-See [Custom Connectors](custom-connectors/index.md) for full command reference, runner values, SDKs, and protocol details.
+See [Custom Connectors](custom-connectors/index.md) for full command reference, runtime values, SDKs, and protocol details.
 
-### Dropping Connectors and Logic
+### Dropping Connectors
 
-To remove custom connectors and their logic, see the full command reference:
+To remove custom connectors, see the full command reference:
 
-- [`DROP CONNECTOR`](custom-connectors/index.md#drop-connector) — removes the connector (or just a specific platform's logic)
-- [`DROP TEMP CONNECTOR`](custom-connectors/index.md#drop-temp-connector) — removes runtime-only logic entries
+- [`DROP CONNECTOR`](custom-connectors/index.md#drop-connector) — removes the connector (or just a specific platform's entry)
+- [`DROP TEMP CONNECTOR`](custom-connectors/index.md#drop-temp-connector) — removes runtime-only connector entries
 
 ## Fetching Data
 

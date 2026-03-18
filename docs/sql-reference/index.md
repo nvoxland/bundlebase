@@ -174,22 +174,22 @@ See [Data Sources](../guide/sources.md) for details.
 
 ## Connectors
 
-Commands for managing custom connectors. Connectors use a two-step workflow: create a connector with its logic, then create a source from it.
+Commands for managing custom connectors. Connectors use a two-step workflow: create a connector, then create a source from it.
 
 See [Custom Connectors](../guide/custom-connectors/index.md) for full details and SDK references.
 
 ### IMPORT CONNECTOR
 
-Creates a named connector with its runner and logic. The connector definition is **persisted** into the bundle's commit history.
+Creates a named connector. The connector definition is **persisted** into the bundle's commit history.
 
 ```sql
-IMPORT CONNECTOR <name> FROM '<runner>::<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT CONNECTOR <name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
 ```
 
-The `runner::logic` URI specifies both the runner and what to run. An optional `WITH` clause can provide additional parameters like `platform`.
+The `runtime::entrypoint` URI specifies both the runtime and what to run. An optional `WITH` clause can provide additional parameters like `platform`.
 
 !!! note
-    The `python` runner is not allowed with `IMPORT CONNECTOR` because Python code cannot be bundled. Use `IMPORT TEMP CONNECTOR` instead.
+    The `python` runtime is not allowed with `IMPORT CONNECTOR` because Python code cannot be bundled. Use `IMPORT TEMP CONNECTOR` instead.
 
 **Examples:**
 
@@ -212,10 +212,10 @@ IMPORT CONNECTOR example.connector FROM 'ffi::./libexample_connector.so' WITH (p
 
 ### IMPORT TEMP CONNECTOR
 
-Creates a connector for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process sources.
+Creates a connector for the current session only. The entrypoint is **not** persisted — it exists only at runtime. Use this for Python in-process sources.
 
 ```sql
-IMPORT TEMP CONNECTOR <name> FROM '<runner>::<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT TEMP CONNECTOR <name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
 ```
 
 **Examples:**
@@ -224,13 +224,13 @@ IMPORT TEMP CONNECTOR <name> FROM '<runner>::<logic>' [WITH (<key> = '<value>', 
 -- Python in-process (most common use case)
 IMPORT TEMP CONNECTOR example.connector FROM 'python::example_connector:ExampleConnector'
 
--- Any other runner also works as temporary
+-- Any other runtime also works as temporary
 IMPORT TEMP CONNECTOR example.connector FROM 'ipc::./example_connector'
 ```
 
 ### DROP CONNECTOR
 
-Removes a connector definition and all associated logic, or removes only logic for a specific platform.
+Removes a connector, or removes a connector for a specific platform only.
 
 ```sql
 DROP CONNECTOR <name> [FOR PLATFORM '<platform>']
@@ -242,13 +242,13 @@ DROP CONNECTOR <name> [FOR PLATFORM '<platform>']
 -- Drop the entire connector
 DROP CONNECTOR example.connector
 
--- Drop logic for a specific platform only
+-- Drop connector for a specific platform only
 DROP CONNECTOR example.connector FOR PLATFORM 'linux/amd64'
 ```
 
 ### DROP TEMP CONNECTOR
 
-Removes runtime-only connector logic. Optionally filter by platform.
+Removes runtime-only connector entries. Optionally filter by platform.
 
 ```sql
 DROP TEMP CONNECTOR <name> [FOR PLATFORM '<platform>']
@@ -257,10 +257,10 @@ DROP TEMP CONNECTOR <name> [FOR PLATFORM '<platform>']
 **Examples:**
 
 ```sql
--- Drop all temporary logic entries
+-- Drop all temporary connector entries
 DROP TEMP CONNECTOR example.connector
 
--- Drop temporary logic for a specific platform only
+-- Drop temporary connector for a specific platform only
 DROP TEMP CONNECTOR example.connector FOR PLATFORM 'linux/amd64'
 ```
 
@@ -294,7 +294,7 @@ RENAME TEMP CONNECTOR acme.weather TO acme.weather_v2
 
 ### DESCRIBE CONNECTOR
 
-Returns metadata about a registered connector. Shows all entries matching the given name, including runner, logic, platform, and whether the entry is temporary.
+Returns metadata about a registered connector. Shows all entries matching the given name, including runtime, entrypoint, platform, and whether the entry is temporary.
 
 ```sql
 DESCRIBE CONNECTOR <dotted_name>
@@ -305,8 +305,8 @@ The result is a table with the following columns:
 | Column | Type | Description |
 |--------|------|-------------|
 | `name` | string | Connector name |
-| `runner` | string | Runtime type (e.g., `ipc`, `ffi`, `python`) |
-| `logic` | string | Logic path or module reference |
+| `runtime` | string | Runtime type (e.g., `ipc`, `ffi`, `python`) |
+| `entrypoint` | string | Entrypoint path or module reference |
 | `platform` | string | Target platform (e.g., `*/*`, `linux/amd64`) |
 | `temporary` | boolean | Whether the entry is runtime-only |
 
@@ -317,12 +317,12 @@ DESCRIBE CONNECTOR acme.weather
 ```
 
 ```
-+---------------+--------+---------------------+----------+-----------+
-| name          | runner | logic               | platform | temporary |
-+---------------+--------+---------------------+----------+-----------+
-| acme.weather  | ipc    | ./my_connector      | */*      | false     |
-| acme.weather  | python | my_module:MyWeather | */*      | true      |
-+---------------+--------+---------------------+----------+-----------+
++---------------+---------+---------------------+----------+-----------+
+| name          | runtime | entrypoint          | platform | temporary |
++---------------+---------+---------------------+----------+-----------+
+| acme.weather  | ipc     | ./my_connector      | */*      | false     |
+| acme.weather  | python  | my_module:MyWeather | */*      | true      |
++---------------+---------+---------------------+----------+-----------+
 ```
 
 ## Indexes
@@ -378,16 +378,16 @@ Commands for creating custom SQL functions that can be used in queries.
 
 ### IMPORT FUNCTION
 
-Creates a named function with its logic. The function definition is **persisted** into the bundle's commit history. Input types, return type, and function kind (scalar/aggregate) are auto-detected from the runner.
+Creates a named function. The function definition is **persisted** into the bundle's commit history. Input types, return type, and function kind (scalar/aggregate) are auto-detected from the runtime.
 
 ```sql
-IMPORT FUNCTION <namespace.name> FROM '<runner>::<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT FUNCTION <namespace.name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
 ```
 
 An optional `WITH` clause can provide additional parameters like `platform`.
 
 !!! note
-    The `python` runner is not allowed with `IMPORT FUNCTION` because Python code cannot be bundled. Use `IMPORT TEMP FUNCTION` instead.
+    The `python` runtime is not allowed with `IMPORT FUNCTION` because Python code cannot be bundled. Use `IMPORT TEMP FUNCTION` instead.
 
 **Scalar function examples:**
 
@@ -429,10 +429,10 @@ IMPORT FUNCTION acme.percentile FROM 'docker::myorg/stats:latest'
 
 ### IMPORT TEMP FUNCTION
 
-Creates a function for the current session only. The logic is **not** persisted — it exists only at runtime. Use this for Python in-process functions. Input types, return type, and function kind are auto-detected.
+Creates a function for the current session only. The entrypoint is **not** persisted — it exists only at runtime. Use this for Python in-process functions. Input types, return type, and function kind are auto-detected.
 
 ```sql
-IMPORT TEMP FUNCTION <namespace.name> FROM '<runner>::<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT TEMP FUNCTION <namespace.name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
 ```
 
 **Scalar function examples:**
@@ -510,7 +510,7 @@ SELECT category, id, acme.my_sum(amount) OVER (PARTITION BY category ORDER BY id
 
 ### DROP FUNCTION
 
-Removes a function definition, or removes only logic for a specific platform.
+Removes a function definition, or removes only the entrypoint for a specific platform.
 
 ```sql
 DROP FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
@@ -522,13 +522,13 @@ DROP FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
 -- Drop the entire function
 DROP FUNCTION acme.double_val
 
--- Drop logic for a specific platform only
+-- Drop function for a specific platform only
 DROP FUNCTION acme.double_val FOR PLATFORM 'linux/amd64'
 ```
 
 ### DROP TEMP FUNCTION
 
-Removes runtime-only function logic. Optionally filter by platform.
+Removes runtime-only function entries. Optionally filter by platform.
 
 ```sql
 DROP TEMP FUNCTION <namespace.name> [FOR PLATFORM '<platform>']
@@ -564,7 +564,7 @@ RENAME TEMP FUNCTION acme.double_val TO acme.double_val_v2
 
 ### DESCRIBE FUNCTION
 
-Returns metadata about a registered function. Shows all entries matching the given name, including kind, input/return types, runner, logic, platform, and whether the entry is temporary.
+Returns metadata about a registered function. Shows all entries matching the given name, including kind, input/return types, runtime, entrypoint, platform, and whether the entry is temporary.
 
 ```sql
 DESCRIBE FUNCTION <dotted_name>
@@ -578,8 +578,8 @@ The result is a table with the following columns:
 | `kind` | string | Function kind (`scalar`, `aggregate`, `table_valued`) |
 | `input_types` | string | Comma-separated Arrow input types (e.g., `Int64, Utf8`) |
 | `return_type` | string | Arrow return type (e.g., `Int64`) |
-| `runner` | string | Runtime type (e.g., `ipc`, `ffi`, `python`) |
-| `logic` | string | Logic path or module reference |
+| `runtime` | string | Runtime type (e.g., `ipc`, `ffi`, `python`) |
+| `entrypoint` | string | Entrypoint path or module reference |
 | `platform` | string | Target platform (e.g., `*/*`, `linux/amd64`) |
 | `temporary` | boolean | Whether the entry is runtime-only |
 
@@ -590,12 +590,12 @@ DESCRIBE FUNCTION acme.double_val
 ```
 
 ```
-+------------------+--------+-------------+-------------+--------+-------------------------+----------+-----------+
-| name             | kind   | input_types | return_type | runner | logic                   | platform | temporary |
-+------------------+--------+-------------+-------------+--------+-------------------------+----------+-----------+
-| acme.double_val  | scalar | Int64       | Int64       | ipc    | ./my_funcs              | */*      | false     |
-| acme.double_val  | scalar | Int64       | Int64       | python | my_module:double_val    | */*      | true      |
-+------------------+--------+-------------+-------------+--------+-------------------------+----------+-----------+
++------------------+--------+-------------+-------------+---------+-------------------------+----------+-----------+
+| name             | kind   | input_types | return_type | runtime | entrypoint              | platform | temporary |
++------------------+--------+-------------+-------------+---------+-------------------------+----------+-----------+
+| acme.double_val  | scalar | Int64       | Int64       | ipc     | ./my_funcs              | */*      | false     |
+| acme.double_val  | scalar | Int64       | Int64       | python  | my_module:double_val    | */*      | true      |
++------------------+--------+-------------+-------------+---------+-------------------------+----------+-----------+
 ```
 
 ### Wildcard Function Discovery
@@ -603,7 +603,7 @@ DESCRIBE FUNCTION acme.double_val
 Discovers and registers all functions exported by a shared library or IPC executable in a single command using the wildcard `namespace.*` syntax. Uses the manifest discovery protocol.
 
 ```sql
-IMPORT FUNCTION <namespace>.* FROM '<runner>::<logic>' [WITH (<key> = '<value>', ...)]
+IMPORT FUNCTION <namespace>.* FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
 ```
 
 **Examples:**

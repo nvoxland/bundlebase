@@ -1,7 +1,7 @@
 //! IPC bridge for invoking functions via external subprocesses.
 //!
 //! Uses JSON-RPC 2.0 + Arrow IPC protocol over stdin/stdout pipes.
-//! Supports scalar and aggregate functions via `ipc`, `java`, and `docker` runners.
+//! Supports scalar and aggregate functions via `ipc`, `java`, and `docker` runtimes.
 //!
 //! Protocol:
 //! - **Scalar invoke**: JSON-RPC `invoke` request, then Arrow IPC input/output.
@@ -61,7 +61,7 @@ struct JsonRpcError {
 // Call string parser (duplicated from connector ipc.rs for independence)
 // ---------------------------------------------------------------------------
 
-/// Parse a call/logic string into a command + arguments vector.
+/// Parse a call/entrypoint string into a command + arguments vector.
 ///
 /// Supported formats:
 /// - `python:script.py`     -> `["python", "script.py"]`
@@ -71,7 +71,7 @@ struct JsonRpcError {
 pub(crate) fn parse_call(call: &str) -> Result<Vec<String>, BundlebaseError> {
     let call = call.trim();
     if call.is_empty() {
-        return Err("Function logic/call string must not be empty".into());
+        return Err("Function entrypoint/call string must not be empty".into());
     }
 
     if let Some(script) = call.strip_prefix("python:") {
@@ -105,7 +105,7 @@ pub(crate) fn parse_call(call: &str) -> Result<Vec<String>, BundlebaseError> {
     } else {
         let parts: Vec<String> = call.split_whitespace().map(|s| s.to_string()).collect();
         if parts.is_empty() {
-            return Err("Function logic/call string must not be empty".into());
+            return Err("Function entrypoint/call string must not be empty".into());
         }
         Ok(parts)
     }
@@ -491,13 +491,13 @@ pub fn new_subprocess_cache() -> SubprocessCache {
     Arc::new(DashMap::new())
 }
 
-/// Normalize a logic string for use as a cache key.
+/// Normalize an entrypoint string for use as a cache key.
 ///
 /// Extracts the command portion (before any whitespace arguments), attempts to
 /// canonicalize it as a filesystem path, and reconstructs the full string.
-/// Falls back to the raw logic string if canonicalization fails.
-fn normalize_cache_key(logic: &str) -> String {
-    let trimmed = logic.trim();
+/// Falls back to the raw entrypoint string if canonicalization fails.
+fn normalize_cache_key(entrypoint: &str) -> String {
+    let trimmed = entrypoint.trim();
     // Split into command and arguments at the first whitespace
     let (cmd_part, args_part) = match trimmed.split_once(char::is_whitespace) {
         Some((cmd, args)) => (cmd, Some(args)),
@@ -513,16 +513,16 @@ fn normalize_cache_key(logic: &str) -> String {
                 None => canonical_str.into_owned(),
             }
         }
-        Err(_) => logic.to_string(),
+        Err(_) => entrypoint.to_string(),
     }
 }
 
 fn get_or_spawn_subprocess(
     cache: &SubprocessCache,
-    logic: &str,
+    entrypoint: &str,
     timeout: Duration,
 ) -> Result<Arc<Mutex<SyncSubprocessHandle>>, BundlebaseError> {
-    let cache_key = normalize_cache_key(logic);
+    let cache_key = normalize_cache_key(entrypoint);
 
     // Fast path: return existing handle without blocking other keys.
     if let Some(entry) = cache.get(&cache_key) {
@@ -534,7 +534,7 @@ fn get_or_spawn_subprocess(
             Ok(Some(status)) => {
                 log::warn!(
                     "IPC subprocess for '{}' exited with status {}, will re-spawn",
-                    logic,
+                    entrypoint,
                     status
                 );
                 drop(guard);
@@ -550,7 +550,7 @@ fn get_or_spawn_subprocess(
             Err(e) => {
                 log::warn!(
                     "Failed to check IPC subprocess status for '{}': {}, assuming alive",
-                    logic,
+                    entrypoint,
                     e
                 );
                 drop(guard);
@@ -564,7 +564,7 @@ fn get_or_spawn_subprocess(
     let handle = cache
         .entry(cache_key)
         .or_try_insert_with(|| {
-            let command = parse_call(logic)?;
+            let command = parse_call(entrypoint)?;
             let h = SyncSubprocessHandle::spawn(&command, timeout)?;
             Ok::<_, BundlebaseError>(Arc::new(Mutex::new(h)))
         })
@@ -601,10 +601,10 @@ const HEALTH_CHECK_TIMEOUT_SECS: u64 = 5;
 /// if the subprocess is unreachable or responds incorrectly.
 pub fn ipc_health_check(
     cache: &SubprocessCache,
-    logic: &str,
+    entrypoint: &str,
 ) -> Result<(), BundlebaseError> {
     let timeout = Duration::from_secs(HEALTH_CHECK_TIMEOUT_SECS);
-    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
 
     let result = guard
@@ -612,7 +612,7 @@ pub fn ipc_health_check(
         .map_err(|e| {
             BundlebaseError::from(format!(
                 "IPC health check failed for '{}': {}",
-                logic, e
+                entrypoint, e
             ))
         })?;
 
@@ -621,7 +621,7 @@ pub fn ipc_health_check(
     } else {
         Err(BundlebaseError::from(format!(
             "IPC health check for '{}' returned unexpected result: {}",
-            logic, result
+            entrypoint, result
         )))
     }
 }
@@ -639,12 +639,12 @@ pub fn ipc_health_check(
 /// 4. Return the single output column
 pub fn invoke_ipc_scalar(
     cache: &SubprocessCache,
-    logic: &str,
+    entrypoint: &str,
     function_name: &str,
     args: &[ArrayRef],
 ) -> Result<ArrayRef, BundlebaseError> {
     let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
-    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
 
     // Send invoke request
@@ -724,11 +724,11 @@ pub fn invoke_ipc_scalar(
 /// State is held server-side in the subprocess.
 pub fn ipc_aggregate_create_state(
     cache: &SubprocessCache,
-    logic: &str,
+    entrypoint: &str,
     function_name: &str,
 ) -> Result<String, BundlebaseError> {
     let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
-    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
 
     let result = guard.send_request(
@@ -760,13 +760,13 @@ pub fn ipc_aggregate_create_state(
 /// 3. State is updated server-side (no data returned)
 pub fn ipc_aggregate_accumulate(
     cache: &SubprocessCache,
-    logic: &str,
+    entrypoint: &str,
     function_name: &str,
     state_id: &str,
     values: &[ArrayRef],
 ) -> Result<(), BundlebaseError> {
     let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
-    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
 
     guard.send_request(
@@ -800,13 +800,13 @@ pub fn ipc_aggregate_accumulate(
 /// 2. Response contains the merged state ID
 pub fn ipc_aggregate_merge(
     cache: &SubprocessCache,
-    logic: &str,
+    entrypoint: &str,
     function_name: &str,
     state_id1: &str,
     state_id2: &str,
 ) -> Result<String, BundlebaseError> {
     let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
-    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
 
     let result = guard.send_request(
@@ -840,13 +840,13 @@ pub fn ipc_aggregate_merge(
 /// 3. Extract ScalarValue from the result
 pub fn ipc_aggregate_evaluate(
     cache: &SubprocessCache,
-    logic: &str,
+    entrypoint: &str,
     function_name: &str,
     state_id: &str,
     return_type: &arrow::datatypes::DataType,
 ) -> Result<ScalarValue, BundlebaseError> {
     let timeout = Duration::from_secs(DEFAULT_FUNCTION_TIMEOUT_SECS);
-    let handle = get_or_spawn_subprocess(cache, logic, timeout)?;
+    let handle = get_or_spawn_subprocess(cache, entrypoint, timeout)?;
     let mut guard = acquire_lock(&handle);
 
     guard.send_request(
