@@ -714,12 +714,12 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Load a named connector with logic (persisted).
+    /// Load a named connector (persisted).
     ///
     /// # Arguments
     /// * `name` - Dot-separated connector name (e.g., "acme.weather")
-    /// * `runner` - The runner: "lib", "java", "docker", or "ipc"
-    /// * `logic` - The logic string (path to shared library or binary)
+    /// * `runtime` - The runtime: "lib", "java", "docker", or "ipc"
+    /// * `entrypoint` - The entrypoint string (path to shared library or binary)
     /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
     #[pyo3(signature = (name, from_, platform="*/*"))]
     fn import_connector<'py>(
@@ -745,7 +745,7 @@ impl PyBundleBuilder {
         })
     }
 
-    /// Load a temporary connector with runtime-only logic (not persisted).
+    /// Load a temporary connector at runtime only (not persisted).
     ///
     /// # Arguments
     /// * `name` - The connector name
@@ -804,7 +804,7 @@ impl PyBundleBuilder {
     }
 
     /// Drop a connector. Without a platform, removes the entire definition.
-    /// With a platform, removes only the logic for that platform.
+    /// With a platform, removes only that platform.
     ///
     /// # Arguments
     /// * `name` - The dotted connector name (e.g., "acme.weather")
@@ -854,7 +854,7 @@ impl PyBundleBuilder {
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to drop temporary connector", e))?;
             Ok(format!(
-                "Dropped {} temporary connector logic entries for: {}",
+                "Dropped {} temporary connector entries for: {}",
                 count, name
             ))
         })
@@ -1160,7 +1160,7 @@ impl PyBundleBuilder {
     /// Describe a registered function's metadata.
     ///
     /// Returns a record batch stream with columns: name, kind, input_types,
-    /// return_type, runner, logic, platform, temporary.
+    /// return_type, runtime, entrypoint, platform, temporary.
     fn describe_function<'py>(
         &self,
         name: &str,

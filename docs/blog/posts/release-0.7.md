@@ -27,7 +27,7 @@ bundle.create_source('acme.weather', {'region': 'us-east'})
 bundle.fetch("base", "add")
 ```
 
-Multiple runners are available depending on your needs:
+Multiple runtimes are available depending on your needs:
 
 - **`python`** — in-process, zero-copy Arrow transfer (use `import_temp_connector` since Python code can't be serialized into the bundle)
 - **`lib`** — load a compiled shared library via `dlopen`, also zero-copy
@@ -58,7 +58,7 @@ See the [custom connectors guide](../../guide/custom-connectors/index.md) for th
 
 ### User-Defined Functions
 
-Extend Bundlebase's SQL with your own scalar and aggregate functions. Same runner options as connectors — `python`, `lib`, `ipc`, `java`, `docker`.
+Extend Bundlebase's SQL with your own scalar and aggregate functions. Same runtime options as connectors — `python`, `lib`, `ipc`, `java`, `docker`.
 
 ```python
 # Import and use a function

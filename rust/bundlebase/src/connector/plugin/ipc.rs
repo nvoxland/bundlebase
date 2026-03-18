@@ -4,10 +4,10 @@
 //! with Arrow IPC (length-prefix framed) for bulk data transfer.
 //! This enables users to write connectors in any language.
 
-use crate::source::connector::{
+use crate::connector::{
     ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::connector_utils;
+use crate::source::shared_utils;
 use crate::bundle_config::is_external_code_allowed;
 use crate::{BundleConfig, BundlebaseError};
 use url::Url;
@@ -343,7 +343,7 @@ impl IpcConnector {
     ) -> Result<(), BundlebaseError> {
         let mut guard = self.handle.lock().await;
         if guard.is_none() {
-            let call = connector_utils::require_arg(args, "call", "ipc")?;
+            let call = shared_utils::require_arg(args, "call", "ipc")?;
             let command = parse_call(call)?;
             let mut handle = SubprocessHandle::spawn(&command)?;
             handle.perform_handshake().await?;
@@ -728,7 +728,7 @@ mod tests {
         let source_data = data.expect("data should be Some");
         match source_data {
             SourceData::Arrow(batch_stream) => {
-                let bytes = connector_utils::record_batch_stream_to_parquet(batch_stream)
+                let bytes = shared_utils::record_batch_stream_to_parquet(batch_stream)
                     .await
                     .expect("parquet conversion should succeed");
                 assert_eq!(&bytes[..4], b"PAR1");

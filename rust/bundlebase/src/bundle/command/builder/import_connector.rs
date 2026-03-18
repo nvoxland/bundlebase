@@ -3,7 +3,7 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::connector_definition::Platform;
-use crate::bundle::logic_runtime::LogicRuntime;
+use crate::udf::UdfRuntime;
 use crate::bundle::operation::ImportConnectorOp;
 use crate::{BundleFacade, BundlebaseError};
 use async_trait::async_trait;
@@ -11,10 +11,10 @@ use std::collections::HashMap;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
-/// Command to define a named connector with its logic.
+/// Command to define a named connector.
 ///
-/// Combines connector loading and logic setting into a single command.
-/// If the connector already exists, adds/replaces logic for the given platform.
+/// Combines connector loading and entrypoint setting into a single command.
+/// If the connector already exists, adds/replaces the entrypoint for the given platform.
 #[derive(Debug, Clone)]
 pub struct ImportConnectorCommand {
     /// Full dotted connector name (e.g., "acme.weather")
@@ -127,7 +127,7 @@ impl BundleBuilderCommand for ImportConnectorCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let from = LogicRuntime::parse_from(&self.from)?;
+        let from = UdfRuntime::parse_from(&self.from)?;
 
         // Persistent connectors cannot use runtimes that can't be bundled
         if !from.can_bundle() {

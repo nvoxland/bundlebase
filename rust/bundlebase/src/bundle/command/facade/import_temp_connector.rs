@@ -1,6 +1,6 @@
-//! ImportTempConnector command implementation (runtime-only).
+//! ImportTempConnector command implementation (session-only).
 //!
-//! Loads a connector with runtime-only logic, without persisting an operation.
+//! Loads a connector at runtime only, without persisting an operation.
 //! Works on both `Bundle` and `BundleBuilder` via `BundleFacade`.
 //! This is the right choice for `python:mod:Class` calls that cannot be bundled.
 
@@ -9,7 +9,7 @@ use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::connector_definition::{ConnectorEntry, Platform};
-use crate::bundle::logic_runtime::LogicRuntime;
+use crate::udf::UdfRuntime;
 use crate::BundlebaseError;
 use crate::NamespacedName;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -17,10 +17,10 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Command to load a connector with runtime-only logic (not persisted).
+/// Command to load a connector at runtime only (not persisted).
 ///
 /// Unlike `ImportConnectorCommand` which persists to the bundle,
-/// this command only sets logic for the current session. It works
+/// this command only sets the entrypoint for the current session. It works
 /// on both read-only `Bundle` and `BundleBuilder` via `BundleFacade`.
 #[derive(Debug, Clone)]
 pub struct ImportTempConnectorCommand {
@@ -151,8 +151,8 @@ impl BundleFacadeCommand for ImportTempConnectorCommand {
         self: Box<Self>,
         facade: &dyn BundleFacade,
     ) -> Result<String, BundlebaseError> {
-        let from = LogicRuntime::parse_from(&self.from)?;
-        from.validate_logic()?;
+        let from = UdfRuntime::parse_from(&self.from)?;
+        from.validate_entrypoint()?;
         let namespaced: NamespacedName = self.name.parse()?;
         let entry = ConnectorEntry {
             id: crate::data::ObjectId::generate(),

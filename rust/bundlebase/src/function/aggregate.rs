@@ -265,7 +265,7 @@ impl Accumulator for PythonAccumulator {
 /// State is held server-side in the subprocess; the accumulator only holds an opaque state ID.
 #[derive(Debug)]
 pub(crate) struct IpcAccumulator {
-    pub(crate) logic: String,
+    pub(crate) entrypoint: String,
     pub(crate) function_name: String,
     pub(crate) display_name: String,
     pub(crate) state_id: String,
@@ -280,7 +280,7 @@ impl Accumulator for IpcAccumulator {
     ) -> DFResult<()> {
         ipc_bridge::ipc_aggregate_accumulate(
             &self.subprocess_cache,
-            &self.logic,
+            &self.entrypoint,
             &self.function_name,
             &self.state_id,
             values,
@@ -309,7 +309,7 @@ impl Accumulator for IpcAccumulator {
             if let ScalarValue::Utf8(Some(other_id)) = &other_state {
                 let merged_id = ipc_bridge::ipc_aggregate_merge(
                     &self.subprocess_cache,
-                    &self.logic,
+                    &self.entrypoint,
                     &self.function_name,
                     &self.state_id,
                     other_id,
@@ -330,7 +330,7 @@ impl Accumulator for IpcAccumulator {
     fn evaluate(&mut self) -> DFResult<ScalarValue> {
         ipc_bridge::ipc_aggregate_evaluate(
             &self.subprocess_cache,
-            &self.logic,
+            &self.entrypoint,
             &self.function_name,
             &self.state_id,
             &self.return_type,
@@ -350,7 +350,7 @@ impl Accumulator for IpcAccumulator {
 
     fn size(&self) -> usize {
         std::mem::size_of_val(self)
-            + self.logic.len()
+            + self.entrypoint.len()
             + self.function_name.len()
             + self.display_name.len()
             + self.state_id.len()
@@ -361,11 +361,11 @@ impl Accumulator for IpcAccumulator {
 mod tests {
     use super::*;
     use crate::bundle::connector_definition::Platform;
-        use crate::bundle::logic_runtime::LogicRuntime;
+        use crate::udf::UdfRuntime;
     use crate::bundle::function_definition::FunctionKind;
     use crate::data::ObjectId;
     use crate::function::ipc_bridge::new_subprocess_cache;
-    use crate::function::parse_python_logic;
+    use crate::function::parse_python_entrypoint;
     use crate::NamespacedName;
 
     #[test]
@@ -375,7 +375,7 @@ mod tests {
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("python::my_module:MySum").unwrap(),
+            from: UdfRuntime::parse_from("python::my_module:MySum").unwrap(),
             platform: Platform::any(),
             temporary: true,
             kind: FunctionKind::Aggregate,
@@ -390,24 +390,24 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_python_logic_valid() {
-        let (module, class) = parse_python_logic("my_module:MySum").unwrap();
+    fn test_parse_python_entrypoint_valid() {
+        let (module, class) = parse_python_entrypoint("my_module:MySum").unwrap();
         assert_eq!(module, "my_module");
         assert_eq!(class, "MySum");
     }
 
     #[test]
-    fn test_parse_python_logic_dotted_module() {
-        let (module, class) = parse_python_logic("pkg.subpkg.mod:MyAgg").unwrap();
+    fn test_parse_python_entrypoint_dotted_module() {
+        let (module, class) = parse_python_entrypoint("pkg.subpkg.mod:MyAgg").unwrap();
         assert_eq!(module, "pkg.subpkg.mod");
         assert_eq!(class, "MyAgg");
     }
 
     #[test]
-    fn test_parse_python_logic_invalid() {
-        assert!(parse_python_logic("no_colon").is_err());
-        assert!(parse_python_logic(":no_module").is_err());
-        assert!(parse_python_logic("no_func:").is_err());
+    fn test_parse_python_entrypoint_invalid() {
+        assert!(parse_python_entrypoint("no_colon").is_err());
+        assert!(parse_python_entrypoint(":no_module").is_err());
+        assert!(parse_python_entrypoint("no_func:").is_err());
     }
 
     #[test]
@@ -423,7 +423,7 @@ mod tests {
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("python::my_module:MySum").unwrap(),
+            from: UdfRuntime::parse_from("python::my_module:MySum").unwrap(),
             platform: Platform::any(),
             temporary: true,
             kind: FunctionKind::Aggregate,
@@ -440,7 +440,7 @@ mod tests {
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("python::my_module:IntSum").unwrap(),
+            from: UdfRuntime::parse_from("python::my_module:IntSum").unwrap(),
             platform: Platform::any(),
             temporary: true,
             kind: FunctionKind::Aggregate,
@@ -450,7 +450,7 @@ mod tests {
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Float64],
             return_type: DataType::Float64,
-            from: LogicRuntime::parse_from("python::my_module:FloatSum").unwrap(),
+            from: UdfRuntime::parse_from("python::my_module:FloatSum").unwrap(),
             platform: Platform::any(),
             temporary: true,
             kind: FunctionKind::Aggregate,

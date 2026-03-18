@@ -3,10 +3,10 @@
 //! Fetches a webpage, extracts links from `<a href="...">` elements,
 //! and downloads files that match specified glob patterns.
 
-use crate::source::connector::{
+use crate::connector::{
     ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::connector_utils;
+use crate::source::shared_utils;
 use crate::{BundleConfig, BundlebaseError};
 use async_trait::async_trait;
 use scraper::{Html, Selector};
@@ -57,7 +57,7 @@ impl Connector for WebScrapeConnector {
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
         // URL must be HTTP or HTTPS
-        let url = connector_utils::require_url(args, "web_scrape")?;
+        let url = shared_utils::require_url(args, "web_scrape")?;
         if url.scheme() != "http" && url.scheme() != "https" {
             return Err(format!(
                 "Function 'web_scrape': URL must be http:// or https://, got '{}'",
@@ -74,8 +74,8 @@ impl Connector for WebScrapeConnector {
         _attached_locations: &HashSet<String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let base_url = connector_utils::require_url(args, "web_scrape")?;
-        let patterns = connector_utils::get_patterns(args)?;
+        let base_url = shared_utils::require_url(args, "web_scrape")?;
+        let patterns = shared_utils::get_patterns(args)?;
 
         // Fetch the webpage
         let html = self.fetch_page(&base_url).await?;
@@ -83,19 +83,19 @@ impl Connector for WebScrapeConnector {
         // Extract and resolve all links, filter by pattern
         let mut locations = Vec::new();
         for url in self.extract_links(&html, &base_url) {
-            if !connector_utils::matches_patterns(&url, &patterns) {
+            if !shared_utils::matches_patterns(&url, &patterns) {
                 continue;
             }
 
             // Get format from URL extension
-            let format = connector_utils::filename_from_url(&url)
+            let format = shared_utils::filename_from_url(&url)
                 .rsplit('.')
                 .next()
                 .unwrap_or("dat")
                 .to_string();
 
             // Read version from HTTP headers
-            let version = connector_utils::read_http_version(&url)
+            let version = shared_utils::read_http_version(&url)
                 .await
                 .unwrap_or_else(|_| "unknown".to_string());
 
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_validate_args_missing_url() {
-        use crate::source::connector::validate_connector_args;
+        use crate::connector::validate_connector_args;
         let func = WebScrapeConnector;
         let args = HashMap::new();
 
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn test_validate_connector_args_copy_invalid() {
-        use crate::source::connector::validate_connector_args;
+        use crate::connector::validate_connector_args;
         let func = WebScrapeConnector;
         let mut args = HashMap::new();
         args.insert(

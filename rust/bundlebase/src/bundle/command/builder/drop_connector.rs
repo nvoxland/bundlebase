@@ -9,10 +9,10 @@ use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
-/// Command to drop a connector definition and all its logic, or drop logic for a specific platform.
+/// Command to drop a connector definition and all its entries, or drop the connector for a specific platform.
 ///
-/// Without a platform, removes the entire connector definition and all logic entries.
-/// With a platform, removes only the logic entry for that platform.
+/// Without a platform, removes the entire connector definition and all entries.
+/// With a platform, removes only that platform.
 #[derive(Debug, Clone)]
 pub struct DropConnectorCommand {
     /// Full dotted connector name
@@ -82,7 +82,7 @@ impl BundleBuilderCommand for DropConnectorCommand {
 
         match &self.platform {
             Some(p) => Ok(format!(
-                "Dropped connector logic for {} on platform {}",
+                "Dropped connector {} on platform {}",
                 self.name, p
             )),
             None => Ok(format!("Dropped connector {}", self.name)),

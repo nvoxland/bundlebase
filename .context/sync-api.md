@@ -427,14 +427,14 @@ Register custom SQL functions:
 ```python
 import Bundlebase.sync as dc
 
-# Temporary function (session-scoped, supports python runner)
+# Temporary function (session-scoped, supports python runtime)
 c = dc.create()
 c.import_temp_function(
     name="acme.double_val",
     from_="python::my_module:double_val",
 )
 
-# Persistent function (bundled, requires serializable runner)
+# Persistent function (bundled, requires serializable runtime)
 c.import_function(
     name="acme.double_val",
     from_="ipc::python:my_functions.py",

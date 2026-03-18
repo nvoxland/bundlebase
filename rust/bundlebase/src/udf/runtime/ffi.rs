@@ -11,7 +11,7 @@ use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 use std::sync::Arc;
 
-use super::{LogicRuntimeImpl, RuntimeType};
+use super::super::entrypoint::{UdfEntrypoint, RuntimeType, validate_file_reachable};
 
 /// FFI runtime: holds a path to a shared library and an optional symbol name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,26 +21,26 @@ pub struct FfiRuntime {
 }
 
 impl FfiRuntime {
-    /// Parse an FFI logic string like `"./mylib.so:double_val"` or `"./mylib.so"`.
-    pub fn parse(logic: &str) -> Result<Self, BundlebaseError> {
-        if logic.is_empty() {
-            return Err("FFI logic string cannot be empty".into());
+    /// Parse an FFI entrypoint string like `"./mylib.so:double_val"` or `"./mylib.so"`.
+    pub fn parse(entrypoint: &str) -> Result<Self, BundlebaseError> {
+        if entrypoint.is_empty() {
+            return Err("FFI entrypoint string cannot be empty".into());
         }
 
-        if let Some(colon_pos) = logic.rfind(':') {
-            let path = &logic[..colon_pos];
-            let symbol = &logic[colon_pos + 1..];
+        if let Some(colon_pos) = entrypoint.rfind(':') {
+            let path = &entrypoint[..colon_pos];
+            let symbol = &entrypoint[colon_pos + 1..];
 
             if path.is_empty() {
                 return Err(format!(
-                    "Invalid FFI logic '{}'. Path before ':' cannot be empty.",
-                    logic
+                    "Invalid FFI entrypoint '{}'. Path before ':' cannot be empty.",
+                    entrypoint
                 ).into());
             }
             if symbol.is_empty() {
                 return Err(format!(
-                    "Invalid FFI logic '{}'. Symbol after ':' cannot be empty.",
-                    logic
+                    "Invalid FFI entrypoint '{}'. Symbol after ':' cannot be empty.",
+                    entrypoint
                 ).into());
             }
 
@@ -50,7 +50,7 @@ impl FfiRuntime {
             })
         } else {
             Ok(Self {
-                path: logic.to_string(),
+                path: entrypoint.to_string(),
                 symbol: None,
             })
         }
@@ -65,9 +65,9 @@ impl FfiRuntime {
     }
 }
 
-impl LogicRuntimeImpl for FfiRuntime {
-    fn validate_logic(&self) -> Result<(), BundlebaseError> {
-        super::validate_file_reachable(&self.path, "Shared library")
+impl UdfEntrypoint for FfiRuntime {
+    fn validate_entrypoint(&self) -> Result<(), BundlebaseError> {
+        validate_file_reachable(&self.path, "Shared library")
     }
 
     fn can_bundle(&self) -> bool {
@@ -78,7 +78,7 @@ impl LogicRuntimeImpl for FfiRuntime {
         RuntimeType::Native
     }
 
-    fn to_logic_string(&self) -> String {
+    fn to_entrypoint_string(&self) -> String {
         match &self.symbol {
             Some(s) => format!("{}:{}", self.path, s),
             None => self.path.clone(),
@@ -90,7 +90,7 @@ impl LogicRuntimeImpl for FfiRuntime {
     }
 
     fn build_call_string(&self) -> String {
-        format!("ffi:{}", self.to_logic_string())
+        format!("ffi:{}", self.to_entrypoint_string())
     }
 
     fn verify_loadable(&self) -> Result<(), BundlebaseError> {

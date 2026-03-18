@@ -5,7 +5,7 @@
 //! `resolve_function` picks the best entry for the current platform at runtime.
 
 use crate::bundle::connector_definition::Platform;
-use crate::bundle::logic_runtime::LogicRuntime;
+use crate::udf::UdfRuntime;
 use crate::data::ObjectId;
 use crate::function::ipc_bridge::SubprocessCache;
 use crate::function::VersionFunction;
@@ -130,8 +130,8 @@ pub struct FunctionEntry {
     /// Arrow type for the return value (e.g., DataType::Int64)
     #[serde(with = "arrow_type_serde::single")]
     pub return_type: DataType,
-    /// Runtime with parsed logic (e.g., FfiRuntime { path: "./mylib.so", symbol: Some("double_val") })
-    pub from: LogicRuntime,
+    /// Runtime with parsed entrypoint (e.g., FfiRuntime { path: "./mylib.so", symbol: Some("double_val") })
+    pub from: UdfRuntime,
     /// Platform pattern in Docker-style os/arch
     pub platform: Platform,
     /// Whether this is a temporary (session-only) entry
@@ -211,7 +211,7 @@ impl FunctionRegistry {
 
         let platforms: Vec<String> = matching.iter().map(|e| e.platform.to_string()).collect();
         Err(format!(
-            "No function logic matches current platform '{}' for function '{}'. Available platforms: {}",
+            "No function entrypoint matches current platform '{}' for function '{}'. Available platforms: {}",
             Platform::current(),
             name,
             platforms.join(", ")
@@ -262,7 +262,7 @@ impl FunctionRegistry {
     /// Resolve all overloads for a name and register them as a composite
     /// DataFusion UDF/UDAF/UDTF using the registry's session context.
     ///
-    /// Uses the registry's `data_dir` to resolve bundle-relative logic paths
+    /// Uses the registry's `data_dir` to resolve bundle-relative entrypoint paths
     /// and `subprocess_cache` for IPC-based functions.
     pub fn register_functions_for_name(
         &self,
@@ -275,7 +275,7 @@ impl FunctionRegistry {
 
         let data_dir = self.data_dir.read().clone();
 
-        // Resolve bundle-relative logic paths against the data directory
+        // Resolve bundle-relative entrypoint paths against the data directory
         let overloads: Vec<_> = overloads
             .into_iter()
             .map(|mut e| {
@@ -776,14 +776,14 @@ mod tests {
 
     // ==================== FunctionRegistry tests ====================
 
-    fn make_entry(name: &str, logic: &str, temporary: bool) -> FunctionEntry {
+    fn make_entry(name: &str, entrypoint: &str, temporary: bool) -> FunctionEntry {
         let nn = parse_function_name(name).unwrap();
         FunctionEntry {
             id: ObjectId::generate(),
             name: nn,
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from(&format!("ipc::{}", logic)).unwrap(),
+            from: UdfRuntime::parse_from(&format!("ipc::{}", entrypoint)).unwrap(),
             platform: Platform::any(),
             temporary,
             kind: FunctionKind::Scalar,
@@ -822,7 +822,7 @@ mod tests {
         reg.add(make_entry("test.func", "second", false));
 
         let resolved = reg.resolve("test.func").expect("should resolve");
-        assert_eq!(resolved.from.to_logic_string(), "second");
+        assert_eq!(resolved.from.to_entrypoint_string(), "second");
     }
 
     #[test]
@@ -830,7 +830,7 @@ mod tests {
         let mut reg = test_registry();
         reg.add(make_entry("test.func", "persisted", false));
         let mut temp = make_entry("test.func", "temporary", true);
-        temp.from = LogicRuntime::parse_from("python::temp:module").unwrap();
+        temp.from = UdfRuntime::parse_from("python::temp:module").unwrap();
         reg.add(temp);
 
         let resolved = reg.resolve("test.func").expect("should resolve");
@@ -847,7 +847,7 @@ mod tests {
 
         let result = reg.resolve("test.func");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No function logic matches"));
+        assert!(result.unwrap_err().to_string().contains("No function entrypoint matches"));
     }
 
     #[test]
@@ -870,7 +870,7 @@ mod tests {
         let removed = reg.remove("test.func", None, true);
         assert_eq!(removed, 1);
         assert_eq!(reg.entries().len(), 1);
-        assert_eq!(reg.entries()[0].from.to_logic_string(), "persisted");
+        assert_eq!(reg.entries()[0].from.to_entrypoint_string(), "persisted");
     }
 
     #[test]
@@ -904,7 +904,7 @@ mod tests {
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("ipc::./my_func").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./my_func").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -921,7 +921,7 @@ mod tests {
             name: NamespacedName::new("acme", "add"),
             input_types: vec![DataType::Int64, DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("python::my_module:add").unwrap(),
+            from: UdfRuntime::parse_from("python::my_module:add").unwrap(),
             platform: "linux/amd64".parse().unwrap(),
             temporary: true,
             kind: FunctionKind::Scalar,
@@ -938,7 +938,7 @@ mod tests {
             name: NamespacedName::new("acme", "my_sum"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("python::my_module:MySum").unwrap(),
+            from: UdfRuntime::parse_from("python::my_module:MySum").unwrap(),
             platform: Platform::any(),
             temporary: true,
             kind: FunctionKind::Aggregate,
@@ -965,14 +965,14 @@ mod tests {
 
     // ==================== resolve_all tests ====================
 
-    fn make_entry_with_types(name: &str, input_types: Vec<DataType>, temporary: bool, logic: &str) -> FunctionEntry {
+    fn make_entry_with_types(name: &str, input_types: Vec<DataType>, temporary: bool, entrypoint: &str) -> FunctionEntry {
         let nn = parse_function_name(name).unwrap();
         FunctionEntry {
             id: ObjectId::generate(),
             name: nn,
             input_types,
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from(&format!("ipc::{}", logic)).unwrap(),
+            from: UdfRuntime::parse_from(&format!("ipc::{}", entrypoint)).unwrap(),
             platform: Platform::any(),
             temporary,
             kind: FunctionKind::Scalar,
@@ -991,7 +991,7 @@ mod tests {
         reg.add(make_entry("test.func", "logic_a", false));
         let resolved = reg.resolve_all("test.func");
         assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].from.to_logic_string(), "logic_a");
+        assert_eq!(resolved[0].from.to_entrypoint_string(), "logic_a");
     }
 
     #[test]
@@ -1001,9 +1001,9 @@ mod tests {
         reg.add(make_entry_with_types("test.func", vec![DataType::Utf8], false, "str_logic"));
         let resolved = reg.resolve_all("test.func");
         assert_eq!(resolved.len(), 2);
-        let logics: Vec<String> = resolved.iter().map(|e| e.from.to_logic_string()).collect();
-        assert!(logics.contains(&"int_logic".to_string()));
-        assert!(logics.contains(&"str_logic".to_string()));
+        let entrypoints: Vec<String> = resolved.iter().map(|e| e.from.to_entrypoint_string()).collect();
+        assert!(entrypoints.contains(&"int_logic".to_string()));
+        assert!(entrypoints.contains(&"str_logic".to_string()));
     }
 
     #[test]
@@ -1016,11 +1016,11 @@ mod tests {
         assert_eq!(resolved.len(), 2);
         // The Int64 overload should be the temp one
         let int_entry = resolved.iter().find(|e| e.input_types == vec![DataType::Int64]).unwrap();
-        assert_eq!(int_entry.from.to_logic_string(), "temp_int");
+        assert_eq!(int_entry.from.to_entrypoint_string(), "temp_int");
         assert!(int_entry.temporary);
         // The Utf8 overload should be the persistent one
         let str_entry = resolved.iter().find(|e| e.input_types == vec![DataType::Utf8]).unwrap();
-        assert_eq!(str_entry.from.to_logic_string(), "persisted_str");
+        assert_eq!(str_entry.from.to_entrypoint_string(), "persisted_str");
     }
 
     #[test]
@@ -1070,7 +1070,7 @@ mod tests {
         reg.add(make_entry_with_types("test.func", vec![DataType::Utf8], false, "str_logic"));
         reg.remove_by_signature("test.func", Some(&[DataType::Int64]));
         assert_eq!(reg.entries().len(), 1);
-        assert_eq!(reg.entries()[0].from.to_logic_string(), "str_logic");
+        assert_eq!(reg.entries()[0].from.to_entrypoint_string(), "str_logic");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! DataFusion ScalarUDFImpl for scalar functions.
 //!
 //! Bridges `FunctionEntry` definitions to DataFusion's UDF system.
-//! Dispatches by runner: Python (via PyArrow), IPC/Java/Docker (via Arrow IPC),
+//! Dispatches by runtime: Python (via PyArrow), IPC/Java/Docker (via Arrow IPC),
 //! Lib (via FFI).
 
 use crate::bundle::function_definition::FunctionEntry;
@@ -163,11 +163,11 @@ impl ScalarUDFImpl for ScalarFunction {
 mod tests {
     use super::*;
     use crate::bundle::connector_definition::Platform;
-        use crate::bundle::logic_runtime::LogicRuntime;
+        use crate::udf::UdfRuntime;
     use crate::bundle::function_definition::FunctionKind;
     use crate::data::ObjectId;
     use crate::function::ipc_bridge::new_subprocess_cache;
-    use crate::function::parse_python_logic;
+    use crate::function::parse_python_entrypoint;
     use crate::NamespacedName;
 
     #[test]
@@ -177,7 +177,7 @@ mod tests {
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("ipc::./my_func").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./my_func").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -198,7 +198,7 @@ mod tests {
             name: NamespacedName::new("acme", "add"),
             input_types: vec![DataType::Int64, DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("ipc::./add_func").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./add_func").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -209,24 +209,24 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_python_logic_valid() {
-        let (module, func) = parse_python_logic("my_module:my_function").unwrap();
+    fn test_parse_python_entrypoint_valid() {
+        let (module, func) = parse_python_entrypoint("my_module:my_function").unwrap();
         assert_eq!(module, "my_module");
         assert_eq!(func, "my_function");
     }
 
     #[test]
-    fn test_parse_python_logic_dotted_module() {
-        let (module, func) = parse_python_logic("pkg.subpkg.mod:func_name").unwrap();
+    fn test_parse_python_entrypoint_dotted_module() {
+        let (module, func) = parse_python_entrypoint("pkg.subpkg.mod:func_name").unwrap();
         assert_eq!(module, "pkg.subpkg.mod");
         assert_eq!(func, "func_name");
     }
 
     #[test]
-    fn test_parse_python_logic_invalid() {
-        assert!(parse_python_logic("no_colon").is_err());
-        assert!(parse_python_logic(":no_module").is_err());
-        assert!(parse_python_logic("no_func:").is_err());
+    fn test_parse_python_entrypoint_invalid() {
+        assert!(parse_python_entrypoint("no_colon").is_err());
+        assert!(parse_python_entrypoint(":no_module").is_err());
+        assert!(parse_python_entrypoint("no_func:").is_err());
     }
 
     #[test]
@@ -242,7 +242,7 @@ mod tests {
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("ipc::./my_func").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./my_func").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -259,7 +259,7 @@ mod tests {
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Utf8,
-            from: LogicRuntime::parse_from("ipc::./int_convert").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./int_convert").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -269,7 +269,7 @@ mod tests {
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Float64],
             return_type: DataType::Utf8,
-            from: LogicRuntime::parse_from("ipc::./float_convert").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./float_convert").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -290,7 +290,7 @@ mod tests {
             name: NamespacedName::new("acme", "transform"),
             input_types: vec![DataType::Int64],
             return_type: DataType::Int64,
-            from: LogicRuntime::parse_from("ipc::./int_transform").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./int_transform").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,
@@ -300,7 +300,7 @@ mod tests {
             name: NamespacedName::new("acme", "transform"),
             input_types: vec![DataType::Utf8],
             return_type: DataType::Utf8,
-            from: LogicRuntime::parse_from("ipc::./str_transform").unwrap(),
+            from: UdfRuntime::parse_from("ipc::./str_transform").unwrap(),
             platform: Platform::any(),
             temporary: false,
             kind: FunctionKind::Scalar,

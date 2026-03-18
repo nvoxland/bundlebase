@@ -19,7 +19,7 @@
 //! - `_columns` — Comma-separated column names for optional column pushdown.
 //!
 //! Orchestration (sync mode handling, materialization, file management)
-//! lives in `connector_utils::orchestrate_fetch()`.
+//! lives in `source::fetch::orchestrate_fetch()`.
 
 pub mod plugin;
 
@@ -29,7 +29,7 @@ use plugin::NativeConnector;
 use plugin::PostgresConnector;
 use plugin::RemoteDirConnector;
 use plugin::WebScrapeConnector;
-use super::connector_utils;
+use crate::source::shared_utils;
 
 use crate::bundle::connector_definition::{self, ConnectorEntry};
 use crate::{BundleConfig, BundlebaseError};
@@ -455,7 +455,7 @@ fn validate_args_standard(
         }
     }
 
-    connector_utils::validate_copy_arg(&signature.name, args)
+    shared_utils::validate_copy_arg(&signature.name, args)
 }
 
 /// Format arg specs as a human-readable list for error messages.
@@ -490,7 +490,7 @@ impl ConnectorRegistry {
     ///
     /// Note: "ipc" and "native" are NOT registered here. They are only available
     /// via connectors (IMPORT CONNECTOR + SET CONNECTOR LOGIC). Use `create_instance()`
-    /// to create instances of them when resolving connector logic.
+    /// to create instances of them when resolving connector entrypoints.
     pub fn new() -> Self {
         let mut registry = Self {
             functions: HashMap::new(),
@@ -520,10 +520,10 @@ impl ConnectorRegistry {
     ///
     /// For `Ipc`, returns a new `IpcConnector` with its own subprocess handle.
     /// For `Native`, returns a new `NativeConnector`.
-    pub fn create_instance(&self, runtime_type: crate::bundle::logic_runtime::RuntimeType) -> Option<Arc<dyn Connector>> {
+    pub fn create_instance(&self, runtime_type: crate::udf::RuntimeType) -> Option<Arc<dyn Connector>> {
         match runtime_type {
-            crate::bundle::logic_runtime::RuntimeType::Ipc => Some(Arc::new(IpcConnector::new())),
-            crate::bundle::logic_runtime::RuntimeType::Native => Some(Arc::new(NativeConnector::new())),
+            crate::udf::RuntimeType::Ipc => Some(Arc::new(IpcConnector::new())),
+            crate::udf::RuntimeType::Native => Some(Arc::new(NativeConnector::new())),
         }
     }
 
@@ -739,7 +739,7 @@ mod tests {
 
     #[test]
     fn test_ipc_native_still_in_create_instance() {
-        use crate::bundle::logic_runtime::RuntimeType;
+        use crate::udf::RuntimeType;
         let registry = ConnectorRegistry::new();
         assert!(registry.create_instance(RuntimeType::Ipc).is_some());
         assert!(registry.create_instance(RuntimeType::Native).is_some());

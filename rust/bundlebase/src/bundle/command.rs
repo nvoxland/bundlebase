@@ -95,11 +95,11 @@ pub enum FacadeCommand {
     DescribeConnector(DescribeConnectorCommand),
     /// Describe a registered function's metadata
     DescribeFunction(DescribeFunctionCommand),
-    /// Load a temporary connector with runtime-only logic (not persisted)
+    /// Load a temporary connector at runtime only (not persisted)
     ImportTempConnector(ImportTempConnectorCommand),
-    /// Load a temporary function with runtime-only logic (not persisted)
+    /// Load a temporary function at runtime only (not persisted)
     ImportTempFunction(ImportTempFunctionCommand),
-    /// Drop runtime-only connector logic (not persisted)
+    /// Drop runtime-only connector (not persisted)
     DropTempConnector(DropTempConnectorCommand),
     /// Drop runtime-only function (not persisted)
     DropTempFunction(DropTempFunctionCommand),

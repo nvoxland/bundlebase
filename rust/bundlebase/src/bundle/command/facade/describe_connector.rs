@@ -1,7 +1,7 @@
 //! DescribeConnector command implementation (read-only facade).
 //!
 //! Returns metadata about a registered connector: all entries matching
-//! the given dotted name, including runner, logic, platform, and temporary status.
+//! the given dotted name, including runtime, entrypoint, platform, and temporary status.
 
 use crate::bundle::command::response::{single_batch_stream, OutputShape};
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 /// Command to describe a registered connector's metadata.
 ///
-/// Returns a table with columns: name, runner, logic, platform, temporary
+/// Returns a table with columns: name, runtime, entrypoint, platform, temporary
 /// for all entries matching the given connector name.
 #[derive(Debug, Clone)]
 pub struct DescribeConnectorCommand {
@@ -36,8 +36,8 @@ impl DescribeConnectorCommand {
     pub fn output_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("name", DataType::Utf8, false),
-            Field::new("runner", DataType::Utf8, false),
-            Field::new("logic", DataType::Utf8, false),
+            Field::new("runtime", DataType::Utf8, false),
+            Field::new("entrypoint", DataType::Utf8, false),
             Field::new("platform", DataType::Utf8, false),
             Field::new("temporary", DataType::Boolean, false),
         ]))
@@ -96,8 +96,8 @@ impl BundleFacadeCommand for DescribeConnectorCommand {
         let schema = Self::output_schema();
 
         let names: Vec<String> = matching.iter().map(|e| e.name.to_string()).collect();
-        let runners: Vec<String> = matching.iter().map(|e| e.from.runtime_name().to_string()).collect();
-        let logics: Vec<String> = matching.iter().map(|e| e.from.to_logic_string()).collect();
+        let runtimes: Vec<String> = matching.iter().map(|e| e.from.runtime_name().to_string()).collect();
+        let entrypoints: Vec<String> = matching.iter().map(|e| e.from.to_entrypoint_string()).collect();
         let platforms: Vec<String> = matching.iter().map(|e| e.platform.to_string()).collect();
         let temporaries: Vec<bool> = matching.iter().map(|e| e.temporary).collect();
 
@@ -105,8 +105,8 @@ impl BundleFacadeCommand for DescribeConnectorCommand {
             Arc::clone(&schema),
             vec![
                 Arc::new(StringArray::from(names)) as ArrayRef,
-                Arc::new(StringArray::from(runners)) as ArrayRef,
-                Arc::new(StringArray::from(logics)) as ArrayRef,
+                Arc::new(StringArray::from(runtimes)) as ArrayRef,
+                Arc::new(StringArray::from(entrypoints)) as ArrayRef,
                 Arc::new(StringArray::from(platforms)) as ArrayRef,
                 Arc::new(BooleanArray::from(temporaries)) as ArrayRef,
             ],

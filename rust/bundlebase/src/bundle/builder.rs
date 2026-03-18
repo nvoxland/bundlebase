@@ -755,9 +755,9 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Load a named connector with logic (persisted).
+    /// Load a named connector (persisted).
     ///
-    /// Creates the connector if it doesn't exist, then adds/replaces logic
+    /// Creates the connector if it doesn't exist, then adds/replaces the entrypoint
     /// for the given platform. The operation is persisted into the bundle's
     /// commit history.
     ///
@@ -765,8 +765,8 @@ impl BundleBuilder {
     ///
     /// # Arguments
     /// * `name` - Dot-separated connector name (e.g., "acme.weather").
-    /// * `runner` - The runner: "lib", "java", "docker", or "ipc"
-    /// * `logic` - The logic string (e.g., "./binary" for ipc, "./lib.so" for lib)
+    /// * `runtime` - The runtime: "lib", "java", "docker", or "ipc"
+    /// * `entrypoint` - The entrypoint string (e.g., "./binary" for ipc, "./lib.so" for lib)
     /// * `platform` - Docker-style platform string (e.g., "linux/amd64", "*/*")
     pub async fn import_connector(
         &self,
@@ -807,7 +807,7 @@ impl BundleBuilder {
     }
 
     /// Drop a connector. Without a platform, removes the entire connector definition.
-    /// With a platform, removes only the logic for that platform.
+    /// With a platform, removes only that platform.
     pub async fn drop_connector(
         &self,
         name: &str,
@@ -820,7 +820,7 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    /// Drop runtime-only connector logic (session-only, no operation created).
+    /// Drop runtime-only connector (session-only, no operation created).
     pub async fn drop_temp_connector(
         &self,
         name: &str,
@@ -1491,7 +1491,7 @@ impl BundleFacade for BundleBuilder {
 
     fn version(&self) -> String {
         let has_changes = !self.status.read().is_empty();
-        let has_temp = self.bundle.has_temporary_logic();
+        let has_temp = self.bundle.has_temporary_udf();
 
         match (has_changes, has_temp) {
             (true, true) => "UNCOMMITTED+TEMP".to_string(),

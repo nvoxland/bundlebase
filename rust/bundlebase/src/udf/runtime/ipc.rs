@@ -7,7 +7,7 @@ use arrow::datatypes::DataType;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 
-use super::{invoke_ipc_scalar_impl, create_ipc_accumulator, LogicRuntimeImpl, RuntimeType};
+use super::super::entrypoint::{invoke_ipc_scalar_impl, create_ipc_accumulator, UdfEntrypoint, RuntimeType, validate_file_reachable};
 
 /// IPC runtime: holds a path to an executable.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,13 +16,13 @@ pub struct IpcRuntime {
 }
 
 impl IpcRuntime {
-    /// Parse an IPC logic string (the whole string is the path).
-    pub fn parse(logic: &str) -> Result<Self, BundlebaseError> {
-        if logic.is_empty() {
-            return Err("IPC logic string cannot be empty".into());
+    /// Parse an IPC entrypoint string (the whole string is the path).
+    pub fn parse(entrypoint: &str) -> Result<Self, BundlebaseError> {
+        if entrypoint.is_empty() {
+            return Err("IPC entrypoint string cannot be empty".into());
         }
         Ok(Self {
-            path: logic.to_string(),
+            path: entrypoint.to_string(),
         })
     }
 
@@ -32,9 +32,9 @@ impl IpcRuntime {
     }
 }
 
-impl LogicRuntimeImpl for IpcRuntime {
-    fn validate_logic(&self) -> Result<(), BundlebaseError> {
-        super::validate_file_reachable(&self.path, "IPC executable")
+impl UdfEntrypoint for IpcRuntime {
+    fn validate_entrypoint(&self) -> Result<(), BundlebaseError> {
+        validate_file_reachable(&self.path, "IPC executable")
     }
 
     fn can_bundle(&self) -> bool {
@@ -45,7 +45,7 @@ impl LogicRuntimeImpl for IpcRuntime {
         RuntimeType::Ipc
     }
 
-    fn to_logic_string(&self) -> String {
+    fn to_entrypoint_string(&self) -> String {
         self.path.clone()
     }
 

@@ -6,7 +6,7 @@
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::connector_definition::Platform;
-use crate::bundle::logic_runtime::LogicRuntime;
+use crate::udf::UdfRuntime;
 use crate::bundle::function_definition::{parse_arrow_type_name, parse_function_name, FunctionKind};
 use crate::bundle::operation::ImportFunctionOp;
 use crate::BundlebaseError;
@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
-/// Command to define a named function with its logic.
+/// Command to define a named function.
 ///
 /// Supports two modes:
 /// - **Single**: `IMPORT FUNCTION acme.double_val FROM 'ipc::./my_func'`
@@ -142,7 +142,7 @@ impl BundleBuilderCommand for ImportFunctionCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let from = LogicRuntime::parse_from(&self.from)?;
+        let from = UdfRuntime::parse_from(&self.from)?;
 
         // Persistent functions cannot use runtimes that can't be bundled
         if !from.can_bundle() {
@@ -164,7 +164,7 @@ impl BundleBuilderCommand for ImportFunctionCommand {
             let manifest = from.load_manifest()?
                 .ok_or_else(|| -> BundlebaseError {
                     format!(
-                        "Wildcard function discovery not supported for '{}' runner",
+                        "Wildcard function discovery not supported for '{}' runtime",
                         from.runtime_name()
                     )
                     .into()
@@ -181,9 +181,9 @@ impl BundleBuilderCommand for ImportFunctionCommand {
                 let kind: FunctionKind = entry.kind.parse()?;
 
                 let symbol = entry.symbol.as_deref().unwrap_or(&entry.name);
-                // bundled_from.to_logic_string() is just the hash path (no symbol) for wildcard mode
-                let func_logic = format!("{}:{}", bundled_from.to_logic_string(), symbol);
-                let func_from = LogicRuntime::parse_from(&format!("{}::{}", bundled_from.runtime_name(), func_logic))?;
+                // bundled_from.to_entrypoint_string() is just the hash path (no symbol) for wildcard mode
+                let entrypoint = format!("{}:{}", bundled_from.to_entrypoint_string(), symbol);
+                let func_from = UdfRuntime::parse_from(&format!("{}::{}", bundled_from.runtime_name(), entrypoint))?;
                 let name = format!("{}.{}", namespace, entry.name);
 
                 let op = ImportFunctionOp::new(
@@ -200,7 +200,7 @@ impl BundleBuilderCommand for ImportFunctionCommand {
 
             Ok(format!(
                 "Loaded {} function(s) from '{}'",
-                count, from.to_logic_string()
+                count, from.to_entrypoint_string()
             ))
         } else {
             let namespaced = parse_function_name(&self.name)?;

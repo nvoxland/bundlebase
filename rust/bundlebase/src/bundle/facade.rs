@@ -300,7 +300,7 @@ pub trait BundleFacade: Send + Sync {
     /// Returns the bundle configuration
     fn config(&self) -> Arc<BundleConfig>;
 
-    /// Load a temporary connector with runtime-only logic (not persisted).
+    /// Load a temporary connector at runtime only (not persisted).
     ///
     /// # Arguments
     /// * `name` - Dotted connector name (e.g., "acme.weather")
@@ -318,9 +318,9 @@ pub trait BundleFacade: Send + Sync {
         Ok(())
     }
 
-    /// Remove runtime-only connector logic for a defined source.
+    /// Remove runtime-only connector for a defined source.
     ///
-    /// If `platform` is None, removes all logic entries.
+    /// If `platform` is None, removes all connector entries.
     /// If `platform` is Some, removes only entries matching that platform.
     /// Returns the number of entries removed.
     async fn drop_temp_connector(
@@ -329,7 +329,7 @@ pub trait BundleFacade: Send + Sync {
         platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError>;
 
-    /// Load a temporary function with runtime-only logic (not persisted).
+    /// Load a temporary function at runtime only (not persisted).
     ///
     /// # Arguments
     /// * `name` - Dotted function name (e.g., "acme.double_val")

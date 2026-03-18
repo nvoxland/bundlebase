@@ -3,10 +3,10 @@
 //! Lists files from a directory URL using the IO registry to support
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
-use crate::source::connector::{
+use crate::connector::{
     ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::connector_utils;
+use crate::source::shared_utils;
 use crate::io::file::IOReadFile;
 use crate::io::plugin::ftp::FtpFile;
 use crate::io::plugin::object_store::ObjectStoreFile;
@@ -71,7 +71,7 @@ impl Connector for RemoteDirConnector {
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
         // Validate URL is parseable
-        connector_utils::require_url(args, "remote_dir")?;
+        shared_utils::require_url(args, "remote_dir")?;
         Ok(())
     }
 
@@ -81,8 +81,8 @@ impl Connector for RemoteDirConnector {
         _attached_locations: &HashSet<String>,
         config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let base_url = connector_utils::require_url(args, "remote_dir")?;
-        let patterns = connector_utils::get_patterns(args)?;
+        let base_url = shared_utils::require_url(args, "remote_dir")?;
+        let patterns = shared_utils::get_patterns(args)?;
         let must_copy = Self::must_copy(&base_url);
 
         // Use IORegistry to create lister for any URL scheme
@@ -130,7 +130,7 @@ impl Connector for RemoteDirConnector {
         args: &HashMap<String, String>,
         config: &Arc<BundleConfig>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
-        let base_url = connector_utils::require_url(args, "remote_dir")?;
+        let base_url = shared_utils::require_url(args, "remote_dir")?;
         let scheme = base_url.scheme();
 
         // Only provide data directly for special protocols (SFTP, FTP)
@@ -156,7 +156,7 @@ impl Connector for RemoteDirConnector {
         args: &HashMap<String, String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<Url>, BundlebaseError> {
-        let base_url = connector_utils::require_url(args, "remote_dir")?;
+        let base_url = shared_utils::require_url(args, "remote_dir")?;
 
         // No stable URL for special protocols (handled by data())
         if Self::must_copy(&base_url) {
@@ -239,7 +239,7 @@ impl RemoteDirConnector {
 
         sftp.close().await?;
 
-        Ok(connector_utils::stream_from_temp_file(temp))
+        Ok(shared_utils::stream_from_temp_file(temp))
     }
 
     /// Download a file via FTP to a temp file, returning a byte stream.
@@ -251,7 +251,7 @@ impl RemoteDirConnector {
         let temp = ftp_file.download_to_temp_file().await?.ok_or_else(|| {
             BundlebaseError::from(format!("FTP file not found: {}", url))
         })?;
-        Ok(connector_utils::stream_from_temp_file(temp))
+        Ok(shared_utils::stream_from_temp_file(temp))
     }
 
     fn must_copy(base_url: &Url) -> bool {
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_validate_connector_args_copy_invalid() {
-        use crate::source::connector::validate_connector_args;
+        use crate::connector::validate_connector_args;
         let func = RemoteDirConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());
@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn test_validate_connector_args_missing_url() {
-        use crate::source::connector::validate_connector_args;
+        use crate::connector::validate_connector_args;
         let func = RemoteDirConnector;
         let args = HashMap::new();
 
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_validate_connector_args_valid() {
-        use crate::source::connector::validate_connector_args;
+        use crate::connector::validate_connector_args;
         let func = RemoteDirConnector;
         let mut args = HashMap::new();
         args.insert("url".to_string(), "s3://bucket/data/".to_string());

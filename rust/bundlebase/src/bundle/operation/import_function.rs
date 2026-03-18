@@ -1,7 +1,7 @@
 //! ImportFunction operation — registers a named function definition.
 
 use crate::bundle::connector_definition::Platform;
-use crate::bundle::logic_runtime::LogicRuntime;
+use crate::udf::UdfRuntime;
 use crate::bundle::function_definition::{arrow_type_serde, parse_function_name, FunctionEntry, FunctionKind};
 use crate::data::ObjectId;
 use crate::NamespacedName;
@@ -28,8 +28,8 @@ pub struct ImportFunctionOp {
     /// Arrow type for the return value
     #[serde(with = "arrow_type_serde::single")]
     pub return_type: DataType,
-    /// Runtime with parsed logic (e.g., `ipc::./my_func`)
-    pub from: LogicRuntime,
+    /// Runtime with parsed entrypoint (e.g., `ipc::./my_func`)
+    pub from: UdfRuntime,
     /// Platform pattern in Docker-style os/arch
     pub platform: Platform,
     /// Scalar or aggregate
@@ -41,7 +41,7 @@ impl ImportFunctionOp {
         name: String,
         input_types: Vec<DataType>,
         return_type: DataType,
-        from: LogicRuntime,
+        from: UdfRuntime,
         platform: Platform,
         kind: FunctionKind,
     ) -> Self {
@@ -54,7 +54,7 @@ impl Operation for ImportFunctionOp {
     fn describe(&self) -> String {
         let input_strs: Vec<String> = self.input_types.iter().map(|dt| dt.to_string()).collect();
         format!(
-            "IMPORT FUNCTION {}({}) RETURNS {} (runner={}, platform={})",
+            "IMPORT FUNCTION {}({}) RETURNS {} (runtime={}, platform={})",
             self.name,
             input_strs.join(", "),
             self.return_type,
@@ -108,13 +108,13 @@ mod tests {
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            LogicRuntime::parse_from("ipc::./my_func").unwrap(),
+            UdfRuntime::parse_from("ipc::./my_func").unwrap(),
             Platform::any(),
             FunctionKind::Scalar,
         );
         assert_eq!(
             op.describe(),
-            "IMPORT FUNCTION acme.double_val(Int64) RETURNS Int64 (runner=ipc, platform=*/*)"
+            "IMPORT FUNCTION acme.double_val(Int64) RETURNS Int64 (runtime=ipc, platform=*/*)"
         );
     }
 
@@ -124,7 +124,7 @@ mod tests {
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            LogicRuntime::parse_from("ipc::./my_func").unwrap(),
+            UdfRuntime::parse_from("ipc::./my_func").unwrap(),
             "linux/amd64".parse().unwrap(),
             FunctionKind::Scalar,
         );
@@ -139,7 +139,7 @@ mod tests {
             "acme.my_sum".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            LogicRuntime::parse_from("ipc::./my_sum").unwrap(),
+            UdfRuntime::parse_from("ipc::./my_sum").unwrap(),
             Platform::any(),
             FunctionKind::Aggregate,
         );
@@ -156,7 +156,7 @@ mod tests {
             "double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            LogicRuntime::parse_from("ipc::./test").unwrap(),
+            UdfRuntime::parse_from("ipc::./test").unwrap(),
             Platform::any(),
             FunctionKind::Scalar,
         );
@@ -172,7 +172,7 @@ mod tests {
             "acme.double_val".to_string(),
             vec![DataType::Int64],
             DataType::Int64,
-            LogicRuntime::parse_from("ipc::./my_func").unwrap(),
+            UdfRuntime::parse_from("ipc::./my_func").unwrap(),
             Platform::any(),
             FunctionKind::Scalar,
         );

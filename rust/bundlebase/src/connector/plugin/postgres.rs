@@ -9,10 +9,10 @@
 //! - `sort_column` (required): Column to ORDER BY and partition on
 //! - `batch_size` (optional): Rows per output file (default: 1000000)
 
-use crate::source::connector::{
+use crate::connector::{
     ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::connector_utils;
+use crate::source::shared_utils;
 use crate::{BundleConfig, BundlebaseError};
 use url::Url;
 use arrow::array::{
@@ -587,7 +587,7 @@ impl Connector for PostgresConnector {
 
     fn validate_args(&self, args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
         // Validate URL format
-        let url = connector_utils::require_arg(args, "url", "postgres")?;
+        let url = shared_utils::require_arg(args, "url", "postgres")?;
         if !url.starts_with("postgres://") && !url.starts_with("postgresql://") {
             return Err("url must be a PostgreSQL connection URL (postgres://...)".into());
         }
@@ -613,9 +613,9 @@ impl Connector for PostgresConnector {
         attached_locations: &HashSet<String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
-        let url = connector_utils::require_arg(args, "url", "postgres")?;
-        let query = connector_utils::require_arg(args, "query", "postgres")?;
-        let sort_column = connector_utils::require_arg(args, "sort_column", "postgres")?;
+        let url = shared_utils::require_arg(args, "url", "postgres")?;
+        let query = shared_utils::require_arg(args, "query", "postgres")?;
+        let sort_column = shared_utils::require_arg(args, "sort_column", "postgres")?;
         let batch_size = Self::get_batch_size(args)?;
 
         Self::validate_identifier(sort_column)?;
@@ -644,9 +644,9 @@ impl Connector for PostgresConnector {
         args: &HashMap<String, String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
-        let url = connector_utils::require_arg(args, "url", "postgres")?;
-        let query = connector_utils::require_arg(args, "query", "postgres")?;
-        let sort_column = connector_utils::require_arg(args, "sort_column", "postgres")?;
+        let url = shared_utils::require_arg(args, "url", "postgres")?;
+        let query = shared_utils::require_arg(args, "query", "postgres")?;
+        let sort_column = shared_utils::require_arg(args, "sort_column", "postgres")?;
 
         let parsed = Self::parse_location(&location.location)?;
 
@@ -676,7 +676,7 @@ impl Connector for PostgresConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::connector::validate_connector_args;
+    use crate::connector::validate_connector_args;
 
     #[test]
     fn test_signature() {

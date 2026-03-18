@@ -350,13 +350,13 @@ These are forwarded to your `discover()` and `data()` methods as `**kwargs`, jus
 
 ### When to Use Native vs IPC
 
-**Use native** (`runner='python'`) when:
+**Use native** (`runtime='python'`) when:
 
 - Your source is part of the same Python project
 - You need maximum performance for large datasets
 - You want the simplest possible setup
 
-**Use IPC** (`runner='ipc'`) when:
+**Use IPC** (`runtime='ipc'`) when:
 
 - Your source runs as a standalone script
 - You want process isolation (source crashes don't affect Bundlebase)

@@ -1,7 +1,7 @@
-//! Connector entry system for named, platform-aware connector logic.
+//! Connector entry system for named, platform-aware connector entrypoints.
 //!
 //! A `ConnectorEntry` is created via `IMPORT CONNECTOR acme.weather`
-//! and represents a single connector logic binding for a name+platform pair.
+//! and represents a single connector entrypoint binding for a name+platform pair.
 //! `resolve_connector` picks the best entry for the current platform at runtime.
 
 use crate::data::ObjectId;
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-use super::logic_runtime::LogicRuntime;
+use crate::udf::UdfRuntime;
 
 /// A Docker-style platform identifier in `os/arch` format.
 ///
@@ -108,7 +108,7 @@ impl TryFrom<String> for Platform {
     }
 }
 
-/// A single connector entry binding a name+platform to runtime+logic.
+/// A single connector entry binding a name+platform to runtime+entrypoint.
 ///
 /// Multiple entries can exist for the same connector name (different platforms
 /// or temporary vs persisted). Resolution picks the best match at runtime.
@@ -116,7 +116,7 @@ impl TryFrom<String> for Platform {
 pub struct ConnectorEntry {
     pub id: ObjectId,
     pub name: NamespacedName,
-    pub from: LogicRuntime,
+    pub from: UdfRuntime,
     pub platform: Platform,
     pub temporary: bool,
 }
@@ -148,7 +148,7 @@ pub fn resolve_connector(entries: &[ConnectorEntry], name: &str) -> Result<Conne
 
     let platforms: Vec<String> = matching.iter().map(|e| e.platform.to_string()).collect();
     Err(format!(
-        "No connector logic matches current platform '{}' for connector '{}'. Available platforms: {}",
+        "No connector entrypoint matches current platform '{}' for connector '{}'. Available platforms: {}",
         Platform::current(),
         name,
         platforms.join(", ")
@@ -267,21 +267,21 @@ mod tests {
             ConnectorEntry {
                 id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
-                from: LogicRuntime::parse_from("ffi::first").unwrap(),
+                from: UdfRuntime::parse_from("ffi::first").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             },
             ConnectorEntry {
                 id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
-                from: LogicRuntime::parse_from("ffi::second").unwrap(),
+                from: UdfRuntime::parse_from("ffi::second").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             },
         ];
 
         let resolved = resolve_connector(&entries, "test.source").expect("should resolve");
-        assert_eq!(resolved.from.to_logic_string(), "second");
+        assert_eq!(resolved.from.to_entrypoint_string(), "second");
     }
 
     #[test]
@@ -289,14 +289,14 @@ mod tests {
         let entries = vec![ConnectorEntry {
             id: ObjectId::generate(),
             name: NamespacedName::new("test", "source"),
-            from: LogicRuntime::parse_from("ffi::test").unwrap(),
+            from: UdfRuntime::parse_from("ffi::test").unwrap(),
             platform: "nonexistent/arch".parse().unwrap(),
             temporary: false,
         }];
 
         let result = resolve_connector(&entries, "test.source");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No connector logic matches"));
+        assert!(result.unwrap_err().to_string().contains("No connector entrypoint matches"));
     }
 
     #[test]
@@ -313,21 +313,21 @@ mod tests {
             ConnectorEntry {
                 id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
-                from: LogicRuntime::parse_from("ffi::persisted").unwrap(),
+                from: UdfRuntime::parse_from("ffi::persisted").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             },
             ConnectorEntry {
                 id: ObjectId::generate(),
                 name: NamespacedName::new("test", "source"),
-                from: LogicRuntime::parse_from("python::temp:source").unwrap(),
+                from: UdfRuntime::parse_from("python::temp:source").unwrap(),
                 platform: Platform::any(),
                 temporary: true,
             },
         ];
 
         let resolved = resolve_connector(&entries, "test.source").expect("should resolve");
-        assert_eq!(resolved.from.to_logic_string(), "temp:source");
+        assert_eq!(resolved.from.to_entrypoint_string(), "temp:source");
         assert!(resolved.temporary);
     }
 

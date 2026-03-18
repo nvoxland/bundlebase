@@ -1,6 +1,6 @@
-//! DropTempConnector command implementation (runtime-only).
+//! DropTempConnector command implementation (session-only).
 //!
-//! Removes connector logic for the current session only, without creating a persisted
+//! Removes a connector for the current session only, without creating a persisted
 //! operation. Works on both `Bundle` and `BundleBuilder` via `BundleFacade`.
 
 use crate::bundle::command::parser::extract_string_content;
@@ -13,10 +13,10 @@ use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use std::sync::Arc;
 
-/// Command to drop runtime-only connector logic (not persisted).
+/// Command to drop a session-only connector (not persisted).
 ///
 /// Unlike `DropConnectorCommand` which persists to the bundle,
-/// this command only removes logic for the current session. It works
+/// this command only removes the entrypoint for the current session. It works
 /// on both read-only `Bundle` and `BundleBuilder` via `BundleFacade`.
 #[derive(Debug, Clone)]
 pub struct DropTempConnectorCommand {
@@ -105,11 +105,11 @@ impl BundleFacadeCommand for DropTempConnectorCommand {
 
         match &self.platform {
             Some(p) => Ok(format!(
-                "Dropped {} temporary connector logic entries for {} on platform {}",
+                "Dropped {} temporary connector entries for {} on platform {}",
                 count, self.name, p
             )),
             None => Ok(format!(
-                "Dropped {} temporary connector logic entries for {}",
+                "Dropped {} temporary connector entries for {}",
                 count, self.name
             )),
         }

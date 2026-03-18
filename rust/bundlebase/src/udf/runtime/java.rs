@@ -7,7 +7,7 @@ use arrow::datatypes::DataType;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 
-use super::{invoke_ipc_scalar_impl, create_ipc_accumulator, LogicRuntimeImpl, RuntimeType};
+use super::super::entrypoint::{invoke_ipc_scalar_impl, create_ipc_accumulator, UdfEntrypoint, RuntimeType, validate_file_reachable};
 
 /// Java runtime: holds a path to a JAR and an optional class name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,26 +17,26 @@ pub struct JavaRuntime {
 }
 
 impl JavaRuntime {
-    /// Parse a Java logic string like `"./my.jar:com.example.MyClass"` or `"./my.jar"`.
-    pub fn parse(logic: &str) -> Result<Self, BundlebaseError> {
-        if logic.is_empty() {
-            return Err("Java logic string cannot be empty".into());
+    /// Parse a Java entrypoint string like `"./my.jar:com.example.MyClass"` or `"./my.jar"`.
+    pub fn parse(entrypoint: &str) -> Result<Self, BundlebaseError> {
+        if entrypoint.is_empty() {
+            return Err("Java entrypoint string cannot be empty".into());
         }
 
-        if let Some(colon_pos) = logic.rfind(':') {
-            let path = &logic[..colon_pos];
-            let class = &logic[colon_pos + 1..];
+        if let Some(colon_pos) = entrypoint.rfind(':') {
+            let path = &entrypoint[..colon_pos];
+            let class = &entrypoint[colon_pos + 1..];
 
             if path.is_empty() {
                 return Err(format!(
-                    "Invalid Java logic '{}'. Path before ':' cannot be empty.",
-                    logic
+                    "Invalid Java entrypoint '{}'. Path before ':' cannot be empty.",
+                    entrypoint
                 ).into());
             }
             if class.is_empty() {
                 return Err(format!(
-                    "Invalid Java logic '{}'. Class after ':' cannot be empty.",
-                    logic
+                    "Invalid Java entrypoint '{}'. Class after ':' cannot be empty.",
+                    entrypoint
                 ).into());
             }
 
@@ -46,7 +46,7 @@ impl JavaRuntime {
             })
         } else {
             Ok(Self {
-                jar_path: logic.to_string(),
+                jar_path: entrypoint.to_string(),
                 class_name: None,
             })
         }
@@ -61,9 +61,9 @@ impl JavaRuntime {
     }
 }
 
-impl LogicRuntimeImpl for JavaRuntime {
-    fn validate_logic(&self) -> Result<(), BundlebaseError> {
-        super::validate_file_reachable(&self.jar_path, "JAR file")
+impl UdfEntrypoint for JavaRuntime {
+    fn validate_entrypoint(&self) -> Result<(), BundlebaseError> {
+        validate_file_reachable(&self.jar_path, "JAR file")
     }
 
     fn can_bundle(&self) -> bool {
@@ -74,7 +74,7 @@ impl LogicRuntimeImpl for JavaRuntime {
         RuntimeType::Ipc
     }
 
-    fn to_logic_string(&self) -> String {
+    fn to_entrypoint_string(&self) -> String {
         match &self.class_name {
             Some(c) => format!("{}:{}", self.jar_path, c),
             None => self.jar_path.clone(),
@@ -86,7 +86,7 @@ impl LogicRuntimeImpl for JavaRuntime {
     }
 
     fn build_call_string(&self) -> String {
-        format!("java:{}", self.to_logic_string())
+        format!("java:{}", self.to_entrypoint_string())
     }
 
     fn verify_loadable(&self) -> Result<(), BundlebaseError> {
@@ -105,7 +105,7 @@ impl LogicRuntimeImpl for JavaRuntime {
         args: &datafusion::logical_expr::ScalarFunctionArgs,
         subprocess_cache: &SubprocessCache,
     ) -> DFResult<ColumnarValue> {
-        invoke_ipc_scalar_impl(name, &self.to_logic_string(), args, subprocess_cache)
+        invoke_ipc_scalar_impl(name, &self.to_entrypoint_string(), args, subprocess_cache)
     }
 
     fn create_accumulator(
@@ -115,7 +115,7 @@ impl LogicRuntimeImpl for JavaRuntime {
         return_type: &DataType,
         subprocess_cache: &SubprocessCache,
     ) -> DFResult<Box<dyn Accumulator>> {
-        create_ipc_accumulator(name, &self.to_logic_string(), function_name, return_type, subprocess_cache)
+        create_ipc_accumulator(name, &self.to_entrypoint_string(), function_name, return_type, subprocess_cache)
     }
 
     fn aggregate_state_type(&self, _return_type: &DataType) -> DataType {

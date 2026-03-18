@@ -52,7 +52,7 @@ Operations are recorded and applied in sequence when querying:
 - **SetName**: Set container name
 - **SetDescription**: Set container description
 - **IndexData**: Track row indexing metadata
-- **DescribeConnector**: Returns metadata table (name, runtime, logic, platform, temporary) for a registered connector
+- **DescribeConnector**: Returns metadata table (name, runtime, entrypoint, platform, temporary) for a registered connector
 
 ## Adapter System
 
@@ -74,7 +74,7 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - `src/function/lib_bridge.rs` — FFI layer for native shared library (.so/.dylib) functions
 
 **Core Components:**
-- **FunctionEntry**: Stores function metadata (name, input/return types, runtime, logic, platform, kind)
+- **FunctionEntry**: Stores function metadata (name, input/return types, runtime, entrypoint, platform, kind)
 - **FunctionKind**: `Scalar` (row → row), `Aggregate` (many rows → one result per group), or `TableValued` (returns a table; registration only, execution not yet implemented)
 - **ScalarFunction**: DataFusion `ScalarUDFImpl` bridge for scalar functions
 - **AggregateFunction**: DataFusion `AggregateUDFImpl` bridge for aggregate functions
@@ -85,14 +85,14 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - **Platform**: OS/arch pattern for multi-platform support (e.g., `linux/amd64`, `*/*`)
 
 **FFI Runtime (FFI Layer):**
-- `lib_bridge::parse_lib_logic()` — Parses `path:symbol` convention (colon separates library path from symbol name)
+- `lib_bridge::parse_lib_entrypoint()` — Parses `path:symbol` convention (colon separates library path from symbol name)
 - `lib_bridge::load_library()` — Loads shared libraries with a global `Mutex<HashMap>` cache
 - `lib_bridge::invoke_lib_scalar()` — Converts Arrow arrays to FFI, calls C function, converts back
 - `lib_bridge::LibAccumulator` — Wraps opaque `void*` state, calls `_create_state/_accumulate/_evaluate/_free_state` symbols
 - `lib_bridge::load_lib_manifest()` — Calls `bundlebase_functions()` C symbol for bulk discovery
 - `lib_bridge::load_ipc_manifest()` — Runs `exec --bundlebase-functions` for IPC discovery
 - `ipc_bridge` module — JSON-RPC + Arrow IPC protocol for scalar invoke and aggregate (`create_state`/`accumulate`/`merge`/`evaluate`)
-- `IMPORT FUNCTION namespace.* FROM 'runtime::logic'` command uses manifests to register multiple functions at once
+- `IMPORT FUNCTION namespace.* FROM 'runtime::entrypoint'` command uses manifests to register multiple functions at once
 
 **IPC Health Check:**
 - All SDKs respond to a `ping` method with `"pong"`, used by Bundlebase to verify subprocess liveness.
@@ -107,7 +107,7 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - Each `Bundle` owns a `SubprocessCache` (`Arc<Mutex<HashMap<String, ...>>>`)
 - IPC subprocesses are cached **per-Bundle**, not globally — each connection/session gets its own processes
 - Subprocesses are spawned on first use and live as long as the Bundle (killed on Drop)
-- Cache key is the logic string (e.g., `python:my_functions.py`)
+- Cache key is the entrypoint string (e.g., `python:my_functions.py`)
 
 **Function Lifecycle:**
 
@@ -134,7 +134,7 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - Class with four methods: `create_state()`, `accumulate(state, values)`, `merge(state1, state2)`, `evaluate(state)`
 - State is a PyArrow scalar (simple types: Int64, Float64, Utf8, etc.)
 - Each accumulator gets its own class instance (stateful per partition)
-- `logic` format: `module:ClassName` (same as scalar `module:function`)
+- `entrypoint` format: `module:ClassName` (same as scalar `module:function`)
 
 **Naming Convention:**
 - Single-level dotted namespace: `namespace.function_name` (e.g., `acme.double_val`)

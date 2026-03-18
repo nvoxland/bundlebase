@@ -182,7 +182,7 @@ reindex_stmt = {
 // ============================================================================
 // IMPORT CONNECTOR Statement
 // ============================================================================
-// Syntax: IMPORT CONNECTOR <dotted_name> FROM '<runner::logic>' [WITH (<args>)]
+// Syntax: IMPORT CONNECTOR <dotted_name> FROM '<runtime::entrypoint>' [WITH (<args>)]
 // Examples:
 //   IMPORT CONNECTOR acme.weather FROM 'ipc::./my_source'
 //   IMPORT CONNECTOR acme.weather FROM 'ffi::./lib.so' WITH (platform = 'linux/amd64')
@@ -194,7 +194,7 @@ import_connector_stmt = {
 // ============================================================================
 // IMPORT TEMP CONNECTOR Statement
 // ============================================================================
-// Syntax: IMPORT TEMP CONNECTOR <dotted_name> FROM '<runner::logic>' [WITH (<args>)]
+// Syntax: IMPORT TEMP CONNECTOR <dotted_name> FROM '<runtime::entrypoint>' [WITH (<args>)]
 // Example: IMPORT TEMP CONNECTOR acme.weather FROM 'python::mod:Class'
 
 import_temp_connector_stmt = {
@@ -228,7 +228,7 @@ drop_temp_connector_stmt = {
 // ============================================================================
 // IMPORT FUNCTION Statement
 // ============================================================================
-// Syntax: IMPORT FUNCTION <function_name> FROM '<runner::logic>' [WITH (<args>)]
+// Syntax: IMPORT FUNCTION <function_name> FROM '<runtime::entrypoint>' [WITH (<args>)]
 // Examples:
 //   IMPORT FUNCTION acme.double_val FROM 'ipc::./my_func'
 //   IMPORT FUNCTION acme.* FROM 'ffi::./mylib.so'
@@ -241,7 +241,7 @@ import_function_stmt = {
 // ============================================================================
 // IMPORT TEMP FUNCTION Statement
 // ============================================================================
-// Syntax: IMPORT TEMP FUNCTION <function_name> FROM '<runner::logic>' [WITH (<args>)]
+// Syntax: IMPORT TEMP FUNCTION <function_name> FROM '<runtime::entrypoint>' [WITH (<args>)]
 // Examples:
 //   IMPORT TEMP FUNCTION acme.double_val FROM 'python::mod:func'
 //   IMPORT TEMP FUNCTION acme.* FROM 'ffi::./mylib.so'

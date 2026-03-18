@@ -1,4 +1,4 @@
-//! Shared low-level utilities used by both `connector_utils` and `source_utils`.
+//! Shared low-level utilities used by connectors and `source_utils`.
 //!
 //! Contains pattern matching, argument parsing, URL helpers, streaming primitives,
 //! and Parquet conversion — everything that is needed by multiple modules in the

@@ -148,7 +148,7 @@ impl Operation for RenameConnectorOp {
 mod tests {
     use super::*;
     use crate::bundle::connector_definition::{ConnectorEntry, Platform};
-    use crate::bundle::logic_runtime::LogicRuntime;
+    use crate::udf::UdfRuntime;
     use crate::NamespacedName;
 
     #[test]
@@ -211,7 +211,7 @@ mod tests {
             .add_entry(ConnectorEntry {
                 id,
                 name: NamespacedName::new("acme", "weather"),
-                from: LogicRuntime::parse_from("ffi::test").unwrap(),
+                from: UdfRuntime::parse_from("ffi::test").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             });
@@ -234,7 +234,7 @@ mod tests {
             .add_entry(ConnectorEntry {
                 id,
                 name: NamespacedName::new("acme", "weather"),
-                from: LogicRuntime::parse_from("ffi::test").unwrap(),
+                from: UdfRuntime::parse_from("ffi::test").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             });
@@ -244,7 +244,7 @@ mod tests {
             .add_entry(ConnectorEntry {
                 id: ObjectId::generate(),
                 name: NamespacedName::new("acme", "weather_v2"),
-                from: LogicRuntime::parse_from("ffi::test2").unwrap(),
+                from: UdfRuntime::parse_from("ffi::test2").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             });
@@ -268,7 +268,7 @@ mod tests {
             .add_entry(ConnectorEntry {
                 id,
                 name: NamespacedName::new("acme", "weather"),
-                from: LogicRuntime::parse_from("ffi::test").unwrap(),
+                from: UdfRuntime::parse_from("ffi::test").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             });
@@ -297,7 +297,7 @@ mod tests {
             .add_entry(ConnectorEntry {
                 id: id1,
                 name: NamespacedName::new("acme", "weather"),
-                from: LogicRuntime::parse_from("ffi::test1").unwrap(),
+                from: UdfRuntime::parse_from("ffi::test1").unwrap(),
                 platform: Platform::any(),
                 temporary: false,
             });
@@ -307,7 +307,7 @@ mod tests {
             .add_entry(ConnectorEntry {
                 id: id2,
                 name: NamespacedName::new("acme", "weather"),
-                from: LogicRuntime::parse_from("ffi::test2").unwrap(),
+                from: UdfRuntime::parse_from("ffi::test2").unwrap(),
                 platform: "linux/amd64".parse().unwrap(),
                 temporary: false,
             });

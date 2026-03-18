@@ -8,10 +8,10 @@
 //! - `python:module:Class` — delegates to a `NativePythonBridge` trait object
 //!   registered by the Python bindings at init time (PyO3 + `FromPyArrow`).
 
-use crate::source::connector::{
+use crate::connector::{
     ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
-use crate::source::connector_utils;
+use crate::source::shared_utils;
 use crate::bundle_config::is_external_code_allowed;
 use crate::{BundleConfig, BundlebaseError};
 
@@ -410,7 +410,7 @@ impl Connector for NativeConnector {
         if !is_external_code_allowed(_config)? {
             return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
         }
-        let call = connector_utils::require_arg(args, "call", "native")?;
+        let call = shared_utils::require_arg(args, "call", "native")?;
 
         match parse_native_call(call)? {
             CallStrategy::SharedLib(path) => {
@@ -439,7 +439,7 @@ impl Connector for NativeConnector {
         if !is_external_code_allowed(_config)? {
             return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
         }
-        let call = connector_utils::require_arg(args, "call", "native")?;
+        let call = shared_utils::require_arg(args, "call", "native")?;
         let loc_json = location_json(location)?;
         let args_json = filtered_args_json(args)?;
 
@@ -492,7 +492,7 @@ impl Connector for NativeConnector {
         if !is_external_code_allowed(_config)? {
             return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
         }
-        let call = connector_utils::require_arg(args, "call", "native")?;
+        let call = shared_utils::require_arg(args, "call", "native")?;
         let loc_json = location_json(location)?;
         let args_json = filtered_args_json(args)?;
 

@@ -1,4 +1,4 @@
-//! DropConnector operation — removes a connector definition, or specific platform logic.
+//! DropConnector operation — removes a connector definition, or a specific platform entry.
 
 use crate::bundle::operation::Operation;
 use crate::data::ObjectId;
@@ -108,7 +108,7 @@ impl Operation for DropConnectorOp {
 mod tests {
     use super::*;
     use crate::bundle::connector_definition::{ConnectorEntry, Platform};
-    use crate::bundle::logic_runtime::LogicRuntime;
+    use crate::udf::UdfRuntime;
     use crate::NamespacedName;
 
     #[test]
@@ -158,7 +158,7 @@ mod tests {
         bundle.connector_registry().write().add_entry(ConnectorEntry {
             id,
             name: NamespacedName::new("acme", "weather"),
-            from: LogicRuntime::parse_from("ffi::test").unwrap(),
+            from: UdfRuntime::parse_from("ffi::test").unwrap(),
             platform: Platform::any(),
             temporary: false,
         });
@@ -177,7 +177,7 @@ mod tests {
         bundle.connector_registry().write().add_entry(ConnectorEntry {
             id,
             name: NamespacedName::new("acme", "weather"),
-            from: LogicRuntime::parse_from("ffi::test").unwrap(),
+            from: UdfRuntime::parse_from("ffi::test").unwrap(),
             platform: Platform::any(),
             temporary: false,
         });
@@ -198,14 +198,14 @@ mod tests {
         bundle.connector_registry().write().add_entry(ConnectorEntry {
             id: id1,
             name: NamespacedName::new("acme", "weather"),
-            from: LogicRuntime::parse_from("ffi::test1").unwrap(),
+            from: UdfRuntime::parse_from("ffi::test1").unwrap(),
             platform: Platform::any(),
             temporary: false,
         });
         bundle.connector_registry().write().add_entry(ConnectorEntry {
             id: id2,
             name: NamespacedName::new("acme", "weather"),
-            from: LogicRuntime::parse_from("ffi::test2").unwrap(),
+            from: UdfRuntime::parse_from("ffi::test2").unwrap(),
             platform: "linux/amd64".parse().unwrap(),
             temporary: false,
         });
@@ -226,14 +226,14 @@ mod tests {
         bundle.connector_registry().write().add_entry(ConnectorEntry {
             id: id1,
             name: NamespacedName::new("acme", "weather"),
-            from: LogicRuntime::parse_from("ffi::wildcard").unwrap(),
+            from: UdfRuntime::parse_from("ffi::wildcard").unwrap(),
             platform: Platform::any(),
             temporary: false,
         });
         bundle.connector_registry().write().add_entry(ConnectorEntry {
             id: id2,
             name: NamespacedName::new("acme", "weather"),
-            from: LogicRuntime::parse_from("ffi::linux-specific").unwrap(),
+            from: UdfRuntime::parse_from("ffi::linux-specific").unwrap(),
             platform: "linux/amd64".parse().unwrap(),
             temporary: false,
         });
@@ -245,6 +245,6 @@ mod tests {
 
         // Wildcard entry should remain
         let resolved = bundle.connector_registry().read().resolve_entry("acme.weather").expect("should resolve");
-        assert_eq!(resolved.from.to_logic_string(), "wildcard");
+        assert_eq!(resolved.from.to_entrypoint_string(), "wildcard");
     }
 }

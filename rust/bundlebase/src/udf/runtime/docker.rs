@@ -7,7 +7,7 @@ use arrow::datatypes::DataType;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 
-use super::{invoke_ipc_scalar_impl, create_ipc_accumulator, LogicRuntimeImpl, RuntimeType};
+use super::super::entrypoint::{invoke_ipc_scalar_impl, create_ipc_accumulator, UdfEntrypoint, RuntimeType};
 
 /// Docker runtime: holds an image name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,18 +16,18 @@ pub struct DockerRuntime {
 }
 
 impl DockerRuntime {
-    /// Parse a Docker logic string (the whole string is the image name).
-    pub fn parse(logic: &str) -> Result<Self, BundlebaseError> {
-        if logic.is_empty() {
-            return Err("Docker logic string cannot be empty".into());
+    /// Parse a Docker entrypoint string (the whole string is the image name).
+    pub fn parse(entrypoint: &str) -> Result<Self, BundlebaseError> {
+        if entrypoint.is_empty() {
+            return Err("Docker entrypoint string cannot be empty".into());
         }
         Ok(Self {
-            image: logic.to_string(),
+            image: entrypoint.to_string(),
         })
     }
 }
 
-impl LogicRuntimeImpl for DockerRuntime {
+impl UdfEntrypoint for DockerRuntime {
     fn can_bundle(&self) -> bool {
         true
     }
@@ -36,7 +36,7 @@ impl LogicRuntimeImpl for DockerRuntime {
         RuntimeType::Ipc
     }
 
-    fn to_logic_string(&self) -> String {
+    fn to_entrypoint_string(&self) -> String {
         self.image.clone()
     }
 
