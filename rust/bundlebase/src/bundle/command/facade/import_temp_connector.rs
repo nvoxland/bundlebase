@@ -161,7 +161,8 @@ impl BundleFacadeCommand for ImportTempConnectorCommand {
             platform: self.platform,
             temporary: true,
         };
-        facade.import_temp_connector(entry).await?;
+        facade.connector_registry().write().add_entry(entry);
+        facade.function_registry().read().refresh_version_udf(facade.version());
         Ok(format!("Loaded temporary connector: {}", self.name))
     }
 }

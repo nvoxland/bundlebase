@@ -9,7 +9,7 @@ use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::command::response::OutputShape;
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::connector_definition::Platform;
-use crate::bundle::logic_runtime::LogicRuntime;
+use crate::bundle::logic_runtime::{LogicRuntime, RuntimeType};
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::function_definition::{parse_arrow_type_name, FunctionEntry, FunctionKind};
 use crate::NamespacedName;
@@ -43,6 +43,42 @@ impl ImportTempFunctionCommand {
             from: from.into(),
             platform,
         }
+    }
+
+    /// Validates a function entry and registers it with the facade.
+    ///
+    /// Performs IPC call string validation and kind consistency checks,
+    /// then adds to the registry and re-registers UDFs.
+    async fn validate_and_register(
+        facade: &dyn BundleFacade,
+        entry: FunctionEntry,
+    ) -> Result<(), BundlebaseError> {
+        // Validate IPC logic string at import time (fail early)
+        if entry.from.runtime_type() == RuntimeType::Ipc {
+            crate::function::ipc_bridge::parse_call(&entry.from.build_call_string())?;
+        }
+
+        // Validate kind consistency before adding
+        let name = entry.name.to_string();
+        {
+            let existing = facade.function_registry().read().resolve_all(&name);
+            if !existing.is_empty() {
+                let existing_kind = existing[0].kind;
+                if entry.kind != existing_kind {
+                    return Err(format!(
+                        "Function '{}' has overloads with mixed kinds (scalar and aggregate). \
+                         All overloads of a function must be the same kind.",
+                        name
+                    ).into());
+                }
+            }
+        }
+
+        // Add to registry then re-register all overloads for this name
+        facade.function_registry().write().add(entry);
+        facade.function_registry().read().register_functions_for_name(&name)?;
+        facade.function_registry().read().refresh_version_udf(facade.version());
+        Ok(())
     }
 
     /// Returns true if this is a wildcard/bulk discovery command.
@@ -203,7 +239,7 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
                     temporary: true,
                     kind,
                 };
-                facade.import_temp_function(entry).await?;
+                Self::validate_and_register(facade, entry).await?;
                 count += 1;
             }
 
@@ -240,7 +276,7 @@ impl BundleFacadeCommand for ImportTempFunctionCommand {
                 temporary: true,
                 kind,
             };
-            facade.import_temp_function(entry).await?;
+            Self::validate_and_register(facade, entry).await?;
             Ok(format!("Loaded temporary function: {}", self.name))
         }
     }

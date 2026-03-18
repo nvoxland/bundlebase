@@ -1,6 +1,7 @@
 use super::column_metadata::{self, ColumnNames};
 use super::command::parser::{is_command_statement, parse_command};
-use super::command::{BundleCommand, ExplainPlanCommand, FacadeCommand, CommandResponse, OutputShape};
+use super::command::{BundleCommand, ExplainPlanCommand, FacadeCommand, CommandResponse, OutputShape, ImportTempConnectorCommand, ImportTempFunctionCommand};
+use super::connector_definition::Platform;
 use super::operation::BundleChange;
 use crate::bundle::BundleCommit;
 use crate::bundle::BundleStatus;
@@ -299,18 +300,23 @@ pub trait BundleFacade: Send + Sync {
     /// Returns the bundle configuration
     fn config(&self) -> Arc<BundleConfig>;
 
-    /// Load a temporary connector with runtime-only logic.
-    ///
-    /// Creates the connector definition if it doesn't exist, then adds
-    /// runtime-only logic without creating a persisted operation.
-    /// Works on both `Bundle` and `BundleBuilder`.
+    /// Load a temporary connector with runtime-only logic (not persisted).
     ///
     /// # Arguments
-    /// * `entry` - The connector entry to add
+    /// * `name` - Dotted connector name (e.g., "acme.weather")
+    /// * `from` - From string (e.g., "python::mod:Class", "ipc::./source")
+    /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
     async fn import_temp_connector(
         &self,
-        entry: crate::bundle::connector_definition::ConnectorEntry,
-    ) -> Result<(), BundlebaseError>;
+        name: &str,
+        from: &str,
+        platform: &str,
+    ) -> Result<(), BundlebaseError> {
+        let platform: Platform = platform.parse()?;
+        let cmd = ImportTempConnectorCommand::new(name, from, platform);
+        self.execute_facade_command(FacadeCommand::ImportTempConnector(cmd)).await?;
+        Ok(())
+    }
 
     /// Remove runtime-only connector logic for a defined source.
     ///
@@ -323,13 +329,23 @@ pub trait BundleFacade: Send + Sync {
         platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError>;
 
-    /// Load a temporary function with runtime-only logic.
+    /// Load a temporary function with runtime-only logic (not persisted).
     ///
-    /// Registers a DataFusion UDF and adds the entry for the current session.
+    /// # Arguments
+    /// * `name` - Dotted function name (e.g., "acme.double_val")
+    /// * `from` - From string (e.g., "python::mod:func", "ipc::./my_func")
+    /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
     async fn import_temp_function(
         &self,
-        entry: crate::bundle::function_definition::FunctionEntry,
-    ) -> Result<(), BundlebaseError>;
+        name: &str,
+        from: &str,
+        platform: &str,
+    ) -> Result<(), BundlebaseError> {
+        let platform: Platform = platform.parse()?;
+        let cmd = ImportTempFunctionCommand::new(name, from, platform);
+        self.execute_facade_command(FacadeCommand::ImportTempFunction(cmd)).await?;
+        Ok(())
+    }
 
     /// Remove runtime-only function entries.
     ///

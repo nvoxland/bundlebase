@@ -1589,53 +1589,12 @@ impl BundleFacade for BundleBuilder {
         self.bundle.config()
     }
 
-    async fn import_temp_connector(
-        &self,
-        entry: crate::bundle::connector_definition::ConnectorEntry,
-    ) -> Result<(), BundlebaseError> {
-        self.bundle.connector_registry().write().add_entry(entry);
-        self.bundle.function_registry().read().refresh_version_udf(self.version());
-        Ok(())
-    }
-
     async fn drop_temp_connector(
         &self,
         name: &str,
         platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError> {
         Ok(self.bundle.connector_registry().write().remove_entry(name, platform, true))
-    }
-
-    async fn import_temp_function(
-        &self,
-        entry: crate::bundle::function_definition::FunctionEntry,
-    ) -> Result<(), BundlebaseError> {
-        // Validate IPC logic string at import time (fail early)
-        if entry.from.runtime_type() == crate::bundle::logic_runtime::RuntimeType::Ipc {
-            crate::function::ipc_bridge::parse_call(&entry.from.build_call_string())?;
-        }
-
-        // Validate kind consistency before adding
-        let name = entry.name.to_string();
-        {
-            let existing = self.bundle.function_registry().read().resolve_all(&name);
-            if !existing.is_empty() {
-                let existing_kind = existing[0].kind;
-                if entry.kind != existing_kind {
-                    return Err(format!(
-                        "Function '{}' has overloads with mixed kinds (scalar and aggregate). \
-                         All overloads of a function must be the same kind.",
-                        name
-                    ).into());
-                }
-            }
-        }
-
-        // Add to registry then re-register all overloads for this name
-        self.bundle.function_registry().write().add(entry);
-        self.bundle.function_registry().read().register_functions_for_name(&name)?;
-        self.bundle.function_registry().read().refresh_version_udf(self.version());
-        Ok(())
     }
 
     async fn drop_temp_function(
@@ -1928,24 +1887,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_version_temp_with_temporary_connector_only() {
-        use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::{ConnectorEntry, Platform};
-        use crate::bundle::logic_runtime::LogicRuntime;
-
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
 
-        BundleFacade::import_temp_connector(
-            bundle.as_ref(),
-            ConnectorEntry {
-                id: crate::data::ObjectId::generate(),
-                name: "test.source".parse().unwrap(),
-                from: LogicRuntime::parse_from("ffi::test_call").unwrap(),
-                platform: Platform::any(),
-                temporary: true,
-            },
-        )
+        bundle
+            .import_temp_connector("test.source", "docker::test-image:latest", "*/*")
             .await
             .unwrap();
 
@@ -1954,10 +1901,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_version_uncommitted_temp_with_changes_and_temporary_connector() {
-        use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::{ConnectorEntry, Platform};
-        use crate::bundle::logic_runtime::LogicRuntime;
-
         let bundle = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
@@ -1966,16 +1909,8 @@ mod tests {
             .await
             .unwrap();
 
-        BundleFacade::import_temp_connector(
-            bundle.as_ref(),
-            ConnectorEntry {
-                id: crate::data::ObjectId::generate(),
-                name: "test.source".parse().unwrap(),
-                from: LogicRuntime::parse_from("ffi::test_call").unwrap(),
-                platform: Platform::any(),
-                temporary: true,
-            },
-        )
+        bundle
+            .import_temp_connector("test.source", "docker::test-image:latest", "*/*")
             .await
             .unwrap();
 
@@ -1984,10 +1919,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_version_uncommitted_temp_via_facade() {
-        use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::{ConnectorEntry, Platform};
-        use crate::bundle::logic_runtime::LogicRuntime;
-
         let builder = BundleBuilder::create("memory:///test_bundle", None)
             .await
             .unwrap();
@@ -1996,16 +1927,8 @@ mod tests {
             .await
             .unwrap();
 
-        BundleFacade::import_temp_connector(
-            builder.as_ref(),
-            ConnectorEntry {
-                id: crate::data::ObjectId::generate(),
-                name: "test.source".parse().unwrap(),
-                from: LogicRuntime::parse_from("python::test:call").unwrap(),
-                platform: Platform::any(),
-                temporary: true,
-            },
-        )
+        builder
+            .import_temp_connector("test.source", "docker::test-image:latest", "*/*")
             .await
             .unwrap();
 

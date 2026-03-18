@@ -463,29 +463,8 @@ impl PyBundle {
         let from_ = from_.to_string();
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let from = ::bundlebase::bundle::LogicRuntime::parse_from(&from_).map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
-            })?;
-            from.validate_logic().map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                    "Failed to load temporary connector: {}", e
-                ))
-            })?;
-            let platform: ::bundlebase::bundle::Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| {
-                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
-            })?;
-            let namespaced: ::bundlebase::NamespacedName = name.parse().map_err(|e: ::bundlebase::BundlebaseError| {
-                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
-            })?;
-            let entry = ::bundlebase::bundle::ConnectorEntry {
-                id: ::bundlebase::io::ObjectId::generate(),
-                name: namespaced,
-                from,
-                platform,
-                temporary: true,
-            };
             inner
-                .import_temp_connector(entry)
+                .import_temp_connector(&name, &from_, &platform)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -513,21 +492,16 @@ impl PyBundle {
         let from_ = from_.to_string();
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            use ::bundlebase::bundle::{Platform, ImportTempFunctionCommand};
-            use ::bundlebase::bundle::BundleFacadeCommand;
-            let platform: Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| {
-                PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
-            })?;
-            let cmd = ImportTempFunctionCommand::new(&name, &from_, platform);
-            Box::new(cmd)
-                .execute(inner.as_ref())
+            inner
+                .import_temp_function(&name, &from_, &platform)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                         "Failed to load temporary function: {}",
                         e
                     ))
-                })
+                })?;
+            Ok(format!("Loaded temporary function: {}", name))
         })
     }
 
