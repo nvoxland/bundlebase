@@ -1894,7 +1894,7 @@ async def test_cast_column_with_clean():
     c2 = await c2.standardize_column_names()
 
     # customer_id is a string like "1", "2", etc. - cast to integer without clean
-    c2 = await c2.cast_column("customer_id", "integer")
+    c2 = await c2.cast_column("customer_id", "Int64")
 
     schema = await c2.schema()
     col = next(f for f in schema if f.name == "customer_id")
@@ -1910,7 +1910,7 @@ async def test_cast_column_invalid_type():
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
 
-    with pytest.raises(Exception, match="Unsupported target type"):
+    with pytest.raises(Exception, match="Unknown Arrow type"):
         await c.cast_column("Customer Id", "invalid_type")
 
 
@@ -1921,7 +1921,7 @@ async def test_cast_column_invalid_column():
     c = await c.attach(datafile("customers-0-100.csv"))
 
     with pytest.raises(Exception):
-        await c.cast_column("nonexistent_column", "integer")
+        await c.cast_column("nonexistent_column", "Int64")
 
 
 @pytest.mark.asyncio
