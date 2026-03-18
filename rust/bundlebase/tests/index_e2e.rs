@@ -1292,7 +1292,7 @@ async fn test_cast_column_then_create_index() -> Result<(), BundlebaseError> {
         .await?;
 
     // Cast "Index" from string to integer
-    bundle.cast_column("Index", "integer", None).await?;
+    bundle.cast_column("Index", "Int64", None).await?;
 
     // Create column index on the cast column
     bundle
@@ -1335,7 +1335,7 @@ async fn test_create_index_then_cast_column_different_column() -> Result<(), Bun
     bundle.commit("Index on City").await?;
 
     // Cast a different column (Index → integer)
-    bundle.cast_column("Index", "integer", None).await?;
+    bundle.cast_column("Index", "Int64", None).await?;
     bundle.commit("Cast Index").await?;
 
     // Verify the City index still works
@@ -1372,7 +1372,7 @@ async fn test_create_index_then_cast_same_column() -> Result<(), BundlebaseError
     bundle.commit("Index on string Index").await?;
 
     // Now cast Index to integer and reindex
-    bundle.cast_column("Index", "integer", None).await?;
+    bundle.cast_column("Index", "Int64", None).await?;
     bundle.reindex().await?;
     bundle.commit("Cast and reindex").await?;
 
@@ -1407,7 +1407,7 @@ async fn test_cast_column_with_clean_then_create_index() -> Result<(), Bundlebas
 
     // Cast Index to integer with clean (strip non-digits, though Index is already numeric)
     bundle
-        .cast_column("Index", "integer", Some("[^0-9]".to_string()))
+        .cast_column("Index", "Int64", Some("[^0-9]".to_string()))
         .await?;
 
     // Create column index on the cleaned+cast column
@@ -1524,7 +1524,7 @@ async fn test_search_with_cast_column() -> Result<(), BundlebaseError> {
         .await?;
 
     // Cast Index column from string to integer
-    bundle.cast_column("Index", "integer", None).await?;
+    bundle.cast_column("Index", "Int64", None).await?;
     bundle.commit("Text index + cast_column").await?;
 
     // Search and select the cast column
@@ -1570,7 +1570,7 @@ async fn test_cast_column_then_create_index_on_different_column() -> Result<(), 
         .await?;
 
     // Cast Index to integer
-    bundle.cast_column("Index", "integer", None).await?;
+    bundle.cast_column("Index", "Int64", None).await?;
 
     // Create index on City (not the cast column)
     bundle

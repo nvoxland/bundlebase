@@ -2,6 +2,7 @@
 
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::command::{CommandParsing, Rule};
+use crate::bundle::function_definition::parse_arrow_type_name;
 use crate::bundle::operation::CastColumnOp;
 use crate::bundle::BundleFacade;
 use crate::BundlebaseError;
@@ -90,11 +91,13 @@ impl BundleBuilderCommand for CastColumnCommand {
         let id = builder.column_id(&self.name)
             .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", self.name)))?;
 
+        let data_type = parse_arrow_type_name(&self.new_type)?;
+
         builder
             .apply_operation(
                 CastColumnOp::setup(
                     id,
-                    &self.new_type,
+                    data_type,
                     self.clean.clone(),
                 )
                 .into(),
@@ -121,11 +124,11 @@ mod tests {
 
     #[test]
     fn test_parse_cast_column() {
-        let cmd = parse_command("CAST COLUMN price TO integer").unwrap();
+        let cmd = parse_command("CAST COLUMN price TO Int64").unwrap();
         match cmd {
             BundleCommand::CastColumn(c) => {
                 assert_eq!(c.name, "price");
-                assert_eq!(c.new_type, "integer");
+                assert_eq!(c.new_type, "Int64");
                 assert_eq!(c.clean, None);
             }
             other => panic!("Expected CastColumn, got {:?}", other),
@@ -134,11 +137,11 @@ mod tests {
 
     #[test]
     fn test_parse_cast_column_with_clean() {
-        let cmd = parse_command("CAST COLUMN price TO integer CLEAN '[^0-9]'").unwrap();
+        let cmd = parse_command("CAST COLUMN price TO Int64 CLEAN '[^0-9]'").unwrap();
         match cmd {
             BundleCommand::CastColumn(c) => {
                 assert_eq!(c.name, "price");
-                assert_eq!(c.new_type, "integer");
+                assert_eq!(c.new_type, "Int64");
                 assert_eq!(c.clean, Some("[^0-9]".to_string()));
             }
             other => panic!("Expected CastColumn, got {:?}", other),
@@ -146,28 +149,29 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_cast_column_case_insensitive() {
-        let cmd = parse_command("cast column value to float").unwrap();
-        match cmd {
-            BundleCommand::CastColumn(c) => {
-                assert_eq!(c.name, "value");
-                assert_eq!(c.new_type, "float");
+    fn test_parse_cast_column_various_types() {
+        for type_name in &["Float64", "Utf8", "Boolean", "Date32"] {
+            let cmd = parse_command(&format!("CAST COLUMN value TO {}", type_name)).unwrap();
+            match cmd {
+                BundleCommand::CastColumn(c) => {
+                    assert_eq!(c.new_type, *type_name);
+                }
+                other => panic!("Expected CastColumn, got {:?}", other),
             }
-            other => panic!("Expected CastColumn, got {:?}", other),
         }
     }
 
     #[test]
     fn test_round_trip() {
-        let cmd = super::CastColumnCommand::new("price", "integer", None);
+        let cmd = super::CastColumnCommand::new("price", "Int64", None);
         let statement = cmd.to_statement();
-        assert_eq!(statement, "CAST COLUMN price TO integer");
+        assert_eq!(statement, "CAST COLUMN price TO Int64");
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::CastColumn(c) => {
                 assert_eq!(c.name, "price");
-                assert_eq!(c.new_type, "integer");
+                assert_eq!(c.new_type, "Int64");
                 assert_eq!(c.clean, None);
             }
             other => panic!("Expected CastColumn, got {:?}", other),
@@ -176,14 +180,14 @@ mod tests {
 
     #[test]
     fn test_round_trip_with_clean() {
-        let cmd = super::CastColumnCommand::new("price", "integer", Some("[^0-9]".to_string()));
+        let cmd = super::CastColumnCommand::new("price", "Int64", Some("[^0-9]".to_string()));
         let statement = cmd.to_statement();
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {
             BundleCommand::CastColumn(c) => {
                 assert_eq!(c.name, "price");
-                assert_eq!(c.new_type, "integer");
+                assert_eq!(c.new_type, "Int64");
                 assert_eq!(c.clean, Some("[^0-9]".to_string()));
             }
             other => panic!("Expected CastColumn, got {:?}", other),
