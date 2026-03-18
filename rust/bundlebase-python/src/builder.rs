@@ -364,12 +364,8 @@ impl PyBundleBuilder {
         let from_ = from_.to_string();
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            use ::bundlebase::bundle::{Platform, ImportTempFunctionCommand};
-            use ::bundlebase::bundle::BundleFacadeCommand;
-            let platform: Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
-            let cmd = ImportTempFunctionCommand::new(&name, &from_, platform);
-            Box::new(cmd)
-                .execute(inner.as_ref())
+            inner
+                .import_temp_function(&name, &from_, &platform)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to load temporary function", e))?;
 
@@ -753,8 +749,7 @@ impl PyBundleBuilder {
     ///
     /// # Arguments
     /// * `name` - The connector name
-    /// * `runner` - The runner: "python", "lib", "java", "docker", or "ipc"
-    /// * `logic` - The logic string (e.g., "mod:Class" for python)
+    /// * `from_` - The from string (e.g., "python::mod:Class", "ipc::./source")
     /// * `platform` - Docker-style platform string (e.g., "*/*", "linux/amd64")
     #[pyo3(signature = (name, from_, platform="*/*"))]
     fn import_temp_connector<'py>(
@@ -769,20 +764,8 @@ impl PyBundleBuilder {
         let from_ = from_.to_string();
         let platform = platform.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let from = ::bundlebase::bundle::LogicRuntime::parse_from(&from_).map_err(|e| to_py_error(e))?;
-            from.validate_logic().map_err(|e| to_py_error_ctx("Failed to load temporary connector", e))?;
-            let platform: ::bundlebase::bundle::Platform = platform.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
-            let namespaced: ::bundlebase::NamespacedName = name.parse().map_err(|e: ::bundlebase::BundlebaseError| to_py_error(e))?;
-            let entry = ::bundlebase::bundle::ConnectorEntry {
-                id: ::bundlebase::io::ObjectId::generate(),
-                name: namespaced,
-                from,
-                platform,
-                temporary: true,
-            };
             inner
-                .as_ref()
-                .import_temp_connector(entry)
+                .import_temp_connector(&name, &from_, &platform)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to load temporary connector", e))?;
             Python::attach(|py| {

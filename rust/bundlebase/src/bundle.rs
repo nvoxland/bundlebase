@@ -25,7 +25,7 @@ pub use command::CommandResponse;
 pub use command::FacadeCommand;
 pub use command::OutputShape;
 pub use command::{CommitCommand, ResetCommand, UndoCommand};
-pub use command::{BundleFacadeCommand, ImportTempFunctionCommand};
+pub use command::{BundleFacadeCommand, ImportTempConnectorCommand, ImportTempFunctionCommand};
 pub use command::{FileVerificationResult, VerificationResults};
 pub use commit::{manifest_version, BundleCommit};
 pub use data_block::DataBlock;
@@ -1281,53 +1281,12 @@ impl BundleFacade for Bundle {
         Bundle::config(self)
     }
 
-    async fn import_temp_connector(
-        &self,
-        entry: ConnectorEntry,
-    ) -> Result<(), BundlebaseError> {
-        self.connector_registry.write().add_entry(entry);
-        self.function_registry.read().refresh_version_udf("TEMP".to_string());
-        Ok(())
-    }
-
     async fn drop_temp_connector(
         &self,
         name: &str,
         platform: Option<&connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError> {
         Ok(self.connector_registry.write().remove_entry(name, platform, true))
-    }
-
-    async fn import_temp_function(
-        &self,
-        entry: FunctionEntry,
-    ) -> Result<(), BundlebaseError> {
-        // Validate IPC logic string at import time (fail early)
-        if entry.from.runtime_type() == crate::bundle::logic_runtime::RuntimeType::Ipc {
-            crate::function::ipc_bridge::parse_call(&entry.from.build_call_string())?;
-        }
-
-        // Validate kind consistency before adding: all overloads must share the same kind
-        let name = entry.name.to_string();
-        {
-            let existing = self.function_registry.read().resolve_all(&name);
-            if !existing.is_empty() {
-                let existing_kind = existing[0].kind;
-                if entry.kind != existing_kind {
-                    return Err(format!(
-                        "Function '{}' has overloads with mixed kinds (scalar and aggregate). \
-                         All overloads of a function must be the same kind.",
-                        name
-                    ).into());
-                }
-            }
-        }
-
-        // Add to registry then re-register all overloads for this name
-        self.function_registry.write().add(entry);
-        self.function_registry.read().register_functions_for_name(&name)?;
-        self.function_registry.read().refresh_version_udf("TEMP".to_string());
-        Ok(())
     }
 
     async fn drop_temp_function(
@@ -1632,19 +1591,11 @@ mod tests {
     #[tokio::test]
     async fn test_import_temp_connector_changes_version_to_temp() -> Result<(), BundlebaseError> {
         use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::ConnectorEntry;
-        use crate::bundle::logic_runtime::LogicRuntime;
 
         let bundle = Bundle::empty(None).await?;
         assert_eq!(bundle.version(), "empty");
 
-        bundle.import_temp_connector(ConnectorEntry {
-            id: crate::data::ObjectId::generate(),
-            name: "test.source".parse()?,
-            from: LogicRuntime::parse_from("ffi::test_call").unwrap(),
-            platform: connector_definition::Platform::any(),
-            temporary: true,
-        }).await?;
+        bundle.import_temp_connector("test.source", "docker::test-image:latest", "*/*").await?;
 
         assert_eq!(bundle.version(), "TEMP");
 
@@ -1654,19 +1605,10 @@ mod tests {
     #[tokio::test]
     async fn test_import_temp_connector_version_udf_returns_temp() -> Result<(), BundlebaseError> {
         use arrow::array::StringArray;
-        use crate::bundle::facade::BundleFacade;
-        use crate::bundle::connector_definition::ConnectorEntry;
-        use crate::bundle::logic_runtime::LogicRuntime;
 
         let bundle = Bundle::empty(None).await?;
 
-        bundle.import_temp_connector(ConnectorEntry {
-            id: crate::data::ObjectId::generate(),
-            name: "test.source".parse()?,
-            from: LogicRuntime::parse_from("ffi::test_call").unwrap(),
-            platform: connector_definition::Platform::any(),
-            temporary: true,
-        }).await?;
+        bundle.import_temp_connector("test.source", "docker::test-image:latest", "*/*").await?;
 
         let df = bundle.ctx().sql("SELECT version() AS ver").await?;
         let batches = df.collect().await?;
