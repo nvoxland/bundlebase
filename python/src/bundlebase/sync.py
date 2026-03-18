@@ -704,6 +704,26 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def rename_connector(
+        self, old_name: str, new_name: str
+    ) -> "SyncBundleBuilder":
+        """Rename a connector to a new dotted name.
+
+        Renames all entries and updates sources referencing the old connector name.
+
+        Args:
+            old_name: Current connector name (e.g., "acme.weather")
+            new_name: New connector name (e.g., "acme.weather_v2")
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(
+            self._async, "rename_connector", old_name, new_name
+        )
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
     def drop_connector(
         self, name: str, platform: str = None
     ) -> "SyncBundleBuilder":
@@ -905,6 +925,26 @@ class SyncBundleBuilder(SyncBundle):
             SyncBundleBuilder for chaining
         """
         coro = _call_original_method(self._async, "import_temp_function", name, from_, platform)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def rename_function(
+        self, old_name: str, new_name: str
+    ) -> "SyncBundleBuilder":
+        """Rename a function to a new dotted name.
+
+        Renames all entries, deregisters old UDFs, and re-registers under the new name.
+
+        Args:
+            old_name: Current function name (e.g., "acme.double_val")
+            new_name: New function name (e.g., "acme.double_val_v2")
+
+        Returns:
+            SyncBundleBuilder for chaining
+        """
+        coro = _call_original_method(
+            self._async, "rename_function", old_name, new_name
+        )
         self._async = _loop_manager.run_sync(coro)
         return self
 

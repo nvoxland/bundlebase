@@ -8,8 +8,8 @@
 // - Data: FILTER, ATTACH, DETACH, REPLACE
 // - Schema: JOIN, DROP JOIN, RENAME JOIN, ADD/DROP/RENAME/CAST COLUMN,
 //           CREATE/DROP/RENAME VIEW
-// - Sources: IMPORT [TEMP] CONNECTOR/FUNCTION, DROP [TEMP] CONNECTOR/FUNCTION,
-//            CREATE SOURCE, FETCH
+// - Sources: IMPORT [TEMP] CONNECTOR/FUNCTION, RENAME [TEMP] CONNECTOR/FUNCTION,
+//            DROP [TEMP] CONNECTOR/FUNCTION, CREATE SOURCE, FETCH
 // - Indexes: CREATE/DROP/REBUILD INDEX, REINDEX
 // - Transactions: COMMIT, RESET, UNDO, VERIFY DATA, EXPLAIN
 // - Metadata: DESCRIBE CONNECTOR, DESCRIBE FUNCTION,
@@ -57,11 +57,16 @@ schema_stmt = {
 }
 
 // Source management statements - operations for data sources and functions
+// Note: temp variants must come before non-temp to match the longer prefix first
 source_stmt = {
     import_temp_function_stmt
     | import_temp_connector_stmt
     | import_function_stmt
     | import_connector_stmt
+    | rename_temp_function_stmt
+    | rename_temp_connector_stmt
+    | rename_function_stmt
+    | rename_connector_stmt
     | drop_temp_function_stmt
     | drop_temp_connector_stmt
     | drop_function_stmt
@@ -263,6 +268,46 @@ drop_function_stmt = {
 
 drop_temp_function_stmt = {
     ^"drop" ~ ^"temp" ~ ^"function" ~ dotted_identifier
+}
+
+// ============================================================================
+// RENAME CONNECTOR Statement
+// ============================================================================
+// Syntax: RENAME CONNECTOR <dotted_name> TO <dotted_name>
+// Example: RENAME CONNECTOR acme.weather TO acme.weather_v2
+
+rename_connector_stmt = {
+    ^"rename" ~ ^"connector" ~ dotted_identifier ~ ^"to" ~ dotted_identifier
+}
+
+// ============================================================================
+// RENAME TEMP CONNECTOR Statement
+// ============================================================================
+// Syntax: RENAME TEMP CONNECTOR <dotted_name> TO <dotted_name>
+// Example: RENAME TEMP CONNECTOR acme.weather TO acme.weather_v2
+
+rename_temp_connector_stmt = {
+    ^"rename" ~ ^"temp" ~ ^"connector" ~ dotted_identifier ~ ^"to" ~ dotted_identifier
+}
+
+// ============================================================================
+// RENAME FUNCTION Statement
+// ============================================================================
+// Syntax: RENAME FUNCTION <dotted_name> TO <dotted_name>
+// Example: RENAME FUNCTION acme.double_val TO acme.double_val_v2
+
+rename_function_stmt = {
+    ^"rename" ~ ^"function" ~ dotted_identifier ~ ^"to" ~ dotted_identifier
+}
+
+// ============================================================================
+// RENAME TEMP FUNCTION Statement
+// ============================================================================
+// Syntax: RENAME TEMP FUNCTION <dotted_name> TO <dotted_name>
+// Example: RENAME TEMP FUNCTION acme.double_val TO acme.double_val_v2
+
+rename_temp_function_stmt = {
+    ^"rename" ~ ^"temp" ~ ^"function" ~ dotted_identifier ~ ^"to" ~ dotted_identifier
 }
 
 // ============================================================================

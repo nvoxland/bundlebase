@@ -30,7 +30,7 @@ The `statement` rule in `grammar.pest` is organized into semantic categories:
 |----------|-------------|------------------|
 | `data_modification_stmt` | Operations that change bundle data content | FILTER, SELECT, ATTACH, DETACH, REPLACE |
 | `schema_stmt` | Operations that change bundle structure | JOIN, DROP JOIN, RENAME JOIN, columns, views |
-| `source_stmt` | Operations for data sources | CREATE SOURCE, FETCH |
+| `source_stmt` | Operations for data sources and functions | CREATE SOURCE, FETCH, IMPORT/DROP/RENAME CONNECTOR, IMPORT/DROP/RENAME FUNCTION (including TEMP variants) |
 | `index_stmt` | Operations for search indexes | CREATE INDEX, DROP INDEX, REBUILD INDEX, REINDEX |
 | `transaction_stmt` | Operations for version control | COMMIT, RESET, UNDO, VERIFY DATA |
 | `metadata_stmt` | Operations for bundle metadata | SET NAME, SET DESCRIPTION, SET CONFIG, SAVE CONFIG |

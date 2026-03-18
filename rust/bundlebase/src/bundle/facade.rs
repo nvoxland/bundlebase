@@ -341,6 +341,26 @@ pub trait BundleFacade: Send + Sync {
         platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError>;
 
+    /// Rename runtime-only connector entries.
+    ///
+    /// Renames temporary connector entries matching old_name to new_name.
+    /// Also updates sources referencing the old connector name.
+    async fn rename_temp_connector(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), BundlebaseError>;
+
+    /// Rename runtime-only function entries.
+    ///
+    /// Renames temporary function entries matching old_name to new_name.
+    /// Deregisters old UDFs and re-registers under the new name.
+    async fn rename_temp_function(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), BundlebaseError>;
+
     /// Set a runtime config value (session-only, highest priority).
     ///
     /// This modifies the runtime config layer which takes precedence over

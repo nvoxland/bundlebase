@@ -49,10 +49,12 @@ Custom connectors use a simple workflow:
 2. [**Create a source**](#create-source) — creates a source instance from the connector
 3. [**Fetch data**](#fetch) — discovers and attaches data from the source
 
-To remove connectors:
+To remove or rename connectors:
 
 - [**Drop connector**](#drop-connector) — removes the connector (or just a specific platform's logic)
 - [**Drop temp connector**](#drop-temp-connector) — removes runtime-only logic entries
+- [**Rename connector**](#rename-connector) — renames a connector and updates associated sources
+- [**Rename temp connector**](#rename-temp-connector) — renames runtime-only connector entries
 
 ## Choosing a Runtime
 
@@ -374,6 +376,56 @@ Removes **runtime-only** logic entries from a connector. Works on both `Bundle` 
 | `platform` | `str` | `None` | If specified, only drop logic for this platform. If `None`, drops all platforms. |
 
 **Returns:** The number of logic entries removed.
+
+---
+
+### RENAME CONNECTOR
+
+Renames a connector definition to a new dotted name. All platform entries are renamed, and any sources referencing the old connector name are automatically updated.
+
+=== "Async API"
+
+    ```python
+    bundle = await bundle.rename_connector('acme.weather', 'acme.weather_v2')
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle.rename_connector('acme.weather', 'acme.weather_v2')
+    ```
+
+=== "SQL"
+
+    ```sql
+    RENAME CONNECTOR acme.weather TO acme.weather_v2
+    ```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `old_name` | `str` | *(required)* | Current dot-separated connector name |
+| `new_name` | `str` | *(required)* | New dot-separated connector name |
+
+---
+
+### RENAME TEMP CONNECTOR
+
+Renames **runtime-only** connector entries to a new name. Only temporary entries are renamed; persistent entries are not affected.
+
+=== "SQL"
+
+    ```sql
+    RENAME TEMP CONNECTOR acme.weather TO acme.weather_v2
+    ```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `old_name` | `str` | *(required)* | Current dot-separated connector name |
+| `new_name` | `str` | *(required)* | New dot-separated connector name |
 
 ## How It Works
 

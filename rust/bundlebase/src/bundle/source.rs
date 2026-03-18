@@ -17,7 +17,7 @@ pub struct Source {
     id: ObjectId,
     pack: ObjectId,
     /// Connector name (e.g., "remote_dir" for built-in, "acme.weather" for custom)
-    connector: String,
+    connector: RwLock<String>,
     /// Connector-specific configuration arguments
     /// For "remote_dir": "url" (required), "patterns" (optional)
     args: HashMap<String, String>,
@@ -35,7 +35,7 @@ impl Source {
         Self {
             id,
             pack,
-            connector,
+            connector: RwLock::new(connector),
             args,
             attached_files: RwLock::new(HashMap::new()),
         }
@@ -69,8 +69,15 @@ impl Source {
         &self.pack
     }
 
-    pub fn connector(&self) -> &str {
-        &self.connector
+    pub fn connector(&self) -> String {
+        self.connector.read().clone()
+    }
+
+    /// Update the connector name for this source.
+    ///
+    /// Used when a connector is renamed to cascade the name change to sources.
+    pub fn set_connector_name(&self, name: String) {
+        *self.connector.write() = name;
     }
 
     pub fn args(&self) -> &HashMap<String, String> {
@@ -85,10 +92,11 @@ impl Source {
         builder: &BundleBuilder,
         mode: SyncMode,
     ) -> Result<Vec<FetchAction>, BundlebaseError> {
-        let (func, data_dir, config, resolved_args) = if self.connector.contains('.') {
+        let connector_name = self.connector();
+        let (func, data_dir, config, resolved_args) = if connector_name.contains('.') {
             // Defined source: resolve connector entry for current platform
             let bundle = builder.bundle();
-            let entry = bundle.connector_registry().read().resolve_entry(&self.connector)?;
+            let entry = bundle.connector_registry().read().resolve_entry(&connector_name)?;
 
             let runtime_type = entry.from.runtime_type();
             let registry = bundle.connector_registry();
@@ -112,8 +120,8 @@ impl Source {
             let registry = bundle.connector_registry();
             let reg = registry.read();
             let func = reg
-                .get(&self.connector)
-                .ok_or_else(|| format!("Unknown connector '{}'", self.connector))?;
+                .get(&connector_name)
+                .ok_or_else(|| format!("Unknown connector '{}'", connector_name))?;
             (func, bundle.data_dir(), bundle.config(), self.args.clone())
         };
 

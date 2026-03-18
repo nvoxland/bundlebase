@@ -20,6 +20,8 @@ mod drop_column;
 mod parameter_value;
 mod rename_column;
 mod rename_join;
+mod rename_connector;
+mod rename_function;
 mod rename_view;
 mod serde_util;
 mod save_config;
@@ -47,6 +49,8 @@ pub use crate::bundle::operation::replace_block::ReplaceBlockOp;
 pub use crate::bundle::operation::index_blocks::IndexBlocksOp;
 pub use crate::bundle::operation::drop_column::DropColumnOp;
 pub use crate::bundle::operation::rename_column::RenameColumnOp;
+pub use crate::bundle::operation::rename_connector::RenameConnectorOp;
+pub use crate::bundle::operation::rename_function::RenameFunctionOp;
 pub use crate::bundle::operation::rename_join::RenameJoinOp;
 pub use crate::bundle::operation::rename_view::RenameViewOp;
 pub use crate::bundle::operation::save_config::SaveConfigOp;
@@ -226,6 +230,8 @@ define_any_operation! {
     Filter(FilterOp),
     IndexBlocks(IndexBlocksOp),
     RenameColumn(RenameColumnOp),
+    RenameConnector(RenameConnectorOp),
+    RenameFunction(RenameFunctionOp),
     RenameJoin(RenameJoinOp),
     RenameView(RenameViewOp),
     ReplaceBlock(ReplaceBlockOp),

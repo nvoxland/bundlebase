@@ -781,6 +781,31 @@ impl BundleBuilder {
         Ok(self)
     }
 
+    /// Rename a connector to a new dotted name.
+    ///
+    /// Renames all entries and updates sources referencing the old connector name.
+    ///
+    /// # Arguments
+    /// * `old_name` - Current connector name (e.g., "acme.weather")
+    /// * `new_name` - New connector name (e.g., "acme.weather_v2")
+    ///
+    /// # Example
+    /// ```ignore
+    /// let c = BundleBuilder::create("memory:///example", None).await?;
+    /// c.import_connector("acme.weather", "ipc::./weather", "*/*").await?;
+    /// c.rename_connector("acme.weather", "acme.weather_v2").await?;
+    /// c.commit("Renamed connector").await?;
+    /// ```
+    pub async fn rename_connector(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::RenameConnectorCommand;
+        self.execute_command(RenameConnectorCommand::new(old_name, new_name)).await?;
+        Ok(self)
+    }
+
     /// Drop a connector. Without a platform, removes the entire connector definition.
     /// With a platform, removes only the logic for that platform.
     pub async fn drop_connector(
@@ -1112,6 +1137,31 @@ impl BundleBuilder {
         self.execute_command(ImportFunctionCommand::new(
             name, from, platform,
         )).await?;
+        Ok(self)
+    }
+
+    /// Rename a function to a new dotted name.
+    ///
+    /// Renames all entries, deregisters old UDFs, and re-registers under the new name.
+    ///
+    /// # Arguments
+    /// * `old_name` - Current function name (e.g., "acme.double_val")
+    /// * `new_name` - New function name (e.g., "acme.double_val_v2")
+    ///
+    /// # Example
+    /// ```ignore
+    /// let c = BundleBuilder::create("memory:///example", None).await?;
+    /// c.import_function("acme.double_val", "ipc::./my_func", "*/*").await?;
+    /// c.rename_function("acme.double_val", "acme.double_val_v2").await?;
+    /// c.commit("Renamed function").await?;
+    /// ```
+    pub async fn rename_function(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<&Self, BundlebaseError> {
+        use crate::bundle::command::RenameFunctionCommand;
+        self.execute_command(RenameFunctionCommand::new(old_name, new_name)).await?;
         Ok(self)
     }
 
@@ -1596,6 +1646,22 @@ impl BundleFacade for BundleBuilder {
         let _ = self.bundle.ctx().deregister_udf(name);
         let _ = self.bundle.ctx().deregister_udaf(name);
         Ok(self.bundle.function_registry().write().remove(name, platform, true))
+    }
+
+    async fn rename_temp_connector(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), BundlebaseError> {
+        self.bundle.rename_temp_connector(old_name, new_name).await
+    }
+
+    async fn rename_temp_function(
+        &self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), BundlebaseError> {
+        self.bundle.rename_temp_function(old_name, new_name).await
     }
 
     async fn set_config(

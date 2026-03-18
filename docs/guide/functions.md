@@ -395,6 +395,54 @@ The `kind` field in a function manifest can be one of:
 
 Complex types can be nested (e.g., `List<Struct<name:Utf8,score:Float64>>`).
 
+## Renaming Functions
+
+### RENAME FUNCTION
+
+Renames a function definition to a new dotted name. All overloads are renamed. Old UDFs are deregistered and re-registered under the new name.
+
+=== "Async API"
+
+    ```python
+    bundle = await bundle.rename_function('acme.double_val', 'acme.double_val_v2')
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle.rename_function('acme.double_val', 'acme.double_val_v2')
+    ```
+
+=== "SQL"
+
+    ```sql
+    RENAME FUNCTION acme.double_val TO acme.double_val_v2
+    ```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `old_name` | `str` | *(required)* | Current dot-separated function name |
+| `new_name` | `str` | *(required)* | New dot-separated function name |
+
+### RENAME TEMP FUNCTION
+
+Renames **runtime-only** function entries to a new name. Only temporary entries are renamed; persistent entries are not affected.
+
+=== "SQL"
+
+    ```sql
+    RENAME TEMP FUNCTION acme.double_val TO acme.double_val_v2
+    ```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `old_name` | `str` | *(required)* | Current dot-separated function name |
+| `new_name` | `str` | *(required)* | New dot-separated function name |
+
 ## Troubleshooting
 
 ### "External code execution is not allowed"

@@ -584,6 +584,24 @@ impl ConnectorRegistry {
         self.entries.retain(|e| !ids.contains(&e.id));
     }
 
+    /// Rename connector entries matching the given IDs to a new name.
+    pub fn rename_entries(&mut self, ids: &[crate::data::ObjectId], new_name: &crate::NamespacedName) {
+        for entry in &mut self.entries {
+            if ids.contains(&entry.id) {
+                entry.name = new_name.clone();
+            }
+        }
+    }
+
+    /// Rename only temporary connector entries matching the old name to a new name.
+    pub fn rename_temp_entries(&mut self, old_name: &str, new_name: &crate::NamespacedName) {
+        for entry in &mut self.entries {
+            if entry.temporary && entry.name == old_name {
+                entry.name = new_name.clone();
+            }
+        }
+    }
+
     /// Get a read-only view of all connector entries.
     pub fn entries(&self) -> &[ConnectorEntry] {
         &self.entries

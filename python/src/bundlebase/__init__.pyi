@@ -509,6 +509,24 @@ class PyBundleBuilder:
         """
         ...
 
+    def rename_function(self, old_name: str, new_name: str) -> "OperationChain":
+        """
+        Rename a function to a new dotted name.
+
+        Renames all entries, deregisters old UDFs, and re-registers under the new name.
+
+        Args:
+            old_name: Current function name (e.g., "acme.double_val")
+            new_name: New function name (e.g., "acme.double_val_v2")
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.rename_function("acme.double_val", "acme.double_val_v2")
+        """
+        ...
+
     def drop_function(
         self,
         name: str,
@@ -564,6 +582,24 @@ class PyBundleBuilder:
 
         Returns:
             OperationChain for fluent chaining
+        """
+        ...
+
+    def rename_connector(self, old_name: str, new_name: str) -> "OperationChain":
+        """
+        Rename a connector to a new dotted name.
+
+        Renames all entries and updates sources referencing the old connector name.
+
+        Args:
+            old_name: Current connector name (e.g., "acme.weather")
+            new_name: New connector name (e.g., "acme.weather_v2")
+
+        Returns:
+            OperationChain for fluent chaining
+
+        Example:
+            c = await c.rename_connector("acme.weather", "acme.weather_v2")
         """
         ...
 
@@ -1428,6 +1464,14 @@ class OperationChain:
         """Queue a create_source operation."""
         ...
 
+    def rename_connector(self, old_name: str, new_name: str) -> "OperationChain":
+        """Queue a rename_connector operation."""
+        ...
+
+    def rename_function(self, old_name: str, new_name: str) -> "OperationChain":
+        """Queue a rename_function operation."""
+        ...
+
     def rename_view(self, old_name: str, new_name: str) -> "OperationChain":
         """Queue a rename_view operation."""
         ...
@@ -1579,6 +1623,14 @@ class CreateChain:
         """Queue a create_source operation."""
         ...
 
+    def rename_connector(self, old_name: str, new_name: str) -> "CreateChain":
+        """Queue a rename_connector operation."""
+        ...
+
+    def rename_function(self, old_name: str, new_name: str) -> "CreateChain":
+        """Queue a rename_function operation."""
+        ...
+
     def rename_view(self, old_name: str, new_name: str) -> "CreateChain":
         """Queue a rename_view operation."""
         ...
@@ -1728,6 +1780,14 @@ class ExtendChain:
 
     def create_source(self, connector: str, args: Dict[str, str], pack: str = "base") -> "ExtendChain":
         """Queue a create_source operation."""
+        ...
+
+    def rename_connector(self, old_name: str, new_name: str) -> "ExtendChain":
+        """Queue a rename_connector operation."""
+        ...
+
+    def rename_function(self, old_name: str, new_name: str) -> "ExtendChain":
+        """Queue a rename_function operation."""
         ...
 
     def rename_view(self, old_name: str, new_name: str) -> "ExtendChain":
