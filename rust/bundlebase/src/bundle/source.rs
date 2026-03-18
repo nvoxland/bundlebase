@@ -88,7 +88,7 @@ impl Source {
         let (func, data_dir, config, resolved_args) = if self.connector.contains('.') {
             // Defined source: resolve connector entry for current platform
             let bundle = builder.bundle();
-            let entry = bundle.resolve_connector(&self.connector)?;
+            let entry = bundle.connector_registry().read().resolve_entry(&self.connector)?;
 
             let runtime_type = entry.from.runtime_type();
             let registry = bundle.connector_registry();

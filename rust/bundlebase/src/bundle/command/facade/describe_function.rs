@@ -88,7 +88,7 @@ impl BundleFacadeCommand for DescribeFunctionCommand {
         self: Box<Self>,
         facade: &dyn BundleFacade,
     ) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        let all_entries = facade.function_entries();
+        let all_entries = facade.function_registry().read().entries().to_vec();
         let matching: Vec<_> = all_entries
             .into_iter()
             .filter(|e| e.name == self.name)

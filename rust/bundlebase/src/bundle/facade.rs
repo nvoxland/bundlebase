@@ -341,16 +341,6 @@ pub trait BundleFacade: Send + Sync {
         platform: Option<&crate::bundle::connector_definition::Platform>,
     ) -> Result<usize, BundlebaseError>;
 
-    /// Returns unique function namespace names from registered functions.
-    ///
-    /// Used by Flight SQL metadata to expose function namespaces as schemas.
-    fn function_namespaces(&self) -> Vec<String>;
-
-    /// Returns the NamespacedName for all registered functions.
-    ///
-    /// Used by Flight SQL metadata to list functions as table entries.
-    fn functions(&self) -> Vec<crate::NamespacedName>;
-
     /// Set a runtime config value (session-only, highest priority).
     ///
     /// This modifies the runtime config layer which takes precedence over
@@ -368,15 +358,11 @@ pub trait BundleFacade: Send + Sync {
         value: &str,
     ) -> Result<(), BundlebaseError>;
 
-    /// Returns all connector entries registered in this bundle.
-    ///
-    /// Includes both persisted and temporary entries.
-    fn connector_entries(&self) -> Vec<crate::bundle::connector_definition::ConnectorEntry>;
+    /// Returns the connector registry.
+    fn connector_registry(&self) -> Arc<parking_lot::RwLock<crate::source::ConnectorRegistry>>;
 
-    /// Returns all function entries registered in this bundle.
-    ///
-    /// Includes both persisted and temporary entries.
-    fn function_entries(&self) -> Vec<crate::bundle::function_definition::FunctionEntry>;
+    /// Returns the function registry.
+    fn function_registry(&self) -> Arc<parking_lot::RwLock<crate::bundle::function_definition::FunctionRegistry>>;
 
     /// Returns the DataFusion session context
     fn ctx(&self) -> Arc<SessionContext>;

@@ -34,8 +34,10 @@ impl DropConnectorOp {
         platform: Option<&Platform>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
-        let entries = builder.bundle().connector_entries.read();
-        let matching: Vec<&crate::bundle::connector_definition::ConnectorEntry> = entries
+        let registry = builder.bundle().connector_registry();
+        let registry_guard = registry.read();
+        let matching: Vec<&crate::bundle::connector_definition::ConnectorEntry> = registry_guard
+            .entries()
             .iter()
             .filter(|e| {
                 if e.name != connector_name {
@@ -76,8 +78,9 @@ impl Operation for DropConnectorOp {
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Verify at least one of the target IDs still exists
-        let entries = bundle.connector_entries.read();
-        let found = self.ids.iter().any(|id| entries.iter().any(|e| e.id == *id));
+        let registry = bundle.connector_registry();
+        let registry_guard = registry.read();
+        let found = self.ids.iter().any(|id| registry_guard.entries().iter().any(|e| e.id == *id));
         if !found {
             return Err(format!(
                 "Connector '{}' is not defined. Use IMPORT CONNECTOR first.",
@@ -95,8 +98,7 @@ impl Operation for DropConnectorOp {
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Remove entries by ID
         {
-            let mut entries = bundle.connector_entries.write();
-            entries.retain(|e| !self.ids.contains(&e.id));
+            bundle.connector_registry().write().remove_entries_by_ids(&self.ids);
         }
 
         // Also remove any sources that reference the connector name
@@ -180,7 +182,7 @@ mod tests {
     async fn test_check_connector_defined() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id = ObjectId::generate();
-        bundle.add_connector_entry(ConnectorEntry {
+        bundle.connector_registry().write().add_entry(ConnectorEntry {
             id,
             name: NamespacedName::new("acme", "weather"),
             from: LogicRuntime::parse_from("ffi::test").unwrap(),
@@ -201,7 +203,7 @@ mod tests {
     async fn test_apply_removes_entries() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id = ObjectId::generate();
-        bundle.add_connector_entry(ConnectorEntry {
+        bundle.connector_registry().write().add_entry(ConnectorEntry {
             id,
             name: NamespacedName::new("acme", "weather"),
             from: LogicRuntime::parse_from("ffi::test").unwrap(),
@@ -216,7 +218,7 @@ mod tests {
         };
         op.apply(&bundle).await.expect("apply");
 
-        assert!(!bundle.has_connector_entry("acme.weather"));
+        assert!(!bundle.connector_registry().read().has_entry("acme.weather"));
     }
 
     #[tokio::test]
@@ -224,14 +226,14 @@ mod tests {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id1 = ObjectId::generate();
         let id2 = ObjectId::generate();
-        bundle.add_connector_entry(ConnectorEntry {
+        bundle.connector_registry().write().add_entry(ConnectorEntry {
             id: id1,
             name: NamespacedName::new("acme", "weather"),
             from: LogicRuntime::parse_from("ffi::test1").unwrap(),
             platform: Platform::any(),
             temporary: false,
         });
-        bundle.add_connector_entry(ConnectorEntry {
+        bundle.connector_registry().write().add_entry(ConnectorEntry {
             id: id2,
             name: NamespacedName::new("acme", "weather"),
             from: LogicRuntime::parse_from("ffi::test2").unwrap(),
@@ -247,7 +249,7 @@ mod tests {
         };
         op.apply(&bundle).await.expect("apply");
 
-        assert!(!bundle.has_connector_entry("acme.weather"));
+        assert!(!bundle.connector_registry().read().has_entry("acme.weather"));
     }
 
     #[tokio::test]
@@ -255,14 +257,14 @@ mod tests {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id1 = ObjectId::generate();
         let id2 = ObjectId::generate();
-        bundle.add_connector_entry(ConnectorEntry {
+        bundle.connector_registry().write().add_entry(ConnectorEntry {
             id: id1,
             name: NamespacedName::new("acme", "weather"),
             from: LogicRuntime::parse_from("ffi::wildcard").unwrap(),
             platform: Platform::any(),
             temporary: false,
         });
-        bundle.add_connector_entry(ConnectorEntry {
+        bundle.connector_registry().write().add_entry(ConnectorEntry {
             id: id2,
             name: NamespacedName::new("acme", "weather"),
             from: LogicRuntime::parse_from("ffi::linux-specific").unwrap(),
@@ -278,7 +280,7 @@ mod tests {
         op.apply(&bundle).await.expect("apply");
 
         // Wildcard entry should remain
-        let resolved = bundle.resolve_connector("acme.weather").expect("should resolve");
+        let resolved = bundle.connector_registry().read().resolve_entry("acme.weather").expect("should resolve");
         assert_eq!(resolved.from.to_logic_string(), "wildcard");
     }
 }

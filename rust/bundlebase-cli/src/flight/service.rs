@@ -725,7 +725,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
             .ok()
             .and_then(|token| {
                 self.sessions.read().get(&token).map(|session| {
-                    session.bundle.function_namespaces()
+                    session.bundle.function_registry().read().namespaces()
                 })
             })
             .unwrap_or_default();
@@ -754,7 +754,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
         let function_entries = token.as_ref()
             .and_then(|t| {
                 self.sessions.read().get(t.as_str()).map(|session| {
-                    session.bundle.functions()
+                    session.bundle.function_registry().read().names()
                 })
             })
             .unwrap_or_default();

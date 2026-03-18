@@ -142,13 +142,12 @@ impl Operation for DropFunctionOp {
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Remove entries by ID
-        bundle.remove_function_entries_by_ids(&self.ids);
+        bundle.function_registry().write().remove_by_ids(&self.ids);
 
         // Deregister existing UDF/UDAF and re-register remaining overloads
         let _ = bundle.ctx().deregister_udf(&self.name);
         let _ = bundle.ctx().deregister_udaf(&self.name);
-        bundle
-            .register_functions_for_name(&self.name)
+        bundle.function_registry().read().register_functions_for_name(&self.name)
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
 
         Ok(())
@@ -244,7 +243,7 @@ mod tests {
     async fn test_check_defined() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id = ObjectId::generate();
-        bundle.add_function_entry(FunctionEntry {
+        bundle.function_registry().write().add(FunctionEntry {
             id,
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
@@ -269,7 +268,7 @@ mod tests {
     async fn test_apply_removes_entries() {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id = ObjectId::generate();
-        bundle.add_function_entry(FunctionEntry {
+        bundle.function_registry().write().add(FunctionEntry {
             id,
             name: NamespacedName::new("acme", "double_val"),
             input_types: vec![DataType::Int64],
@@ -288,7 +287,7 @@ mod tests {
         };
         op.apply(&bundle).await.expect("apply");
 
-        assert!(!bundle.has_function_entry("acme.double_val"));
+        assert!(!bundle.function_registry().read().has("acme.double_val"));
     }
 
     #[tokio::test]
@@ -296,7 +295,7 @@ mod tests {
         let bundle = Bundle::empty(None).await.expect("empty bundle");
         let id1 = ObjectId::generate();
         let id2 = ObjectId::generate();
-        bundle.add_function_entry(FunctionEntry {
+        bundle.function_registry().write().add(FunctionEntry {
             id: id1,
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Int64],
@@ -306,7 +305,7 @@ mod tests {
             temporary: false,
             kind: FunctionKind::Scalar,
         });
-        bundle.add_function_entry(FunctionEntry {
+        bundle.function_registry().write().add(FunctionEntry {
             id: id2,
             name: NamespacedName::new("acme", "convert"),
             input_types: vec![DataType::Float64],
@@ -327,8 +326,8 @@ mod tests {
         op.apply(&bundle).await.expect("apply");
 
         // The function should still exist (Float64 overload remains)
-        assert!(bundle.has_function_entry("acme.convert"));
-        let entries = bundle.function_entries();
+        assert!(bundle.function_registry().read().has("acme.convert"));
+        let entries = bundle.function_registry().read().entries().to_vec();
         let convert_entries: Vec<_> = entries.iter().filter(|e| e.name.name == "convert").collect();
         assert_eq!(convert_entries.len(), 1);
         assert_eq!(convert_entries[0].input_types, vec![DataType::Float64]);
