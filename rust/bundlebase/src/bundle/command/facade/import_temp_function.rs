@@ -54,7 +54,7 @@ impl ImportTempFunctionCommand {
         entry: FunctionEntry,
     ) -> Result<(), BundlebaseError> {
         // Validate IPC entrypoint string at import time (fail early)
-        if entry.from.runtime_type() == RuntimeType::Ipc {
+        if entry.from.runtime_type() == RuntimeType::External {
             crate::function::ipc_bridge::parse_call(&entry.from.build_call_string())?;
         }
 

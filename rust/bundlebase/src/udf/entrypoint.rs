@@ -14,10 +14,10 @@ use std::sync::Arc;
 /// The type of connector registry used by a runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeType {
-    /// Native (in-process) execution via FFI shared libraries or Python bridge.
-    Native,
-    /// IPC (inter-process communication) via subprocess JSON-RPC protocol.
-    Ipc,
+    /// Internal (in-process) execution via FFI shared libraries or Python bridge.
+    Internal,
+    /// External (out-of-process) execution via subprocess JSON-RPC protocol.
+    External,
 }
 
 /// Trait for runtime-specific behavior.
