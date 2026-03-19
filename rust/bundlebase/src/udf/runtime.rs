@@ -83,14 +83,15 @@ impl UdfRuntime {
 
     /// Return a new UdfRuntime with a different file path.
     ///
-    /// Only meaningful for runtimes that reference files (Ffi, Ipc, Java).
-    /// Panics for Python and Docker (which don't have file paths).
+    /// Only meaningful for runtimes that reference files (Ffi, Ipc, Java, file-backed Python).
+    /// Panics for module-backed Python and Docker (which don't have file paths).
     pub fn with_path(self, new_path: String) -> Self {
         match self {
             UdfRuntime::Ffi(r) => UdfRuntime::Ffi(r.with_path(new_path)),
             UdfRuntime::Ipc(r) => UdfRuntime::Ipc(r.with_path(new_path)),
             UdfRuntime::Java(r) => UdfRuntime::Java(r.with_path(new_path)),
-            UdfRuntime::Python(_) | UdfRuntime::Docker(_) => {
+            UdfRuntime::Python(r) => UdfRuntime::Python(r.with_path(new_path)),
+            UdfRuntime::Docker(_) => {
                 panic!("with_path not supported for {} runtime", self.runtime_name())
             }
         }
@@ -196,11 +197,11 @@ impl UdfRuntime {
 
     /// Copy the file referenced by this UdfRuntime into the bundle's data directory.
     ///
-    /// For runtimes that reference local files (Ffi, Ipc, Java), reads the file,
-    /// writes it into the bundle's content-addressed storage via `write_stream()`,
-    /// and returns a new UdfRuntime pointing to the bundle-relative location.
+    /// For runtimes that reference local files (Ffi, Ipc, Java, file-backed Python),
+    /// reads the file, writes it into the bundle's content-addressed storage via
+    /// `write_stream()`, and returns a new UdfRuntime pointing to the bundle-relative location.
     ///
-    /// For runtimes that don't reference files (Docker, Python), returns as-is.
+    /// For runtimes that don't reference files (Docker, module-backed Python), returns as-is.
     pub async fn copy_into_bundle(
         &self,
         data_dir: &Arc<dyn IOReadWriteDir>,
@@ -566,7 +567,12 @@ mod tests {
 
     #[test]
     fn test_udf_runtime_can_bundle() {
+        // Module-backed Python cannot be bundled
         assert!(!UdfRuntime::parse_from("python::mod:func").unwrap().can_bundle());
+        // File-backed Python CAN be bundled
+        assert!(UdfRuntime::parse_from("python::./script.py:func").unwrap().can_bundle());
+        assert!(UdfRuntime::parse_from("python::path/to/script.py:func").unwrap().can_bundle());
+
         assert!(UdfRuntime::parse_from("ffi::./lib.so").unwrap().can_bundle());
         assert!(UdfRuntime::parse_from("java::./my.jar").unwrap().can_bundle());
         assert!(UdfRuntime::parse_from("docker::my-image").unwrap().can_bundle());
@@ -596,6 +602,72 @@ mod tests {
         let yaml = serde_yaml_ng::to_string(&rt).unwrap();
         let deser: UdfRuntime = serde_yaml_ng::from_str(&yaml).unwrap();
         assert_eq!(deser, rt);
+    }
+
+    #[test]
+    fn test_udf_runtime_serde_roundtrip_python_file_backed() {
+        let rt = UdfRuntime::parse_from("python::./script.py:func").unwrap();
+        let yaml = serde_yaml_ng::to_string(&rt).unwrap();
+        assert!(yaml.contains("python::./script.py:func"));
+        let deser: UdfRuntime = serde_yaml_ng::from_str(&yaml).unwrap();
+        assert_eq!(deser, rt);
+    }
+
+    #[test]
+    fn test_python_file_backed_detection() {
+        // File-backed: contains / or ends with .py
+        let rt = UdfRuntime::parse_from("python::./script.py:func").unwrap();
+        assert!(rt.can_bundle());
+        assert_eq!(rt.runtime_type(), RuntimeType::External);
+        assert_eq!(rt.file_path(), Some("./script.py"));
+
+        let rt = UdfRuntime::parse_from("python::path/to/module:func").unwrap();
+        assert!(rt.can_bundle());
+        assert_eq!(rt.file_path(), Some("path/to/module"));
+
+        // Module-backed: no / and no .py
+        let rt = UdfRuntime::parse_from("python::mymodule:func").unwrap();
+        assert!(!rt.can_bundle());
+        assert_eq!(rt.runtime_type(), RuntimeType::Internal);
+        assert_eq!(rt.file_path(), None);
+    }
+
+    #[test]
+    fn test_validate_entrypoint_python_file_backed_nonexistent() {
+        let rt = UdfRuntime::parse_from("python::./nonexistent_script_xyz.py:func").unwrap();
+        let err = rt.validate_entrypoint().unwrap_err().to_string();
+        assert!(err.contains("Python script"), "Expected 'Python script' in error: {}", err);
+        assert!(err.contains("not found"), "Expected 'not found' in error: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_copy_into_bundle_python_module_backed_noop() {
+        let dir = crate::test_utils::random_memory_dir();
+        let from = UdfRuntime::parse_from("python::mymodule:func").unwrap();
+        let result = from.copy_into_bundle(&dir).await.unwrap();
+        assert_eq!(result.to_entrypoint_string(), "mymodule:func");
+    }
+
+    #[tokio::test]
+    async fn test_copy_into_bundle_python_file_backed() {
+        let dir = crate::test_utils::random_memory_dir();
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let script_path = tmp_dir.path().join("my_func.py");
+        std::fs::write(&script_path, b"def func(): pass").unwrap();
+
+        let from_str = format!("python::{}:func", script_path.to_str().unwrap());
+        let from = UdfRuntime::parse_from(&from_str).unwrap();
+        let result = from.copy_into_bundle(&dir).await.unwrap();
+
+        let entrypoint = result.to_entrypoint_string();
+        // Path portion should end with .py and have hash dir
+        let path_part = entrypoint.strip_suffix(":func").unwrap();
+        assert!(path_part.ends_with(".py"), "Expected .py extension, got: {}", entrypoint);
+        assert!(path_part.contains('/'), "Expected hash dir separator, got: {}", entrypoint);
+        let parts: Vec<&str> = path_part.split('/').collect();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].len(), 2); // 2-char hash prefix dir
     }
 
     #[tokio::test]
