@@ -519,11 +519,11 @@ impl ConnectorRegistry {
     /// Create a fresh instance for connectors that hold per-fetch state.
     ///
     /// For `Ipc`, returns a new `IpcConnector` with its own subprocess handle.
-    /// For `Native`, returns a new `NativeConnector`.
+    /// For `Internal`, returns a new `NativeConnector`.
     pub fn create_instance(&self, runtime_type: crate::udf::RuntimeType) -> Option<Arc<dyn Connector>> {
         match runtime_type {
-            crate::udf::RuntimeType::Ipc => Some(Arc::new(IpcConnector::new())),
-            crate::udf::RuntimeType::Native => Some(Arc::new(NativeConnector::new())),
+            crate::udf::RuntimeType::External => Some(Arc::new(IpcConnector::new())),
+            crate::udf::RuntimeType::Internal => Some(Arc::new(NativeConnector::new())),
         }
     }
 
@@ -741,8 +741,8 @@ mod tests {
     fn test_ipc_native_still_in_create_instance() {
         use crate::udf::RuntimeType;
         let registry = ConnectorRegistry::new();
-        assert!(registry.create_instance(RuntimeType::Ipc).is_some());
-        assert!(registry.create_instance(RuntimeType::Native).is_some());
+        assert!(registry.create_instance(RuntimeType::External).is_some());
+        assert!(registry.create_instance(RuntimeType::Internal).is_some());
     }
 
     #[test]

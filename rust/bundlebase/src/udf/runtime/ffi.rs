@@ -75,7 +75,7 @@ impl UdfEntrypoint for FfiRuntime {
     }
 
     fn runtime_type(&self) -> RuntimeType {
-        RuntimeType::Native
+        RuntimeType::Internal
     }
 
     fn to_entrypoint_string(&self) -> String {

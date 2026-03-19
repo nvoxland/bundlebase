@@ -33,7 +33,7 @@ impl UdfEntrypoint for DockerRuntime {
     }
 
     fn runtime_type(&self) -> RuntimeType {
-        RuntimeType::Ipc
+        RuntimeType::External
     }
 
     fn to_entrypoint_string(&self) -> String {
