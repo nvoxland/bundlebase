@@ -46,7 +46,7 @@ impl std::fmt::Display for SyncMode {
 }
 
 pub use crate::connector::plugin::kaggle::KaggleConnector;
-pub use crate::connector::plugin::native;
+pub use crate::connector::plugin::ffi;
 pub use crate::connector::plugin::PostgresConnector;
 pub use crate::connector::plugin::RemoteDirConnector;
 pub use crate::connector::plugin::WebScrapeConnector;

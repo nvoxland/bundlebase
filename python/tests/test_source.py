@@ -294,11 +294,11 @@ async def test_create_source_ipc_directly_fails():
 
 
 @pytest.mark.asyncio
-async def test_create_source_native_directly_fails():
-    """Test that create_source('native', ...) fails (removed from registry)."""
+async def test_create_source_ffi_directly_fails():
+    """Test that create_source('ffi', ...) fails (removed from registry)."""
     c = await bundlebase.create(random_bundle(), config=ALLOW_EXTERNAL_CODE_CONFIG)
     with pytest.raises(ValueError, match="Unknown connector"):
-        await c.create_source("native", {"call": "python:mod:Class"})
+        await c.create_source("ffi", {"call": "python:mod:Class"})
 
 
 @pytest.mark.asyncio

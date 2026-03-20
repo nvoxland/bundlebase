@@ -1,4 +1,4 @@
-//! Built-in "native" connector.
+//! Built-in "ffi" connector.
 //!
 //! Loads user connectors in-process for zero-copy Arrow data transfer.
 //! Two strategies based on the `call` argument:
@@ -236,19 +236,19 @@ impl SharedLibHandle {
 }
 
 // ---------------------------------------------------------------------------
-// NativeConnector
+// FfiConnector
 // ---------------------------------------------------------------------------
 
-/// Built-in "native" connector for in-process data loading.
+/// Built-in "ffi" connector for in-process data loading.
 ///
 /// Supports two call strategies:
 /// - `ffi:/path/to/lib.so` — shared library via Arrow C Data Interface
 /// - `python:module:Class` — Python in-process via PyO3
-pub struct NativeConnector {
+pub struct FfiConnector {
     lib_handle: tokio::sync::Mutex<Option<SharedLibHandle>>,
 }
 
-impl NativeConnector {
+impl FfiConnector {
     pub fn new() -> Self {
         Self {
             lib_handle: tokio::sync::Mutex::new(None),
@@ -297,7 +297,7 @@ enum CallStrategy {
     Python(String),
 }
 
-fn parse_native_call(call: &str) -> Result<CallStrategy, BundlebaseError> {
+fn parse_ffi_call(call: &str) -> Result<CallStrategy, BundlebaseError> {
     let call = call.trim();
     if let Some(path) = call.strip_prefix("ffi:") {
         let path = path.trim();
@@ -313,7 +313,7 @@ fn parse_native_call(call: &str) -> Result<CallStrategy, BundlebaseError> {
         Ok(CallStrategy::Python(call.to_string()))
     } else {
         Err(format!(
-            "Native source 'call' must start with 'ffi:' or 'python:'. Got: '{}'",
+            "FFI connector 'call' must start with 'ffi:' or 'python:'. Got: '{}'",
             call
         )
         .into())
@@ -384,10 +384,10 @@ fn build_discover_args_json(
 }
 
 #[async_trait]
-impl Connector for NativeConnector {
+impl Connector for FfiConnector {
     fn signature(&self) -> ConnectorSignature {
         ConnectorSignature {
-            name: "native".to_string(),
+            name: "ffi".to_string(),
             arg_specs: vec![
                 ArgSpec {
                     name: "copy",
@@ -408,11 +408,11 @@ impl Connector for NativeConnector {
         _config: &Arc<BundleConfig>,
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
         if !is_external_code_allowed(_config)? {
-            return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable FFI sources.".into());
         }
-        let call = shared_utils::require_arg(args, "call", "native")?;
+        let call = shared_utils::require_arg(args, "call", "ffi")?;
 
-        match parse_native_call(call)? {
+        match parse_ffi_call(call)? {
             CallStrategy::SharedLib(path) => {
                 self.ensure_lib_loaded(&path).await?;
                 let guard = self.lib_handle.lock().await;
@@ -437,13 +437,13 @@ impl Connector for NativeConnector {
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<SourceData>, BundlebaseError> {
         if !is_external_code_allowed(_config)? {
-            return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable FFI sources.".into());
         }
-        let call = shared_utils::require_arg(args, "call", "native")?;
+        let call = shared_utils::require_arg(args, "call", "ffi")?;
         let loc_json = location_json(location)?;
         let args_json = filtered_args_json(args)?;
 
-        match parse_native_call(call)? {
+        match parse_ffi_call(call)? {
             CallStrategy::SharedLib(_) => {
                 let guard = self.lib_handle.lock().await;
                 let handle = guard.as_ref().ok_or("Shared library not loaded")?;
@@ -490,13 +490,13 @@ impl Connector for NativeConnector {
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<Url>, BundlebaseError> {
         if !is_external_code_allowed(_config)? {
-            return Err("External code execution is disabled. Set system.allow_external_code=true to enable native sources.".into());
+            return Err("External code execution is disabled. Set system.allow_external_code=true to enable FFI sources.".into());
         }
-        let call = shared_utils::require_arg(args, "call", "native")?;
+        let call = shared_utils::require_arg(args, "call", "ffi")?;
         let loc_json = location_json(location)?;
         let args_json = filtered_args_json(args)?;
 
-        let url_str = match parse_native_call(call)? {
+        let url_str = match parse_ffi_call(call)? {
             CallStrategy::SharedLib(_) => {
                 let guard = self.lib_handle.lock().await;
                 let handle = guard.as_ref().ok_or("Shared library not loaded")?;
@@ -529,46 +529,46 @@ mod tests {
     use crate::bundle_config::{PassedBundleConfig, Scope};
 
     #[test]
-    fn test_parse_native_call_lib() {
-        match parse_native_call("ffi:/path/to/lib.so") {
+    fn test_parse_ffi_call_lib() {
+        match parse_ffi_call("ffi:/path/to/lib.so") {
             Ok(CallStrategy::SharedLib(path)) => assert_eq!(path, "/path/to/lib.so"),
             _ => panic!("Expected SharedLib"),
         }
     }
 
     #[test]
-    fn test_parse_native_call_python() {
-        match parse_native_call("python:my_module:MyClass") {
+    fn test_parse_ffi_call_python() {
+        match parse_ffi_call("python:my_module:MyClass") {
             Ok(CallStrategy::Python(call)) => assert_eq!(call, "python:my_module:MyClass"),
             _ => panic!("Expected Python"),
         }
     }
 
     #[test]
-    fn test_parse_native_call_lib_empty() {
-        assert!(parse_native_call("ffi:").is_err());
+    fn test_parse_ffi_call_lib_empty() {
+        assert!(parse_ffi_call("ffi:").is_err());
     }
 
     #[test]
-    fn test_parse_native_call_python_empty() {
-        assert!(parse_native_call("python:").is_err());
+    fn test_parse_ffi_call_python_empty() {
+        assert!(parse_ffi_call("python:").is_err());
     }
 
     #[test]
-    fn test_parse_native_call_invalid() {
-        assert!(parse_native_call("some_command").is_err());
+    fn test_parse_ffi_call_invalid() {
+        assert!(parse_ffi_call("some_command").is_err());
     }
 
     #[test]
-    fn test_parse_native_call_empty() {
-        assert!(parse_native_call("").is_err());
+    fn test_parse_ffi_call_empty() {
+        assert!(parse_ffi_call("").is_err());
     }
 
     #[test]
-    fn test_native_signature() {
-        let func = NativeConnector::new();
+    fn test_ffi_signature() {
+        let func = FfiConnector::new();
         let sig = func.signature();
-        assert_eq!(sig.name, "native");
+        assert_eq!(sig.name, "ffi");
         // call is no longer in arg_specs — it's injected by source definition resolution
         assert_eq!(sig.arg_specs.len(), 1);
         assert_eq!(sig.arg_specs[0].name, "copy");
@@ -630,7 +630,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_discover_blocked_when_external_code_disabled() {
-        let func = NativeConnector::new();
+        let func = FfiConnector::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -643,7 +643,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_data_blocked_when_external_code_disabled() {
-        let func = NativeConnector::new();
+        let func = FfiConnector::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -661,7 +661,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stable_url_blocked_when_external_code_disabled() {
-        let func = NativeConnector::new();
+        let func = FfiConnector::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
         let config = Arc::new(BundleConfig::new(None).expect("test config creation"));
@@ -682,7 +682,7 @@ mod tests {
         // With allow_external_code=true, discover should pass the config gate
         // (will still fail because the Python bridge isn't initialized, but the
         // error should NOT be about external code being disabled)
-        let func = NativeConnector::new();
+        let func = FfiConnector::new();
         let mut args = HashMap::new();
         args.insert("call".to_string(), "python:mod:Class".to_string());
 
