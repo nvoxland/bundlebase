@@ -5,7 +5,8 @@
 
 mod bundle_info;
 pub mod ipc_bridge;
-pub mod lib_bridge;
+pub mod ffi_bridge;
+pub mod manifest;
 pub mod python_bridge;
 pub mod scalar;
 pub mod aggregate;

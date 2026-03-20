@@ -5,7 +5,7 @@
 
 use arrow::array::ArrayRef;
 use arrow::pyarrow::{FromPyArrow, ToPyArrow};
-use bundlebase::function::lib_bridge::ManifestEntry;
+use bundlebase::function::manifest::ManifestEntry;
 use bundlebase::function::python_bridge::PythonFunctionBridge;
 use bundlebase::BundlebaseError;
 use datafusion::scalar::ScalarValue;
@@ -497,7 +497,7 @@ impl PythonFunctionBridge for PyFunctionBridge {
                 .extract()
                 .map_err(|e| format!("Failed to extract JSON string: {}", e))?;
 
-            let manifest: bundlebase::function::lib_bridge::Manifest =
+            let manifest: bundlebase::function::manifest::Manifest =
                 serde_json::from_str(&json_str).map_err(|e| {
                     format!(
                         "Failed to parse bundlebase_metadata() from '{}': {}. JSON: {}",

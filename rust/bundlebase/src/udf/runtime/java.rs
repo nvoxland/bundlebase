@@ -1,7 +1,7 @@
 //! Java runtime implementation.
 
 use crate::function::ipc_bridge::SubprocessCache;
-use crate::function::lib_bridge::{load_java_ipc_manifest, Manifest};
+use crate::function::manifest::Manifest;
 use crate::BundlebaseError;
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DFResult;
@@ -122,4 +122,46 @@ impl UdfEntrypoint for JavaRuntime {
     fn aggregate_state_type(&self, _return_type: &DataType) -> DataType {
         DataType::Utf8
     }
+}
+
+/// Load a function manifest from a Java JAR via IPC.
+///
+/// Runs `java -jar jar_path --bundlebase-functions`, captures stdout, parses JSON.
+fn load_java_ipc_manifest(jar_path: &str) -> Result<Manifest, BundlebaseError> {
+    let output = std::process::Command::new("java")
+        .args(["-jar", jar_path, "--bundlebase-functions"])
+        .output()
+        .map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to execute 'java -jar {}' for manifest discovery: {}",
+                jar_path, e
+            ))
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "'java -jar {}' --bundlebase-functions failed (exit {}): {}",
+            jar_path,
+            output.status,
+            stderr.trim()
+        )
+        .into());
+    }
+
+    let json_str = String::from_utf8(output.stdout).map_err(|e| {
+        BundlebaseError::from(format!(
+            "Invalid UTF-8 output from 'java -jar {}' --bundlebase-functions: {}",
+            jar_path, e
+        ))
+    })?;
+
+    let manifest: Manifest = serde_json::from_str(&json_str).map_err(|e| {
+        BundlebaseError::from(format!(
+            "Failed to parse manifest JSON from 'java -jar {}': {}. Output: {}",
+            jar_path, e, json_str.trim()
+        ))
+    })?;
+
+    Ok(manifest)
 }

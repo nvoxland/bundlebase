@@ -1,9 +1,10 @@
 //! FFI (shared library) runtime implementation.
 
 use crate::function::ipc_bridge::SubprocessCache;
-use crate::function::lib_bridge::{
-    invoke_lib_scalar, load_lib_manifest, LibAccumulator, Manifest,
+use crate::function::ffi_bridge::{
+    invoke_lib_scalar, load_lib_manifest, LibAccumulator,
 };
+use crate::function::manifest::Manifest;
 use crate::BundlebaseError;
 use arrow::array::ArrayRef;
 use arrow::datatypes::DataType;

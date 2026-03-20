@@ -1,7 +1,7 @@
 //! IPC runtime implementation.
 
 use crate::function::ipc_bridge::SubprocessCache;
-use crate::function::lib_bridge::{load_ipc_manifest, Manifest};
+use crate::function::manifest::Manifest;
 use crate::BundlebaseError;
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DFResult;
@@ -90,4 +90,46 @@ impl UdfEntrypoint for IpcRuntime {
     fn aggregate_state_type(&self, _return_type: &DataType) -> DataType {
         DataType::Utf8
     }
+}
+
+/// Load a function manifest from an IPC executable.
+///
+/// Runs `exec_path --bundlebase-functions`, captures stdout, parses JSON.
+pub(super) fn load_ipc_manifest(exec_path: &str) -> Result<Manifest, BundlebaseError> {
+    let output = std::process::Command::new(exec_path)
+        .arg("--bundlebase-functions")
+        .output()
+        .map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to execute '{}' for manifest discovery: {}",
+                exec_path, e
+            ))
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "'{}' --bundlebase-functions failed (exit {}): {}",
+            exec_path,
+            output.status,
+            stderr.trim()
+        )
+        .into());
+    }
+
+    let json_str = String::from_utf8(output.stdout).map_err(|e| {
+        BundlebaseError::from(format!(
+            "Invalid UTF-8 output from '{}' --bundlebase-functions: {}",
+            exec_path, e
+        ))
+    })?;
+
+    let manifest: Manifest = serde_json::from_str(&json_str).map_err(|e| {
+        BundlebaseError::from(format!(
+            "Failed to parse manifest JSON from '{}': {}. Output: {}",
+            exec_path, e, json_str.trim()
+        ))
+    })?;
+
+    Ok(manifest)
 }

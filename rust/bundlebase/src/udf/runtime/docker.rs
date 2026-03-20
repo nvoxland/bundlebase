@@ -1,7 +1,7 @@
 //! Docker runtime implementation.
 
 use crate::function::ipc_bridge::SubprocessCache;
-use crate::function::lib_bridge::{load_ipc_manifest, Manifest};
+use crate::function::manifest::Manifest;
 use crate::BundlebaseError;
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DFResult;
@@ -9,6 +9,7 @@ use datafusion::logical_expr::{Accumulator, ColumnarValue};
 
 use super::super::entrypoint::{UdfEntrypoint, RuntimeType};
 use super::super::ipc_utils::{invoke_ipc_scalar_impl, create_ipc_accumulator};
+use super::ipc::load_ipc_manifest;
 
 /// Docker runtime: holds an image name.
 #[derive(Debug, Clone, PartialEq, Eq)]

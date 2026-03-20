@@ -10,4 +10,4 @@ mod runtime;
 pub use entrypoint::{RuntimeType, UdfEntrypoint};
 pub use runtime::UdfRuntime;
 pub use runtime::{PythonRuntime, FfiRuntime, IpcRuntime, JavaRuntime, DockerRuntime};
-pub use crate::function::lib_bridge::{Manifest, ManifestEntry};
+pub use crate::function::manifest::{Manifest, ManifestEntry};

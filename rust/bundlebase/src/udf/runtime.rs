@@ -13,7 +13,7 @@ pub use java::JavaRuntime;
 pub use docker::DockerRuntime;
 
 use super::entrypoint::{UdfEntrypoint, RuntimeType};
-pub use crate::function::lib_bridge::{Manifest, ManifestEntry};
+pub use crate::function::manifest::{Manifest, ManifestEntry};
 use crate::io::IOReadWriteDir;
 use crate::BundlebaseError;
 use serde::{Deserialize, Serialize};
