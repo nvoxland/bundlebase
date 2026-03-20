@@ -68,7 +68,7 @@ Custom SQL function system supporting both scalar and aggregate functions.
 
 **Key Files:**
 - `src/bundle/function_entry.rs` — `FunctionEntry`, `FunctionKind`, `FunctionRegistry`
-- `src/arrow_types.rs` — Arrow type parsing/serialization (`parse_arrow_type_name`, `arrow_type_to_name`, `arrow_type_serde`)
+- `src/arrow_types.rs` — Arrow type parsing (`parse_arrow_type_name`)
 - `src/platform.rs` — `Platform` struct for Docker-style os/arch matching
 - `src/function/scalar.rs` — DataFusion `ScalarUDFImpl` bridge
 - `src/function/aggregate.rs` — DataFusion `AggregateUDFImpl` bridge with `PythonAccumulator` and `LibAccumulator`

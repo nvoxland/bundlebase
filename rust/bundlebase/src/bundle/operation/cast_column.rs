@@ -1,5 +1,4 @@
 use crate::bundle::column_metadata::ColumnNames;
-use crate::arrow_types::{arrow_type_serde, arrow_type_to_name};
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;
@@ -18,7 +17,6 @@ use std::sync::Arc;
 #[serde(rename_all = "camelCase")]
 pub struct CastColumnOp {
     pub id: ColumnId,
-    #[serde(with = "arrow_type_serde::single")]
     pub new_type: DataType,
     pub clean: Option<String>,
 }
@@ -102,15 +100,14 @@ impl Operation for CastColumnOp {
     }
 
     fn describe(&self) -> String {
-        let type_name = arrow_type_to_name(&self.new_type);
         match &self.clean {
             Some(pattern) => format!(
                 "CAST COLUMN: {} to {} (clean: {})",
-                self.id, type_name, pattern
+                self.id, self.new_type, pattern
             ),
             None => format!(
                 "CAST COLUMN: {} to {}",
-                self.id, type_name
+                self.id, self.new_type
             ),
         }
     }

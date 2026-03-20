@@ -1,5 +1,4 @@
 use crate::bundle::BundleFacade;
-use crate::arrow_types::arrow_type_to_name;
 use arrow::array::{BooleanArray, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
@@ -60,8 +59,8 @@ impl BundleFunctionsTable {
         entries.sort_by(|a, b| {
             a.name.to_string().cmp(&b.name.to_string())
                 .then_with(|| {
-                    let a_types: Vec<String> = a.input_types.iter().map(|dt| arrow_type_to_name(dt)).collect();
-                    let b_types: Vec<String> = b.input_types.iter().map(|dt| arrow_type_to_name(dt)).collect();
+                    let a_types: Vec<String> = a.input_types.iter().map(|dt| dt.to_string()).collect();
+                    let b_types: Vec<String> = b.input_types.iter().map(|dt| dt.to_string()).collect();
                     a_types.join(",").cmp(&b_types.join(","))
                 })
         });
@@ -70,10 +69,10 @@ impl BundleFunctionsTable {
         let names: Vec<String> = entries.iter().map(|e| e.name.to_string()).collect();
         let kinds: Vec<String> = entries.iter().map(|e| e.kind.to_string()).collect();
         let input_types: Vec<String> = entries.iter().map(|e| {
-            let types: Vec<String> = e.input_types.iter().map(|dt| arrow_type_to_name(dt)).collect();
+            let types: Vec<String> = e.input_types.iter().map(|dt| dt.to_string()).collect();
             types.join(", ")
         }).collect();
-        let return_types: Vec<String> = entries.iter().map(|e| arrow_type_to_name(&e.return_type)).collect();
+        let return_types: Vec<String> = entries.iter().map(|e| e.return_type.to_string()).collect();
         let runtimes: Vec<String> = entries.iter().map(|e| e.from.runtime_name().to_string()).collect();
         let entrypoints: Vec<String> = entries.iter().map(|e| e.from.to_entrypoint_string()).collect();
         let platforms: Vec<String> = entries.iter().map(|e| e.platform.to_string()).collect();

@@ -2,7 +2,6 @@
 
 use crate::platform::Platform;
 use crate::udf::UdfRuntime;
-use crate::arrow_types::arrow_type_serde;
 use crate::bundle::function_entry::{parse_function_name, FunctionEntry, FunctionKind};
 use crate::data::ObjectId;
 use crate::NamespacedName;
@@ -24,10 +23,8 @@ pub struct ImportFunctionOp {
     /// Full dotted function name (e.g., "acme.double_val")
     pub name: String,
     /// Arrow types for input parameters
-    #[serde(with = "arrow_type_serde::vec")]
     pub input_types: Vec<DataType>,
     /// Arrow type for the return value
-    #[serde(with = "arrow_type_serde::single")]
     pub return_type: DataType,
     /// Runtime with parsed entrypoint (e.g., `ipc::./my_func`)
     pub from: UdfRuntime,
