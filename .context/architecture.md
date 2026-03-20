@@ -67,7 +67,9 @@ Plugin architecture for data sources (`src/data_adapter/`):
 Custom SQL function system supporting both scalar and aggregate functions.
 
 **Key Files:**
-- `src/bundle/function_definition.rs` — `FunctionEntry`, `FunctionKind`, `FunctionRegistry`
+- `src/bundle/function_entry.rs` — `FunctionEntry`, `FunctionKind`, `FunctionRegistry`
+- `src/arrow_types.rs` — Arrow type parsing/serialization (`parse_arrow_type_name`, `arrow_type_to_name`, `arrow_type_serde`)
+- `src/platform.rs` — `Platform` struct for Docker-style os/arch matching
 - `src/function/scalar.rs` — DataFusion `ScalarUDFImpl` bridge
 - `src/function/aggregate.rs` — DataFusion `AggregateUDFImpl` bridge with `PythonAccumulator` and `LibAccumulator`
 - `src/function/python_bridge.rs` — Trait for Python function invocation

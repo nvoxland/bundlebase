@@ -23,7 +23,7 @@ impl DropFunctionOp {
     /// Resolve a function name (and optional filters) to entry IDs, creating the operation.
     pub fn setup(
         name: &str,
-        platform: Option<&crate::bundle::connector_definition::Platform>,
+        platform: Option<&crate::platform::Platform>,
         input_types: Option<&[arrow::datatypes::DataType]>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
@@ -112,9 +112,9 @@ impl Operation for DropFunctionOp {
 mod tests {
     use super::*;
     use arrow::datatypes::DataType;
-    use crate::bundle::connector_definition::Platform;
+    use crate::platform::Platform;
     use crate::udf::UdfRuntime;
-    use crate::bundle::function_definition::{FunctionEntry, FunctionKind};
+    use crate::bundle::function_entry::{FunctionEntry, FunctionKind};
     use crate::NamespacedName;
 
     #[test]

@@ -31,7 +31,7 @@ use plugin::RemoteDirConnector;
 use plugin::WebScrapeConnector;
 use crate::source::shared_utils;
 
-use crate::bundle::connector_definition::{self, ConnectorEntry};
+use crate::bundle::connector_entry::{self, ConnectorEntry};
 use crate::{BundleConfig, BundlebaseError};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
@@ -546,7 +546,7 @@ impl ConnectorRegistry {
 
     /// Resolve the best connector entry for the current platform.
     pub fn resolve_entry(&self, name: &str) -> Result<ConnectorEntry, BundlebaseError> {
-        connector_definition::resolve_connector(&self.entries, name)
+        connector_entry::resolve_connector(&self.entries, name)
     }
 
     /// Remove all connector entries for a name.
@@ -558,7 +558,7 @@ impl ConnectorRegistry {
     pub fn remove_entry(
         &mut self,
         name: &str,
-        platform: Option<&connector_definition::Platform>,
+        platform: Option<&crate::platform::Platform>,
         temporary_only: bool,
     ) -> usize {
         let before = self.entries.len();

@@ -3,7 +3,7 @@
 //! Bridges `FunctionEntry` definitions (with `kind == Aggregate`) to DataFusion's UDAF system.
 //! Dispatches to Python via the `PythonFunctionBridge` aggregate methods.
 
-use crate::bundle::function_definition::FunctionEntry;
+use crate::bundle::function_entry::FunctionEntry;
 use crate::function::ipc_bridge::{self, SubprocessCache};
 use crate::function::python_bridge::get_python_function_bridge;
 use crate::BundlebaseError;
@@ -360,9 +360,9 @@ impl Accumulator for IpcAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::connector_definition::Platform;
+    use crate::platform::Platform;
         use crate::udf::UdfRuntime;
-    use crate::bundle::function_definition::FunctionKind;
+    use crate::bundle::function_entry::FunctionKind;
     use crate::data::ObjectId;
     use crate::function::ipc_bridge::new_subprocess_cache;
     use crate::function::parse_python_entrypoint;

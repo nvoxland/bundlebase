@@ -2,7 +2,7 @@
 
 use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::command::{CommandParsing, Rule};
-use crate::bundle::connector_definition::Platform;
+use crate::platform::Platform;
 use crate::bundle::operation::DropConnectorOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;
@@ -93,7 +93,7 @@ impl BundleBuilderCommand for DropConnectorCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::bundle::connector_definition::Platform;
+    use crate::platform::Platform;
     use crate::bundle::command::parser::parse_command;
     use crate::bundle::command::BundleCommand;
 

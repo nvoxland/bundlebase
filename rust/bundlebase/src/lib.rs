@@ -1,9 +1,11 @@
 #![deny(clippy::unwrap_used)]
 extern crate core;
 
+pub(crate) mod arrow_types;
 pub mod bundle;
 pub mod bundle_config;
 pub mod namespaced_name;
+pub(crate) mod platform;
 mod catalog;
 mod data;
 

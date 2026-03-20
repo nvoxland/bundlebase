@@ -4,7 +4,7 @@
 //! Dispatches by runtime: Python (via PyArrow), IPC/Java/Docker (via Arrow IPC),
 //! Lib (via FFI).
 
-use crate::bundle::function_definition::FunctionEntry;
+use crate::bundle::function_entry::FunctionEntry;
 use crate::function::ipc_bridge::SubprocessCache;
 use crate::BundlebaseError;
 use arrow::datatypes::DataType;
@@ -162,9 +162,9 @@ impl ScalarUDFImpl for ScalarFunction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::connector_definition::Platform;
+    use crate::platform::Platform;
         use crate::udf::UdfRuntime;
-    use crate::bundle::function_definition::FunctionKind;
+    use crate::bundle::function_entry::FunctionKind;
     use crate::data::ObjectId;
     use crate::function::ipc_bridge::new_subprocess_cache;
     use crate::function::parse_python_entrypoint;

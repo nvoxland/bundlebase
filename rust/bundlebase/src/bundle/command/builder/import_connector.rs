@@ -2,7 +2,7 @@
 
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
-use crate::bundle::connector_definition::Platform;
+use crate::platform::Platform;
 use crate::udf::UdfRuntime;
 use crate::bundle::operation::ImportConnectorOp;
 use crate::{BundleFacade, BundlebaseError};
@@ -154,7 +154,7 @@ impl BundleBuilderCommand for ImportConnectorCommand {
 #[cfg(test)]
 mod parsing_tests {
     use super::*;
-    use crate::bundle::connector_definition::Platform;
+    use crate::platform::Platform;
     use crate::bundle::command::parser::parse_command;
     use crate::bundle::command::BundleCommand;
 

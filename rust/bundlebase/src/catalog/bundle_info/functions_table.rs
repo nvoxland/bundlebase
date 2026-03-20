@@ -1,5 +1,5 @@
 use crate::bundle::BundleFacade;
-use crate::bundle::function_definition::arrow_type_to_name;
+use crate::arrow_types::arrow_type_to_name;
 use arrow::array::{BooleanArray, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;

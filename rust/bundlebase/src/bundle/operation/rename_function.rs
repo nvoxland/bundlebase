@@ -153,8 +153,8 @@ impl Operation for RenameFunctionOp {
 mod tests {
     use super::*;
     use arrow::datatypes::DataType;
-    use crate::bundle::connector_definition::Platform;
-    use crate::bundle::function_definition::{FunctionEntry, FunctionKind};
+    use crate::platform::Platform;
+    use crate::bundle::function_entry::{FunctionEntry, FunctionKind};
     use crate::udf::UdfRuntime;
     use crate::NamespacedName;
 

@@ -8,10 +8,11 @@
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::command::response::OutputShape;
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
-use crate::bundle::connector_definition::Platform;
+use crate::platform::Platform;
 use crate::udf::{UdfRuntime, RuntimeType};
 use crate::bundle::facade::BundleFacade;
-use crate::bundle::function_definition::{parse_arrow_type_name, FunctionEntry, FunctionKind};
+use crate::arrow_types::parse_arrow_type_name;
+use crate::bundle::function_entry::{FunctionEntry, FunctionKind};
 use crate::NamespacedName;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};

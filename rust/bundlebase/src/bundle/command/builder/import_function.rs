@@ -5,9 +5,10 @@
 
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::command::{CommandParsing, Rule};
-use crate::bundle::connector_definition::Platform;
+use crate::platform::Platform;
 use crate::udf::UdfRuntime;
-use crate::bundle::function_definition::{parse_arrow_type_name, parse_function_name, FunctionKind};
+use crate::arrow_types::parse_arrow_type_name;
+use crate::bundle::function_entry::{parse_function_name, FunctionKind};
 use crate::bundle::operation::ImportFunctionOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;

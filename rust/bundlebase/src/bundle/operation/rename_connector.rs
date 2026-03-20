@@ -147,7 +147,8 @@ impl Operation for RenameConnectorOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::connector_definition::{ConnectorEntry, Platform};
+    use crate::bundle::connector_entry::ConnectorEntry;
+    use crate::platform::Platform;
     use crate::udf::UdfRuntime;
     use crate::NamespacedName;
 
