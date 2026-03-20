@@ -4,6 +4,7 @@
 //! centralizing per-runtime logic that was previously scattered across match statements.
 
 mod entrypoint;
+pub(crate) mod ipc_utils;
 mod runtime;
 
 pub use entrypoint::{RuntimeType, UdfEntrypoint};

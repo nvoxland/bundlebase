@@ -273,7 +273,7 @@ impl UdfRuntime {
         let resolved = self.resolve_path(data_dir);
         let call_string = resolved.build_call_string();
 
-        verify_ipc_handshake(&call_string).await
+        super::ipc_utils::verify_ipc_handshake(&call_string).await
     }
 }
 
@@ -304,123 +304,6 @@ impl<'de> Deserialize<'de> for UdfRuntime {
     }
 }
 
-/// Spawn an IPC subprocess, perform a handshake, then shut it down.
-///
-/// Used as a smoke test to verify a bundled connector binary is functional.
-/// Accepts both success and `method_not_found` responses as valid — the point
-/// is just to confirm the binary can be spawned and responds to JSON-RPC.
-async fn verify_ipc_handshake(call_string: &str) -> Result<(), BundlebaseError> {
-    let command = crate::function::ipc_bridge::parse_call(call_string)?;
-
-    if command.is_empty() {
-        return Err("Cannot verify connector with empty command".into());
-    }
-
-    let mut child = tokio::process::Command::new(&command[0])
-        .args(&command[1..])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .map_err(|e| {
-            BundlebaseError::from(format!(
-                "Bundled connector verification failed: could not spawn '{}': {}",
-                command[0], e
-            ))
-        })?;
-
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or("Failed to capture stdin for connector verification")?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or("Failed to capture stdout for connector verification")?;
-
-    let mut writer = tokio::io::BufWriter::new(stdin);
-    let mut reader = tokio::io::BufReader::new(stdout);
-
-    // Send handshake request
-    let request = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "handshake",
-        "params": {"protocol_version": "1"}
-    });
-    let mut line = serde_json::to_string(&request)
-        .map_err(|e| format!("Failed to serialize handshake request: {}", e))?;
-    line.push('\n');
-
-    use tokio::io::AsyncBufReadExt;
-    use tokio::io::AsyncWriteExt;
-
-    writer
-        .write_all(line.as_bytes())
-        .await
-        .map_err(|e| format!("Connector verification: failed to write handshake: {}", e))?;
-    writer
-        .flush()
-        .await
-        .map_err(|e| format!("Connector verification: failed to flush handshake: {}", e))?;
-
-    // Read response (with timeout)
-    let mut response_line = String::new();
-    let read_result = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        reader.read_line(&mut response_line),
-    )
-    .await;
-
-    // Send shutdown and kill regardless of response
-    let shutdown = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "shutdown",
-        "params": {}
-    });
-    let mut shutdown_line = serde_json::to_string(&shutdown).unwrap_or_default();
-    shutdown_line.push('\n');
-    let _ = writer.write_all(shutdown_line.as_bytes()).await;
-    let _ = writer.flush().await;
-    let _ = child.kill().await;
-
-    // Now check the read result
-    match read_result {
-        Ok(Ok(0)) => {
-            Err("Connector verification failed: subprocess closed stdout without responding".into())
-        }
-        Ok(Ok(_)) => {
-            // Got a response — parse it to check for errors (but method_not_found is OK)
-            if let Ok(resp) = serde_json::from_str::<serde_json::Value>(response_line.trim()) {
-                if let Some(err) = resp.get("error") {
-                    let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
-                    if code != -32601 {
-                        // Not method_not_found — report the error
-                        let message = err
-                            .get("message")
-                            .and_then(|m| m.as_str())
-                            .unwrap_or("unknown error");
-                        return Err(format!(
-                            "Connector verification failed: handshake error (code {}): {}",
-                            code, message
-                        )
-                        .into());
-                    }
-                }
-            }
-            Ok(())
-        }
-        Ok(Err(e)) => Err(format!(
-            "Connector verification failed: error reading response: {}",
-            e
-        )
-        .into()),
-        Err(_) => Err(
-            "Connector verification failed: subprocess did not respond within 10 seconds".into(),
-        ),
-    }
-}
 
 #[cfg(test)]
 mod tests {

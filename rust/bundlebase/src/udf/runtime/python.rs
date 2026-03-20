@@ -14,9 +14,8 @@ use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 use std::sync::Arc;
 
-use super::super::entrypoint::{
-    create_ipc_accumulator, validate_file_reachable, UdfEntrypoint, RuntimeType,
-};
+use super::super::entrypoint::{validate_file_reachable, UdfEntrypoint, RuntimeType};
+use super::super::ipc_utils::create_ipc_accumulator;
 
 /// Python runtime: holds a module name and function/class name.
 #[derive(Debug, Clone, PartialEq, Eq)]
