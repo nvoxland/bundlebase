@@ -1,11 +1,10 @@
 //! UDF entrypoint trait and shared helpers.
 
 use async_trait::async_trait;
-use crate::function::ipc_bridge::{self, SubprocessCache};
+use crate::function::ipc_bridge::SubprocessCache;
 pub use crate::function::lib_bridge::{Manifest, ManifestEntry};
 use crate::io::IOReadWriteDir;
 use crate::BundlebaseError;
-use arrow::array::ArrayRef;
 use arrow::datatypes::DataType;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
@@ -205,63 +204,3 @@ pub(crate) fn find_in_manifest(
         })
 }
 
-/// Shared IPC scalar invocation for Ipc, Java, and Docker runtimes.
-pub(crate) fn invoke_ipc_scalar_impl(
-    name: &str,
-    entrypoint: &str,
-    args: &datafusion::logical_expr::ScalarFunctionArgs,
-    subprocess_cache: &SubprocessCache,
-) -> DFResult<ColumnarValue> {
-    let arrays: Vec<ArrayRef> = args
-        .args
-        .iter()
-        .map(|cv| match cv {
-            ColumnarValue::Array(arr) => Ok(Arc::clone(arr)),
-            ColumnarValue::Scalar(scalar) => scalar
-                .to_array_of_size(args.number_rows)
-                .map_err(|e| datafusion::common::DataFusionError::Execution(e.to_string())),
-        })
-        .collect::<DFResult<Vec<_>>>()?;
-
-    // Extract function name from the call - use the name parameter which is the display name
-    // For IPC, we need to extract the actual function name from the display name (namespace.name -> name)
-    let func_name = name.rsplit('.').next().unwrap_or(name);
-
-    let result =
-        ipc_bridge::invoke_ipc_scalar(subprocess_cache, entrypoint, func_name, &arrays)
-            .map_err(|e| {
-                datafusion::common::DataFusionError::Execution(format!(
-                    "IPC function '{}' ({}) failed: {}",
-                    name, entrypoint, e
-                ))
-            })?;
-
-    Ok(ColumnarValue::Array(result))
-}
-
-/// Shared IPC accumulator creation for Ipc, Java, and Docker runtimes.
-pub(crate) fn create_ipc_accumulator(
-    name: &str,
-    entrypoint: &str,
-    function_name: &str,
-    return_type: &DataType,
-    subprocess_cache: &SubprocessCache,
-) -> DFResult<Box<dyn Accumulator>> {
-    let state_id =
-        ipc_bridge::ipc_aggregate_create_state(subprocess_cache, entrypoint, function_name)
-            .map_err(|e| {
-                datafusion::common::DataFusionError::Execution(format!(
-                    "Failed to create IPC aggregate state for '{}': {}",
-                    name, e
-                ))
-            })?;
-
-    Ok(Box::new(crate::function::aggregate::IpcAccumulator {
-        entrypoint: entrypoint.to_string(),
-        function_name: function_name.to_string(),
-        display_name: name.to_string(),
-        state_id,
-        return_type: return_type.clone(),
-        subprocess_cache: Arc::clone(subprocess_cache),
-    }))
-}

@@ -7,7 +7,8 @@ use arrow::datatypes::DataType;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 
-use super::super::entrypoint::{invoke_ipc_scalar_impl, create_ipc_accumulator, UdfEntrypoint, RuntimeType};
+use super::super::entrypoint::{UdfEntrypoint, RuntimeType};
+use super::super::ipc_utils::{invoke_ipc_scalar_impl, create_ipc_accumulator};
 
 /// Docker runtime: holds an image name.
 #[derive(Debug, Clone, PartialEq, Eq)]

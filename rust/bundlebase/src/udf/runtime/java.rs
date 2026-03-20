@@ -7,7 +7,8 @@ use arrow::datatypes::DataType;
 use datafusion::common::Result as DFResult;
 use datafusion::logical_expr::{Accumulator, ColumnarValue};
 
-use super::super::entrypoint::{invoke_ipc_scalar_impl, create_ipc_accumulator, UdfEntrypoint, RuntimeType, validate_file_reachable};
+use super::super::entrypoint::{UdfEntrypoint, RuntimeType, validate_file_reachable};
+use super::super::ipc_utils::{invoke_ipc_scalar_impl, create_ipc_accumulator};
 
 /// Java runtime: holds a path to a JAR and an optional class name.
 #[derive(Debug, Clone, PartialEq, Eq)]
