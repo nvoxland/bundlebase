@@ -25,7 +25,7 @@ pub mod plugin;
 
 use plugin::IpcConnector;
 use plugin::KaggleConnector;
-use plugin::NativeConnector;
+use plugin::FfiConnector;
 use plugin::PostgresConnector;
 use plugin::RemoteDirConnector;
 use plugin::WebScrapeConnector;
@@ -488,7 +488,7 @@ pub struct ConnectorRegistry {
 impl ConnectorRegistry {
     /// Create a new registry with built-in connectors registered.
     ///
-    /// Note: "ipc" and "native" are NOT registered here. They are only available
+    /// Note: "ipc" and "ffi" are NOT registered here. They are only available
     /// via connectors (IMPORT CONNECTOR + SET CONNECTOR LOGIC). Use `create_instance()`
     /// to create instances of them when resolving connector entrypoints.
     pub fn new() -> Self {
@@ -519,11 +519,11 @@ impl ConnectorRegistry {
     /// Create a fresh instance for connectors that hold per-fetch state.
     ///
     /// For `Ipc`, returns a new `IpcConnector` with its own subprocess handle.
-    /// For `Internal`, returns a new `NativeConnector`.
+    /// For `Internal`, returns a new `FfiConnector`.
     pub fn create_instance(&self, runtime_type: crate::udf::RuntimeType) -> Option<Arc<dyn Connector>> {
         match runtime_type {
             crate::udf::RuntimeType::External => Some(Arc::new(IpcConnector::new())),
-            crate::udf::RuntimeType::Internal => Some(Arc::new(NativeConnector::new())),
+            crate::udf::RuntimeType::Internal => Some(Arc::new(FfiConnector::new())),
         }
     }
 
@@ -731,10 +731,10 @@ mod tests {
     }
 
     #[test]
-    fn test_ipc_native_removed_from_registry() {
+    fn test_ipc_ffi_removed_from_registry() {
         let registry = ConnectorRegistry::new();
         assert!(registry.get("ipc").is_none());
-        assert!(registry.get("native").is_none());
+        assert!(registry.get("ffi").is_none());
     }
 
     #[test]

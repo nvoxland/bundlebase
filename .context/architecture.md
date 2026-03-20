@@ -71,7 +71,8 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - `src/function/scalar.rs` — DataFusion `ScalarUDFImpl` bridge
 - `src/function/aggregate.rs` — DataFusion `AggregateUDFImpl` bridge with `PythonAccumulator` and `LibAccumulator`
 - `src/function/python_bridge.rs` — Trait for Python function invocation
-- `src/function/lib_bridge.rs` — FFI layer for native shared library (.so/.dylib) functions
+- `src/function/ffi_bridge.rs` — FFI layer for native shared library (.so/.dylib) functions
+- `src/function/manifest.rs` — Shared `Manifest`/`ManifestEntry` types used by all runtimes
 
 **Core Components:**
 - **FunctionEntry**: Stores function metadata (name, input/return types, runtime, entrypoint, platform, kind)
@@ -85,12 +86,12 @@ Custom SQL function system supporting both scalar and aggregate functions.
 - **Platform**: OS/arch pattern for multi-platform support (e.g., `linux/amd64`, `*/*`)
 
 **FFI Runtime (FFI Layer):**
-- `lib_bridge::parse_lib_entrypoint()` — Parses `path:symbol` convention (colon separates library path from symbol name)
-- `lib_bridge::load_library()` — Loads shared libraries with a global `Mutex<HashMap>` cache
-- `lib_bridge::invoke_lib_scalar()` — Converts Arrow arrays to FFI, calls C function, converts back
-- `lib_bridge::LibAccumulator` — Wraps opaque `void*` state, calls `_create_state/_accumulate/_evaluate/_free_state` symbols
-- `lib_bridge::load_lib_manifest()` — Calls `bundlebase_functions()` C symbol for bulk discovery
-- `lib_bridge::load_ipc_manifest()` — Runs `exec --bundlebase-functions` for IPC discovery
+- `ffi_bridge::parse_lib_entrypoint()` — Parses `path:symbol` convention (colon separates library path from symbol name)
+- `ffi_bridge::load_library()` — Loads shared libraries with a global `Mutex<HashMap>` cache
+- `ffi_bridge::invoke_lib_scalar()` — Converts Arrow arrays to FFI, calls C function, converts back
+- `ffi_bridge::LibAccumulator` — Wraps opaque `void*` state, calls `_create_state/_accumulate/_evaluate/_free_state` symbols
+- `ffi_bridge::load_lib_manifest()` — Calls `bundlebase_functions()` C symbol for bulk discovery
+- IPC/Java manifest loaders live in their respective runtime files (`ipc.rs`, `java.rs`)
 - `ipc_bridge` module — JSON-RPC + Arrow IPC protocol for scalar invoke and aggregate (`create_state`/`accumulate`/`merge`/`evaluate`)
 - `IMPORT FUNCTION namespace.* FROM 'runtime::entrypoint'` command uses manifests to register multiple functions at once
 

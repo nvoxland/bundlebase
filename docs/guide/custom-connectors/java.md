@@ -408,11 +408,11 @@ Register your connector with `PluginExport`:
 ```java
 import com.bundlebase.sdk.*;
 
-public class ExampleNativeConnector implements Connector {
+public class ExampleFfiConnector implements Connector {
     // ... implement discover() and data() as usual ...
 
     static {
-        PluginExport.register(new ExampleNativeConnector());
+        PluginExport.register(new ExampleFfiConnector());
     }
 }
 ```

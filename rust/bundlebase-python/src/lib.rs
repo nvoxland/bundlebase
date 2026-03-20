@@ -107,7 +107,7 @@ fn bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
     progress::register_module(m)?;
 
     // Register the Python native source bridge for in-process source loading
-    ::bundlebase::source::native::register_python_bridge(
+    ::bundlebase::source::ffi::register_python_bridge(
         std::sync::Arc::new(native_source::PyNativeBridge),
     );
 
