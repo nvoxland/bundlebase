@@ -4,7 +4,6 @@
 //! and represents a single function binding for a name+platform pair.
 //! `resolve_function` picks the best entry for the current platform at runtime.
 
-use crate::arrow_types::arrow_type_serde;
 use crate::platform::Platform;
 use crate::udf::UdfRuntime;
 use crate::data::ObjectId;
@@ -72,10 +71,8 @@ pub struct FunctionEntry {
     /// Namespaced function name (e.g., "acme.double_val")
     pub name: NamespacedName,
     /// Arrow types for input parameters (e.g., [DataType::Int64, DataType::Utf8])
-    #[serde(with = "arrow_type_serde::vec")]
     pub input_types: Vec<DataType>,
     /// Arrow type for the return value (e.g., DataType::Int64)
-    #[serde(with = "arrow_type_serde::single")]
     pub return_type: DataType,
     /// Runtime with parsed entrypoint (e.g., FfiRuntime { path: "./mylib.so", symbol: Some("double_val") })
     pub from: UdfRuntime,

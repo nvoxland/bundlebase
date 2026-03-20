@@ -1,65 +1,11 @@
-//! Arrow type parsing and serialization utilities.
+//! Arrow type parsing utilities.
 //!
-//! Converts between Arrow `DataType` and string representations used in
-//! function signatures and YAML configuration files.
+//! Converts Arrow type name strings into `DataType` values for use in
+//! function signatures and SQL commands.
 
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Fields};
 use std::sync::Arc;
-
-/// Custom serde for Arrow `DataType` ↔ string (e.g., `"Int64"` in YAML).
-pub mod arrow_type_serde {
-    use super::{arrow_type_to_name, parse_arrow_type_name, DataType};
-    use serde::{self, Deserialize, Deserializer, Serializer};
-
-    /// Serde helpers for a single `DataType` field.
-    pub mod single {
-        use super::*;
-
-        pub fn serialize<S>(dt: &DataType, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            serializer.serialize_str(&arrow_type_to_name(dt))
-        }
-
-        pub fn deserialize<'de, D>(deserializer: D) -> Result<DataType, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let s = String::deserialize(deserializer)?;
-            parse_arrow_type_name(&s).map_err(serde::de::Error::custom)
-        }
-    }
-
-    /// Serde helpers for a `Vec<DataType>` field.
-    pub mod vec {
-        use super::*;
-        use serde::ser::SerializeSeq;
-
-        pub fn serialize<S>(types: &[DataType], serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            let mut seq = serializer.serialize_seq(Some(types.len()))?;
-            for dt in types {
-                seq.serialize_element(&arrow_type_to_name(dt))?;
-            }
-            seq.end()
-        }
-
-        pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<DataType>, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let strings: Vec<String> = Vec::<String>::deserialize(deserializer)?;
-            strings
-                .iter()
-                .map(|s| parse_arrow_type_name(s).map_err(serde::de::Error::custom))
-                .collect()
-        }
-    }
-}
 
 /// Parse an Arrow type name string into a DataFusion `DataType`.
 ///
@@ -75,9 +21,11 @@ pub mod arrow_type_serde {
 /// - `"Decimal128(38,10)"` → `DataType::Decimal128(38, 10)`
 pub fn parse_arrow_type_name(type_name: &str) -> Result<DataType, BundlebaseError> {
     let trimmed = type_name.trim();
+    let lower = trimmed.to_ascii_lowercase();
 
-    // Check for parameterized types first
-    if let Some(inner) = trimmed.strip_prefix("List<").and_then(|s| s.strip_suffix('>')) {
+    // Check for parameterized types first (case-insensitive prefix matching)
+    if lower.starts_with("list<") && trimmed.ends_with('>') {
+        let inner = &trimmed[5..trimmed.len() - 1];
         let element_type = parse_arrow_type_name(inner)?;
         return Ok(DataType::List(Arc::new(Field::new(
             "item",
@@ -86,15 +34,14 @@ pub fn parse_arrow_type_name(type_name: &str) -> Result<DataType, BundlebaseErro
         ))));
     }
 
-    if let Some(inner) = trimmed
-        .strip_prefix("Struct<")
-        .and_then(|s| s.strip_suffix('>'))
-    {
+    if lower.starts_with("struct<") && trimmed.ends_with('>') {
+        let inner = &trimmed[7..trimmed.len() - 1];
         let fields = parse_struct_fields(inner)?;
         return Ok(DataType::Struct(fields));
     }
 
-    if let Some(inner) = trimmed.strip_prefix("Map<").and_then(|s| s.strip_suffix('>')) {
+    if lower.starts_with("map<") && trimmed.ends_with('>') {
+        let inner = &trimmed[4..trimmed.len() - 1];
         let (key_str, value_str) = split_top_level_comma(inner).ok_or_else(|| {
             BundlebaseError::from(format!(
                 "Invalid Map type '{}'. Expected format: Map<KeyType,ValueType>",
@@ -114,10 +61,8 @@ pub fn parse_arrow_type_name(type_name: &str) -> Result<DataType, BundlebaseErro
         return Ok(DataType::Map(Arc::new(entries_field), false));
     }
 
-    if let Some(inner) = trimmed
-        .strip_prefix("Decimal128(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
+    if lower.starts_with("decimal128(") && trimmed.ends_with(')') {
+        let inner = &trimmed[11..trimmed.len() - 1];
         let parts: Vec<&str> = inner.split(',').collect();
         if parts.len() != 2 {
             return Err(format!(
@@ -141,35 +86,38 @@ pub fn parse_arrow_type_name(type_name: &str) -> Result<DataType, BundlebaseErro
         return Ok(DataType::Decimal128(precision, scale));
     }
 
-    // Simple types
-    match trimmed {
-        "Boolean" => Ok(DataType::Boolean),
-        "Int8" => Ok(DataType::Int8),
-        "Int16" => Ok(DataType::Int16),
-        "Int32" => Ok(DataType::Int32),
-        "Int64" => Ok(DataType::Int64),
-        "UInt8" => Ok(DataType::UInt8),
-        "UInt16" => Ok(DataType::UInt16),
-        "UInt32" => Ok(DataType::UInt32),
-        "UInt64" => Ok(DataType::UInt64),
-        "Float16" => Ok(DataType::Float16),
-        "Float32" => Ok(DataType::Float32),
-        "Float64" => Ok(DataType::Float64),
-        "Utf8" => Ok(DataType::Utf8),
-        "LargeUtf8" => Ok(DataType::LargeUtf8),
-        "Binary" => Ok(DataType::Binary),
-        "LargeBinary" => Ok(DataType::LargeBinary),
-        "Date32" => Ok(DataType::Date32),
-        "Date64" => Ok(DataType::Date64),
-        "Timestamp" => Ok(DataType::Timestamp(
+    // Simple types — case-insensitive canonical names + aliases
+    match lower.as_str() {
+        "boolean" | "bool" => Ok(DataType::Boolean),
+        "int8" | "tinyint" | "byte" => Ok(DataType::Int8),
+        "int16" | "short" | "smallint" => Ok(DataType::Int16),
+        "int32" | "int" | "integer" => Ok(DataType::Int32),
+        "int64" | "long" | "bigint" => Ok(DataType::Int64),
+        "uint8" => Ok(DataType::UInt8),
+        "uint16" => Ok(DataType::UInt16),
+        "uint32" => Ok(DataType::UInt32),
+        "uint64" => Ok(DataType::UInt64),
+        "float16" => Ok(DataType::Float16),
+        "float32" | "float" | "real" => Ok(DataType::Float32),
+        "float64" | "double" => Ok(DataType::Float64),
+        "utf8" | "string" | "text" | "varchar" => Ok(DataType::Utf8),
+        "largeutf8" => Ok(DataType::LargeUtf8),
+        "binary" | "bytes" | "blob" => Ok(DataType::Binary),
+        "largebinary" => Ok(DataType::LargeBinary),
+        "date32" | "date" => Ok(DataType::Date32),
+        "date64" => Ok(DataType::Date64),
+        "timestamp" => Ok(DataType::Timestamp(
             arrow::datatypes::TimeUnit::Microsecond,
             None,
         )),
+        "decimal" => Ok(DataType::Decimal128(38, 10)),
         _ => Err(format!(
             "Unknown Arrow type name '{}'. Supported types: Boolean, Int8, Int16, Int32, Int64, \
              UInt8, UInt16, UInt32, UInt64, Float16, Float32, Float64, Utf8, LargeUtf8, \
              Binary, LargeBinary, Date32, Date64, Timestamp, List<T>, Struct<name:type,...>, \
-             Map<K,V>, Decimal128(precision,scale)",
+             Map<K,V>, Decimal128(precision,scale). \
+             Aliases: bool, string, text, varchar, int, integer, long, bigint, short, smallint, \
+             tinyint, byte, float, real, double, date, bytes, blob, decimal",
             trimmed
         )
         .into()),
@@ -226,60 +174,6 @@ fn parse_struct_fields(fields_str: &str) -> Result<Fields, BundlebaseError> {
     Ok(Fields::from(fields))
 }
 
-/// Convert an Arrow `DataType` to its canonical string representation.
-///
-/// This is the inverse of `parse_arrow_type_name` and ensures roundtrip fidelity
-/// for both simple and complex types.
-pub fn arrow_type_to_name(dt: &DataType) -> String {
-    match dt {
-        DataType::Boolean => "Boolean".to_string(),
-        DataType::Int8 => "Int8".to_string(),
-        DataType::Int16 => "Int16".to_string(),
-        DataType::Int32 => "Int32".to_string(),
-        DataType::Int64 => "Int64".to_string(),
-        DataType::UInt8 => "UInt8".to_string(),
-        DataType::UInt16 => "UInt16".to_string(),
-        DataType::UInt32 => "UInt32".to_string(),
-        DataType::UInt64 => "UInt64".to_string(),
-        DataType::Float16 => "Float16".to_string(),
-        DataType::Float32 => "Float32".to_string(),
-        DataType::Float64 => "Float64".to_string(),
-        DataType::Utf8 => "Utf8".to_string(),
-        DataType::LargeUtf8 => "LargeUtf8".to_string(),
-        DataType::Binary => "Binary".to_string(),
-        DataType::LargeBinary => "LargeBinary".to_string(),
-        DataType::Date32 => "Date32".to_string(),
-        DataType::Date64 => "Date64".to_string(),
-        DataType::Timestamp(_, _) => "Timestamp".to_string(),
-        DataType::Decimal128(precision, scale) => {
-            format!("Decimal128({},{})", precision, scale)
-        }
-        DataType::List(field) => {
-            format!("List<{}>", arrow_type_to_name(field.data_type()))
-        }
-        DataType::Struct(fields) => {
-            let field_strs: Vec<String> = fields
-                .iter()
-                .map(|f| format!("{}:{}", f.name(), arrow_type_to_name(f.data_type())))
-                .collect();
-            format!("Struct<{}>", field_strs.join(","))
-        }
-        DataType::Map(field, _) => {
-            // Map entries field is a Struct with "key" and "value" fields
-            if let DataType::Struct(entries) = field.data_type() {
-                if entries.len() == 2 {
-                    let key_type = arrow_type_to_name(entries[0].data_type());
-                    let value_type = arrow_type_to_name(entries[1].data_type());
-                    return format!("Map<{},{}>", key_type, value_type);
-                }
-            }
-            // Fallback for non-standard map shapes
-            format!("Map<{}>", arrow_type_to_name(field.data_type()))
-        }
-        other => other.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,4 +203,88 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Unknown Arrow type name"));
     }
+
+    #[test]
+    fn test_parse_case_insensitive_simple_types() {
+        assert_eq!(parse_arrow_type_name("int64").unwrap(), DataType::Int64);
+        assert_eq!(parse_arrow_type_name("INT64").unwrap(), DataType::Int64);
+        assert_eq!(parse_arrow_type_name("Int64").unwrap(), DataType::Int64);
+        assert_eq!(parse_arrow_type_name("utf8").unwrap(), DataType::Utf8);
+        assert_eq!(parse_arrow_type_name("BOOLEAN").unwrap(), DataType::Boolean);
+        assert_eq!(parse_arrow_type_name("float32").unwrap(), DataType::Float32);
+        assert_eq!(parse_arrow_type_name("LARGEUTF8").unwrap(), DataType::LargeUtf8);
+        assert_eq!(parse_arrow_type_name("timestamp").unwrap(), DataType::Timestamp(
+            arrow::datatypes::TimeUnit::Microsecond, None,
+        ));
+    }
+
+    #[test]
+    fn test_parse_aliases() {
+        assert_eq!(parse_arrow_type_name("bool").unwrap(), DataType::Boolean);
+        assert_eq!(parse_arrow_type_name("string").unwrap(), DataType::Utf8);
+        assert_eq!(parse_arrow_type_name("text").unwrap(), DataType::Utf8);
+        assert_eq!(parse_arrow_type_name("varchar").unwrap(), DataType::Utf8);
+        assert_eq!(parse_arrow_type_name("int").unwrap(), DataType::Int32);
+        assert_eq!(parse_arrow_type_name("integer").unwrap(), DataType::Int32);
+        assert_eq!(parse_arrow_type_name("long").unwrap(), DataType::Int64);
+        assert_eq!(parse_arrow_type_name("bigint").unwrap(), DataType::Int64);
+        assert_eq!(parse_arrow_type_name("short").unwrap(), DataType::Int16);
+        assert_eq!(parse_arrow_type_name("smallint").unwrap(), DataType::Int16);
+        assert_eq!(parse_arrow_type_name("tinyint").unwrap(), DataType::Int8);
+        assert_eq!(parse_arrow_type_name("byte").unwrap(), DataType::Int8);
+        assert_eq!(parse_arrow_type_name("float").unwrap(), DataType::Float32);
+        assert_eq!(parse_arrow_type_name("real").unwrap(), DataType::Float32);
+        assert_eq!(parse_arrow_type_name("double").unwrap(), DataType::Float64);
+        assert_eq!(parse_arrow_type_name("date").unwrap(), DataType::Date32);
+        assert_eq!(parse_arrow_type_name("bytes").unwrap(), DataType::Binary);
+        assert_eq!(parse_arrow_type_name("blob").unwrap(), DataType::Binary);
+        assert_eq!(parse_arrow_type_name("decimal").unwrap(), DataType::Decimal128(38, 10));
+    }
+
+    #[test]
+    fn test_parse_aliases_case_insensitive() {
+        assert_eq!(parse_arrow_type_name("STRING").unwrap(), DataType::Utf8);
+        assert_eq!(parse_arrow_type_name("Bool").unwrap(), DataType::Boolean);
+        assert_eq!(parse_arrow_type_name("DOUBLE").unwrap(), DataType::Float64);
+        assert_eq!(parse_arrow_type_name("Integer").unwrap(), DataType::Int32);
+    }
+
+    #[test]
+    fn test_parse_parameterized_case_insensitive() {
+        // List
+        let list_int = DataType::List(Arc::new(Field::new("item", DataType::Int64, true)));
+        assert_eq!(parse_arrow_type_name("list<Int64>").unwrap(), list_int);
+        assert_eq!(parse_arrow_type_name("LIST<Int64>").unwrap(), list_int);
+        assert_eq!(parse_arrow_type_name("List<int64>").unwrap(), list_int);
+
+        // List with alias
+        let list_utf8 = DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)));
+        assert_eq!(parse_arrow_type_name("list<string>").unwrap(), list_utf8);
+        assert_eq!(parse_arrow_type_name("LIST<STRING>").unwrap(), list_utf8);
+
+        // Decimal128
+        assert_eq!(
+            parse_arrow_type_name("decimal128(10,2)").unwrap(),
+            DataType::Decimal128(10, 2)
+        );
+        assert_eq!(
+            parse_arrow_type_name("DECIMAL128(10,2)").unwrap(),
+            DataType::Decimal128(10, 2)
+        );
+    }
+
+    #[test]
+    fn test_parse_map_with_aliases() {
+        let result = parse_arrow_type_name("map<string,int>").unwrap();
+        let expected_entries = Field::new(
+            "entries",
+            DataType::Struct(Fields::from(vec![
+                Field::new("key", DataType::Utf8, false),
+                Field::new("value", DataType::Int32, true),
+            ])),
+            false,
+        );
+        assert_eq!(result, DataType::Map(Arc::new(expected_entries), false));
+    }
+
 }
