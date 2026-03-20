@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use crate::function::ipc_bridge::SubprocessCache;
-pub use crate::function::lib_bridge::{Manifest, ManifestEntry};
+pub use crate::function::manifest::{Manifest, ManifestEntry};
 use crate::io::IOReadWriteDir;
 use crate::BundlebaseError;
 use arrow::datatypes::DataType;

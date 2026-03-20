@@ -5,15 +5,15 @@
 //! - `load_library()` — loads and caches shared libraries via `libloading`
 //! - `invoke_lib_scalar()` — calls a C scalar function through Arrow FFI
 //! - `LibAccumulator` — wraps C aggregate function state for DataFusion
-//! - `load_lib_manifest()` / `load_ipc_manifest()` — bulk function discovery
+//! - `load_lib_manifest()` — bulk function discovery from shared libraries
 
+use super::manifest::Manifest;
 use crate::BundlebaseError;
 use arrow::array::ArrayRef;
 use arrow::datatypes::DataType;
 use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use datafusion::scalar::ScalarValue;
 use libloading::{Library, Symbol};
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::sync::{Arc, Mutex};
@@ -417,28 +417,6 @@ impl Drop for LibAccumulator {
 
 // ==================== Manifest discovery ====================
 
-/// A single function entry from a manifest.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ManifestEntry {
-    pub name: String,
-    #[serde(default)]
-    pub symbol: Option<String>,
-    pub input_types: Vec<String>,
-    pub return_type: String,
-    #[serde(default = "default_kind")]
-    pub kind: String,
-}
-
-fn default_kind() -> String {
-    "scalar".to_string()
-}
-
-/// JSON manifest returned by `bundlebase_functions()`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Manifest {
-    pub functions: Vec<ManifestEntry>,
-}
-
 /// C function signature for the manifest function.
 type ManifestFn = unsafe extern "C" fn() -> *const std::ffi::c_char;
 
@@ -491,100 +469,6 @@ pub fn load_lib_manifest(lib_path: &str) -> Result<Manifest, BundlebaseError> {
     })?;
 
     Ok(manifest)
-}
-
-/// Load a function manifest from an IPC executable.
-///
-/// Runs `exec_path --bundlebase-functions`, captures stdout, parses JSON.
-pub fn load_ipc_manifest(exec_path: &str) -> Result<Manifest, BundlebaseError> {
-    let output = std::process::Command::new(exec_path)
-        .arg("--bundlebase-functions")
-        .output()
-        .map_err(|e| {
-            BundlebaseError::from(format!(
-                "Failed to execute '{}' for manifest discovery: {}",
-                exec_path, e
-            ))
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "'{}' --bundlebase-functions failed (exit {}): {}",
-            exec_path,
-            output.status,
-            stderr.trim()
-        )
-        .into());
-    }
-
-    let json_str = String::from_utf8(output.stdout).map_err(|e| {
-        BundlebaseError::from(format!(
-            "Invalid UTF-8 output from '{}' --bundlebase-functions: {}",
-            exec_path, e
-        ))
-    })?;
-
-    let manifest: Manifest = serde_json::from_str(&json_str).map_err(|e| {
-        BundlebaseError::from(format!(
-            "Failed to parse manifest JSON from '{}': {}. Output: {}",
-            exec_path, e, json_str.trim()
-        ))
-    })?;
-
-    Ok(manifest)
-}
-
-/// Load a function manifest from a Java JAR via IPC.
-///
-/// Runs `java -jar jar_path --bundlebase-functions`, captures stdout, parses JSON.
-pub fn load_java_ipc_manifest(jar_path: &str) -> Result<Manifest, BundlebaseError> {
-    let output = std::process::Command::new("java")
-        .args(["-jar", jar_path, "--bundlebase-functions"])
-        .output()
-        .map_err(|e| {
-            BundlebaseError::from(format!(
-                "Failed to execute 'java -jar {}' for manifest discovery: {}",
-                jar_path, e
-            ))
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "'java -jar {}' --bundlebase-functions failed (exit {}): {}",
-            jar_path,
-            output.status,
-            stderr.trim()
-        )
-        .into());
-    }
-
-    let json_str = String::from_utf8(output.stdout).map_err(|e| {
-        BundlebaseError::from(format!(
-            "Invalid UTF-8 output from 'java -jar {}' --bundlebase-functions: {}",
-            jar_path, e
-        ))
-    })?;
-
-    let manifest: Manifest = serde_json::from_str(&json_str).map_err(|e| {
-        BundlebaseError::from(format!(
-            "Failed to parse manifest JSON from 'java -jar {}': {}. Output: {}",
-            jar_path, e, json_str.trim()
-        ))
-    })?;
-
-    Ok(manifest)
-}
-
-/// Look up a single function's metadata from its runtime.
-///
-/// Delegates to `runtime.lookup_function_in_manifest()`.
-pub fn lookup_function_in_manifest(
-    runtime: &crate::udf::UdfRuntime,
-    function_name: &str,
-) -> Result<ManifestEntry, BundlebaseError> {
-    runtime.lookup_function_in_manifest(function_name)
 }
 
 #[cfg(test)]
@@ -651,51 +535,6 @@ mod tests {
         let (path, symbol) = parse_lib_entrypoint("./my_func:double_val").unwrap();
         assert_eq!(path, "./my_func");
         assert_eq!(symbol, Some("double_val"));
-    }
-
-    // ==================== manifest JSON parsing tests ====================
-
-    #[test]
-    fn test_manifest_deserialize() {
-        let json = r#"{"functions": [
-            {"name": "double_val", "symbol": "double_val",
-             "input_types": ["Int64"], "return_type": "Int64", "kind": "scalar"},
-            {"name": "my_sum", "input_types": ["Int64"],
-             "return_type": "Int64", "kind": "aggregate"}
-        ]}"#;
-
-        let manifest: Manifest = serde_json::from_str(json).unwrap();
-        assert_eq!(manifest.functions.len(), 2);
-
-        assert_eq!(manifest.functions[0].name, "double_val");
-        assert_eq!(manifest.functions[0].symbol, Some("double_val".to_string()));
-        assert_eq!(manifest.functions[0].input_types, vec!["Int64"]);
-        assert_eq!(manifest.functions[0].return_type, "Int64");
-        assert_eq!(manifest.functions[0].kind, "scalar");
-
-        assert_eq!(manifest.functions[1].name, "my_sum");
-        assert_eq!(manifest.functions[1].symbol, None);
-        assert_eq!(manifest.functions[1].kind, "aggregate");
-    }
-
-    #[test]
-    fn test_manifest_default_kind() {
-        let json = r#"{"functions": [
-            {"name": "double_val", "input_types": ["Int64"], "return_type": "Int64"}
-        ]}"#;
-
-        let manifest: Manifest = serde_json::from_str(json).unwrap();
-        assert_eq!(manifest.functions[0].kind, "scalar");
-    }
-
-    #[test]
-    fn test_manifest_multi_input() {
-        let json = r#"{"functions": [
-            {"name": "add", "input_types": ["Int64", "Int64"], "return_type": "Int64"}
-        ]}"#;
-
-        let manifest: Manifest = serde_json::from_str(json).unwrap();
-        assert_eq!(manifest.functions[0].input_types, vec!["Int64", "Int64"]);
     }
 
     // ==================== Integration tests with test cdylib ====================

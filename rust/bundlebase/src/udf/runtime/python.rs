@@ -6,7 +6,7 @@
 
 use crate::function::ipc_bridge::SubprocessCache;
 use crate::function::python_bridge::get_python_function_bridge;
-use crate::function::lib_bridge::{ManifestEntry, Manifest};
+use crate::function::manifest::{ManifestEntry, Manifest};
 use crate::BundlebaseError;
 use arrow::array::ArrayRef;
 use arrow::datatypes::DataType;

@@ -5,7 +5,7 @@
 
 use arrow::array::ArrayRef;
 use datafusion::scalar::ScalarValue;
-use crate::function::lib_bridge::ManifestEntry;
+use crate::function::manifest::ManifestEntry;
 use crate::BundlebaseError;
 use std::sync::{Arc, OnceLock};
 
