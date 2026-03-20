@@ -1,5 +1,5 @@
 use crate::bundle::column_metadata::ColumnNames;
-use crate::bundle::function_definition::{arrow_type_serde, arrow_type_to_name};
+use crate::arrow_types::{arrow_type_serde, arrow_type_to_name};
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;

@@ -6,7 +6,7 @@ use crate::bundle::init::InitCommit;
 use crate::bundle::operation::AnyOperation;
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
-use crate::bundle::function_definition::FunctionRegistry;
+use crate::bundle::function_entry::FunctionRegistry;
 use crate::bundle::{column_metadata, sql, Bundle};
 use crate::source::ConnectorRegistry;
 use crate::data::{BlockId, ObjectId, VersionedBlockId};
@@ -775,7 +775,7 @@ impl BundleBuilder {
         platform: &str,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::ImportConnectorCommand;
-        use crate::bundle::connector_definition::Platform;
+        use crate::platform::Platform;
         let platform: Platform = platform.parse()?;
         self.execute_command(ImportConnectorCommand::new(name, from, platform)).await?;
         Ok(self)
@@ -814,7 +814,7 @@ impl BundleBuilder {
         platform: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::DropConnectorCommand;
-        use crate::bundle::connector_definition::Platform;
+        use crate::platform::Platform;
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
         self.execute_command(DropConnectorCommand::new(name, platform)).await?;
         Ok(self)
@@ -826,7 +826,7 @@ impl BundleBuilder {
         name: &str,
         platform: Option<&str>,
     ) -> Result<usize, BundlebaseError> {
-        use crate::bundle::connector_definition::Platform;
+        use crate::platform::Platform;
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
         Ok(self.bundle().connector_registry().write().remove_entry(name, platform.as_ref(), true))
     }
@@ -1132,7 +1132,7 @@ impl BundleBuilder {
         platform: &str,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::ImportFunctionCommand;
-        use crate::bundle::connector_definition::Platform;
+        use crate::platform::Platform;
         let platform: Platform = platform.parse()?;
         self.execute_command(ImportFunctionCommand::new(
             name, from, platform,
@@ -1174,7 +1174,7 @@ impl BundleBuilder {
         platform: Option<&str>,
     ) -> Result<&Self, BundlebaseError> {
         use crate::bundle::command::DropFunctionCommand;
-        use crate::bundle::connector_definition::Platform;
+        use crate::platform::Platform;
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
         self.execute_command(DropFunctionCommand::new(name, platform)).await?;
         Ok(self)
@@ -1186,7 +1186,7 @@ impl BundleBuilder {
         name: &str,
         platform: Option<&str>,
     ) -> Result<usize, BundlebaseError> {
-        use crate::bundle::connector_definition::Platform;
+        use crate::platform::Platform;
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
         let _ = self.bundle().ctx().deregister_udf(name);
         let _ = self.bundle().ctx().deregister_udaf(name);
@@ -1592,7 +1592,7 @@ impl BundleFacade for BundleBuilder {
     async fn drop_temp_connector(
         &self,
         name: &str,
-        platform: Option<&crate::bundle::connector_definition::Platform>,
+        platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError> {
         Ok(self.bundle.connector_registry().write().remove_entry(name, platform, true))
     }
@@ -1600,7 +1600,7 @@ impl BundleFacade for BundleBuilder {
     async fn drop_temp_function(
         &self,
         name: &str,
-        platform: Option<&crate::bundle::connector_definition::Platform>,
+        platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError> {
         let _ = self.bundle.ctx().deregister_udf(name);
         let _ = self.bundle.ctx().deregister_udaf(name);

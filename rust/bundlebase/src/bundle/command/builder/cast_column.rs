@@ -2,7 +2,7 @@
 
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::command::{CommandParsing, Rule};
-use crate::bundle::function_definition::parse_arrow_type_name;
+use crate::arrow_types::parse_arrow_type_name;
 use crate::bundle::operation::CastColumnOp;
 use crate::bundle::BundleFacade;
 use crate::BundlebaseError;

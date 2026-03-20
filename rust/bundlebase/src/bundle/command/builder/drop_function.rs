@@ -1,7 +1,7 @@
 //! DropFunction command implementation (persistent).
 
 use crate::bundle::command::{CommandParsing, Rule};
-use crate::bundle::connector_definition::Platform;
+use crate::platform::Platform;
 use crate::bundle::operation::DropFunctionOp;
 use crate::BundlebaseError;
 use async_trait::async_trait;

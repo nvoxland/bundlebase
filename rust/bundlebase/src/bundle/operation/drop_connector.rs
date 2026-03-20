@@ -26,12 +26,12 @@ impl DropConnectorOp {
     /// the bundle state is available for name→ID resolution.
     pub fn setup(
         connector_name: &str,
-        platform: Option<&crate::bundle::connector_definition::Platform>,
+        platform: Option<&crate::platform::Platform>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         let registry = builder.bundle().connector_registry();
         let registry_guard = registry.read();
-        let matching: Vec<&crate::bundle::connector_definition::ConnectorEntry> = registry_guard
+        let matching: Vec<&crate::bundle::connector_entry::ConnectorEntry> = registry_guard
             .entries()
             .iter()
             .filter(|e| {
@@ -107,7 +107,8 @@ impl Operation for DropConnectorOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::connector_definition::{ConnectorEntry, Platform};
+    use crate::bundle::connector_entry::ConnectorEntry;
+    use crate::platform::Platform;
     use crate::udf::UdfRuntime;
     use crate::NamespacedName;
 

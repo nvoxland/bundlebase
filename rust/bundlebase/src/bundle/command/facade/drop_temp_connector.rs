@@ -6,7 +6,7 @@
 use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::command::response::OutputShape;
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
-use crate::bundle::connector_definition::Platform;
+use crate::platform::Platform;
 use crate::bundle::facade::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};

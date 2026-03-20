@@ -1,7 +1,7 @@
 use super::column_metadata::{self, ColumnNames};
 use super::command::parser::{is_command_statement, parse_command};
 use super::command::{BundleCommand, ExplainPlanCommand, FacadeCommand, CommandResponse, OutputShape, ImportTempConnectorCommand, ImportTempFunctionCommand};
-use super::connector_definition::Platform;
+use crate::platform::Platform;
 use super::operation::BundleChange;
 use crate::bundle::BundleCommit;
 use crate::bundle::BundleStatus;
@@ -326,7 +326,7 @@ pub trait BundleFacade: Send + Sync {
     async fn drop_temp_connector(
         &self,
         name: &str,
-        platform: Option<&crate::bundle::connector_definition::Platform>,
+        platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError>;
 
     /// Load a temporary function at runtime only (not persisted).
@@ -354,7 +354,7 @@ pub trait BundleFacade: Send + Sync {
     async fn drop_temp_function(
         &self,
         name: &str,
-        platform: Option<&crate::bundle::connector_definition::Platform>,
+        platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError>;
 
     /// Rename runtime-only connector entries.
@@ -398,7 +398,7 @@ pub trait BundleFacade: Send + Sync {
     fn connector_registry(&self) -> Arc<parking_lot::RwLock<crate::source::ConnectorRegistry>>;
 
     /// Returns the function registry.
-    fn function_registry(&self) -> Arc<parking_lot::RwLock<crate::bundle::function_definition::FunctionRegistry>>;
+    fn function_registry(&self) -> Arc<parking_lot::RwLock<crate::bundle::function_entry::FunctionRegistry>>;
 
     /// Returns the DataFusion session context
     fn ctx(&self) -> Arc<SessionContext>;

@@ -10,8 +10,8 @@ mod indexed_blocks;
 mod init;
 mod operation;
 mod source;
-pub(crate) mod connector_definition;
-pub(crate) mod function_definition;
+pub(crate) mod connector_entry;
+pub(crate) mod function_entry;
 mod sql;
 
 use crate::io::EMPTY_SCHEME;
@@ -35,9 +35,11 @@ pub use indexed_blocks::IndexedBlocks;
 pub use init::{InitCommit, INIT_FILENAME};
 pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
 pub use source::Source;
-pub use connector_definition::{ConnectorEntry, Platform};
+pub use crate::arrow_types::parse_arrow_type_name;
+pub use connector_entry::ConnectorEntry;
+pub use crate::platform::Platform;
 pub use crate::udf::UdfRuntime;
-pub use function_definition::{parse_arrow_type_name, validate_kind_consistency, FunctionEntry, FunctionKind, FunctionRegistry};
+pub use function_entry::{validate_kind_consistency, FunctionEntry, FunctionKind, FunctionRegistry};
 use arrow::datatypes::DataType;
 use std::collections::{HashMap, HashSet};
 
@@ -1283,7 +1285,7 @@ impl BundleFacade for Bundle {
     async fn drop_temp_connector(
         &self,
         name: &str,
-        platform: Option<&connector_definition::Platform>,
+        platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError> {
         Ok(self.connector_registry.write().remove_entry(name, platform, true))
     }
@@ -1291,7 +1293,7 @@ impl BundleFacade for Bundle {
     async fn drop_temp_function(
         &self,
         name: &str,
-        platform: Option<&connector_definition::Platform>,
+        platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError> {
         // Deregister from DataFusion (try both UDF and UDAF)
         let _ = self.ctx.deregister_udf(name);

@@ -1,7 +1,8 @@
 //! ImportConnector operation — registers a named connector definition.
 
 use crate::bundle::operation::Operation;
-use crate::bundle::connector_definition::{parse_connector_name, ConnectorEntry, Platform};
+use crate::bundle::connector_entry::{parse_connector_name, ConnectorEntry};
+use crate::platform::Platform;
 use crate::udf::UdfRuntime;
 use crate::data::ObjectId;
 use crate::NamespacedName;

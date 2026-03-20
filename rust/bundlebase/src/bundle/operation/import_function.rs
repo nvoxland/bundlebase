@@ -1,8 +1,9 @@
 //! ImportFunction operation — registers a named function definition.
 
-use crate::bundle::connector_definition::Platform;
+use crate::platform::Platform;
 use crate::udf::UdfRuntime;
-use crate::bundle::function_definition::{arrow_type_serde, parse_function_name, FunctionEntry, FunctionKind};
+use crate::arrow_types::arrow_type_serde;
+use crate::bundle::function_entry::{parse_function_name, FunctionEntry, FunctionKind};
 use crate::data::ObjectId;
 use crate::NamespacedName;
 use crate::bundle::operation::Operation;
