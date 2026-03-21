@@ -1,0 +1,266 @@
+---
+name: bundlebase
+description: >
+  Work with bundlebase data bundles — Docker for data. Use when the user asks
+  to analyze data files (CSV, Parquet, JSON), create data bundles, query data
+  with SQL, transform or clean data, join multiple data sources, create custom
+  functions or connectors, or version data changes.
+---
+
+# Bundlebase
+
+Bundlebase packages data files into versioned bundles with a SQL query engine, custom functions, custom connectors, and a CLI interface. Think of it as Docker for data.
+
+## Installation
+
+```
+pip install bundlebase
+```
+
+This installs the `bundlebase` CLI command.
+
+## CLI Quick Start
+
+All operations use `--execute` for non-interactive, single-command execution. Add `--format json` for machine-readable output.
+
+```bash
+# Create a new bundle and attach data
+bundlebase --bundle ./my-bundle --create --execute "ATTACH 'data.csv'"
+
+# Query the bundle
+bundlebase --bundle ./my-bundle --execute "SELECT * FROM bundle LIMIT 10" --format json
+
+# Commit changes (version control)
+bundlebase --bundle ./my-bundle --execute "COMMIT 'Initial data load'"
+```
+
+### Key CLI Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--bundle <path>` | Path to bundle (local path or `s3://...`) |
+| `--create` | Create new bundle if it doesn't exist |
+| `--execute "<sql>"` | Run one command and exit |
+| `--format json` | JSON output (default: `table`) |
+| `--read-only` | Open in read-only mode |
+| `--config <path>` | YAML/JSON config file |
+
+JSON mode outputs arrays of objects for queries, single values/objects for commands. Errors go to stderr as `{"error": "..."}`. Exit code 1 on error.
+
+Query results are hard-limited to 1000 rows. Use `LIMIT` in SQL for fewer.
+
+## Common Workflows
+
+### 1. Analyze a Data File
+
+```bash
+# Create bundle and load data
+bundlebase --bundle ./analysis --create --execute "ATTACH 'sales.csv'"
+
+# Explore the schema
+bundlebase --bundle ./analysis --execute "/schema" --format json
+
+# Count rows
+bundlebase --bundle ./analysis --execute "/count" --format json
+
+# Run queries
+bundlebase --bundle ./analysis --execute "SELECT department, COUNT(*) as cnt, AVG(salary) as avg_salary FROM bundle GROUP BY department ORDER BY avg_salary DESC" --format json
+
+# Save your work
+bundlebase --bundle ./analysis --execute "COMMIT 'Loaded sales data'"
+```
+
+### 2. Clean and Transform Data
+
+```bash
+# Drop unnecessary columns
+bundlebase --bundle ./clean --execute "DROP COLUMN internal_id"
+bundlebase --bundle ./clean --execute "DROP COLUMN debug_notes"
+
+# Rename columns for clarity
+bundlebase --bundle ./clean --execute "RENAME COLUMN fname TO first_name"
+bundlebase --bundle ./clean --execute "RENAME COLUMN lname TO last_name"
+
+# Add a computed column
+bundlebase --bundle ./clean --execute "ADD COLUMN full_name first_name || ' ' || last_name"
+
+# Filter out bad data
+bundlebase --bundle ./clean --execute "FILTER WITH SELECT * FROM bundle WHERE email IS NOT NULL"
+
+# Commit the cleaned version
+bundlebase --bundle ./clean --execute "COMMIT 'Cleaned and standardized columns'"
+```
+
+### 3. Join Multiple Data Sources
+
+```bash
+# Start with a base dataset
+bundlebase --bundle ./combined --create --execute "ATTACH 'customers.parquet'"
+
+# Join with orders
+bundlebase --bundle ./combined --execute "JOIN 'orders.csv' AS orders ON id = orders.customer_id"
+
+# Query across joined data
+bundlebase --bundle ./combined --execute "SELECT c.name, COUNT(orders.id) as order_count, SUM(orders.amount) as total FROM bundle c JOIN orders ON c.id = orders.customer_id GROUP BY c.name ORDER BY total DESC LIMIT 10" --format json
+
+# Remove a join when no longer needed
+bundlebase --bundle ./combined --execute "DROP JOIN orders"
+```
+
+### 4. Work with Multiple File Formats
+
+```bash
+# Attach CSV, Parquet, and JSON files to the same bundle
+bundlebase --bundle ./multi --create --execute "ATTACH 'data.csv'"
+bundlebase --bundle ./multi --execute "ATTACH 'more_data.parquet'"
+bundlebase --bundle ./multi --execute "ATTACH 'extra.json'"
+
+# Replace a data source with updated version
+bundlebase --bundle ./multi --execute "REPLACE 'data.csv' WITH 'data_v2.csv'"
+
+# Detach a file
+bundlebase --bundle ./multi --execute "DETACH 'extra.json'"
+```
+
+### 5. Create Views for Reusable Queries
+
+```bash
+# Create named views
+bundlebase --bundle ./reports --execute "CREATE VIEW active_users AS SELECT * FROM bundle WHERE status = 'active'"
+bundlebase --bundle ./reports --execute "CREATE VIEW high_value AS SELECT * FROM bundle WHERE lifetime_value > 10000"
+
+# Query views like tables
+bundlebase --bundle ./reports --execute "SELECT * FROM active_users LIMIT 5" --format json
+
+# Drop a view
+bundlebase --bundle ./reports --execute "DROP VIEW high_value"
+```
+
+### 6. Full-Text Search
+
+```bash
+# Create a text index on a column
+bundlebase --bundle ./docs --execute "CREATE TEXT INDEX ON description"
+
+# Search with BM25 relevance scoring
+bundlebase --bundle ./docs --execute "SELECT title, _score FROM search('description', 'machine learning') ORDER BY _score DESC LIMIT 10" --format json
+
+# Combine search with filters
+bundlebase --bundle ./docs --execute "SELECT * FROM search('description', 'neural networks') WHERE category = 'AI'" --format json
+```
+
+### 7. Version Control
+
+```bash
+# Commit changes
+bundlebase --bundle ./data --execute "COMMIT 'Added Q4 sales data'"
+
+# View history
+bundlebase --bundle ./data --execute "/history" --format json
+
+# View uncommitted changes
+bundlebase --bundle ./data --execute "/status" --format json
+
+# Undo last commit
+bundlebase --bundle ./data --execute "UNDO"
+
+# Discard uncommitted changes
+bundlebase --bundle ./data --execute "RESET"
+
+# Verify data integrity
+bundlebase --bundle ./data --execute "VERIFY DATA"
+```
+
+### 8. Indexes for Performance
+
+```bash
+# Create a column index for faster filtering
+bundlebase --bundle ./data --execute "CREATE COLUMN INDEX ON customer_id"
+
+# Create a text index for full-text search
+bundlebase --bundle ./data --execute "CREATE TEXT INDEX ON description"
+
+# Rebuild a specific index
+bundlebase --bundle ./data --execute "REBUILD INDEX ON customer_id"
+
+# Rebuild all indexes
+bundlebase --bundle ./data --execute "REINDEX"
+
+# Drop an index
+bundlebase --bundle ./data --execute "DROP INDEX customer_id"
+```
+
+### 9. Data Sources and Fetch
+
+```bash
+# Create a source pointing to a directory of files
+bundlebase --bundle ./pipeline --execute "CREATE SOURCE my_connector WITH (url = 's3://bucket/data/')"
+
+# Preview what fetch would do (dry run)
+bundlebase --bundle ./pipeline --execute "FETCH base ADD DRY RUN" --format json
+
+# Actually fetch new files
+bundlebase --bundle ./pipeline --execute "FETCH base ADD"
+
+# Fetch all sources
+bundlebase --bundle ./pipeline --execute "FETCH ALL SYNC"
+```
+
+### 10. Bundle Metadata
+
+```bash
+# Set bundle name and description
+bundlebase --bundle ./data --execute "SET NAME 'Q4 Sales Report'"
+bundlebase --bundle ./data --execute "SET DESCRIPTION 'Quarterly sales data with regional breakdowns'"
+
+# Set runtime config
+bundlebase --bundle ./data --execute "SET CONFIG max_rows = '5000'"
+
+# Save config to bundle manifest
+bundlebase --bundle ./data --execute "SAVE CONFIG max_rows = '5000'"
+```
+
+### 11. Query Execution Plans
+
+```bash
+# See how a query will execute
+bundlebase --bundle ./data --execute "EXPLAIN SELECT * FROM bundle WHERE salary > 50000"
+
+# With execution statistics
+bundlebase --bundle ./data --execute "EXPLAIN ANALYZE SELECT * FROM bundle WHERE salary > 50000"
+
+# Tree format
+bundlebase --bundle ./data --execute "EXPLAIN VERBOSE FORMAT TREE"
+```
+
+### 12. Remote Bundles
+
+```bash
+# Open a bundle from S3
+bundlebase --bundle s3://mybucket/my-bundle --execute "SELECT COUNT(*) FROM bundle" --format json
+
+# Read-only access
+bundlebase --bundle s3://mybucket/my-bundle --read-only --execute "/schema" --format json
+```
+
+## SQL Reference Summary
+
+The table name for bundle data is always `bundle`. Standard SQL (Apache DataFusion syntax) is supported for SELECT queries.
+
+For the full command reference with detailed syntax, see [reference.md](reference.md).
+
+### REPL Meta-Commands
+
+When using the interactive REPL (without `--execute`), these meta-commands are available:
+
+| Command | Purpose |
+|---------|---------|
+| `/help` | Show available commands |
+| `/show` | Display all data |
+| `/schema` | Show bundle schema |
+| `/count` | Count rows |
+| `/status` | Show uncommitted changes |
+| `/history` | Show version history |
+| `/exit` | Exit the REPL |
+
+These also work with `--execute`, e.g. `--execute "/schema" --format json`.

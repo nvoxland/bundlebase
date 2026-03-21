@@ -4,6 +4,7 @@
 //! - REPL: Interactive command-line interface
 //! - Flight: Arrow Flight server for SQL queries
 
+mod agent_skills;
 mod auth;
 mod flight;
 mod repl;
@@ -39,8 +40,12 @@ impl std::fmt::Display for Mode {
 #[command(about = "Bundlebase CLI - Interactive REPL and Arrow Flight Server", long_about = None)]
 struct Args {
     /// Path to bundle to load
+    #[arg(long, required_unless_present = "setup_agent")]
+    bundle: Option<String>,
+
+    /// Install agent skills for coding agents (Claude Code, Cursor, Copilot, etc.)
     #[arg(long)]
-    bundle: String,
+    setup_agent: bool,
 
     /// Mode of operation (repl or flight)
     #[arg(long, value_enum, default_value = "repl")]
@@ -161,6 +166,13 @@ async fn main() -> Result<(), BundlebaseError> {
 
     init_logging(&args);
 
+    if args.setup_agent {
+        agent_skills::install()?;
+        return Ok(());
+    }
+
+    let bundle = args.bundle.expect("--bundle is required when not using --setup-agent");
+
     // Validate flag combinations
     if args.create && args.read_only {
         eprintln!("Error: Cannot use --create with --read-only=true. Creating a bundle requires write access.");
@@ -174,16 +186,16 @@ async fn main() -> Result<(), BundlebaseError> {
         Mode::Repl => {
             let state: Arc<dyn BundleFacade> = if args.create {
                 // Creating a new bundle - always read-write
-                info!("Creating bundle at: {}", args.bundle);
-                BundleBuilder::create(&args.bundle, config.clone()).await?
+                info!("Creating bundle at: {}", bundle);
+                BundleBuilder::create(&bundle, config.clone()).await?
             } else if args.read_only {
                 // Read-only mode - open as Bundle
-                info!("Opening bundle in read-only mode: {}", args.bundle);
-                Bundle::open(&args.bundle, config.clone()).await?
+                info!("Opening bundle in read-only mode: {}", bundle);
+                Bundle::open(&bundle, config.clone()).await?
             } else {
                 // Read-write mode - open and extend
-                info!("Opening bundle in read-write mode: {}", args.bundle);
-                Bundle::open(&args.bundle, config.clone()).await?.extend(None).await?
+                info!("Opening bundle in read-write mode: {}", bundle);
+                Bundle::open(&bundle, config.clone()).await?.extend(None).await?
             };
 
             if let Some(sql) = args.execute {
@@ -199,14 +211,14 @@ async fn main() -> Result<(), BundlebaseError> {
             info!(
                 "{} bundle at: {}{}",
                 if args.create { "Creating" } else { "Opening" },
-                args.bundle,
+                bundle,
                 if args.read_only { " (read-only)" } else { "" }
             );
             let port = args.port.unwrap_or(50051);
             let addr = format!("{}:{}", args.host, port)
                 .parse()
                 .map_err(|e| BundlebaseError::from(format!("Invalid address: {}", e)))?;
-            flight::start(&args.bundle, config, args.create, args.read_only, addr).await?;
+            flight::start(&bundle, config, args.create, args.read_only, addr).await?;
         }
     }
 
