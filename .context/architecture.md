@@ -313,6 +313,33 @@ Schema is stored as `Arc<LinkedHashMap<String, String>>`:
 
 Schema updates are immediate - `container.schema()` work instantly without executing the query.
 
+## CLI Modes
+
+The CLI (`rust/bundlebase-cli/`) provides three modes for interacting with bundles. All modes share the same `BundleFacade` trait, command parsing, and query execution infrastructure.
+
+### REPL Mode (default)
+
+Interactive command-line interface using `reedline`. Supports SQL commands and `/meta-commands` with tab completion and history. Also supports `--execute` for non-interactive single-command execution.
+
+**Key files:** `repl.rs`, `repl/commands.rs`, `repl/commands/sql.rs`
+
+### Flight Mode (`--mode flight`)
+
+Arrow Flight SQL server over gRPC. Each authenticated client gets its own session with independent bundle state. Supports JDBC/ODBC clients like DBeaver.
+
+**Key files:** `flight.rs`, `flight/server.rs`, `flight/service.rs`
+
+### MCP Mode (`--mode mcp`)
+
+Model Context Protocol server over stdio for AI assistant integration. The bundle opens once at startup and stays alive across tool calls, preserving cache and state. Exposes tools (`query`, `schema`, `count`, `sample`, `status`, `history`) that AI assistants call directly. Uses the `rmcp` crate.
+
+**Key files:** `mcp.rs`, `mcp/server.rs`, `mcp/tools.rs`
+
+**Shared infrastructure reused by MCP:**
+- `repl/commands.rs` — command parsing (`parse()`, `execute()`)
+- `repl/json_formatter.rs` — Arrow RecordBatch to JSON conversion
+- `repl/commands/sql.rs` — SQL execution with 1000-row hard limit
+
 ## Design Patterns
 
 1. **Plugin Architecture**: Extensible adapter system for new data sources
