@@ -6,7 +6,7 @@
 
 ## Context
 
-Operations like `filter()`, `attach()`, and `remove_column()` modify the container. The question was how these methods should interact with Rust's ownership system and how to enable method chaining.
+Operations like `filter()`, `attach()`, and `drop_column()` modify the container. The question was how these methods should interact with Rust's ownership system and how to enable method chaining.
 
 ### Alternatives Considered
 
@@ -59,7 +59,7 @@ impl BundleBuilder {
         Ok(self)
     }
 
-    pub fn remove_column(&mut self, name: &str) -> Result<&mut Self> {
+    pub fn drop_column(&mut self, name: &str) -> Result<&mut Self> {
         self.operations.push(Operation::RemoveColumn(name.to_string()));
         Ok(self)
     }
@@ -74,7 +74,7 @@ let mut container = BundleBuilder::create("/path").await?;
 container
     .attach("data.parquet")?
     .filter("age >= 18")?
-    .remove_column("ssn")?
+    .drop_column("ssn")?
     .rename_column("name", "full_name")?;
 ```
 
@@ -128,7 +128,7 @@ Builder::new()
 ```rust
 container
     .filter("a")?
-    .select(["col"])? // &mut reference through chain
+    .query("SELECT col FROM bundle")? // &mut reference through chain
 ```
 
 ## Python Mapping
@@ -140,7 +140,7 @@ Python doesn't distinguish `&mut` from ownership, so the mapping is straightforw
 c = await bundlebase.create()
 c.attach("data.parquet")\
   .filter("age >= 18")\
-  .remove_column("ssn")
+  .drop_column("ssn")
 ```
 
 Implementation: PyO3 methods return `clone()` of `self` to Python (Python can't hold Rust references):

@@ -24,7 +24,7 @@
     c = bb.create("s3://mybucket/path")
         .attach("data.parquet")
         .filter("age >= 18")
-        .remove_column("ssn")
+        .drop_column("ssn")
         .rename_column("fname", "first_name")
 
     c.commit("Created initial bundle")
@@ -37,7 +37,7 @@
 
     c = bb.open("s3://mybucket/path")
     print(c.to_pandas())
-    print(bb.select("select * from bundle where revenue > 100"))
+    print(c.query("select * from bundle where revenue > 100").to_pandas())
     ```
 
 === "Async API"
@@ -50,7 +50,7 @@
     c = await (bb.create("s3://mybucket/path")
         .attach("data.parquet")
         .filter("age >= 18")
-        .remove_column("ssn")
+        .drop_column("ssn")
         .rename_column("fname", "first_name"))
 
     await c.commit("Created initial bundle")
@@ -64,7 +64,7 @@
     c = await bb.open("s3://mybucket/path")
 
     print(await c.to_pandas())
-    print(await bb.select("select * from bundle where revenue > 100"))
+    print((await c.query("select * from bundle where revenue > 100")).to_pandas())
     ```
 
 ## Next Steps

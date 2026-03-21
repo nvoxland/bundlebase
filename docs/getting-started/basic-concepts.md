@@ -59,7 +59,7 @@ c = await bb.create("my/bundle")
 # You can transform it
 await c.attach("data.parquet")
 await c.filter("age >= 18")
-await c.remove_column("ssn")
+await c.drop_column("ssn")
 ```
 
 !!! tip "All Mutations Are In-Place"
@@ -74,7 +74,7 @@ Bundlebase uses **lazy evaluation** - operations are recorded but not executed i
 c = await bb.create("my/path")
 c = await c.attach("data.parquet")
 c = await c.filter("age >= 18")
-c = await c.remove_column("ssn")
+c = await c.drop_column("ssn")
 
 # Execution happens here when you export
 df = await c.to_pandas()  # Now the pipeline executes

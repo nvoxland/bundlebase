@@ -67,7 +67,7 @@ Without clear boundaries:
 **BundleBuilder** (mutable):
 - Contains uncommitted operations
 - All mutation methods take `&mut self` and return `&mut Self`
-- Methods: `attach()`, `filter()`, `remove_column()`, `commit()`
+- Methods: `attach()`, `filter()`, `drop_column()`, `commit()`
 - Wraps a base Bundle + list of new operations
 
 ### Implementation Details
@@ -151,7 +151,7 @@ let mut builder = BundleBuilder::create("/path").await?;
 builder
     .attach("data.parquet")?
     .filter("active = true")?
-    .remove_column("temp")?;
+    .drop_column("temp")?;
 
 // Commit creates immutable snapshot
 builder.commit("Initial load").await?;

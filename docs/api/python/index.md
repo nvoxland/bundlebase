@@ -76,14 +76,14 @@ All mutation methods return `self` for fluent chaining:
 c = await (bundlebase.create()
     .attach("data.parquet")
     .filter("age >= 18")
-    .remove_column("ssn")
+    .drop_column("ssn")
     .rename_column("fname", "first_name"))
 
 # Sync
 c = (dc.create()
     .attach("data.parquet")
     .filter("age >= 18")
-    .remove_column("ssn")
+    .drop_column("ssn")
     .rename_column("fname", "first_name"))
 ```
 

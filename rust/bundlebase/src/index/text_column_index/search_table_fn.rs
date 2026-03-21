@@ -76,7 +76,7 @@ impl SearchTableFunction {
 impl TableFunctionImpl for SearchTableFunction {
     fn call(&self, args: &[Expr]) -> datafusion::common::Result<Arc<dyn TableProvider>> {
         let facade = self.facade.upgrade().ok_or_else(|| {
-            DataFusionError::Internal("Bundle has been dropped".to_string())
+            DataFusionError::Internal("Bundle has been dropped (while calling search() table function)".to_string())
         })?;
 
         let indexes = facade.indexes();

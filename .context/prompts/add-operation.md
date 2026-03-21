@@ -7,7 +7,7 @@ Use this template when adding a new operation to bundlebase's transformation pip
 Operations are transformations applied to data:
 - **Filtering**: `filter("age > 18")`
 - **Selection**: `select(["name", "age"])`
-- **Column manipulation**: `rename_column()`, `remove_column()`
+- **Column manipulation**: `rename_column()`, `drop_column()`
 - **Joining**: `join()` (future)
 - **Aggregation**: `aggregate()` (future)
 

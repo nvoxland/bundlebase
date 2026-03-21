@@ -33,8 +33,8 @@ Make sure you are importing the version you want to use
 
     # No await needed!
     c = bb.create()
-    c = bb.attach("data.parquet")
-    df = bb.to_pandas()
+    c = c.attach("data.parquet")
+    df = c.to_pandas()
     ```
 
 ## Creating Your First Bundle
@@ -98,7 +98,7 @@ Bundlebase provides APIs for transforming your data:
     await c.filter("age >= 18")
 
     # Remove columns
-    await c.remove_column("ssn")
+    await c.drop_column("ssn")
 
     # Rename columns
     await c.rename_column("fname", "first_name")
@@ -111,7 +111,7 @@ Bundlebase provides APIs for transforming your data:
     c.filter("age >= 18")
 
     # Remove columns
-    c.remove_column("ssn")
+    c.drop_column("ssn")
 
     # Rename columns
     c.rename_column("fname", "first_name")
@@ -150,7 +150,7 @@ All mutation methods return `self`, enabling clean method chaining:
     c = await (bb.create()
         .attach("data.parquet")
         .filter("active = true")
-        .remove_column("temp_field")
+        .drop_column("temp_field")
         .rename_column("old_name", "new_name"))
     ```
 
@@ -162,7 +162,7 @@ All mutation methods return `self`, enabling clean method chaining:
     c = (bb.create()
         .attach("data.parquet")
         .filter("active = true")
-        .remove_column("temp_field")
+        .drop_column("temp_field")
         .rename_column("old_name", "new_name"))
     ```
 
@@ -212,7 +212,7 @@ Bundlebase supports [Apache Datafusion SQL syntax](https://datafusion.apache.org
 === "Async API"
 
     ```python
-    rs = await c.select("select * from bundle where revenue > 100")
+    rs = await c.query("select * from bundle where revenue > 100")
     
     # Can export the rs like a bundle
     df = rs.to_polars()
@@ -221,7 +221,7 @@ Bundlebase supports [Apache Datafusion SQL syntax](https://datafusion.apache.org
 === "Sync API"
 
     ```python
-    rs = c.select("select * from bundle where revenue > 100")
+    rs = c.query("select * from bundle where revenue > 100")
     
     # Can export the rs like a bundle
     df = rs.to_polars()

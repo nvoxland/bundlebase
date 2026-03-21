@@ -55,7 +55,7 @@ Mutable bundle class returned by `create()` and transformation methods.
         - attach
         - add_column
         - cast_column
-        - remove_column
+        - drop_column
         - rename_column
         - filter
         - select
@@ -138,7 +138,7 @@ c = await c.attach("data.parquet")
 
 # Transform
 c = await c.filter("age >= 18")
-c = await c.remove_column("ssn")
+c = await c.drop_column("ssn")
 
 # Export
 df = await c.to_pandas()
@@ -152,7 +152,7 @@ import bundlebase
 c = await (bundlebase.create()
     .attach("data.parquet")
     .filter("active = true")
-    .remove_column("temp")
+    .drop_column("temp")
     .rename_column("old", "new"))
 
 df = await c.to_pandas()

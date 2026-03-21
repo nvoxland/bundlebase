@@ -40,7 +40,7 @@ import bundlebase
 c = await bundlebase.create()  # CreateChain
 c = await c.attach("data.parquet")  # OperationChain
 c = await c.filter("age >= 18")  # OperationChain
-c = await c.remove_column("ssn")  # OperationChain
+c = await c.drop_column("ssn")  # OperationChain
 
 # Final await executes all queued operations
 df = await c.to_pandas()
@@ -57,7 +57,7 @@ import bundlebase
 c = await (bundlebase.create()
     .attach("data.parquet")
     .filter("active = true")
-    .remove_column("temp"))
+    .drop_column("temp"))
 
 # Execute when needed
 df = await c.to_pandas()
@@ -113,12 +113,12 @@ c = await (bundlebase.create()
     .filter("age >= 18"))
 
 # Continue with direct calls
-c = await c.remove_column("ssn")
+c = await c.drop_column("ssn")
 c = await c.rename_column("fname", "first_name")
 
 # Or resume chaining
 c = await (c
-    .select(["id", "first_name", "last_name"])
+    .query("SELECT id, first_name, last_name FROM bundle")
     .filter("active = true"))
 
 df = await c.to_pandas()
@@ -135,13 +135,13 @@ Chaining enables clean, readable code:
 c = await (bundlebase.create()
     .attach("data.parquet")
     .filter("age >= 18")
-    .remove_column("ssn"))
+    .drop_column("ssn"))
 
 # Without chaining (more verbose)
 c = await bundlebase.create()
 c = await c.attach("data.parquet")
 c = await c.filter("age >= 18")
-c = await c.remove_column("ssn")
+c = await c.drop_column("ssn")
 ```
 
 ### 2. Performance
@@ -153,13 +153,13 @@ Operations are queued and executed together, reducing async overhead:
 c = await (bundlebase.create()
     .attach("data.parquet")
     .filter("age >= 18")
-    .remove_column("ssn"))  # All operations execute together
+    .drop_column("ssn"))  # All operations execute together
 
 # Less optimal: Multiple async calls
 c = await bundlebase.create()
 c = await c.attach("data.parquet")  # Separate async call
 c = await c.filter("age >= 18")  # Separate async call
-c = await c.remove_column("ssn")  # Separate async call
+c = await c.drop_column("ssn")  # Separate async call
 ```
 
 ### 3. Type Safety
@@ -173,7 +173,7 @@ import bundlebase
 c = await (bundlebase.create()
     .attach("data.parquet")  # Autocomplete available
     .filter("age >= 18")  # Autocomplete available
-    .remove_column("ssn"))  # Autocomplete available
+    .drop_column("ssn"))  # Autocomplete available
 ```
 
 ## Advanced Usage
@@ -193,8 +193,8 @@ if filter_active:
     chain = chain.filter("active = true")
 
 if remove_pii:
-    chain = chain.remove_column("email")
-    chain = chain.remove_column("phone")
+    chain = chain.drop_column("email")
+    chain = chain.drop_column("phone")
 
 # Execute final chain
 c = await chain
@@ -212,8 +212,8 @@ def clean_customer_data(chain: OperationChain) -> OperationChain:
     """Standard customer data cleaning."""
     return (chain
         .filter("active = true")
-        .remove_column("email")
-        .remove_column("phone")
+        .drop_column("email")
+        .drop_column("phone")
         .rename_column("fname", "first_name")
         .rename_column("lname", "last_name"))
 
@@ -238,7 +238,7 @@ chain = bundlebase.create().attach("data.parquet")
 # Add operations from a list
 operations = [
     ("filter", ["age >= 18"], {}),
-    ("remove_column", ["ssn"], {}),
+    ("drop_column", ["ssn"], {}),
     ("rename_column", ["fname", "first_name"], {}),
 ]
 
@@ -270,7 +270,7 @@ import bundlebase.sync as dc
 c = (dc.create()
     .attach("data.parquet")
     .filter("age >= 18")
-    .remove_column("ssn"))
+    .drop_column("ssn"))
 
 df = c.to_pandas()  # No await needed
 ```

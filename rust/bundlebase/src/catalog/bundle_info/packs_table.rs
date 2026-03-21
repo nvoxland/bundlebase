@@ -34,7 +34,7 @@ impl BundlePacksTable {
 
     fn facade(&self) -> Result<Arc<dyn BundleFacade>> {
         self.facade.upgrade().ok_or_else(|| {
-            datafusion::error::DataFusionError::Internal("Bundle has been dropped".to_string())
+            datafusion::error::DataFusionError::Internal("Bundle has been dropped (while accessing bundle_info.packs)".to_string())
         })
     }
 

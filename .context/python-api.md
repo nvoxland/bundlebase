@@ -26,12 +26,12 @@ await c.import_function(
 )
 
 # Transform data (modifies container in place)
-await c.remove_column("title")
+await c.drop_column("title")
 await c.rename_column("first_name", "full_name")
 
 # Chain multiple operations (each mutates the container)
 await c.filter("salary > $1", [50000])
-await c.select("id", "full_name", "salary")
+await c.query("SELECT id, full_name, salary FROM bundle")
 
 # Access metadata (properties, not methods)
 print(f"Name: {c.name}")  # Property access
@@ -56,7 +56,7 @@ c = await Bundlebase.create("/path/to/container")
 c = await c.attach("data.parquet")
 
 # c is now modified with the attached data
-c = await c.remove_column("title")  # c is further modified
+c = await c.drop_column("title")  # c is further modified
 c = await c.rename_column("name", "full_name")  # c continues to be modified
 
 # All modifications are on the same container instance
@@ -78,7 +78,7 @@ c = await Bundlebase.open("/my/container/dir")
 ## Supported Mutation Methods
 
 - `attach(url)` - Add data source
-- `remove_column(name)` - Remove column
+- `drop_column(name)` - Remove column
 - `rename_column(old_name, new_name)` - Rename column
 - `standardize_column_names()` - Convert all column names to lowercase+underscore identifiers
 - `add_column(name, expression)` - Add a computed column using a SQL expression
@@ -440,13 +440,13 @@ c = await bundlebase.create("/path/to/container")
 await c.attach("customers.csv")
 await c.commit("Initial data")
 
-# Create view from select
-adults = await c.select("select * where age > 21")
+# Create view from query
+adults = await c.query("SELECT * FROM bundle WHERE age > 21")
 await c.create_view("adults", adults)
 await c.commit("Add adults view")
 
 # Create view with multiple operations
-working_age = await c.select("select * where age > 21")
+working_age = await c.query("SELECT * FROM bundle WHERE age > 21")
 await working_age.filter("age < 65")
 await c.create_view("working_age", working_age)
 await c.commit("Add working age view")
@@ -459,7 +459,7 @@ await c.create_view(name: str, source: BundleBuilder) -> BundleBuilder
 
 **Parameters:**
 - `name` - Unique name for the view
-- `source` - BundleBuilder containing operations to capture (typically from `select()`)
+- `source` - BundleBuilder containing operations to capture (typically from `query()`)
 
 **Returns:** Self (for method chaining)
 
@@ -503,7 +503,7 @@ view = await c.view("adults")
 # Create view
 await c.attach("data-1.csv")
 await c.commit("v1")
-active = await c.select("select * where status = 'active'")
+active = await c.query("SELECT * FROM bundle WHERE status = 'active'")
 await c.create_view("active", active)
 await c.commit("v2")
 
@@ -522,8 +522,8 @@ view = await c_reopened.view("active")  # Sees both data-1.csv and data-2.csv
 **Reusable filters:**
 ```python
 # Define standard views
-await c.create_view("high_value", await c.select("select * where amount > 1000"))
-await c.create_view("recent", await c.select("select * where date > today() - 30"))
+await c.create_view("high_value", await c.query("SELECT * FROM bundle WHERE amount > 1000"))
+await c.create_view("recent", await c.query("SELECT * FROM bundle WHERE date > today() - 30"))
 await c.commit("Add standard views")
 
 # Use later
@@ -533,7 +533,7 @@ high_value_data = await c.view("high_value")
 **Multi-tenant access:**
 ```python
 # Create per-tenant views
-tenant_a = await c.select("select * where tenant_id = 'A'")
+tenant_a = await c.query("SELECT * FROM bundle WHERE tenant_id = 'A'")
 await c.create_view("tenant_a", tenant_a)
 await c.commit("Add tenant views")
 ```
@@ -548,11 +548,11 @@ except Exception as e:
     print(f"Error: {e}")  # "View 'nonexistent' not found"
 
 # Duplicate view name
-await c.create_view("adults", await c.select("select * where age > 21"))
+await c.create_view("adults", await c.query("SELECT * FROM bundle WHERE age > 21"))
 await c.commit("v1")
 
 try:
-    await c.create_view("adults", await c.select("select * where age > 30"))
+    await c.create_view("adults", await c.query("SELECT * FROM bundle WHERE age > 30"))
 except Exception as e:
     print(f"Error: {e}")  # "View 'adults' already exists"
 ```

@@ -44,7 +44,7 @@ c.attach("userdata.parquet")
 
 # Transform
 c.filter("salary > 50000")
-c.remove_column("email")
+c.drop_column("email")
 
 # Export
 df = c.to_pandas()
@@ -112,9 +112,9 @@ All operations work synchronously without `await`:
   c.attach("ipc::./my_connector")  # Custom connector
   ```
 
-- **`remove_column(name: str)`** - Remove column
+- **`drop_column(name: str)`** - Remove column
   ```python
-  c.remove_column("unwanted_col")
+  c.drop_column("unwanted_col")
   ```
 
 - **`rename_column(old: str, new: str)`** - Rename column
@@ -144,25 +144,15 @@ All operations work synchronously without `await`:
   c.filter("status = $1 AND active = true", ["active"])
   ```
 
-- **`select(*columns: str)`** - Select columns
+- **`join(name: str, on: str, location: Optional[str] = None, how: str = "inner")`** - Join with data
   ```python
-  c.select("id", "name", "salary")
+  c.join("sales", "customer_id = sale_customer", "sales.parquet", how="left")
   ```
 
-- **`join(name: str, url: str, on: str, how: str = "inner")`** - Join with data
+- **`query(sql: str, params: List = [])`** - Execute a SQL query and return streaming results
   ```python
-  c.join("sales", "sales.parquet", "customer_id = sale_customer", how="left")
-  ```
-
-- **`attach(name: str, location: str)`** - Attach data source for joining
-  ```python
-  c.attach("sales", "sales.parquet")
-  ```
-
-- **`select(sql: str, params: List = [])`** - Execute SQL (SELECT keyword is auto-prepended if missing)
-  ```python
-  c.select("SELECT * FROM bundle WHERE id = $1 LIMIT 10", [42])
-  c.select("* FROM bundle LIMIT 10")  # SELECT is auto-prepended
+  result = c.query("SELECT id, name FROM bundle WHERE id = $1 LIMIT 10", [42])
+  df = result.to_pandas()
   ```
 
 - **`set_name(name: str)`** - Set container name
@@ -201,7 +191,7 @@ Since all mutation methods return `self`, you can chain operations without inter
 ```python
 df = (dc.create()
       .attach("data.parquet")
-      .remove_column("email")
+      .drop_column("email")
       .filter("active = true")
       .rename_column("fname", "first_name")
       .to_pandas())
@@ -211,7 +201,7 @@ This is equivalent to:
 ```python
 c = dc.create()
 c.attach("data.parquet")
-c.remove_column("email")
+c.drop_column("email")
 c.filter("active = true")
 c.rename_column("fname", "first_name")
 df = c.to_pandas()
@@ -229,9 +219,9 @@ c = dc.create()
 c.attach("raw_users.csv")
 
 # Remove personal info for privacy
-c.remove_column("email")
-c.remove_column("phone")
-c.remove_column("address")
+c.drop_column("email")
+c.drop_column("phone")
+c.drop_column("address")
 
 # Filter to active users
 c.filter("status = $1", ["active"])
@@ -415,7 +405,7 @@ except ValueError as e:
     print(f"Failed to load data: {e}")
 
 try:
-    c.remove_column("nonexistent")
+    c.drop_column("nonexistent")
 except ValueError as e:
     print(f"Column not found: {e}")
 ```

@@ -65,7 +65,7 @@ import bundlebase.sync as dc
 c = dc.create()
 c.attach("userdata.parquet")
 c.filter("salary > 50000")
-c.remove_column("email")
+c.drop_column("email")
 
 # Export
 df = c.to_pandas()
@@ -79,7 +79,7 @@ import bundlebase.sync as dc
 
 df = (dc.create()
       .attach("data.parquet")
-      .remove_column("email")
+      .drop_column("email")
       .filter("active = true")
       .rename_column("fname", "first_name")
       .to_pandas())

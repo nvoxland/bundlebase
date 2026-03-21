@@ -344,7 +344,7 @@ def filter(self, expr: str) -> "Container":
     return self  # ✅ Enables chaining
 ```
 
-## Example: Wrapping `remove_column()`
+## Example: Wrapping `drop_column()`
 
 Complete example of wrapping a Rust method:
 
@@ -355,8 +355,8 @@ Complete example of wrapping a Rust method:
 
 #[pymethods]
 impl PyBundleBuilder {
-    fn remove_column(&mut self, name: String) -> PyResult<Self> {
-        self.inner.remove_column(&name)
+    fn drop_column(&mut self, name: String) -> PyResult<Self> {
+        self.inner.drop_column(&name)
             .map_err(|e| PyErr::new::<PyRuntimeError, _>(
                 format!("Failed to remove column '{}': {}", name, e)
             ))?;
@@ -371,7 +371,7 @@ impl PyBundleBuilder {
 # python/bundlebase/container.py
 
 class AsyncContainer:
-    async def remove_column(self, name: str) -> "AsyncContainer":
+    async def drop_column(self, name: str) -> "AsyncContainer":
         """Remove a column from the dataset.
 
         Args:
@@ -386,10 +386,10 @@ class AsyncContainer:
         Example:
             >>> c = await bundlebase.create_async()
             >>> await c.attach("data.parquet")
-            >>> await c.remove_column("ssn")  # Remove sensitive column
+            >>> await c.drop_column("ssn")  # Remove sensitive column
             >>> df = await c.to_pandas()
         """
-        await self._inner.remove_column(name)
+        await self._inner.drop_column(name)
         return self
 ```
 
@@ -399,7 +399,7 @@ class AsyncContainer:
 # python/bundlebase/container_sync.py
 
 class Container:
-    def remove_column(self, name: str) -> "Container":
+    def drop_column(self, name: str) -> "Container":
         """Remove a column from the dataset.
 
         Args:
@@ -414,32 +414,32 @@ class Container:
         Example:
             >>> c = bundlebase.create()
             >>> c.attach("data.parquet")
-            >>> c.remove_column("ssn")  # Remove sensitive column
+            >>> c.drop_column("ssn")  # Remove sensitive column
             >>> df = c.to_pandas()
         """
-        sync(self._async_impl.remove_column(name))
+        sync(self._async_impl.drop_column(name))
         return self
 ```
 
 ### 4. Tests
 
 ```python
-# python/tests/test_remove_column.py
+# python/tests/test_drop_column.py
 
-def test_remove_column():
+def test_drop_column():
     c = bundlebase.create()
     c.attach("tests/data/sample.parquet")
-    c.remove_column("age")
+    c.drop_column("age")
 
     df = c.to_pandas()
     assert "age" not in df.columns
 
-def test_remove_column_error():
+def test_drop_column_error():
     c = bundlebase.create()
     c.attach("tests/data/sample.parquet")
 
     with pytest.raises(RuntimeError, match="Column.*not found"):
-        c.remove_column("nonexistent")
+        c.drop_column("nonexistent")
 ```
 
 ## Success Criteria

@@ -27,7 +27,7 @@ When users call operations like `filter()` or `select()`, should the operation e
 **Option 1: Eager/immediate execution** (like Pandas)
 ```rust
 container.filter("age > 18"); // Executes filter immediately
-container.select(["name"]); // Executes select immediately
+container.query("SELECT name FROM bundle"); // Executes query immediately
 df = container.to_pandas(); // Just returns already-filtered data
 ```
 - Pros: Simple, immediate feedback on errors
@@ -36,7 +36,7 @@ df = container.to_pandas(); // Just returns already-filtered data
 **Option 2: Fully lazy** (like Spark RDDs)
 ```rust
 container.filter("age > 18"); // Records operation
-container.select(["name"]); // Records operation
+container.query("SELECT name FROM bundle"); // Records operation
 df = container.to_pandas(); // NOW executes entire pipeline
 ```
 - Pros: Maximum optimization potential, deferred execution
@@ -45,7 +45,7 @@ df = container.to_pandas(); // NOW executes entire pipeline
 **Option 3: Hybrid lazy** (chosen - like DataFusion)
 ```rust
 container.filter("age > 18")?; // Records + validates
-container.select(["name"])?; // Records + validates schema
+container.query("SELECT name FROM bundle")?; // Records + validates schema
 df = container.to_pandas().await?; // Executes pipeline
 ```
 - Pros: Early validation, optimization potential, clear execution point
@@ -81,7 +81,7 @@ pub trait Operation {
 ```rust
 // User code
 container.filter("age >= 18")?; // Phase 1+2: validate, update schema
-container.select(["name"])?; // Phase 1+2: validate, update schema
+container.query("SELECT name FROM bundle")?; // Phase 1+2: validate, update schema
 
 // Later... (maybe much later)
 df = container.to_pandas().await?; // Phase 3: execute all operations
@@ -175,7 +175,7 @@ Lazy evaluation enables optimizations:
 // User code
 container
     .filter("age >= 18")?
-    .select(["name", "age"])?
+    .query("SELECT name, age FROM bundle")?
     .filter("age < 65")?;
 
 // Optimizer can:
@@ -189,13 +189,13 @@ container
 **What users see**:
 ```python
 c.filter("age >= 18") # "Records filter operation"
-c.select(["name"]) # "Records select operation"
+c.query("SELECT name FROM bundle") # "Records query operation"
 df = await c.to_pandas() # "NOW executes pipeline"
 ```
 
 **What happens internally**:
 1. `filter()` - validate SQL, update schema, record operation
-2. `select()` - validate columns exist, update schema, record operation
+2. `query()` - validate columns exist, update schema, record operation
 3. `to_pandas()` - execute all recorded operations via DataFusion
 
 ## Related Decisions

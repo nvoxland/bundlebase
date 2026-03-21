@@ -99,9 +99,9 @@ import bundlebase as bb
 # Remove sensitive columns
 c = await (bb.create("memory:///")
     .attach("file:///path/data.parquet")
-    .remove_column("ssn")
-    .remove_column("credit_card")
-    .remove_column("password"))
+    .drop_column("ssn")
+    .drop_column("credit_card")
+    .drop_column("password"))
 
 df = await c.to_pandas()
 ```
@@ -176,7 +176,7 @@ import bundlebase as bb
 
 c = await (bb.create("memory:///")
     .attach("file:///path/data.parquet")
-    .select(["x", "y", "z"]))
+    .query("SELECT x, y, z FROM bundle"))
 
 # Convert to NumPy arrays
 arrays = await c.to_numpy()
@@ -216,8 +216,8 @@ import bundlebase as bb
 
 c = await (bb.create("memory:///")
     .attach("file:///path/data.parquet")
-    .define_index("email")  # Create index on email column
-    .define_index("user_id"))  # Create index on user_id column
+    .create_index("email")  # Create index on email column
+    .create_index("user_id"))  # Create index on user_id column
 
 # Queries on indexed columns will be faster
 c = await c.filter("email = 'user@example.com'")
@@ -235,10 +235,10 @@ c = await (bundlebase.create("/path/to/cleaned_data")
     .attach("raw_orders.csv")
 
     # Remove PII
-    .remove_column("ssn")
-    .remove_column("email")
-    .remove_column("phone")
-    .remove_column("credit_card")
+    .drop_column("ssn")
+    .drop_column("email")
+    .drop_column("phone")
+    .drop_column("credit_card")
 
     # Filter to active records
     .filter("status = 'active'")
@@ -251,15 +251,7 @@ c = await (bundlebase.create("/path/to/cleaned_data")
     .rename_column("zip", "postal_code")
 
     # Select final columns
-    .select([
-        "id",
-        "first_name",
-        "last_name",
-        "address",
-        "postal_code",
-        "country",
-        "order_total"
-    ]))
+    .query("SELECT id, first_name, last_name, address, postal_code, country, order_total FROM bundle"))
 
 # Export cleaned data
 df = await c.to_pandas()

@@ -55,7 +55,7 @@ c = await bundlebase.create("/path/to/container")
 await c.attach("data.parquet")
 
 # Transform data (mutations are in-place)
-await c.remove_column("unwanted")
+await c.drop_column("unwanted")
 await c.filter("active = true")
 
 # Export results

@@ -204,8 +204,8 @@ impl BundleBuilder {
 // Usage: Fluent chaining
 let container = builder
     .filter("age >= 18")
-    .select(vec!["name", "email"])
-    .remove_column("temp");
+    .query("SELECT name, email FROM bundle")?
+    .drop_column("temp");
 
 // ❌ WRONG: Returns () - breaks chaining
 impl BundleBuilder {
@@ -229,7 +229,7 @@ impl BundleBuilder {
 ```python
 # These operations are RECORDED, not executed
 c = c.filter("age >= 18")    # Adds FilterBlock to operations list
-c = c.select(["name"])       # Adds SelectColumns to operations list
+c = c.query("SELECT name FROM bundle")  # Adds query to operations list
 
 # THIS executes all recorded operations
 df = await c.to_pandas()     # NOW queries run

@@ -247,7 +247,16 @@ impl SyncSubprocessHandle {
         let done_clone = Arc::clone(&done);
 
         let watchdog = std::thread::spawn(move || {
-            std::thread::sleep(timeout);
+            // Poll the done flag in short intervals so the thread exits promptly
+            // after the read completes, instead of sleeping the full timeout.
+            let check_interval = Duration::from_millis(100);
+            let start = std::time::Instant::now();
+            while start.elapsed() < timeout {
+                std::thread::sleep(check_interval);
+                if done_clone.load(std::sync::atomic::Ordering::Acquire) {
+                    return;
+                }
+            }
             if !done_clone.load(std::sync::atomic::Ordering::Acquire) {
                 log::warn!(
                     "IPC subprocess (pid {}) timed out after {} seconds, sending kill signal",
@@ -274,7 +283,7 @@ impl SyncSubprocessHandle {
         // Signal the watchdog that the read completed.
         done.store(true, std::sync::atomic::Ordering::Release);
 
-        // Detach the watchdog — it will exit on its own after the sleep.
+        // Detach the watchdog — it will exit within ~100ms now that done is set.
         drop(watchdog);
 
         let bytes_read = result.map_err(|e| {
@@ -305,7 +314,14 @@ impl SyncSubprocessHandle {
         let done_clone = Arc::clone(&done);
 
         let watchdog = std::thread::spawn(move || {
-            std::thread::sleep(timeout);
+            let check_interval = Duration::from_millis(100);
+            let start = std::time::Instant::now();
+            while start.elapsed() < timeout {
+                std::thread::sleep(check_interval);
+                if done_clone.load(std::sync::atomic::Ordering::Acquire) {
+                    return;
+                }
+            }
             if !done_clone.load(std::sync::atomic::Ordering::Acquire) {
                 log::warn!(
                     "IPC subprocess (pid {}) timed out after {} seconds during binary read, sending kill signal",
@@ -470,12 +486,17 @@ impl Drop for SyncSubprocessHandle {
     fn drop(&mut self) {
         log::debug!("Killing IPC function subprocess during drop");
         let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
 // ---------------------------------------------------------------------------
 // Per-connection subprocess cache
 // ---------------------------------------------------------------------------
+
+/// Maximum number of live subprocesses per session. When exceeded, an arbitrary
+/// entry is evicted (killed) to make room. Each subprocess uses 10-50 MB.
+const MAX_SUBPROCESS_CACHE_SIZE: usize = 32;
 
 /// Per-connection cache of IPC subprocess handles.
 ///
@@ -489,6 +510,33 @@ pub type SubprocessCache = Arc<DashMap<String, Arc<Mutex<SyncSubprocessHandle>>>
 /// Create a new, empty subprocess cache.
 pub fn new_subprocess_cache() -> SubprocessCache {
     Arc::new(DashMap::new())
+}
+
+/// Evict entries from the cache if it exceeds `MAX_SUBPROCESS_CACHE_SIZE`.
+///
+/// Removes arbitrary entries (not the one just inserted) to bring the cache
+/// back under the limit. Removed entries drop their `SyncSubprocessHandle`,
+/// which kills the subprocess.
+fn evict_if_over_capacity(cache: &SubprocessCache, keep_key: &str) {
+    while cache.len() > MAX_SUBPROCESS_CACHE_SIZE {
+        // Find a key to evict that isn't the one we just inserted.
+        let victim = cache
+            .iter()
+            .find(|entry| entry.key() != keep_key)
+            .map(|entry| entry.key().clone());
+
+        if let Some(key) = victim {
+            log::info!(
+                "Subprocess cache over limit ({}/{}), evicting '{}'",
+                cache.len(),
+                MAX_SUBPROCESS_CACHE_SIZE,
+                key
+            );
+            cache.remove(&key);
+        } else {
+            break;
+        }
+    }
 }
 
 /// Normalize an entrypoint string for use as a cache key.
@@ -562,7 +610,7 @@ fn get_or_spawn_subprocess(
     // Slow path: spawn subprocess and insert.
     // DashMap's entry API ensures only one thread spawns per key.
     let handle = cache
-        .entry(cache_key)
+        .entry(cache_key.clone())
         .or_try_insert_with(|| {
             let command = parse_call(entrypoint)?;
             let h = SyncSubprocessHandle::spawn(&command, timeout)?;
@@ -570,20 +618,32 @@ fn get_or_spawn_subprocess(
         })
         .map_err(|e: BundlebaseError| e)?;
 
-    Ok(Arc::clone(handle.value()))
+    let result = Arc::clone(handle.value());
+    drop(handle);
+
+    // Evict old entries if over capacity.
+    evict_if_over_capacity(cache, &cache_key);
+
+    Ok(result)
 }
 
-/// Acquire the subprocess lock, recovering from poisoning.
+/// Acquire the subprocess lock, recovering from poisoning by killing and
+/// re-spawning the subprocess.
 ///
-/// Lock poisoning occurs when a thread panics while holding the lock. Since the
-/// protected data is just I/O handles (stdin/stdout pipes), it is safe to recover
-/// by taking ownership of the inner data via `into_inner()`.
+/// Lock poisoning occurs when a thread panics while holding the lock. The
+/// subprocess may have corrupted I/O buffers from the panic, so we kill it
+/// and let it be re-spawned on next use via `get_or_spawn_subprocess`.
 fn acquire_lock(
     handle: &Arc<Mutex<SyncSubprocessHandle>>,
 ) -> std::sync::MutexGuard<'_, SyncSubprocessHandle> {
     handle.lock().unwrap_or_else(|poisoned| {
-        log::warn!("IPC subprocess mutex was poisoned, recovering");
-        poisoned.into_inner()
+        log::warn!("IPC subprocess mutex was poisoned, killing subprocess for clean re-spawn");
+        let mut guard = poisoned.into_inner();
+        // Kill the potentially-corrupted subprocess so the next call to
+        // get_or_spawn_subprocess will detect the exit and re-spawn.
+        let _ = guard.child.kill();
+        let _ = guard.child.wait();
+        guard
     })
 }
 

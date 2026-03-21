@@ -118,7 +118,7 @@ Usage  │ │ │ │ │ │ │ │ │ Constant
 
 ```python
 # Only reads "name" and "age" columns from Parquet
-c.select(["name", "age"])
+c.query("SELECT name, age FROM bundle")
 df = c.to_pandas()
 
 # DataFusion automatically pushes projection to ParquetExec
@@ -157,7 +157,7 @@ df = c.to_pandas()
 ```python
 # These operations don't execute yet (just recorded)
 c.filter("age > 18")  # Recorded
-c.select(["name"])     # Recorded
+c.query("SELECT name FROM bundle")  # Recorded
 c.filter("age < 65")   # Recorded
 
 # Execution happens here (all operations in single pass)
@@ -283,7 +283,7 @@ names = df["name"]  # Only needed one column
 
 **Right:**
 ```python
-c.select(["name"])  # Project before reading
+c.query("SELECT name FROM bundle")  # Project before reading
 df = c.to_pandas()  # Reads only 1 column
 ```
 
