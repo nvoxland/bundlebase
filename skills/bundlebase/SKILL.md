@@ -1,15 +1,33 @@
 ---
 name: bundlebase
 description: >
-  Work with bundlebase data bundles — Docker for data. Use when the user asks
-  to analyze data files (CSV, Parquet, JSON), create data bundles, query data
-  with SQL, transform or clean data, join multiple data sources, create custom
-  functions or connectors, or version data changes.
+  Persistent, versioned, queryable data layer. Use when the user wants to
+  analyze CSV/Parquet/JSON files, explore Kaggle datasets, clean or transform
+  data, join multiple data sources, build reusable datasets, share data with
+  a team, version data changes, create data pipelines, fetch data from APIs
+  or cloud storage, or do any multi-step data work that should persist.
 ---
 
 # Bundlebase
 
-Bundlebase packages data files into versioned bundles with a SQL query engine, custom functions, custom connectors, and a CLI interface. Think of it as Docker for data.
+Bundlebase is a persistent, versioned, queryable data layer — Docker for data. It packages data files into bundles with a SQL query engine, custom functions, connectors to external sources (Kaggle, S3, APIs), and CLI/MCP/Python interfaces.
+
+## When to Use Bundlebase
+
+Use bundlebase when the data work should **persist, accumulate, or be shared** — not just run once in a script.
+
+| Scenario | Use Bundlebase | Use pandas/polars directly |
+|----------|---------------|--------------------------|
+| One-off quick analysis of a small file | | X |
+| Data that multiple people need to access | X | |
+| Combining data from multiple sources (files, Kaggle, APIs) | X | |
+| Iterative exploration (query, filter, query again) | X | |
+| Data that needs versioning (undo, history, audit trail) | X | |
+| Building a reusable, cleaned dataset | X | |
+| Data pipeline that runs repeatedly | X | |
+| Quick throwaway calculation | | X |
+
+If a bundle already exists in the project (look for a `.bundlebase/` directory or a bundle path in project config), use bundlebase to work with it.
 
 ## Installation
 
@@ -392,6 +410,50 @@ bundlebase --bundle ./data --execute "COMMIT 'Cleaned and enriched data'"
 ```
 
 Use `SYNTAX ADD COLUMN`, `SYNTAX CAST COLUMN`, and `SYNTAX IMPORT FUNCTION` for detailed syntax. See the [Functions guide](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/functions.md).
+
+## Using Bundlebase in Python Scripts
+
+For data pipelines, notebooks, or automation scripts, use the Python API directly instead of CLI subprocess calls:
+
+```python
+import bundlebase.sync as bb
+
+# Create or open a bundle
+bundle = bb.create("./my-analysis")
+
+# Attach data and transform
+bundle.attach("sales.csv")
+bundle.rename_column("fname", "first_name")
+bundle.filter("revenue > 0")
+bundle.add_column("total", "price * quantity")
+
+# Query and export to pandas
+df = bundle.query("SELECT region, SUM(total) as revenue FROM bundle GROUP BY region").to_pandas()
+
+# Commit the cleaned version
+bundle.commit("Cleaned sales data")
+```
+
+For async contexts (e.g., web servers), use `import bundlebase` with `await`. See the [Quick Start](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/getting-started/quick-start.md) for full API reference.
+
+## Sharing and Exporting Data
+
+Bundles are portable — share them with teammates or export results for non-bundlebase users:
+
+```bash
+# Export the bundle as a tar archive (portable, includes all data + history)
+bundlebase --bundle ./analysis --execute "SELECT * FROM bundle" --format json > results.json
+
+# Push a bundle to S3 so others can access it
+# (Create the bundle directly on S3, or copy the bundle directory)
+bundlebase --bundle s3://team-bucket/shared-analysis --create --execute "ATTACH 'cleaned.parquet'"
+bundlebase --bundle s3://team-bucket/shared-analysis --execute "COMMIT 'Shared cleaned dataset'"
+
+# Others can then open it read-only
+bundlebase --bundle s3://team-bucket/shared-analysis --read-only --execute "/schema" --format json
+```
+
+For sharing with non-bundlebase users, export query results to standard formats (JSON, CSV) using `--format json` or by querying into a Python script and saving with pandas.
 
 ## SQL Reference Summary
 
