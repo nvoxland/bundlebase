@@ -53,6 +53,7 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
         .query(
             "select Index, City from bundle where Email='elizabethbarr@ewing.com'",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<_> = stream.try_collect().await?;
@@ -121,6 +122,7 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
         .query(
             "select Index, City from bundle where Email='elizabethbarr@ewing.com'",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<_> = stream.try_collect().await?;
@@ -527,6 +529,7 @@ async fn test_query_path_index_with_parameterized_filter() -> Result<(), Bundleb
             vec![ScalarValue::Utf8(Some(
                 "elizabethbarr@ewing.com".to_string(),
             ))],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -590,6 +593,7 @@ async fn test_search_single_column() -> Result<(), BundlebaseError> {
         .query(
             "SELECT \"Index\", \"Company\" FROM search('company_search', 'Group')",
             vec![],
+            None,
         )
         .await?;
 
@@ -643,6 +647,7 @@ async fn test_search_no_results() -> Result<(), BundlebaseError> {
         .query(
             "SELECT \"Index\", \"Company\" FROM search('company_search', 'zzzznonexistent')",
             vec![],
+            None,
         )
         .await?;
 
@@ -681,6 +686,7 @@ async fn test_search_multi_column() -> Result<(), BundlebaseError> {
         .query(
             "SELECT \"Company\", \"City\" FROM search('multi_search', 'Company:group')",
             vec![],
+            None,
         )
         .await?;
 
@@ -734,6 +740,7 @@ async fn test_search_with_score_ordering() -> Result<(), BundlebaseError> {
         .query(
             "SELECT \"Company\", _score FROM search('company_search', 'Group') ORDER BY _score DESC",
             vec![],
+            None,
         )
         .await?;
 
@@ -789,6 +796,7 @@ async fn test_search_tantivy_boolean_syntax() -> Result<(), BundlebaseError> {
         .query(
             "SELECT \"Company\", \"City\" FROM search('multi_search', '+Company:group +City:east')",
             vec![],
+            None,
         )
         .await?;
 
@@ -843,6 +851,7 @@ async fn test_search_with_additional_where() -> Result<(), BundlebaseError> {
         .query(
             "SELECT \"Company\", \"City\" FROM search('company_search', 'group') WHERE \"City\" = 'East Leonard'",
             vec![],
+            None,
         )
         .await?;
 
@@ -902,6 +911,7 @@ async fn test_search_single_arg_with_one_text_index() -> Result<(), BundlebaseEr
         .query(
             "SELECT \"Company\" FROM search('Group')",
             vec![],
+            None,
         )
         .await?;
 
@@ -948,6 +958,7 @@ async fn test_search_single_arg_error_with_multiple_text_indexes() -> Result<(),
         .query(
             "SELECT \"Company\" FROM search('Group')",
             vec![],
+            None,
         )
         .await;
 
@@ -988,6 +999,7 @@ async fn test_create_index_after_rename_column() -> Result<(), BundlebaseError> 
         .query(
             "SELECT \"Index\" FROM bundle WHERE city = 'East Leonard'",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1022,6 +1034,7 @@ async fn test_create_index_after_standardize_column_names() -> Result<(), Bundle
         .query(
             "SELECT \"index\" FROM bundle WHERE city = 'East Leonard'",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1063,6 +1076,7 @@ async fn test_search_after_standardize_column_names() -> Result<(), BundlebaseEr
         .query(
             "SELECT company, city FROM search('search_idx', 'group')",
             vec![],
+            None,
         )
         .await?;
 
@@ -1123,6 +1137,7 @@ async fn test_search_with_projection_and_where_on_score() -> Result<(), Bundleba
         .query(
             "SELECT \"Company\", _score FROM search('multi_search', 'group') WHERE _score > 0",
             vec![],
+            None,
         )
         .await?;
 
@@ -1181,6 +1196,7 @@ async fn test_search_field_specific_after_standardize_column_names() -> Result<(
         .query(
             "SELECT company, city FROM search('search_idx', 'company:group')",
             vec![],
+            None,
         )
         .await?;
 
@@ -1243,6 +1259,7 @@ async fn test_search_after_chained_renames() -> Result<(), BundlebaseError> {
         .query(
             "SELECT co FROM search('search_idx', 'co:group')",
             vec![],
+            None,
         )
         .await?;
 
@@ -1305,6 +1322,7 @@ async fn test_cast_column_then_create_index() -> Result<(), BundlebaseError> {
         .query(
             "SELECT * FROM bundle WHERE \"Index\" = 1",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1381,6 +1399,7 @@ async fn test_create_index_then_cast_same_column() -> Result<(), BundlebaseError
         .query(
             "SELECT * FROM bundle WHERE \"Index\" = 1",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1421,6 +1440,7 @@ async fn test_cast_column_with_clean_then_create_index() -> Result<(), Bundlebas
         .query(
             "SELECT * FROM bundle WHERE \"Index\" = 1",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1464,6 +1484,7 @@ async fn test_search_with_add_column() -> Result<(), BundlebaseError> {
         .query(
             "SELECT \"Company\", company_upper, _score FROM search('company_search', 'Group')",
             vec![],
+            None,
         )
         .await?;
 
@@ -1532,6 +1553,7 @@ async fn test_search_with_cast_column() -> Result<(), BundlebaseError> {
         .query(
             "SELECT \"Index\", \"Company\", _score FROM search('company_search', 'Group')",
             vec![],
+            None,
         )
         .await?;
 
@@ -1625,6 +1647,7 @@ async fn test_create_column_index_on_added_column() -> Result<(), BundlebaseErro
         .query(
             "SELECT \"Company\", company_upper FROM bundle WHERE company_upper = 'RASMUSSEN GROUP'",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1691,6 +1714,7 @@ async fn test_create_text_index_on_added_column() -> Result<(), BundlebaseError>
         .query(
             "SELECT \"Company\", company_upper FROM search('upper_search', 'GROUP')",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1750,6 +1774,7 @@ async fn test_create_column_index_on_added_column_after_rename() -> Result<(), B
         .query(
             "SELECT company, company_upper FROM bundle WHERE company_upper = 'RASMUSSEN GROUP'",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1796,6 +1821,7 @@ async fn test_search_with_index_on_added_column() -> Result<(), BundlebaseError>
         .query(
             "SELECT \"Company\", company_upper FROM search('company_search', 'Group')",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1858,6 +1884,7 @@ async fn test_column_index_across_multiple_blocks() -> Result<(), BundlebaseErro
         .query(
             "select Email from bundle where Email='elizabethbarr@ewing.com'",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1868,6 +1895,7 @@ async fn test_column_index_across_multiple_blocks() -> Result<(), BundlebaseErro
         .query(
             "select Email from bundle where Email='olivia.reyes@armstrong.com'",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;
@@ -1904,6 +1932,7 @@ async fn test_text_search_across_multiple_blocks() -> Result<(), BundlebaseError
         .query(
             "SELECT \"Company\" FROM search('company_search', 'Group')",
             vec![],
+            None,
         )
         .await?;
     let rs: Vec<RecordBatch> = stream.try_collect().await?;

@@ -1105,6 +1105,7 @@ impl BundleFacade for Bundle {
         &self,
         sql: &str,
         params: Vec<ScalarValue>,
+        hard_limit: Option<usize>,
     ) -> Result<SendableRecordBatchStream, BundlebaseError> {
         let ctx = self.ctx();
 
@@ -1114,7 +1115,12 @@ impl BundleFacade for Bundle {
         let plan = plan.with_param_values(params)?;
 
         // Execute the parameterized plan
-        let result_df = ctx.execute_logical_plan(plan).await?;
+        let mut result_df = ctx.execute_logical_plan(plan).await?;
+
+        // Apply hard row limit if specified (DataFusion optimizes this in the physical plan)
+        if let Some(n) = hard_limit {
+            result_df = result_df.limit(0, Some(n))?;
+        }
 
         Ok(result_df.execute_stream().await?)
     }
@@ -1547,7 +1553,7 @@ mod tests {
 
         let bundle = Bundle::empty(None).await?;
 
-        let stream = bundle.query("SELECT * FROM bundle", vec![]).await?;
+        let stream = bundle.query("SELECT * FROM bundle", vec![], None).await?;
         let result_schema = stream.schema().clone();
         let batches: Vec<_> = stream.try_collect().await?;
 
@@ -1580,7 +1586,7 @@ mod tests {
         let bundle = Bundle::empty(None).await?;
 
         // This previously failed with "Invalid qualifier t" when the bundle had 0 columns
-        let stream = bundle.query("SELECT t.* FROM bundle t", vec![]).await?;
+        let stream = bundle.query("SELECT t.* FROM bundle t", vec![], None).await?;
         let batches: Vec<_> = stream.try_collect().await?;
 
         let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();

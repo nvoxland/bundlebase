@@ -1589,8 +1589,9 @@ impl BundleFacade for BundleBuilder {
         &self,
         sql: &str,
         params: Vec<ScalarValue>,
+        hard_limit: Option<usize>,
     ) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        Ok(self.bundle().query(sql, params).await?)
+        Ok(self.bundle().query(sql, params, hard_limit).await?)
     }
 
     fn views(&self) -> HashMap<ObjectId, String> {

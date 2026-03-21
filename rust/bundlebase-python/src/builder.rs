@@ -977,11 +977,12 @@ impl PyBundleBuilder {
         })
     }
 
-    #[pyo3(signature = (sql, params=None))]
+    #[pyo3(signature = (sql, params=None, hard_limit=None))]
     fn query<'py>(
         slf: PyRef<'_, Self>,
         sql: &str,
         params: Option<Vec<Py<PyAny>>>,
+        hard_limit: Option<usize>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
@@ -994,7 +995,7 @@ impl PyBundleBuilder {
             };
 
             let stream = inner
-                .query(sql.as_str(), params_vec)
+                .query(sql.as_str(), params_vec, hard_limit)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -1170,7 +1171,7 @@ impl PyBundleBuilder {
         let sql = format!("DESCRIBE FUNCTION {}", name);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let stream = inner
-                .query(&sql, vec![])
+                .query(&sql, vec![], None)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to describe function", e))?;
             let schema = std::sync::Arc::new(stream.schema().as_ref().clone());

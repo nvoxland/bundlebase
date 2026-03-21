@@ -6,10 +6,12 @@
 mod commands;
 mod completion;
 pub mod display;
+pub mod json_formatter;
 mod progress_impl;
 pub mod stream_formatter;
 pub mod table_utils;
 
+use super::OutputFormat;
 use bundlebase::{BundlebaseError, BundleFacade};
 use commands::{Command, ReplCommand};
 use completion::BundleCompleter;
@@ -19,6 +21,7 @@ use reedline::{
 };
 use std::sync::Arc;
 use stream_formatter::format_stream;
+use json_formatter::format_stream_json;
 use tracing::{error, info};
 
 /// Print the REPL header.
@@ -41,7 +44,70 @@ pub fn print_header() {
 ///
 /// * `Ok(())` - REPL exited normally
 /// * `Err(BundlebaseError)` - An error occurred
-pub async fn start(bundle: Arc<dyn BundleFacade>) -> Result<(), BundlebaseError> {
+/// Execute a single command non-interactively and exit.
+pub async fn execute_single(
+    bundle: Arc<dyn BundleFacade>,
+    sql: &str,
+    format: OutputFormat,
+) -> Result<(), BundlebaseError> {
+    // Install progress tracker
+    let tracker = Box::new(progress_impl::IndicatifTracker::new());
+    bundlebase::progress::set_tracker(tracker);
+
+    // Parse command
+    let cmd = match commands::parse(sql) {
+        Ok(cmd) => cmd,
+        Err(e) => {
+            let error_msg = format!("Error: {}", e);
+            match format {
+                OutputFormat::Json => {
+                    eprintln!("{}", serde_json::json!({"error": error_msg}));
+                }
+                OutputFormat::Table => {
+                    eprintln!("{}", error_msg);
+                }
+            }
+            std::process::exit(1);
+        }
+    };
+
+    // Handle exit/quit commands as no-ops
+    if matches!(cmd, Command::Repl(ReplCommand::Exit)) {
+        return Ok(());
+    }
+
+    // Execute command
+    match commands::execute(cmd, &bundle).await {
+        Ok(Some((stream, shape))) => {
+            let output = match format {
+                OutputFormat::Json => format_stream_json(stream, Some(shape), Some(1000)).await?,
+                OutputFormat::Table => format_stream(stream, Some(shape), Some(1000)).await?,
+            };
+            if !output.is_empty() {
+                println!("{}", output);
+            }
+        }
+        Ok(None) => {
+            // No output (Clear command, etc.)
+        }
+        Err(e) => {
+            let error_msg = format!("{}", e);
+            match format {
+                OutputFormat::Json => {
+                    eprintln!("{}", serde_json::json!({"error": error_msg}));
+                }
+                OutputFormat::Table => {
+                    eprintln!("Error: {}", error_msg);
+                }
+            }
+            std::process::exit(1);
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn start(bundle: Arc<dyn BundleFacade>, format: OutputFormat) -> Result<(), BundlebaseError> {
     // Install progress tracker for REPL
     let tracker = Box::new(progress_impl::IndicatifTracker::new());
     bundlebase::progress::set_tracker(tracker);
@@ -105,7 +171,11 @@ pub async fn start(bundle: Arc<dyn BundleFacade>) -> Result<(), BundlebaseError>
                 match commands::execute(cmd, &bundle).await {
                     Ok(Some((stream, shape))) => {
                         // Use format_stream for consistent output formatting
-                        match format_stream(stream, Some(shape), Some(100)).await {
+                        let result = match format {
+                            OutputFormat::Json => format_stream_json(stream, Some(shape), Some(1000)).await,
+                            OutputFormat::Table => format_stream(stream, Some(shape), Some(1000)).await,
+                        };
+                        match result {
                             Ok(output) => {
                                 if !output.is_empty() {
                                     println!("{}", output);

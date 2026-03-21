@@ -296,11 +296,12 @@ impl PyBundle {
         })
     }
 
-    #[pyo3(signature = (sql, params=None))]
+    #[pyo3(signature = (sql, params=None, hard_limit=None))]
     fn query<'py>(
         &self,
         sql: &str,
         params: Option<Vec<Py<PyAny>>>,
+        hard_limit: Option<usize>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
@@ -313,7 +314,7 @@ impl PyBundle {
             };
 
             let stream = inner
-                .query(&sql, params_vec)
+                .query(&sql, params_vec, hard_limit)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -423,7 +424,7 @@ impl PyBundle {
         let sql = format!("DESCRIBE FUNCTION {}", name);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let stream = inner
-                .query(&sql, vec![])
+                .query(&sql, vec![], None)
                 .await
                 .map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(

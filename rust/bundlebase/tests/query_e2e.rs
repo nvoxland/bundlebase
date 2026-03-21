@@ -17,6 +17,7 @@ async fn test_query_basic_filter() -> Result<(), BundlebaseError> {
         .query(
             "SELECT first_name, last_name FROM bundle WHERE salary > $1",
             vec![ScalarValue::Float64(Some(50000.0))],
+            None,
         )
         .await?;
 
@@ -34,7 +35,7 @@ async fn test_query_star() -> Result<(), BundlebaseError> {
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
-    let stream = bundle.query("SELECT * FROM bundle LIMIT 10", vec![]).await?;
+    let stream = bundle.query("SELECT * FROM bundle LIMIT 10", vec![], None).await?;
     let result: Vec<_> = stream.try_collect().await?;
 
     assert_eq!(result.len(), 1);
@@ -50,7 +51,7 @@ async fn test_query_lowercase_select() -> Result<(), BundlebaseError> {
 
     // Lowercase "select" should work
     let stream = bundle
-        .query("select * from bundle limit 10", vec![])
+        .query("select * from bundle limit 10", vec![], None)
         .await?;
     let result: Vec<_> = stream.try_collect().await?;
 
@@ -73,6 +74,7 @@ async fn test_query_multiple_parameters() -> Result<(), BundlebaseError> {
                 ScalarValue::Float64(Some(100000.0)),
                 ScalarValue::Utf8(Some("F".to_string())),
             ],
+            None,
         )
         .await?;
     let result: Vec<_> = stream.try_collect().await?;
@@ -92,7 +94,7 @@ async fn test_query_no_parameters() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Apply SQL query without parameters
-    let stream = bundle.query("SELECT * FROM bundle LIMIT 10", vec![]).await?;
+    let stream = bundle.query("SELECT * FROM bundle LIMIT 10", vec![], None).await?;
     let result: Vec<_> = stream.try_collect().await?;
 
     assert_eq!(result.len(), 1);
@@ -111,6 +113,7 @@ async fn test_query_with_aggregation() -> Result<(), BundlebaseError> {
         .query(
             "SELECT gender, COUNT(*) as count FROM bundle GROUP BY gender",
             vec![],
+            None,
         )
         .await?;
     let result: Vec<_> = stream.try_collect().await?;
@@ -172,7 +175,7 @@ async fn test_query_table_alias_qualified_wildcard() -> Result<(), BundlebaseErr
     let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
-    let stream = bundle.query("SELECT t.* FROM bundle t", vec![]).await?;
+    let stream = bundle.query("SELECT t.* FROM bundle t", vec![], None).await?;
     let result: Vec<_> = stream.try_collect().await?;
 
     assert_eq!(result.len(), 1);
@@ -185,7 +188,7 @@ async fn test_query_table_alias_qualified_wildcard() -> Result<(), BundlebaseErr
 async fn test_query_empty_bundle() -> Result<(), BundlebaseError> {
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
-    let stream = bundle.query("SELECT * FROM bundle", vec![]).await?;
+    let stream = bundle.query("SELECT * FROM bundle", vec![], None).await?;
     let schema = stream.schema().clone();
     let result: Vec<_> = stream.try_collect().await?;
 

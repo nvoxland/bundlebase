@@ -26,7 +26,7 @@ async fn test_bundle_data_table() {
     assert!(df_fields > 0, "DataFrame should have fields");
 
     // Query via query() - should return record batches with schema
-    let stream = bundle.query("SELECT * FROM bundle", vec![]).await.unwrap();
+    let stream = bundle.query("SELECT * FROM bundle", vec![], None).await.unwrap();
     let batches: Vec<_> = stream.try_collect().await.unwrap();
 
     // Verify it works
@@ -54,7 +54,7 @@ async fn test_data_table_schema() {
     let df_schema = df.schema();
 
     // Query via query()
-    let stream = bundle.query("SELECT * FROM bundle", vec![]).await.unwrap();
+    let stream = bundle.query("SELECT * FROM bundle", vec![], None).await.unwrap();
     let batches: Vec<_> = stream.try_collect().await.unwrap();
     assert!(!batches.is_empty(), "Should have at least one batch");
     let result_schema = batches[0].schema();

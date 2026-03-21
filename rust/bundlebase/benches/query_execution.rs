@@ -39,6 +39,7 @@ fn bench_filter_selective(c: &mut Criterion) {
                                 .query(
                                     "SELECT * FROM bundle WHERE filter_value < 1",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -77,6 +78,7 @@ fn bench_filter_broad(c: &mut Criterion) {
                                 .query(
                                     "SELECT * FROM bundle WHERE filter_value < 50",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -114,6 +116,7 @@ fn bench_aggregation_sum(c: &mut Criterion) {
                                 .query(
                                     "SELECT category, SUM(amount) as total FROM bundle GROUP BY category",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -151,6 +154,7 @@ fn bench_filter_parameterized(c: &mut Criterion) {
                                 .query(
                                     "SELECT * FROM bundle WHERE filter_value < $1",
                                     vec![ScalarValue::Int64(Some(50))],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -236,7 +240,7 @@ fn bench_projection(c: &mut Criterion) {
                         let bundle = bundle.clone();
                         async move {
                             let mut stream = bundle
-                                .query("SELECT id, category, amount FROM bundle", vec![])
+                                .query("SELECT id, category, amount FROM bundle", vec![], None)
                                 .await
                                 .expect("query failed");
                             while let Some(batch_result) = stream.next().await {

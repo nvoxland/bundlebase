@@ -126,6 +126,7 @@ fn bench_stream_with_aggregation(c: &mut Criterion) {
                                 .query(
                                     "SELECT category, SUM(amount) as total FROM bundle GROUP BY category",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -195,7 +196,7 @@ fn bench_stream_projection(c: &mut Criterion) {
                         let bundle = bundle.clone();
                         async move {
                             let mut stream = bundle
-                                .query("SELECT id, amount FROM bundle", vec![])
+                                .query("SELECT id, amount FROM bundle", vec![], None)
                                 .await
                                 .expect("query failed");
 

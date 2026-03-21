@@ -1,0 +1,252 @@
+# Bundlebase
+
+> Docker for data. Bundle, query with SQL, extend with Python.
+
+Bundlebase packages data files into versioned bundles with a SQL query engine, custom functions, custom connectors, and Python/CLI interfaces.
+
+## Docs
+- [SQL Reference](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/sql-reference/index.md): Full command syntax
+- [Connector SDK](https://raw.githubusercontent.com/nvoxland/bundlebase/main/sdk/python/bundlebase_sdk/README.md): Custom connectors
+- [Function SDK](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/user-guide/functions.md): Custom functions
+- [Python API](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/api/sync.md): Full sync API docs
+- [CLI Reference](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/cli-repl.md): CLI usage
+
+## Quick Reference
+
+### Installation
+
+```
+pip install bundlebase
+```
+
+### Python API (bundlebase.sync)
+
+```python
+import bundlebase.sync as bb
+
+# Factory functions
+c = bb.create("./my-bundle")      # new bundle -> SyncBundleBuilder
+c = bb.create()                    # in-memory bundle
+b = bb.open("./my-bundle")        # existing bundle -> SyncBundle (read-only)
+
+# To mutate a read-only bundle:
+c = b.extend()                     # -> SyncBundleBuilder
+
+# Data operations (SyncBundleBuilder, all return self for chaining)
+c.attach("data.parquet")
+c.attach("more.csv", pack="my_join")
+c.filter("SELECT * FROM bundle WHERE salary > $1", [50000])
+c.join("orders", on="id = order_id", location="orders.parquet", how="inner")
+c.drop_join("orders")
+c.drop_column("email")
+c.rename_column("first_name", "name")
+c.add_column("full_name", "first_name || ' ' || last_name")
+c.cast_column("age", "integer")
+c.standardize_column_names()
+c.set_name("My Bundle")
+c.set_description("Customer data")
+
+# Query -> SyncQueryResult
+result = c.query("SELECT name, salary FROM bundle WHERE active = true", [])
+result = c.query("SELECT * FROM bundle", hard_limit=100)   # DataFrame-level row cap
+df = result.to_pandas()
+df = result.to_polars()
+d  = result.to_dict()
+
+# Direct conversion from bundle
+df = c.to_pandas()
+df = c.to_polars()
+d  = c.to_dict()
+a  = c.to_numpy()
+
+# Sources & Fetch
+c.create_source("remote_dir", {"url": "s3://bucket/data/"})
+c.fetch(pack="base", mode="add")       # mode: add | update | sync
+c.fetch_all(mode="add")
+
+# Views
+c.create_view("active_users", "SELECT * FROM bundle WHERE active = true")
+
+# Functions
+c.import_function("acme.double_val", "ipc::./my_funcs", platform="*/*")
+c.import_temp_function("acme.double_val", "python::my_module:double_val")
+c.drop_function("acme.double_val")
+c.drop_temp_function("acme.double_val")
+
+# Connectors
+c.import_connector("acme.weather", "ipc::./my_connector")
+c.import_temp_connector("acme.weather", "python::my_module:MyConnector")
+c.drop_connector("acme.weather")
+c.drop_temp_connector("acme.weather")
+
+# Versioning
+c.commit("Added customer data")
+c2 = c.extend()                        # new builder from committed bundle
+
+# Introspection
+c.schema          # PySchema with .fields, .field(name)
+c.name            # str or None
+c.description     # str or None
+c.version         # 12-char hex string
+c.url             # storage path
+c.num_rows()      # int
+c.history()       # list of commits
+c.status()        # list of uncommitted changes
+c.explain()       # query execution plan
+```
+
+### SQL Commands
+
+```sql
+-- Data
+ATTACH '<path>' [TO <pack>]
+DETACH '<location>'
+REPLACE '<old>' WITH '<new>'
+FILTER WITH <select_query>
+
+-- Schema
+JOIN '<source>' AS <name> ON <condition>
+DROP JOIN <name>
+DROP COLUMN <name>
+RENAME COLUMN <old> TO <new>
+CREATE VIEW <name> AS <sql>
+DROP VIEW <name>
+
+-- Sources
+CREATE SOURCE <connector> WITH (key = 'val', ...) [ON <pack>]
+FETCH <pack> <ADD|UPDATE|SYNC> [DRY RUN]
+FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN]
+
+-- Functions
+IMPORT FUNCTION <ns.name> FROM '<runtime>::<entrypoint>'
+IMPORT TEMP FUNCTION <ns.name> FROM '<runtime>::<entrypoint>'
+IMPORT FUNCTION <ns>.* FROM '<runtime>::<entrypoint>'
+DROP FUNCTION <ns.name> [FOR PLATFORM '<platform>']
+DESCRIBE FUNCTION <ns.name>
+
+-- Connectors
+IMPORT CONNECTOR <name> FROM '<runtime>::<entrypoint>'
+IMPORT TEMP CONNECTOR <name> FROM '<runtime>::<entrypoint>'
+DROP CONNECTOR <name> [FOR PLATFORM '<platform>']
+DESCRIBE CONNECTOR <name>
+
+-- Indexes
+CREATE <COLUMN|TEXT> INDEX ON <column>
+DROP INDEX <column>
+REBUILD INDEX ON <column>
+REINDEX
+
+-- Version control
+COMMIT '<message>'
+RESET
+UNDO
+EXPLAIN [ANALYZE] [VERBOSE] [FORMAT format] [sql]
+
+-- Metadata
+SET NAME '<name>'
+SET DESCRIPTION '<desc>'
+
+-- Built-in functions
+SELECT * FROM search('<index_name>', '<query>')
+```
+
+Runtimes for functions/connectors: `python`, `ipc`, `ffi`, `java`, `docker`.
+`python` runtime requires TEMP (session-only) imports. Persistent imports use other runtimes.
+
+### Custom Connector (Connector ABC)
+
+```python
+from bundlebase_sdk.source import Connector
+from bundlebase_sdk.types import Location
+
+class MyConnector(Connector):
+    def discover(self, attached_locations: list[str], **kwargs: str) -> list[Location]:
+        """Return list of available data locations."""
+        ...
+
+    def data(self, location: Location, **kwargs: str):
+        """Return data as pa.Table, pa.RecordBatch, list[dict], or None."""
+        ...
+
+    # Optional overrides:
+    # def schema(self) -> dict[str, str] | None:  # for dict->Arrow conversion
+    # def stable_url(self, location, **kwargs) -> StableUrl | None:
+```
+
+Register: `c.import_temp_connector("acme.my_conn", "python::my_module:MyConnector")`
+Then: `c.create_source("acme.my_conn", {"key": "value"})`
+
+### Custom Function (Python scalar)
+
+```python
+import pyarrow as pa
+import pyarrow.compute as pc
+
+def double_val(col: pa.Array) -> pa.Array:
+    return pc.multiply(col, 2)
+
+def bundlebase_metadata():
+    return [{"name": "double_val", "input_types": ["Int64"], "return_type": "Int64", "kind": "scalar"}]
+```
+
+Register: `c.import_temp_function("acme.double_val", "python::my_module:double_val")`
+
+### Custom Function (Python aggregate)
+
+```python
+import pyarrow as pa
+import pyarrow.compute as pc
+
+class MySum:
+    def create_state(self):
+        return pa.scalar(0, type=pa.int64())
+    def accumulate(self, state, values):
+        return pa.scalar(state.as_py() + pc.sum(values).as_py(), type=pa.int64())
+    def merge(self, state1, state2):
+        return pa.scalar(state1.as_py() + state2.as_py(), type=pa.int64())
+    def evaluate(self, state):
+        return state
+
+def bundlebase_metadata():
+    return [{"name": "my_sum", "input_types": ["Int64"], "return_type": "Int64", "kind": "aggregate"}]
+```
+
+### Function SDK (IPC provider ABC)
+
+```python
+from bundlebase_sdk.function import Function
+
+class MyFunctions(Function):
+    def functions(self) -> list[dict]:
+        return [{"name": "double_val", "input_types": ["Int64"], "return_type": "Int64", "kind": "scalar"}]
+    def invoke(self, name: str, batch: pa.RecordBatch):
+        return pc.multiply(batch.column(0), 2)
+    # Aggregate: override create_state(), accumulate(), merge(), evaluate()
+```
+
+### CLI Usage
+
+```bash
+# Non-interactive execute mode (agent-friendly)
+bundlebase --bundle ./sales --create --execute "ATTACH 'raw_sales.csv'"
+bundlebase --bundle ./sales --execute "SELECT * FROM bundle LIMIT 5" --format json
+bundlebase --bundle ./sales --execute "FILTER WITH SELECT * FROM bundle WHERE amount > 0"
+bundlebase --bundle ./sales --execute "COMMIT 'Cleaned sales data'"
+bundlebase --bundle ./sales --execute "/schema" --format json
+bundlebase --bundle ./sales --execute "/count" --format json
+
+# Interactive REPL
+bundlebase --bundle ./my-bundle --create
+bundlebase --bundle ./my-bundle
+bundlebase --bundle ./my-bundle --read-only
+bundlebase --bundle ./my-bundle --format json   # JSON output in REPL too
+
+# Remote bundles
+bundlebase --bundle s3://mybucket/my-bundle
+```
+
+`--format`: `table` (default) or `json`. JSON mode outputs arrays of objects for queries, single values/objects for commands.
+`--execute`: Run one command and exit. Errors go to stderr as `{"error": "..."}` in JSON mode. Exit code 1 on error.
+Query results are hard-limited to 1000 rows. Use `LIMIT` in SQL for fewer.
+
+REPL meta-commands: `/help`, `/show`, `/schema`, `/count`, `/status`, `/history`, `/exit`
