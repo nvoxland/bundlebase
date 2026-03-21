@@ -1,5 +1,5 @@
 ---
-date: 2026-03-12
+date: 2026-03-21
 categories:
   - Releases
 ---
@@ -30,7 +30,7 @@ bundle.fetch("base", "add")
 Multiple runtimes are available depending on your needs:
 
 - **`python`** — in-process, zero-copy Arrow transfer (use `import_temp_connector` since Python code can't be serialized into the bundle)
-- **`lib`** — load a compiled shared library via `dlopen`, also zero-copy
+- **`ffi`** — load a compiled shared library, also zero-copy
 - **`ipc`** — run any executable as a subprocess
 - **`java`** — run a JAR file
 - **`docker`** — run a container image
@@ -58,15 +58,13 @@ See the [custom connectors guide](../../guide/custom-connectors/index.md) for th
 
 ### User-Defined Functions
 
-Extend Bundlebase's SQL with your own scalar and aggregate functions. Same runtime options as connectors — `python`, `lib`, `ipc`, `java`, `docker`.
+Extend Bundlebase's SQL with your own scalar and aggregate functions. Same runtime options as connectors — `python`, `ffi`, `ipc`, `java`, `docker`.
 
 ```python
-# Import and use a function
+# Import and use a function — types auto-detected from bundlebase_metadata()
 bundle.import_temp_function("tools.double_val", "ipc::python:my_functions.py")
 bundle.query("SELECT tools.double_val(amount) FROM bundle")
 ```
-
-Functions support overloading — same name, different type signatures. And if your function module exports a `bundlebase_metadata()` function (or the equivalent manifest in compiled languages), Bundlebase can auto-discover all the functions without you specifying types:
 
 ```sql
 -- Import all functions from a module, types auto-detected
@@ -77,31 +75,60 @@ Aggregate UDFs work too — implement `create_state`, `accumulate`, `merge`, and
 
 See the [functions guide](../../guide/functions.md).
 
-### Column Operations
+### `bundlebase init-sdk`
 
-Three new operations for wrangling messy columns:
+Writing the IPC boilerplate for a new connector or function is tedious, so there's now a scaffolding command. It generates a working project with example code, build files, and a README:
 
-- **`standardize_column_names()`** — normalizes column names to lowercase, underscore-separated identifiers. `"Customer Id"` becomes `customer_id`, `"Phone 1"` becomes `phone_1`.
+```bash
+bundlebase init-sdk python my_weather --type connector
+```
 
-    ```python
-    bundle.standardize_column_names()
-    ```
+That gives you:
 
-- **`add_column(name, expr)`** — creates a computed column from a SQL expression. Even a SQL expression using your custom functions.
+```
+my_weather/
+├── pyproject.toml
+├── connector.py      # Working example connector
+└── README.md
+```
 
-    ```python
-    bundle.add_column("full_name", "first_name || ' ' || last_name")
-    ```
+The generated connector is runnable out of the box — `pip install -e .` and `python connector.py` gives you a working IPC server you can point `import_connector` at.
 
-- **`cast_column(name, type)`** — changes a column's data type, with optional regex cleaning to strip junk before conversion.
+Supported languages: **Python**, **Go**, **Java**, and **Rust**. Each generates idiomatic build files (`pyproject.toml`, `go.mod`, `pom.xml`, `Cargo.toml`).
 
-    ```python
-    bundle.cast_column("price", "integer", clean="[^0-9]")
-    ```
+The `--type` flag controls what gets scaffolded:
 
-### Drop Commands
+- `--type connector` — connector only
+- `--type function` — function provider with example scalar and aggregate UDFs
+- `--type both` — connector + functions in one project
 
-You can now remove connectors and sources you no longer need:
+```bash
+# Rust function provider
+bundlebase init-sdk rust my_functions --type function
+
+# Go project with both
+bundlebase init-sdk go my_project --type both
+```
+
+### Managing Functions and Connectors
+
+Imported functions and connectors can be renamed without re-importing them:
+
+```python
+bundle.rename_function("acme.double_val", "acme.double_val_v2")
+bundle.rename_connector("acme.weather", "acme.weather_v2")
+```
+
+Or via SQL:
+
+```sql
+RENAME FUNCTION acme.double_val TO acme.double_val_v2
+RENAME CONNECTOR acme.weather TO acme.weather_v2
+```
+
+Works for both committed and temporary functions/connectors.
+
+You can remove connectors and sources you no longer need:
 
 ```sql
 DROP CONNECTOR acme.weather
@@ -119,13 +146,27 @@ config = {"system": {"allow_external_code": "true"}}
 bundle = bb.create("my/data", config=config)
 ```
 
-## Other Changes
+### Column Operations
 
-- **Object store support for tar URLs** — bundle tar files can now live on S3, Azure Blob, and GCS
-- **IPC protocol hardening** — fixed a deadlock in the subprocess protocol, improved type safety
-- **SDK improvements** — better error handling, complex type support, `DRY RUN` and `DESCRIBE CONNECTOR`/`DESCRIBE FUNCTION` commands
-- **`bundlebase init-sdk`** — scaffold a new connector or function project with `bundlebase init-sdk python my_project --type connector`
-- **CI upgraded to GitHub Actions Node 24**
+Three new operations for wrangling messy columns:
+
+- **`standardize_column_names()`** — normalizes column names to lowercase, underscore-separated identifiers. `"Customer Id"` becomes `customer_id`, `"Phone 1"` becomes `phone_1`.
+
+    ```python
+    bundle.standardize_column_names()
+    ```
+
+- **`add_column(name, expr)`** — creates a computed column from a SQL expression. Even a SQL expression using your custom functions.
+
+    ```python
+    bundle.add_column("full_name", "first_name || ' ' || last_name")
+    ```
+
+- **`cast_column(name, type)`** — changes a column's data type, with optional regex cleaning to strip junk before conversion. Type names are now case-insensitive, and common aliases work (`int` for `Int32`, etc.).
+
+    ```python
+    bundle.cast_column("price", "integer", clean="[^0-9]")
+    ```
 
 ---
 
