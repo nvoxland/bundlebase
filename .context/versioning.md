@@ -47,7 +47,7 @@ c = await Bundlebase.create("/my/container")
 
 # Make modifications
 await c.attach("data.parquet")
-await c.remove_column("sensitive")
+await c.drop_column("sensitive")
 
 # Commit creates versioned snapshot
 await c.commit("Cleaned sensitive data")
@@ -135,7 +135,7 @@ await c.attach("data.parquet")
 
 # Validation happens immediately (check phase)
 try:
-    await c.remove_column("nonexistent")  # May raise error here
+    await c.drop_column("nonexistent")  # May raise error here
 except Exception as e:
     print(f"Validation error: {e}")
 

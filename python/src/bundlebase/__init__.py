@@ -317,4 +317,5 @@ __all__ = [
     "set_rust_log_level",
 ]
 
-__version__ = "0.1.0"
+from importlib.metadata import version as _metadata_version
+__version__ = _metadata_version("bundlebase")

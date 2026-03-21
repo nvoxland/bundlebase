@@ -52,12 +52,12 @@ await c.attach("customers.csv")
 await c.commit("Initial data")
 
 # Create a filtered view
-adults = await c.select("select * where age > 21")
+adults = await c.query("SELECT * FROM bundle WHERE age > 21")
 await c.create_view("adults", adults)
 await c.commit("Add adults view")
 
 # Create a view with multiple operations
-working_age = await c.select("select * where age > 21")
+working_age = await c.query("SELECT * FROM bundle WHERE age > 21")
 await working_age.filter("age < 65")
 await c.create_view("working_age", working_age)
 await c.commit("Add working age view")
@@ -88,7 +88,7 @@ await c.attach("customers-1-100.csv")
 await c.commit("v1")
 
 # Create view
-active = await c.select("select * where status = 'active'")
+active = await c.query("SELECT * FROM bundle WHERE status = 'active'")
 await c.create_view("active", active)
 await c.commit("v2")
 
@@ -119,7 +119,7 @@ c.attach("data.csv").await?;
 c.commit("Initial").await?;
 
 // Create view from select
-let adults = c.select("select * where age > 21", vec![]).await?;
+let adults = c.query("SELECT * FROM bundle WHERE age > 21", vec![]).await?;
 c.create_view("adults", &adults).await?;
 c.commit("Add adults view").await?;
 ```
@@ -173,8 +173,8 @@ When you call `view(name)`:
 
 ```python
 # Define common filters as views
-await c.create_view("high_value", await c.select("select * where value > 1000"))
-await c.create_view("recent", await c.select("select * where date > today() - 30"))
+await c.create_view("high_value", await c.query("SELECT * FROM bundle WHERE value > 1000"))
+await c.create_view("recent", await c.query("SELECT * FROM bundle WHERE date > today() - 30"))
 await c.commit("Add standard views")
 
 # Reuse later
@@ -185,10 +185,10 @@ high_value = await c.view("high_value")
 
 ```python
 # Create tenant-specific views
-tenant_a = await c.select("select * where tenant_id = 'A'")
+tenant_a = await c.query("SELECT * FROM bundle WHERE tenant_id = 'A'")
 await c.create_view("tenant_a", tenant_a)
 
-tenant_b = await c.select("select * where tenant_id = 'B'")
+tenant_b = await c.query("SELECT * FROM bundle WHERE tenant_id = 'B'")
 await c.create_view("tenant_b", tenant_b)
 
 await c.commit("Add tenant views")
@@ -199,9 +199,9 @@ await c.commit("Add tenant views")
 ```python
 # Create analysis-specific views
 await c.create_view("sales_analysis",
-    await c.select("""
-        select product, sum(revenue) as total
-        group by product
+    await c.query("""
+        SELECT product, sum(revenue) as total FROM bundle
+        GROUP BY product
     """))
 await c.commit("Q4 2024 analysis")
 

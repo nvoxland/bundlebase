@@ -30,7 +30,7 @@ import bundlebase
 c = await (bundlebase.create()
     .attach("data.parquet")
     .filter("age >= 18")
-    .remove_column("ssn")
+    .drop_column("ssn")
     .rename_column("fname", "first_name"))
 
 # Stream to pandas (constant memory, even for huge files)
@@ -166,7 +166,7 @@ Operations are **recorded** when called but only **executed** during query time:
 
 ```python
 c = c.filter("age >= 18")    # Records FilterBlock operation
-c = c.select(["name"])       # Records SelectColumns operation
+c = c.query("SELECT name FROM bundle")  # Records query operation
 df = await c.to_pandas()     # NOW executes both operations
 ```
 

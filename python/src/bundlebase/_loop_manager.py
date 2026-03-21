@@ -111,7 +111,7 @@ class EventLoopManager:
         """
         # Use persistent Runner for efficiency (avoids creating new loop each time)
         if self._runner is None:
-            self._runner = asyncio.Runner(debug=True)
+            self._runner = asyncio.Runner(debug=False)
         return self._runner.run(coro)
 
     def cleanup(self) -> None:

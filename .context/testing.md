@@ -55,7 +55,7 @@ async fn test_remove_nonexistent_column_error() -> Result<(), ContainerError> {
     container.attach("test_data/userdata.parquet").await?;
 
     // Should fail when removing a column that doesn't exist
-    let result = container.remove_column("nonexistent_column").await;
+    let result = container.drop_column("nonexistent_column").await;
     assert!(result.is_err());  // Expected behavior
 
     Ok(())

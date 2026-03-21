@@ -27,7 +27,7 @@ fn Bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 **Class separation:**
 - **PyBundlebase**: Wraps Bundlebase - exposes read-only operations (query, to_pandas, to_dict, schema, num_rows, etc.)
-- **PyBundlebaseBuilder**: Wraps BundlebaseBuilder - exposes mutable operations (attach, filter, remove_column, commit, etc.) and delegates read operations
+- **PyBundlebaseBuilder**: Wraps BundlebaseBuilder - exposes mutable operations (attach, filter, drop_column, commit, etc.) and delegates read operations
 
 **Module organization:**
 - `python/mod.rs` - Module entry point, pymodule macro

@@ -378,7 +378,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
             "authorization",
             format!("Bearer {}", token)
                 .parse()
-                .expect("Token should be valid header value"),
+                .map_err(|_| Status::internal("Failed to set authorization header"))?,
         );
 
         Ok(response)

@@ -43,7 +43,7 @@ impl SchemaProvider for DefaultSchemaProvider {
     async fn table(&self, name: &str) -> datafusion::error::Result<Option<Arc<dyn TableProvider>>> {
         if name == BUNDLE_TABLE {
             let facade = self.bundle.upgrade().ok_or_else(|| {
-                datafusion::error::DataFusionError::Internal("Bundle has been dropped".to_string())
+                datafusion::error::DataFusionError::Internal("Bundle has been dropped (while resolving 'bundle' table)".to_string())
             })?;
 
             let df = facade

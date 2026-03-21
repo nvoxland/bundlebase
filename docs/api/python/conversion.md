@@ -79,7 +79,7 @@ import bundlebase
 
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .select(["x", "y", "z"]))
+    .query("SELECT x, y, z FROM bundle"))
 
 # Convert to NumPy arrays (dict of column name -> array)
 arrays = await c.to_numpy()
@@ -192,7 +192,7 @@ import numpy as np
 
 c = await (bundlebase.create()
     .attach("data.parquet")
-    .select(["x", "y", "z"]))
+    .query("SELECT x, y, z FROM bundle"))
 
 # Convert to NumPy for numerical operations
 arrays = await c.to_numpy()

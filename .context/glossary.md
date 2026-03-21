@@ -47,7 +47,7 @@ df = await c.to_pandas()  # Can read, cannot modify
 - All modification methods mutate in-place and return `&mut self`
 - Can be committed via `commit(message)` to create a versioned snapshot
 
-**Methods**: `attach()`, `remove_column()`, `rename_column()`, `filter()`, `select()`, `join()`, `import_function()`, `commit()`
+**Methods**: `attach()`, `drop_column()`, `rename_column()`, `filter()`, `select()`, `join()`, `import_function()`, `commit()`
 
 **Python Type**: `BundleBuilder` (mutable wrapper)
 
@@ -111,7 +111,7 @@ await c.commit("Filtered adults")
 **Example**:
 ```python
 c = c.filter("age >= 18")    # RECORDED only
-c = c.select(["name"])       # RECORDED only
+c = c.query("SELECT name FROM bundle")  # RECORDED only
 df = await c.to_pandas()     # NOW both operations EXECUTE
 ```
 
