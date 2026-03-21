@@ -121,6 +121,7 @@ pub trait BundleFacade: Send + Sync {
         &self,
         sql: &str,
         params: Vec<ScalarValue>,
+        hard_limit: Option<usize>,
     ) -> Result<SendableRecordBatchStream, BundlebaseError>;
 
     /// Execute a SQL statement or command, returning streaming results.
@@ -153,7 +154,7 @@ pub trait BundleFacade: Send + Sync {
             let output = self.execute_command(cmd).await?;
             output.into_stream()
         } else {
-            self.query(sql, params).await
+            self.query(sql, params, None).await
         }
     }
 
@@ -188,7 +189,7 @@ pub trait BundleFacade: Send + Sync {
             Ok((cmd.output_schema(), cmd.output_shape()))
         } else {
             // Plan the SQL query to get its schema; SQL queries are always tables
-            let stream = self.query(sql, vec![]).await?;
+            let stream = self.query(sql, vec![], None).await?;
             Ok((stream.schema().clone(), OutputShape::Table))
         }
     }

@@ -78,7 +78,7 @@ pub fn format_batches_as_table(
     } else {
         let mut output = table.to_string();
         if row_count >= limit {
-            output.push_str(&format!("\n(Showing first {} rows)", limit));
+            output.push_str(&format!("\n(output limited to {} rows)", limit));
         }
         Ok(output)
     }

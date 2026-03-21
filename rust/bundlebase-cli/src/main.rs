@@ -9,6 +9,7 @@ mod flight;
 mod repl;
 
 use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade, PassedBundleConfig};
+use bundlebase_cli::OutputFormat;
 use clap::{Parser, ValueEnum};
 use std::path::Path;
 use std::sync::Arc;
@@ -75,6 +76,14 @@ struct Args {
     /// OpenTelemetry endpoint for tracing (e.g., "http://localhost:4317")
     #[arg(long)]
     otel: Option<String>,
+
+    /// Execute a single command and exit (non-interactive mode)
+    #[arg(long)]
+    execute: Option<String>,
+
+    /// Output format for query results
+    #[arg(long, value_enum, default_value = "table")]
+    format: OutputFormat,
 }
 
 /// Configuration for logging
@@ -163,8 +172,6 @@ async fn main() -> Result<(), BundlebaseError> {
 
     match args.mode {
         Mode::Repl => {
-            repl::print_header();
-
             let state: Arc<dyn BundleFacade> = if args.create {
                 // Creating a new bundle - always read-write
                 info!("Creating bundle at: {}", args.bundle);
@@ -179,7 +186,14 @@ async fn main() -> Result<(), BundlebaseError> {
                 Bundle::open(&args.bundle, config.clone()).await?.extend(None).await?
             };
 
-            repl::start(state).await?;
+            if let Some(sql) = args.execute {
+                // Non-interactive execute mode
+                repl::execute_single(state, &sql, args.format).await?;
+            } else {
+                // Interactive REPL mode
+                repl::print_header();
+                repl::start(state, args.format).await?;
+            }
         }
         Mode::Flight => {
             info!(

@@ -53,6 +53,7 @@ fn bench_order_by(c: &mut Criterion) {
                                 .query(
                                     "SELECT * FROM bundle ORDER BY id LIMIT 1000",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -79,6 +80,7 @@ fn bench_order_by(c: &mut Criterion) {
                                 .query(
                                     "SELECT * FROM bundle ORDER BY id LIMIT 1000",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -117,6 +119,7 @@ fn bench_limit_with_filter(c: &mut Criterion) {
                                 .query(
                                     "SELECT * FROM bundle WHERE filter_value < 50 ORDER BY id LIMIT 100",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -143,6 +146,7 @@ fn bench_limit_with_filter(c: &mut Criterion) {
                                 .query(
                                     "SELECT * FROM bundle WHERE filter_value < 50 ORDER BY id LIMIT 100",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -181,6 +185,7 @@ fn bench_distinct(c: &mut Criterion) {
                                 .query(
                                     "SELECT DISTINCT category FROM bundle",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -207,6 +212,7 @@ fn bench_distinct(c: &mut Criterion) {
                                 .query(
                                     "SELECT DISTINCT category FROM bundle",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -245,6 +251,7 @@ fn bench_count_group_by(c: &mut Criterion) {
                                 .query(
                                     "SELECT category, COUNT(*) FROM bundle GROUP BY category",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -271,6 +278,7 @@ fn bench_count_group_by(c: &mut Criterion) {
                                 .query(
                                     "SELECT category, COUNT(*) FROM bundle GROUP BY category",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -307,7 +315,7 @@ fn bench_aggregations(c: &mut Criterion) {
                         let bundle = bundle.clone();
                         async move {
                             let mut stream = bundle
-                                .query("SELECT COUNT(*) FROM bundle", vec![])
+                                .query("SELECT COUNT(*) FROM bundle", vec![], None)
                                 .await
                                 .expect("query failed");
                             while let Some(batch_result) = stream.next().await {
@@ -327,7 +335,7 @@ fn bench_aggregations(c: &mut Criterion) {
                         let bundle = bundle.clone();
                         async move {
                             let mut stream = bundle
-                                .query("SELECT AVG(amount) FROM bundle", vec![])
+                                .query("SELECT AVG(amount) FROM bundle", vec![], None)
                                 .await
                                 .expect("query failed");
                             while let Some(batch_result) = stream.next().await {
@@ -350,6 +358,7 @@ fn bench_aggregations(c: &mut Criterion) {
                                 .query(
                                     "SELECT MIN(amount), MAX(amount) FROM bundle",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -388,6 +397,7 @@ fn bench_like(c: &mut Criterion) {
                                 .query(
                                     "SELECT * FROM bundle WHERE name LIKE 'item_0000%'",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -414,6 +424,7 @@ fn bench_like(c: &mut Criterion) {
                                 .query(
                                     "SELECT * FROM bundle WHERE name LIKE 'item_0000%'",
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");

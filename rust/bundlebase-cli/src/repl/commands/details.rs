@@ -25,7 +25,7 @@ fn execute(_cmd: &ReplCommand, bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'sta
     let bundle = bundle.clone();
     Box::pin(async move {
         let stream = bundle
-            .query("SELECT * FROM bundle_info.details", vec![])
+            .query("SELECT * FROM bundle_info.details", vec![], None)
             .await?;
         Ok(Some((stream, OutputShape::Dictionary)))
     })

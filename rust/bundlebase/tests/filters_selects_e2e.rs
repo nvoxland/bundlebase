@@ -124,7 +124,7 @@ async fn test_select_limit() -> Result<(), BundlebaseError> {
 
     // Query with LIMIT
     let stream = bundle
-        .query("SELECT * FROM bundle LIMIT 10", vec![])
+        .query("SELECT * FROM bundle LIMIT 10", vec![], None)
         .await?;
     let record_batches: Vec<_> = stream.try_collect().await?;
     let total_rows: usize = record_batches.iter().map(|rb| rb.num_rows()).sum();
@@ -149,6 +149,7 @@ async fn test_select_with_filter() -> Result<(), BundlebaseError> {
         .query(
             "SELECT id, salary FROM bundle WHERE salary > $1",
             vec![ScalarValue::Float64(Some(50000.0))],
+            None,
         )
         .await?;
     let record_batches: Vec<_> = stream.try_collect().await?;

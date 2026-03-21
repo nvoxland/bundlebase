@@ -330,7 +330,7 @@ class SyncBundle:
         async_extended = _loop_manager.run_sync(coro)
         return SyncBundleBuilder(async_extended)
 
-    def query(self, sql: str, params: Optional[List[Any]] = None) -> SyncQueryResult:
+    def query(self, sql: str, params: Optional[List[Any]] = None, hard_limit: Optional[int] = None) -> SyncQueryResult:
         """Execute a SQL query and return streaming results.
 
         Unlike extend() with SQL, this does NOT create a new BundleBuilder.
@@ -340,6 +340,9 @@ class SyncBundle:
             sql: SQL query string
             params: Optional list of parameters for parameterized queries.
                     If None, defaults to empty list.
+            hard_limit: Optional maximum number of rows to return. Applied at
+                        the DataFrame level for efficient execution. If None,
+                        no limit is applied.
 
         Returns:
             SyncQueryResult that can be converted to pandas/polars.
@@ -347,7 +350,7 @@ class SyncBundle:
         # Call the wrapped query method which returns QueryResult
         async def _query_async():
             # self._async.query is the wrapped method that returns QueryResult
-            return await self._async.query(sql, params)
+            return await self._async.query(sql, params, hard_limit)
 
         async_result = _loop_manager.run_sync(_query_async())
         return SyncQueryResult(async_result)
@@ -838,7 +841,7 @@ class SyncBundleBuilder(SyncBundle):
         async_extended = _loop_manager.run_sync(coro)
         return SyncBundleBuilder(async_extended)
 
-    def query(self, sql: str, params: Optional[List[Any]] = None) -> SyncQueryResult:
+    def query(self, sql: str, params: Optional[List[Any]] = None, hard_limit: Optional[int] = None) -> SyncQueryResult:
         """Execute a SQL query and return streaming results.
 
         Unlike extend() with SQL, this does NOT create a new BundleBuilder.
@@ -848,13 +851,16 @@ class SyncBundleBuilder(SyncBundle):
             sql: SQL query string
             params: Optional list of parameters for parameterized queries.
                     If None, defaults to empty list.
+            hard_limit: Optional maximum number of rows to return. Applied at
+                        the DataFrame level for efficient execution. If None,
+                        no limit is applied.
 
         Returns:
             SyncQueryResult that can be converted to pandas/polars.
         """
         # Call the wrapped query method which returns QueryResult
         async def _query_async():
-            return await self._async.query(sql, params)
+            return await self._async.query(sql, params, hard_limit)
 
         async_result = _loop_manager.run_sync(_query_async())
         return SyncQueryResult(async_result)

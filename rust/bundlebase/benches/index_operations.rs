@@ -92,6 +92,7 @@ fn bench_index_lookup_exact(c: &mut Criterion) {
                                 .query(
                                     &format!("SELECT * FROM bundle WHERE id = {}", target_id),
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -134,6 +135,7 @@ fn bench_index_vs_scan(c: &mut Criterion) {
                             .query(
                                 &format!("SELECT * FROM bundle WHERE id = {}", target_id),
                                 vec![],
+                                None,
                             )
                             .await
                             .expect("query failed");
@@ -156,6 +158,7 @@ fn bench_index_vs_scan(c: &mut Criterion) {
                             .query(
                                 &format!("SELECT * FROM bundle WHERE id = {}", target_id),
                                 vec![],
+                                None,
                             )
                             .await
                             .expect("query failed");
@@ -196,6 +199,7 @@ fn bench_index_range_query(c: &mut Criterion) {
                                         min_id, max_id
                                     ),
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
@@ -241,6 +245,7 @@ fn bench_index_in_query(c: &mut Criterion) {
                                         id_list
                                     ),
                                     vec![],
+                                    None,
                                 )
                                 .await
                                 .expect("query failed");
