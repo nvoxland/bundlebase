@@ -203,6 +203,29 @@ impl FunctionRegistry {
         self.entries.iter().any(|e| e.temporary)
     }
 
+    /// Return function names where ALL entries are temporary (no persistent entry exists).
+    ///
+    /// A name is "temporary-only" if it has at least one temporary entry and zero persistent entries.
+    /// If a persistent entry shadows a temporary one (same name), the name is NOT included.
+    pub fn temporary_only_names(&self) -> Vec<String> {
+        let mut temp_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut persistent_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for entry in &self.entries {
+            let name_str = entry.name.to_string();
+            if entry.temporary {
+                temp_names.insert(name_str);
+            } else {
+                persistent_names.insert(name_str);
+            }
+        }
+
+        temp_names
+            .difference(&persistent_names)
+            .cloned()
+            .collect()
+    }
+
     /// Resolve all overloads for a name and register them as a composite
     /// DataFusion UDF/UDAF/UDTF using the registry's session context.
     ///
@@ -787,5 +810,50 @@ mod tests {
         reg.remove_by_signature("test.func", Some(&[DataType::Int64]));
         assert_eq!(reg.entries().len(), 1);
         assert_eq!(reg.entries()[0].name.name, "other");
+    }
+
+    // ==================== temporary_only_names tests ====================
+
+    #[test]
+    fn test_temporary_only_names_empty_registry() {
+        let reg = test_registry();
+        assert!(reg.temporary_only_names().is_empty());
+    }
+
+    #[test]
+    fn test_temporary_only_names_only_persistent() {
+        let mut reg = test_registry();
+        reg.add(make_entry("test.func", "a", false));
+        assert!(reg.temporary_only_names().is_empty());
+    }
+
+    #[test]
+    fn test_temporary_only_names_only_temp() {
+        let mut reg = test_registry();
+        reg.add(make_entry("test.func", "a", true));
+        let names = reg.temporary_only_names();
+        assert_eq!(names.len(), 1);
+        assert!(names.contains(&"test.func".to_string()));
+    }
+
+    #[test]
+    fn test_temporary_only_names_shadowed_by_persistent() {
+        let mut reg = test_registry();
+        reg.add(make_entry("test.func", "persistent", false));
+        reg.add(make_entry("test.func", "temporary", true));
+        // Has both persistent and temporary — NOT temporary-only
+        assert!(reg.temporary_only_names().is_empty());
+    }
+
+    #[test]
+    fn test_temporary_only_names_mixed() {
+        let mut reg = test_registry();
+        reg.add(make_entry("test.temp_only", "a", true));
+        reg.add(make_entry("test.shadowed", "b", false));
+        reg.add(make_entry("test.shadowed", "c", true));
+        reg.add(make_entry("test.persistent", "d", false));
+        let names = reg.temporary_only_names();
+        assert_eq!(names.len(), 1);
+        assert!(names.contains(&"test.temp_only".to_string()));
     }
 }

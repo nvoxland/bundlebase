@@ -96,7 +96,20 @@ impl Source {
         let (func, data_dir, config, resolved_args) = if connector_name.contains('.') {
             // Defined source: resolve connector entry for current platform
             let bundle = builder.bundle();
-            let entry = bundle.connector_registry().read().resolve_entry(&connector_name)?;
+            let entry = bundle
+                .connector_registry()
+                .read()
+                .resolve_entry(&connector_name)
+                .map_err(|_| {
+                    BundlebaseError::from(format!(
+                        "Connector '{}' is not available. If it was imported as a temporary \
+                         connector in a previous session, re-import it with:\n  \
+                         IMPORT TEMP CONNECTOR {} FROM '<runtime>::<entrypoint>'\n\
+                         Or import it permanently with:\n  \
+                         IMPORT CONNECTOR {} FROM '<runtime>::<entrypoint>'",
+                        connector_name, connector_name, connector_name
+                    ))
+                })?;
 
             let runtime_type = entry.from.runtime_type();
             let registry = bundle.connector_registry();
