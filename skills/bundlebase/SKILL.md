@@ -303,6 +303,96 @@ bundlebase --bundle s3://mybucket/my-bundle --execute "SELECT COUNT(*) FROM bund
 bundlebase --bundle s3://mybucket/my-bundle --read-only --execute "/schema" --format json
 ```
 
+## Fetching External Data with Connectors
+
+Bundlebase has built-in connectors for common data sources. The pattern is: CREATE SOURCE → FETCH → query/transform → COMMIT.
+
+**Built-in connectors:** `kaggle`, `remote_dir` (S3/GCS/Azure/local dirs), `ftp_directory`, `sftp_directory`, `web_scrape`, `postgres`
+
+```bash
+# Kaggle: download a dataset (requires ~/.kaggle/kaggle.json credentials)
+bundlebase --bundle ./housing --create --execute "CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')"
+bundlebase --bundle ./housing --execute "FETCH base ADD"
+
+# S3: attach all parquet files from a bucket
+bundlebase --bundle ./logs --create --execute "CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')"
+bundlebase --bundle ./logs --execute "FETCH base ADD"
+
+# Preview what would be fetched without actually fetching
+bundlebase --bundle ./logs --execute "FETCH base ADD DRY RUN" --format json
+
+# Check what sources are configured
+bundlebase --bundle ./logs --execute "SHOW CONNECTORS" --format json
+```
+
+Use `SYNTAX CREATE SOURCE` and `SYNTAX FETCH` for detailed syntax. See the [Sources guide](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/sources.md) for full connector documentation.
+
+## Building a Custom Connector
+
+When data lives behind a custom API or needs custom fetch logic, write a Python connector:
+
+```python
+# my_connector.py
+from bundlebase_sdk import Connector, Location, serve
+
+class MyApiConnector(Connector):
+    def discover(self, attached_locations, **kwargs):
+        # Return available data locations (e.g., from an API listing endpoint)
+        return [Location("users.parquet", format="parquet", version="v1")]
+
+    def data(self, location, **kwargs):
+        # Fetch and return data for a specific location
+        import pyarrow as pa
+        # ... call your API here ...
+        return pa.table({"id": [1, 2], "name": ["Alice", "Bob"]})
+
+if __name__ == "__main__":
+    serve(MyApiConnector())
+```
+
+Register and use it:
+
+```bash
+# Install the SDK: pip install bundlebase-sdk
+# Register the connector (temp = session-only, supports Python runtime)
+bundlebase --bundle ./data --execute "IMPORT TEMP CONNECTOR my.api FROM 'python::my_connector.py:MyApiConnector'"
+bundlebase --bundle ./data --execute "CREATE SOURCE my.api"
+bundlebase --bundle ./data --execute "FETCH base ADD"
+```
+
+For persistent connectors (survive across sessions), use `ipc` or `ffi` runtimes instead of `python`. See the [Custom Connectors guide](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/index.md) and [Python SDK](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/python.md).
+
+## Transforming Data with Functions and Computed Columns
+
+After attaching data, use computed columns and custom functions to clean and enrich it:
+
+```bash
+# Add computed columns using SQL expressions
+bundlebase --bundle ./data --execute "ADD COLUMN full_name AS first_name || ' ' || last_name"
+bundlebase --bundle ./data --execute "ADD COLUMN price_cents AS CAST(price * 100 AS INTEGER)"
+
+# Cast column types with optional regex cleanup (strip non-numeric chars before casting)
+bundlebase --bundle ./data --execute "CAST COLUMN price TO integer CLEAN '[^0-9]'"
+
+# Filter out bad rows
+bundlebase --bundle ./data --execute "FILTER WITH SELECT * FROM bundle WHERE email IS NOT NULL"
+
+# Use a custom Python function for complex transformations
+# First, create the function file:
+#   from bundlebase_sdk import Function
+#   class NormalizePhone(Function):
+#       def call(self, phone: str) -> str:
+#           return re.sub(r'[^0-9+]', '', phone)
+# Then register and use it:
+bundlebase --bundle ./data --execute "IMPORT TEMP FUNCTION util.normalize_phone FROM 'python::normalize.py:NormalizePhone'"
+bundlebase --bundle ./data --execute "ADD COLUMN clean_phone AS util.normalize_phone(phone)"
+
+# Commit the cleaned version
+bundlebase --bundle ./data --execute "COMMIT 'Cleaned and enriched data'"
+```
+
+Use `SYNTAX ADD COLUMN`, `SYNTAX CAST COLUMN`, and `SYNTAX IMPORT FUNCTION` for detailed syntax. See the [Functions guide](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/functions.md).
+
 ## SQL Reference Summary
 
 The table name for bundle data is always `bundle`. Standard SQL (Apache DataFusion syntax) is supported for SELECT queries.

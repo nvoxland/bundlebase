@@ -6,8 +6,10 @@ Bundlebase packages data files into versioned bundles with a SQL query engine, c
 
 ## Docs
 - [SQL Reference](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/sql-reference/index.md): Full command syntax
-- [Connector SDK](https://raw.githubusercontent.com/nvoxland/bundlebase/main/sdk/python/bundlebase_sdk/README.md): Custom connectors
-- [Function SDK](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/user-guide/functions.md): Custom functions
+- [Sources & Connectors](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/sources.md): Built-in connectors (Kaggle, S3, FTP, PostgreSQL, etc.)
+- [Custom Connectors](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/index.md): Build your own data connectors
+- [Python Connector SDK](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/python.md): Python SDK for connectors
+- [Functions](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/functions.md): Custom SQL functions
 - [CLI Reference](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/cli-repl.md): CLI usage
 
 ## Quick Reference
