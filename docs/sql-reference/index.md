@@ -780,7 +780,27 @@ SAVE CONFIG <key> = '<value>' [FOR '<scope>']
 
 See [Metadata](../guide/metadata.md) and [Configuration](../guide/configuration.md) for details.
 
-## Help
+## Help & Introspection
+
+### SHOW
+
+Shows the contents of a bundle metadata table. A shortcut for `SELECT * FROM bundle_info.<table>`.
+
+```sql
+SHOW <table>
+```
+
+Available tables: `DETAILS`, `HISTORY`, `STATUS`, `VIEWS`, `INDEXES`, `PACKS`, `BLOCKS`, `CONFIG`, `CONNECTORS`, `FUNCTIONS`.
+
+**Examples:**
+
+```sql
+SHOW HISTORY
+SHOW STATUS
+SHOW DETAILS
+SHOW CONFIG
+SHOW CONNECTORS
+```
 
 ### SYNTAX
 

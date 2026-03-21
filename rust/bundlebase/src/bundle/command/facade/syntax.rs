@@ -167,6 +167,7 @@ fn usage_for_command(command_name: &str) -> Option<&'static str> {
         "EXPLAIN" => Some(include_str!("../syntax/explain.md")),
         "DESCRIBE CONNECTOR" => Some(include_str!("../syntax/describe_connector.md")),
         "DESCRIBE FUNCTION" => Some(include_str!("../syntax/describe_function.md")),
+        "SHOW" => Some(include_str!("../syntax/show.md")),
         "SYNTAX" => Some(include_str!("../syntax/syntax.md")),
         _ => None,
     }

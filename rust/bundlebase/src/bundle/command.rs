@@ -84,6 +84,7 @@ pub use facade::RenameTempConnectorCommand;
 pub use facade::RenameTempFunctionCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
+pub use facade::ShowCommand;
 pub use facade::SyntaxCommand;
 
 /// Commands that can be executed on a BundleFacade (read-only).
@@ -112,6 +113,8 @@ pub enum FacadeCommand {
     ExplainPlan(ExplainPlanCommand),
     /// Set runtime config value (session-only)
     SetConfig(SetConfigCommand),
+    /// Show contents of a bundle_info helper table
+    Show(ShowCommand),
     /// Show syntax and usage for bundlebase commands
     Syntax(SyntaxCommand),
 }
@@ -163,6 +166,10 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::Show(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
             FacadeCommand::Syntax(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
@@ -183,6 +190,7 @@ impl FacadeCommand {
             FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_schema(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
+            FacadeCommand::Show(_) => ShowCommand::output_schema(),
             FacadeCommand::Syntax(_) => SyntaxCommand::output_schema(),
         }
     }
@@ -200,6 +208,7 @@ impl FacadeCommand {
             FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_shape(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
+            FacadeCommand::Show(_) => ShowCommand::output_shape(),
             FacadeCommand::Syntax(_) => SyntaxCommand::output_shape(),
         }
     }
@@ -222,6 +231,7 @@ impl BundleCommand {
             BundleCommand::RenameTempFunction(cmd) => Ok(FacadeCommand::RenameTempFunction(cmd)),
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
             BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
+            BundleCommand::Show(cmd) => Ok(FacadeCommand::Show(cmd)),
             BundleCommand::Syntax(cmd) => Ok(FacadeCommand::Syntax(cmd)),
             _ => {
                 // Get the command name for the error message
@@ -260,7 +270,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::Syntax(_) => {
+                    BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::Show(_) | BundleCommand::Syntax(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -274,7 +284,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::Syntax(_))
+        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::Show(_) | BundleCommand::Syntax(_))
     }
 }
 
@@ -646,6 +656,8 @@ register_commands! {
             "EXPLAIN" => "EXPLAIN [ANALYZE] [VERBOSE] [FORMAT <format>] [<sql>]",
         SetConfig(SetConfigCommand) => Rule::set_config_stmt,
             "SET CONFIG" => "SET CONFIG <key> = '<value>' FOR '<scope>'",
+        Show(ShowCommand) => Rule::show_stmt,
+            "SHOW" => "SHOW <DETAILS|HISTORY|STATUS|VIEWS|INDEXES|PACKS|BLOCKS|CONFIG|CONNECTORS|FUNCTIONS>",
         Syntax(SyntaxCommand) => Rule::syntax_stmt,
             "SYNTAX" => "SYNTAX [<command>]",
     }

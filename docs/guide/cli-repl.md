@@ -77,10 +77,12 @@ Any input that doesn't start with `/` is treated as SQL and executed against the
 ./my-bundle> COMMIT 'Cleaned up sales data'
 ```
 
-Use `SYNTAX` to discover available commands and their usage:
+Use `SHOW` to inspect bundle metadata and `SYNTAX` to discover available commands:
 
 ```
-./my-bundle> SYNTAX
+./my-bundle> SHOW HISTORY
+./my-bundle> SHOW STATUS
+./my-bundle> SHOW CONFIG
 ./my-bundle> SYNTAX IMPORT FUNCTION
 ```
 

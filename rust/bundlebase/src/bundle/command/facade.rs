@@ -14,6 +14,7 @@ mod drop_temp_function;
 mod rename_temp_connector;
 mod rename_temp_function;
 mod set_config;
+mod show;
 mod syntax;
 
 pub use describe_connector::DescribeConnectorCommand;
@@ -26,4 +27,5 @@ pub use rename_temp_connector::RenameTempConnectorCommand;
 pub use rename_temp_function::RenameTempFunctionCommand;
 pub use explain::ExplainPlanCommand;
 pub use set_config::SetConfigCommand;
+pub use show::ShowCommand;
 pub use syntax::SyntaxCommand;

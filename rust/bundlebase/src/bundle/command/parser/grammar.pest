@@ -94,7 +94,8 @@ transaction_stmt = {
 
 // Metadata statements - operations for bundle metadata
 metadata_stmt = {
-    syntax_stmt
+    show_stmt
+    | syntax_stmt
     | describe_connector_stmt
     | describe_function_stmt
     | set_name_stmt
@@ -118,6 +119,25 @@ syntax_stmt = {
 
 syntax_query = @{
     (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// SHOW Statement
+// ============================================================================
+// Syntax: SHOW <table>
+// Examples:
+//   SHOW HISTORY       -- show commit history
+//   SHOW STATUS        -- show uncommitted changes
+//   SHOW DETAILS       -- show bundle metadata
+//   SHOW CONFIG        -- show configuration values
+
+show_stmt = {
+    ^"show" ~ show_table
+}
+
+show_table = {
+    ^"details" | ^"history" | ^"status" | ^"views" | ^"indexes"
+    | ^"packs" | ^"blocks" | ^"config" | ^"connectors" | ^"functions"
 }
 
 // ============================================================================
