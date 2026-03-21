@@ -345,10 +345,19 @@ impl BundleBuilder {
     /// builder.commit("Filter high-value transactions").await?;
     /// ```
     pub async fn commit(&self, message: &str) -> Result<&Self, BundlebaseError> {
+        // Validate no pending filters reference temporary-only functions
+        let changes = self.status.read().changes().clone();
+        for change in &changes {
+            for op in &change.operations {
+                if let AnyOperation::Filter(filter_op) = op {
+                    self.check_no_temp_functions_in_sql(&filter_op.query, "commit")?;
+                }
+            }
+        }
+
         let manifest_dir = self.bundle.data_dir().writable_subdir(META_DIR)?;
         let last_manifest_version = *self.bundle.last_manifest_version.read();
         let from = self.bundle.from();
-        let changes = self.status.read().changes().clone();
         let passed_config = Some((*self.bundle.config.passed_config()).clone());
         let url = self.bundle.url().to_string();
         let bundle_id = self.bundle.id();
@@ -481,6 +490,44 @@ impl BundleBuilder {
         info!("Last operation undone");
 
         Ok(self)
+    }
+
+    /// Check that a SQL string does not reference any temporary-only functions.
+    ///
+    /// Returns an error naming the temporary function if one is found,
+    /// or Ok(()) if the SQL is safe to persist.
+    pub(crate) fn check_no_temp_functions_in_sql(
+        &self,
+        sql: &str,
+        context: &str,
+    ) -> Result<(), BundlebaseError> {
+        let temp_names = self.bundle.function_registry().read().temporary_only_names();
+        if temp_names.is_empty() {
+            return Ok(());
+        }
+
+        let conflicts = sql::find_temp_functions_in_sql(sql, &temp_names);
+
+        if let Some(name) = conflicts.first() {
+            if context == "commit" {
+                return Err(format!(
+                    "Cannot commit: filter query references temporary function '{}'. \
+                     Temporary functions are session-only and will not be available after \
+                     the bundle is reopened. Either import '{}' as a persistent function \
+                     (IMPORT FUNCTION) or remove the filter before committing.",
+                    name, name
+                ).into());
+            } else {
+                return Err(format!(
+                    "Cannot create view: SQL references temporary function '{}'. \
+                     Views are persisted and must not depend on temporary functions. \
+                     Import '{}' as a persistent function (IMPORT FUNCTION) first.",
+                    name, name
+                ).into());
+            }
+        }
+
+        Ok(())
     }
 
     pub(in crate::bundle) async fn reload_bundle(&self) -> Result<(), BundlebaseError> {
@@ -916,6 +963,8 @@ impl BundleBuilder {
         sql: &str,
     ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
         use crate::bundle::operation::CreateViewOp;
+
+        self.check_no_temp_functions_in_sql(sql, "view")?;
 
         let name_clone = name.to_string();
         let sql_clone = sql.to_string();
@@ -1933,5 +1982,91 @@ mod tests {
             .unwrap();
 
         assert_eq!(builder.version(), "UNCOMMITTED+TEMP");
+    }
+
+    #[tokio::test]
+    async fn test_commit_blocked_by_temp_function_in_filter() {
+        use crate::bundle::function_entry::{FunctionEntry, FunctionKind, parse_function_name};
+        use crate::udf::UdfRuntime;
+        use crate::platform::Platform;
+        use crate::function::ipc_bridge::new_subprocess_cache;
+        use datafusion::logical_expr::ScalarUDF;
+
+        let builder = BundleBuilder::create("memory:///test_temp_guard", None)
+            .await
+            .unwrap();
+        builder
+            .attach(test_datafile("userdata.parquet"), None)
+            .await
+            .unwrap();
+
+        // Manually add a temp function entry and register the UDF
+        let entry = FunctionEntry {
+            id: ObjectId::generate(),
+            name: parse_function_name("test.double_val").unwrap(),
+            input_types: vec![DataType::Int32],
+            return_type: DataType::Int32,
+            from: UdfRuntime::parse_from("ipc::fake_binary").unwrap(),
+            platform: Platform::any(),
+            temporary: true,
+            kind: FunctionKind::Scalar,
+        };
+        let func = crate::function::scalar::ScalarFunction::new_composite(
+            vec![entry.clone()],
+            new_subprocess_cache(),
+        )
+        .unwrap();
+        builder.bundle().ctx().register_udf(ScalarUDF::from(func));
+        builder.bundle().function_registry().write().add(entry);
+
+        // Verify temp function is registered
+        let temp_names = builder.bundle().function_registry().read().temporary_only_names();
+        assert!(
+            temp_names.contains(&"test.double_val".to_string()),
+            "Expected 'test.double_val' in temp_names: {:?}",
+            temp_names
+        );
+
+        // Apply a filter that uses the temp function
+        builder
+            .filter("SELECT * FROM bundle WHERE test.double_val(id) > 10", vec![])
+            .await
+            .unwrap();
+
+        // Verify status has the filter operation
+        let status = builder.status();
+        assert!(!status.is_empty(), "Status should have changes after filter");
+
+        // Commit should fail
+        let result = builder.commit("should fail").await;
+        assert!(result.is_err(), "Commit should fail when filter uses temp function");
+        let err = result.err().unwrap();
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("temporary function"),
+            "Error should mention temp function: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_commit_succeeds_without_temp_function_in_filter() {
+        let builder = BundleBuilder::create("memory:///test_no_temp", None)
+            .await
+            .unwrap();
+        builder
+            .attach(test_datafile("userdata.parquet"), None)
+            .await
+            .unwrap();
+
+        // Filter without temp function
+        builder
+            .filter("SELECT * FROM bundle WHERE id > 10", vec![])
+            .await
+            .unwrap();
+
+        // Commit should succeed
+        let result = builder.commit("should succeed").await;
+        assert!(result.is_ok(), "Commit should succeed: {:?}", result.err());
     }
 }

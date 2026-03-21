@@ -63,6 +63,7 @@ impl BundleBuilderCommand for CreateViewCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
+        builder.check_no_temp_functions_in_sql(&self.sql, "view")?;
         let (op, _view_builder) = CreateViewOp::setup(&self.name, &self.sql, builder).await?;
         builder.apply_operation(op.into()).await?;
         Ok(format!("Created view: {}", self.name))
