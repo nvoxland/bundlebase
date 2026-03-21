@@ -23,6 +23,7 @@ const VALID_TABLES: &[&str] = &[
     tables::PACKS,
     tables::BLOCKS,
     tables::CONFIG,
+    tables::COMMANDS,
     tables::CONNECTORS,
     tables::FUNCTIONS,
 ];

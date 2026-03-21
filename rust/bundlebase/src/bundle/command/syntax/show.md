@@ -9,6 +9,7 @@ Show the contents of a bundle metadata table. A shortcut for
     SHOW VIEWS
     SHOW INDEXES
     SHOW CONFIG
+    SHOW COMMANDS
     SHOW CONNECTORS
     SHOW FUNCTIONS
     SHOW PACKS

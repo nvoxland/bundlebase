@@ -507,6 +507,20 @@ macro_rules! register_commands {
                 $( map.insert($facade_name, $facade_syntax); )*
                 map
             }
+
+            /// Returns metadata for all registered commands: (name, syntax, mode).
+            ///
+            /// Mode is "read-write" for builder commands and "read-only" for facade commands.
+            /// Auto-generated from the `register_commands!` macro invocation.
+            pub fn command_metadata() -> Vec<(&'static str, &'static str, &'static str)> {
+                let mut entries = Vec::new();
+                $( entries.push(($msg_name, $msg_syntax, "read-write")); )*
+                $( entries.push(($fetch_name, $fetch_syntax, "read-write")); )*
+                $( entries.push(($verify_name, $verify_syntax, "read-write")); )*
+                $( entries.push(($facade_name, $facade_syntax, "read-only")); )*
+                entries.sort_by_key(|(name, _, _)| name.to_string());
+                entries
+            }
         }
 
         /// Parse a command from a pest Rule and Pair.
@@ -657,7 +671,7 @@ register_commands! {
         SetConfig(SetConfigCommand) => Rule::set_config_stmt,
             "SET CONFIG" => "SET CONFIG <key> = '<value>' FOR '<scope>'",
         Show(ShowCommand) => Rule::show_stmt,
-            "SHOW" => "SHOW <DETAILS|HISTORY|STATUS|VIEWS|INDEXES|PACKS|BLOCKS|CONFIG|CONNECTORS|FUNCTIONS>",
+            "SHOW" => "SHOW <DETAILS|HISTORY|STATUS|VIEWS|INDEXES|PACKS|BLOCKS|CONFIG|COMMANDS|CONNECTORS|FUNCTIONS>",
         Syntax(SyntaxCommand) => Rule::syntax_stmt,
             "SYNTAX" => "SYNTAX [<command>]",
     }

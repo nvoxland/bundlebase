@@ -137,7 +137,7 @@ show_stmt = {
 
 show_table = {
     ^"details" | ^"history" | ^"status" | ^"views" | ^"indexes"
-    | ^"packs" | ^"blocks" | ^"config" | ^"connectors" | ^"functions"
+    | ^"packs" | ^"blocks" | ^"config" | ^"commands" | ^"connectors" | ^"functions"
 }
 
 // ============================================================================

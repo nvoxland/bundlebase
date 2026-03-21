@@ -790,7 +790,7 @@ Shows the contents of a bundle metadata table. A shortcut for `SELECT * FROM bun
 SHOW <table>
 ```
 
-Available tables: `DETAILS`, `HISTORY`, `STATUS`, `VIEWS`, `INDEXES`, `PACKS`, `BLOCKS`, `CONFIG`, `CONNECTORS`, `FUNCTIONS`.
+Available tables: `DETAILS`, `HISTORY`, `STATUS`, `VIEWS`, `INDEXES`, `PACKS`, `BLOCKS`, `CONFIG`, `COMMANDS`, `CONNECTORS`, `FUNCTIONS`.
 
 **Examples:**
 
@@ -799,6 +799,7 @@ SHOW HISTORY
 SHOW STATUS
 SHOW DETAILS
 SHOW CONFIG
+SHOW COMMANDS
 SHOW CONNECTORS
 ```
 

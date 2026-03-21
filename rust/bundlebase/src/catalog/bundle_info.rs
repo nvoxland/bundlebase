@@ -1,4 +1,5 @@
 mod blocks_table;
+mod commands_table;
 mod config_table;
 mod connectors_table;
 mod details_table;
@@ -14,6 +15,7 @@ use crate::bundle::BundleFacade;
 
 use async_trait::async_trait;
 use blocks_table::BundleBlocksTable;
+use commands_table::CommandsTable;
 use config_table::BundleConfigTable;
 use connectors_table::BundleConnectorsTable;
 use datafusion::catalog::{SchemaProvider, TableProvider};
@@ -58,6 +60,7 @@ impl BundleInfoSchemaProvider {
         tables.insert(tables::BLOCKS, Arc::new(BundleBlocksTable::new(bundle.clone())));
         tables.insert(tables::CONNECTORS, Arc::new(BundleConnectorsTable::new(bundle.clone())));
         tables.insert(tables::FUNCTIONS, Arc::new(BundleFunctionsTable::new(bundle)));
+        tables.insert(tables::COMMANDS, Arc::new(CommandsTable::new()));
         Self { tables }
     }
 }

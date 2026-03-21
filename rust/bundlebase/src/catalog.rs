@@ -29,6 +29,7 @@ pub mod tables {
     pub static PACKS: &str = "packs";
     pub static BLOCKS: &str = "blocks";
     pub static CONFIG: &str = "config";
+    pub static COMMANDS: &str = "commands";
     pub static CONNECTORS: &str = "connectors";
     pub static FUNCTIONS: &str = "functions";
 }
