@@ -19,7 +19,25 @@ pip install bundlebase
 
 This installs the `bundlebase` CLI command.
 
-## CLI Quick Start
+## Choosing CLI vs MCP Mode
+
+Bundlebase offers two agent-friendly modes. Choose based on the task:
+
+**CLI mode (`--execute`)** — Best for one-shot simple queries or changes. Each invocation opens the bundle, runs a command, and exits. Use when you need a quick lookup, a single query, or a standalone mutation.
+
+**MCP mode (`--mode mcp`)** — Best for building up a new bundle or other multi-step operations. The bundle stays open across calls, preserving cache and state. Use when you need to attach multiple files, run a sequence of transformations, explore data iteratively, or build up changes before committing.
+
+| Scenario | Use |
+|----------|-----|
+| Check schema or row count | CLI |
+| Run a single SELECT query | CLI |
+| One-off ATTACH or COMMIT | CLI |
+| Create a bundle from scratch with multiple files | MCP |
+| Iterative data exploration (query, filter, query again) | MCP |
+| Multi-step transformations (attach, filter, rename, commit) | MCP |
+| Building up joins and views | MCP |
+
+## CLI Mode
 
 All operations use `--execute` for non-interactive, single-command execution. Add `--format json` for machine-readable output.
 
@@ -48,6 +66,48 @@ bundlebase --bundle ./my-bundle --execute "COMMIT 'Initial data load'"
 JSON mode outputs arrays of objects for queries, single values/objects for commands. Errors go to stderr as `{"error": "..."}`. Exit code 1 on error.
 
 Query results are hard-limited to 1000 rows. Use `LIMIT` in SQL for fewer.
+
+## MCP Mode
+
+MCP mode runs bundlebase as a Model Context Protocol server over stdio. Configure it as an MCP server in your AI assistant (Claude Code, Cursor, etc.) and the tools become available directly.
+
+### MCP Server Configuration
+
+Add to your MCP settings (e.g., Claude Code `mcp_servers` config):
+
+```json
+{
+  "bundlebase": {
+    "command": "bundlebase",
+    "args": ["--bundle", "./my-bundle", "--mode", "mcp"]
+  }
+}
+```
+
+Add `--create` to the args to create a new bundle, or `--read-only` for read-only access.
+
+### Available MCP Tools
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `query` | `sql` (string) | Execute any SQL query or bundlebase command. Returns JSON. 1000-row limit. |
+| `schema` | (none) | Get column names, data types, and nullability |
+| `count` | (none) | Get total row count |
+| `sample` | `limit` (optional, default 10) | Preview sample rows as JSON |
+| `status` | (none) | Show uncommitted changes |
+| `history` | (none) | Show commit history |
+
+The `query` tool handles everything: SELECT queries, ATTACH, DETACH, FILTER, RENAME, COMMIT, and all other bundlebase SQL commands.
+
+### MCP Workflow Example
+
+```
+1. Call `schema` to understand the data structure
+2. Call `sample` to preview the data
+3. Call `query` with SQL to explore and transform
+4. Call `status` to review uncommitted changes
+5. Call `query` with "COMMIT 'message'" to save
+```
 
 ## Common Workflows
 

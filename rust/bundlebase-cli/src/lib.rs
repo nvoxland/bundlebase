@@ -11,6 +11,7 @@
 pub mod agent_skills;
 pub mod auth;
 pub mod flight;
+pub mod mcp;
 pub mod repl;
 
 use clap::ValueEnum;

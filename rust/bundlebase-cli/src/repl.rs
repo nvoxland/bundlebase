@@ -3,7 +3,7 @@
 //! This module provides an interactive command-line interface for working with
 //! bundlebase bundles. It supports SQL commands and REPL-specific meta commands.
 
-mod commands;
+pub(crate) mod commands;
 mod completion;
 pub mod display;
 pub mod json_formatter;

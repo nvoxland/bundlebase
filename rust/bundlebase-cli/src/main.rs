@@ -7,6 +7,7 @@
 mod agent_skills;
 mod auth;
 mod flight;
+mod mcp;
 mod repl;
 
 use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade, PassedBundleConfig};
@@ -24,6 +25,8 @@ pub enum Mode {
     Repl,
     /// Arrow Flight server mode
     Flight,
+    /// MCP (Model Context Protocol) server over stdio
+    Mcp,
 }
 
 impl std::fmt::Display for Mode {
@@ -31,6 +34,7 @@ impl std::fmt::Display for Mode {
         match self {
             Mode::Repl => write!(f, "repl"),
             Mode::Flight => write!(f, "flight"),
+            Mode::Mcp => write!(f, "mcp"),
         }
     }
 }
@@ -219,6 +223,20 @@ async fn main() -> Result<(), BundlebaseError> {
                 .parse()
                 .map_err(|e| BundlebaseError::from(format!("Invalid address: {}", e)))?;
             flight::start(&bundle, config, args.create, args.read_only, addr).await?;
+        }
+        Mode::Mcp => {
+            let state: Arc<dyn BundleFacade> = if args.create {
+                info!("Creating bundle at: {}", bundle);
+                BundleBuilder::create(&bundle, config.clone()).await?
+            } else if args.read_only {
+                info!("Opening bundle in read-only mode: {}", bundle);
+                Bundle::open(&bundle, config.clone()).await?
+            } else {
+                info!("Opening bundle in read-write mode: {}", bundle);
+                Bundle::open(&bundle, config.clone()).await?.extend(None).await?
+            };
+
+            mcp::start(state).await?;
         }
     }
 
