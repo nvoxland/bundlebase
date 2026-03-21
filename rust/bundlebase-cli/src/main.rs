@@ -48,8 +48,9 @@ struct Args {
     bundle: Option<String>,
 
     /// Install agent skills for coding agents (Claude Code, Cursor, Copilot, etc.)
-    #[arg(long)]
-    setup_agent: bool,
+    /// Use --setup-agent for project-level or --setup-agent global for user-level (~/.agents/skills/)
+    #[arg(long, default_missing_value = "local", num_args = 0..=1)]
+    setup_agent: Option<String>,
 
     /// Mode of operation (repl or flight)
     #[arg(long, value_enum, default_value = "repl")]
@@ -170,8 +171,16 @@ async fn main() -> Result<(), BundlebaseError> {
 
     init_logging(&args);
 
-    if args.setup_agent {
-        agent_skills::install()?;
+    if let Some(scope) = &args.setup_agent {
+        let global = match scope.as_str() {
+            "local" => false,
+            "global" => true,
+            other => {
+                eprintln!("Error: Invalid --setup-agent value '{}'. Use 'local' (default) or 'global'.", other);
+                std::process::exit(1);
+            }
+        };
+        agent_skills::install(global)?;
         return Ok(());
     }
 

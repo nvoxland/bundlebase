@@ -1,12 +1,19 @@
 use bundlebase::BundlebaseError;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const SKILL_MD: &str = include_str!("../../../skills/bundlebase/SKILL.md");
 const REFERENCE_MD: &str = include_str!("../../../skills/bundlebase/reference.md");
 
-pub fn install() -> Result<(), BundlebaseError> {
-    let skill_dir = Path::new(".agents/skills/bundlebase");
+pub fn install(global: bool) -> Result<(), BundlebaseError> {
+    let skill_dir: PathBuf = if global {
+        let home = dirs::home_dir().ok_or_else(|| {
+            BundlebaseError::from("Could not determine home directory".to_string())
+        })?;
+        home.join(".agents/skills/bundlebase")
+    } else {
+        Path::new(".agents/skills/bundlebase").to_path_buf()
+    };
 
     if skill_dir.join("SKILL.md").exists() {
         println!(
@@ -16,7 +23,7 @@ pub fn install() -> Result<(), BundlebaseError> {
         return Ok(());
     }
 
-    fs::create_dir_all(skill_dir).map_err(|e| {
+    fs::create_dir_all(&skill_dir).map_err(|e| {
         BundlebaseError::from(format!(
             "Failed to create directory '{}': {}",
             skill_dir.display(),

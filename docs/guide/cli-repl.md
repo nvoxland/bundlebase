@@ -15,6 +15,9 @@ bundlebase --bundle <path> [options]
 | `--bundle <path>` | *(required)* | Path or URL to the bundle |
 | `--create` | `false` | Create a new bundle if it doesn't exist |
 | `--read-only` | `false` | Open in read-only mode (only SELECT and EXPLAIN allowed) |
+| `--execute <sql>` | *(none)* | Execute a single command and exit (non-interactive) |
+| `--format <format>` | `table` | Output format: `table` or `json` |
+| `--setup-agent [scope]` | *(n/a)* | Install agent skills for coding agents (see [Agent Skills](#agent-skills)) |
 | `--log-level <level>` | `ui` | Logging level: `ui`, `trace`, `debug`, `info`, `warn`, `error` |
 | `--otel <endpoint>` | *(none)* | OpenTelemetry endpoint for tracing |
 
@@ -149,3 +152,29 @@ Creating bundle at: ./demo
 ./demo> /exit
 Goodbye!
 ```
+
+## Agent Skills
+
+The `--setup-agent` flag installs [Agent Skills](https://agentskills.io) files that make bundlebase automatically discoverable by coding agents like Claude Code, Cursor, Copilot, Gemini CLI, and others.
+
+### Project-Level Install (default)
+
+```bash
+bundlebase --setup-agent
+```
+
+Creates `.agents/skills/bundlebase/` in the current directory with `SKILL.md` (instructions and workflows) and `reference.md` (SQL command reference). Any agent that opens this project will discover bundlebase automatically.
+
+### User-Level Install
+
+```bash
+bundlebase --setup-agent global
+```
+
+Creates `~/.agents/skills/bundlebase/` so bundlebase skills are available across all projects for agents that scan user-level skill directories.
+
+### Notes
+
+- The command is idempotent — running it again prints "already installed" and exits
+- No `--bundle` flag is needed
+- The installed files contain CLI usage patterns and the full SQL command reference so agents can use bundlebase without making web requests to documentation
