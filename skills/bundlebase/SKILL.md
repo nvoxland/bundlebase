@@ -307,7 +307,20 @@ bundlebase --bundle s3://mybucket/my-bundle --read-only --execute "/schema" --fo
 
 The table name for bundle data is always `bundle`. Standard SQL (Apache DataFusion syntax) is supported for SELECT queries.
 
-For the full command reference with detailed syntax, see [reference.md](reference.md).
+Use `SYNTAX` to get command syntax on demand:
+
+```bash
+# List all available commands
+bundlebase --bundle ./data --execute "SYNTAX"
+
+# Get detailed syntax and examples for a specific command
+bundlebase --bundle ./data --execute "SYNTAX IMPORT FUNCTION"
+bundlebase --bundle ./data --execute "SYNTAX ATTACH"
+```
+
+In MCP mode, use the `query` tool with `SYNTAX <command>`.
+
+For a quick command reference, see [reference.md](reference.md).
 
 ### REPL Meta-Commands
 

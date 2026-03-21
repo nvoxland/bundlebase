@@ -59,6 +59,7 @@ The `query` tool is the primary tool, handling all SQL queries and bundlebase co
 - **Transformations**: `FILTER WITH SELECT * FROM bundle WHERE active = true`
 - **Schema changes**: `RENAME COLUMN fname TO first_name`, `DROP COLUMN temp_id`
 - **Version control**: `COMMIT 'Added sales data'`, `RESET`, `UNDO`
+- **Help**: `SYNTAX` to list all commands, `SYNTAX ATTACH` for detailed syntax and examples
 - **Everything else**: `JOIN`, `CREATE VIEW`, `CREATE TEXT INDEX`, `EXPLAIN`, etc.
 
 All query results are returned as JSON, limited to 1000 rows.

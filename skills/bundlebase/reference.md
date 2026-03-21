@@ -62,141 +62,23 @@ Prefer CLI (`--execute`) for one-shot queries. Prefer MCP for building bundles o
 
 ### SQL Commands
 
-#### Data Modification
+Use `SYNTAX <command>` to get detailed syntax and examples for any command:
 
 ```sql
--- Attach a data file (CSV, Parquet, JSON, etc.)
-ATTACH '<path>' [TO <pack>] [WITH (<key> = <value>, ...)]
-
--- Remove an attached data file
-DETACH '<location>'
-
--- Replace one attached location with another
-REPLACE '<old_location>' WITH '<new_location>'
-
--- Filter rows using a SQL query
-FILTER WITH <select_query>
+SYNTAX              -- list all commands
+SYNTAX ATTACH       -- detailed syntax for ATTACH
+SYNTAX IMPORT FUNCTION  -- detailed syntax for IMPORT FUNCTION
 ```
 
-#### Schema
+#### Available Commands
 
-```sql
--- Add a join (supports INNER, LEFT, RIGHT, FULL OUTER)
-[INNER | LEFT | RIGHT | FULL [OUTER]] JOIN '<source>' AS <name> ON <condition>
+**Data**: ATTACH, DETACH, REPLACE, FILTER
+**Schema**: JOIN, DROP JOIN, RENAME JOIN, ADD COLUMN, DROP COLUMN, RENAME COLUMN, CAST COLUMN, CREATE VIEW, DROP VIEW, RENAME VIEW
+**Sources**: IMPORT [TEMP] FUNCTION, IMPORT [TEMP] CONNECTOR, DROP/RENAME [TEMP] FUNCTION/CONNECTOR, CREATE SOURCE, FETCH, FETCH ALL, DESCRIBE FUNCTION, DESCRIBE CONNECTOR
+**Indexes**: CREATE INDEX, DROP INDEX, REBUILD INDEX, REINDEX
+**Version Control**: COMMIT, RESET, UNDO, VERIFY DATA, EXPLAIN
+**Metadata**: SET NAME, SET DESCRIPTION, SET CONFIG, SAVE CONFIG
 
--- Remove/rename a join
-DROP JOIN <name>
-RENAME JOIN <old_name> TO <new_name>
+**Built-in SQL functions**: `search('<index_name>', '<query>')` for full-text search with BM25 scoring.
 
--- Column operations
-DROP COLUMN <name>
-RENAME COLUMN <old_name> TO <new_name>
-
--- Views (named reusable queries)
-CREATE VIEW <name> AS <sql>
-DROP VIEW <name>
-RENAME VIEW <old_name> TO <new_name>
-```
-
-#### Sources & Fetch
-
-```sql
--- Define a source for automatic file discovery
-CREATE SOURCE <connector> WITH (<key> = '<value>', ...) [ON <pack>]
-
--- Discover and attach files from sources
-FETCH <pack> <ADD|UPDATE|SYNC> [DRY RUN]
-FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN]
-```
-
-Fetch modes:
-- `ADD` — attach newly discovered files only
-- `UPDATE` — update already-attached files with new versions
-- `SYNC` — add new + update existing + detach removed
-
-#### Functions
-
-```sql
--- Persistent function (not available for python runtime)
-IMPORT FUNCTION <ns.name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
-
--- Session-only function
-IMPORT TEMP FUNCTION <ns.name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
-
--- Wildcard discovery (register all functions from a library)
-IMPORT FUNCTION <namespace>.* FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
-
--- Management
-DROP FUNCTION <ns.name> [FOR PLATFORM '<platform>']
-DROP TEMP FUNCTION <ns.name> [FOR PLATFORM '<platform>']
-RENAME FUNCTION <old_name> TO <new_name>
-RENAME TEMP FUNCTION <old_name> TO <new_name>
-DESCRIBE FUNCTION <ns.name>
-```
-
-Runtimes: `python` (temp only), `ipc`, `ffi`, `java`, `docker`.
-
-#### Connectors
-
-```sql
--- Persistent connector (not available for python runtime)
-IMPORT CONNECTOR <name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
-
--- Session-only connector
-IMPORT TEMP CONNECTOR <name> FROM '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
-
--- Management
-DROP CONNECTOR <name> [FOR PLATFORM '<platform>']
-DROP TEMP CONNECTOR <name> [FOR PLATFORM '<platform>']
-RENAME CONNECTOR <old_name> TO <new_name>
-RENAME TEMP CONNECTOR <old_name> TO <new_name>
-DESCRIBE CONNECTOR <name>
-```
-
-Runtimes: `python` (temp only), `ipc`, `ffi`, `java`, `docker`.
-
-#### Indexes
-
-```sql
--- Create an index (COLUMN for filtering, TEXT for full-text search)
-CREATE <COLUMN|TEXT> INDEX ON <column>
-
--- Management
-DROP INDEX <column>
-REBUILD INDEX ON <column>
-REINDEX
-```
-
-#### Built-in Functions
-
-```sql
--- Full-text search with BM25 relevance scoring
-SELECT * FROM search('<index_name>', '<query>')
-
--- Field-specific search (for multi-column indexes)
-SELECT * FROM search('product_search', 'title:learning')
-
--- Order by relevance
-SELECT title, _score FROM search('my_search', 'machine learning') ORDER BY _score DESC
-```
-
-#### Version Control
-
-```sql
-COMMIT '<message>'
-RESET
-UNDO
-VERIFY DATA [UPDATE]
-EXPLAIN [ANALYZE] [VERBOSE] [FORMAT format] [sql]
-```
-
-EXPLAIN formats: `INDENT` (default), `TREE`, `GRAPHVIZ`.
-
-#### Metadata
-
-```sql
-SET NAME '<name>'
-SET DESCRIPTION '<description>'
-SET CONFIG <key> = '<value>' [FOR '<scope>']
-SAVE CONFIG <key> = '<value>' [FOR '<scope>']
-```
+Standard SQL (SELECT, WITH, etc.) uses Apache DataFusion syntax. The table name is always `bundle`.

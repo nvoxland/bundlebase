@@ -12,15 +12,16 @@ Commands encapsulate operation logic and can be executed via SQL parsing or dire
 
 When adding a new command, update these files:
 
-1. [ ] `rust/bundlebase/src/bundle/command/<name>.rs` - Create command struct implementing `Command` trait
-2. [ ] `rust/bundlebase/src/bundle/command.rs` - Add `mod <name>` declaration
-3. [ ] `rust/bundlebase/src/bundle/command.rs` - Add `pub use <name>::<Name>Command`
-4. [ ] `rust/bundlebase/src/bundle/command.rs` - Add `BundleCommand::<Name>` variant to enum
-5. [ ] `rust/bundlebase/src/bundle/command.rs` - Add match arm in `BundleCommand::execute()`
-6. [ ] `rust/bundlebase/src/bundle/command/parser/grammar.pest` - Add `<name>_stmt` rule (if SQL-parseable)
-7. [ ] `rust/bundlebase/src/bundle/command/parser/grammar.pest` - Add to appropriate category in `statement` rule
-8. [ ] `rust/bundlebase/src/bundle/command/parser.rs` - Add match arm in `try_parse_pest()` (if SQL-parseable)
-9. [ ] `rust/bundlebase/src/bundle/command/parser/pest_parser.rs` - Update `is_likely_custom_syntax()` if needed
+1. [ ] `rust/bundlebase/src/bundle/command/builder/<name>.rs` or `facade/<name>.rs` - Create command struct
+2. [ ] `rust/bundlebase/src/bundle/command/builder.rs` or `facade.rs` - Add `mod <name>` and `pub use`
+3. [ ] `rust/bundlebase/src/bundle/command.rs` - Add to `register_commands!` macro with syntax string
+4. [ ] `rust/bundlebase/src/bundle/command.rs` - Add re-export
+5. [ ] `rust/bundlebase/src/bundle/command/parser/grammar.pest` - Add `<name>_stmt` rule
+6. [ ] `rust/bundlebase/src/bundle/command/parser/grammar.pest` - Add to appropriate category
+7. [ ] `rust/bundlebase/src/bundle/command/syntax/<name>.md` - Add usage docs (description + examples)
+8. [ ] For facade commands: update `FacadeCommand` enum, `into_facade_command()`, and `is_facade_command()`
+
+The `register_commands!` macro auto-generates `available_commands()` from the syntax strings — no separate update needed in `pest_parser.rs`.
 
 ## Grammar Categories
 
@@ -33,7 +34,7 @@ The `statement` rule in `grammar.pest` is organized into semantic categories:
 | `source_stmt` | Operations for data sources and functions | CREATE SOURCE, FETCH, IMPORT/DROP/RENAME CONNECTOR, IMPORT/DROP/RENAME FUNCTION (including TEMP variants) |
 | `index_stmt` | Operations for search indexes | CREATE INDEX, DROP INDEX, REBUILD INDEX, REINDEX |
 | `transaction_stmt` | Operations for version control | COMMIT, RESET, UNDO, VERIFY DATA |
-| `metadata_stmt` | Operations for bundle metadata | SET NAME, SET DESCRIPTION, SET CONFIG, SAVE CONFIG |
+| `metadata_stmt` | Operations for bundle metadata | SET NAME, SET DESCRIPTION, SET CONFIG, SAVE CONFIG, SYNTAX, DESCRIBE |
 
 Add new statement rules to the appropriate category for maintainability.
 

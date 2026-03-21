@@ -779,3 +779,25 @@ SAVE CONFIG <key> = '<value>' [FOR '<scope>']
 ```
 
 See [Metadata](../guide/metadata.md) and [Configuration](../guide/configuration.md) for details.
+
+## Help
+
+### SYNTAX
+
+Shows syntax and usage information for bundlebase commands. With no arguments, lists all available commands. With a command name, shows detailed syntax and examples.
+
+```sql
+SYNTAX [<command>]
+```
+
+**Examples:**
+
+```sql
+-- List all available commands
+SYNTAX
+
+-- Show detailed syntax for a specific command
+SYNTAX ATTACH
+SYNTAX IMPORT CONNECTOR
+SYNTAX FETCH
+```

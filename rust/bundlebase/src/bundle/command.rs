@@ -84,6 +84,7 @@ pub use facade::RenameTempConnectorCommand;
 pub use facade::RenameTempFunctionCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
+pub use facade::SyntaxCommand;
 
 /// Commands that can be executed on a BundleFacade (read-only).
 ///
@@ -111,6 +112,8 @@ pub enum FacadeCommand {
     ExplainPlan(ExplainPlanCommand),
     /// Set runtime config value (session-only)
     SetConfig(SetConfigCommand),
+    /// Show syntax and usage for bundlebase commands
+    Syntax(SyntaxCommand),
 }
 
 impl FacadeCommand {
@@ -160,6 +163,10 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::Syntax(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
         }
     }
 
@@ -176,6 +183,7 @@ impl FacadeCommand {
             FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_schema(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
+            FacadeCommand::Syntax(_) => SyntaxCommand::output_schema(),
         }
     }
 
@@ -192,6 +200,7 @@ impl FacadeCommand {
             FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_shape(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
+            FacadeCommand::Syntax(_) => SyntaxCommand::output_shape(),
         }
     }
 }
@@ -213,6 +222,7 @@ impl BundleCommand {
             BundleCommand::RenameTempFunction(cmd) => Ok(FacadeCommand::RenameTempFunction(cmd)),
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
             BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
+            BundleCommand::Syntax(cmd) => Ok(FacadeCommand::Syntax(cmd)),
             _ => {
                 // Get the command name for the error message
                 let cmd_name = match &self {
@@ -250,7 +260,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
+                    BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::Syntax(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -264,7 +274,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
+        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::Syntax(_))
     }
 }
 
@@ -354,6 +364,7 @@ pub trait BundleFacadeCommand: CommandParsing {
 /// - `BundleCommand` enum variants
 /// - Match arms in `BundleCommand::execute()`
 /// - `parse_from_rule()` function for centralized rule-to-command mapping
+/// - `available_commands()` function returning all command names and syntax strings
 ///
 /// # Categories
 ///
@@ -368,19 +379,19 @@ macro_rules! register_commands {
     (
         // Commands that return MessageResponse::ok()
         message {
-            $( $msg_variant:ident($msg_cmd:ty) => $msg_rule:path ),* $(,)?
+            $( $msg_variant:ident($msg_cmd:ty) => $msg_rule:path, $msg_name:literal => $msg_syntax:literal ),* $(,)?
         }
         // Commands that return Vec<FetchResults> but need special parsing (shared rules)
         fetch_special {
-            $( $fetch_variant:ident($fetch_cmd:ty) ),* $(,)?
+            $( $fetch_variant:ident($fetch_cmd:ty), $fetch_name:literal => $fetch_syntax:literal ),* $(,)?
         }
         // Commands that return VerificationResults
         verification {
-            $( $verify_variant:ident($verify_cmd:ty) => $verify_rule:path ),* $(,)?
+            $( $verify_variant:ident($verify_cmd:ty) => $verify_rule:path, $verify_name:literal => $verify_syntax:literal ),* $(,)?
         }
         // Read-only commands using BundleFacadeCommand (e.g. ExplainPlan)
         facade {
-            $( $facade_variant:ident($facade_cmd:ty) => $facade_rule:path ),* $(,)?
+            $( $facade_variant:ident($facade_cmd:ty) => $facade_rule:path, $facade_name:literal => $facade_syntax:literal ),* $(,)?
         }
     ) => {
         /// Command that can be executed on a BundleBuilder.
@@ -473,6 +484,19 @@ macro_rules! register_commands {
                     _ => String::output_shape(),
                 }
             }
+
+            /// Returns a map of command names to their syntax descriptions.
+            ///
+            /// This is auto-generated from the `register_commands!` macro invocation,
+            /// ensuring every registered command has a syntax entry.
+            pub fn available_commands() -> std::collections::HashMap<&'static str, &'static str> {
+                let mut map = std::collections::HashMap::new();
+                $( map.insert($msg_name, $msg_syntax); )*
+                $( map.insert($fetch_name, $fetch_syntax); )*
+                $( map.insert($verify_name, $verify_syntax); )*
+                $( map.insert($facade_name, $facade_syntax); )*
+                map
+            }
         }
 
         /// Parse a command from a pest Rule and Pair.
@@ -516,68 +540,114 @@ register_commands! {
     message {
         // Data modification commands
         Attach(AttachCommand) => Rule::attach_stmt,
+            "ATTACH" => "ATTACH '<path>' [TO <pack>] [WITH (<options>)]",
         DetachBlock(DetachBlockCommand) => Rule::detach_stmt,
+            "DETACH" => "DETACH '<location>'",
         Filter(FilterCommand) => Rule::filter_stmt,
+            "FILTER" => "FILTER WITH <select_query>",
         Join(JoinCommand) => Rule::join_stmt,
+            "JOIN" => "[LEFT|RIGHT|FULL|INNER] JOIN '<path>' AS <name> ON <expression>",
         ReplaceBlock(ReplaceBlockCommand) => Rule::replace_stmt,
+            "REPLACE" => "REPLACE '<old_location>' WITH '<new_location>'",
 
         // Schema commands
         AddColumn(AddColumnCommand) => Rule::add_column_stmt,
+            "ADD COLUMN" => "ADD COLUMN <name> AS <expression>",
         CastColumn(CastColumnCommand) => Rule::cast_column_stmt,
+            "CAST COLUMN" => "CAST COLUMN <name> TO <type> [CLEAN '<pattern>']",
         DropColumn(DropColumnCommand) => Rule::drop_column_stmt,
+            "DROP COLUMN" => "DROP COLUMN <name>",
         RenameColumn(RenameColumnCommand) => Rule::rename_column_stmt,
+            "RENAME COLUMN" => "RENAME COLUMN <old> TO <new>",
         CreateIndex(CreateIndexCommand) => Rule::create_index_stmt,
+            "CREATE INDEX" => "CREATE <COLUMN|TEXT> INDEX ON <column>",
         DropIndex(DropIndexCommand) => Rule::drop_index_stmt,
+            "DROP INDEX" => "DROP INDEX <column>",
         RebuildIndex(RebuildIndexCommand) => Rule::rebuild_index_stmt,
+            "REBUILD INDEX" => "REBUILD INDEX ON <column>",
         Reindex(ReindexCommand) => Rule::reindex_stmt,
+            "REINDEX" => "REINDEX [ON data(<column>)]",
 
         // View commands
         CreateView(CreateViewCommand) => Rule::create_view_stmt,
+            "CREATE VIEW" => "CREATE VIEW <name> AS <sql>",
         RenameView(RenameViewCommand) => Rule::rename_view_stmt,
+            "RENAME VIEW" => "RENAME VIEW <old> TO <new>",
         DropView(DropViewCommand) => Rule::drop_view_stmt,
+            "DROP VIEW" => "DROP VIEW <name>",
 
         // Join management commands
         DropJoin(DropJoinCommand) => Rule::drop_join_stmt,
+            "DROP JOIN" => "DROP JOIN <name>",
         RenameJoin(RenameJoinCommand) => Rule::rename_join_stmt,
+            "RENAME JOIN" => "RENAME JOIN <old> TO <new>",
 
         // Metadata commands
         SetName(SetNameCommand) => Rule::set_name_stmt,
+            "SET NAME" => "SET NAME '<name>'",
         SetDescription(SetDescriptionCommand) => Rule::set_description_stmt,
+            "SET DESCRIPTION" => "SET DESCRIPTION '<description>'",
         SaveConfig(SaveConfigCommand) => Rule::save_config_stmt,
+            "SAVE CONFIG" => "SAVE CONFIG <key> = '<value>' FOR '<scope>'",
 
         // Source commands
         ImportConnector(ImportConnectorCommand) => Rule::import_connector_stmt,
+            "IMPORT CONNECTOR" => "IMPORT CONNECTOR <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
         ImportFunction(ImportFunctionCommand) => Rule::import_function_stmt,
+            "IMPORT FUNCTION" => "IMPORT FUNCTION <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
         RenameConnector(RenameConnectorCommand) => Rule::rename_connector_stmt,
+            "RENAME CONNECTOR" => "RENAME CONNECTOR <old> TO <new>",
         RenameFunction(RenameFunctionCommand) => Rule::rename_function_stmt,
+            "RENAME FUNCTION" => "RENAME FUNCTION <old> TO <new>",
         DropConnector(DropConnectorCommand) => Rule::drop_connector_stmt,
+            "DROP CONNECTOR" => "DROP CONNECTOR <name> [FOR PLATFORM '<platform>']",
         DropFunction(DropFunctionCommand) => Rule::drop_function_stmt,
+            "DROP FUNCTION" => "DROP FUNCTION <name>",
         CreateSource(CreateSourceCommand) => Rule::create_source_stmt,
+            "CREATE SOURCE" => "CREATE SOURCE <connector> WITH (<args>) [ON <pack>]",
 
         // Transaction commands
         Reset(ResetCommand) => Rule::reset_stmt,
+            "RESET" => "RESET",
         Undo(UndoCommand) => Rule::undo_stmt,
+            "UNDO" => "UNDO",
         Commit(CommitCommand) => Rule::commit_stmt,
+            "COMMIT" => "COMMIT '<message>'",
     }
     fetch_special {
         // These commands share Rule::fetch_stmt - handled in parser.rs
         Fetch(FetchCommand),
+            "FETCH" => "FETCH <pack> <ADD|UPDATE|SYNC> [DRY RUN]",
         FetchAll(FetchAllCommand),
+            "FETCH ALL" => "FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN]",
     }
     verification {
         VerifyData(VerifyDataCommand) => Rule::verify_data_stmt,
+            "VERIFY DATA" => "VERIFY DATA [UPDATE]",
     }
     facade {
         DescribeConnector(DescribeConnectorCommand) => Rule::describe_connector_stmt,
+            "DESCRIBE CONNECTOR" => "DESCRIBE CONNECTOR <name>",
         DescribeFunction(DescribeFunctionCommand) => Rule::describe_function_stmt,
+            "DESCRIBE FUNCTION" => "DESCRIBE FUNCTION <name>",
         ImportTempConnector(ImportTempConnectorCommand) => Rule::import_temp_connector_stmt,
+            "IMPORT TEMP CONNECTOR" => "IMPORT TEMP CONNECTOR <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
         ImportTempFunction(ImportTempFunctionCommand) => Rule::import_temp_function_stmt,
+            "IMPORT TEMP FUNCTION" => "IMPORT TEMP FUNCTION <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
         DropTempConnector(DropTempConnectorCommand) => Rule::drop_temp_connector_stmt,
+            "DROP TEMP CONNECTOR" => "DROP TEMP CONNECTOR <name> [FOR PLATFORM '<platform>']",
         DropTempFunction(DropTempFunctionCommand) => Rule::drop_temp_function_stmt,
+            "DROP TEMP FUNCTION" => "DROP TEMP FUNCTION <name>",
         RenameTempConnector(RenameTempConnectorCommand) => Rule::rename_temp_connector_stmt,
+            "RENAME TEMP CONNECTOR" => "RENAME TEMP CONNECTOR <old> TO <new>",
         RenameTempFunction(RenameTempFunctionCommand) => Rule::rename_temp_function_stmt,
+            "RENAME TEMP FUNCTION" => "RENAME TEMP FUNCTION <old> TO <new>",
         ExplainPlan(ExplainPlanCommand) => Rule::explain_stmt,
+            "EXPLAIN" => "EXPLAIN [ANALYZE] [VERBOSE] [FORMAT <format>] [<sql>]",
         SetConfig(SetConfigCommand) => Rule::set_config_stmt,
+            "SET CONFIG" => "SET CONFIG <key> = '<value>' FOR '<scope>'",
+        Syntax(SyntaxCommand) => Rule::syntax_stmt,
+            "SYNTAX" => "SYNTAX [<command>]",
     }
 }
 

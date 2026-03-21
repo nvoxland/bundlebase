@@ -77,6 +77,13 @@ Any input that doesn't start with `/` is treated as SQL and executed against the
 ./my-bundle> COMMIT 'Cleaned up sales data'
 ```
 
+Use `SYNTAX` to discover available commands and their usage:
+
+```
+./my-bundle> SYNTAX
+./my-bundle> SYNTAX IMPORT FUNCTION
+```
+
 See the [SQL Reference](../sql-reference/index.md) for the full command syntax.
 
 !!! note

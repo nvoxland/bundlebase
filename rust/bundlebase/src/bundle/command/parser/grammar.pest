@@ -94,12 +94,30 @@ transaction_stmt = {
 
 // Metadata statements - operations for bundle metadata
 metadata_stmt = {
-    describe_connector_stmt
+    syntax_stmt
+    | describe_connector_stmt
     | describe_function_stmt
     | set_name_stmt
     | set_description_stmt
     | set_config_stmt
     | save_config_stmt
+}
+
+// ============================================================================
+// SYNTAX Statement
+// ============================================================================
+// Syntax: SYNTAX [<command>]
+// Examples:
+//   SYNTAX                     -- list all available commands
+//   SYNTAX ATTACH              -- show syntax for ATTACH command
+//   SYNTAX IMPORT CONNECTOR    -- show syntax for IMPORT CONNECTOR
+
+syntax_stmt = {
+    ^"syntax" ~ syntax_query?
+}
+
+syntax_query = @{
+    (!EOI ~ ANY)+
 }
 
 // ============================================================================

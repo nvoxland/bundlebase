@@ -120,42 +120,12 @@ pub fn all_statement_keywords() -> Vec<&'static str> {
     keywords
 }
 
-/// Returns a map of command keywords to their syntax descriptions.
+/// Returns a map of command names to their syntax descriptions.
 ///
-/// This is the single source of truth for all bundlebase command metadata.
-/// Used by `all_statement_keywords()`, `rule_to_syntax()`, and the CLI completer.
+/// This delegates to `BundleCommand::available_commands()` which is auto-generated
+/// by the `register_commands!` macro, ensuring every registered command has a syntax entry.
 pub fn available_commands() -> std::collections::HashMap<&'static str, &'static str> {
-    let mut map = std::collections::HashMap::new();
-    map.insert("FILTER", "FILTER WHERE <condition>");
-    map.insert("ATTACH", "ATTACH '<path>' [TO <pack>] [WITH (<options>)]");
-    map.insert("DETACH", "DETACH '<location>'");
-    map.insert("REPLACE", "REPLACE '<old_location>' WITH '<new_location>'");
-    map.insert("JOIN", "[LEFT|RIGHT|FULL|INNER] JOIN '<path>' AS <name> ON <expression>");
-    map.insert("DROP COLUMN", "DROP COLUMN <name>");
-    map.insert("DROP INDEX", "DROP INDEX <column>");
-    map.insert("DROP VIEW", "DROP VIEW <name>");
-    map.insert("DROP JOIN", "DROP JOIN <name>");
-    map.insert("RENAME COLUMN", "RENAME COLUMN <old> TO <new>");
-    map.insert("RENAME VIEW", "RENAME VIEW <old> TO <new>");
-    map.insert("RENAME JOIN", "RENAME JOIN <old> TO <new>");
-    map.insert("CREATE SOURCE", "CREATE SOURCE <function> WITH (<args>) [ON <pack>]");
-    map.insert("CREATE INDEX", "CREATE <COLUMN|TEXT> INDEX ON <column>");
-    map.insert("CREATE VIEW", "CREATE VIEW <name> AS <sql>");
-    map.insert("FETCH", "FETCH [<pack>] | FETCH ALL");
-    map.insert("REINDEX", "REINDEX [ON data(<column>)]");
-    map.insert("REBUILD INDEX", "REBUILD INDEX ON <column>");
-    map.insert("COMMIT", "COMMIT '<message>'");
-    map.insert("RESET", "RESET");
-    map.insert("UNDO", "UNDO");
-    map.insert("SET CONFIG", "SET CONFIG <key> = '<value>' [FOR '<scope>']");
-    map.insert("SAVE CONFIG", "SAVE CONFIG <key> = '<value>' [FOR '<scope>']");
-    map.insert("SET NAME", "SET NAME '<name>'");
-    map.insert("SET DESCRIPTION", "SET DESCRIPTION '<description>'");
-    map.insert("VERIFY DATA", "VERIFY DATA [UPDATE]");
-    map.insert("EXPLAIN", "EXPLAIN [ANALYZE] [VERBOSE] [FORMAT <format>] [<sql>]");
-    map.insert("DESCRIBE CONNECTOR", "DESCRIBE CONNECTOR <dotted_name>");
-    map.insert("DESCRIBE FUNCTION", "DESCRIBE FUNCTION <dotted_name>");
-    map
+    super::BundleCommand::available_commands()
 }
 
 #[cfg(test)]
