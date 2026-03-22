@@ -23,27 +23,27 @@ pip install bundlebase
 ### CLI Usage
 
 ```bash
-# Read-only queries (piping via stdin avoids shell quoting issues)
-echo "SELECT * FROM bundle LIMIT 5" | bundlebase query --bundle ./sales --format json
-echo "SHOW COLUMNS" | bundlebase query --bundle ./sales --format json
-echo "SHOW COUNT" | bundlebase query --bundle ./sales --format json
+# Read-only queries (<<< passes SQL via stdin, avoids shell quoting issues)
+bundlebase query --bundle ./sales --format json <<< "SELECT * FROM bundle LIMIT 5"
+bundlebase query --bundle ./sales --format json <<< "SHOW COLUMNS"
+bundlebase query --bundle ./sales --format json <<< "SHOW COUNT"
 
 # Create a new bundle
-echo "ATTACH 'raw_sales.csv'" | bundlebase create --bundle ./sales
+bundlebase create --bundle ./sales <<< "ATTACH 'raw_sales.csv'"
 
 # Mutating commands on existing bundles (auto-commits after each call)
-echo "FILTER WITH SELECT * FROM bundle WHERE amount > 0" | bundlebase extend --bundle ./sales
-echo "RENAME COLUMN amt TO amount" | bundlebase extend --bundle ./sales -m "Cleaned sales data"
+bundlebase extend --bundle ./sales <<< "FILTER WITH SELECT * FROM bundle WHERE amount > 0"
+bundlebase extend --bundle ./sales -m "Cleaned sales data" <<< "RENAME COLUMN amt TO amount"
 
 # Multiple statements in one call (committed together)
-echo "DROP COLUMN temp_id; RENAME COLUMN amt TO amount" | bundlebase extend --bundle ./sales -m "Initial cleanup"
+bundlebase extend --bundle ./sales -m "Initial cleanup" <<< "DROP COLUMN temp_id; RENAME COLUMN amt TO amount"
 
 # Interactive REPL
 bundlebase repl --bundle ./my-bundle
 bundlebase repl --bundle ./my-bundle --read-only
 
 # Remote bundles
-echo "SELECT * FROM bundle LIMIT 5" | bundlebase query --bundle s3://mybucket/my-bundle --format json
+bundlebase query --bundle s3://mybucket/my-bundle --format json <<< "SELECT * FROM bundle LIMIT 5"
 ```
 
 `--format`: `table` (default) or `json`. JSON mode outputs arrays of objects for queries, single values/objects for commands.

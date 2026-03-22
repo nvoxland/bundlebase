@@ -61,6 +61,28 @@ Connectors define how to pull data from an external source into your bundle.
 
 Bundlebase ships with several common connectors, but custom connectors can also be made and plugged in to support any external data you need.
 
+### http
+
+Downloads data from a single HTTP(S) URL. Use this for any direct link to a CSV, JSON, or Parquet file — including REST API endpoints that return data.
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `url` | Yes | The HTTP(S) URL to download |
+| `format` | No | Force file format (`csv`, `json`, `parquet`). Auto-detected from URL extension if omitted |
+| `headers` | No | Custom HTTP headers as comma-separated `key:value` pairs |
+
+=== "SQL"
+
+    ```sql
+    -- Download a CSV from a URL
+    CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv')
+
+    -- Force format when URL has no extension
+    CREATE SOURCE USING http WITH (url = 'https://api.example.com/data?format=csv', format = 'csv')
+    ```
+
 ### remote_dir
 
 Lists files from a local or cloud directory. Supports any URL scheme supported by the IO registry (S3, GCS, Azure, file://, etc.).
