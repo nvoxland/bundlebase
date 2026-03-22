@@ -229,16 +229,16 @@ Creates a source instance from a connector. For built-in connectors (`remote_dir
 
     ```sql
     -- Custom connector (no extra args)
-    CREATE SOURCE acme.weather
+    CREATE SOURCE USING acme.weather
 
     -- Custom connector with extra args
-    CREATE SOURCE acme.weather WITH (region = 'us-east')
+    CREATE SOURCE USING acme.weather WITH (region = 'us-east')
 
     -- Built-in connector
-    CREATE SOURCE remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')
+    CREATE SOURCE USING remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')
 
     -- Source on a specific pack
-    CREATE SOURCE remote_dir WITH (url = 's3://bucket/customers/') ON customers
+    CREATE SOURCE FOR customers USING remote_dir WITH (url = 's3://bucket/customers/')
     ```
 
 **Parameters:**

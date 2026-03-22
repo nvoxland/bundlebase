@@ -304,7 +304,7 @@ echo "DROP INDEX customer_id" | bundlebase extend --bundle ./data
 
 ```bash
 # Create a source pointing to a directory of files
-echo "CREATE SOURCE my_connector WITH (url = 's3://bucket/data/')" | bundlebase extend --bundle ./pipeline
+echo "CREATE SOURCE USING my_connector WITH (url = 's3://bucket/data/')" | bundlebase extend --bundle ./pipeline
 
 # Preview what fetch would do (dry run)
 echo "FETCH base ADD DRY RUN" | bundlebase query --bundle ./pipeline --format json
@@ -362,11 +362,11 @@ Bundlebase has built-in connectors for common data sources. The pattern is: CREA
 
 ```bash
 # Kaggle: download a public dataset (no kaggle CLI needed — just ~/.kaggle/kaggle.json)
-echo "CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')" | bundlebase create --bundle ./housing
+echo "CREATE SOURCE USING kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')" | bundlebase create --bundle ./housing
 echo "FETCH base ADD" | bundlebase extend --bundle ./housing
 
 # S3: attach all parquet files from a bucket
-echo "CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')" | bundlebase create --bundle ./logs
+echo "CREATE SOURCE USING remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')" | bundlebase create --bundle ./logs
 echo "FETCH base ADD" | bundlebase extend --bundle ./logs
 
 # Preview what would be fetched without actually fetching
@@ -407,7 +407,7 @@ Register and use it:
 # Install the SDK: pip install bundlebase-sdk
 # Register the connector (temp = session-only, supports Python runtime)
 echo "IMPORT TEMP CONNECTOR my.api FROM 'python::my_connector.py:MyApiConnector'" | bundlebase extend --bundle ./data
-echo "CREATE SOURCE my.api" | bundlebase extend --bundle ./data
+echo "CREATE SOURCE USING my.api" | bundlebase extend --bundle ./data
 echo "FETCH base ADD" | bundlebase extend --bundle ./data
 ```
 

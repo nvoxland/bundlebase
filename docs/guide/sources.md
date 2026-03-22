@@ -52,7 +52,7 @@ The source workflow has two steps:
 === "SQL"
 
     ```sql
-    CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
+    CREATE SOURCE USING remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
     ```
 
 ## Connectors
@@ -120,7 +120,7 @@ Lists files from a local or cloud directory. Supports any URL scheme supported b
 === "SQL"
 
     ```sql
-    CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
+    CREATE SOURCE USING remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
     ```
 
 ### ftp_directory
@@ -170,7 +170,7 @@ Lists files from an FTP server. Supports anonymous and authenticated access.
 === "SQL"
 
     ```sql
-    CREATE SOURCE ftp_directory WITH (url = 'ftp://ftp.example.com/pub/data/')
+    CREATE SOURCE USING ftp_directory WITH (url = 'ftp://ftp.example.com/pub/data/')
     ```
 
 ### sftp_directory
@@ -211,7 +211,7 @@ Lists files from a remote directory via SFTP. Requires an SSH private key for au
 === "SQL"
 
     ```sql
-    CREATE SOURCE sftp_directory WITH (url = 'sftp://user@host/data/', key_path = '~/.ssh/id_rsa', patterns = '**/*.parquet')
+    CREATE SOURCE USING sftp_directory WITH (url = 'sftp://user@host/data/', key_path = '~/.ssh/id_rsa', patterns = '**/*.parquet')
     ```
 
 ### kaggle
@@ -286,7 +286,7 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
 === "SQL"
 
     ```sql
-    CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')
+    CREATE SOURCE USING kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')
     ```
 
 ### Custom Connectors
@@ -461,7 +461,7 @@ You can define sources for joined packs by specifying the `pack` parameter.
 === "SQL"
 
     ```sql
-    CREATE SOURCE remote_dir WITH (url = 's3://bucket/customers/', patterns = '**/*.parquet') ON customers
+    CREATE SOURCE FOR customers USING remote_dir WITH (url = 's3://bucket/customers/', patterns = '**/*.parquet')
     ```
 
 ## Pattern Matching

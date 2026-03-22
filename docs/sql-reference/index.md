@@ -141,7 +141,7 @@ Commands for managing data sources.
 Defines a source for automatic file discovery.
 
 ```sql
-CREATE SOURCE <connector> WITH (<key> = '<value>', ...) [ON <pack>]
+CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<key> = '<value>', ...)]
 ```
 
 See [Data Sources](../guide/sources.md) for details.

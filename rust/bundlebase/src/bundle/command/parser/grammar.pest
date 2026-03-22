@@ -392,16 +392,15 @@ rename_temp_function_stmt = {
 // ============================================================================
 // CREATE SOURCE Statement
 // ============================================================================
-// Syntax: CREATE SOURCE <function> WITH (<args>) [ON <pack>]
-//         CREATE SOURCE <dotted_name> [WITH (<args>)] [ON <pack>]
+// Syntax: CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<args>)]
 // Examples:
-//   CREATE SOURCE remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')
-//   CREATE SOURCE remote_dir WITH (url = 'file:///data/') ON users
-//   CREATE SOURCE acme.weather WITH (custom_key = 'hello')
-//   CREATE SOURCE acme.weather
+//   CREATE SOURCE USING remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')
+//   CREATE SOURCE FOR users USING remote_dir WITH (url = 'file:///data/')
+//   CREATE SOURCE USING acme.weather WITH (custom_key = 'hello')
+//   CREATE SOURCE USING acme.weather
 
 create_source_stmt = {
-    ^"create" ~ ^"source" ~ (dotted_identifier | identifier) ~ (^"with" ~ source_args)? ~ (^"on" ~ identifier)?
+    ^"create" ~ ^"source" ~ (^"for" ~ identifier)? ~ ^"using" ~ (dotted_identifier | identifier) ~ (^"with" ~ source_args)?
 }
 
 source_args = {
