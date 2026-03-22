@@ -19,23 +19,24 @@ pub async fn execute_query(
 ) -> Result<String, String> {
     use crate::repl::commands;
 
-    let cmds = commands::parse(sql).map_err(|e| e.to_string())?;
+    let mut cmds = commands::parse(sql).map_err(|e| e.to_string())?;
 
-    let mut last_output = "OK".to_string();
-    for cmd in cmds {
-        match commands::execute(cmd, bundle).await {
-            Ok(Some((stream, shape))) => {
-                last_output = format_stream_json(stream, Some(shape), Some(MCP_QUERY_LIMIT))
-                    .await
-                    .map_err(|e| format!("{}", e))?;
-            }
-            Ok(None) => {
-                last_output = "OK".to_string();
-            }
-            Err(e) => return Err(format!("{}", e)),
-        }
+    if cmds.len() > 1 {
+        return Err(
+            "MCP supports only one statement at a time. Send each statement as a separate tool call instead of separating with ';'.".to_string()
+        );
     }
-    Ok(last_output)
+
+    let cmd = cmds.pop().ok_or_else(|| "Empty command".to_string())?;
+    match commands::execute(cmd, bundle).await {
+        Ok(Some((stream, shape))) => {
+            format_stream_json(stream, Some(shape), Some(MCP_QUERY_LIMIT))
+                .await
+                .map_err(|e| format!("{}", e))
+        }
+        Ok(None) => Ok("OK".to_string()),
+        Err(e) => Err(format!("{}", e)),
+    }
 }
 
 /// Get the bundle schema as a JSON string.

@@ -110,9 +110,6 @@ pub enum Command {
     Repl(ReplCommand),
 }
 
-/// Parse input string into Command using SQL syntax
-/// Repl commands start with `/` (e.g., `/help`)
-/// All other input is treated as SQL
 /// Parse a single statement into a Command. Used internally by `parse`.
 fn parse_single(input: &str) -> Result<Command, String> {
     let input = input.trim();

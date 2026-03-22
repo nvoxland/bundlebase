@@ -1,4 +1,4 @@
-//! The `extend` subcommand — execute a single mutating command and exit.
+//! The `extend` subcommand — execute one or more mutating commands and exit.
 //! Also used by the hidden `execute` alias.
 //!
 //! Opens the bundle in read-write mode (via `extend()`), allowing
