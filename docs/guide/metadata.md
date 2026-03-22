@@ -80,8 +80,8 @@ Bundle metadata is available as properties:
     SELECT * FROM bundle_info.details
     ```
 
-=== "REPL"
+    or
 
     ```
-    /details
+    SHOW DETAILS
     ```

@@ -12,15 +12,9 @@
 //! 5. Add `Self::MyCommand => &my_command::DEF` to the `definition()` match
 
 pub mod clear;
-pub mod count;
-pub mod details;
 pub mod exit;
 pub mod help;
-pub mod history;
-pub mod schema;
-pub mod show;
 mod sql;
-pub mod status;
 
 use bundlebase::bundle::{parse_command, CommandResponse, OutputShape};
 use bundlebase::BundlebaseError;
@@ -46,14 +40,8 @@ pub struct ReplCommandDef {
 #[derive(Debug, Clone)]
 pub enum ReplCommand {
     Clear,
-    Count,
-    Details,
     Exit,
     Help,
-    History,
-    Schema,
-    Show { limit: Option<usize> },
-    Status,
 }
 
 impl ReplCommand {
@@ -61,28 +49,16 @@ impl ReplCommand {
     pub fn definition(&self) -> &'static ReplCommandDef {
         match self {
             Self::Clear => &clear::DEF,
-            Self::Count => &count::DEF,
-            Self::Details => &details::DEF,
             Self::Exit => &exit::DEF,
             Self::Help => &help::DEF,
-            Self::History => &history::DEF,
-            Self::Schema => &schema::DEF,
-            Self::Show { .. } => &show::DEF,
-            Self::Status => &status::DEF,
         }
     }
 
     pub fn all_commands() -> impl Iterator<Item = &'static ReplCommandDef> {
         [
             &clear::DEF,
-            &count::DEF,
-            &details::DEF,
             &exit::DEF,
             &help::DEF,
-            &history::DEF,
-            &schema::DEF,
-            &show::DEF,
-            &status::DEF,
         ]
         .into_iter()
     }
@@ -135,7 +111,7 @@ pub enum Command {
 }
 
 /// Parse input string into Command using SQL syntax
-/// Repl commands start with `/` (e.g., `/help`, `/show`)
+/// Repl commands start with `/` (e.g., `/help`)
 /// All other input is treated as SQL
 pub fn parse(input: &str) -> Result<Command, String> {
     let input = input.trim();
@@ -255,26 +231,6 @@ mod tests {
             Command::Repl(ReplCommand::Exit)
         ));
         assert!(matches!(
-            parse("/schema").unwrap(),
-            Command::Repl(ReplCommand::Schema)
-        ));
-        assert!(matches!(
-            parse("/count").unwrap(),
-            Command::Repl(ReplCommand::Count)
-        ));
-        assert!(matches!(
-            parse("/details").unwrap(),
-            Command::Repl(ReplCommand::Details)
-        ));
-        assert!(matches!(
-            parse("/history").unwrap(),
-            Command::Repl(ReplCommand::History)
-        ));
-        assert!(matches!(
-            parse("/status").unwrap(),
-            Command::Repl(ReplCommand::Status)
-        ));
-        assert!(matches!(
             parse("/clear").unwrap(),
             Command::Repl(ReplCommand::Clear)
         ));
@@ -294,14 +250,6 @@ mod tests {
             parse("/EXIT").unwrap(),
             Command::Repl(ReplCommand::Exit)
         ));
-        assert!(matches!(
-            parse("/SCHEMA").unwrap(),
-            Command::Repl(ReplCommand::Schema)
-        ));
-        assert!(matches!(
-            parse("/COUNT").unwrap(),
-            Command::Repl(ReplCommand::Count)
-        ));
     }
 
     #[test]
@@ -309,10 +257,6 @@ mod tests {
         assert!(matches!(
             parse("/ help").unwrap(),
             Command::Repl(ReplCommand::Help)
-        ));
-        assert!(matches!(
-            parse("/  schema").unwrap(),
-            Command::Repl(ReplCommand::Schema)
         ));
     }
 
@@ -322,11 +266,13 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("/help"), "Error should suggest /help: {}", err);
+    }
 
-        let result = parse("SHOW");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("/show"), "Error should suggest /show: {}", err);
+    #[test]
+    fn test_show_is_sql_not_repl() {
+        // SHOW is valid SQL, not a repl command suggestion
+        let cmd = parse("SHOW HISTORY").unwrap();
+        assert!(matches!(cmd, Command::Sql(_)));
     }
 
     #[test]
@@ -359,27 +305,6 @@ mod tests {
                 assert!(sql.contains("my commit message"));
             }
             _ => panic!("Expected Sql command"),
-        }
-    }
-
-    #[test]
-    fn test_parse_show() {
-        let cmd = parse("/show").unwrap();
-        match cmd {
-            Command::Repl(ReplCommand::Show { limit }) => assert_eq!(limit, None),
-            _ => panic!("Expected Show command"),
-        }
-
-        let cmd = parse("/show limit 20").unwrap();
-        match cmd {
-            Command::Repl(ReplCommand::Show { limit }) => assert_eq!(limit, Some(20)),
-            _ => panic!("Expected Show command"),
-        }
-
-        let cmd = parse("/SHOW LIMIT 20").unwrap();
-        match cmd {
-            Command::Repl(ReplCommand::Show { limit }) => assert_eq!(limit, Some(20)),
-            _ => panic!("Expected Show command"),
         }
     }
 }

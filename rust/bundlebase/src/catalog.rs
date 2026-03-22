@@ -32,4 +32,5 @@ pub mod tables {
     pub static COMMANDS: &str = "commands";
     pub static CONNECTORS: &str = "connectors";
     pub static FUNCTIONS: &str = "functions";
+    pub static COLUMNS: &str = "columns";
 }

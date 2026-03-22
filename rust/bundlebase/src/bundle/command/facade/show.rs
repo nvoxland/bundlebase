@@ -1,167 +1,153 @@
-//! Show command implementation.
+//! SHOW command implementations.
 //!
-//! Provides a shortcut for querying bundle_info helper tables.
+//! Each SHOW target is its own command struct, generated via the `show_table_command!` macro
+//! for table-backed commands. Non-table commands (like ShowCount) live in their own modules.
+//!
 //! `SHOW HISTORY` is equivalent to `SELECT * FROM bundle_info.history`.
 
 use crate::bundle::command::response::OutputShape;
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::facade::BundleFacade;
-use crate::catalog::{tables, BUNDLE_INFO_SCHEMA};
+use crate::catalog::BUNDLE_INFO_SCHEMA;
 use crate::BundlebaseError;
 use arrow::datatypes::{Schema, SchemaRef};
 use async_trait::async_trait;
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;
 
-/// Valid table names for the SHOW command.
-const VALID_TABLES: &[&str] = &[
-    tables::DETAILS,
-    tables::HISTORY,
-    tables::STATUS,
-    tables::VIEWS,
-    tables::INDEXES,
-    tables::PACKS,
-    tables::BLOCKS,
-    tables::CONFIG,
-    tables::COMMANDS,
-    tables::CONNECTORS,
-    tables::FUNCTIONS,
-];
+/// Generates a SHOW command struct that queries a bundle_info table.
+macro_rules! show_table_command {
+    ($name:ident, $rule:ident, $table:expr, $keyword:expr) => {
+        #[derive(Debug, Clone)]
+        pub struct $name;
 
-/// Command to show contents of a bundle_info helper table.
-#[derive(Debug, Clone)]
-pub struct ShowCommand {
-    /// The helper table name (e.g., "history", "status", "details")
-    pub table: String,
-}
+        impl $name {
+            pub fn output_schema() -> SchemaRef {
+                Arc::new(Schema::empty())
+            }
 
-impl ShowCommand {
-    /// Returns a placeholder Arrow schema for show output.
-    /// The actual schema depends on which table is queried and comes from the stream.
-    pub fn output_schema() -> SchemaRef {
-        Arc::new(Schema::empty())
-    }
-
-    /// Returns the expected output shape.
-    pub fn output_shape() -> OutputShape {
-        OutputShape::Table
-    }
-}
-
-impl CommandParsing for ShowCommand {
-    fn rule() -> Rule {
-        Rule::show_stmt
-    }
-
-    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        let mut table = None;
-
-        for inner_pair in pair.into_inner() {
-            if inner_pair.as_rule() == Rule::show_table {
-                table = Some(inner_pair.as_str().to_lowercase());
+            pub fn output_shape() -> OutputShape {
+                OutputShape::Table
             }
         }
 
-        let table = table.ok_or_else(|| -> BundlebaseError {
-            format!(
-                "SHOW requires a table name. Valid tables: {}",
-                VALID_TABLES.join(", ")
-            )
-            .into()
-        })?;
+        impl CommandParsing for $name {
+            fn rule() -> Rule {
+                Rule::$rule
+            }
 
-        Ok(ShowCommand { table })
-    }
+            fn from_statement(
+                _pair: pest::iterators::Pair<Rule>,
+            ) -> Result<Self, BundlebaseError> {
+                Ok($name)
+            }
 
-    fn to_statement(&self) -> String {
-        format!("SHOW {}", self.table.to_uppercase())
-    }
+            fn to_statement(&self) -> String {
+                format!("SHOW {}", $keyword)
+            }
+        }
+
+        #[async_trait]
+        impl BundleFacadeCommand for $name {
+            type Output = SendableRecordBatchStream;
+
+            async fn execute(
+                self: Box<Self>,
+                facade: &dyn BundleFacade,
+            ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+                let sql = format!("SELECT * FROM {}.{}", BUNDLE_INFO_SCHEMA, $table);
+                facade.query(&sql, vec![], None).await
+            }
+        }
+    };
 }
 
-#[async_trait]
-impl BundleFacadeCommand for ShowCommand {
-    type Output = SendableRecordBatchStream;
-
-    async fn execute(
-        self: Box<Self>,
-        facade: &dyn BundleFacade,
-    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        let sql = format!("SELECT * FROM {}.{}", BUNDLE_INFO_SCHEMA, self.table);
-        facade.query(&sql, vec![], None).await
-    }
-}
+show_table_command!(ShowDetailsCommand, show_details_stmt, "details", "DETAILS");
+show_table_command!(ShowHistoryCommand, show_history_stmt, "history", "HISTORY");
+show_table_command!(ShowStatusCommand, show_status_stmt, "status", "STATUS");
+show_table_command!(ShowViewsCommand, show_views_stmt, "views", "VIEWS");
+show_table_command!(ShowIndexesCommand, show_indexes_stmt, "indexes", "INDEXES");
+show_table_command!(ShowPacksCommand, show_packs_stmt, "packs", "PACKS");
+show_table_command!(ShowBlocksCommand, show_blocks_stmt, "blocks", "BLOCKS");
+show_table_command!(ShowConfigCommand, show_config_stmt, "config", "CONFIG");
+show_table_command!(ShowCommandsCommand, show_commands_stmt, "commands", "COMMANDS");
+show_table_command!(ShowConnectorsCommand, show_connectors_stmt, "connectors", "CONNECTORS");
+show_table_command!(ShowFunctionsCommand, show_functions_stmt, "functions", "FUNCTIONS");
+show_table_command!(ShowColumnsCommand, show_columns_stmt, "columns", "COLUMNS");
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::bundle::command::parser::parse_command;
     use crate::bundle::command::BundleCommand;
 
     #[test]
     fn test_parse_show_history() {
         let cmd = parse_command("SHOW HISTORY").expect("Failed to parse SHOW HISTORY");
-        match cmd {
-            BundleCommand::Show(s) => assert_eq!(s.table, "history"),
-            _ => panic!("Expected Show variant"),
-        }
-    }
-
-    #[test]
-    fn test_parse_show_status() {
-        let cmd = parse_command("SHOW STATUS").expect("Failed to parse SHOW STATUS");
-        match cmd {
-            BundleCommand::Show(s) => assert_eq!(s.table, "status"),
-            _ => panic!("Expected Show variant"),
-        }
+        assert!(matches!(cmd, BundleCommand::ShowHistory(_)));
     }
 
     #[test]
     fn test_parse_show_details() {
         let cmd = parse_command("SHOW DETAILS").expect("Failed to parse SHOW DETAILS");
-        match cmd {
-            BundleCommand::Show(s) => assert_eq!(s.table, "details"),
-            _ => panic!("Expected Show variant"),
-        }
+        assert!(matches!(cmd, BundleCommand::ShowDetails(_)));
+    }
+
+    #[test]
+    fn test_parse_show_status() {
+        let cmd = parse_command("SHOW STATUS").expect("Failed to parse SHOW STATUS");
+        assert!(matches!(cmd, BundleCommand::ShowStatus(_)));
+    }
+
+    #[test]
+    fn test_parse_show_columns() {
+        let cmd = parse_command("SHOW COLUMNS").expect("Failed to parse SHOW COLUMNS");
+        assert!(matches!(cmd, BundleCommand::ShowColumns(_)));
     }
 
     #[test]
     fn test_parse_show_case_insensitive() {
-        let cmd = parse_command("show config").expect("Failed to parse show config");
-        match cmd {
-            BundleCommand::Show(s) => assert_eq!(s.table, "config"),
-            _ => panic!("Expected Show variant"),
-        }
+        assert!(matches!(
+            parse_command("show config").unwrap(),
+            BundleCommand::ShowConfig(_)
+        ));
+        assert!(matches!(
+            parse_command("Show History").unwrap(),
+            BundleCommand::ShowHistory(_)
+        ));
     }
 
     #[test]
-    fn test_parse_all_valid_tables() {
-        for table in VALID_TABLES {
-            let sql = format!("SHOW {}", table.to_uppercase());
-            let cmd = parse_command(&sql).unwrap_or_else(|e| panic!("Failed to parse {}: {}", sql, e));
-            match cmd {
-                BundleCommand::Show(s) => assert_eq!(s.table, *table),
-                _ => panic!("Expected Show variant for {}", table),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_show_invalid_table() {
+    fn test_parse_show_invalid() {
         let result = parse_command("SHOW NONSENSE");
         assert!(result.is_err(), "SHOW NONSENSE should fail to parse");
     }
 
     #[test]
-    fn test_roundtrip() {
-        let cmd = ShowCommand {
-            table: "history".to_string(),
-        };
-        let stmt = cmd.to_statement();
-        assert_eq!(stmt, "SHOW HISTORY");
-        let parsed = parse_command(&stmt).expect("Failed to re-parse");
-        match parsed {
-            BundleCommand::Show(s) => assert_eq!(s.table, "history"),
-            _ => panic!("Expected Show variant"),
+    fn test_parse_all_show_commands() {
+        let cases = vec![
+            ("SHOW DETAILS", "ShowDetails"),
+            ("SHOW HISTORY", "ShowHistory"),
+            ("SHOW STATUS", "ShowStatus"),
+            ("SHOW VIEWS", "ShowViews"),
+            ("SHOW INDEXES", "ShowIndexes"),
+            ("SHOW PACKS", "ShowPacks"),
+            ("SHOW BLOCKS", "ShowBlocks"),
+            ("SHOW CONFIG", "ShowConfig"),
+            ("SHOW COMMANDS", "ShowCommands"),
+            ("SHOW CONNECTORS", "ShowConnectors"),
+            ("SHOW FUNCTIONS", "ShowFunctions"),
+            ("SHOW COLUMNS", "ShowColumns"),
+        ];
+        for (sql, expected_name) in cases {
+            let cmd = parse_command(sql).unwrap_or_else(|e| panic!("Failed to parse {}: {}", sql, e));
+            let debug = format!("{:?}", cmd);
+            assert!(
+                debug.starts_with(expected_name),
+                "Expected {} for '{}', got {:?}",
+                expected_name,
+                sql,
+                cmd
+            );
         }
     }
 }

@@ -94,7 +94,19 @@ transaction_stmt = {
 
 // Metadata statements - operations for bundle metadata
 metadata_stmt = {
-    show_stmt
+    show_details_stmt
+    | show_history_stmt
+    | show_status_stmt
+    | show_views_stmt
+    | show_indexes_stmt
+    | show_packs_stmt
+    | show_blocks_stmt
+    | show_config_stmt
+    | show_commands_stmt
+    | show_connectors_stmt
+    | show_functions_stmt
+    | show_columns_stmt
+    | show_count_stmt
     | syntax_stmt
     | describe_connector_stmt
     | describe_function_stmt
@@ -122,23 +134,28 @@ syntax_query = @{
 }
 
 // ============================================================================
-// SHOW Statement
+// SHOW Statements
 // ============================================================================
-// Syntax: SHOW <table>
+// Each SHOW target has its own grammar rule.
 // Examples:
 //   SHOW HISTORY       -- show commit history
 //   SHOW STATUS        -- show uncommitted changes
 //   SHOW DETAILS       -- show bundle metadata
-//   SHOW CONFIG        -- show configuration values
+//   SHOW COUNT         -- show row count
 
-show_stmt = {
-    ^"show" ~ show_table
-}
-
-show_table = {
-    ^"details" | ^"history" | ^"status" | ^"views" | ^"indexes"
-    | ^"packs" | ^"blocks" | ^"config" | ^"commands" | ^"connectors" | ^"functions"
-}
+show_details_stmt    = { ^"show" ~ ^"details" }
+show_history_stmt    = { ^"show" ~ ^"history" }
+show_status_stmt     = { ^"show" ~ ^"status" }
+show_views_stmt      = { ^"show" ~ ^"views" }
+show_indexes_stmt    = { ^"show" ~ ^"indexes" }
+show_packs_stmt      = { ^"show" ~ ^"packs" }
+show_blocks_stmt     = { ^"show" ~ ^"blocks" }
+show_config_stmt     = { ^"show" ~ ^"config" }
+show_commands_stmt   = { ^"show" ~ ^"commands" }
+show_connectors_stmt = { ^"show" ~ ^"connectors" }
+show_functions_stmt  = { ^"show" ~ ^"functions" }
+show_columns_stmt    = { ^"show" ~ ^"columns" }
+show_count_stmt      = { ^"show" ~ ^"count" }
 
 // ============================================================================
 // FILTER Statement

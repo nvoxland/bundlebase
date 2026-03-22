@@ -78,20 +78,23 @@ Meta-commands start with `/` and provide quick access to common operations:
 | Command | Description |
 |---|---|
 | `/help` | Show available commands |
-| `/show [limit <n>]` | Display bundle rows |
-| `/schema` | Show column names and types |
-| `/count` | Show total row count |
-| `/status` | Show uncommitted changes |
-| `/history` | Show commit history |
-| `/details` | Show bundle metadata (id, name, URL, version) |
 | `/clear` | Clear the terminal |
 | `/exit` (`/quit`) | Exit the REPL |
 
-Meta-commands are case-insensitive: `/SHOW`, `/Show`, and `/show` all work.
+For inspecting bundle data and metadata, use SQL commands:
+
+| SQL Command | Description |
+|---|---|
+| `SELECT * FROM bundle` | Display bundle rows |
+| `SHOW COLUMNS` | Show column names and types |
+| `SHOW COUNT` | Show total row count |
+| `SHOW STATUS` | Show uncommitted changes |
+| `SHOW HISTORY` | Show commit history |
+| `SHOW DETAILS` | Show bundle metadata (id, name, URL, version) |
 
 ## SQL Commands
 
-Any input that doesn't start with `/` is treated as SQL and executed against the bundle. This includes both standard SQL and Bundlebase-specific commands:
+Any input that doesn't start with `/` is treated as SQL and executed against the bundle. This includes both standard SQL and Bundlebase-specific commands like `SHOW` and `SYNTAX`:
 
 ```
 ./my-bundle> ATTACH 'sales.parquet'
@@ -113,17 +116,15 @@ Use `SHOW` to inspect bundle metadata and `SYNTAX` to discover available command
 See the [SQL Reference](../sql-reference/index.md) for the full command syntax.
 
 !!! note
-    If you type a bare command name like `help` or `show` without the `/` prefix, the REPL will suggest the correct form (e.g., "Did you mean '/help'?").
+    If you type a bare command name like `help` without the `/` prefix, the REPL will suggest the correct form (e.g., "Did you mean '/help'?").
 
 ## Output Formatting
 
-Query results display as formatted tables. By default, output is limited to 100 rows. Use `/show limit <n>` to control the number of rows displayed:
+Query results display as formatted tables. By default, output is limited to 100 rows. Use `LIMIT` in SQL queries to control the number of rows displayed:
 
 ```
-./my-bundle> /show limit 10
+./my-bundle> SELECT * FROM bundle LIMIT 10
 ```
-
-For SQL queries, the full result set is displayed (up to the 100-row display limit).
 
 ## Example Session
 
@@ -135,7 +136,7 @@ Type '/help' for available commands, '/exit' to quit
 ----------------------------------------------------------
 Creating bundle at: ./demo
 ./demo> ATTACH 'customers.csv'
-./demo> /schema
+./demo> SHOW COLUMNS
 +-----------+-----------+
 | column    | type      |
 +-----------+-----------+
@@ -145,7 +146,7 @@ Creating bundle at: ./demo
 | country   | Utf8      |
 +-----------+-----------+
 
-./demo> /count
+./demo> SHOW COUNT
 4821
 
 ./demo> SELECT country, count(*) as n FROM bundle GROUP BY country ORDER BY n DESC
@@ -159,11 +160,11 @@ Creating bundle at: ./demo
 +---------+------+
 
 ./demo> FILTER WITH SELECT * FROM bundle WHERE country = 'US'
-./demo> /count
+./demo> SHOW COUNT
 2104
 
 ./demo> COMMIT 'US customers only'
-./demo> /history
+./demo> SHOW HISTORY
 +-----+-------------------+-------------------+
 | ver | message           | timestamp         |
 +-----+-------------------+-------------------+

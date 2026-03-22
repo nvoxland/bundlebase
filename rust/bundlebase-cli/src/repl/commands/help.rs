@@ -34,6 +34,8 @@ fn help_text() -> String {
          Enter any bundlebase SQL statement or command directly.\n\
          Type a query like SELECT ... FROM bundle, or use a command like ATTACH, FILTER, COMMIT, etc.\n\
          \n\
+         For metadata, use SHOW (e.g., SHOW HISTORY, SHOW COLUMNS). Type SHOW COMMANDS for the full list.\n\
+         \n\
          Available commands:",
     );
 

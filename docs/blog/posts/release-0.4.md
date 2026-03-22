@@ -33,7 +33,7 @@ Authentication is required. It ships with default credentials of `admin/password
 
 REPL meta-commands now use a `/` prefix to distinguish them from SQL. The old bare-word commands are gone.
 
-- `/schema` -- show the table schema
+- `SHOW COLUMNS` -- show the table schema
 - `/count` -- row count
 - `/details` -- bundle metadata (id, name, url, version)
 - `/history` -- commit history
@@ -68,7 +68,7 @@ The `select()` command has been replaced with `query()`. The key difference: `qu
 
 ### REPL commands require `/` prefix
 
-Meta-commands like `help` and `schema` now need a leading slash: `/help`, `/schema`. The REPL will suggest the correct form if you forget.
+Meta-commands like `help` and `schema` now need a leading slash: `/help`, `SHOW COLUMNS`. The REPL will suggest the correct form if you forget.
 
 ### Schema naming
 

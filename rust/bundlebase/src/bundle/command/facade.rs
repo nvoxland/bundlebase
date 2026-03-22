@@ -15,6 +15,7 @@ mod rename_temp_connector;
 mod rename_temp_function;
 mod set_config;
 mod show;
+mod show_count;
 mod syntax;
 
 pub use describe_connector::DescribeConnectorCommand;
@@ -27,5 +28,10 @@ pub use rename_temp_connector::RenameTempConnectorCommand;
 pub use rename_temp_function::RenameTempFunctionCommand;
 pub use explain::ExplainPlanCommand;
 pub use set_config::SetConfigCommand;
-pub use show::ShowCommand;
+pub use show::{
+    ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
+    ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
+    ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
+};
+pub use show_count::ShowCountCommand;
 pub use syntax::SyntaxCommand;

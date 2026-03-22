@@ -66,8 +66,8 @@ Opens the bundle in read-only mode. Use for SELECT, EXPLAIN, SHOW, SYNTAX, and m
 bundlebase query --bundle ./my-bundle "SELECT * FROM bundle LIMIT 10" --format json
 
 # Explore schema and row count
-bundlebase query --bundle ./my-bundle "/schema" --format json
-bundlebase query --bundle ./my-bundle "/count" --format json
+bundlebase query --bundle ./my-bundle "SHOW COLUMNS" --format json
+bundlebase query --bundle ./my-bundle "SHOW COUNT" --format json
 
 # Pipe SQL from stdin
 echo "SELECT count(*) FROM bundle" | bundlebase query --bundle ./my-bundle --format json
@@ -159,10 +159,10 @@ The `query` tool handles everything: SELECT queries, ATTACH, DETACH, FILTER, REN
 bundlebase extend --bundle ./analysis --create "ATTACH 'sales.csv'" -m "Loaded sales data"
 
 # Explore the schema
-bundlebase query --bundle ./analysis "/schema" --format json
+bundlebase query --bundle ./analysis "SHOW COLUMNS" --format json
 
 # Count rows
-bundlebase query --bundle ./analysis "/count" --format json
+bundlebase query --bundle ./analysis "SHOW COUNT" --format json
 
 # Run queries
 bundlebase query --bundle ./analysis "SELECT department, COUNT(*) as cnt, AVG(salary) as avg_salary FROM bundle GROUP BY department ORDER BY avg_salary DESC" --format json
@@ -248,10 +248,10 @@ bundlebase query --bundle ./docs "SELECT * FROM search('description', 'neural ne
 
 ```bash
 # View history
-bundlebase query --bundle ./data "/history" --format json
+bundlebase query --bundle ./data "SHOW HISTORY" --format json
 
 # View uncommitted changes
-bundlebase query --bundle ./data "/status" --format json
+bundlebase query --bundle ./data "SHOW STATUS" --format json
 
 # Undo last commit
 bundlebase extend --bundle ./data "UNDO"
@@ -332,7 +332,7 @@ bundlebase query --bundle ./data "EXPLAIN VERBOSE FORMAT TREE"
 bundlebase query --bundle s3://mybucket/my-bundle "SELECT COUNT(*) FROM bundle" --format json
 
 # Read-only schema check
-bundlebase query --bundle s3://mybucket/my-bundle "/schema" --format json
+bundlebase query --bundle s3://mybucket/my-bundle "SHOW COLUMNS" --format json
 ```
 
 ## Fetching External Data with Connectors
@@ -461,7 +461,7 @@ bundlebase query --bundle ./analysis "SELECT * FROM bundle" --format json > resu
 bundlebase extend --bundle s3://team-bucket/shared-analysis --create "ATTACH 'cleaned.parquet'" -m "Shared cleaned dataset"
 
 # Others can then query it
-bundlebase query --bundle s3://team-bucket/shared-analysis "/schema" --format json
+bundlebase query --bundle s3://team-bucket/shared-analysis "SHOW COLUMNS" --format json
 ```
 
 For sharing with non-bundlebase users, export query results to standard formats (JSON, CSV) using `--format json` or by querying into a Python script and saving with pandas.
@@ -492,11 +492,18 @@ When using the interactive REPL (`bundlebase repl`), these meta-commands are ava
 | Command | Purpose |
 |---------|---------|
 | `/help` | Show available commands |
-| `/show` | Display all data |
-| `/schema` | Show bundle schema |
-| `/count` | Count rows |
-| `/status` | Show uncommitted changes |
-| `/history` | Show version history |
+| `/clear` | Clear the terminal |
 | `/exit` | Exit the REPL |
 
-These also work with `bundlebase query`, e.g. `bundlebase query --bundle ./data "/schema" --format json`.
+For inspecting bundle data and metadata, use SQL commands directly:
+
+| SQL Command | Purpose |
+|-------------|---------|
+| `SELECT * FROM bundle` | Display all data |
+| `SHOW COLUMNS` | Show bundle schema |
+| `SHOW COUNT` | Count rows |
+| `SHOW STATUS` | Show uncommitted changes |
+| `SHOW HISTORY` | Show version history |
+| `SHOW DETAILS` | Show bundle metadata |
+
+These SQL commands also work with `bundlebase query`, e.g. `bundlebase query --bundle ./data "SHOW COLUMNS" --format json`.

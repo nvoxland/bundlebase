@@ -25,8 +25,8 @@ pip install bundlebase
 ```bash
 # Read-only queries
 bundlebase query --bundle ./sales "SELECT * FROM bundle LIMIT 5" --format json
-bundlebase query --bundle ./sales "/schema" --format json
-bundlebase query --bundle ./sales "/count" --format json
+bundlebase query --bundle ./sales "SHOW COLUMNS" --format json
+bundlebase query --bundle ./sales "SHOW COUNT" --format json
 echo "SELECT count(*) FROM bundle" | bundlebase query --bundle ./sales --format json
 
 # Mutating commands (auto-commits after each)
@@ -48,7 +48,7 @@ bundlebase query --bundle s3://mybucket/my-bundle "SELECT * FROM bundle LIMIT 5"
 `bundlebase extend` auto-commits after each command. Use `-m` for a custom commit message.
 Query results are hard-limited to 1000 rows. Use `LIMIT` in SQL for fewer.
 
-REPL meta-commands: `/help`, `/show`, `/schema`, `/count`, `/status`, `/history`, `/exit`
+REPL meta-commands: `/help`, `/clear`, `/exit`
 
 ### MCP Usage
 

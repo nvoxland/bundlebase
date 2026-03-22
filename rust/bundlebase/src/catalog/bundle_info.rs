@@ -7,6 +7,7 @@ mod functions_table;
 mod history_table;
 mod indexes_table;
 mod packs_table;
+mod columns_table;
 mod status_table;
 mod views_table;
 
@@ -24,6 +25,7 @@ use functions_table::BundleFunctionsTable;
 use history_table::BundleHistoryTable;
 use indexes_table::BundleIndexesTable;
 use packs_table::BundlePacksTable;
+use columns_table::BundleColumnsTable;
 use status_table::BundleStatusTable;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
@@ -59,7 +61,8 @@ impl BundleInfoSchemaProvider {
         tables.insert(tables::CONFIG, Arc::new(BundleConfigTable::new(bundle.clone())));
         tables.insert(tables::BLOCKS, Arc::new(BundleBlocksTable::new(bundle.clone())));
         tables.insert(tables::CONNECTORS, Arc::new(BundleConnectorsTable::new(bundle.clone())));
-        tables.insert(tables::FUNCTIONS, Arc::new(BundleFunctionsTable::new(bundle)));
+        tables.insert(tables::FUNCTIONS, Arc::new(BundleFunctionsTable::new(bundle.clone())));
+        tables.insert(tables::COLUMNS, Arc::new(BundleColumnsTable::new(bundle)));
         tables.insert(tables::COMMANDS, Arc::new(CommandsTable::new()));
         Self { tables }
     }

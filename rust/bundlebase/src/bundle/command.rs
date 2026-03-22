@@ -84,7 +84,12 @@ pub use facade::RenameTempConnectorCommand;
 pub use facade::RenameTempFunctionCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
-pub use facade::ShowCommand;
+pub use facade::{
+    ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
+    ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
+    ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
+    ShowCountCommand,
+};
 pub use facade::SyntaxCommand;
 
 /// Commands that can be executed on a BundleFacade (read-only).
@@ -113,8 +118,19 @@ pub enum FacadeCommand {
     ExplainPlan(ExplainPlanCommand),
     /// Set runtime config value (session-only)
     SetConfig(SetConfigCommand),
-    /// Show contents of a bundle_info helper table
-    Show(ShowCommand),
+    ShowDetails(ShowDetailsCommand),
+    ShowHistory(ShowHistoryCommand),
+    ShowStatus(ShowStatusCommand),
+    ShowViews(ShowViewsCommand),
+    ShowIndexes(ShowIndexesCommand),
+    ShowPacks(ShowPacksCommand),
+    ShowBlocks(ShowBlocksCommand),
+    ShowConfig(ShowConfigCommand),
+    ShowCommands(ShowCommandsCommand),
+    ShowConnectors(ShowConnectorsCommand),
+    ShowFunctions(ShowFunctionsCommand),
+    ShowColumns(ShowColumnsCommand),
+    ShowCount(ShowCountCommand),
     /// Show syntax and usage for bundlebase commands
     Syntax(SyntaxCommand),
 }
@@ -166,7 +182,55 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
-            FacadeCommand::Show(cmd) => {
+            FacadeCommand::ShowDetails(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowHistory(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowStatus(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowViews(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowIndexes(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowPacks(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowBlocks(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowConfig(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowCommands(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowConnectors(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowFunctions(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowColumns(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowCount(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
@@ -190,7 +254,19 @@ impl FacadeCommand {
             FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_schema(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
-            FacadeCommand::Show(_) => ShowCommand::output_schema(),
+            FacadeCommand::ShowDetails(_) => ShowDetailsCommand::output_schema(),
+            FacadeCommand::ShowHistory(_) => ShowHistoryCommand::output_schema(),
+            FacadeCommand::ShowStatus(_) => ShowStatusCommand::output_schema(),
+            FacadeCommand::ShowViews(_) => ShowViewsCommand::output_schema(),
+            FacadeCommand::ShowIndexes(_) => ShowIndexesCommand::output_schema(),
+            FacadeCommand::ShowPacks(_) => ShowPacksCommand::output_schema(),
+            FacadeCommand::ShowBlocks(_) => ShowBlocksCommand::output_schema(),
+            FacadeCommand::ShowConfig(_) => ShowConfigCommand::output_schema(),
+            FacadeCommand::ShowCommands(_) => ShowCommandsCommand::output_schema(),
+            FacadeCommand::ShowConnectors(_) => ShowConnectorsCommand::output_schema(),
+            FacadeCommand::ShowFunctions(_) => ShowFunctionsCommand::output_schema(),
+            FacadeCommand::ShowColumns(_) => ShowColumnsCommand::output_schema(),
+            FacadeCommand::ShowCount(_) => ShowCountCommand::output_schema(),
             FacadeCommand::Syntax(_) => SyntaxCommand::output_schema(),
         }
     }
@@ -208,7 +284,19 @@ impl FacadeCommand {
             FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_shape(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
-            FacadeCommand::Show(_) => ShowCommand::output_shape(),
+            FacadeCommand::ShowDetails(_) => ShowDetailsCommand::output_shape(),
+            FacadeCommand::ShowHistory(_) => ShowHistoryCommand::output_shape(),
+            FacadeCommand::ShowStatus(_) => ShowStatusCommand::output_shape(),
+            FacadeCommand::ShowViews(_) => ShowViewsCommand::output_shape(),
+            FacadeCommand::ShowIndexes(_) => ShowIndexesCommand::output_shape(),
+            FacadeCommand::ShowPacks(_) => ShowPacksCommand::output_shape(),
+            FacadeCommand::ShowBlocks(_) => ShowBlocksCommand::output_shape(),
+            FacadeCommand::ShowConfig(_) => ShowConfigCommand::output_shape(),
+            FacadeCommand::ShowCommands(_) => ShowCommandsCommand::output_shape(),
+            FacadeCommand::ShowConnectors(_) => ShowConnectorsCommand::output_shape(),
+            FacadeCommand::ShowFunctions(_) => ShowFunctionsCommand::output_shape(),
+            FacadeCommand::ShowColumns(_) => ShowColumnsCommand::output_shape(),
+            FacadeCommand::ShowCount(_) => ShowCountCommand::output_shape(),
             FacadeCommand::Syntax(_) => SyntaxCommand::output_shape(),
         }
     }
@@ -231,7 +319,19 @@ impl BundleCommand {
             BundleCommand::RenameTempFunction(cmd) => Ok(FacadeCommand::RenameTempFunction(cmd)),
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
             BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
-            BundleCommand::Show(cmd) => Ok(FacadeCommand::Show(cmd)),
+            BundleCommand::ShowDetails(cmd) => Ok(FacadeCommand::ShowDetails(cmd)),
+            BundleCommand::ShowHistory(cmd) => Ok(FacadeCommand::ShowHistory(cmd)),
+            BundleCommand::ShowStatus(cmd) => Ok(FacadeCommand::ShowStatus(cmd)),
+            BundleCommand::ShowViews(cmd) => Ok(FacadeCommand::ShowViews(cmd)),
+            BundleCommand::ShowIndexes(cmd) => Ok(FacadeCommand::ShowIndexes(cmd)),
+            BundleCommand::ShowPacks(cmd) => Ok(FacadeCommand::ShowPacks(cmd)),
+            BundleCommand::ShowBlocks(cmd) => Ok(FacadeCommand::ShowBlocks(cmd)),
+            BundleCommand::ShowConfig(cmd) => Ok(FacadeCommand::ShowConfig(cmd)),
+            BundleCommand::ShowCommands(cmd) => Ok(FacadeCommand::ShowCommands(cmd)),
+            BundleCommand::ShowConnectors(cmd) => Ok(FacadeCommand::ShowConnectors(cmd)),
+            BundleCommand::ShowFunctions(cmd) => Ok(FacadeCommand::ShowFunctions(cmd)),
+            BundleCommand::ShowColumns(cmd) => Ok(FacadeCommand::ShowColumns(cmd)),
+            BundleCommand::ShowCount(cmd) => Ok(FacadeCommand::ShowCount(cmd)),
             BundleCommand::Syntax(cmd) => Ok(FacadeCommand::Syntax(cmd)),
             _ => {
                 // Get the command name for the error message
@@ -270,7 +370,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::Show(_) | BundleCommand::Syntax(_) => {
+                    BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -284,7 +384,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::Show(_) | BundleCommand::Syntax(_))
+        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_))
     }
 }
 
@@ -399,7 +499,7 @@ macro_rules! register_commands {
         verification {
             $( $verify_variant:ident($verify_cmd:ty) => $verify_rule:path, $verify_name:literal => $verify_syntax:literal ),* $(,)?
         }
-        // Read-only commands using BundleFacadeCommand (e.g. ExplainPlan)
+        // Read-only commands using BundleFacadeCommand (e.g. ExplainPlan, Show*)
         facade {
             $( $facade_variant:ident($facade_cmd:ty) => $facade_rule:path, $facade_name:literal => $facade_syntax:literal ),* $(,)?
         }
@@ -670,8 +770,32 @@ register_commands! {
             "EXPLAIN" => "EXPLAIN [ANALYZE] [VERBOSE] [FORMAT <format>] [<sql>]",
         SetConfig(SetConfigCommand) => Rule::set_config_stmt,
             "SET CONFIG" => "SET CONFIG <key> = '<value>' FOR '<scope>'",
-        Show(ShowCommand) => Rule::show_stmt,
-            "SHOW" => "SHOW <DETAILS|HISTORY|STATUS|VIEWS|INDEXES|PACKS|BLOCKS|CONFIG|COMMANDS|CONNECTORS|FUNCTIONS>",
+        ShowDetails(ShowDetailsCommand) => Rule::show_details_stmt,
+            "SHOW DETAILS" => "SHOW DETAILS",
+        ShowHistory(ShowHistoryCommand) => Rule::show_history_stmt,
+            "SHOW HISTORY" => "SHOW HISTORY",
+        ShowStatus(ShowStatusCommand) => Rule::show_status_stmt,
+            "SHOW STATUS" => "SHOW STATUS",
+        ShowViews(ShowViewsCommand) => Rule::show_views_stmt,
+            "SHOW VIEWS" => "SHOW VIEWS",
+        ShowIndexes(ShowIndexesCommand) => Rule::show_indexes_stmt,
+            "SHOW INDEXES" => "SHOW INDEXES",
+        ShowPacks(ShowPacksCommand) => Rule::show_packs_stmt,
+            "SHOW PACKS" => "SHOW PACKS",
+        ShowBlocks(ShowBlocksCommand) => Rule::show_blocks_stmt,
+            "SHOW BLOCKS" => "SHOW BLOCKS",
+        ShowConfig(ShowConfigCommand) => Rule::show_config_stmt,
+            "SHOW CONFIG" => "SHOW CONFIG",
+        ShowCommands(ShowCommandsCommand) => Rule::show_commands_stmt,
+            "SHOW COMMANDS" => "SHOW COMMANDS",
+        ShowConnectors(ShowConnectorsCommand) => Rule::show_connectors_stmt,
+            "SHOW CONNECTORS" => "SHOW CONNECTORS",
+        ShowFunctions(ShowFunctionsCommand) => Rule::show_functions_stmt,
+            "SHOW FUNCTIONS" => "SHOW FUNCTIONS",
+        ShowColumns(ShowColumnsCommand) => Rule::show_columns_stmt,
+            "SHOW COLUMNS" => "SHOW COLUMNS",
+        ShowCount(ShowCountCommand) => Rule::show_count_stmt,
+            "SHOW COUNT" => "SHOW COUNT",
         Syntax(SyntaxCommand) => Rule::syntax_stmt,
             "SYNTAX" => "SYNTAX [<command>]",
     }

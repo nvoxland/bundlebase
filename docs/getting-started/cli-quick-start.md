@@ -37,12 +37,6 @@ Use standard SQL to explore the data:
 ./my-bundle> SELECT * FROM bundle
 ```
 
-Or use the `/show` meta-command for a quick look:
-
-```
-./my-bundle> /show
-```
-
 ## Filter Rows
 
 Narrow down the data in your bundle:
@@ -64,7 +58,7 @@ Save your work as a new version:
 Check the commit log:
 
 ```
-./my-bundle> /history
+./my-bundle> SHOW HISTORY
 ```
 
 ## Discover Commands
