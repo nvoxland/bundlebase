@@ -16,7 +16,7 @@ pub mod exit;
 pub mod help;
 mod sql;
 
-use bundlebase::bundle::{parse_command, CommandResponse, OutputShape};
+use bundlebase::bundle::{parse_command, split_statements, CommandResponse, OutputShape};
 use bundlebase::BundlebaseError;
 use bundlebase::BundleFacade;
 use datafusion::execution::SendableRecordBatchStream;
@@ -113,7 +113,8 @@ pub enum Command {
 /// Parse input string into Command using SQL syntax
 /// Repl commands start with `/` (e.g., `/help`)
 /// All other input is treated as SQL
-pub fn parse(input: &str) -> Result<Command, String> {
+/// Parse a single statement into a Command. Used internally by `parse`.
+fn parse_single(input: &str) -> Result<Command, String> {
     let input = input.trim();
     if input.is_empty() {
         return Err("Empty command".to_string());
@@ -167,6 +168,51 @@ fn suggest_repl_command(input: &str) -> Option<String> {
     None
 }
 
+/// Parse input that may contain multiple semicolon-separated statements.
+///
+/// Uses a grammar-based parser to split on `;` while respecting quoted strings.
+/// All statements are validated before any are returned. If any statement fails
+/// to parse, an error is returned and none are executed.
+pub fn parse(input: &str) -> Result<Vec<Command>, String> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err("Empty command".to_string());
+    }
+
+    // REPL commands cannot be part of multi-statement input
+    if input.starts_with('/') {
+        return Ok(vec![parse_single(input)?]);
+    }
+
+    let parts = split_statements(input).map_err(|e| e.to_string())?;
+    if parts.is_empty() {
+        return Err("Empty command".to_string());
+    }
+
+    // Parse and validate all statements before returning any
+    let mut commands = Vec::with_capacity(parts.len());
+    let mut errors = Vec::new();
+
+    for (i, stmt) in parts.iter().enumerate() {
+        match parse_single(stmt) {
+            Ok(cmd) => commands.push(cmd),
+            Err(e) => {
+                if parts.len() == 1 {
+                    errors.push(e);
+                } else {
+                    errors.push(format!("Statement {}: {}", i + 1, e));
+                }
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(errors.join("\n"));
+    }
+
+    Ok(commands)
+}
+
 /// Get SQL command suggestions (for tab completion)
 pub fn get_parameter_names(_command_name: &str) -> Vec<String> {
     // With SQL syntax, we don't need parameter completion
@@ -192,9 +238,16 @@ pub async fn execute(
 mod tests {
     use super::*;
 
+    /// Helper to parse a single statement and return the first command.
+    fn parse_one(input: &str) -> Result<Command, String> {
+        let cmds = parse(input)?;
+        assert_eq!(cmds.len(), 1, "Expected 1 command, got {}", cmds.len());
+        Ok(cmds.into_iter().next().unwrap())
+    }
+
     #[test]
     fn test_parse_attach() {
-        let cmd = parse("ATTACH 'data.parquet'").unwrap();
+        let cmd = parse_one("ATTACH 'data.parquet'").unwrap();
         match cmd {
             Command::Sql(sql) => {
                 assert!(sql.contains("ATTACH"));
@@ -206,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_parse_filter() {
-        let cmd = parse("FILTER WHERE country = 'USA'").unwrap();
+        let cmd = parse_one("FILTER WHERE country = 'USA'").unwrap();
         match cmd {
             Command::Sql(sql) => {
                 assert!(sql.contains("FILTER"));
@@ -218,46 +271,22 @@ mod tests {
 
     #[test]
     fn test_parse_repl_commands() {
-        assert!(matches!(
-            parse("/help").unwrap(),
-            Command::Repl(ReplCommand::Help)
-        ));
-        assert!(matches!(
-            parse("/exit").unwrap(),
-            Command::Repl(ReplCommand::Exit)
-        ));
-        assert!(matches!(
-            parse("/quit").unwrap(),
-            Command::Repl(ReplCommand::Exit)
-        ));
-        assert!(matches!(
-            parse("/clear").unwrap(),
-            Command::Repl(ReplCommand::Clear)
-        ));
+        assert!(matches!(parse_one("/help").unwrap(), Command::Repl(ReplCommand::Help)));
+        assert!(matches!(parse_one("/exit").unwrap(), Command::Repl(ReplCommand::Exit)));
+        assert!(matches!(parse_one("/quit").unwrap(), Command::Repl(ReplCommand::Exit)));
+        assert!(matches!(parse_one("/clear").unwrap(), Command::Repl(ReplCommand::Clear)));
     }
 
     #[test]
     fn test_parse_repl_commands_case_insensitive() {
-        assert!(matches!(
-            parse("/HELP").unwrap(),
-            Command::Repl(ReplCommand::Help)
-        ));
-        assert!(matches!(
-            parse("/Help").unwrap(),
-            Command::Repl(ReplCommand::Help)
-        ));
-        assert!(matches!(
-            parse("/EXIT").unwrap(),
-            Command::Repl(ReplCommand::Exit)
-        ));
+        assert!(matches!(parse_one("/HELP").unwrap(), Command::Repl(ReplCommand::Help)));
+        assert!(matches!(parse_one("/Help").unwrap(), Command::Repl(ReplCommand::Help)));
+        assert!(matches!(parse_one("/EXIT").unwrap(), Command::Repl(ReplCommand::Exit)));
     }
 
     #[test]
     fn test_parse_repl_commands_with_space_after_slash() {
-        assert!(matches!(
-            parse("/ help").unwrap(),
-            Command::Repl(ReplCommand::Help)
-        ));
+        assert!(matches!(parse_one("/ help").unwrap(), Command::Repl(ReplCommand::Help)));
     }
 
     #[test]
@@ -270,8 +299,7 @@ mod tests {
 
     #[test]
     fn test_show_is_sql_not_repl() {
-        // SHOW is valid SQL, not a repl command suggestion
-        let cmd = parse("SHOW HISTORY").unwrap();
+        let cmd = parse_one("SHOW HISTORY").unwrap();
         assert!(matches!(cmd, Command::Sql(_)));
     }
 
@@ -280,11 +308,7 @@ mod tests {
         let result = parse("/foo");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(
-            err.contains("Unknown command: /foo"),
-            "Error: {}",
-            err
-        );
+        assert!(err.contains("Unknown command: /foo"), "Error: {}", err);
         assert!(err.contains("/help"), "Error should suggest /help: {}", err);
     }
 
@@ -298,7 +322,7 @@ mod tests {
 
     #[test]
     fn test_parse_commit() {
-        let cmd = parse("COMMIT 'my commit message'").unwrap();
+        let cmd = parse_one("COMMIT 'my commit message'").unwrap();
         match cmd {
             Command::Sql(sql) => {
                 assert!(sql.contains("COMMIT"));
@@ -306,5 +330,40 @@ mod tests {
             }
             _ => panic!("Expected Sql command"),
         }
+    }
+
+    // Multi-statement tests
+
+    #[test]
+    fn test_parse_two_statements() {
+        let cmds = parse("ATTACH 'data.csv'; SHOW HISTORY").unwrap();
+        assert_eq!(cmds.len(), 2);
+        assert!(matches!(&cmds[0], Command::Sql(_)));
+        assert!(matches!(&cmds[1], Command::Sql(_)));
+    }
+
+    #[test]
+    fn test_parse_trailing_semicolon() {
+        let cmds = parse("SHOW HISTORY;").unwrap();
+        assert_eq!(cmds.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_semicolon_in_quotes() {
+        let cmds = parse("COMMIT 'msg with ; in it'; SHOW STATUS").unwrap();
+        assert_eq!(cmds.len(), 2);
+        match &cmds[0] {
+            Command::Sql(sql) => assert!(sql.contains("msg with ; in it")),
+            _ => panic!("Expected Sql"),
+        }
+    }
+
+    #[test]
+    fn test_parse_validates_all_before_returning() {
+        // Second statement is invalid — HELP is not SQL, should suggest /help
+        let result = parse("SHOW HISTORY; HELP");
+        assert!(result.is_err(), "Should fail validation: {:?}", result);
+        let err = result.unwrap_err();
+        assert!(err.contains("Statement 2"), "Error should reference statement number: {}", err);
     }
 }

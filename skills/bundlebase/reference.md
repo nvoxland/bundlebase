@@ -23,16 +23,18 @@ pip install bundlebase
 ### CLI Usage
 
 ```bash
-# Read-only queries
-bundlebase query --bundle ./sales "SELECT * FROM bundle LIMIT 5" --format json
-bundlebase query --bundle ./sales "SHOW COLUMNS" --format json
-bundlebase query --bundle ./sales "SHOW COUNT" --format json
-echo "SELECT count(*) FROM bundle" | bundlebase query --bundle ./sales --format json
+# Read-only queries (piping via stdin avoids shell quoting issues)
+echo "SELECT * FROM bundle LIMIT 5" | bundlebase query --bundle ./sales --format json
+echo "SHOW COLUMNS" | bundlebase query --bundle ./sales --format json
+echo "SHOW COUNT" | bundlebase query --bundle ./sales --format json
 
-# Mutating commands (auto-commits after each)
-bundlebase extend --bundle ./sales --create "ATTACH 'raw_sales.csv'"
-bundlebase extend --bundle ./sales "FILTER WITH SELECT * FROM bundle WHERE amount > 0"
-bundlebase extend --bundle ./sales -m "Cleaned sales data" "RENAME COLUMN amt TO amount"
+# Mutating commands (auto-commits after each call)
+echo "ATTACH 'raw_sales.csv'" | bundlebase extend --bundle ./sales --create
+echo "FILTER WITH SELECT * FROM bundle WHERE amount > 0" | bundlebase extend --bundle ./sales
+echo "RENAME COLUMN amt TO amount" | bundlebase extend --bundle ./sales -m "Cleaned sales data"
+
+# Multiple statements in one call (committed together)
+echo "DROP COLUMN temp_id; RENAME COLUMN amt TO amount" | bundlebase extend --bundle ./sales -m "Initial cleanup"
 
 # Interactive REPL
 bundlebase repl --bundle ./my-bundle --create
@@ -40,12 +42,13 @@ bundlebase repl --bundle ./my-bundle
 bundlebase repl --bundle ./my-bundle --read-only
 
 # Remote bundles
-bundlebase query --bundle s3://mybucket/my-bundle "SELECT * FROM bundle LIMIT 5" --format json
+echo "SELECT * FROM bundle LIMIT 5" | bundlebase query --bundle s3://mybucket/my-bundle --format json
 ```
 
 `--format`: `table` (default) or `json`. JSON mode outputs arrays of objects for queries, single values/objects for commands.
 `bundlebase execute` is an alias for `bundlebase extend`.
-`bundlebase extend` auto-commits after each command. Use `-m` for a custom commit message.
+`bundlebase extend` auto-commits after each call. Use `-m` for a custom commit message.
+Multiple statements can be separated with `;` — all are validated before any execute, and all changes commit together.
 Query results are hard-limited to 1000 rows. Use `LIMIT` in SQL for fewer.
 
 REPL meta-commands: `/help`, `/clear`, `/exit`

@@ -11,13 +11,13 @@ use bundlebase_cli::OutputFormat;
 use clap::Args;
 use std::io::Read;
 
-/// Execute a single SQL statement against a bundle in read-write mode
+/// Execute one or more semicolon-separated SQL statements against a bundle in read-write mode
 #[derive(Args, Debug)]
 pub struct ExtendArgs {
     #[command(flatten)]
     pub bundle: BundleArgs,
 
-    /// SQL or bundlebase command to execute (reads from stdin if omitted)
+    /// SQL or bundlebase command(s) to execute, semicolon-separated (reads from stdin if omitted)
     pub sql: Option<String>,
 
     /// Output format for query results

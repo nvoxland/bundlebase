@@ -18,7 +18,7 @@ use crate::io::EMPTY_SCHEME;
 pub use builder::BundleBuilder;
 pub use builder::BundleStatus;
 pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
-pub use command::parser::{available_commands, is_command_statement, parse_command};
+pub use command::parser::{available_commands, is_command_statement, parse_command, split_statements};
 pub use command::BundleCommand;
 pub use command::CommandResponse;
 pub use command::FacadeCommand;

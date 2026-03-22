@@ -120,6 +120,32 @@ pub fn all_statement_keywords() -> Vec<&'static str> {
     keywords
 }
 
+/// Split input into individual statement strings, respecting quoted strings.
+///
+/// Uses the `multi_statement` grammar rule to properly handle semicolons
+/// inside single-quoted strings. Returns the trimmed text of each statement.
+/// Empty statements (from trailing `;`) are skipped.
+pub fn split_statements(input: &str) -> Result<Vec<&str>, BundlebaseError> {
+    use pest::Parser;
+
+    let pairs = BundlebaseParser::parse(Rule::multi_statement, input)
+        .map_err(|e| format_pest_error(e, input))?;
+
+    let mut statements = Vec::new();
+    for pair in pairs {
+        for inner in pair.into_inner() {
+            if inner.as_rule() == Rule::statement_text {
+                let text = inner.as_str().trim();
+                if !text.is_empty() {
+                    statements.push(text);
+                }
+            }
+        }
+    }
+
+    Ok(statements)
+}
+
 /// Returns a map of command names to their syntax descriptions.
 ///
 /// This delegates to `BundleCommand::available_commands()` which is auto-generated
@@ -158,5 +184,47 @@ mod tests {
         assert!(map.len() > 20);
         assert!(map.contains_key("FILTER"));
         assert!(map.contains_key("ATTACH"));
+    }
+
+    #[test]
+    fn test_split_single_statement() {
+        let stmts = split_statements("SELECT * FROM bundle").unwrap();
+        assert_eq!(stmts, vec!["SELECT * FROM bundle"]);
+    }
+
+    #[test]
+    fn test_split_two_statements() {
+        let stmts = split_statements("ATTACH 'data.csv'; SHOW HISTORY").unwrap();
+        assert_eq!(stmts, vec!["ATTACH 'data.csv'", "SHOW HISTORY"]);
+    }
+
+    #[test]
+    fn test_split_trailing_semicolon() {
+        let stmts = split_statements("SHOW HISTORY;").unwrap();
+        assert_eq!(stmts, vec!["SHOW HISTORY"]);
+    }
+
+    #[test]
+    fn test_split_semicolon_in_quotes() {
+        let stmts = split_statements("COMMIT 'msg with ; in it'; SHOW STATUS").unwrap();
+        assert_eq!(stmts, vec!["COMMIT 'msg with ; in it'", "SHOW STATUS"]);
+    }
+
+    #[test]
+    fn test_split_escaped_quotes() {
+        let stmts = split_statements("COMMIT 'it''s done'; SHOW HISTORY").unwrap();
+        assert_eq!(stmts, vec!["COMMIT 'it''s done'", "SHOW HISTORY"]);
+    }
+
+    #[test]
+    fn test_split_whitespace_handling() {
+        let stmts = split_statements("  SHOW HISTORY ;  SHOW STATUS  ").unwrap();
+        assert_eq!(stmts, vec!["SHOW HISTORY", "SHOW STATUS"]);
+    }
+
+    #[test]
+    fn test_split_multiple_statements() {
+        let stmts = split_statements("ATTACH 'a.csv'; FILTER WHERE x > 1; COMMIT 'done'").unwrap();
+        assert_eq!(stmts, vec!["ATTACH 'a.csv'", "FILTER WHERE x > 1", "COMMIT 'done'"]);
     }
 }

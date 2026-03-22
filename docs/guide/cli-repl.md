@@ -64,6 +64,25 @@ echo "SELECT count(*) FROM bundle" | bundlebase query --bundle ./my-bundle
 
 `bundlebase execute` is an alias for `bundlebase extend`. See `bundlebase query --help` and `bundlebase extend --help` for details.
 
+## Multiple Statements
+
+You can execute multiple statements in a single input by separating them with semicolons (`;`). This works in the REPL, `bundlebase query`, and `bundlebase extend`:
+
+```bash
+# Multiple statements in the REPL
+./my-bundle> ATTACH 'data.csv'; RENAME COLUMN fname TO first_name; SHOW COLUMNS
+
+# Multiple statements via extend (all committed together)
+bundlebase extend --bundle ./data "ATTACH 'sales.csv'; FILTER WITH SELECT * FROM bundle WHERE amount > 0"
+
+# Multiple queries
+bundlebase query --bundle ./data "SHOW COLUMNS; SHOW COUNT"
+```
+
+All statements are **validated before any execute** — if any statement has a syntax error, none will run. Semicolons inside single-quoted strings are handled correctly (e.g., `COMMIT 'added; cleaned'` is treated as one statement).
+
+When using `bundlebase extend` with multiple statements, all changes are **committed together** as a single commit after all statements complete.
+
 ## REPL Features
 
 - **Command history** — Previous commands are saved to `~/.bundlebase/history.txt` (up to 1,000 entries) and recalled with the up/down arrow keys
@@ -99,7 +118,7 @@ Any input that doesn't start with `/` is treated as SQL and executed against the
 ```
 ./my-bundle> ATTACH 'sales.parquet'
 ./my-bundle> FILTER WITH SELECT * FROM bundle WHERE revenue > 1000
-./my-bundle> RENAME COLUMN fname TO first_name
+./my-bundle> RENAME COLUMN fname TO first_name; RENAME COLUMN lname TO last_name
 ./my-bundle> SELECT count(*) FROM bundle
 ./my-bundle> COMMIT 'Cleaned up sales data'
 ```

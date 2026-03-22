@@ -34,6 +34,12 @@ statement = { SOI ~ (
     | metadata_stmt
 ) ~ EOI }
 
+// Multi-statement input: semicolon-separated statements.
+// Respects single-quoted strings so semicolons inside quotes are not treated as delimiters.
+// This rule is used by the CLI for batch execution; the core library uses `statement` for single commands.
+multi_statement = { SOI ~ statement_text ~ (";" ~ statement_text)* ~ ";"? ~ EOI }
+statement_text  = { (quoted_string | !(";" | EOI) ~ ANY)+ }
+
 // Data modification statements - operations that change bundle data content
 data_modification_stmt = {
     filter_stmt

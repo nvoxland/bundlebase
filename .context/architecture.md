@@ -325,13 +325,13 @@ Interactive command-line interface using `reedline`. Supports SQL commands and `
 
 ### `bundlebase query` (Read-Only Query)
 
-Non-interactive read-only mode: execute one SQL query and exit. Opens bundle via `Bundle::open()`. SQL can be passed as a positional argument or piped via stdin.
+Non-interactive read-only mode: execute one or more semicolon-separated SQL queries and exit. Opens bundle via `Bundle::open()`. SQL can be passed as a positional argument or piped via stdin. All statements are validated before any execute.
 
 **Key files:** `cmd/query_cmd.rs`
 
 ### `bundlebase extend` (Mutating Command)
 
-Non-interactive read-write mode: execute one mutating command and exit. Opens bundle via `Bundle::open().extend()`. Auto-commits after execution if there are uncommitted changes. `bundlebase execute` is a hidden alias.
+Non-interactive read-write mode: execute one or more semicolon-separated mutating commands and exit. Opens bundle via `Bundle::open().extend()`. All statements are validated before any execute. Auto-commits after all commands complete if there are uncommitted changes. `bundlebase execute` is a hidden alias.
 
 **Key files:** `cmd/extend_cmd.rs`
 

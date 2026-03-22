@@ -19,17 +19,23 @@ pub async fn execute_query(
 ) -> Result<String, String> {
     use crate::repl::commands;
 
-    let cmd = commands::parse(sql).map_err(|e| e.to_string())?;
+    let cmds = commands::parse(sql).map_err(|e| e.to_string())?;
 
-    match commands::execute(cmd, bundle).await {
-        Ok(Some((stream, shape))) => {
-            format_stream_json(stream, Some(shape), Some(MCP_QUERY_LIMIT))
-                .await
-                .map_err(|e| format!("{}", e))
+    let mut last_output = "OK".to_string();
+    for cmd in cmds {
+        match commands::execute(cmd, bundle).await {
+            Ok(Some((stream, shape))) => {
+                last_output = format_stream_json(stream, Some(shape), Some(MCP_QUERY_LIMIT))
+                    .await
+                    .map_err(|e| format!("{}", e))?;
+            }
+            Ok(None) => {
+                last_output = "OK".to_string();
+            }
+            Err(e) => return Err(format!("{}", e)),
         }
-        Ok(None) => Ok("OK".to_string()),
-        Err(e) => Err(format!("{}", e)),
     }
+    Ok(last_output)
 }
 
 /// Get the bundle schema as a JSON string.
