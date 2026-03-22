@@ -1,99 +1,54 @@
 //! Bundlebase CLI - command-line interface for bundlebase.
 //!
-//! This binary provides two modes of operation:
-//! - REPL: Interactive command-line interface
-//! - Flight: Arrow Flight server for SQL queries
+//! Provides subcommands for interactive REPL, single query execution,
+//! Arrow Flight server, and MCP server modes.
 
-mod agent_skills;
-mod auth;
-mod flight;
-mod mcp;
-mod repl;
+mod cmd;
 
-use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade, PassedBundleConfig};
-use bundlebase_cli::OutputFormat;
-use clap::{Parser, ValueEnum};
-use std::path::Path;
-use std::sync::Arc;
-use tracing::info;
+use bundlebase::BundlebaseError;
+use clap::{Parser, Subcommand as ClapSubcommand};
 use tracing_log::LogTracer;
-
-/// Mode of operation for the CLI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum Mode {
-    /// Interactive REPL mode
-    Repl,
-    /// Arrow Flight server mode
-    Flight,
-    /// MCP (Model Context Protocol) server over stdio
-    Mcp,
-}
-
-impl std::fmt::Display for Mode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Mode::Repl => write!(f, "repl"),
-            Mode::Flight => write!(f, "flight"),
-            Mode::Mcp => write!(f, "mcp"),
-        }
-    }
-}
 
 #[derive(Parser, Debug)]
 #[command(name = "bundlebase")]
 #[command(about = "Bundlebase CLI - Interactive REPL and Arrow Flight Server", long_about = None)]
-struct Args {
-    /// Path to bundle to load
-    #[arg(long, required_unless_present = "setup_agent")]
-    bundle: Option<String>,
-
-    /// Install agent skills for coding agents (Claude Code, Cursor, Copilot, etc.)
-    /// Use --setup-agent for project-level or --setup-agent global for user-level (~/.agents/skills/)
-    #[arg(long, default_missing_value = "local", num_args = 0..=1)]
-    setup_agent: Option<String>,
-
-    /// Mode of operation (repl or flight)
-    #[arg(long, value_enum, default_value = "repl")]
-    mode: Mode,
-
-    /// Create a new bundle if it doesn't exist or is empty
-    #[arg(long)]
-    create: bool,
-
-    /// Open bundle in read-only mode (default: false).
-    /// When true, only SELECT and EXPLAIN commands are allowed.
-    /// Use --read-only to enable read-only mode.
-    #[arg(long, default_value = "false")]
-    read_only: bool,
-
-    /// Host address to bind to (Flight mode only)
-    #[arg(long, default_value = "0.0.0.0")]
-    host: String,
-
-    /// Port to listen on (default: 50051 for Flight)
-    #[arg(long)]
-    port: Option<u16>,
-
-    /// Path to a YAML or JSON config file
-    #[arg(long)]
-    config: Option<String>,
-
+struct Cli {
     /// Logging level (ui, trace, debug, info, warn, error)
     /// ui: Minimal format (message only), INFO level - good for interactive use
-    #[arg(long, default_value = "ui")]
+    #[arg(long, default_value = "ui", global = true)]
     log_level: String,
 
     /// OpenTelemetry endpoint for tracing (e.g., "http://localhost:4317")
-    #[arg(long)]
+    #[arg(long, global = true)]
     otel: Option<String>,
 
-    /// Execute a single command and exit (non-interactive mode)
-    #[arg(long)]
-    execute: Option<String>,
+    #[command(subcommand)]
+    subcommand: Subcommand,
+}
 
-    /// Output format for query results
-    #[arg(long, value_enum, default_value = "table")]
-    format: OutputFormat,
+#[derive(ClapSubcommand, Debug)]
+enum Subcommand {
+    /// Interactive REPL mode
+    Repl(cmd::repl_cmd::ReplArgs),
+
+    /// Execute a read-only SQL query and exit
+    Query(cmd::query_cmd::QueryArgs),
+
+    /// Execute a mutating statement against a bundle and exit
+    Extend(cmd::extend_cmd::ExtendArgs),
+
+    /// Execute a mutating statement against a bundle and exit (alias for extend)
+    #[command(hide = true)]
+    Execute(cmd::extend_cmd::ExtendArgs),
+
+    /// Start MCP (Model Context Protocol) server over stdio
+    Mcp(cmd::mcp_cmd::McpArgs),
+
+    /// Start Arrow Flight SQL server
+    Server(cmd::server_cmd::ServerArgs),
+
+    /// Install agent skills for coding agents
+    SetupAgent(cmd::setup_agent_cmd::SetupAgentArgs),
 }
 
 /// Configuration for logging
@@ -136,126 +91,28 @@ fn parse_log_level(level_str: &str) -> Result<LogConfig, String> {
     }
 }
 
-/// Load a `PassedBundleConfig` from a YAML or JSON file, if a path is provided.
-fn load_config(path: Option<&str>) -> Result<Option<PassedBundleConfig>, BundlebaseError> {
-    let path = match path {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-
-    let contents = std::fs::read_to_string(path)
-        .map_err(|e| BundlebaseError::from(format!("Failed to read config file '{}': {}", path, e)))?;
-
-    let ext = Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-
-    let config: PassedBundleConfig = match ext {
-        "json" => serde_json::from_str(&contents)
-            .map_err(|e| BundlebaseError::from(format!("Failed to parse JSON config '{}': {}", path, e)))?,
-        "yaml" | "yml" => serde_yaml_ng::from_str(&contents)
-            .map_err(|e| BundlebaseError::from(format!("Failed to parse YAML config '{}': {}", path, e)))?,
-        _ => return Err(BundlebaseError::from(format!(
-            "Unrecognized config file extension '{}'. Use .json, .yaml, or .yml",
-            ext
-        ))),
-    };
-
-    Ok(Some(config))
-}
-
 #[tokio::main]
 async fn main() -> Result<(), BundlebaseError> {
-    let args = Args::parse();
+    let cli = Cli::parse();
 
-    init_logging(&args);
+    init_logging(&cli);
 
-    if let Some(scope) = &args.setup_agent {
-        let global = match scope.as_str() {
-            "local" => false,
-            "global" => true,
-            other => {
-                eprintln!("Error: Invalid --setup-agent value '{}'. Use 'local' (default) or 'global'.", other);
-                std::process::exit(1);
-            }
-        };
-        agent_skills::install(global)?;
-        return Ok(());
-    }
-
-    let bundle = args.bundle.expect("--bundle is required when not using --setup-agent");
-
-    // Validate flag combinations
-    if args.create && args.read_only {
-        eprintln!("Error: Cannot use --create with --read-only=true. Creating a bundle requires write access.");
-        eprintln!("Use --read-only=false with --create to create a new bundle.");
-        std::process::exit(1);
-    }
-
-    let config = load_config(args.config.as_deref())?;
-
-    match args.mode {
-        Mode::Repl => {
-            let state: Arc<dyn BundleFacade> = if args.create {
-                // Creating a new bundle - always read-write
-                info!("Creating bundle at: {}", bundle);
-                BundleBuilder::create(&bundle, config.clone()).await?
-            } else if args.read_only {
-                // Read-only mode - open as Bundle
-                info!("Opening bundle in read-only mode: {}", bundle);
-                Bundle::open(&bundle, config.clone()).await?
-            } else {
-                // Read-write mode - open and extend
-                info!("Opening bundle in read-write mode: {}", bundle);
-                Bundle::open(&bundle, config.clone()).await?.extend(None).await?
-            };
-
-            if let Some(sql) = args.execute {
-                // Non-interactive execute mode
-                repl::execute_single(state, &sql, args.format).await?;
-            } else {
-                // Interactive REPL mode
-                repl::print_header();
-                repl::start(state, args.format).await?;
-            }
-        }
-        Mode::Flight => {
-            info!(
-                "{} bundle at: {}{}",
-                if args.create { "Creating" } else { "Opening" },
-                bundle,
-                if args.read_only { " (read-only)" } else { "" }
-            );
-            let port = args.port.unwrap_or(50051);
-            let addr = format!("{}:{}", args.host, port)
-                .parse()
-                .map_err(|e| BundlebaseError::from(format!("Invalid address: {}", e)))?;
-            flight::start(&bundle, config, args.create, args.read_only, addr).await?;
-        }
-        Mode::Mcp => {
-            let state: Arc<dyn BundleFacade> = if args.create {
-                info!("Creating bundle at: {}", bundle);
-                BundleBuilder::create(&bundle, config.clone()).await?
-            } else if args.read_only {
-                info!("Opening bundle in read-only mode: {}", bundle);
-                Bundle::open(&bundle, config.clone()).await?
-            } else {
-                info!("Opening bundle in read-write mode: {}", bundle);
-                Bundle::open(&bundle, config.clone()).await?.extend(None).await?
-            };
-
-            mcp::start(state).await?;
-        }
+    match cli.subcommand {
+        Subcommand::Repl(args) => cmd::repl_cmd::run(args).await?,
+        Subcommand::Query(args) => cmd::query_cmd::run(args).await?,
+        Subcommand::Extend(args) | Subcommand::Execute(args) => cmd::extend_cmd::run(args).await?,
+        Subcommand::Mcp(args) => cmd::mcp_cmd::run(args).await?,
+        Subcommand::Server(args) => cmd::server_cmd::run(args).await?,
+        Subcommand::SetupAgent(args) => cmd::setup_agent_cmd::run(args)?,
     }
 
     Ok(())
 }
 
-fn init_logging(args: &Args) {
+fn init_logging(cli: &Cli) {
     // Parse log level from CLI argument
-    let log_config = parse_log_level(&args.log_level).unwrap_or_else(|e| {
-        eprintln!("Invalid log level '{}': {}", args.log_level, e);
+    let log_config = parse_log_level(&cli.log_level).unwrap_or_else(|e| {
+        eprintln!("Invalid log level '{}': {}", cli.log_level, e);
         std::process::exit(1);
     });
 

@@ -5,7 +5,7 @@ The Bundlebase CLI can run as an [Arrow Flight SQL](https://arrow.apache.org/doc
 ## Starting the Server
 
 ```bash
-bundlebase --bundle <path> --mode flight [options]
+bundlebase server --bundle <path> [options]
 ```
 
 ### Flags
@@ -13,7 +13,6 @@ bundlebase --bundle <path> --mode flight [options]
 | Flag | Default | Description |
 |---|---|---|
 | `--bundle <path>` | *(required)* | Path or URL to the bundle |
-| `--mode flight` | *(required)* | Start in Flight server mode |
 | `--create` | `false` | Create a new bundle if it doesn't exist |
 | `--read-only` | `false` | Only allow SELECT and EXPLAIN commands |
 | `--host <addr>` | `0.0.0.0` | Host address to bind to |
@@ -24,16 +23,16 @@ bundlebase --bundle <path> --mode flight [options]
 
 ```bash
 # Start with defaults (0.0.0.0:50051)
-bundlebase --bundle ./my-bundle --mode flight
+bundlebase server --bundle ./my-bundle
 
 # Custom host and port
-bundlebase --bundle ./my-bundle --mode flight --host 127.0.0.1 --port 8080
+bundlebase server --bundle ./my-bundle --host 127.0.0.1 --port 8080
 
 # Read-only server
-bundlebase --bundle ./my-bundle --mode flight --read-only
+bundlebase server --bundle ./my-bundle --read-only
 
 # Create a new bundle and serve it
-bundlebase --bundle ./my-bundle --mode flight --create
+bundlebase server --bundle ./my-bundle --create
 ```
 
 ## Authentication

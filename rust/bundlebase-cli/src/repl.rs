@@ -11,7 +11,7 @@ mod progress_impl;
 pub mod stream_formatter;
 pub mod table_utils;
 
-use super::OutputFormat;
+use crate::OutputFormat;
 use bundlebase::{BundlebaseError, BundleFacade};
 use commands::{Command, ReplCommand};
 use completion::BundleCompleter;

@@ -41,45 +41,68 @@ This installs the `bundlebase` CLI command.
 
 Bundlebase offers two agent-friendly modes. Choose based on the task:
 
-**CLI mode (`--execute`)** — Best for one-shot simple queries or changes. Each invocation opens the bundle, runs a command, and exits. Use when you need a quick lookup, a single query, or a standalone mutation.
+**CLI mode** — Best for one-shot operations. `bundlebase query` for read-only queries, `bundlebase extend` for mutations (auto-commits after each command).
 
-**MCP mode (`--mode mcp`)** — Best for building up a new bundle or other multi-step operations. The bundle stays open across calls, preserving cache and state. Use when you need to attach multiple files, run a sequence of transformations, explore data iteratively, or build up changes before committing.
+**MCP mode (`bundlebase mcp`)** — Best for building up a new bundle or other multi-step operations. The bundle stays open across calls, preserving cache and state. Use when you need to attach multiple files, run a sequence of transformations, explore data iteratively, or build up changes before committing.
 
 | Scenario | Use |
 |----------|-----|
-| Check schema or row count | CLI |
-| Run a single SELECT query | CLI |
-| One-off ATTACH or COMMIT | CLI |
+| Check schema or row count | `query` |
+| Run a single SELECT query | `query` |
+| One-off ATTACH, FILTER, or other mutation | `extend` |
 | Create a bundle from scratch with multiple files | MCP |
 | Iterative data exploration (query, filter, query again) | MCP |
 | Multi-step transformations (attach, filter, rename, commit) | MCP |
 | Building up joins and views | MCP |
 
-## CLI Mode
+## CLI Commands
 
-All operations use `--execute` for non-interactive, single-command execution. Add `--format json` for machine-readable output.
+### `bundlebase query` — Read-only queries
+
+Opens the bundle in read-only mode. Use for SELECT, EXPLAIN, SHOW, SYNTAX, and meta-commands.
 
 ```bash
-# Create a new bundle and attach data
-bundlebase --bundle ./my-bundle --create --execute "ATTACH 'data.csv'"
-
 # Query the bundle
-bundlebase --bundle ./my-bundle --execute "SELECT * FROM bundle LIMIT 10" --format json
+bundlebase query --bundle ./my-bundle "SELECT * FROM bundle LIMIT 10" --format json
 
-# Commit changes (version control)
-bundlebase --bundle ./my-bundle --execute "COMMIT 'Initial data load'"
+# Explore schema and row count
+bundlebase query --bundle ./my-bundle "/schema" --format json
+bundlebase query --bundle ./my-bundle "/count" --format json
+
+# Pipe SQL from stdin
+echo "SELECT count(*) FROM bundle" | bundlebase query --bundle ./my-bundle --format json
 ```
 
-### Key CLI Flags
+| Flag | Purpose |
+|------|---------|
+| `--bundle <path>` | Path to bundle (local path or `s3://...`) |
+| `--format json` | JSON output (default: `table`) |
+| `--config <path>` | YAML/JSON config file |
+
+### `bundlebase extend` — Mutating commands (auto-commits)
+
+Opens the bundle in read-write mode. Executes the command and **automatically commits** afterward. Use `-m` to provide a commit message; otherwise one is generated from the command.
+
+```bash
+# Create a new bundle and attach data (auto-commits)
+bundlebase extend --bundle ./my-bundle --create "ATTACH 'data.csv'"
+
+# Mutate with a custom commit message
+bundlebase extend --bundle ./my-bundle -m "Cleaned up names" "RENAME COLUMN fname TO first_name"
+
+# Pipe SQL from stdin
+echo "FILTER WITH SELECT * FROM bundle WHERE active" | bundlebase extend --bundle ./my-bundle
+```
 
 | Flag | Purpose |
 |------|---------|
 | `--bundle <path>` | Path to bundle (local path or `s3://...`) |
 | `--create` | Create new bundle if it doesn't exist |
-| `--execute "<sql>"` | Run one command and exit |
+| `-m, --message` | Commit message (auto-generated if omitted) |
 | `--format json` | JSON output (default: `table`) |
-| `--read-only` | Open in read-only mode |
 | `--config <path>` | YAML/JSON config file |
+
+`bundlebase execute` is an alias for `bundlebase extend`.
 
 JSON mode outputs arrays of objects for queries, single values/objects for commands. Errors go to stderr as `{"error": "..."}`. Exit code 1 on error.
 
@@ -97,7 +120,7 @@ Add to your MCP settings (e.g., Claude Code `mcp_servers` config):
 {
   "bundlebase": {
     "command": "bundlebase",
-    "args": ["--bundle", "./my-bundle", "--mode", "mcp"]
+    "args": ["mcp", "--bundle", "./my-bundle"]
   }
 }
 ```
@@ -133,214 +156,207 @@ The `query` tool handles everything: SELECT queries, ATTACH, DETACH, FILTER, REN
 
 ```bash
 # Create bundle and load data
-bundlebase --bundle ./analysis --create --execute "ATTACH 'sales.csv'"
+bundlebase extend --bundle ./analysis --create "ATTACH 'sales.csv'" -m "Loaded sales data"
 
 # Explore the schema
-bundlebase --bundle ./analysis --execute "/schema" --format json
+bundlebase query --bundle ./analysis "/schema" --format json
 
 # Count rows
-bundlebase --bundle ./analysis --execute "/count" --format json
+bundlebase query --bundle ./analysis "/count" --format json
 
 # Run queries
-bundlebase --bundle ./analysis --execute "SELECT department, COUNT(*) as cnt, AVG(salary) as avg_salary FROM bundle GROUP BY department ORDER BY avg_salary DESC" --format json
-
-# Save your work
-bundlebase --bundle ./analysis --execute "COMMIT 'Loaded sales data'"
+bundlebase query --bundle ./analysis "SELECT department, COUNT(*) as cnt, AVG(salary) as avg_salary FROM bundle GROUP BY department ORDER BY avg_salary DESC" --format json
 ```
 
 ### 2. Clean and Transform Data
 
 ```bash
 # Drop unnecessary columns
-bundlebase --bundle ./clean --execute "DROP COLUMN internal_id"
-bundlebase --bundle ./clean --execute "DROP COLUMN debug_notes"
+bundlebase extend --bundle ./clean "DROP COLUMN internal_id"
+bundlebase extend --bundle ./clean "DROP COLUMN debug_notes"
 
 # Rename columns for clarity
-bundlebase --bundle ./clean --execute "RENAME COLUMN fname TO first_name"
-bundlebase --bundle ./clean --execute "RENAME COLUMN lname TO last_name"
+bundlebase extend --bundle ./clean "RENAME COLUMN fname TO first_name"
+bundlebase extend --bundle ./clean "RENAME COLUMN lname TO last_name"
 
 # Add a computed column
-bundlebase --bundle ./clean --execute "ADD COLUMN full_name first_name || ' ' || last_name"
+bundlebase extend --bundle ./clean "ADD COLUMN full_name first_name || ' ' || last_name"
 
 # Filter out bad data
-bundlebase --bundle ./clean --execute "FILTER WITH SELECT * FROM bundle WHERE email IS NOT NULL"
-
-# Commit the cleaned version
-bundlebase --bundle ./clean --execute "COMMIT 'Cleaned and standardized columns'"
+bundlebase extend --bundle ./clean "FILTER WITH SELECT * FROM bundle WHERE email IS NOT NULL" -m "Cleaned and standardized columns"
 ```
 
 ### 3. Join Multiple Data Sources
 
 ```bash
 # Start with a base dataset
-bundlebase --bundle ./combined --create --execute "ATTACH 'customers.parquet'"
+bundlebase extend --bundle ./combined --create "ATTACH 'customers.parquet'"
 
 # Join with orders
-bundlebase --bundle ./combined --execute "JOIN 'orders.csv' AS orders ON id = orders.customer_id"
+bundlebase extend --bundle ./combined "JOIN 'orders.csv' AS orders ON id = orders.customer_id"
 
 # Query across joined data
-bundlebase --bundle ./combined --execute "SELECT c.name, COUNT(orders.id) as order_count, SUM(orders.amount) as total FROM bundle c JOIN orders ON c.id = orders.customer_id GROUP BY c.name ORDER BY total DESC LIMIT 10" --format json
+bundlebase query --bundle ./combined "SELECT c.name, COUNT(orders.id) as order_count, SUM(orders.amount) as total FROM bundle c JOIN orders ON c.id = orders.customer_id GROUP BY c.name ORDER BY total DESC LIMIT 10" --format json
 
 # Remove a join when no longer needed
-bundlebase --bundle ./combined --execute "DROP JOIN orders"
+bundlebase extend --bundle ./combined "DROP JOIN orders"
 ```
 
 ### 4. Work with Multiple File Formats
 
 ```bash
 # Attach CSV, Parquet, and JSON files to the same bundle
-bundlebase --bundle ./multi --create --execute "ATTACH 'data.csv'"
-bundlebase --bundle ./multi --execute "ATTACH 'more_data.parquet'"
-bundlebase --bundle ./multi --execute "ATTACH 'extra.json'"
+bundlebase extend --bundle ./multi --create "ATTACH 'data.csv'"
+bundlebase extend --bundle ./multi "ATTACH 'more_data.parquet'"
+bundlebase extend --bundle ./multi "ATTACH 'extra.json'"
 
 # Replace a data source with updated version
-bundlebase --bundle ./multi --execute "REPLACE 'data.csv' WITH 'data_v2.csv'"
+bundlebase extend --bundle ./multi "REPLACE 'data.csv' WITH 'data_v2.csv'"
 
 # Detach a file
-bundlebase --bundle ./multi --execute "DETACH 'extra.json'"
+bundlebase extend --bundle ./multi "DETACH 'extra.json'"
 ```
 
 ### 5. Create Views for Reusable Queries
 
 ```bash
 # Create named views
-bundlebase --bundle ./reports --execute "CREATE VIEW active_users AS SELECT * FROM bundle WHERE status = 'active'"
-bundlebase --bundle ./reports --execute "CREATE VIEW high_value AS SELECT * FROM bundle WHERE lifetime_value > 10000"
+bundlebase extend --bundle ./reports "CREATE VIEW active_users AS SELECT * FROM bundle WHERE status = 'active'"
+bundlebase extend --bundle ./reports "CREATE VIEW high_value AS SELECT * FROM bundle WHERE lifetime_value > 10000"
 
 # Query views like tables
-bundlebase --bundle ./reports --execute "SELECT * FROM active_users LIMIT 5" --format json
+bundlebase query --bundle ./reports "SELECT * FROM active_users LIMIT 5" --format json
 
 # Drop a view
-bundlebase --bundle ./reports --execute "DROP VIEW high_value"
+bundlebase extend --bundle ./reports "DROP VIEW high_value"
 ```
 
 ### 6. Full-Text Search
 
 ```bash
 # Create a text index on a column
-bundlebase --bundle ./docs --execute "CREATE TEXT INDEX ON description"
+bundlebase extend --bundle ./docs "CREATE TEXT INDEX ON description"
 
 # Search with BM25 relevance scoring
-bundlebase --bundle ./docs --execute "SELECT title, _score FROM search('description', 'machine learning') ORDER BY _score DESC LIMIT 10" --format json
+bundlebase query --bundle ./docs "SELECT title, _score FROM search('description', 'machine learning') ORDER BY _score DESC LIMIT 10" --format json
 
 # Combine search with filters
-bundlebase --bundle ./docs --execute "SELECT * FROM search('description', 'neural networks') WHERE category = 'AI'" --format json
+bundlebase query --bundle ./docs "SELECT * FROM search('description', 'neural networks') WHERE category = 'AI'" --format json
 ```
 
 ### 7. Version Control
 
 ```bash
-# Commit changes
-bundlebase --bundle ./data --execute "COMMIT 'Added Q4 sales data'"
-
 # View history
-bundlebase --bundle ./data --execute "/history" --format json
+bundlebase query --bundle ./data "/history" --format json
 
 # View uncommitted changes
-bundlebase --bundle ./data --execute "/status" --format json
+bundlebase query --bundle ./data "/status" --format json
 
 # Undo last commit
-bundlebase --bundle ./data --execute "UNDO"
+bundlebase extend --bundle ./data "UNDO"
 
 # Discard uncommitted changes
-bundlebase --bundle ./data --execute "RESET"
+bundlebase extend --bundle ./data "RESET"
 
 # Verify data integrity
-bundlebase --bundle ./data --execute "VERIFY DATA"
+bundlebase query --bundle ./data "VERIFY DATA"
 ```
 
 ### 8. Indexes for Performance
 
 ```bash
 # Create a column index for faster filtering
-bundlebase --bundle ./data --execute "CREATE COLUMN INDEX ON customer_id"
+bundlebase extend --bundle ./data "CREATE COLUMN INDEX ON customer_id"
 
 # Create a text index for full-text search
-bundlebase --bundle ./data --execute "CREATE TEXT INDEX ON description"
+bundlebase extend --bundle ./data "CREATE TEXT INDEX ON description"
 
 # Rebuild a specific index
-bundlebase --bundle ./data --execute "REBUILD INDEX ON customer_id"
+bundlebase extend --bundle ./data "REBUILD INDEX ON customer_id"
 
 # Rebuild all indexes
-bundlebase --bundle ./data --execute "REINDEX"
+bundlebase extend --bundle ./data "REINDEX"
 
 # Drop an index
-bundlebase --bundle ./data --execute "DROP INDEX customer_id"
+bundlebase extend --bundle ./data "DROP INDEX customer_id"
 ```
 
 ### 9. Data Sources and Fetch
 
 ```bash
 # Create a source pointing to a directory of files
-bundlebase --bundle ./pipeline --execute "CREATE SOURCE my_connector WITH (url = 's3://bucket/data/')"
+bundlebase extend --bundle ./pipeline "CREATE SOURCE my_connector WITH (url = 's3://bucket/data/')"
 
 # Preview what fetch would do (dry run)
-bundlebase --bundle ./pipeline --execute "FETCH base ADD DRY RUN" --format json
+bundlebase query --bundle ./pipeline "FETCH base ADD DRY RUN" --format json
 
 # Actually fetch new files
-bundlebase --bundle ./pipeline --execute "FETCH base ADD"
+bundlebase extend --bundle ./pipeline "FETCH base ADD"
 
 # Fetch all sources
-bundlebase --bundle ./pipeline --execute "FETCH ALL SYNC"
+bundlebase extend --bundle ./pipeline "FETCH ALL SYNC"
 ```
 
 ### 10. Bundle Metadata
 
 ```bash
 # Set bundle name and description
-bundlebase --bundle ./data --execute "SET NAME 'Q4 Sales Report'"
-bundlebase --bundle ./data --execute "SET DESCRIPTION 'Quarterly sales data with regional breakdowns'"
+bundlebase extend --bundle ./data "SET NAME 'Q4 Sales Report'"
+bundlebase extend --bundle ./data "SET DESCRIPTION 'Quarterly sales data with regional breakdowns'"
 
 # Set runtime config
-bundlebase --bundle ./data --execute "SET CONFIG max_rows = '5000'"
+bundlebase extend --bundle ./data "SET CONFIG max_rows = '5000'"
 
 # Save config to bundle manifest
-bundlebase --bundle ./data --execute "SAVE CONFIG max_rows = '5000'"
+bundlebase extend --bundle ./data "SAVE CONFIG max_rows = '5000'"
 ```
 
 ### 11. Query Execution Plans
 
 ```bash
 # See how a query will execute
-bundlebase --bundle ./data --execute "EXPLAIN SELECT * FROM bundle WHERE salary > 50000"
+bundlebase query --bundle ./data "EXPLAIN SELECT * FROM bundle WHERE salary > 50000"
 
 # With execution statistics
-bundlebase --bundle ./data --execute "EXPLAIN ANALYZE SELECT * FROM bundle WHERE salary > 50000"
+bundlebase query --bundle ./data "EXPLAIN ANALYZE SELECT * FROM bundle WHERE salary > 50000"
 
 # Tree format
-bundlebase --bundle ./data --execute "EXPLAIN VERBOSE FORMAT TREE"
+bundlebase query --bundle ./data "EXPLAIN VERBOSE FORMAT TREE"
 ```
 
 ### 12. Remote Bundles
 
 ```bash
-# Open a bundle from S3
-bundlebase --bundle s3://mybucket/my-bundle --execute "SELECT COUNT(*) FROM bundle" --format json
+# Query a bundle from S3
+bundlebase query --bundle s3://mybucket/my-bundle "SELECT COUNT(*) FROM bundle" --format json
 
-# Read-only access
-bundlebase --bundle s3://mybucket/my-bundle --read-only --execute "/schema" --format json
+# Read-only schema check
+bundlebase query --bundle s3://mybucket/my-bundle "/schema" --format json
 ```
 
 ## Fetching External Data with Connectors
 
-Bundlebase has built-in connectors for common data sources. The pattern is: CREATE SOURCE → FETCH → query/transform → COMMIT.
+Bundlebase has built-in connectors for common data sources. The pattern is: CREATE SOURCE → FETCH → query/transform.
 
 **Built-in connectors:** `kaggle`, `remote_dir` (S3/GCS/Azure/local dirs), `ftp_directory`, `sftp_directory`, `web_scrape`, `postgres`
 
+**Important:** Bundlebase's connectors call external APIs directly — you do **not** need to install separate CLI tools. For example, the `kaggle` connector uses the Kaggle REST API directly; there is no need to install the `kaggle` pip package or CLI. It only requires a `~/.kaggle/kaggle.json` credentials file (for public datasets, create one at kaggle.com → Settings → API → Create New Token).
+
 ```bash
-# Kaggle: download a dataset (requires ~/.kaggle/kaggle.json credentials)
-bundlebase --bundle ./housing --create --execute "CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')"
-bundlebase --bundle ./housing --execute "FETCH base ADD"
+# Kaggle: download a public dataset (no kaggle CLI needed — just ~/.kaggle/kaggle.json)
+bundlebase extend --bundle ./housing --create "CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')"
+bundlebase extend --bundle ./housing "FETCH base ADD"
 
 # S3: attach all parquet files from a bucket
-bundlebase --bundle ./logs --create --execute "CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')"
-bundlebase --bundle ./logs --execute "FETCH base ADD"
+bundlebase extend --bundle ./logs --create "CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')"
+bundlebase extend --bundle ./logs "FETCH base ADD"
 
 # Preview what would be fetched without actually fetching
-bundlebase --bundle ./logs --execute "FETCH base ADD DRY RUN" --format json
+bundlebase query --bundle ./logs "FETCH base ADD DRY RUN" --format json
 
 # Check what sources are configured
-bundlebase --bundle ./logs --execute "SHOW CONNECTORS" --format json
+bundlebase query --bundle ./logs "SHOW CONNECTORS" --format json
 ```
 
 Use `SYNTAX CREATE SOURCE` and `SYNTAX FETCH` for detailed syntax. See the [Sources guide](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/sources.md) for full connector documentation.
@@ -373,9 +389,9 @@ Register and use it:
 ```bash
 # Install the SDK: pip install bundlebase-sdk
 # Register the connector (temp = session-only, supports Python runtime)
-bundlebase --bundle ./data --execute "IMPORT TEMP CONNECTOR my.api FROM 'python::my_connector.py:MyApiConnector'"
-bundlebase --bundle ./data --execute "CREATE SOURCE my.api"
-bundlebase --bundle ./data --execute "FETCH base ADD"
+bundlebase extend --bundle ./data "IMPORT TEMP CONNECTOR my.api FROM 'python::my_connector.py:MyApiConnector'"
+bundlebase extend --bundle ./data "CREATE SOURCE my.api"
+bundlebase extend --bundle ./data "FETCH base ADD"
 ```
 
 For persistent connectors (survive across sessions), use `ipc` or `ffi` runtimes instead of `python`. See the [Custom Connectors guide](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/index.md) and [Python SDK](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/python.md).
@@ -386,14 +402,14 @@ After attaching data, use computed columns and custom functions to clean and enr
 
 ```bash
 # Add computed columns using SQL expressions
-bundlebase --bundle ./data --execute "ADD COLUMN full_name AS first_name || ' ' || last_name"
-bundlebase --bundle ./data --execute "ADD COLUMN price_cents AS CAST(price * 100 AS INTEGER)"
+bundlebase extend --bundle ./data "ADD COLUMN full_name AS first_name || ' ' || last_name"
+bundlebase extend --bundle ./data "ADD COLUMN price_cents AS CAST(price * 100 AS INTEGER)"
 
 # Cast column types with optional regex cleanup (strip non-numeric chars before casting)
-bundlebase --bundle ./data --execute "CAST COLUMN price TO integer CLEAN '[^0-9]'"
+bundlebase extend --bundle ./data "CAST COLUMN price TO integer CLEAN '[^0-9]'"
 
 # Filter out bad rows
-bundlebase --bundle ./data --execute "FILTER WITH SELECT * FROM bundle WHERE email IS NOT NULL"
+bundlebase extend --bundle ./data "FILTER WITH SELECT * FROM bundle WHERE email IS NOT NULL"
 
 # Use a custom Python function for complex transformations
 # First, create the function file:
@@ -402,11 +418,8 @@ bundlebase --bundle ./data --execute "FILTER WITH SELECT * FROM bundle WHERE ema
 #       def call(self, phone: str) -> str:
 #           return re.sub(r'[^0-9+]', '', phone)
 # Then register and use it:
-bundlebase --bundle ./data --execute "IMPORT TEMP FUNCTION util.normalize_phone FROM 'python::normalize.py:NormalizePhone'"
-bundlebase --bundle ./data --execute "ADD COLUMN clean_phone AS util.normalize_phone(phone)"
-
-# Commit the cleaned version
-bundlebase --bundle ./data --execute "COMMIT 'Cleaned and enriched data'"
+bundlebase extend --bundle ./data "IMPORT TEMP FUNCTION util.normalize_phone FROM 'python::normalize.py:NormalizePhone'"
+bundlebase extend --bundle ./data "ADD COLUMN clean_phone AS util.normalize_phone(phone)" -m "Cleaned and enriched data"
 ```
 
 Use `SYNTAX ADD COLUMN`, `SYNTAX CAST COLUMN`, and `SYNTAX IMPORT FUNCTION` for detailed syntax. See the [Functions guide](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/functions.md).
@@ -441,16 +454,14 @@ For async contexts (e.g., web servers), use `import bundlebase` with `await`. Se
 Bundles are portable — share them with teammates or export results for non-bundlebase users:
 
 ```bash
-# Export the bundle as a tar archive (portable, includes all data + history)
-bundlebase --bundle ./analysis --execute "SELECT * FROM bundle" --format json > results.json
+# Export query results as JSON
+bundlebase query --bundle ./analysis "SELECT * FROM bundle" --format json > results.json
 
 # Push a bundle to S3 so others can access it
-# (Create the bundle directly on S3, or copy the bundle directory)
-bundlebase --bundle s3://team-bucket/shared-analysis --create --execute "ATTACH 'cleaned.parquet'"
-bundlebase --bundle s3://team-bucket/shared-analysis --execute "COMMIT 'Shared cleaned dataset'"
+bundlebase extend --bundle s3://team-bucket/shared-analysis --create "ATTACH 'cleaned.parquet'" -m "Shared cleaned dataset"
 
-# Others can then open it read-only
-bundlebase --bundle s3://team-bucket/shared-analysis --read-only --execute "/schema" --format json
+# Others can then query it
+bundlebase query --bundle s3://team-bucket/shared-analysis "/schema" --format json
 ```
 
 For sharing with non-bundlebase users, export query results to standard formats (JSON, CSV) using `--format json` or by querying into a Python script and saving with pandas.
@@ -463,11 +474,11 @@ Use `SYNTAX` to get command syntax on demand:
 
 ```bash
 # List all available commands
-bundlebase --bundle ./data --execute "SYNTAX"
+bundlebase query --bundle ./data "SYNTAX"
 
 # Get detailed syntax and examples for a specific command
-bundlebase --bundle ./data --execute "SYNTAX IMPORT FUNCTION"
-bundlebase --bundle ./data --execute "SYNTAX ATTACH"
+bundlebase query --bundle ./data "SYNTAX IMPORT FUNCTION"
+bundlebase query --bundle ./data "SYNTAX ATTACH"
 ```
 
 In MCP mode, use the `query` tool with `SYNTAX <command>`.
@@ -476,7 +487,7 @@ For a quick command reference, see [reference.md](reference.md).
 
 ### REPL Meta-Commands
 
-When using the interactive REPL (without `--execute`), these meta-commands are available:
+When using the interactive REPL (`bundlebase repl`), these meta-commands are available:
 
 | Command | Purpose |
 |---------|---------|
@@ -488,4 +499,4 @@ When using the interactive REPL (without `--execute`), these meta-commands are a
 | `/history` | Show version history |
 | `/exit` | Exit the REPL |
 
-These also work with `--execute`, e.g. `--execute "/schema" --format json`.
+These also work with `bundlebase query`, e.g. `bundlebase query --bundle ./data "/schema" --format json`.

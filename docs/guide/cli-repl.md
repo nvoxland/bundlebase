@@ -5,7 +5,7 @@ The Bundlebase CLI includes an interactive REPL (Read-Eval-Print Loop) for worki
 ## Starting the REPL
 
 ```bash
-bundlebase --bundle <path> [options]
+bundlebase repl --bundle <path> [options]
 ```
 
 ### Flags
@@ -15,9 +15,7 @@ bundlebase --bundle <path> [options]
 | `--bundle <path>` | *(required)* | Path or URL to the bundle |
 | `--create` | `false` | Create a new bundle if it doesn't exist |
 | `--read-only` | `false` | Open in read-only mode (only SELECT and EXPLAIN allowed) |
-| `--execute <sql>` | *(none)* | Execute a single command and exit (non-interactive) |
 | `--format <format>` | `table` | Output format: `table` or `json` |
-| `--setup-agent [scope]` | *(n/a)* | Install agent skills for coding agents (see [Agent Skills](#agent-skills)) |
 | `--log-level <level>` | `ui` | Logging level: `ui`, `trace`, `debug`, `info`, `warn`, `error` |
 | `--otel <endpoint>` | *(none)* | OpenTelemetry endpoint for tracing |
 
@@ -25,23 +23,46 @@ bundlebase --bundle <path> [options]
 
 ```bash
 # Create a new bundle
-bundlebase --bundle ./my-bundle --create
+bundlebase repl --bundle ./my-bundle --create
 
 # Open an existing bundle
-bundlebase --bundle ./my-bundle
+bundlebase repl --bundle ./my-bundle
 
 # Open in read-only mode
-bundlebase --bundle ./my-bundle --read-only
+bundlebase repl --bundle ./my-bundle --read-only
 
 # Open with debug logging
-bundlebase --bundle ./my-bundle --log-level debug
+bundlebase repl --bundle ./my-bundle --log-level debug
 
 # Open a remote bundle
-bundlebase --bundle s3://mybucket/my-bundle
+bundlebase repl --bundle s3://mybucket/my-bundle
 ```
 
 !!! note
     The `--create` and `--read-only` flags cannot be combined.
+
+## Non-Interactive Execution
+
+For one-shot operations without the interactive REPL:
+
+- **`bundlebase query`** — Read-only queries (SELECT, EXPLAIN, SHOW, SYNTAX, meta-commands)
+- **`bundlebase extend`** — Mutating commands (ATTACH, FILTER, DROP, etc.) with auto-commit
+
+```bash
+# Read-only query
+bundlebase query --bundle <path> "SELECT * FROM bundle"
+
+# Mutating command (auto-commits afterward)
+bundlebase extend --bundle <path> "ATTACH 'data.csv'"
+
+# Custom commit message
+bundlebase extend --bundle <path> -m "Added sales data" "ATTACH 'sales.csv'"
+
+# Pipe SQL from stdin
+echo "SELECT count(*) FROM bundle" | bundlebase query --bundle ./my-bundle
+```
+
+`bundlebase execute` is an alias for `bundlebase extend`. See `bundlebase query --help` and `bundlebase extend --help` for details.
 
 ## REPL Features
 
@@ -107,7 +128,7 @@ For SQL queries, the full result set is displayed (up to the 100-row display lim
 ## Example Session
 
 ```
-$ bundlebase --bundle ./demo --create
+$ bundlebase repl --bundle ./demo --create
 
 Bundlebase REPL
 Type '/help' for available commands, '/exit' to quit
@@ -155,23 +176,26 @@ Goodbye!
 
 ## Agent Skills
 
-The `--setup-agent` flag installs [Agent Skills](https://agentskills.io) files that make bundlebase automatically discoverable by coding agents like Claude Code, Cursor, Copilot, Gemini CLI, and others.
+The `setup-agent` subcommand installs [Agent Skills](https://agentskills.io) files that make bundlebase automatically discoverable by coding agents like Claude Code, Cursor, Copilot, Gemini CLI, and others.
 
 ### Project-Level Install (default)
 
 ```bash
-bundlebase --setup-agent
+bundlebase setup-agent
 ```
 
-Creates `.agents/skills/bundlebase/` in the current directory with `SKILL.md` (instructions and workflows) and `reference.md` (SQL command reference). Any agent that opens this project will discover bundlebase automatically.
+Installs into the current directory:
+
+- `.agents/skills/bundlebase/SKILL.md` and `reference.md` — agent skill files with CLI workflows and SQL command reference
+- Appends a `## Bundlebase` section to `CLAUDE.md` (creates the file if it doesn't exist) so agents always know bundlebase is available
 
 ### User-Level Install
 
 ```bash
-bundlebase --setup-agent global
+bundlebase setup-agent --scope global
 ```
 
-Creates `~/.agents/skills/bundlebase/` so bundlebase skills are available across all projects for agents that scan user-level skill directories.
+Same as above but installs to `~/.agents/skills/bundlebase/` and `~/CLAUDE.md`, making bundlebase skills available across all projects.
 
 ### Notes
 

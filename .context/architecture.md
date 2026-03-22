@@ -315,21 +315,33 @@ Schema updates are immediate - `container.schema()` work instantly without execu
 
 ## CLI Modes
 
-The CLI (`rust/bundlebase-cli/`) provides three modes for interacting with bundles. All modes share the same `BundleFacade` trait, command parsing, and query execution infrastructure.
+The CLI (`rust/bundlebase-cli/`) provides subcommands for interacting with bundles. All modes share the same `BundleFacade` trait, command parsing, and query execution infrastructure. Subcommand dispatch is in `main.rs`; each subcommand is implemented in its own module under `cmd/` (one module per subcommand).
 
-### REPL Mode (default)
+### `bundlebase repl` (Interactive REPL)
 
-Interactive command-line interface using `reedline`. Supports SQL commands and `/meta-commands` with tab completion and history. Also supports `--execute` for non-interactive single-command execution.
+Interactive command-line interface using `reedline`. Supports SQL commands and `/meta-commands` with tab completion and history.
 
-**Key files:** `repl.rs`, `repl/commands.rs`, `repl/commands/sql.rs`
+**Key files:** `cmd/repl_cmd.rs`, `repl.rs`, `repl/commands.rs`, `repl/commands/sql.rs`
 
-### Flight Mode (`--mode flight`)
+### `bundlebase query` (Read-Only Query)
+
+Non-interactive read-only mode: execute one SQL query and exit. Opens bundle via `Bundle::open()`. SQL can be passed as a positional argument or piped via stdin.
+
+**Key files:** `cmd/query_cmd.rs`
+
+### `bundlebase extend` (Mutating Command)
+
+Non-interactive read-write mode: execute one mutating command and exit. Opens bundle via `Bundle::open().extend()`. Auto-commits after execution if there are uncommitted changes. `bundlebase execute` is a hidden alias.
+
+**Key files:** `cmd/extend_cmd.rs`
+
+### `bundlebase server` (Flight SQL Server)
 
 Arrow Flight SQL server over gRPC. Each authenticated client gets its own session with independent bundle state. Supports JDBC/ODBC clients like DBeaver.
 
-**Key files:** `flight.rs`, `flight/server.rs`, `flight/service.rs`
+**Key files:** `cmd/server_cmd.rs`, `flight.rs`, `flight/server.rs`, `flight/service.rs`
 
-### MCP Mode (`--mode mcp`)
+### `bundlebase mcp` (MCP Server)
 
 Model Context Protocol server over stdio for AI assistant integration. The bundle opens once at startup and stays alive across tool calls, preserving cache and state. Exposes tools (`query`, `schema`, `count`, `sample`, `status`, `history`) that AI assistants call directly. Uses the `rmcp` crate.
 

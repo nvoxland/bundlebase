@@ -23,26 +23,29 @@ pip install bundlebase
 ### CLI Usage
 
 ```bash
-# Non-interactive execute mode (agent-friendly, best for one-shot operations)
-bundlebase --bundle ./sales --create --execute "ATTACH 'raw_sales.csv'"
-bundlebase --bundle ./sales --execute "SELECT * FROM bundle LIMIT 5" --format json
-bundlebase --bundle ./sales --execute "FILTER WITH SELECT * FROM bundle WHERE amount > 0"
-bundlebase --bundle ./sales --execute "COMMIT 'Cleaned sales data'"
-bundlebase --bundle ./sales --execute "/schema" --format json
-bundlebase --bundle ./sales --execute "/count" --format json
+# Read-only queries
+bundlebase query --bundle ./sales "SELECT * FROM bundle LIMIT 5" --format json
+bundlebase query --bundle ./sales "/schema" --format json
+bundlebase query --bundle ./sales "/count" --format json
+echo "SELECT count(*) FROM bundle" | bundlebase query --bundle ./sales --format json
+
+# Mutating commands (auto-commits after each)
+bundlebase extend --bundle ./sales --create "ATTACH 'raw_sales.csv'"
+bundlebase extend --bundle ./sales "FILTER WITH SELECT * FROM bundle WHERE amount > 0"
+bundlebase extend --bundle ./sales -m "Cleaned sales data" "RENAME COLUMN amt TO amount"
 
 # Interactive REPL
-bundlebase --bundle ./my-bundle --create
-bundlebase --bundle ./my-bundle
-bundlebase --bundle ./my-bundle --read-only
-bundlebase --bundle ./my-bundle --format json   # JSON output in REPL too
+bundlebase repl --bundle ./my-bundle --create
+bundlebase repl --bundle ./my-bundle
+bundlebase repl --bundle ./my-bundle --read-only
 
 # Remote bundles
-bundlebase --bundle s3://mybucket/my-bundle
+bundlebase query --bundle s3://mybucket/my-bundle "SELECT * FROM bundle LIMIT 5" --format json
 ```
 
 `--format`: `table` (default) or `json`. JSON mode outputs arrays of objects for queries, single values/objects for commands.
-`--execute`: Run one command and exit. Errors go to stderr as `{"error": "..."}` in JSON mode. Exit code 1 on error.
+`bundlebase execute` is an alias for `bundlebase extend`.
+`bundlebase extend` auto-commits after each command. Use `-m` for a custom commit message.
 Query results are hard-limited to 1000 rows. Use `LIMIT` in SQL for fewer.
 
 REPL meta-commands: `/help`, `/show`, `/schema`, `/count`, `/status`, `/history`, `/exit`
@@ -53,14 +56,14 @@ MCP mode keeps the bundle open across calls — use for multi-step workflows.
 
 ```bash
 # Start as MCP server (configure in your AI assistant's MCP settings)
-bundlebase --bundle ./my-bundle --mode mcp
-bundlebase --bundle ./my-bundle --mode mcp --create
-bundlebase --bundle ./my-bundle --mode mcp --read-only
+bundlebase mcp --bundle ./my-bundle
+bundlebase mcp --bundle ./my-bundle --create
+bundlebase mcp --bundle ./my-bundle --read-only
 ```
 
 MCP tools: `query` (any SQL/command), `schema`, `count`, `sample`, `status`, `history`.
 
-Prefer CLI (`--execute`) for one-shot queries. Prefer MCP for building bundles or multi-step exploration.
+Prefer CLI (`bundlebase query`) for one-shot queries. Prefer MCP for building bundles or multi-step exploration.
 
 ### SQL Commands
 
