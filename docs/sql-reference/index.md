@@ -780,6 +780,36 @@ SAVE CONFIG <key> = '<value>' [FOR '<scope>']
 
 See [Metadata](../guide/metadata.md) and [Configuration](../guide/configuration.md) for details.
 
+## Export
+
+### EXPORT
+
+Exports query results to a file. The output format is determined by the file extension.
+
+```sql
+EXPORT TO '<path>' <sql>
+```
+
+**Supported formats:**
+
+| Extension | Format |
+|-----------|--------|
+| `.csv` | Comma-separated values |
+| `.jsonl` | JSON Lines (one JSON object per line) |
+
+**Examples:**
+
+```sql
+-- Export all data to CSV
+EXPORT TO 'output.csv' SELECT * FROM bundle
+
+-- Export filtered results to JSON Lines
+EXPORT TO '/tmp/active_users.jsonl' SELECT * FROM bundle WHERE active = true
+
+-- Export aggregated results
+EXPORT TO 'summary.csv' SELECT department, COUNT(*) as cnt, AVG(salary) as avg_sal FROM bundle GROUP BY department
+```
+
 ## Help & Introspection
 
 ### SHOW

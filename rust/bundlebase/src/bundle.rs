@@ -4,6 +4,7 @@ pub(crate) mod column_metadata;
 pub(crate) mod command;
 mod commit;
 mod data_block;
+pub(crate) mod export;
 mod pack;
 mod facade;
 mod indexed_blocks;

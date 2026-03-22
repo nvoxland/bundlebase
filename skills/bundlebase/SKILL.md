@@ -445,22 +445,36 @@ bundle.commit("Cleaned sales data")
 
 For async contexts (e.g., web servers), use `import bundlebase` with `await`. See the [Quick Start](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/getting-started/quick-start.md) for full API reference.
 
-## Sharing and Exporting Data
+## Exporting Data
 
-Bundles are portable — share them with teammates or export results for non-bundlebase users:
+Use `EXPORT TO` to save query results directly to a file. This is more efficient than piping query output through stdout, especially for large result sets — use it instead of `SELECT` when you need the data in a file.
 
 ```bash
-# Export query results as JSON
-echo "SELECT * FROM bundle" | bundlebase query --bundle ./analysis --format json > results.json
+# Export to CSV
+echo "EXPORT TO 'output.csv' SELECT * FROM bundle" | bundlebase query --bundle ./analysis
 
+# Export filtered results to JSON Lines
+echo "EXPORT TO 'active_users.jsonl' SELECT * FROM bundle WHERE active = true" | bundlebase query --bundle ./analysis
+
+# Export aggregated results
+echo "EXPORT TO 'summary.csv' SELECT department, COUNT(*) as cnt, AVG(salary) as avg_sal FROM bundle GROUP BY department" | bundlebase query --bundle ./analysis
+```
+
+**Supported formats:** `.csv`, `.jsonl` (JSON Lines — one JSON object per line)
+
+**Tip:** For data exploration where you need to see results, use `SELECT` with `--format json`. For saving data to a file for further processing, prefer `EXPORT TO` — it streams directly to the file without row limits.
+
+### Sharing Bundles
+
+Bundles are portable — share them with teammates:
+
+```bash
 # Push a bundle to S3 so others can access it
 echo "ATTACH 'cleaned.parquet'" | bundlebase extend --bundle s3://team-bucket/shared-analysis --create -m "Shared cleaned dataset"
 
 # Others can then query it
 echo "SHOW COLUMNS" | bundlebase query --bundle s3://team-bucket/shared-analysis --format json
 ```
-
-For sharing with non-bundlebase users, export query results to standard formats (JSON, CSV) using `--format json` or by querying into a Python script and saving with pandas.
 
 ## SQL Reference Summary
 

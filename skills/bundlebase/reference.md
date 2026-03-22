@@ -86,6 +86,7 @@ SYNTAX IMPORT FUNCTION  -- detailed syntax for IMPORT FUNCTION
 **Indexes**: CREATE INDEX, DROP INDEX, REBUILD INDEX, REINDEX
 **Version Control**: COMMIT, RESET, UNDO, VERIFY DATA, EXPLAIN
 **Metadata**: SET NAME, SET DESCRIPTION, SET CONFIG, SAVE CONFIG
+**Export**: EXPORT TO '<path>' <sql> (formats: .csv, .jsonl)
 **Introspection**: SHOW (DETAILS, HISTORY, STATUS, VIEWS, INDEXES, PACKS, BLOCKS, CONFIG, CONNECTORS, FUNCTIONS), SYNTAX
 
 **Built-in SQL functions**: `search('<index_name>', '<query>')` for full-text search with BM25 scoring.

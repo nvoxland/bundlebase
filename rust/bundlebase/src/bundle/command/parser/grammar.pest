@@ -100,7 +100,8 @@ transaction_stmt = {
 
 // Metadata statements - operations for bundle metadata
 metadata_stmt = {
-    show_details_stmt
+    export_stmt
+    | show_details_stmt
     | show_history_stmt
     | show_status_stmt
     | show_views_stmt
@@ -136,6 +137,23 @@ syntax_stmt = {
 }
 
 syntax_query = @{
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// EXPORT Statement
+// ============================================================================
+// Syntax: EXPORT TO '<path>' <sql>
+// Examples:
+//   EXPORT TO 'output.csv' SELECT * FROM bundle
+//   EXPORT TO '/tmp/results.json' SELECT name, count FROM bundle WHERE active = true
+//   EXPORT TO 'data.table' SELECT * FROM bundle LIMIT 100
+
+export_stmt = {
+    ^"export" ~ ^"to" ~ quoted_string ~ export_sql
+}
+
+export_sql = @{
     (!EOI ~ ANY)+
 }
 

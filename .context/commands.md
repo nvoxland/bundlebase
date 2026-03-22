@@ -34,7 +34,7 @@ The `statement` rule in `grammar.pest` is organized into semantic categories:
 | `source_stmt` | Operations for data sources and functions | CREATE SOURCE, FETCH, IMPORT/DROP/RENAME CONNECTOR, IMPORT/DROP/RENAME FUNCTION (including TEMP variants) |
 | `index_stmt` | Operations for search indexes | CREATE INDEX, DROP INDEX, REBUILD INDEX, REINDEX |
 | `transaction_stmt` | Operations for version control | COMMIT, RESET, UNDO, VERIFY DATA |
-| `metadata_stmt` | Operations for bundle metadata | SET NAME, SET DESCRIPTION, SET CONFIG, SAVE CONFIG, SHOW, SYNTAX, DESCRIBE |
+| `metadata_stmt` | Operations for bundle metadata | SET NAME, SET DESCRIPTION, SET CONFIG, SAVE CONFIG, SHOW, SYNTAX, DESCRIBE, EXPORT |
 
 Add new statement rules to the appropriate category for maintainability.
 
