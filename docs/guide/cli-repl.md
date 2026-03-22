@@ -13,7 +13,6 @@ bundlebase repl --bundle <path> [options]
 | Flag | Default | Description |
 |---|---|---|
 | `--bundle <path>` | *(required)* | Path or URL to the bundle |
-| `--create` | `false` | Create a new bundle if it doesn't exist |
 | `--read-only` | `false` | Open in read-only mode (only SELECT and EXPLAIN allowed) |
 | `--format <format>` | `table` | Output format: `table` or `json` |
 | `--log-level <level>` | `ui` | Logging level: `ui`, `trace`, `debug`, `info`, `warn`, `error` |
@@ -22,9 +21,6 @@ bundlebase repl --bundle <path> [options]
 ### Examples
 
 ```bash
-# Create a new bundle
-bundlebase repl --bundle ./my-bundle --create
-
 # Open an existing bundle
 bundlebase repl --bundle ./my-bundle
 
@@ -38,14 +34,19 @@ bundlebase repl --bundle ./my-bundle --log-level debug
 bundlebase repl --bundle s3://mybucket/my-bundle
 ```
 
-!!! note
-    The `--create` and `--read-only` flags cannot be combined.
+To create a new bundle, use `bundlebase create` first:
+
+```bash
+bundlebase create --bundle ./my-bundle
+bundlebase repl --bundle ./my-bundle
+```
 
 ## Non-Interactive Execution
 
 For one-shot operations without the interactive REPL:
 
 - **`bundlebase query`** — Read-only queries (SELECT, EXPLAIN, SHOW, SYNTAX, meta-commands)
+- **`bundlebase create`** — Create a new bundle, optionally with initial commands
 - **`bundlebase extend`** — Mutating commands (ATTACH, FILTER, DROP, etc.) with auto-commit
 
 ```bash
@@ -148,13 +149,13 @@ Query results display as formatted tables. By default, output is limited to 100 
 ## Example Session
 
 ```
-$ bundlebase repl --bundle ./demo --create
+$ bundlebase create --bundle ./demo "ATTACH 'customers.csv'"
+$ bundlebase repl --bundle ./demo
 
-Bundlebase REPL
+Opened bundle at ./demo (version ..., 1 commit)
 Type '/help' for available commands, '/exit' to quit
 ----------------------------------------------------------
-Creating bundle at: ./demo
-./demo> ATTACH 'customers.csv'
+./demo>
 ./demo> SHOW COLUMNS
 +-----------+-----------+
 | column    | type      |

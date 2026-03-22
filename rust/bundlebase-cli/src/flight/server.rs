@@ -16,7 +16,7 @@ use tracing::{info, warn};
 /// # Arguments
 ///
 /// * `bundle_path` - Path to the bundle (URL or filesystem path)
-/// * `create` - If true, create the bundle; if false, open existing
+/// * `config` - Optional bundle configuration
 /// * `read_only` - If true, open in read-only mode (only SELECT/EXPLAIN allowed)
 /// * `addr` - The address to bind to (e.g., "0.0.0.0:50051")
 ///
@@ -27,7 +27,6 @@ use tracing::{info, warn};
 pub async fn start(
     bundle_path: &str,
     config: Option<PassedBundleConfig>,
-    create: bool,
     read_only: bool,
     addr: SocketAddr,
 ) -> Result<(), bundlebase::BundlebaseError> {
@@ -45,7 +44,6 @@ pub async fn start(
     let flight_service = BundlebaseFlightSqlService::new(
         bundle_path.to_string(),
         config,
-        create,
         read_only,
         authenticator,
     );

@@ -49,7 +49,19 @@ pub async fn run(args: QueryArgs) -> Result<(), BundlebaseError> {
 
     let config = load_config(args.config.as_deref())?;
     info!("Opening bundle in read-only mode: {}", args.bundle);
-    let state = Bundle::open(&args.bundle, config).await?;
+    let state = match Bundle::open(&args.bundle, config).await {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("init.yaml") || msg.contains("not found") || msg.contains("No such file") || msg.contains("does not exist") {
+                return Err(format!(
+                    "No bundle found at '{}'. To create a new bundle, use 'bundlebase create'.\n\nUnderlying error: {}",
+                    args.bundle, msg
+                ).into());
+            }
+            return Err(e);
+        }
+    };
 
     bundlebase_cli::repl::execute_single(state, &sql, args.format).await
 }

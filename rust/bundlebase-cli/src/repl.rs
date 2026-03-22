@@ -24,9 +24,23 @@ use stream_formatter::format_stream;
 use json_formatter::format_stream_json;
 use tracing::{error, info};
 
-/// Print the REPL header.
-pub fn print_header() {
-    info!("Bundlebase REPL");
+/// Print the REPL header with bundle info.
+pub fn print_header(bundle: &dyn BundleFacade) {
+    let url = bundle.url();
+    let version = bundle.version();
+    let commit_count = bundle.history().len();
+
+    if commit_count == 0 {
+        info!("Opened new bundle at {}", url);
+    } else {
+        info!(
+            "Opened bundle at {} (version {}, {} commit{})",
+            url,
+            version,
+            commit_count,
+            if commit_count == 1 { "" } else { "s" }
+        );
+    }
     info!("Type '/help' for available commands, '/exit' to quit");
     info!("----------------------------------------------------------");
 }

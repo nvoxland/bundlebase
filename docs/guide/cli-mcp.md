@@ -15,7 +15,6 @@ bundlebase mcp --bundle <path> [options]
 | Flag | Default | Description |
 |---|---|---|
 | `--bundle <path>` | *(required)* | Path or URL to the bundle |
-| `--create` | `false` | Create a new bundle if it doesn't exist |
 | `--read-only` | `false` | Only allow SELECT and EXPLAIN commands |
 | `--config <path>` | *(none)* | Path to a YAML/JSON config file |
 | `--log-level <level>` | `ui` | Logging level |
@@ -26,15 +25,14 @@ bundlebase mcp --bundle <path> [options]
 # Open an existing bundle as MCP server
 bundlebase mcp --bundle ./my-bundle
 
-# Create a new bundle
-bundlebase mcp --bundle ./my-bundle --create
-
 # Read-only access
 bundlebase mcp --bundle ./my-bundle --read-only
 
 # Remote bundle
 bundlebase mcp --bundle s3://mybucket/my-bundle
 ```
+
+To serve a new bundle, create it first with `bundlebase create`.
 
 ## Available Tools
 

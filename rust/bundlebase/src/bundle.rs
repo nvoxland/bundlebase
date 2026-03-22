@@ -343,8 +343,12 @@ impl Bundle {
         debug!("Loading initial commit from {}", INIT_FILENAME);
 
         let init_commit: Option<InitCommit> = read_yaml(manifest_dir.file(INIT_FILENAME)?.as_ref()).await?;
-        let init_commit = init_commit
-            .expect(format!("No {}/{} found in {}", META_DIR, INIT_FILENAME, url).as_str());
+        let init_commit = init_commit.ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "No bundle found at '{}' ({}/{} does not exist)",
+                url, META_DIR, INIT_FILENAME
+            ))
+        })?;
 
         // Recursively load the base bundle and store the Arc reference
         // Handle views: if view field is set, load parent from "../"

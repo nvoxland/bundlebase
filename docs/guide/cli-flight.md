@@ -13,7 +13,6 @@ bundlebase server --bundle <path> [options]
 | Flag | Default | Description |
 |---|---|---|
 | `--bundle <path>` | *(required)* | Path or URL to the bundle |
-| `--create` | `false` | Create a new bundle if it doesn't exist |
 | `--read-only` | `false` | Only allow SELECT and EXPLAIN commands |
 | `--host <addr>` | `0.0.0.0` | Host address to bind to |
 | `--port <port>` | `50051` | Port to listen on |
@@ -30,10 +29,9 @@ bundlebase server --bundle ./my-bundle --host 127.0.0.1 --port 8080
 
 # Read-only server
 bundlebase server --bundle ./my-bundle --read-only
-
-# Create a new bundle and serve it
-bundlebase server --bundle ./my-bundle --create
 ```
+
+To serve a new bundle, create it first with `bundlebase create`.
 
 ## Authentication
 

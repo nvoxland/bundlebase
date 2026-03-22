@@ -31,10 +31,13 @@ enum Subcommand {
     /// Interactive REPL mode
     Repl(cmd::repl_cmd::ReplArgs),
 
+    /// Create a new bundle, optionally executing initial commands
+    Create(cmd::create_cmd::CreateArgs),
+
     /// Execute a read-only SQL query and exit
     Query(cmd::query_cmd::QueryArgs),
 
-    /// Execute a mutating statement against a bundle and exit
+    /// Execute a mutating statement against an existing bundle and exit
     Extend(cmd::extend_cmd::ExtendArgs),
 
     /// Execute a mutating statement against a bundle and exit (alias for extend)
@@ -99,6 +102,7 @@ async fn main() -> Result<(), BundlebaseError> {
 
     match cli.subcommand {
         Subcommand::Repl(args) => cmd::repl_cmd::run(args).await?,
+        Subcommand::Create(args) => cmd::create_cmd::run(args).await?,
         Subcommand::Query(args) => cmd::query_cmd::run(args).await?,
         Subcommand::Extend(args) | Subcommand::Execute(args) => cmd::extend_cmd::run(args).await?,
         Subcommand::Mcp(args) => cmd::mcp_cmd::run(args).await?,

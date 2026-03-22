@@ -21,14 +21,8 @@ pub struct ServerArgs {
 }
 
 pub async fn run(args: ServerArgs) -> Result<(), BundlebaseError> {
-    if args.bundle.create && args.bundle.read_only {
-        eprintln!("Error: Cannot use --create with --read-only=true. Creating a bundle requires write access.");
-        std::process::exit(1);
-    }
-
     info!(
-        "{} bundle at: {}{}",
-        if args.bundle.create { "Creating" } else { "Opening" },
+        "Opening bundle at: {}{}",
         args.bundle.bundle,
         if args.bundle.read_only { " (read-only)" } else { "" }
     );
@@ -42,7 +36,6 @@ pub async fn run(args: ServerArgs) -> Result<(), BundlebaseError> {
     bundlebase_cli::flight::start(
         &args.bundle.bundle,
         config,
-        args.bundle.create,
         args.bundle.read_only,
         addr,
     )

@@ -4,6 +4,7 @@
 
 use arrow_flight::flight_service_server::FlightServiceServer;
 use arrow_flight::sql::client::FlightSqlServiceClient;
+use bundlebase::BundleBuilder;
 use bundlebase_cli::auth::BundlebaseAuthenticator;
 use bundlebase_cli::flight::BundlebaseFlightSqlService as FlightService;
 use std::net::{SocketAddr, TcpListener};
@@ -37,11 +38,17 @@ impl FlightTestServer {
                 .as_nanos()
         );
 
-        Self::start_with_bundle_path(&bundle_path, true).await
+        // Pre-create the bundle so the flight service can open it
+        let builder = BundleBuilder::create(&bundle_path, None)
+            .await
+            .expect("Failed to create test bundle");
+        builder.commit("Initial commit").await.expect("Failed to commit");
+
+        Self::start_with_bundle_path(&bundle_path).await
     }
 
     /// Start a new Flight SQL test server with the given bundle path.
-    pub async fn start_with_bundle_path(bundle_path: &str, create: bool) -> Self {
+    pub async fn start_with_bundle_path(bundle_path: &str) -> Self {
         let port = get_available_port();
         let addr: SocketAddr = format!("127.0.0.1:{}", port)
             .parse()
@@ -50,7 +57,6 @@ impl FlightTestServer {
         let flight_service = FlightService::new(
             bundle_path.to_string(),
             None,
-            create,
             false, // read_only: false - tests need to modify bundle
             BundlebaseAuthenticator::default(),
         );
@@ -118,6 +124,12 @@ impl FlightTestServer {
                 .as_nanos()
         );
 
+        // Pre-create the bundle so the flight service can open it
+        let builder = BundleBuilder::create(&bundle_path, None)
+            .await
+            .expect("Failed to create test bundle");
+        builder.commit("Initial commit").await.expect("Failed to commit");
+
         let port = get_available_port();
         let addr: SocketAddr = format!("127.0.0.1:{}", port)
             .parse()
@@ -126,7 +138,6 @@ impl FlightTestServer {
         let flight_service = FlightService::new(
             bundle_path,
             None,
-            true,
             false,
             BundlebaseAuthenticator::default(),
         );

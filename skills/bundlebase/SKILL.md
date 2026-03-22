@@ -79,26 +79,47 @@ bundlebase query --bundle ./my-bundle "SELECT * FROM bundle LIMIT 10" --format j
 
 **Tip:** Piping SQL via stdin (`echo "..." | bundlebase query`) is simpler than passing it as an argument — no need to worry about escaping quotes for the shell.
 
-### `bundlebase extend` — Mutating commands (auto-commits)
+### `bundlebase create` — Create a new bundle
 
-Opens the bundle in read-write mode. Executes the command(s) and **automatically commits** afterward. Use `-m` to provide a commit message; otherwise one is generated from the command. Multiple statements can be separated with `;` — all changes are committed together as a single commit.
+Creates a new bundle at the specified path. Optionally executes initial commands (like ATTACH) and auto-commits.
 
 ```bash
-# Pipe SQL from stdin (preferred — avoids shell quoting issues)
-echo "ATTACH 'data.csv'" | bundlebase extend --bundle ./my-bundle --create
+# Create an empty bundle
+bundlebase create --bundle ./my-bundle
+
+# Create and load initial data
+echo "ATTACH 'data.csv'" | bundlebase create --bundle ./my-bundle
+bundlebase create --bundle ./my-bundle "ATTACH 'data.csv'"
+
+# Create with a custom commit message
+echo "ATTACH 'sales.csv'" | bundlebase create --bundle ./analysis -m "Loaded sales data"
+```
+
+| Flag | Purpose |
+|------|---------|
+| `--bundle <path>` | Path for the new bundle (local path or `s3://...`) |
+| `-m, --message` | Commit message (auto-generated if omitted) |
+| `--format json` | JSON output (default: `table`) |
+| `--config <path>` | YAML/JSON config file |
+
+### `bundlebase extend` — Mutating commands (auto-commits)
+
+Opens an existing bundle in read-write mode. Executes the command(s) and **automatically commits** afterward. Use `-m` to provide a commit message; otherwise one is generated from the command. Multiple statements can be separated with `;` — all changes are committed together as a single commit.
+
+```bash
 echo "RENAME COLUMN fname TO first_name" | bundlebase extend --bundle ./my-bundle -m "Cleaned up names"
 
 # Multiple statements in one call (committed together)
 echo "DROP COLUMN internal_id; RENAME COLUMN fname TO first_name" | bundlebase extend --bundle ./my-bundle -m "Initial cleanup"
 
-# Or pass SQL as an argument
-bundlebase extend --bundle ./my-bundle --create "ATTACH 'data.csv'"
+# Extend to a new directory (fork the bundle)
+echo "FILTER WITH SELECT * FROM bundle WHERE active" | bundlebase extend --bundle ./source --to ./fork
 ```
 
 | Flag | Purpose |
 |------|---------|
-| `--bundle <path>` | Path to bundle (local path or `s3://...`) |
-| `--create` | Create new bundle if it doesn't exist |
+| `--bundle <path>` | Path to the existing bundle |
+| `--to <path>` | Extend to a new directory instead of modifying in place |
 | `-m, --message` | Commit message (auto-generated if omitted) |
 | `--format json` | JSON output (default: `table`) |
 | `--config <path>` | YAML/JSON config file |
@@ -128,7 +149,7 @@ Add to your MCP settings (e.g., Claude Code `mcp_servers` config):
 }
 ```
 
-Add `--create` to the args to create a new bundle, or `--read-only` for read-only access.
+Add `--read-only` for read-only access. To create a new bundle, use `bundlebase create` first.
 
 ### Available MCP Tools
 
@@ -159,7 +180,7 @@ The `query` tool handles everything: SELECT queries, ATTACH, DETACH, FILTER, REN
 
 ```bash
 # Create bundle and load data
-echo "ATTACH 'sales.csv'" | bundlebase extend --bundle ./analysis --create -m "Loaded sales data"
+echo "ATTACH 'sales.csv'" | bundlebase create --bundle ./analysis -m "Loaded sales data"
 
 # Explore the schema
 echo "SHOW COLUMNS" | bundlebase query --bundle ./analysis --format json
@@ -189,7 +210,7 @@ echo "FILTER WITH SELECT * FROM bundle WHERE email IS NOT NULL" | bundlebase ext
 
 ```bash
 # Start with a base dataset
-echo "ATTACH 'customers.parquet'" | bundlebase extend --bundle ./combined --create
+echo "ATTACH 'customers.parquet'" | bundlebase create --bundle ./combined
 
 # Join with orders
 echo "JOIN 'orders.csv' AS orders ON id = orders.customer_id" | bundlebase extend --bundle ./combined
@@ -205,7 +226,7 @@ echo "DROP JOIN orders" | bundlebase extend --bundle ./combined
 
 ```bash
 # Attach multiple files in one call (committed together)
-echo "ATTACH 'data.csv'; ATTACH 'more_data.parquet'; ATTACH 'extra.json'" | bundlebase extend --bundle ./multi --create -m "Loaded all data files"
+echo "ATTACH 'data.csv'; ATTACH 'more_data.parquet'; ATTACH 'extra.json'" | bundlebase create --bundle ./multi -m "Loaded all data files"
 
 # Replace a data source with updated version
 echo "REPLACE 'data.csv' WITH 'data_v2.csv'" | bundlebase extend --bundle ./multi
@@ -341,11 +362,11 @@ Bundlebase has built-in connectors for common data sources. The pattern is: CREA
 
 ```bash
 # Kaggle: download a public dataset (no kaggle CLI needed — just ~/.kaggle/kaggle.json)
-echo "CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')" | bundlebase extend --bundle ./housing --create
+echo "CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')" | bundlebase create --bundle ./housing
 echo "FETCH base ADD" | bundlebase extend --bundle ./housing
 
 # S3: attach all parquet files from a bucket
-echo "CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')" | bundlebase extend --bundle ./logs --create
+echo "CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')" | bundlebase create --bundle ./logs
 echo "FETCH base ADD" | bundlebase extend --bundle ./logs
 
 # Preview what would be fetched without actually fetching
@@ -470,7 +491,7 @@ Bundles are portable — share them with teammates:
 
 ```bash
 # Push a bundle to S3 so others can access it
-echo "ATTACH 'cleaned.parquet'" | bundlebase extend --bundle s3://team-bucket/shared-analysis --create -m "Shared cleaned dataset"
+echo "ATTACH 'cleaned.parquet'" | bundlebase create --bundle s3://team-bucket/shared-analysis -m "Shared cleaned dataset"
 
 # Others can then query it
 echo "SHOW COLUMNS" | bundlebase query --bundle s3://team-bucket/shared-analysis --format json

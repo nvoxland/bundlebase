@@ -28,8 +28,10 @@ echo "SELECT * FROM bundle LIMIT 5" | bundlebase query --bundle ./sales --format
 echo "SHOW COLUMNS" | bundlebase query --bundle ./sales --format json
 echo "SHOW COUNT" | bundlebase query --bundle ./sales --format json
 
-# Mutating commands (auto-commits after each call)
-echo "ATTACH 'raw_sales.csv'" | bundlebase extend --bundle ./sales --create
+# Create a new bundle
+echo "ATTACH 'raw_sales.csv'" | bundlebase create --bundle ./sales
+
+# Mutating commands on existing bundles (auto-commits after each call)
 echo "FILTER WITH SELECT * FROM bundle WHERE amount > 0" | bundlebase extend --bundle ./sales
 echo "RENAME COLUMN amt TO amount" | bundlebase extend --bundle ./sales -m "Cleaned sales data"
 
@@ -37,7 +39,6 @@ echo "RENAME COLUMN amt TO amount" | bundlebase extend --bundle ./sales -m "Clea
 echo "DROP COLUMN temp_id; RENAME COLUMN amt TO amount" | bundlebase extend --bundle ./sales -m "Initial cleanup"
 
 # Interactive REPL
-bundlebase repl --bundle ./my-bundle --create
 bundlebase repl --bundle ./my-bundle
 bundlebase repl --bundle ./my-bundle --read-only
 
@@ -48,6 +49,7 @@ echo "SELECT * FROM bundle LIMIT 5" | bundlebase query --bundle s3://mybucket/my
 `--format`: `table` (default) or `json`. JSON mode outputs arrays of objects for queries, single values/objects for commands.
 `bundlebase execute` is an alias for `bundlebase extend`.
 `bundlebase extend` auto-commits after each call. Use `-m` for a custom commit message.
+`bundlebase extend --to ./new-dir` extends to a new directory instead of modifying in place.
 Multiple statements can be separated with `;` — all are validated before any execute, and all changes commit together.
 Query results are hard-limited to 1000 rows. Use `LIMIT` in SQL for fewer.
 
@@ -60,7 +62,6 @@ MCP mode keeps the bundle open across calls — use for multi-step workflows.
 ```bash
 # Start as MCP server (configure in your AI assistant's MCP settings)
 bundlebase mcp --bundle ./my-bundle
-bundlebase mcp --bundle ./my-bundle --create
 bundlebase mcp --bundle ./my-bundle --read-only
 ```
 
