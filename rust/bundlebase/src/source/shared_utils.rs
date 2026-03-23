@@ -126,7 +126,12 @@ pub fn filename_from_url(url: &Url) -> String {
 /// Sends a HEAD request and extracts version information from headers.
 /// Uses ETag if available, otherwise Last-Modified, otherwise falls back to status code.
 pub async fn read_http_version(url: &Url) -> Result<String, BundlebaseError> {
-    let response = reqwest::Client::new()
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| BundlebaseError::from(format!("Failed to create HTTP client: {}", e)))?;
+
+    let response = client
         .head(url.as_str())
         .send()
         .await

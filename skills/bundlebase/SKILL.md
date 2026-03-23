@@ -59,7 +59,7 @@ Bundlebase offers two agent-friendly modes:
 | Multi-step transformations with intermediate inspection | MCP |
 | Building up joins and views before committing | MCP |
 
-**Important:** Do NOT use MCP and CLI on the same bundle at the same time. If the MCP server has a bundle open, close it with `close_bundle` before using CLI commands on that bundle. For any multi-step work, prefer MCP over repeated CLI calls.
+**Important:** If the bundlebase MCP server is configured, **prefer MCP over CLI for ALL multi-step data work** — it keeps bundles open for better performance and feedback. Only use CLI for true one-shot operations. Do NOT use MCP and CLI on the same bundle simultaneously — close the MCP bundle first.
 
 ## CLI Commands
 
@@ -178,6 +178,35 @@ The `query` tool handles everything: SELECT queries, ATTACH, DETACH, FILTER, REN
 6. Call `query` with "COMMIT 'message'" to save
 7. Call `close_bundle` when done (or to switch to a different bundle)
 ```
+
+## Delegating Data Research
+
+When using sub-agents to search for data sources, include these constraints in the delegation prompt:
+
+> "I'm using bundlebase to build a versioned, queryable dataset. I need URLs that can be used with bundlebase's http connector: `CREATE SOURCE USING http WITH (url = '...')`. Find direct-download CSV/JSON/Parquet URLs. Do NOT test URLs with curl or wget — just find and return them. Prefer smaller, scoped datasets over huge bulk downloads. If the source supports query parameters (date range, filters), include those to keep downloads fast."
+
+This prevents sub-agents from falling back to curl/wget and ensures the URLs work with bundlebase.
+
+## Start Small, Then Expand
+
+When fetching from a new data source, **start with a small scoped request** to validate the approach before downloading everything:
+
+```bash
+# BAD: Download all data at once (may be huge, may timeout)
+bundlebase create --bundle ./lakes <<< "CREATE SOURCE USING http WITH (url = 'https://api.example.com/all-data.csv')"
+
+# GOOD: Start with a small slice to validate format and structure
+bundlebase create --bundle ./lakes <<< "CREATE SOURCE USING http WITH (url = 'https://api.example.com/data?year=2024&limit=1000')"
+
+# Verify it worked
+bundlebase query --bundle ./lakes --format json <<< "SHOW COLUMNS"
+bundlebase query --bundle ./lakes --format json <<< "SHOW COUNT"
+
+# Then expand to more data
+bundlebase extend --bundle ./lakes <<< "CREATE SOURCE USING http WITH (url = 'https://api.example.com/data?year=2023')"
+```
+
+If a download times out, scope it with URL query parameters (date range, geographic filter, row limit).
 
 ## Common Mistakes to Avoid
 

@@ -51,13 +51,50 @@ pub async fn download_io_file_to_data_dir(
 /// Download a file from an HTTP(S) URL to the data directory.
 ///
 /// Returns a WriteResult containing the file reference and the computed SHA256 hash.
+/// Default timeout for HTTP downloads (5 minutes).
+const HTTP_DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 pub async fn download_http_to_data_dir(
     url: &Url,
     data_dir: &dyn IOReadWriteDir,
 ) -> Result<WriteResult, BundlebaseError> {
-    let response = reqwest::get(url.as_str())
+    download_http_to_data_dir_with_format(url, data_dir, None).await
+}
+
+/// Download an HTTP(S) URL to the data directory with optional format hint.
+///
+/// If `format_hint` is provided and the filename from the URL doesn't have a recognized
+/// extension, the format hint is appended as the extension.
+pub async fn download_http_to_data_dir_with_format(
+    url: &Url,
+    data_dir: &dyn IOReadWriteDir,
+    format_hint: Option<&str>,
+) -> Result<WriteResult, BundlebaseError> {
+    use log::info;
+
+    info!("Downloading {}", url);
+
+    let client = reqwest::Client::builder()
+        .timeout(HTTP_DOWNLOAD_TIMEOUT)
+        .build()
+        .map_err(|e| BundlebaseError::from(format!("Failed to create HTTP client: {}", e)))?;
+
+    let response = client
+        .get(url.as_str())
+        .send()
         .await
-        .map_err(|e| BundlebaseError::from(format!("Failed to download '{}': {}", url, e)))?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                BundlebaseError::from(format!(
+                    "Download timed out after {}s for '{}'. The data source may be too large. \
+                     Try scoping the URL with query parameters (e.g., date range, filters) to reduce the download size.",
+                    HTTP_DOWNLOAD_TIMEOUT.as_secs(),
+                    url
+                ))
+            } else {
+                BundlebaseError::from(format!("Failed to download '{}': {}", url, e))
+            }
+        })?;
 
     if !response.status().is_success() {
         return Err(format!(
@@ -68,12 +105,43 @@ pub async fn download_http_to_data_dir(
         .into());
     }
 
+    // Log content length if available
+    if let Some(len) = response.content_length() {
+        info!("Downloading {} ({:.1} MB)", url, len as f64 / 1_048_576.0);
+    }
+
     let data = response
         .bytes()
         .await
-        .map_err(|e| BundlebaseError::from(format!("Failed to read '{}': {}", url, e)))?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                BundlebaseError::from(format!(
+                    "Download timed out while reading response from '{}'. \
+                     Try scoping the URL with query parameters to reduce the download size.",
+                    url
+                ))
+            } else {
+                BundlebaseError::from(format!("Failed to read '{}': {}", url, e))
+            }
+        })?;
 
-    let filename = filename_from_url(url);
+    info!("Downloaded {} ({:.1} MB)", url, data.len() as f64 / 1_048_576.0);
+
+    let mut filename = filename_from_url(url);
+
+    // If the filename has no recognized data extension and we have a format hint, append it
+    if let Some(fmt) = format_hint {
+        let known_extensions = ["csv", "json", "jsonl", "parquet", "tsv", "xml"];
+        let has_known_ext = filename
+            .rsplit('.')
+            .next()
+            .map(|ext| known_extensions.contains(&ext.to_lowercase().as_str()))
+            .unwrap_or(false);
+        if !has_known_ext {
+            filename = format!("{}.{}", filename, fmt);
+        }
+    }
+
     download_to_data_dir(data, &filename, data_dir).await
 }
 
@@ -99,15 +167,25 @@ pub async fn materialize_url(
     data_dir: &dyn IOReadWriteDir,
     config: &Arc<BundleConfig>,
 ) -> Result<MaterializeResult, BundlebaseError> {
+    materialize_url_with_format(url, should_copy, data_dir, config, None).await
+}
+
+/// Materialize a URL with an optional format hint for the file extension.
+pub async fn materialize_url_with_format(
+    url: &Url,
+    should_copy: bool,
+    data_dir: &dyn IOReadWriteDir,
+    config: &Arc<BundleConfig>,
+    format_hint: Option<&str>,
+) -> Result<MaterializeResult, BundlebaseError> {
     if !should_copy {
-        // For non-copied files, compute the hash by streaming
         let file: Box<dyn IOReadFile> = Box::new(ObjectStoreFile::from_url(url, config.clone())?);
         let hash = file.compute_hash().await?;
         return Ok(MaterializeResult { file, hash });
     }
 
     if url.scheme() == "http" || url.scheme() == "https" {
-        let result = download_http_to_data_dir(url, data_dir).await?;
+        let result = download_http_to_data_dir_with_format(url, data_dir, format_hint).await?;
         Ok(MaterializeResult {
             file: result.file,
             hash: result.hash,
@@ -176,7 +254,7 @@ async fn get_data_for_location(
     if let Some(stable) = func.stable_url(location, args, config).await? {
         if should_copy || location.must_copy {
             // Download the file into data_dir
-            let result = materialize_url(&stable, true, data_dir, config).await?;
+            let result = materialize_url_with_format(&stable, true, data_dir, config, Some(&location.format)).await?;
             let attach_location = data_dir
                 .relative_path(result.file.as_ref())
                 .unwrap_or_else(|_| result.file.url().to_string());
