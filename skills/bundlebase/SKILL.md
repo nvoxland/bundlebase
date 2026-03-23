@@ -414,7 +414,7 @@ bundlebase query --bundle ./lakes --format json <<< "SHOW COLUMNS"
 bundlebase query --bundle ./stations --format json <<< "SELECT * FROM bundle LIMIT 5"
 ```
 
-**Step 3: Combine using `bundle://` joins or `IMPORT BUNDLE`**
+**Step 3: Combine using `bundle://` joins or `IMPORT JOIN`**
 
 *Option A: Live join via `bundle://`* — the join references the other bundle at query time. No data copying. Good for exploration.
 
@@ -423,10 +423,10 @@ bundlebase extend --bundle ./lakes <<< "JOIN 'bundle://./stations' AS stations O
 bundlebase query --bundle ./lakes --format json <<< "SELECT * FROM bundle JOIN stations ON lake_id = stations.lake_id LIMIT 10"
 ```
 
-*Option B: Import bundle* — copies all data, commits, and indexes into one self-contained bundle. Good for the final dataset.
+*Option B: Solidify the join* — copies all data, commits, and indexes into one self-contained bundle. Good for the final dataset. Requires the `bundle://` join from Option A first.
 
 ```bash
-bundlebase extend --bundle ./lakes <<< "IMPORT BUNDLE './stations' AS stations ON lake_id = stations.lake_id"
+bundlebase extend --bundle ./lakes <<< "IMPORT JOIN stations"
 ```
 
 **When to use which:**
@@ -434,8 +434,8 @@ bundlebase extend --bundle ./lakes <<< "IMPORT BUNDLE './stations' AS stations O
 | Approach | Use when |
 |----------|----------|
 | `bundle://` JOIN | Exploring, prototyping, data may still change |
-| `IMPORT BUNDLE` | Finalizing — want self-contained bundle with full history |
-| `IMPORT BUNDLE FLATTEN HISTORY` | Same, but collapse imported commits into one |
+| `IMPORT JOIN` | Finalizing — want self-contained bundle with full history |
+| `IMPORT JOIN FLATTEN HISTORY` | Same, but collapse imported commits into one |
 
 ## Building a Custom Connector
 

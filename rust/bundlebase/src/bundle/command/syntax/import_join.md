@@ -1,9 +1,9 @@
-Import an entire bundle as a join pack, copying all commits, data files, indexes, and connectors/functions. Operations referencing the source base pack are remapped to the new join pack.
+Solidify an existing `bundle://` join by copying all commits, data files, indexes, and connectors/functions from the source bundle into the target. The join must have been created with `JOIN 'bundle://...'`.
 
 ### Examples
 
-    IMPORT BUNDLE './stations' AS stations ON lake_id = stations.lake_id
-    IMPORT BUNDLE './stations' FLATTEN HISTORY AS stations ON lake_id = stations.lake_id
+    IMPORT JOIN stations
+    IMPORT JOIN stations FLATTEN HISTORY
 
 `FLATTEN HISTORY` collapses all imported commits into a single commit. Without it, each source commit becomes a separate commit in the target (prefixed with `[import <name>]`).
 

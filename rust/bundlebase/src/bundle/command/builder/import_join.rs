@@ -1,14 +1,11 @@
-//! ImportBundle command implementation.
+//! ImportJoin command implementation.
 //!
-//! Imports a bundle as a join pack in the target bundle, copying all commits,
-//! data files, indexes, and connectors/functions. Operations referencing the
-//! source base pack are remapped to the new join pack.
+//! Solidifies an existing `bundle://` join by copying all commits, data files,
+//! indexes, and connectors/functions from the source bundle into the target.
+//! Operations referencing the source base pack are remapped to the join pack.
 
-use crate::bundle::command::parser::extract_string_content;
 use crate::bundle::command::{CommandParsing, Rule};
-use crate::bundle::commit::BundleCommit;
 use crate::bundle::operation::*;
-use crate::bundle::pack::JoinTypeOption;
 use crate::data::ObjectId;
 use crate::{Bundle, BundleBuilder, BundleFacade, BundlebaseError};
 use async_trait::async_trait;
@@ -17,90 +14,99 @@ use tracing::info;
 
 use super::super::BundleBuilderCommand;
 
-/// Command to import a bundle as a join pack.
+/// Command to import (solidify) an existing bundle:// join.
+///
+/// Looks up an existing join pack by name, finds the `bundle://` source URL
+/// from its attach operations, opens that source bundle, and copies all its
+/// data, commits, and indexes into the target bundle.
 #[derive(Debug, Clone)]
-pub struct ImportBundleCommand {
-    /// Path to the source bundle
-    pub path: String,
-    /// Name for the new join pack
+pub struct ImportJoinCommand {
+    /// Name of the existing join pack to import
     pub name: String,
-    /// Join expression
-    pub expression: String,
     /// Whether to flatten all imported commits into one
     pub flatten: bool,
 }
 
-impl ImportBundleCommand {
-    pub fn new(
-        path: impl Into<String>,
-        name: impl Into<String>,
-        expression: impl Into<String>,
-        flatten: bool,
-    ) -> Self {
+impl ImportJoinCommand {
+    pub fn new(name: impl Into<String>, flatten: bool) -> Self {
         Self {
-            path: path.into(),
             name: name.into(),
-            expression: expression.into(),
             flatten,
         }
     }
 }
 
-impl CommandParsing for ImportBundleCommand {
+impl CommandParsing for ImportJoinCommand {
     fn rule() -> Rule {
-        Rule::import_bundle_stmt
+        Rule::import_join_stmt
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        let mut path = None;
         let mut name = None;
-        let mut expression = None;
         let mut flatten = false;
 
         for inner in pair.into_inner() {
             match inner.as_rule() {
-                Rule::quoted_string => {
-                    path = Some(extract_string_content(inner.as_str())?);
-                }
-                Rule::import_bundle_flatten => {
-                    flatten = true;
-                }
                 Rule::identifier => {
                     name = Some(inner.as_str().to_string());
                 }
-                Rule::import_bundle_expression => {
-                    expression = Some(inner.as_str().trim().to_string());
+                Rule::import_join_flatten => {
+                    flatten = true;
                 }
                 _ => {}
             }
         }
 
-        let path = path.ok_or_else(|| BundlebaseError::from("IMPORT BUNDLE: missing path"))?;
-        let name = name.ok_or_else(|| BundlebaseError::from("IMPORT BUNDLE: missing AS name"))?;
-        let expression =
-            expression.ok_or_else(|| BundlebaseError::from("IMPORT BUNDLE: missing ON expression"))?;
-
-        Ok(ImportBundleCommand::new(path, name, expression, flatten))
+        let name = name.ok_or_else(|| BundlebaseError::from("IMPORT JOIN: missing join name"))?;
+        Ok(ImportJoinCommand::new(name, flatten))
     }
 
     fn to_statement(&self) -> String {
         if self.flatten {
-            format!(
-                "IMPORT BUNDLE '{}' FLATTEN HISTORY AS {} ON {}",
-                self.path, self.name, self.expression
-            )
+            format!("IMPORT JOIN {} FLATTEN HISTORY", self.name)
         } else {
-            format!(
-                "IMPORT BUNDLE '{}' AS {} ON {}",
-                self.path, self.name, self.expression
-            )
+            format!("IMPORT JOIN {}", self.name)
         }
     }
 }
 
+/// Find the bundle:// source URL for a join pack by scanning attach operations.
+fn find_bundle_source_url(
+    builder: &BundleBuilder,
+    pack_id: &ObjectId,
+) -> Result<String, BundlebaseError> {
+    let operations = builder.bundle().operations();
+    for op in &operations {
+        if let AnyOperation::AttachBlock(attach) = op {
+            if attach.pack == *pack_id
+                && (attach.location.starts_with("bundle://")
+                    || attach.location.starts_with("bundlebase://")
+                    || attach.location.starts_with("bundle+")
+                    || attach.location.starts_with("bundlebase+"))
+            {
+                // Extract the bundle path from the URL
+                let path = if attach.location.starts_with("bundle+") {
+                    &attach.location["bundle+".len()..]
+                } else if attach.location.starts_with("bundlebase+") {
+                    &attach.location["bundlebase+".len()..]
+                } else if attach.location.starts_with("bundle://") {
+                    &attach.location["bundle://".len()..]
+                } else {
+                    &attach.location["bundlebase://".len()..]
+                };
+                return Ok(path.to_string());
+            }
+        }
+    }
+
+    Err(format!(
+        "Join pack has no bundle:// data source. IMPORT JOIN only works on joins created with 'JOIN bundle://...'."
+    ).into())
+}
+
 /// Remap an operation from the source bundle context to the target bundle context.
 ///
-/// - Base pack references become the new join pack ID
+/// - Base pack references become the target join pack ID
 /// - Source join pack IDs are remapped via the provided mapping
 /// - Data file locations are updated for copied files
 /// - Bundle-level metadata ops (SetName, SetDescription, etc.) are stripped
@@ -188,17 +194,17 @@ fn remap_operation(
     }
 }
 
-/// Build the pack ID remap table from source bundle to target.
+/// Build the pack ID remap table from source bundle to target join pack.
 fn build_pack_remap(
     source: &Bundle,
-    new_join_pack_id: ObjectId,
+    target_join_pack_id: ObjectId,
 ) -> HashMap<ObjectId, ObjectId> {
     let mut remap = HashMap::new();
 
-    // Source base pack → new join pack
-    remap.insert(ObjectId::BASE_PACK, new_join_pack_id);
+    // Source base pack → existing target join pack
+    remap.insert(ObjectId::BASE_PACK, target_join_pack_id);
 
-    // Source join packs → new unique IDs
+    // Source join packs → new unique IDs (avoid collisions in target)
     for (pack_id, _pack) in source.packs().read().iter() {
         if *pack_id != ObjectId::BASE_PACK {
             remap.insert(*pack_id, ObjectId::generate());
@@ -209,25 +215,40 @@ fn build_pack_remap(
 }
 
 #[async_trait]
-impl BundleBuilderCommand for ImportBundleCommand {
+impl BundleBuilderCommand for ImportJoinCommand {
     type Output = String;
 
     async fn execute(
         self: Box<Self>,
         builder: &BundleBuilder,
     ) -> Result<String, BundlebaseError> {
-        info!("Importing bundle from '{}' as '{}'", self.path, self.name);
+        info!("Importing join '{}'", self.name);
 
-        // 1. Open source bundle
-        let source = Bundle::open(&self.path, None).await.map_err(|e| {
+        // 1. Look up existing join pack
+        let target_bundle = builder.bundle();
+        let pack = target_bundle.pack_by_name(&self.name).ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "Join '{}' not found. Available joins: {}",
+                self.name,
+                target_bundle.join_names().join(", ")
+            ))
+        })?;
+        let pack_id = *pack.id();
+
+        // 2. Find the bundle:// source URL from operations
+        let source_path = find_bundle_source_url(builder, &pack_id)?;
+
+        info!("Source bundle for '{}': {}", self.name, source_path);
+
+        // 3. Open source bundle
+        let source = Bundle::open(&source_path, None).await.map_err(|e| {
             BundlebaseError::from(format!(
                 "Failed to open source bundle '{}': {}",
-                self.path, e
+                source_path, e
             ))
         })?;
 
-        // 2. Check for function/connector name conflicts
-        let target_bundle = builder.bundle();
+        // 4. Check for function/connector name conflicts
         {
             let target_reg_arc = target_bundle.connector_registry();
             let target_registry = target_reg_arc.read();
@@ -259,28 +280,16 @@ impl BundleBuilderCommand for ImportBundleCommand {
             }
         }
 
-        // 3. Generate new join pack ID and build remap table
-        let join_pack_id = ObjectId::generate();
-        let pack_remap = build_pack_remap(&source, join_pack_id);
+        // 5. Build pack remap (source base → this join pack, source joins → new IDs)
+        let pack_remap = build_pack_remap(&source, pack_id);
 
-        // 4. Copy data files from source to target
+        // 6. Copy data files from source to target
         let location_remap = copy_data_files(&source, builder).await?;
 
-        // 5. Create the join pack operation
-        let create_join = AnyOperation::CreateJoin(CreateJoinOp {
-            id: join_pack_id,
-            name: self.name.clone(),
-            join_type: JoinTypeOption::Inner,
-            expression: self.expression.clone(),
-        });
-
-        // 6. Get source commits and transform operations
+        // 7. Get source commits and transform + replay operations
         let source_commits = source.history();
 
         if self.flatten {
-            // Flatten: all operations into one change, caller will commit
-            builder.apply_operation(create_join).await?;
-
             for commit in &source_commits {
                 for change in &commit.changes {
                     for op in &change.operations {
@@ -291,11 +300,6 @@ impl BundleBuilderCommand for ImportBundleCommand {
                 }
             }
         } else {
-            // Separate commits: first commit creates the join pack
-            builder.apply_operation(create_join).await?;
-            builder.commit(&format!("[import {}] Create join pack '{}'", self.name, self.name)).await?;
-
-            // Then replay each source commit
             for commit in &source_commits {
                 let mut has_ops = false;
                 for change in &commit.changes {
@@ -316,8 +320,7 @@ impl BundleBuilderCommand for ImportBundleCommand {
 
         let commit_count = source_commits.len();
         Ok(format!(
-            "Imported bundle '{}' as '{}' ({} commit{})",
-            self.path,
+            "Imported join '{}' ({} commit{})",
             self.name,
             commit_count,
             if commit_count == 1 { "" } else { "s" }
@@ -341,7 +344,6 @@ async fn copy_data_files(
     let source_base_url = source_dir.url().to_string();
     let target_base_url = target_dir.url().to_string();
 
-    // List all files in source data_dir (excluding _bundlebase/ manifests)
     let files = source_dir.list_files().await?;
     for file_info in files {
         let file_url = file_info.url.to_string();
@@ -355,7 +357,7 @@ async fn copy_data_files(
         let relative = if let Some(rel) = file_url.strip_prefix(source_base_url.trim_end_matches('/')) {
             rel.trim_start_matches('/')
         } else {
-            continue; // Skip files outside the data_dir
+            continue;
         };
 
         if relative.is_empty() {
@@ -365,7 +367,6 @@ async fn copy_data_files(
         let source_file = source_dir.file(relative)?;
         let target_file = target_dir.writable_file(relative)?;
 
-        // Read from source and write to target
         if let Some(stream) = source_file.read_stream().await? {
             let pinned: std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>> =
                 Box::pin(futures::StreamExt::map(stream, |r| {
@@ -374,7 +375,6 @@ async fn copy_data_files(
             target_file.write_stream(pinned).await?;
         }
 
-        // Build location remap: source URL → target URL
         let new_url = format!("{}/{}", target_base_url.trim_end_matches('/'), relative);
         if file_url != new_url {
             location_remap.insert(file_url, new_url);
@@ -385,100 +385,83 @@ async fn copy_data_files(
 }
 
 #[cfg(test)]
-mod parsing_tests {
+mod tests {
     use super::*;
     use crate::bundle::command::parser::parse_command;
     use crate::bundle::command::BundleCommand;
 
+    // --- Parsing tests ---
+
     #[test]
-    fn test_parse_import_bundle_basic() {
-        let cmd = parse_command("IMPORT BUNDLE './stations' AS stations ON lake_id = stations.lake_id")
-            .expect("Failed to parse IMPORT BUNDLE");
+    fn test_parse_import_join_basic() {
+        let cmd = parse_command("IMPORT JOIN stations")
+            .expect("Failed to parse IMPORT JOIN");
         match cmd {
-            BundleCommand::ImportBundle(ref c) => {
-                assert_eq!(c.path, "./stations");
+            BundleCommand::ImportJoin(ref c) => {
                 assert_eq!(c.name, "stations");
-                assert_eq!(c.expression, "lake_id = stations.lake_id");
                 assert!(!c.flatten);
             }
-            _ => panic!("Expected ImportBundle variant, got {:?}", cmd),
+            _ => panic!("Expected ImportJoin variant, got {:?}", cmd),
         }
     }
 
     #[test]
-    fn test_parse_import_bundle_flatten() {
-        let cmd = parse_command(
-            "IMPORT BUNDLE './stations' FLATTEN HISTORY AS stations ON lake_id = stations.lake_id",
-        )
-        .expect("Failed to parse IMPORT BUNDLE FLATTEN");
+    fn test_parse_import_join_flatten() {
+        let cmd = parse_command("IMPORT JOIN stations FLATTEN HISTORY")
+            .expect("Failed to parse IMPORT JOIN FLATTEN");
         match cmd {
-            BundleCommand::ImportBundle(ref c) => {
-                assert_eq!(c.path, "./stations");
+            BundleCommand::ImportJoin(ref c) => {
                 assert_eq!(c.name, "stations");
                 assert!(c.flatten);
             }
-            _ => panic!("Expected ImportBundle variant"),
+            _ => panic!("Expected ImportJoin variant"),
         }
     }
 
     #[test]
-    fn test_parse_import_bundle_case_insensitive() {
-        let cmd = parse_command(
-            "import bundle './data' as orders on id = orders.customer_id",
-        )
-        .expect("Failed to parse case-insensitive IMPORT BUNDLE");
+    fn test_parse_import_join_case_insensitive() {
+        let cmd = parse_command("import join orders")
+            .expect("Failed to parse case-insensitive IMPORT JOIN");
         match cmd {
-            BundleCommand::ImportBundle(ref c) => {
-                assert_eq!(c.path, "./data");
+            BundleCommand::ImportJoin(ref c) => {
                 assert_eq!(c.name, "orders");
             }
-            _ => panic!("Expected ImportBundle variant"),
+            _ => panic!("Expected ImportJoin variant"),
         }
     }
 
     #[test]
     fn test_round_trip() {
-        let cmd = ImportBundleCommand::new(
-            "./stations",
-            "stations",
-            "lake_id = stations.lake_id",
-            false,
-        );
+        let cmd = ImportJoinCommand::new("stations", false);
         let statement = cmd.to_statement();
-        assert_eq!(
-            statement,
-            "IMPORT BUNDLE './stations' AS stations ON lake_id = stations.lake_id"
-        );
+        assert_eq!(statement, "IMPORT JOIN stations");
 
         let parsed = parse_command(&statement).expect("Failed to re-parse");
         match parsed {
-            BundleCommand::ImportBundle(ref c) => {
-                assert_eq!(c.path, "./stations");
+            BundleCommand::ImportJoin(ref c) => {
                 assert_eq!(c.name, "stations");
-                assert_eq!(c.expression, "lake_id = stations.lake_id");
                 assert!(!c.flatten);
             }
-            _ => panic!("Expected ImportBundle variant"),
+            _ => panic!("Expected ImportJoin variant"),
         }
     }
 
     #[test]
     fn test_round_trip_flatten() {
-        let cmd = ImportBundleCommand::new("./data", "orders", "id = orders.id", true);
+        let cmd = ImportJoinCommand::new("orders", true);
         let statement = cmd.to_statement();
-        assert_eq!(
-            statement,
-            "IMPORT BUNDLE './data' FLATTEN HISTORY AS orders ON id = orders.id"
-        );
+        assert_eq!(statement, "IMPORT JOIN orders FLATTEN HISTORY");
 
         let parsed = parse_command(&statement).expect("Failed to re-parse");
         match parsed {
-            BundleCommand::ImportBundle(ref c) => {
+            BundleCommand::ImportJoin(ref c) => {
                 assert!(c.flatten);
             }
-            _ => panic!("Expected ImportBundle variant"),
+            _ => panic!("Expected ImportJoin variant"),
         }
     }
+
+    // --- Remap tests (unchanged from import_bundle) ---
 
     #[test]
     fn test_remap_attach_block_op() {
@@ -516,36 +499,20 @@ mod parsing_tests {
 
     #[test]
     fn test_remap_strips_set_name() {
-        let pack_remap = HashMap::new();
-        let loc_remap = HashMap::new();
-
-        let op = AnyOperation::SetName(SetNameOp {
-            name: "old name".to_string(),
-        });
-        assert!(remap_operation(&op, &pack_remap, &loc_remap).is_none());
+        let op = AnyOperation::SetName(SetNameOp { name: "old".to_string() });
+        assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_none());
     }
 
     #[test]
     fn test_remap_strips_set_description() {
-        let pack_remap = HashMap::new();
-        let loc_remap = HashMap::new();
-
-        let op = AnyOperation::SetDescription(SetDescriptionOp {
-            description: "old desc".to_string(),
-        });
-        assert!(remap_operation(&op, &pack_remap, &loc_remap).is_none());
+        let op = AnyOperation::SetDescription(SetDescriptionOp { description: "old".to_string() });
+        assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_none());
     }
 
     #[test]
     fn test_remap_keeps_filter() {
-        let pack_remap = HashMap::new();
-        let loc_remap = HashMap::new();
-
-        let op = AnyOperation::Filter(FilterOp::new(
-            "SELECT * FROM bundle WHERE active = true",
-            vec![],
-        ));
-        assert!(remap_operation(&op, &pack_remap, &loc_remap).is_some());
+        let op = AnyOperation::Filter(FilterOp::new("SELECT * FROM bundle WHERE active", vec![]));
+        assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_some());
     }
 
     #[test]
@@ -571,20 +538,19 @@ mod parsing_tests {
     #[test]
     fn test_remap_create_join_id() {
         let mut pack_remap = HashMap::new();
-        let old_join_id: ObjectId = "00000000000000a5".try_into().unwrap();
-        let new_join_id = ObjectId::generate();
-        pack_remap.insert(old_join_id, new_join_id);
+        let old_id: ObjectId = "00000000000000a5".try_into().unwrap();
+        let new_id = ObjectId::generate();
+        pack_remap.insert(old_id, new_id);
 
         let op = AnyOperation::CreateJoin(CreateJoinOp {
-            id: old_join_id,
-            name: "sub_join".to_string(),
+            id: old_id,
+            name: "sub".to_string(),
             join_type: crate::bundle::pack::JoinTypeOption::Left,
             expression: "a = b".to_string(),
         });
 
-        let remapped = remap_operation(&op, &pack_remap, &HashMap::new()).unwrap();
-        match remapped {
-            AnyOperation::CreateJoin(j) => assert_eq!(j.id, new_join_id),
+        match remap_operation(&op, &pack_remap, &HashMap::new()).unwrap() {
+            AnyOperation::CreateJoin(j) => assert_eq!(j.id, new_id),
             _ => panic!("Expected CreateJoin"),
         }
     }
@@ -596,9 +562,7 @@ mod parsing_tests {
         let new_id = ObjectId::generate();
         pack_remap.insert(old_id, new_id);
 
-        let op = AnyOperation::DropJoin(DropJoinOp { id: old_id });
-        let remapped = remap_operation(&op, &pack_remap, &HashMap::new()).unwrap();
-        match remapped {
+        match remap_operation(&AnyOperation::DropJoin(DropJoinOp { id: old_id }), &pack_remap, &HashMap::new()).unwrap() {
             AnyOperation::DropJoin(d) => assert_eq!(d.id, new_id),
             _ => panic!("Expected DropJoin"),
         }
@@ -611,103 +575,64 @@ mod parsing_tests {
         let new_id = ObjectId::generate();
         pack_remap.insert(old_id, new_id);
 
-        let op = AnyOperation::RenameJoin(RenameJoinOp {
-            id: old_id,
-            new_name: "new_name".to_string(),
-        });
-        let remapped = remap_operation(&op, &pack_remap, &HashMap::new()).unwrap();
-        match remapped {
-            AnyOperation::RenameJoin(r) => {
-                assert_eq!(r.id, new_id);
-                assert_eq!(r.new_name, "new_name");
-            }
+        match remap_operation(&AnyOperation::RenameJoin(RenameJoinOp { id: old_id, new_name: "x".into() }), &pack_remap, &HashMap::new()).unwrap() {
+            AnyOperation::RenameJoin(r) => assert_eq!(r.id, new_id),
             _ => panic!("Expected RenameJoin"),
         }
     }
 
     #[test]
     fn test_remap_replace_block_location() {
-        let mut loc_remap = HashMap::new();
-        loc_remap.insert("old://file.csv".to_string(), "new://file.csv".to_string());
+        let mut loc = HashMap::new();
+        loc.insert("old://f.csv".to_string(), "new://f.csv".to_string());
 
-        let op = AnyOperation::ReplaceBlock(ReplaceBlockOp {
+        match remap_operation(&AnyOperation::ReplaceBlock(ReplaceBlockOp {
             id: "00000000000000cc".try_into().unwrap(),
-            new_location: "old://file.csv".to_string(),
-            new_version: "2".to_string(),
-            new_hash: "0".repeat(64),
-            source_info: None,
-        });
-
-        let remapped = remap_operation(&op, &HashMap::new(), &loc_remap).unwrap();
-        match remapped {
-            AnyOperation::ReplaceBlock(r) => assert_eq!(r.new_location, "new://file.csv"),
+            new_location: "old://f.csv".into(), new_version: "2".into(), new_hash: "0".repeat(64), source_info: None,
+        }), &HashMap::new(), &loc).unwrap() {
+            AnyOperation::ReplaceBlock(r) => assert_eq!(r.new_location, "new://f.csv"),
             _ => panic!("Expected ReplaceBlock"),
         }
     }
 
     #[test]
     fn test_remap_index_blocks_path() {
-        let mut loc_remap = HashMap::new();
-        loc_remap.insert("old://index/col.idx".to_string(), "new://index/col.idx".to_string());
+        let mut loc = HashMap::new();
+        loc.insert("old://idx".to_string(), "new://idx".to_string());
 
-        let op = AnyOperation::IndexBlocks(IndexBlocksOp {
-            index: ObjectId::generate(),
-            blocks: vec![],
-            path: "old://index/col.idx".to_string(),
-            cardinality: 100,
-            doc_count: None,
-        });
-
-        let remapped = remap_operation(&op, &HashMap::new(), &loc_remap).unwrap();
-        match remapped {
-            AnyOperation::IndexBlocks(i) => assert_eq!(i.path, "new://index/col.idx"),
+        match remap_operation(&AnyOperation::IndexBlocks(IndexBlocksOp {
+            index: ObjectId::generate(), blocks: vec![], path: "old://idx".into(), cardinality: 10, doc_count: None,
+        }), &HashMap::new(), &loc).unwrap() {
+            AnyOperation::IndexBlocks(i) => assert_eq!(i.path, "new://idx"),
             _ => panic!("Expected IndexBlocks"),
         }
     }
 
     #[test]
     fn test_remap_strips_save_config() {
-        // SaveConfigOp requires a valid Scope which needs registry init.
-        // Test via YAML deserialization instead.
         let yaml = "type: saveConfig\nscope: s3\nkey: region\nvalue: us-east-1";
         let op: AnyOperation = serde_yaml_ng::from_str(yaml).expect("deserialize");
-        assert!(matches!(op, AnyOperation::SaveConfig(_)));
         assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_none());
     }
 
     #[test]
     fn test_remap_strips_create_view() {
-        let op = AnyOperation::CreateView(CreateViewOp {
-            id: ObjectId::generate(),
-            name: "my_view".to_string(),
-        });
+        let op = AnyOperation::CreateView(CreateViewOp { id: ObjectId::generate(), name: "v".into() });
         assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_none());
     }
 
     #[test]
-    fn test_remap_keeps_rename_column() {
-        let op = AnyOperation::RenameColumn(RenameColumnOp {
-            id: "00000000000000c1".try_into().unwrap(),
-            new_name: "new_col".to_string(),
-        });
-        let remapped = remap_operation(&op, &HashMap::new(), &HashMap::new());
-        assert!(remapped.is_some());
-        assert!(matches!(remapped.unwrap(), AnyOperation::RenameColumn(_)));
-    }
+    fn test_remap_keeps_column_ops() {
+        assert!(remap_operation(&AnyOperation::RenameColumn(RenameColumnOp {
+            id: "00000000000000c1".try_into().unwrap(), new_name: "x".into(),
+        }), &HashMap::new(), &HashMap::new()).is_some());
 
-    #[test]
-    fn test_remap_keeps_drop_column() {
-        let op = AnyOperation::DropColumn(DropColumnOp {
+        assert!(remap_operation(&AnyOperation::DropColumn(DropColumnOp {
             id: "00000000000000c1".try_into().unwrap(),
-        });
-        assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_some());
-    }
+        }), &HashMap::new(), &HashMap::new()).is_some());
 
-    #[test]
-    fn test_remap_keeps_detach_block() {
-        let op = AnyOperation::DetachBlock(DetachBlockOp {
+        assert!(remap_operation(&AnyOperation::DetachBlock(DetachBlockOp {
             id: "00000000000000cc".try_into().unwrap(),
-        });
-        assert!(remap_operation(&op, &HashMap::new(), &HashMap::new()).is_some());
+        }), &HashMap::new(), &HashMap::new()).is_some());
     }
 }

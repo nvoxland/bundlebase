@@ -42,7 +42,7 @@ statement_text  = { (quoted_string | !(";" | EOI) ~ ANY)+ }
 
 // Data modification statements - operations that change bundle data content
 data_modification_stmt = {
-    import_bundle_stmt
+    import_join_stmt
     | filter_stmt
     | attach_stmt
     | detach_stmt
@@ -183,22 +183,18 @@ show_columns_stmt    = { ^"show" ~ ^"columns" }
 show_count_stmt      = { ^"show" ~ ^"count" }
 
 // ============================================================================
-// IMPORT BUNDLE Statement
+// IMPORT JOIN Statement
 // ============================================================================
-// Syntax: IMPORT BUNDLE '<path>' [FLATTEN HISTORY] AS <name> ON <expression>
+// Syntax: IMPORT JOIN <name> [FLATTEN HISTORY]
 // Examples:
-//   IMPORT BUNDLE './stations' AS stations ON lake_id = stations.lake_id
-//   IMPORT BUNDLE './stations' FLATTEN HISTORY AS stations ON lake_id = stations.lake_id
+//   IMPORT JOIN stations
+//   IMPORT JOIN stations FLATTEN HISTORY
 
-import_bundle_stmt = {
-    ^"import" ~ ^"bundle" ~ quoted_string ~ import_bundle_flatten? ~ ^"as" ~ identifier ~ ^"on" ~ import_bundle_expression
+import_join_stmt = {
+    ^"import" ~ ^"join" ~ identifier ~ import_join_flatten?
 }
 
-import_bundle_expression = @{
-    (!EOI ~ ANY)+
-}
-
-import_bundle_flatten = { ^"flatten" ~ ^"history" }
+import_join_flatten = { ^"flatten" ~ ^"history" }
 
 // ============================================================================
 // FILTER Statement

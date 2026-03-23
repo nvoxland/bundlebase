@@ -31,22 +31,25 @@ ATTACH 'bundle+s3://bucket/path/to/bundle'
 
 See [Attaching Data](../guide/attaching.md) for details.
 
-### IMPORT BUNDLE
+### IMPORT JOIN
 
-Imports an entire bundle as a join pack, copying all commits, data files, indexes, and connectors/functions. Operations referencing the source base pack are remapped to the new join pack.
+Solidifies an existing `bundle://` join by copying all commits, data files, indexes, and connectors/functions from the source bundle into the target. The join must have been created with `JOIN 'bundle://...'`.
 
 ```sql
-IMPORT BUNDLE '<path>' [FLATTEN HISTORY] AS <name> ON <expression>
+IMPORT JOIN <name> [FLATTEN HISTORY]
 ```
 
 **Examples:**
 
 ```sql
--- Import with full commit history
-IMPORT BUNDLE './stations' AS stations ON lake_id = stations.lake_id
+-- First, create a join referencing another bundle
+JOIN 'bundle://./stations' AS stations ON lake_id = stations.lake_id
 
--- Flatten all imported commits into one
-IMPORT BUNDLE './stations' FLATTEN HISTORY AS stations ON lake_id = stations.lake_id
+-- Then solidify it — copies all data and history into this bundle
+IMPORT JOIN stations
+
+-- Or flatten all imported commits into one
+IMPORT JOIN stations FLATTEN HISTORY
 ```
 
 ### DETACH
