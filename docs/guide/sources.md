@@ -71,7 +71,6 @@ Downloads data from a single HTTP(S) URL. Use this for any direct link to a CSV,
 |----------|----------|-------------|
 | `url` | Yes | The HTTP(S) URL to download |
 | `format` | No | Force file format (`csv`, `json`, `parquet`). Auto-detected from URL extension if omitted |
-| `headers` | No | Custom HTTP headers as comma-separated `key:value` pairs |
 
 === "SQL"
 

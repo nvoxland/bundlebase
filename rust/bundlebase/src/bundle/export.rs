@@ -118,7 +118,11 @@ impl ExportWriter for CsvExportWriter {
     }
 
     fn finish(self: Box<Self>) -> Result<usize, BundlebaseError> {
-        Ok(self.row_count)
+        // Arrow CSV Writer's inner writer is flushed when dropped.
+        // Explicitly drop to ensure flush happens before returning count.
+        let count = self.row_count;
+        drop(self.writer);
+        Ok(count)
     }
 }
 

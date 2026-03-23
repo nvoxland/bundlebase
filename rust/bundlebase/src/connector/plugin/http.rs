@@ -21,8 +21,6 @@ use url::Url;
 /// - `url` (required): The HTTP(S) URL to download
 /// - `format` (optional): Force the file format (csv, json, parquet).
 ///   Auto-detected from the URL extension if omitted.
-/// - `headers` (optional): Custom HTTP headers as comma-separated key:value pairs
-///   (e.g., "Authorization:Bearer token,Accept:text/csv")
 pub struct HttpConnector;
 
 #[async_trait]
@@ -40,12 +38,6 @@ impl Connector for HttpConnector {
                 ArgSpec {
                     name: "format",
                     description: "Force file format (csv, json, parquet). Auto-detected from URL if omitted",
-                    required: false,
-                    default: None,
-                },
-                ArgSpec {
-                    name: "headers",
-                    description: "Custom HTTP headers as comma-separated key:value pairs",
                     required: false,
                     default: None,
                 },
@@ -111,17 +103,9 @@ impl Connector for HttpConnector {
     async fn stable_url(
         &self,
         location: &DiscoveredLocation,
-        args: &HashMap<String, String>,
+        _args: &HashMap<String, String>,
         _config: &Arc<BundleConfig>,
     ) -> Result<Option<Url>, BundlebaseError> {
-        // If custom headers are needed, we can't use a plain URL for download.
-        // For now, custom headers are used via discover() only. The stable_url
-        // returns the URL for the standard download path.
-        if args.contains_key("headers") {
-            // TODO: Support custom headers in the download path.
-            // For now, most public APIs don't require headers for GET requests.
-        }
-
         let url = Url::parse(&location.location).map_err(|e| {
             BundlebaseError::from(format!(
                 "Invalid URL in discovered location '{}': {}",
@@ -142,15 +126,12 @@ mod tests {
         let connector = HttpConnector;
         let sig = connector.signature();
         assert_eq!(sig.name, "http");
+        assert_eq!(sig.arg_specs.len(), 2);
         assert!(sig.arg_specs.iter().any(|s| s.name == "url" && s.required));
         assert!(sig
             .arg_specs
             .iter()
             .any(|s| s.name == "format" && !s.required));
-        assert!(sig
-            .arg_specs
-            .iter()
-            .any(|s| s.name == "headers" && !s.required));
     }
 
     #[test]

@@ -39,21 +39,25 @@ This installs the `bundlebase` CLI command.
 
 ## Choosing CLI vs MCP Mode
 
-Bundlebase offers two agent-friendly modes. Choose based on the task:
+Bundlebase offers two agent-friendly modes:
 
-**CLI mode** — Best for one-shot operations. `bundlebase query` for read-only queries, `bundlebase extend` for mutations (auto-commits after each command).
+**CLI mode** — Opens and closes the bundle on every call. Best for one-shot operations.
 
-**MCP mode (`bundlebase mcp`)** — Best for building up a new bundle or other multi-step operations. The bundle stays open across calls, preserving cache and state. Use when you need to attach multiple files, run a sequence of transformations, explore data iteratively, or build up changes before committing.
+- `bundlebase query` — read-only queries (SELECT, SHOW, EXPORT TO, EXPLAIN)
+- `bundlebase create` — create a new bundle with initial data
+- `bundlebase extend` — mutate an existing bundle (auto-commits after each call)
+
+**MCP mode (`bundlebase mcp`)** — Keeps the bundle open across calls, preserving cache and state between operations. Best for multi-step work where you need to inspect intermediate state.
 
 | Scenario | Use |
 |----------|-----|
-| Check schema or row count | `query` |
-| Run a single SELECT query | `query` |
-| One-off ATTACH, FILTER, or other mutation | `extend` |
-| Create a bundle from scratch with multiple files | MCP |
-| Iterative data exploration (query, filter, query again) | MCP |
-| Multi-step transformations (attach, filter, rename, commit) | MCP |
-| Building up joins and views | MCP |
+| Quick schema check or row count | CLI `query` |
+| Single SELECT query | CLI `query` |
+| One-off ATTACH, FILTER, or other mutation | CLI `extend` |
+| Create bundle + load initial data | CLI `create` |
+| Iterative exploration (query → filter → query → adjust) | MCP |
+| Multi-step transformations with intermediate inspection | MCP |
+| Building up joins and views before committing | MCP |
 
 ## CLI Commands
 
@@ -169,6 +173,37 @@ The `query` tool handles everything: SELECT queries, ATTACH, DETACH, FILTER, REN
 4. Call `status` to review uncommitted changes
 5. Call `query` with "COMMIT 'message'" to save
 ```
+
+## Common Mistakes to Avoid
+
+| Don't do this | Why | Do this instead |
+|---------------|-----|-----------------|
+| `curl`/`wget` to download data | No versioning, caching, or error handling | `CREATE SOURCE USING http WITH (url = '...')` |
+| `pip install pandas` to read CSV | Extra dependency; no history tracking | `bundlebase query` for exploration |
+| Materialize huge datasets in memory | Crashes on large data | Use `to_pandas()` / `to_polars()` which stream internally |
+| Skip commits during exploration | Lost history, can't undo mistakes | Commit at every meaningful step |
+| Download data then ATTACH separately | Two steps when one will do | `CREATE SOURCE USING http; FETCH base ADD` in one call |
+
+## Bundle References (`bundle://`)
+
+Use `bundle://` URLs in ATTACH and JOIN to reference another committed bundle's query output — including all its filters, column ops, and joins.
+
+| Format | Example |
+|--------|---------|
+| Relative path | `bundle://./other-bundle` |
+| Absolute path | `bundle:///home/user/other-bundle` |
+| S3 | `bundle+s3://bucket/path/to/bundle` |
+| GCS | `bundle+gcs://bucket/path/to/bundle` |
+
+```sql
+-- Join with another bundle's processed output
+JOIN 'bundle://./stations' AS stations ON lake_id = stations.lake_id
+
+-- Attach another bundle's data into yours
+ATTACH 'bundle:///path/to/other/bundle'
+```
+
+The target bundle must be committed. The referenced data reflects the target's full query output at read time.
 
 ## Common Workflows
 
@@ -434,8 +469,8 @@ bundlebase extend --bundle ./lakes <<< "IMPORT JOIN stations"
 | Approach | Use when |
 |----------|----------|
 | `bundle://` JOIN | Exploring, prototyping, data may still change |
-| `IMPORT JOIN` | Finalizing — want self-contained bundle with full history |
-| `IMPORT JOIN FLATTEN HISTORY` | Same, but collapse imported commits into one |
+| `IMPORT JOIN` | Finalizing — want self-contained bundle with full commit history from the source |
+| `IMPORT JOIN ... FLATTEN HISTORY` | Same, but collapse all imported commits into a single commit for a cleaner history |
 
 ## Building a Custom Connector
 

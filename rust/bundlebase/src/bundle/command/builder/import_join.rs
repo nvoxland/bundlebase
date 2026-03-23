@@ -367,13 +367,17 @@ async fn copy_data_files(
         let source_file = source_dir.file(relative)?;
         let target_file = target_dir.writable_file(relative)?;
 
-        if let Some(stream) = source_file.read_stream().await? {
-            let pinned: std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>> =
-                Box::pin(futures::StreamExt::map(stream, |r| {
-                    r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                }));
-            target_file.write_stream(pinned).await?;
-        }
+        let stream = source_file.read_stream().await?.ok_or_else(|| {
+            BundlebaseError::from(format!(
+                "Failed to read file during import: {}",
+                relative
+            ))
+        })?;
+        let pinned: std::pin::Pin<Box<dyn futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>> =
+            Box::pin(futures::StreamExt::map(stream, |r| {
+                r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            }));
+        target_file.write_stream(pinned).await?;
 
         let new_url = format!("{}/{}", target_base_url.trim_end_matches('/'), relative);
         if file_url != new_url {

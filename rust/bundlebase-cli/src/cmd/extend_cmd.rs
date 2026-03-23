@@ -5,7 +5,7 @@
 //! ATTACH, COMMIT, FILTER, DROP, and all other mutating commands.
 //! Auto-commits after execution if there are uncommitted changes.
 
-use super::load_config;
+use super::{auto_commit_message, load_config};
 use bundlebase::{Bundle, BundleFacade, BundlebaseError};
 use bundlebase_cli::OutputFormat;
 use clap::Args;
@@ -39,18 +39,6 @@ pub struct ExtendArgs {
     pub config: Option<String>,
 }
 
-/// Generate a commit message from the SQL command.
-fn auto_commit_message(sql: &str) -> String {
-    // Normalize whitespace and trim
-    let normalized: String = sql.split_whitespace().collect::<Vec<_>>().join(" ");
-
-    // Truncate if too long
-    if normalized.len() <= 72 {
-        normalized
-    } else {
-        format!("{}...", &normalized[..69])
-    }
-}
 
 pub async fn run(args: ExtendArgs) -> Result<(), BundlebaseError> {
     let sql = match args.sql {

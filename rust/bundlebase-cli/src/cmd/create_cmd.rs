@@ -3,7 +3,7 @@
 //! Creates a new bundle at the specified path, then optionally executes SQL
 //! commands (like ATTACH) and auto-commits.
 
-use super::load_config;
+use super::{auto_commit_message, load_config};
 use bundlebase::{BundleBuilder, BundleFacade, BundlebaseError};
 use bundlebase_cli::OutputFormat;
 use clap::Args;
@@ -33,15 +33,6 @@ pub struct CreateArgs {
     pub config: Option<String>,
 }
 
-/// Generate a commit message from the SQL command.
-fn auto_commit_message(sql: &str) -> String {
-    let normalized: String = sql.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.len() <= 72 {
-        normalized
-    } else {
-        format!("{}...", &normalized[..69])
-    }
-}
 
 pub async fn run(args: CreateArgs) -> Result<(), BundlebaseError> {
     let config = load_config(args.config.as_deref())?;
@@ -49,7 +40,7 @@ pub async fn run(args: CreateArgs) -> Result<(), BundlebaseError> {
         Ok(builder) => builder,
         Err(e) => {
             let msg = e.to_string();
-            if msg.contains("already exists") {
+            if msg.contains("A bundle already exists") {
                 return Err(format!(
                     "A bundle already exists at '{}'. To modify an existing bundle, use 'bundlebase extend' instead.",
                     args.bundle

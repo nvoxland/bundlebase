@@ -18,8 +18,7 @@ use std::sync::Arc;
 ///
 /// The file format is determined by the extension of the output path:
 /// - `.csv` - Comma-separated values
-/// - `.json` - JSON array of objects
-/// - `.table` - Plain-text table with pipe delimiters
+/// - `.jsonl` - JSON Lines (one JSON object per line)
 #[derive(Debug, Clone)]
 pub struct ExportCommand {
     pub path: String,

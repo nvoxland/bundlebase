@@ -92,6 +92,16 @@ pub fn load_config(path: Option<&str>) -> Result<Option<PassedBundleConfig>, Bun
     Ok(Some(config))
 }
 
+/// Generate a commit message from the SQL command, truncating if too long.
+pub fn auto_commit_message(sql: &str) -> String {
+    let normalized: String = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.len() <= 72 {
+        normalized
+    } else {
+        format!("{}...", &normalized[..69])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
