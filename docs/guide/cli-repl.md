@@ -220,6 +220,6 @@ Same as above but installs to `~/.agents/skills/bundlebase/` and `~/CLAUDE.md`, 
 
 ### Notes
 
-- The command is idempotent — running it again prints "already installed" and exits
+- The command is idempotent — running it again overwrites skill files with the latest version
 - No `--bundle` flag is needed
 - The installed files contain CLI usage patterns and the full SQL command reference so agents can use bundlebase without making web requests to documentation

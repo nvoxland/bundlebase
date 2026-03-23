@@ -208,15 +208,20 @@ bundlebase extend --bundle ./clean -m "Removed rows without email" <<< "FILTER W
 # Start with a base dataset
 bundlebase create --bundle ./combined <<< "ATTACH 'customers.parquet'"
 
-# Join with orders
+# Join with a file
 bundlebase extend --bundle ./combined <<< "JOIN 'orders.csv' AS orders ON id = orders.customer_id"
 
+# Join with another bundle (reads the target bundle's full query output, including filters/transforms)
+bundlebase extend --bundle ./combined <<< "JOIN 'bundle://./regions' AS regions ON region_code = regions.code"
+
 # Query across joined data
-bundlebase query --bundle ./combined --format json <<< "SELECT c.name, COUNT(orders.id) as order_count, SUM(orders.amount) as total FROM bundle c JOIN orders ON c.id = orders.customer_id GROUP BY c.name ORDER BY total DESC LIMIT 10"
+bundlebase query --bundle ./combined --format json <<< "SELECT c.name, COUNT(orders.id) as order_count FROM bundle c JOIN orders ON c.id = orders.customer_id GROUP BY c.name ORDER BY order_count DESC LIMIT 10"
 
 # Remove a join when no longer needed
 bundlebase extend --bundle ./combined <<< "DROP JOIN orders"
 ```
+
+**`bundle://` URLs:** Use `bundle:///path` to reference another committed bundle's query output as a data source. This includes all filters, column operations, and joins applied to that bundle. For remote bundles, use `bundle+s3://bucket/path`.
 
 ### 4. Work with Multiple File Formats
 
@@ -385,24 +390,52 @@ bundlebase query --bundle ./logs --format json <<< "FETCH base ADD DRY RUN"
 
 Use `SYNTAX CREATE SOURCE` and `SYNTAX FETCH` for detailed syntax.
 
-### Multiple data sources in separate bundles
+### Iterative multi-source dataset building
 
-When working with multiple data sources, create a separate bundle for each. Then use `IMPORT BUNDLE` to combine them — one becomes the base, others become joins:
+When working with multiple data sources, build each one as a separate bundle first — explore, clean, and reshape independently. Then combine them.
+
+**Step 1: Build separate bundles for each data source**
 
 ```bash
-# Create separate bundles for each data source
+# Bundle 1: Lake quality measurements
 bundlebase create --bundle ./lakes <<< "CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/lakes.csv')"
+bundlebase extend --bundle ./lakes <<< "RENAME COLUMN lake_identifier TO lake_id"
+bundlebase extend --bundle ./lakes -m "Cleaned lake data" <<< "FILTER WITH SELECT * FROM bundle WHERE measurement_date > '2020-01-01'"
+
+# Bundle 2: Monitoring stations
 bundlebase create --bundle ./stations <<< "CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/stations.csv')"
+bundlebase extend --bundle ./stations -m "Kept active stations" <<< "FILTER WITH SELECT * FROM bundle WHERE status = 'active'"
+```
 
-# Pick one as the base, import the other as a join
-# This copies all data, commits, and indexes from stations into lakes
-bundlebase extend --bundle ./lakes <<< "IMPORT BUNDLE './stations' AS stations ON lake_id = stations.lake_id"
+**Step 2: Explore each bundle, verify data quality**
 
-# Now query across both datasets
+```bash
+bundlebase query --bundle ./lakes --format json <<< "SHOW COLUMNS"
+bundlebase query --bundle ./stations --format json <<< "SELECT * FROM bundle LIMIT 5"
+```
+
+**Step 3: Combine using `bundle://` joins or `IMPORT BUNDLE`**
+
+*Option A: Live join via `bundle://`* — the join references the other bundle at query time. No data copying. Good for exploration.
+
+```bash
+bundlebase extend --bundle ./lakes <<< "JOIN 'bundle://./stations' AS stations ON lake_id = stations.lake_id"
 bundlebase query --bundle ./lakes --format json <<< "SELECT * FROM bundle JOIN stations ON lake_id = stations.lake_id LIMIT 10"
 ```
 
-`IMPORT BUNDLE` copies all commit history from the source. Add `FLATTEN HISTORY` to collapse into a single commit instead.
+*Option B: Import bundle* — copies all data, commits, and indexes into one self-contained bundle. Good for the final dataset.
+
+```bash
+bundlebase extend --bundle ./lakes <<< "IMPORT BUNDLE './stations' AS stations ON lake_id = stations.lake_id"
+```
+
+**When to use which:**
+
+| Approach | Use when |
+|----------|----------|
+| `bundle://` JOIN | Exploring, prototyping, data may still change |
+| `IMPORT BUNDLE` | Finalizing — want self-contained bundle with full history |
+| `IMPORT BUNDLE FLATTEN HISTORY` | Same, but collapse imported commits into one |
 
 ## Building a Custom Connector
 

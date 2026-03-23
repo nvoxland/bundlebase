@@ -10,10 +10,23 @@ Commands that change bundle data content.
 
 ### ATTACH
 
-Adds a data file to the bundle.
+Adds a data file to the bundle. Supports CSV, Parquet, JSON files, and `bundle://` URLs to reference other bundles.
 
 ```sql
 ATTACH '<path>' [TO <pack>] [WITH (<key> = <value>, ...)]
+```
+
+**Examples:**
+
+```sql
+-- Attach a local file
+ATTACH 'data.csv'
+
+-- Attach another bundle's query output (includes all its filters, column ops, etc.)
+ATTACH 'bundle:///path/to/other/bundle'
+
+-- Attach a remote bundle
+ATTACH 'bundle+s3://bucket/path/to/bundle'
 ```
 
 See [Attaching Data](../guide/attaching.md) for details.
@@ -72,10 +85,23 @@ Commands that change bundle structure.
 
 ### JOIN
 
-Adds a join to the bundle.
+Adds a join to the bundle. The source can be a file or a `bundle://` URL to join with another bundle's query output.
 
 ```sql
 [INNER | LEFT | RIGHT | FULL [OUTER]] JOIN '<source>' AS <name> ON <condition>
+```
+
+**Examples:**
+
+```sql
+-- Join with a local file
+JOIN 'orders.csv' AS orders ON id = orders.customer_id
+
+-- Join with another bundle (includes all its filters, column ops, etc.)
+JOIN 'bundle:///path/to/other/bundle' AS other ON id = other.id
+
+-- Join with a remote bundle
+LEFT JOIN 'bundle+s3://bucket/regions' AS regions ON region_code = regions.code
 ```
 
 See [Joins](../guide/joins.md) for details.

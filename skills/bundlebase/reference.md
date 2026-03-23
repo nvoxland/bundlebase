@@ -90,6 +90,9 @@ SYNTAX IMPORT FUNCTION  -- detailed syntax for IMPORT FUNCTION
 **Export**: EXPORT TO '<path>' <sql> (formats: .csv, .jsonl)
 **Introspection**: SHOW (DETAILS, HISTORY, STATUS, VIEWS, INDEXES, PACKS, BLOCKS, CONFIG, CONNECTORS, FUNCTIONS), SYNTAX
 
+**Bundle references**: ATTACH and JOIN accept `bundle://` URLs to reference another bundle's query output:
+`ATTACH 'bundle:///path/to/bundle'`, `JOIN 'bundle://./other' AS other ON ...`, `bundle+s3://bucket/path` for remote.
+
 **Built-in SQL functions**: `search('<index_name>', '<query>')` for full-text search with BM25 scoring.
 
 Standard SQL (SELECT, WITH, etc.) uses Apache DataFusion syntax. The table name is always `bundle`.
