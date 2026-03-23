@@ -14,25 +14,23 @@ bundlebase mcp --bundle <path> [options]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--bundle <path>` | *(required)* | Path or URL to the bundle |
-| `--read-only` | `false` | Only allow SELECT and EXPLAIN commands |
+| `--bundle <path>` | *(none)* | Pre-open a bundle at startup (optional) |
+| `--read-only` | `false` | Open in read-only mode (only with `--bundle`) |
 | `--config <path>` | *(none)* | Path to a YAML/JSON config file |
 | `--log-level <level>` | `ui` | Logging level |
 
 ### Examples
 
 ```bash
-# Open an existing bundle as MCP server
+# Start without a bundle — agent uses open_bundle/create_bundle tools
+bundlebase mcp
+
+# Start with a bundle pre-opened
 bundlebase mcp --bundle ./my-bundle
 
-# Read-only access
+# Start read-only
 bundlebase mcp --bundle ./my-bundle --read-only
-
-# Remote bundle
-bundlebase mcp --bundle s3://mybucket/my-bundle
 ```
-
-To serve a new bundle, create it first with `bundlebase create`.
 
 ## Available Tools
 
@@ -40,7 +38,10 @@ The MCP server exposes the following tools to AI assistants:
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `query` | `sql` (string, required) | Execute any SQL query or bundlebase command |
+| `create_bundle` | `path` (string) | Create a new bundle at the given path |
+| `open_bundle` | `path` (string), `read_only` (bool, optional) | Open an existing bundle |
+| `close_bundle` | *(none)* | Close the current bundle (required before opening another) |
+| `query` | `sql` (string) | Execute any SQL query or bundlebase command |
 | `schema` | *(none)* | Get column names, data types, and nullability |
 | `count` | *(none)* | Get total row count |
 | `sample` | `limit` (integer, optional, default 10) | Preview sample rows as JSON |
@@ -68,14 +69,14 @@ See the [SQL Reference](../sql-reference/index.md) for the full command syntax.
 
 ### Claude Code
 
-Add to your Claude Code MCP settings (`.claude/settings.json` or project settings):
+Run `bundlebase setup-agent` to automatically install the MCP server config. Or add manually to `.claude/settings.json`:
 
 ```json
 {
   "mcpServers": {
     "bundlebase": {
       "command": "bundlebase",
-      "args": ["mcp", "--bundle", "./my-bundle"]
+      "args": ["mcp"]
     }
   }
 }
@@ -90,7 +91,7 @@ Add to your Cursor MCP configuration (`.cursor/mcp.json`):
   "mcpServers": {
     "bundlebase": {
       "command": "bundlebase",
-      "args": ["mcp", "--bundle", "./my-bundle"]
+      "args": ["mcp"]
     }
   }
 }
@@ -105,7 +106,7 @@ Add to your VS Code MCP settings (`.vscode/mcp.json`):
   "servers": {
     "bundlebase": {
       "command": "bundlebase",
-      "args": ["mcp", "--bundle", "./my-bundle"]
+      "args": ["mcp"]
     }
   }
 }
@@ -125,6 +126,9 @@ Add to your VS Code MCP settings (`.vscode/mcp.json`):
 **CLI mode** (`bundlebase query` for reads, `bundlebase extend` for mutations) opens and closes the bundle on every call. `extend` auto-commits after each command. Efficient for simple, standalone operations but has overhead for multi-step workflows.
 
 **MCP mode** keeps the bundle open, so the cache is warm and state is preserved. Use it when you need multiple related operations in sequence.
+
+!!! warning
+    Do not use MCP and CLI on the same bundle simultaneously. If the MCP server has a bundle open, close it with `close_bundle` before using CLI commands on the same bundle. Both can write to the same manifest files, which can cause conflicts.
 
 ## Read-Only Mode
 

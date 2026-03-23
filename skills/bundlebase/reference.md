@@ -57,15 +57,14 @@ REPL meta-commands: `/help`, `/clear`, `/exit`
 
 ### MCP Usage
 
-MCP mode keeps the bundle open across calls — use for multi-step workflows.
+MCP mode keeps bundles open across calls — use for multi-step workflows. Starts without a bundle; use tools to open/create.
 
 ```bash
 # Start as MCP server (configure in your AI assistant's MCP settings)
-bundlebase mcp --bundle ./my-bundle
-bundlebase mcp --bundle ./my-bundle --read-only
+bundlebase mcp
 ```
 
-MCP tools: `query` (any SQL/command), `schema`, `count`, `sample`, `status`, `history`.
+MCP tools: `create_bundle`, `open_bundle`, `close_bundle`, `query` (any SQL/command), `schema`, `count`, `sample`, `status`, `history`.
 
 Prefer CLI (`bundlebase query`) for one-shot queries. Prefer MCP for building bundles or multi-step exploration.
 
