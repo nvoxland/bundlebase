@@ -33,7 +33,7 @@ Authentication is required. It ships with default credentials of `admin/password
 
 REPL meta-commands now use a `/` prefix to distinguish them from SQL. The old bare-word commands are gone.
 
-- `SHOW COLUMNS` -- show the table schema
+- `/schema` -- show the table schema
 - `/count` -- row count
 - `/details` -- bundle metadata (id, name, url, version)
 - `/history` -- commit history

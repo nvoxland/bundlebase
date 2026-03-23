@@ -11,7 +11,7 @@ use tracing_log::LogTracer;
 
 #[derive(Parser, Debug)]
 #[command(name = "bundlebase")]
-#[command(about = "Bundlebase CLI - Interactive REPL and Arrow Flight Server", long_about = None)]
+#[command(about = "Bundlebase", long_about = None)]
 struct Cli {
     /// Logging level (ui, trace, debug, info, warn, error)
     /// ui: Minimal format (message only), INFO level - good for interactive use

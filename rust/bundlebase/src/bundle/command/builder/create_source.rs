@@ -84,6 +84,7 @@ impl CommandParsing for CreateSourceCommand {
             }
         }
 
+        // TODO: why this complexity?
         // Resolve connector and pack from collected identifiers.
         // Grammar: CREATE SOURCE [FOR <pack>] USING <connector> [WITH ...]
         // If a dotted_identifier was found, that's always the connector.

@@ -51,18 +51,10 @@ pub async fn download_io_file_to_data_dir(
 /// Download a file from an HTTP(S) URL to the data directory.
 ///
 /// Returns a WriteResult containing the file reference and the computed SHA256 hash.
-pub async fn download_http_to_data_dir(
-    url: &Url,
-    data_dir: &dyn IOReadWriteDir,
-) -> Result<WriteResult, BundlebaseError> {
-    download_http_to_data_dir_with_format(url, data_dir, None).await
-}
-
-/// Download an HTTP(S) URL to the data directory with optional format hint.
 ///
 /// If `format_hint` is provided and the filename from the URL doesn't have a recognized
 /// extension, the format hint is appended as the extension.
-pub async fn download_http_to_data_dir_with_format(
+pub async fn download_http_to_data_dir(
     url: &Url,
     data_dir: &dyn IOReadWriteDir,
     format_hint: Option<&str>,
@@ -135,16 +127,6 @@ pub async fn materialize_url(
     should_copy: bool,
     data_dir: &dyn IOReadWriteDir,
     config: &Arc<BundleConfig>,
-) -> Result<MaterializeResult, BundlebaseError> {
-    materialize_url_with_format(url, should_copy, data_dir, config, None).await
-}
-
-/// Materialize a URL with an optional format hint for the file extension.
-pub async fn materialize_url_with_format(
-    url: &Url,
-    should_copy: bool,
-    data_dir: &dyn IOReadWriteDir,
-    config: &Arc<BundleConfig>,
     format_hint: Option<&str>,
 ) -> Result<MaterializeResult, BundlebaseError> {
     if !should_copy {
@@ -154,7 +136,7 @@ pub async fn materialize_url_with_format(
     }
 
     if url.scheme() == "http" || url.scheme() == "https" {
-        let result = download_http_to_data_dir_with_format(url, data_dir, format_hint).await?;
+        let result = download_http_to_data_dir(url, data_dir, format_hint).await?;
         Ok(MaterializeResult {
             file: result.file,
             hash: result.hash,
@@ -223,7 +205,7 @@ async fn get_data_for_location(
     if let Some(stable) = func.stable_url(location, args, config).await? {
         if should_copy || location.must_copy {
             // Download the file into data_dir
-            let result = materialize_url_with_format(&stable, true, data_dir, config, Some(&location.format)).await?;
+            let result = materialize_url(&stable, true, data_dir, config, Some(&location.format)).await?;
             let attach_location = data_dir
                 .relative_path(result.file.as_ref())
                 .unwrap_or_else(|_| result.file.url().to_string());
