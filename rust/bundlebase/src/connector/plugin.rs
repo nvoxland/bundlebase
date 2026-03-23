@@ -1,6 +1,7 @@
 //! Built-in connector implementations (IPC, Kaggle, FFI, Postgres, remote_dir, web_scrape).
 
 pub mod ffi;
+mod http;
 mod ipc;
 pub(crate) mod kaggle;
 mod postgres;
@@ -8,6 +9,7 @@ mod remote_dir;
 mod web_scrape;
 
 pub use ffi::FfiConnector;
+pub use http::HttpConnector;
 pub use ipc::IpcConnector;
 pub use kaggle::KaggleConnector;
 pub use postgres::PostgresConnector;

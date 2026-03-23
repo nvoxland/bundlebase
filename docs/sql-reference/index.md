@@ -10,13 +10,47 @@ Commands that change bundle data content.
 
 ### ATTACH
 
-Adds a data file to the bundle.
+Adds a data file to the bundle. Supports CSV, Parquet, JSON files, and `bundle://` URLs to reference other bundles.
 
 ```sql
 ATTACH '<path>' [TO <pack>] [WITH (<key> = <value>, ...)]
 ```
 
+**Examples:**
+
+```sql
+-- Attach a local file
+ATTACH 'data.csv'
+
+-- Attach another bundle's query output (includes all its filters, column ops, etc.)
+ATTACH 'bundle:///path/to/other/bundle'
+
+-- Attach a remote bundle
+ATTACH 'bundle+s3://bucket/path/to/bundle'
+```
+
 See [Attaching Data](../guide/attaching.md) for details.
+
+### IMPORT JOIN
+
+Solidifies an existing `bundle://` join by copying all commits, data files, indexes, and connectors/functions from the source bundle into the target. The join must have been created with `JOIN 'bundle://...'`.
+
+```sql
+IMPORT JOIN <name> [FLATTEN HISTORY]
+```
+
+**Examples:**
+
+```sql
+-- First, create a join referencing another bundle
+JOIN 'bundle://./stations' AS stations ON lake_id = stations.lake_id
+
+-- Then solidify it — copies all data and history into this bundle
+IMPORT JOIN stations
+
+-- Or flatten all imported commits into one
+IMPORT JOIN stations FLATTEN HISTORY
+```
 
 ### DETACH
 
@@ -54,10 +88,23 @@ Commands that change bundle structure.
 
 ### JOIN
 
-Adds a join to the bundle.
+Adds a join to the bundle. The source can be a file or a `bundle://` URL to join with another bundle's query output.
 
 ```sql
 [INNER | LEFT | RIGHT | FULL [OUTER]] JOIN '<source>' AS <name> ON <condition>
+```
+
+**Examples:**
+
+```sql
+-- Join with a local file
+JOIN 'orders.csv' AS orders ON id = orders.customer_id
+
+-- Join with another bundle (includes all its filters, column ops, etc.)
+JOIN 'bundle:///path/to/other/bundle' AS other ON id = other.id
+
+-- Join with a remote bundle
+LEFT JOIN 'bundle+s3://bucket/regions' AS regions ON region_code = regions.code
 ```
 
 See [Joins](../guide/joins.md) for details.
@@ -141,7 +188,7 @@ Commands for managing data sources.
 Defines a source for automatic file discovery.
 
 ```sql
-CREATE SOURCE <connector> WITH (<key> = '<value>', ...) [ON <pack>]
+CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<key> = '<value>', ...)]
 ```
 
 See [Data Sources](../guide/sources.md) for details.
@@ -779,3 +826,76 @@ SAVE CONFIG <key> = '<value>' [FOR '<scope>']
 ```
 
 See [Metadata](../guide/metadata.md) and [Configuration](../guide/configuration.md) for details.
+
+## Export
+
+### EXPORT
+
+Exports query results to a file. The output format is determined by the file extension.
+
+```sql
+EXPORT TO '<path>' <sql>
+```
+
+**Supported formats:**
+
+| Extension | Format |
+|-----------|--------|
+| `.csv` | Comma-separated values |
+| `.jsonl` | JSON Lines (one JSON object per line) |
+
+**Examples:**
+
+```sql
+-- Export all data to CSV
+EXPORT TO 'output.csv' SELECT * FROM bundle
+
+-- Export filtered results to JSON Lines
+EXPORT TO '/tmp/active_users.jsonl' SELECT * FROM bundle WHERE active = true
+
+-- Export aggregated results
+EXPORT TO 'summary.csv' SELECT department, COUNT(*) as cnt, AVG(salary) as avg_sal FROM bundle GROUP BY department
+```
+
+## Help & Introspection
+
+### SHOW
+
+Shows the contents of a bundle metadata table. A shortcut for `SELECT * FROM bundle_info.<table>`.
+
+```sql
+SHOW <table>
+```
+
+Available tables: `DETAILS`, `HISTORY`, `STATUS`, `VIEWS`, `INDEXES`, `PACKS`, `BLOCKS`, `CONFIG`, `COMMANDS`, `CONNECTORS`, `FUNCTIONS`.
+
+**Examples:**
+
+```sql
+SHOW HISTORY
+SHOW STATUS
+SHOW DETAILS
+SHOW CONFIG
+SHOW COMMANDS
+SHOW CONNECTORS
+```
+
+### SYNTAX
+
+Shows syntax and usage information for bundlebase commands. With no arguments, lists all available commands. With a command name, shows detailed syntax and examples.
+
+```sql
+SYNTAX [<command>]
+```
+
+**Examples:**
+
+```sql
+-- List all available commands
+SYNTAX
+
+-- Show detailed syntax for a specific command
+SYNTAX ATTACH
+SYNTAX IMPORT CONNECTOR
+SYNTAX FETCH
+```

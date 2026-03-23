@@ -23,9 +23,10 @@
 
 pub mod plugin;
 
+use plugin::FfiConnector;
+use plugin::HttpConnector;
 use plugin::IpcConnector;
 use plugin::KaggleConnector;
-use plugin::FfiConnector;
 use plugin::PostgresConnector;
 use plugin::RemoteDirConnector;
 use plugin::WebScrapeConnector;
@@ -498,6 +499,7 @@ impl ConnectorRegistry {
         };
 
         // Register built-in connectors (ipc/native removed — only via defined sources)
+        registry.register(Arc::new(HttpConnector));
         registry.register(Arc::new(KaggleConnector));
         registry.register(Arc::new(PostgresConnector));
         registry.register(Arc::new(RemoteDirConnector));

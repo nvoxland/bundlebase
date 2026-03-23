@@ -7,13 +7,14 @@ This guide walks through a basic workflow using the Bundlebase CLI's interactive
 Create a new bundle and open the interactive REPL:
 
 ```bash
-bundlebase --bundle ./my-bundle --create
+bundlebase create --bundle ./my-bundle
+bundlebase repl --bundle ./my-bundle
 ```
 
 You'll see a header and prompt:
 
 ```
-Bundlebase REPL
+Opened bundle at ./my-bundle (version ..., 1 commit)
 Type '/help' for available commands, '/exit' to quit
 ----------------------------------------------------------
 ./my-bundle>
@@ -37,12 +38,6 @@ Use standard SQL to explore the data:
 ./my-bundle> SELECT * FROM bundle
 ```
 
-Or use the `/show` meta-command for a quick look:
-
-```
-./my-bundle> /show
-```
-
 ## Filter Rows
 
 Narrow down the data in your bundle:
@@ -64,7 +59,7 @@ Save your work as a new version:
 Check the commit log:
 
 ```
-./my-bundle> /history
+./my-bundle> SHOW HISTORY
 ```
 
 ## Discover Commands

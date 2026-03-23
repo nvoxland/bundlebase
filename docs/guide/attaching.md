@@ -65,6 +65,12 @@ You can attach the query output of another committed bundle using a `bundle://` 
 
 **For filesystem bundles**, use `bundle://` followed by the path:
 
+=== "SQL"
+
+    ```sql
+    ATTACH 'bundle:///path/to/other/bundle'
+    ```
+
 === "Async API"
 
     ```python
@@ -79,6 +85,12 @@ You can attach the query output of another committed bundle using a `bundle://` 
 
 **For remote bundles** (S3, etc.), use the compound scheme `bundle+<scheme>://`:
 
+=== "SQL"
+
+    ```sql
+    ATTACH 'bundle+s3://bucket/path/to/bundle'
+    ```
+
 === "Async API"
 
     ```python
@@ -92,7 +104,7 @@ You can attach the query output of another committed bundle using a `bundle://` 
     ```
 
 !!! note
-    The target bundle must be committed. The attached data reflects the target's full query output at read time, not just its raw files.
+    The target bundle must be committed. The attached data reflects the target's full query output at read time — including any filters, column operations, and joins that have been applied.
 
 ## Supported Formats
 

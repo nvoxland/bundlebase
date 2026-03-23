@@ -52,7 +52,7 @@ The source workflow has two steps:
 === "SQL"
 
     ```sql
-    CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
+    CREATE SOURCE USING remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
     ```
 
 ## Connectors
@@ -60,6 +60,27 @@ The source workflow has two steps:
 Connectors define how to pull data from an external source into your bundle.
 
 Bundlebase ships with several common connectors, but custom connectors can also be made and plugged in to support any external data you need.
+
+### http
+
+Downloads data from a single HTTP(S) URL. Use this for any direct link to a CSV, JSON, or Parquet file — including REST API endpoints that return data.
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `url` | Yes | The HTTP(S) URL to download |
+| `format` | No | Force file format (`csv`, `json`, `parquet`). Auto-detected from URL extension if omitted |
+
+=== "SQL"
+
+    ```sql
+    -- Download a CSV from a URL
+    CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv')
+
+    -- Force format when URL has no extension
+    CREATE SOURCE USING http WITH (url = 'https://api.example.com/data?format=csv', format = 'csv')
+    ```
 
 ### remote_dir
 
@@ -120,7 +141,7 @@ Lists files from a local or cloud directory. Supports any URL scheme supported b
 === "SQL"
 
     ```sql
-    CREATE SOURCE remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
+    CREATE SOURCE USING remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')
     ```
 
 ### ftp_directory
@@ -170,7 +191,7 @@ Lists files from an FTP server. Supports anonymous and authenticated access.
 === "SQL"
 
     ```sql
-    CREATE SOURCE ftp_directory WITH (url = 'ftp://ftp.example.com/pub/data/')
+    CREATE SOURCE USING ftp_directory WITH (url = 'ftp://ftp.example.com/pub/data/')
     ```
 
 ### sftp_directory
@@ -211,7 +232,7 @@ Lists files from a remote directory via SFTP. Requires an SSH private key for au
 === "SQL"
 
     ```sql
-    CREATE SOURCE sftp_directory WITH (url = 'sftp://user@host/data/', key_path = '~/.ssh/id_rsa', patterns = '**/*.parquet')
+    CREATE SOURCE USING sftp_directory WITH (url = 'sftp://user@host/data/', key_path = '~/.ssh/id_rsa', patterns = '**/*.parquet')
     ```
 
 ### kaggle
@@ -286,7 +307,7 @@ Downloads dataset files from [Kaggle](https://www.kaggle.com/) via the Kaggle RE
 === "SQL"
 
     ```sql
-    CREATE SOURCE kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')
+    CREATE SOURCE USING kaggle WITH (dataset = 'zillow/zecon', patterns = '*.csv')
     ```
 
 ### Custom Connectors
@@ -461,7 +482,7 @@ You can define sources for joined packs by specifying the `pack` parameter.
 === "SQL"
 
     ```sql
-    CREATE SOURCE remote_dir WITH (url = 's3://bucket/customers/', patterns = '**/*.parquet') ON customers
+    CREATE SOURCE FOR customers USING remote_dir WITH (url = 's3://bucket/customers/', patterns = '**/*.parquet')
     ```
 
 ## Pattern Matching

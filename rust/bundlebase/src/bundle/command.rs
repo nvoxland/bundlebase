@@ -61,7 +61,7 @@ pub use parser::Rule;
 // Re-export builder command structs
 pub use builder::{
     AddColumnCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
+    ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
     DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -74,6 +74,7 @@ pub use builder::{
 pub use builder::{FileVerificationResult, VerificationResults};
 
 // Re-export facade command structs
+pub use facade::ExportCommand;
 pub use facade::DescribeConnectorCommand;
 pub use facade::DescribeFunctionCommand;
 pub use facade::ImportTempConnectorCommand;
@@ -84,6 +85,13 @@ pub use facade::RenameTempConnectorCommand;
 pub use facade::RenameTempFunctionCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
+pub use facade::{
+    ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
+    ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
+    ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
+    ShowCountCommand,
+};
+pub use facade::SyntaxCommand;
 
 /// Commands that can be executed on a BundleFacade (read-only).
 ///
@@ -91,6 +99,8 @@ pub use facade::SetConfigCommand;
 /// It's a subset of `BundleCommand` that can be executed on a read-only `Bundle`.
 #[derive(Debug, Clone)]
 pub enum FacadeCommand {
+    /// Export query results to a file
+    Export(ExportCommand),
     /// Describe a registered connector's metadata
     DescribeConnector(DescribeConnectorCommand),
     /// Describe a registered function's metadata
@@ -111,6 +121,21 @@ pub enum FacadeCommand {
     ExplainPlan(ExplainPlanCommand),
     /// Set runtime config value (session-only)
     SetConfig(SetConfigCommand),
+    ShowDetails(ShowDetailsCommand),
+    ShowHistory(ShowHistoryCommand),
+    ShowStatus(ShowStatusCommand),
+    ShowViews(ShowViewsCommand),
+    ShowIndexes(ShowIndexesCommand),
+    ShowPacks(ShowPacksCommand),
+    ShowBlocks(ShowBlocksCommand),
+    ShowConfig(ShowConfigCommand),
+    ShowCommands(ShowCommandsCommand),
+    ShowConnectors(ShowConnectorsCommand),
+    ShowFunctions(ShowFunctionsCommand),
+    ShowColumns(ShowColumnsCommand),
+    ShowCount(ShowCountCommand),
+    /// Show syntax and usage for bundlebase commands
+    Syntax(SyntaxCommand),
 }
 
 impl FacadeCommand {
@@ -120,6 +145,10 @@ impl FacadeCommand {
         facade: &dyn BundleFacade,
     ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         match self {
+            FacadeCommand::Export(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
             FacadeCommand::DescribeConnector(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
@@ -160,12 +189,69 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::ShowDetails(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowHistory(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowStatus(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowViews(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowIndexes(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowPacks(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowBlocks(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowConfig(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowCommands(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowConnectors(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowFunctions(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowColumns(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowCount(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::Syntax(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
         }
     }
 
     /// Returns the Arrow schema for this command's output.
     pub fn output_schema(&self) -> SchemaRef {
         match self {
+            FacadeCommand::Export(_) => ExportCommand::output_schema(),
             FacadeCommand::DescribeConnector(_) => DescribeConnectorCommand::output_schema(),
             FacadeCommand::DescribeFunction(_) => DescribeFunctionCommand::output_schema(),
             FacadeCommand::ImportTempConnector(_) => ImportTempConnectorCommand::output_schema(),
@@ -176,12 +262,27 @@ impl FacadeCommand {
             FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_schema(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
+            FacadeCommand::ShowDetails(_) => ShowDetailsCommand::output_schema(),
+            FacadeCommand::ShowHistory(_) => ShowHistoryCommand::output_schema(),
+            FacadeCommand::ShowStatus(_) => ShowStatusCommand::output_schema(),
+            FacadeCommand::ShowViews(_) => ShowViewsCommand::output_schema(),
+            FacadeCommand::ShowIndexes(_) => ShowIndexesCommand::output_schema(),
+            FacadeCommand::ShowPacks(_) => ShowPacksCommand::output_schema(),
+            FacadeCommand::ShowBlocks(_) => ShowBlocksCommand::output_schema(),
+            FacadeCommand::ShowConfig(_) => ShowConfigCommand::output_schema(),
+            FacadeCommand::ShowCommands(_) => ShowCommandsCommand::output_schema(),
+            FacadeCommand::ShowConnectors(_) => ShowConnectorsCommand::output_schema(),
+            FacadeCommand::ShowFunctions(_) => ShowFunctionsCommand::output_schema(),
+            FacadeCommand::ShowColumns(_) => ShowColumnsCommand::output_schema(),
+            FacadeCommand::ShowCount(_) => ShowCountCommand::output_schema(),
+            FacadeCommand::Syntax(_) => SyntaxCommand::output_schema(),
         }
     }
 
     /// Returns the expected output shape for display formatting.
     pub fn output_shape(&self) -> OutputShape {
         match self {
+            FacadeCommand::Export(_) => ExportCommand::output_shape(),
             FacadeCommand::DescribeConnector(_) => DescribeConnectorCommand::output_shape(),
             FacadeCommand::DescribeFunction(_) => DescribeFunctionCommand::output_shape(),
             FacadeCommand::ImportTempConnector(_) => ImportTempConnectorCommand::output_shape(),
@@ -192,6 +293,20 @@ impl FacadeCommand {
             FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_shape(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
+            FacadeCommand::ShowDetails(_) => ShowDetailsCommand::output_shape(),
+            FacadeCommand::ShowHistory(_) => ShowHistoryCommand::output_shape(),
+            FacadeCommand::ShowStatus(_) => ShowStatusCommand::output_shape(),
+            FacadeCommand::ShowViews(_) => ShowViewsCommand::output_shape(),
+            FacadeCommand::ShowIndexes(_) => ShowIndexesCommand::output_shape(),
+            FacadeCommand::ShowPacks(_) => ShowPacksCommand::output_shape(),
+            FacadeCommand::ShowBlocks(_) => ShowBlocksCommand::output_shape(),
+            FacadeCommand::ShowConfig(_) => ShowConfigCommand::output_shape(),
+            FacadeCommand::ShowCommands(_) => ShowCommandsCommand::output_shape(),
+            FacadeCommand::ShowConnectors(_) => ShowConnectorsCommand::output_shape(),
+            FacadeCommand::ShowFunctions(_) => ShowFunctionsCommand::output_shape(),
+            FacadeCommand::ShowColumns(_) => ShowColumnsCommand::output_shape(),
+            FacadeCommand::ShowCount(_) => ShowCountCommand::output_shape(),
+            FacadeCommand::Syntax(_) => SyntaxCommand::output_shape(),
         }
     }
 }
@@ -203,6 +318,7 @@ impl BundleCommand {
     /// Returns `Err` with a descriptive error message if this is a mutating command.
     pub fn into_facade_command(self) -> Result<FacadeCommand, BundlebaseError> {
         match self {
+            BundleCommand::Export(cmd) => Ok(FacadeCommand::Export(cmd)),
             BundleCommand::DescribeConnector(cmd) => Ok(FacadeCommand::DescribeConnector(cmd)),
             BundleCommand::DescribeFunction(cmd) => Ok(FacadeCommand::DescribeFunction(cmd)),
             BundleCommand::ImportTempConnector(cmd) => Ok(FacadeCommand::ImportTempConnector(cmd)),
@@ -213,12 +329,27 @@ impl BundleCommand {
             BundleCommand::RenameTempFunction(cmd) => Ok(FacadeCommand::RenameTempFunction(cmd)),
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
             BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
+            BundleCommand::ShowDetails(cmd) => Ok(FacadeCommand::ShowDetails(cmd)),
+            BundleCommand::ShowHistory(cmd) => Ok(FacadeCommand::ShowHistory(cmd)),
+            BundleCommand::ShowStatus(cmd) => Ok(FacadeCommand::ShowStatus(cmd)),
+            BundleCommand::ShowViews(cmd) => Ok(FacadeCommand::ShowViews(cmd)),
+            BundleCommand::ShowIndexes(cmd) => Ok(FacadeCommand::ShowIndexes(cmd)),
+            BundleCommand::ShowPacks(cmd) => Ok(FacadeCommand::ShowPacks(cmd)),
+            BundleCommand::ShowBlocks(cmd) => Ok(FacadeCommand::ShowBlocks(cmd)),
+            BundleCommand::ShowConfig(cmd) => Ok(FacadeCommand::ShowConfig(cmd)),
+            BundleCommand::ShowCommands(cmd) => Ok(FacadeCommand::ShowCommands(cmd)),
+            BundleCommand::ShowConnectors(cmd) => Ok(FacadeCommand::ShowConnectors(cmd)),
+            BundleCommand::ShowFunctions(cmd) => Ok(FacadeCommand::ShowFunctions(cmd)),
+            BundleCommand::ShowColumns(cmd) => Ok(FacadeCommand::ShowColumns(cmd)),
+            BundleCommand::ShowCount(cmd) => Ok(FacadeCommand::ShowCount(cmd)),
+            BundleCommand::Syntax(cmd) => Ok(FacadeCommand::Syntax(cmd)),
             _ => {
                 // Get the command name for the error message
                 let cmd_name = match &self {
                     BundleCommand::Attach(_) => "ATTACH",
                     BundleCommand::DetachBlock(_) => "DETACH",
                     BundleCommand::Filter(_) => "FILTER",
+                    BundleCommand::ImportJoin(_) => "IMPORT JOIN",
                     BundleCommand::Join(_) => "JOIN",
                     BundleCommand::ReplaceBlock(_) => "REPLACE",
                     BundleCommand::AddColumn(_) => "ADD COLUMN",
@@ -250,7 +381,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) => {
+                    BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -264,7 +395,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_))
+        matches!(self, BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_))
     }
 }
 
@@ -354,6 +485,7 @@ pub trait BundleFacadeCommand: CommandParsing {
 /// - `BundleCommand` enum variants
 /// - Match arms in `BundleCommand::execute()`
 /// - `parse_from_rule()` function for centralized rule-to-command mapping
+/// - `available_commands()` function returning all command names and syntax strings
 ///
 /// # Categories
 ///
@@ -368,19 +500,19 @@ macro_rules! register_commands {
     (
         // Commands that return MessageResponse::ok()
         message {
-            $( $msg_variant:ident($msg_cmd:ty) => $msg_rule:path ),* $(,)?
+            $( $msg_variant:ident($msg_cmd:ty) => $msg_rule:path, $msg_name:literal => $msg_syntax:literal ),* $(,)?
         }
         // Commands that return Vec<FetchResults> but need special parsing (shared rules)
         fetch_special {
-            $( $fetch_variant:ident($fetch_cmd:ty) ),* $(,)?
+            $( $fetch_variant:ident($fetch_cmd:ty), $fetch_name:literal => $fetch_syntax:literal ),* $(,)?
         }
         // Commands that return VerificationResults
         verification {
-            $( $verify_variant:ident($verify_cmd:ty) => $verify_rule:path ),* $(,)?
+            $( $verify_variant:ident($verify_cmd:ty) => $verify_rule:path, $verify_name:literal => $verify_syntax:literal ),* $(,)?
         }
-        // Read-only commands using BundleFacadeCommand (e.g. ExplainPlan)
+        // Read-only commands using BundleFacadeCommand (e.g. ExplainPlan, Show*)
         facade {
-            $( $facade_variant:ident($facade_cmd:ty) => $facade_rule:path ),* $(,)?
+            $( $facade_variant:ident($facade_cmd:ty) => $facade_rule:path, $facade_name:literal => $facade_syntax:literal ),* $(,)?
         }
     ) => {
         /// Command that can be executed on a BundleBuilder.
@@ -473,6 +605,33 @@ macro_rules! register_commands {
                     _ => String::output_shape(),
                 }
             }
+
+            /// Returns a map of command names to their syntax descriptions.
+            ///
+            /// This is auto-generated from the `register_commands!` macro invocation,
+            /// ensuring every registered command has a syntax entry.
+            pub fn available_commands() -> std::collections::HashMap<&'static str, &'static str> {
+                let mut map = std::collections::HashMap::new();
+                $( map.insert($msg_name, $msg_syntax); )*
+                $( map.insert($fetch_name, $fetch_syntax); )*
+                $( map.insert($verify_name, $verify_syntax); )*
+                $( map.insert($facade_name, $facade_syntax); )*
+                map
+            }
+
+            /// Returns metadata for all registered commands: (name, syntax, mode).
+            ///
+            /// Mode is "read-write" for builder commands and "read-only" for facade commands.
+            /// Auto-generated from the `register_commands!` macro invocation.
+            pub fn command_metadata() -> Vec<(&'static str, &'static str, &'static str)> {
+                let mut entries = Vec::new();
+                $( entries.push(($msg_name, $msg_syntax, "read-write")); )*
+                $( entries.push(($fetch_name, $fetch_syntax, "read-write")); )*
+                $( entries.push(($verify_name, $verify_syntax, "read-write")); )*
+                $( entries.push(($facade_name, $facade_syntax, "read-only")); )*
+                entries.sort_by_key(|(name, _, _)| name.to_string());
+                entries
+            }
         }
 
         /// Parse a command from a pest Rule and Pair.
@@ -516,68 +675,144 @@ register_commands! {
     message {
         // Data modification commands
         Attach(AttachCommand) => Rule::attach_stmt,
+            "ATTACH" => "ATTACH '<path>' [TO <pack>] [WITH (<options>)]",
         DetachBlock(DetachBlockCommand) => Rule::detach_stmt,
+            "DETACH" => "DETACH '<location>'",
         Filter(FilterCommand) => Rule::filter_stmt,
+            "FILTER" => "FILTER WITH <select_query>",
+        ImportJoin(ImportJoinCommand) => Rule::import_join_stmt,
+            "IMPORT JOIN" => "IMPORT JOIN <name> [FLATTEN HISTORY]",
         Join(JoinCommand) => Rule::join_stmt,
+            "JOIN" => "[LEFT|RIGHT|FULL|INNER] JOIN '<path>' AS <name> ON <expression>",
         ReplaceBlock(ReplaceBlockCommand) => Rule::replace_stmt,
+            "REPLACE" => "REPLACE '<old_location>' WITH '<new_location>'",
 
         // Schema commands
         AddColumn(AddColumnCommand) => Rule::add_column_stmt,
+            "ADD COLUMN" => "ADD COLUMN <name> AS <expression>",
         CastColumn(CastColumnCommand) => Rule::cast_column_stmt,
+            "CAST COLUMN" => "CAST COLUMN <name> TO <type> [CLEAN '<pattern>']",
         DropColumn(DropColumnCommand) => Rule::drop_column_stmt,
+            "DROP COLUMN" => "DROP COLUMN <name>",
         RenameColumn(RenameColumnCommand) => Rule::rename_column_stmt,
+            "RENAME COLUMN" => "RENAME COLUMN <old> TO <new>",
         CreateIndex(CreateIndexCommand) => Rule::create_index_stmt,
+            "CREATE INDEX" => "CREATE <COLUMN|TEXT> INDEX ON <column>",
         DropIndex(DropIndexCommand) => Rule::drop_index_stmt,
+            "DROP INDEX" => "DROP INDEX <column>",
         RebuildIndex(RebuildIndexCommand) => Rule::rebuild_index_stmt,
+            "REBUILD INDEX" => "REBUILD INDEX ON <column>",
         Reindex(ReindexCommand) => Rule::reindex_stmt,
+            "REINDEX" => "REINDEX [ON data(<column>)]",
 
         // View commands
         CreateView(CreateViewCommand) => Rule::create_view_stmt,
+            "CREATE VIEW" => "CREATE VIEW <name> AS <sql>",
         RenameView(RenameViewCommand) => Rule::rename_view_stmt,
+            "RENAME VIEW" => "RENAME VIEW <old> TO <new>",
         DropView(DropViewCommand) => Rule::drop_view_stmt,
+            "DROP VIEW" => "DROP VIEW <name>",
 
         // Join management commands
         DropJoin(DropJoinCommand) => Rule::drop_join_stmt,
+            "DROP JOIN" => "DROP JOIN <name>",
         RenameJoin(RenameJoinCommand) => Rule::rename_join_stmt,
+            "RENAME JOIN" => "RENAME JOIN <old> TO <new>",
 
         // Metadata commands
         SetName(SetNameCommand) => Rule::set_name_stmt,
+            "SET NAME" => "SET NAME '<name>'",
         SetDescription(SetDescriptionCommand) => Rule::set_description_stmt,
+            "SET DESCRIPTION" => "SET DESCRIPTION '<description>'",
         SaveConfig(SaveConfigCommand) => Rule::save_config_stmt,
+            "SAVE CONFIG" => "SAVE CONFIG <key> = '<value>' FOR '<scope>'",
 
         // Source commands
         ImportConnector(ImportConnectorCommand) => Rule::import_connector_stmt,
+            "IMPORT CONNECTOR" => "IMPORT CONNECTOR <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
         ImportFunction(ImportFunctionCommand) => Rule::import_function_stmt,
+            "IMPORT FUNCTION" => "IMPORT FUNCTION <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
         RenameConnector(RenameConnectorCommand) => Rule::rename_connector_stmt,
+            "RENAME CONNECTOR" => "RENAME CONNECTOR <old> TO <new>",
         RenameFunction(RenameFunctionCommand) => Rule::rename_function_stmt,
+            "RENAME FUNCTION" => "RENAME FUNCTION <old> TO <new>",
         DropConnector(DropConnectorCommand) => Rule::drop_connector_stmt,
+            "DROP CONNECTOR" => "DROP CONNECTOR <name> [FOR PLATFORM '<platform>']",
         DropFunction(DropFunctionCommand) => Rule::drop_function_stmt,
+            "DROP FUNCTION" => "DROP FUNCTION <name>",
         CreateSource(CreateSourceCommand) => Rule::create_source_stmt,
+            "CREATE SOURCE" => "CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<args>)]",
 
         // Transaction commands
         Reset(ResetCommand) => Rule::reset_stmt,
+            "RESET" => "RESET",
         Undo(UndoCommand) => Rule::undo_stmt,
+            "UNDO" => "UNDO",
         Commit(CommitCommand) => Rule::commit_stmt,
+            "COMMIT" => "COMMIT '<message>'",
     }
     fetch_special {
         // These commands share Rule::fetch_stmt - handled in parser.rs
         Fetch(FetchCommand),
+            "FETCH" => "FETCH <pack> <ADD|UPDATE|SYNC> [DRY RUN]",
         FetchAll(FetchAllCommand),
+            "FETCH ALL" => "FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN]",
     }
     verification {
         VerifyData(VerifyDataCommand) => Rule::verify_data_stmt,
+            "VERIFY DATA" => "VERIFY DATA [UPDATE]",
     }
     facade {
+        Export(ExportCommand) => Rule::export_stmt,
+            "EXPORT" => "EXPORT TO '<path>' <sql>",
         DescribeConnector(DescribeConnectorCommand) => Rule::describe_connector_stmt,
+            "DESCRIBE CONNECTOR" => "DESCRIBE CONNECTOR <name>",
         DescribeFunction(DescribeFunctionCommand) => Rule::describe_function_stmt,
+            "DESCRIBE FUNCTION" => "DESCRIBE FUNCTION <name>",
         ImportTempConnector(ImportTempConnectorCommand) => Rule::import_temp_connector_stmt,
+            "IMPORT TEMP CONNECTOR" => "IMPORT TEMP CONNECTOR <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
         ImportTempFunction(ImportTempFunctionCommand) => Rule::import_temp_function_stmt,
+            "IMPORT TEMP FUNCTION" => "IMPORT TEMP FUNCTION <name> FROM '<runtime::entrypoint>' [WITH (<args>)]",
         DropTempConnector(DropTempConnectorCommand) => Rule::drop_temp_connector_stmt,
+            "DROP TEMP CONNECTOR" => "DROP TEMP CONNECTOR <name> [FOR PLATFORM '<platform>']",
         DropTempFunction(DropTempFunctionCommand) => Rule::drop_temp_function_stmt,
+            "DROP TEMP FUNCTION" => "DROP TEMP FUNCTION <name>",
         RenameTempConnector(RenameTempConnectorCommand) => Rule::rename_temp_connector_stmt,
+            "RENAME TEMP CONNECTOR" => "RENAME TEMP CONNECTOR <old> TO <new>",
         RenameTempFunction(RenameTempFunctionCommand) => Rule::rename_temp_function_stmt,
+            "RENAME TEMP FUNCTION" => "RENAME TEMP FUNCTION <old> TO <new>",
         ExplainPlan(ExplainPlanCommand) => Rule::explain_stmt,
+            "EXPLAIN" => "EXPLAIN [ANALYZE] [VERBOSE] [FORMAT <format>] [<sql>]",
         SetConfig(SetConfigCommand) => Rule::set_config_stmt,
+            "SET CONFIG" => "SET CONFIG <key> = '<value>' FOR '<scope>'",
+        ShowDetails(ShowDetailsCommand) => Rule::show_details_stmt,
+            "SHOW DETAILS" => "SHOW DETAILS",
+        ShowHistory(ShowHistoryCommand) => Rule::show_history_stmt,
+            "SHOW HISTORY" => "SHOW HISTORY",
+        ShowStatus(ShowStatusCommand) => Rule::show_status_stmt,
+            "SHOW STATUS" => "SHOW STATUS",
+        ShowViews(ShowViewsCommand) => Rule::show_views_stmt,
+            "SHOW VIEWS" => "SHOW VIEWS",
+        ShowIndexes(ShowIndexesCommand) => Rule::show_indexes_stmt,
+            "SHOW INDEXES" => "SHOW INDEXES",
+        ShowPacks(ShowPacksCommand) => Rule::show_packs_stmt,
+            "SHOW PACKS" => "SHOW PACKS",
+        ShowBlocks(ShowBlocksCommand) => Rule::show_blocks_stmt,
+            "SHOW BLOCKS" => "SHOW BLOCKS",
+        ShowConfig(ShowConfigCommand) => Rule::show_config_stmt,
+            "SHOW CONFIG" => "SHOW CONFIG",
+        ShowCommands(ShowCommandsCommand) => Rule::show_commands_stmt,
+            "SHOW COMMANDS" => "SHOW COMMANDS",
+        ShowConnectors(ShowConnectorsCommand) => Rule::show_connectors_stmt,
+            "SHOW CONNECTORS" => "SHOW CONNECTORS",
+        ShowFunctions(ShowFunctionsCommand) => Rule::show_functions_stmt,
+            "SHOW FUNCTIONS" => "SHOW FUNCTIONS",
+        ShowColumns(ShowColumnsCommand) => Rule::show_columns_stmt,
+            "SHOW COLUMNS" => "SHOW COLUMNS",
+        ShowCount(ShowCountCommand) => Rule::show_count_stmt,
+            "SHOW COUNT" => "SHOW COUNT",
+        Syntax(SyntaxCommand) => Rule::syntax_stmt,
+            "SYNTAX" => "SYNTAX [<command>]",
     }
 }
 

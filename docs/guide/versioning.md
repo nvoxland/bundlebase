@@ -60,10 +60,10 @@ Until `commit()` is called, any changes you have made remain in-memory and only 
     SELECT * FROM bundle_info.history
     ```
 
-=== "REPL"
+    or 
 
     ```
-    /history
+    SHOW HISTORY
     ```
 
 ## Status
@@ -90,10 +90,10 @@ View uncommitted changes in the bundle.
     SELECT * FROM bundle_info.status
     ```
 
-=== "REPL"
+    or
 
     ```
-    /status
+    SHOW STATUS
     ```
 
 ## Reset

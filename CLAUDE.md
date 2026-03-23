@@ -11,7 +11,7 @@ For detailed documentation, see the modular guides in the `.context/` directory:
 
 **Core Architecture:**
 - **[overview.md](.context/overview.md)** - Project purpose, structure, and development guidelines
-- **[architecture.md](.context/architecture.md)** - Three-tier architecture, operations, adapters, function system
+- **[architecture.md](.context/architecture.md)** - Three-tier architecture, operations, adapters, function system, CLI modes (REPL/Flight/MCP)
 - **[versioning.md](.context/versioning.md)** - Commit-based versioning and path handling
 
 **Python API:**

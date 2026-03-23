@@ -28,12 +28,6 @@ The `query()` method returns a `QueryResult` with methods to convert the results
     SELECT * FROM bundle WHERE age >= 21
     ```
 
-=== "REPL"
-
-    ```
-    /show
-    ```
-
 ## Result Formats
 
 The `QueryResult` object supports several output formats:

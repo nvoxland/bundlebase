@@ -68,7 +68,7 @@ The `select()` command has been replaced with `query()`. The key difference: `qu
 
 ### REPL commands require `/` prefix
 
-Meta-commands like `help` and `schema` now need a leading slash: `/help`, `/schema`. The REPL will suggest the correct form if you forget.
+Meta-commands like `help` and `schema` now need a leading slash: `/help`, `SHOW COLUMNS`. The REPL will suggest the correct form if you forget.
 
 ### Schema naming
 

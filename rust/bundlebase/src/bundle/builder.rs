@@ -694,7 +694,7 @@ impl BundleBuilder {
                 }
             }
             Err(e) => {
-                warn!("Command failed: {}: {}", description, e);
+                debug!("Command failed: {}: {}", description, e);
                 if !is_nested {
                     // On failure, discard the in-progress change
                     self.in_progress_change.write().take();

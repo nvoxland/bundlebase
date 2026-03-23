@@ -34,9 +34,16 @@ statement = { SOI ~ (
     | metadata_stmt
 ) ~ EOI }
 
+// Multi-statement input: semicolon-separated statements.
+// Respects single-quoted strings so semicolons inside quotes are not treated as delimiters.
+// This rule is used by the CLI for batch execution; the core library uses `statement` for single commands.
+multi_statement = { SOI ~ statement_text ~ (";" ~ statement_text)* ~ ";"? ~ EOI }
+statement_text  = { (quoted_string | !(";" | EOI) ~ ANY)+ }
+
 // Data modification statements - operations that change bundle data content
 data_modification_stmt = {
-    filter_stmt
+    import_join_stmt
+    | filter_stmt
     | attach_stmt
     | detach_stmt
     | replace_stmt
@@ -94,13 +101,100 @@ transaction_stmt = {
 
 // Metadata statements - operations for bundle metadata
 metadata_stmt = {
-    describe_connector_stmt
+    export_stmt
+    | show_details_stmt
+    | show_history_stmt
+    | show_status_stmt
+    | show_views_stmt
+    | show_indexes_stmt
+    | show_packs_stmt
+    | show_blocks_stmt
+    | show_config_stmt
+    | show_commands_stmt
+    | show_connectors_stmt
+    | show_functions_stmt
+    | show_columns_stmt
+    | show_count_stmt
+    | syntax_stmt
+    | describe_connector_stmt
     | describe_function_stmt
     | set_name_stmt
     | set_description_stmt
     | set_config_stmt
     | save_config_stmt
 }
+
+// ============================================================================
+// SYNTAX Statement
+// ============================================================================
+// Syntax: SYNTAX [<command>]
+// Examples:
+//   SYNTAX                     -- list all available commands
+//   SYNTAX ATTACH              -- show syntax for ATTACH command
+//   SYNTAX IMPORT CONNECTOR    -- show syntax for IMPORT CONNECTOR
+
+syntax_stmt = {
+    ^"syntax" ~ syntax_query?
+}
+
+syntax_query = @{
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// EXPORT Statement
+// ============================================================================
+// Syntax: EXPORT TO '<path>' <sql>
+// Examples:
+//   EXPORT TO 'output.csv' SELECT * FROM bundle
+//   EXPORT TO '/tmp/results.json' SELECT name, count FROM bundle WHERE active = true
+//   EXPORT TO 'data.table' SELECT * FROM bundle LIMIT 100
+
+export_stmt = {
+    ^"export" ~ ^"to" ~ quoted_string ~ export_sql
+}
+
+export_sql = @{
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// SHOW Statements
+// ============================================================================
+// Each SHOW target has its own grammar rule.
+// Examples:
+//   SHOW HISTORY       -- show commit history
+//   SHOW STATUS        -- show uncommitted changes
+//   SHOW DETAILS       -- show bundle metadata
+//   SHOW COUNT         -- show row count
+
+show_details_stmt    = { ^"show" ~ ^"details" }
+show_history_stmt    = { ^"show" ~ ^"history" }
+show_status_stmt     = { ^"show" ~ ^"status" }
+show_views_stmt      = { ^"show" ~ ^"views" }
+show_indexes_stmt    = { ^"show" ~ ^"indexes" }
+show_packs_stmt      = { ^"show" ~ ^"packs" }
+show_blocks_stmt     = { ^"show" ~ ^"blocks" }
+show_config_stmt     = { ^"show" ~ ^"config" }
+show_commands_stmt   = { ^"show" ~ ^"commands" }
+show_connectors_stmt = { ^"show" ~ ^"connectors" }
+show_functions_stmt  = { ^"show" ~ ^"functions" }
+show_columns_stmt    = { ^"show" ~ ^"columns" }
+show_count_stmt      = { ^"show" ~ ^"count" }
+
+// ============================================================================
+// IMPORT JOIN Statement
+// ============================================================================
+// Syntax: IMPORT JOIN <name> [FLATTEN HISTORY]
+// Examples:
+//   IMPORT JOIN stations
+//   IMPORT JOIN stations FLATTEN HISTORY
+
+import_join_stmt = {
+    ^"import" ~ ^"join" ~ identifier ~ import_join_flatten?
+}
+
+import_join_flatten = { ^"flatten" ~ ^"history" }
 
 // ============================================================================
 // FILTER Statement
@@ -313,16 +407,15 @@ rename_temp_function_stmt = {
 // ============================================================================
 // CREATE SOURCE Statement
 // ============================================================================
-// Syntax: CREATE SOURCE <function> WITH (<args>) [ON <pack>]
-//         CREATE SOURCE <dotted_name> [WITH (<args>)] [ON <pack>]
+// Syntax: CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<args>)]
 // Examples:
-//   CREATE SOURCE remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')
-//   CREATE SOURCE remote_dir WITH (url = 'file:///data/') ON users
-//   CREATE SOURCE acme.weather WITH (custom_key = 'hello')
-//   CREATE SOURCE acme.weather
+//   CREATE SOURCE USING remote_dir WITH (url = 's3://bucket/data/', patterns = '**/*.parquet')
+//   CREATE SOURCE FOR users USING remote_dir WITH (url = 'file:///data/')
+//   CREATE SOURCE USING acme.weather WITH (custom_key = 'hello')
+//   CREATE SOURCE USING acme.weather
 
 create_source_stmt = {
-    ^"create" ~ ^"source" ~ (dotted_identifier | identifier) ~ (^"with" ~ source_args)? ~ (^"on" ~ identifier)?
+    ^"create" ~ ^"source" ~ (^"for" ~ identifier)? ~ ^"using" ~ (dotted_identifier | identifier) ~ (^"with" ~ source_args)?
 }
 
 source_args = {
@@ -429,8 +522,11 @@ single_quoted = @{
 }
 
 single_quoted_content = @{
-    (escape_sequence | (!"'" ~ !"\\" ~ ANY))*
+    (sql_escaped_quote | escape_sequence | (!"'" ~ !"\\" ~ ANY))*
 }
+
+// SQL-style escaped single quote: two consecutive single quotes
+sql_escaped_quote = @{ "''" }
 
 double_quoted = @{
     "\"" ~ double_quoted_content ~ "\""

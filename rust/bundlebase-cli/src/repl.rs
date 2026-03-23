@@ -3,7 +3,7 @@
 //! This module provides an interactive command-line interface for working with
 //! bundlebase bundles. It supports SQL commands and REPL-specific meta commands.
 
-mod commands;
+pub(crate) mod commands;
 mod completion;
 pub mod display;
 pub mod json_formatter;
@@ -11,7 +11,7 @@ mod progress_impl;
 pub mod stream_formatter;
 pub mod table_utils;
 
-use super::OutputFormat;
+use crate::OutputFormat;
 use bundlebase::{BundlebaseError, BundleFacade};
 use commands::{Command, ReplCommand};
 use completion::BundleCompleter;
@@ -24,9 +24,23 @@ use stream_formatter::format_stream;
 use json_formatter::format_stream_json;
 use tracing::{error, info};
 
-/// Print the REPL header.
-pub fn print_header() {
-    info!("Bundlebase REPL");
+/// Print the REPL header with bundle info.
+pub fn print_header(bundle: &dyn BundleFacade) {
+    let url = bundle.url();
+    let version = bundle.version();
+    let commit_count = bundle.history().len();
+
+    if commit_count == 0 {
+        info!("Opened new bundle at {}", url);
+    } else {
+        info!(
+            "Opened bundle at {} (version {}, {} commit{})",
+            url,
+            version,
+            commit_count,
+            if commit_count == 1 { "" } else { "s" }
+        );
+    }
     info!("Type '/help' for available commands, '/exit' to quit");
     info!("----------------------------------------------------------");
 }
@@ -44,7 +58,7 @@ pub fn print_header() {
 ///
 /// * `Ok(())` - REPL exited normally
 /// * `Err(BundlebaseError)` - An error occurred
-/// Execute a single command non-interactively and exit.
+/// Execute one or more semicolon-separated commands non-interactively and exit.
 pub async fn execute_single(
     bundle: Arc<dyn BundleFacade>,
     sql: &str,
@@ -54,9 +68,9 @@ pub async fn execute_single(
     let tracker = Box::new(progress_impl::IndicatifTracker::new());
     bundlebase::progress::set_tracker(tracker);
 
-    // Parse command
-    let cmd = match commands::parse(sql) {
-        Ok(cmd) => cmd,
+    // Parse all commands (validates all before executing any)
+    let cmds = match commands::parse(sql) {
+        Ok(cmds) => cmds,
         Err(e) => {
             let error_msg = format!("Error: {}", e);
             match format {
@@ -71,36 +85,38 @@ pub async fn execute_single(
         }
     };
 
-    // Handle exit/quit commands as no-ops
-    if matches!(cmd, Command::Repl(ReplCommand::Exit)) {
-        return Ok(());
-    }
+    // Execute all commands sequentially
+    for cmd in cmds {
+        // Handle exit/quit commands as no-ops
+        if matches!(cmd, Command::Repl(ReplCommand::Exit)) {
+            return Ok(());
+        }
 
-    // Execute command
-    match commands::execute(cmd, &bundle).await {
-        Ok(Some((stream, shape))) => {
-            let output = match format {
-                OutputFormat::Json => format_stream_json(stream, Some(shape), Some(1000)).await?,
-                OutputFormat::Table => format_stream(stream, Some(shape), Some(1000)).await?,
-            };
-            if !output.is_empty() {
-                println!("{}", output);
-            }
-        }
-        Ok(None) => {
-            // No output (Clear command, etc.)
-        }
-        Err(e) => {
-            let error_msg = format!("{}", e);
-            match format {
-                OutputFormat::Json => {
-                    eprintln!("{}", serde_json::json!({"error": error_msg}));
-                }
-                OutputFormat::Table => {
-                    eprintln!("Error: {}", error_msg);
+        match commands::execute(cmd, &bundle).await {
+            Ok(Some((stream, shape))) => {
+                let output = match format {
+                    OutputFormat::Json => format_stream_json(stream, Some(shape), Some(1000)).await?,
+                    OutputFormat::Table => format_stream(stream, Some(shape), Some(1000)).await?,
+                };
+                if !output.is_empty() {
+                    println!("{}", output);
                 }
             }
-            std::process::exit(1);
+            Ok(None) => {
+                // No output (Clear command, etc.)
+            }
+            Err(e) => {
+                let error_msg = format!("{}", e);
+                match format {
+                    OutputFormat::Json => {
+                        eprintln!("{}", serde_json::json!({"error": error_msg}));
+                    }
+                    OutputFormat::Table => {
+                        eprintln!("Error: {}", error_msg);
+                    }
+                }
+                std::process::exit(1);
+            }
         }
     }
 
@@ -152,9 +168,9 @@ pub async fn start(bundle: Arc<dyn BundleFacade>, format: OutputFormat) -> Resul
                     continue;
                 }
 
-                // Parse command
-                let cmd = match commands::parse(input) {
-                    Ok(cmd) => cmd,
+                // Parse all statements (validates all before executing any)
+                let cmds = match commands::parse(input) {
+                    Ok(cmds) => cmds,
                     Err(e) => {
                         error!("Error parsing command: {}", e);
                         continue;
@@ -162,36 +178,45 @@ pub async fn start(bundle: Arc<dyn BundleFacade>, format: OutputFormat) -> Resul
                 };
 
                 // Check for exit command
-                if matches!(cmd, Command::Repl(ReplCommand::Exit)) {
+                if cmds.iter().any(|cmd| matches!(cmd, Command::Repl(ReplCommand::Exit))) {
                     info!("Goodbye!");
                     break;
                 }
 
-                // Execute command
-                match commands::execute(cmd, &bundle).await {
-                    Ok(Some((stream, shape))) => {
-                        // Use format_stream for consistent output formatting
-                        let result = match format {
-                            OutputFormat::Json => format_stream_json(stream, Some(shape), Some(1000)).await,
-                            OutputFormat::Table => format_stream(stream, Some(shape), Some(1000)).await,
-                        };
-                        match result {
-                            Ok(output) => {
-                                if !output.is_empty() {
-                                    println!("{}", output);
+                // Execute all commands sequentially
+                let mut had_error = false;
+                for cmd in cmds {
+                    match commands::execute(cmd, &bundle).await {
+                        Ok(Some((stream, shape))) => {
+                            let result = match format {
+                                OutputFormat::Json => format_stream_json(stream, Some(shape), Some(1000)).await,
+                                OutputFormat::Table => format_stream(stream, Some(shape), Some(1000)).await,
+                            };
+                            match result {
+                                Ok(output) => {
+                                    if !output.is_empty() {
+                                        println!("{}", output);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Error formatting output: {}", e);
+                                    had_error = true;
+                                    break;
                                 }
                             }
-                            Err(e) => {
-                                error!("Error formatting output: {}", e);
-                            }
+                        }
+                        Ok(None) => {
+                            // No output (Clear command)
+                        }
+                        Err(e) => {
+                            error!("Error executing command: {}", e);
+                            had_error = true;
+                            break;
                         }
                     }
-                    Ok(None) => {
-                        // No output (Clear command)
-                    }
-                    Err(e) => {
-                        error!("Error executing command: {}", e);
-                    }
+                }
+                if had_error {
+                    continue;
                 }
             }
             Signal::CtrlC | Signal::CtrlD => {

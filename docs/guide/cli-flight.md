@@ -5,7 +5,7 @@ The Bundlebase CLI can run as an [Arrow Flight SQL](https://arrow.apache.org/doc
 ## Starting the Server
 
 ```bash
-bundlebase --bundle <path> --mode flight [options]
+bundlebase server --bundle <path> [options]
 ```
 
 ### Flags
@@ -13,8 +13,6 @@ bundlebase --bundle <path> --mode flight [options]
 | Flag | Default | Description |
 |---|---|---|
 | `--bundle <path>` | *(required)* | Path or URL to the bundle |
-| `--mode flight` | *(required)* | Start in Flight server mode |
-| `--create` | `false` | Create a new bundle if it doesn't exist |
 | `--read-only` | `false` | Only allow SELECT and EXPLAIN commands |
 | `--host <addr>` | `0.0.0.0` | Host address to bind to |
 | `--port <port>` | `50051` | Port to listen on |
@@ -24,17 +22,16 @@ bundlebase --bundle <path> --mode flight [options]
 
 ```bash
 # Start with defaults (0.0.0.0:50051)
-bundlebase --bundle ./my-bundle --mode flight
+bundlebase server --bundle ./my-bundle
 
 # Custom host and port
-bundlebase --bundle ./my-bundle --mode flight --host 127.0.0.1 --port 8080
+bundlebase server --bundle ./my-bundle --host 127.0.0.1 --port 8080
 
 # Read-only server
-bundlebase --bundle ./my-bundle --mode flight --read-only
-
-# Create a new bundle and serve it
-bundlebase --bundle ./my-bundle --mode flight --create
+bundlebase server --bundle ./my-bundle --read-only
 ```
+
+To serve a new bundle, create it first with `bundlebase create`.
 
 ## Authentication
 
@@ -67,6 +64,8 @@ The Flight SQL server supports the full set of Bundlebase SQL commands:
 - **Schema changes**: `JOIN`, `DROP JOIN`, `DROP COLUMN`, `RENAME COLUMN`, `CREATE VIEW`, etc.
 - **Version control**: `COMMIT`, `RESET`, `UNDO`, `VERIFY DATA`
 - **Metadata**: `SET NAME`, `SET DESCRIPTION`, `SAVE CONFIG`, `SET CONFIG`
+- **Introspection**: `SHOW HISTORY`, `SHOW STATUS`, `SHOW CONFIG`, etc.
+- **Help**: `SYNTAX` to list all commands, `SYNTAX <command>` for detailed syntax
 - **Prepared statements**: Create, execute, and close prepared statements
 
 In read-only mode (`--read-only`), only `SELECT`, `EXPLAIN`, and `SET CONFIG` are allowed.

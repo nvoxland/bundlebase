@@ -26,7 +26,7 @@ use arrow_flight::{
     FlightDescriptor, FlightEndpoint, FlightInfo, HandshakeRequest, HandshakeResponse, Ticket,
 };
 use base64::prelude::*;
-use bundlebase::{Bundle, BundleBuilder, BundleFacade, PassedBundleConfig};
+use bundlebase::{Bundle, BundleFacade, PassedBundleConfig};
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::RwLock;
@@ -89,8 +89,6 @@ pub struct BundlebaseFlightSqlService {
     bundle_path: String,
     /// Bundle config for creating new session states
     bundle_config: Option<PassedBundleConfig>,
-    /// Whether to create bundles (vs open existing)
-    create_bundle: bool,
     /// Whether to open bundles in read-only mode
     read_only: bool,
     /// Session states keyed by auth token
@@ -107,13 +105,11 @@ impl BundlebaseFlightSqlService {
     ///
     /// * `bundle_path` - Path to the bundle (URL or filesystem path)
     /// * `bundle_config` - Optional bundle configuration
-    /// * `create_bundle` - If true, create the bundle; if false, open existing
     /// * `read_only` - If true, sessions will be read-only (only SELECT/EXPLAIN allowed)
     /// * `authenticator` - Authenticator for validating credentials
     pub fn new(
         bundle_path: String,
         bundle_config: Option<PassedBundleConfig>,
-        create_bundle: bool,
         read_only: bool,
         authenticator: BundlebaseAuthenticator,
     ) -> Self {
@@ -145,7 +141,6 @@ impl BundlebaseFlightSqlService {
         Self {
             bundle_path,
             bundle_config,
-            create_bundle,
             read_only,
             sessions,
             issued_tokens: Arc::new(RwLock::new(HashSet::new())),
@@ -215,18 +210,11 @@ impl BundlebaseFlightSqlService {
     ///
     /// Creates a new bundle facade and prepared statement storage for the session.
     async fn create_session(&self) -> Result<Session, Status> {
-        let state: Arc<dyn BundleFacade> = if self.create_bundle {
-            // Creating always needs read-write mode
-            BundleBuilder::create(&self.bundle_path, self.bundle_config.clone())
-                .await
-                .map_err(|e| Status::internal(format!("Failed to create bundle: {}", e)))?
-        } else if self.read_only {
-            // Read-only mode - open as Bundle
+        let state: Arc<dyn BundleFacade> = if self.read_only {
             Bundle::open(&self.bundle_path, self.bundle_config.clone())
                 .await
                 .map_err(|e| Status::internal(format!("Failed to open bundle: {}", e)))?
         } else {
-            // Read-write mode - open and extend
             Bundle::open(&self.bundle_path, self.bundle_config.clone())
                 .await
                 .map_err(|e| Status::internal(format!("Failed to open bundle: {}", e)))?

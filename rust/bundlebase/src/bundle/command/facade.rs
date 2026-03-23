@@ -6,6 +6,7 @@
 // Facade command implementations
 mod describe_connector;
 mod describe_function;
+mod export;
 mod import_temp_connector;
 mod import_temp_function;
 mod explain;
@@ -14,9 +15,13 @@ mod drop_temp_function;
 mod rename_temp_connector;
 mod rename_temp_function;
 mod set_config;
+mod show;
+mod show_count;
+mod syntax;
 
 pub use describe_connector::DescribeConnectorCommand;
 pub use describe_function::DescribeFunctionCommand;
+pub use export::ExportCommand;
 pub use import_temp_connector::ImportTempConnectorCommand;
 pub use import_temp_function::ImportTempFunctionCommand;
 pub use drop_temp_connector::DropTempConnectorCommand;
@@ -25,3 +30,10 @@ pub use rename_temp_connector::RenameTempConnectorCommand;
 pub use rename_temp_function::RenameTempFunctionCommand;
 pub use explain::ExplainPlanCommand;
 pub use set_config::SetConfigCommand;
+pub use show::{
+    ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
+    ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
+    ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
+};
+pub use show_count::ShowCountCommand;
+pub use syntax::SyntaxCommand;
