@@ -522,8 +522,11 @@ single_quoted = @{
 }
 
 single_quoted_content = @{
-    (escape_sequence | (!"'" ~ !"\\" ~ ANY))*
+    (sql_escaped_quote | escape_sequence | (!"'" ~ !"\\" ~ ANY))*
 }
+
+// SQL-style escaped single quote: two consecutive single quotes
+sql_escaped_quote = @{ "''" }
 
 double_quoted = @{
     "\"" ~ double_quoted_content ~ "\""

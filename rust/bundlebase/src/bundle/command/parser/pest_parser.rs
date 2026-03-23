@@ -54,6 +54,7 @@ pub fn extract_string_content(quoted: &str) -> Result<String, BundlebaseError> {
 pub fn process_escapes(s: &str) -> String {
     s.replace("\\\\", "\\")
         .replace("\\'", "'")
+        .replace("''", "'")  // SQL-style escaped single quote
         .replace("\\\"", "\"")
         .replace("\\n", "\n")
         .replace("\\r", "\r")
@@ -77,8 +78,7 @@ pub fn parse_join_type(s: &str) -> Result<JoinTypeOption, BundlebaseError> {
 /// Returns a single-quoted string with special characters escaped.
 pub fn escape_string(s: &str) -> String {
     let escaped = s
-        .replace('\\', "\\\\")
-        .replace('\'', "\\'")
+        .replace('\'', "''")   // SQL-style: ' → ''
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('\t', "\\t");
