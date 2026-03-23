@@ -387,20 +387,22 @@ Use `SYNTAX CREATE SOURCE` and `SYNTAX FETCH` for detailed syntax.
 
 ### Multiple data sources in separate bundles
 
-When working with multiple data sources, create a separate bundle for each. Use EXPORT to combine them:
+When working with multiple data sources, create a separate bundle for each. Then use `IMPORT BUNDLE` to combine them — one becomes the base, others become joins:
 
 ```bash
 # Create separate bundles for each data source
 bundlebase create --bundle ./lakes <<< "CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/lakes.csv')"
 bundlebase create --bundle ./stations <<< "CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/stations.csv')"
 
-# Export and combine for cross-source analysis
-bundlebase query --bundle ./lakes <<< "EXPORT TO 'lakes.csv' SELECT * FROM bundle"
-bundlebase query --bundle ./stations <<< "EXPORT TO 'stations.csv' SELECT * FROM bundle"
-bundlebase create --bundle ./combined <<< "ATTACH 'lakes.csv'"
-bundlebase extend --bundle ./combined <<< "JOIN 'stations.csv' AS stations ON lake_id = stations.lake_id"
-bundlebase query --bundle ./combined --format json <<< "SELECT * FROM bundle LIMIT 10"
+# Pick one as the base, import the other as a join
+# This copies all data, commits, and indexes from stations into lakes
+bundlebase extend --bundle ./lakes <<< "IMPORT BUNDLE './stations' AS stations ON lake_id = stations.lake_id"
+
+# Now query across both datasets
+bundlebase query --bundle ./lakes --format json <<< "SELECT * FROM bundle JOIN stations ON lake_id = stations.lake_id LIMIT 10"
 ```
+
+`IMPORT BUNDLE` copies all commit history from the source. Add `FLATTEN HISTORY` to collapse into a single commit instead.
 
 ## Building a Custom Connector
 

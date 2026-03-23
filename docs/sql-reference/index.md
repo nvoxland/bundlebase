@@ -18,6 +18,24 @@ ATTACH '<path>' [TO <pack>] [WITH (<key> = <value>, ...)]
 
 See [Attaching Data](../guide/attaching.md) for details.
 
+### IMPORT BUNDLE
+
+Imports an entire bundle as a join pack, copying all commits, data files, indexes, and connectors/functions. Operations referencing the source base pack are remapped to the new join pack.
+
+```sql
+IMPORT BUNDLE '<path>' [FLATTEN HISTORY] AS <name> ON <expression>
+```
+
+**Examples:**
+
+```sql
+-- Import with full commit history
+IMPORT BUNDLE './stations' AS stations ON lake_id = stations.lake_id
+
+-- Flatten all imported commits into one
+IMPORT BUNDLE './stations' FLATTEN HISTORY AS stations ON lake_id = stations.lake_id
+```
+
 ### DETACH
 
 Removes an attached data file from the bundle.

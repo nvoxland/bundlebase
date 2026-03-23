@@ -61,7 +61,7 @@ pub use parser::Rule;
 // Re-export builder command structs
 pub use builder::{
     AddColumnCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
+    ImportBundleCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
     DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -349,6 +349,7 @@ impl BundleCommand {
                     BundleCommand::Attach(_) => "ATTACH",
                     BundleCommand::DetachBlock(_) => "DETACH",
                     BundleCommand::Filter(_) => "FILTER",
+                    BundleCommand::ImportBundle(_) => "IMPORT BUNDLE",
                     BundleCommand::Join(_) => "JOIN",
                     BundleCommand::ReplaceBlock(_) => "REPLACE",
                     BundleCommand::AddColumn(_) => "ADD COLUMN",
@@ -679,6 +680,8 @@ register_commands! {
             "DETACH" => "DETACH '<location>'",
         Filter(FilterCommand) => Rule::filter_stmt,
             "FILTER" => "FILTER WITH <select_query>",
+        ImportBundle(ImportBundleCommand) => Rule::import_bundle_stmt,
+            "IMPORT BUNDLE" => "IMPORT BUNDLE '<path>' [FLATTEN HISTORY] AS <name> ON <expression>",
         Join(JoinCommand) => Rule::join_stmt,
             "JOIN" => "[LEFT|RIGHT|FULL|INNER] JOIN '<path>' AS <name> ON <expression>",
         ReplaceBlock(ReplaceBlockCommand) => Rule::replace_stmt,
