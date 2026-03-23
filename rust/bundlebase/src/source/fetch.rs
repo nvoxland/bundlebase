@@ -51,9 +51,6 @@ pub async fn download_io_file_to_data_dir(
 /// Download a file from an HTTP(S) URL to the data directory.
 ///
 /// Returns a WriteResult containing the file reference and the computed SHA256 hash.
-/// Default timeout for HTTP downloads (5 minutes).
-const HTTP_DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
-
 pub async fn download_http_to_data_dir(
     url: &Url,
     data_dir: &dyn IOReadWriteDir,
@@ -74,27 +71,9 @@ pub async fn download_http_to_data_dir_with_format(
 
     info!("Downloading {}", url);
 
-    let client = reqwest::Client::builder()
-        .timeout(HTTP_DOWNLOAD_TIMEOUT)
-        .build()
-        .map_err(|e| BundlebaseError::from(format!("Failed to create HTTP client: {}", e)))?;
-
-    let response = client
-        .get(url.as_str())
-        .send()
+    let response = reqwest::get(url.as_str())
         .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                BundlebaseError::from(format!(
-                    "Download timed out after {}s for '{}'. The data source may be too large. \
-                     Try scoping the URL with query parameters (e.g., date range, filters) to reduce the download size.",
-                    HTTP_DOWNLOAD_TIMEOUT.as_secs(),
-                    url
-                ))
-            } else {
-                BundlebaseError::from(format!("Failed to download '{}': {}", url, e))
-            }
-        })?;
+        .map_err(|e| BundlebaseError::from(format!("Failed to download '{}': {}", url, e)))?;
 
     if !response.status().is_success() {
         return Err(format!(
@@ -113,17 +92,7 @@ pub async fn download_http_to_data_dir_with_format(
     let data = response
         .bytes()
         .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                BundlebaseError::from(format!(
-                    "Download timed out while reading response from '{}'. \
-                     Try scoping the URL with query parameters to reduce the download size.",
-                    url
-                ))
-            } else {
-                BundlebaseError::from(format!("Failed to read '{}': {}", url, e))
-            }
-        })?;
+        .map_err(|e| BundlebaseError::from(format!("Failed to read '{}': {}", url, e)))?;
 
     info!("Downloaded {} ({:.1} MB)", url, data.len() as f64 / 1_048_576.0);
 
