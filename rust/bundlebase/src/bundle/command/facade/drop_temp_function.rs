@@ -8,7 +8,6 @@ use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::facade::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Command to drop runtime-only function entries (not persisted).
@@ -68,7 +67,6 @@ impl CommandParsing for DropTempFunctionCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for DropTempFunctionCommand {
     type Output = String;
 

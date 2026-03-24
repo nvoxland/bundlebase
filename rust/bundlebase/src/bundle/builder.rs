@@ -26,7 +26,7 @@ use datafusion::prelude::{DataFrame, SessionContext};
 use datafusion::scalar::ScalarValue;
 use parking_lot::RwLock;
 use sha2::{Digest, Sha256};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;

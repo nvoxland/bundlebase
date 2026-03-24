@@ -3,7 +3,6 @@ use crate::bundle::operation::Operation;
 use crate::bundle::BundleBuilder;
 use crate::data::ObjectId;
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
@@ -51,7 +50,6 @@ impl RenameViewOp {
     }
 }
 
-#[async_trait]
 impl Operation for RenameViewOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         let views = bundle.views.read();

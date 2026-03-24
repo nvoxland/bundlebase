@@ -3,7 +3,6 @@ use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
@@ -26,7 +25,6 @@ impl RenameColumnOp {
     }
 }
 
-#[async_trait]
 impl Operation for RenameColumnOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         bundle.column_name(&self.id)

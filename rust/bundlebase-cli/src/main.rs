@@ -177,7 +177,7 @@ mod tests {
         let create_result = BundleBuilder::create(&url, None).await;
         assert!(create_result.is_ok(), "Failed to create bundle");
 
-        let mut builder = create_result.expect("Should succeed");
+        let builder = create_result.expect("Should succeed");
 
         // Commit it so it's persisted
         builder

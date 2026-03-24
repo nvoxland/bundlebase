@@ -1,0 +1,43 @@
+[package]
+name = "bundlebase-index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Indexing infrastructure for Bundlebase - text search, column indexes, row ID caching"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+bundlebase-common = { workspace = true }
+bundlebase-io = { workspace = true }
+arrow = { workspace = true }
+arrow-schema = { workspace = true }
+datafusion = { workspace = true }
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+log = "0.4"
+rand = "0.9"
+url = { version = "2.5", features = ["serde"] }
+tempfile = { workspace = true }
+tar = { workspace = true }
+tantivy = "0.25"
+lru = "0.16"
+dashmap = "6"
+lazy_static = "1.5"
+
+# Metrics/observability (re-export from common or define locally)
+opentelemetry = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true }
+object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }

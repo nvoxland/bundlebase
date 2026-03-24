@@ -26,8 +26,6 @@ use std::sync::Arc;
 use url::Url;
 pub use versioned_blockid::VersionedBlockId;
 
-#[cfg(test)]
-pub use plugin::MockReader;
 
 #[async_trait]
 pub trait DataReader: Sync + Send + Debug {

@@ -41,11 +41,10 @@ pub use connector_entry::ConnectorEntry;
 pub use crate::platform::Platform;
 pub use crate::udf::UdfRuntime;
 pub use function_entry::{validate_kind_consistency, FunctionEntry, FunctionKind, FunctionRegistry};
-use arrow::datatypes::DataType;
 use std::collections::{HashMap, HashSet};
 
 use crate::catalog::{BlockSchemaProvider, BundleInfoSchemaProvider, DefaultSchemaProvider, PackSchemaProvider, CATALOG_NAME, BUNDLE_INFO_SCHEMA, DEFAULT_SCHEMA};
-use crate::namespaced_name::NamespacedName;
+use crate::ConfigProvider;
 use crate::function::VersionFunction;
 use crate::index::SearchTableFunction;
 use crate::data::{BlockId, DataReaderFactory, ObjectId, VersionedBlockId};
@@ -207,7 +206,8 @@ impl Bundle {
         );
 
         let bundle_config = Arc::new(BundleConfig::new(passed_config.as_ref())?);
-        let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, Arc::clone(&bundle_config)).await?));
+        let config_provider: Arc<dyn ConfigProvider> = Arc::clone(&bundle_config) as Arc<dyn ConfigProvider>;
+        let data_dir = Arc::new(RwLock::new(writable_dir_from_url(&url, config_provider).await?));
         let subprocess_cache = crate::function::ipc_bridge::new_subprocess_cache();
 
         let bundle = Arc::new(Self {

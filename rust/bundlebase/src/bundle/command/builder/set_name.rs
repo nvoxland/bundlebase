@@ -4,7 +4,6 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::SetNameOp;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -46,7 +45,6 @@ impl CommandParsing for SetNameCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for SetNameCommand {
     type Output = String;
 

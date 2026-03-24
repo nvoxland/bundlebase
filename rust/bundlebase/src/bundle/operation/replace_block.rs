@@ -6,7 +6,6 @@ use crate::data::{BlockId, ObjectId};
 use crate::io::readable_file_from_path;
 use crate::source::AttachedFileInfo;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
@@ -123,7 +122,6 @@ impl ReplaceBlockOp {
     }
 }
 
-#[async_trait]
 impl Operation for ReplaceBlockOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Check that the block exists in some pack

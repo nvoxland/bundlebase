@@ -6,7 +6,6 @@ use crate::platform::Platform;
 use crate::udf::UdfRuntime;
 use crate::bundle::operation::ImportConnectorOp;
 use crate::{BundleFacade, BundlebaseError};
-use async_trait::async_trait;
 use std::collections::HashMap;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
@@ -122,7 +121,6 @@ impl CommandParsing for ImportConnectorCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for ImportConnectorCommand {
     type Output = String;
 

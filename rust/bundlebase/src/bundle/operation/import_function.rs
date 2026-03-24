@@ -8,7 +8,6 @@ use crate::NamespacedName;
 use crate::bundle::operation::Operation;
 use crate::{Bundle, BundlebaseError};
 use arrow::datatypes::DataType;
-use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +46,6 @@ impl ImportFunctionOp {
     }
 }
 
-#[async_trait]
 impl Operation for ImportFunctionOp {
     fn describe(&self) -> String {
         let input_strs: Vec<String> = self.input_types.iter().map(|dt| dt.to_string()).collect();

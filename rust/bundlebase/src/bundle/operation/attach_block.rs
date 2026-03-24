@@ -9,7 +9,6 @@ use crate::progress::ProgressScope;
 use crate::source::AttachedFileInfo;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use arrow_schema::SchemaRef;
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -184,7 +183,6 @@ impl AttachBlockOp {
     }
 }
 
-#[async_trait]
 impl Operation for AttachBlockOp {
     fn describe(&self) -> String {
         format!("ATTACH: {}", self.location)
@@ -262,7 +260,7 @@ mod tests {
     use crate::io::plugin::object_store::ObjectStoreFile;
     use crate::io::IOReadFile;
     use crate::test_utils::{empty_bundle, for_yaml, test_datafile};
-    use crate::BundleConfig;
+    
     use url::Url;
 
     #[tokio::test]
@@ -295,7 +293,7 @@ mod tests {
         let pack = String::from(op.pack);
         let version = ObjectStoreFile::from_url(
             &Url::parse(datafile).unwrap(),
-            BundleConfig::new(None)?.into(),
+            crate::test_utils::test_config(),
         )?
         .version()
         .await?;
@@ -376,7 +374,7 @@ schema:
 
     #[tokio::test]
     async fn test_attach_dataframe_schema() -> Result<(), BundlebaseError> {
-        let mut bundle = crate::BundleBuilder::create("memory:///test_bundle", None).await?;
+        let bundle = crate::BundleBuilder::create("memory:///test_bundle", None).await?;
         bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
         // Get the DataFrame from the bundle

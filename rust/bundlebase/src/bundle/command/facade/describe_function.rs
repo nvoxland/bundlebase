@@ -11,7 +11,6 @@ use crate::namespaced_name::NamespacedName;
 use crate::BundlebaseError;
 use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;
 
@@ -80,7 +79,6 @@ impl CommandParsing for DescribeFunctionCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for DescribeFunctionCommand {
     type Output = SendableRecordBatchStream;
 

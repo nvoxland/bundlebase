@@ -3,9 +3,13 @@ use crate::bundle::Operation;
 use crate::data::DataReaderFactory;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{writable_dir_with_store, DataStorage, IOReadWriteDir, IOReadWriteFile};
-use crate::{BundleBuilder, BundleConfig, BundleFacade};
+use crate::{BundleBuilder, BundleConfig, BundleFacade, ConfigProvider};
+
+/// Create a test config as `Arc<dyn ConfigProvider>` for use in io functions.
+pub fn test_config() -> Arc<dyn ConfigProvider> {
+    Arc::new(BundleConfig::new(None).unwrap()) as Arc<dyn ConfigProvider>
+}
 use arrow_schema::SchemaRef;
-use parking_lot::RwLock;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
@@ -58,7 +62,7 @@ pub fn test_datafile(name: &str) -> &'static str {
                 let bytes = fs::read(os_path).unwrap();
 
                 let url = Url::parse(&format!("memory:///test_data/{}", filename)).unwrap();
-                let file = ObjectStoreFile::from_url(&url, BundleConfig::new(None).unwrap().into()).unwrap();
+                let file = ObjectStoreFile::from_url(&url, test_config()).unwrap();
 
                 rt.block_on(file.write(bytes.into())).unwrap();
 
@@ -84,16 +88,15 @@ pub fn random_memory_url() -> Url {
 /// Returns an Arc<dyn IOReadWriteDir> that can be used in tests.
 pub fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
     let url = random_memory_url();
-    let config: Arc<BundleConfig> = BundleConfig::new(None).unwrap().into();
     let store = crate::io::get_memory_store();
-    writable_dir_with_store(&url, store, &object_store::path::Path::from(url.path()), config).unwrap()
+    writable_dir_with_store(&url, store, &object_store::path::Path::from(url.path()), test_config()).unwrap()
 }
 
 /// Internal function for unit tests that need the concrete ObjectStoreDir type.
 /// This is pub(crate) so it's only available within the crate.
 #[cfg(test)]
 pub(crate) fn random_memory_dir_concrete() -> crate::io::plugin::object_store::ObjectStoreDir {
-    crate::io::plugin::object_store::ObjectStoreDir::from_url(&random_memory_url(), BundleConfig::new(None).unwrap().into()).unwrap()
+    crate::io::plugin::object_store::ObjectStoreDir::from_url(&random_memory_url(), test_config()).unwrap()
 }
 
 /// Create a random memory file for testing.

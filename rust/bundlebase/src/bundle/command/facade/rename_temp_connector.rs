@@ -9,7 +9,6 @@ use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::facade::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Command to rename runtime-only connector entries (not persisted).
@@ -85,7 +84,6 @@ impl CommandParsing for RenameTempConnectorCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for RenameTempConnectorCommand {
     type Output = String;
 

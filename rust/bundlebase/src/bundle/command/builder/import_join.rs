@@ -8,7 +8,6 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::*;
 use crate::data::ObjectId;
 use crate::{Bundle, BundleBuilder, BundleFacade, BundlebaseError};
-use async_trait::async_trait;
 use std::collections::HashMap;
 use tracing::info;
 
@@ -214,7 +213,6 @@ fn build_pack_remap(
     remap
 }
 
-#[async_trait]
 impl BundleBuilderCommand for ImportJoinCommand {
     type Output = String;
 
@@ -335,8 +333,6 @@ async fn copy_data_files(
     source: &Bundle,
     target: &BundleBuilder,
 ) -> Result<HashMap<String, String>, BundlebaseError> {
-    use crate::io::{IOReadWriteDir, IOReadWriteFile};
-
     let source_dir = source.data_dir();
     let target_dir = target.bundle().data_dir();
     let mut location_remap = HashMap::new();

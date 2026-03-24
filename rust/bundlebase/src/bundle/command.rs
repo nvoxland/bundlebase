@@ -44,7 +44,6 @@ use crate::bundle::facade::BundleFacade;
 use crate::source::FetchResults;
 use crate::{BundleBuilder, BundlebaseError};
 use arrow::datatypes::SchemaRef;
-use async_trait::async_trait;
 
 pub mod parser;
 pub mod builder;
@@ -436,7 +435,6 @@ pub trait CommandParsing: Send + Sync {
 /// - `rule()` - Returns the pest Rule that matches this command
 /// - `from_statement(pair)` - Parses from a pest Pair that matched the rule
 /// - `to_statement()` - Serializes back to command string (round-trip support)
-#[async_trait]
 pub trait BundleBuilderCommand: CommandParsing {
     /// The type returned by execute().
     ///
@@ -464,7 +462,6 @@ pub trait BundleBuilderCommand: CommandParsing {
 /// - `rule()` - Returns the pest Rule that matches this command
 /// - `from_statement(pair)` - Parses from a pest Pair that matched the rule
 /// - `to_statement()` - Serializes back to command string (round-trip support)
-#[async_trait]
 pub trait BundleFacadeCommand: CommandParsing {
     /// The type returned by execute().
     ///

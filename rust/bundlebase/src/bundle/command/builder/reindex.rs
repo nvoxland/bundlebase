@@ -2,7 +2,6 @@
 
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -32,7 +31,6 @@ impl CommandParsing for ReindexCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for ReindexCommand {
     type Output = String;
 

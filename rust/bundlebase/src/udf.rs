@@ -7,7 +7,5 @@ mod entrypoint;
 pub(crate) mod ipc_utils;
 mod runtime;
 
-pub use entrypoint::{RuntimeType, UdfEntrypoint};
+pub use entrypoint::RuntimeType;
 pub use runtime::UdfRuntime;
-pub use runtime::{PythonRuntime, FfiRuntime, IpcRuntime, JavaRuntime, DockerRuntime};
-pub use crate::function::manifest::{Manifest, ManifestEntry};

@@ -3,7 +3,6 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::extract_string_content;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -53,7 +52,6 @@ impl CommandParsing for CommitCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for CommitCommand {
     type Output = String;
 

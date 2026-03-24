@@ -2,7 +2,6 @@
 
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -48,7 +47,6 @@ impl CommandParsing for RebuildIndexCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for RebuildIndexCommand {
     type Output = String;
 

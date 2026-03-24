@@ -5,7 +5,6 @@ use crate::bundle::operation::RenameColumnOp;
 use crate::bundle::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
-use async_trait::async_trait;
 use std::collections::HashMap;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
@@ -98,7 +97,6 @@ fn compute_renames(schema: &SchemaRef) -> Vec<(String, String)> {
     renames
 }
 
-#[async_trait]
 impl BundleBuilderCommand for StandardizeColumnNamesCommand {
     type Output = String;
 

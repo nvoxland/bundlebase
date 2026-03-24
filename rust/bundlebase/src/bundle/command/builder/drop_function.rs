@@ -4,7 +4,6 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::platform::Platform;
 use crate::bundle::operation::DropFunctionOp;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -52,7 +51,6 @@ impl CommandParsing for DropFunctionCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for DropFunctionCommand {
     type Output = String;
 

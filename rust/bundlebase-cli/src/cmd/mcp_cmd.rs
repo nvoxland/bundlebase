@@ -3,7 +3,7 @@
 //! Starts without a bundle by default. Agents use the `create_bundle` or
 //! `open_bundle` tools to load one. Optionally pass `--bundle` to pre-open.
 
-use super::{load_config, open_bundle, BundleArgs};
+use super::{open_bundle, BundleArgs};
 use bundlebase::BundlebaseError;
 use clap::Args;
 

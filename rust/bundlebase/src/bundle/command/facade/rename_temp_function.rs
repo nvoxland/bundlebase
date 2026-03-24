@@ -9,7 +9,6 @@ use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::facade::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Command to rename runtime-only function entries (not persisted).
@@ -85,7 +84,6 @@ impl CommandParsing for RenameTempFunctionCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for RenameTempFunctionCommand {
     type Output = String;
 

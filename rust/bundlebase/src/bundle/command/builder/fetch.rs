@@ -9,7 +9,6 @@ use crate::source::{FetchAction, FetchResults, SyncMode};
 use crate::BundlebaseError;
 use arrow::array::{ArrayRef, RecordBatch, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use log::info;
 use std::sync::Arc;
 use datafusion::execution::SendableRecordBatchStream;
@@ -138,7 +137,6 @@ impl CommandParsing for FetchCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for FetchCommand {
     type Output = Vec<FetchResults>;
 
@@ -218,7 +216,6 @@ impl CommandParsing for FetchAllCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for FetchAllCommand {
     type Output = Vec<FetchResults>;
 

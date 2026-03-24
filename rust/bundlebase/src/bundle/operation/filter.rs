@@ -4,7 +4,6 @@ use crate::bundle::operation::Operation;
 use crate::catalog::BundleViewTable;
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::{SessionConfig, SessionContext};
@@ -29,7 +28,6 @@ impl FilterOp {
     }
 }
 
-#[async_trait]
 impl Operation for FilterOp {
     fn describe(&self) -> String {
         format!("FILTER: {}", self.query)

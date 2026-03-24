@@ -4,8 +4,11 @@ mod system;
 mod scope;
 pub use passed::PassedBundleConfig;
 pub use system::{SYSTEM_SCOPE, MAX_MEMORY_CFG, CATALOG_NAME_CFG, ALLOW_EXTERNAL_CODE_CFG, is_external_code_allowed};
-pub use scope::Scope;
+pub use scope::{Scope, validated_scope, validated_scope_from_url};
 use registry::config_registry;
+
+// Re-export config types from common
+pub use bundlebase_common::config::{ConfigKey, ConfigProvider, ConfigScope, ConfigSource, default_url_to_name};
 
 use arrow::array::{BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
@@ -18,44 +21,7 @@ use datafusion::execution::SendableRecordBatchStream;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 
-/// Identifies which config layer a value came from.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ConfigSource {
-    /// Stored in the bundle manifest via SaveConfigOp
-    Stored,
-    /// From environment variables (BB_*)
-    Env,
-    /// Passed explicitly to create()/open()
-    Passed,
-    /// Set at runtime via SET CONFIG (session-only)
-    Runtime,
-    /// Static default defined on a ConfigKey via `with_default()`
-    Default,
-}
-
-impl ConfigSource {
-    /// String representation for Python/CLI display.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ConfigSource::Stored => "stored",
-            ConfigSource::Env => "env",
-            ConfigSource::Passed => "passed",
-            ConfigSource::Runtime => "runtime",
-            ConfigSource::Default => "default",
-        }
-    }
-
-    /// Higher priority wins when the same key+scope appears in multiple layers.
-    fn priority(&self) -> u8 {
-        match self {
-            ConfigSource::Default => 0,
-            ConfigSource::Stored => 1,
-            ConfigSource::Env => 2,
-            ConfigSource::Passed => 3,
-            ConfigSource::Runtime => 4,
-        }
-    }
-}
+// ConfigSource, ConfigScope, ConfigKey, ConfigProvider are re-exported from bundlebase_common above.
 
 /// A single config entry with source tracking metadata.
 #[derive(Debug, Clone)]
@@ -74,257 +40,36 @@ pub struct ConfigValueDetails {
     pub secure: bool,
 }
 
-/// Identifies which provider/protocol a configuration key belongs to.
-///
-/// Created via `BundleConfig::register_scope("s3")`. At runtime, `matches()`
-/// checks that a `Scope` (e.g. `s3/bucket`) falls under this config scope.
-///
-/// Each scope carries a function pointer for converting URLs to scope names.
-/// The default (`default_url_to_name`) matches URLs whose scheme equals
-/// the scope name (e.g., `s3://…`). Providers that use custom URL formats
-/// (like Kaggle) override this via `with_url_to_name()`.
-#[derive(Debug, Clone, Copy, Eq)]
-pub struct ConfigScope {
-    /// Provider name (e.g., "s3", "gs", "azure", "sftp", "kaggle")
-    pub name: &'static str,
-    /// Function to convert a URL to a scope name for this provider.
-    /// Takes (&ConfigScope, &str) → Option<String>.
-    /// Returns Some(name) if the URL belongs to this scope, None otherwise.
-    url_to_name_fn: fn(&ConfigScope, &str) -> Option<String>,
+// ConfigScope is now defined in bundlebase_common::config
+
+// ConfigKey is now defined in bundlebase_common::config.
+// These validation methods remain here since they need the config registry.
+
+/// Check whether a key is secure for a given scope.
+pub fn is_key_secure(scope: &Scope, key: &str) -> bool {
+    BundleConfig::get_config_key(scope, key)
+        .map_or(false, |spec| spec.secure)
 }
 
-impl PartialEq for ConfigScope {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-
-/// Default URL-to-name conversion: matches URLs whose scheme equals the scope name.
-///
-/// Only handles URL-format input (e.g., `s3://bucket/path` → `"s3/bucket/path"`).
-/// Name-based input (e.g., `"s3/bucket"`) is handled by `Scope::try_from` directly.
-pub(crate) fn default_url_to_name(scope: &ConfigScope, url: &str) -> Option<String> {
-    let url_prefix = format!("{}://", scope.name);
-    if !url.starts_with(&url_prefix) {
-        return None;
-    }
-    let rest = url[url_prefix.len()..].trim_end_matches('/');
-    if rest.is_empty() {
-        Some(scope.name.to_string())
+/// Validate that a config key is recognized for a specific scope.
+pub fn validate_key_exists(scope: &Scope, key: &str) -> Result<(), BundlebaseError> {
+    if BundleConfig::get_config_key(scope, key).is_some() {
+        Ok(())
     } else {
-        Some(format!("{}/{}", scope.name, rest))
+        let valid_keys: Vec<&str> = config_registry().keys()
+            .iter()
+            .filter(|s| s.scope.matches(scope))
+            .map(|s| s.key)
+            .collect();
+        Err(format!(
+            "Unknown config key '{}' for scope '{}'. Valid keys for this scope: {:?}",
+            key, scope, valid_keys
+        )
+        .into())
     }
 }
 
-impl ConfigScope {
-    /// Convert a URL to a scope name using this scope's rules.
-    /// Returns Some(name) if the URL belongs to this scope, None otherwise.
-    pub fn url_to_name(&self, url: &str) -> Option<String> {
-        (self.url_to_name_fn)(self, url)
-    }
-
-    /// Builder: override the URL-to-name conversion function.
-    pub const fn with_url_to_name(
-        mut self,
-        f: fn(&ConfigScope, &str) -> Option<String>,
-    ) -> Self {
-        self.url_to_name_fn = f;
-        self
-    }
-
-    /// Define a non-secure configuration key within this scope.
-    ///
-    /// ```rust,ignore
-    /// pub const S3_REGION_CFG: ConfigKey = S3_SCOPE.define("region");
-    /// ```
-    pub const fn define(self, key: &'static str) -> ConfigKey {
-        ConfigKey { key, secure: false, scope: self, default_value: None, default_fn: None }
-    }
-
-    /// Define a secure (secret) configuration key within this scope.
-    ///
-    /// Values for secure keys are masked in display output.
-    /// ```rust,ignore
-    /// pub const S3_SECRET: ConfigKey = S3_SCOPE.define_secure("secret_access_key");
-    /// ```
-    pub const fn define_secure(self, key: &'static str) -> ConfigKey {
-        ConfigKey { key, secure: true, scope: self, default_value: None, default_fn: None }
-    }
-
-    /// Check if a runtime `Scope` is compatible with this `ConfigScope`.
-    ///
-    /// e.g., `ConfigScope("s3")` matches `Scope("s3")`, `Scope("s3/bucket")`, etc.
-    /// but NOT `Scope("")` (global) or `Scope("gs/bucket")`.
-    pub fn matches(&self, scope: &Scope) -> bool {
-        let s = scope.as_str();
-        let n = self.name;
-        // Exact match: "s3" == "s3"
-        if s == n {
-            return true;
-        }
-        // Prefix match: "s3/bucket" starts with "s3/"
-        if s.starts_with(n) && s.as_bytes().get(n.len()) == Some(&b'/') {
-            return true;
-        }
-        false
-    }
-}
-
-impl std::fmt::Display for ConfigScope {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name)
-    }
-}
-
-/// Defines a known configuration key and whether it is secure.
-///
-/// Each service/provider defines its own slice of `ConfigKey` entries.
-/// Duplicate keys across modules are fine (e.g., `access_key` in S3 and Azure).
-#[derive(Debug, Clone, Copy)]
-pub struct ConfigKey {
-    /// Configuration key name (e.g., "region", "secret_access_key")
-    pub key: &'static str,
-    /// Whether this key holds a secret (password, token, etc.)
-    pub secure: bool,
-    /// Which provider scope this key belongs to
-    pub scope: ConfigScope,
-    /// Static default value, set via `with_default()`.
-    /// The value is both the display value in `SHOW CONFIG` and the actual default.
-    pub default_value: Option<&'static str>,
-    /// Dynamic default: `(description, resolver)`, set via `with_default_fn()`.
-    ///
-    /// The resolver function takes no arguments and returns the actual default
-    /// (or `None` if unavailable). The description is shown in `SHOW CONFIG`
-    /// output (e.g., `"~/.kaggle/kaggle.json"`).
-    pub default_fn: Option<(&'static str, fn() -> Option<String>)>,
-}
-
-impl ConfigKey {
-    /// Set a static default value for this config key.
-    ///
-    /// When `BundleConfig::get()` finds no value from any source, it returns
-    /// this default if the key's scope is compatible with the lookup scope.
-    ///
-    /// ```rust,ignore
-    /// pub const MY_KEY: ConfigKey = MY_SCOPE.define("base_url")
-    ///     .with_default("https://example.com");
-    /// ```
-    pub const fn with_default(mut self, value: &'static str) -> Self {
-        self.default_value = Some(value);
-        self
-    }
-
-    /// Set a dynamic default for this config key.
-    ///
-    /// The resolver function is called with the description string and returns
-    /// the actual default value (or `None` if unavailable). The description is
-    /// displayed in `SHOW CONFIG` output (e.g., `"~/.kaggle/kaggle.json"`).
-    ///
-    /// ```rust,ignore
-    /// fn read_username(_desc: &'static str) -> Option<String> { ... }
-    /// pub const MY_KEY: ConfigKey = MY_SCOPE.define("username")
-    ///     .with_default_fn("~/.kaggle/kaggle.json", read_username);
-    /// ```
-    pub const fn with_default_fn(mut self, description: &'static str, f: fn() -> Option<String>) -> Self {
-        self.default_fn = Some((description, f));
-        self
-    }
-
-    /// Resolve the default value for this key.
-    ///
-    /// Checks `default_fn` first (dynamic), then `default_value` (static).
-    pub fn resolve_default(&self) -> Option<String> {
-        if let Some((_desc, f)) = self.default_fn {
-            return f();
-        }
-        self.default_value.map(|v| v.to_string())
-    }
-
-    /// Description string for display in `SHOW CONFIG`.
-    ///
-    /// For static defaults this is the value itself; for dynamic defaults
-    /// it is the description passed to `with_default_fn`.
-    pub fn default_description(&self) -> Option<&'static str> {
-        if let Some((desc, _)) = self.default_fn {
-            return Some(desc);
-        }
-        self.default_value
-    }
-
-    /// Check whether a key is secure for a given scope.
-    ///
-    /// Returns true if the registered spec for this scope+key is marked secure.
-    pub fn is_key_secure(scope: &Scope, key: &str) -> bool {
-        BundleConfig::get_config_key(scope, key)
-            .map_or(false, |spec| spec.secure)
-    }
-
-    /// Validate that a config key is recognized for a specific scope.
-    ///
-    /// Returns an error if the key is not found in any registered spec matching the scope.
-    pub fn validate_key_exists(scope: &Scope, key: &str) -> Result<(), BundlebaseError> {
-        if BundleConfig::get_config_key(scope, key).is_some() {
-            Ok(())
-        } else {
-            let valid_keys: Vec<&str> = config_registry().keys()
-                .iter()
-                .filter(|s| s.scope.matches(scope))
-                .map(|s| s.key)
-                .collect();
-            Err(format!(
-                "Unknown config key '{}' for scope '{}'. Valid keys for this scope: {:?}",
-                key, scope, valid_keys
-            )
-            .into())
-        }
-    }
-}
-
-/// Declares `pub const` config keys and generates a function returning `&'static [ConfigKey]`.
-///
-/// # Example
-/// ```rust,ignore
-/// config_keys!(s3_keys, {
-///     pub const S3_REGION_CFG: ConfigKey = S3_SCOPE.define("region");
-///     pub const S3_SECRET_CFG: ConfigKey = S3_SCOPE.define_secure("secret");
-/// });
-/// // Generates: pub const S3_REGION_CFG, S3_SECRET_CFG, and fn s3_keys() -> &'static [ConfigKey]
-/// ```
-macro_rules! config_keys {
-    ($fn_name:ident, {
-        $( pub const $name:ident : ConfigKey = $init:expr ; )*
-    }) => {
-        $( pub const $name: ConfigKey = $init; )*
-
-        pub(crate) fn $fn_name() -> &'static [ConfigKey] {
-            &[ $( $name ),* ]
-        }
-    };
-}
-pub(crate) use config_keys;
-
-/// Declares `pub const` config scopes and generates a function returning `&'static [ConfigScope]`.
-///
-/// # Example
-/// ```rust,ignore
-/// config_scopes!(object_store_scopes, {
-///     pub const S3_SCOPE: ConfigScope = BundleConfig::register_scope("s3");
-///     pub const GCS_SCOPE: ConfigScope = BundleConfig::register_scope("gs");
-/// });
-/// // Generates: pub const S3_SCOPE, GCS_SCOPE, and fn object_store_scopes() -> &'static [ConfigScope]
-/// ```
-macro_rules! config_scopes {
-    ($fn_name:ident, {
-        $( pub const $name:ident : ConfigScope = $init:expr ; )*
-    }) => {
-        $( pub const $name: ConfigScope = $init; )*
-
-        pub(crate) fn $fn_name() -> &'static [ConfigScope] {
-            &[ $( $name ),* ]
-        }
-    };
-}
-pub(crate) use config_scopes;
+// Re-export macros from common (they use #[macro_export] so they're at the crate root)
 
 
 /// A single config entry stored internally.
@@ -406,7 +151,7 @@ impl BundleConfig {
     /// pub const S3_SCOPE: ConfigScope = BundleConfig::register_scope("s3");
     /// ```
     pub const fn register_scope(name: &'static str) -> ConfigScope {
-        ConfigScope { name, url_to_name_fn: default_url_to_name }
+        ConfigScope::new(name)
     }
 
     /// Returns all known configuration scopes.
@@ -460,7 +205,7 @@ impl BundleConfig {
     /// * `value` - Configuration value
     /// * `source` - Which config layer this entry belongs to
     pub fn set(&self, scope: &Scope, key: &str, value: &str, source: ConfigSource) -> Result<(), BundlebaseError> {
-        ConfigKey::validate_key_exists(scope, key)?;
+        validate_key_exists(scope, key)?;
 
         let mut inner = self.inner.write();
         let scope_str = scope.as_str().to_string();
@@ -574,7 +319,7 @@ impl BundleConfig {
         for (source, entries) in &inner.entries {
             let priority = source.priority();
             for entry in entries {
-                let scope = match Scope::new(&entry.scope) {
+                let scope = match Scope::from_name(&entry.scope) {
                     Ok(s) => s,
                     Err(e) => {
                         log::warn!("Skipping invalid scope '{}' in config: {}", entry.scope, e);
@@ -677,7 +422,7 @@ impl BundleConfig {
         for (source, entries) in &inner.entries {
             let priority = source.priority();
             for entry in entries {
-                let scope = match Scope::new(&entry.scope) {
+                let scope = match Scope::from_name(&entry.scope) {
                     Ok(s) => s,
                     Err(e) => {
                         log::warn!("Skipping invalid scope '{}' in config: {}", entry.scope, e);
@@ -688,7 +433,7 @@ impl BundleConfig {
                 let is_active = winners
                     .get(&winner_key)
                     .map_or(false, |(p, _)| *p == priority);
-                let is_secure = ConfigKey::is_key_secure(&scope, &entry.key);
+                let is_secure = is_key_secure(&scope, &entry.key);
                 result.push(ConfigValueDetails {
                     key: entry.key.clone(),
                     value: entry.value.clone(),
@@ -703,7 +448,7 @@ impl BundleConfig {
         // Append synthetic default entries for keys that have defaults
         for spec in specs {
             if let Some(description) = spec.default_description() {
-                let scope = match Scope::new(spec.scope.name) {
+                let scope = match Scope::from_name(spec.scope.name) {
                     Ok(s) => s,
                     Err(e) => {
                         log::warn!("Skipping invalid scope '{}' in config spec: {}", spec.scope.name, e);
@@ -796,7 +541,7 @@ impl BundleConfig {
                 (scope_parts.join("/"), key)
             };
 
-            let scope = match Scope::new(&scope_str) {
+            let scope = match Scope::new(&scope_str, &BundleConfig::all_scopes()) {
                 Ok(s) => s,
                 Err(_) => {
                     log::warn!(
@@ -831,6 +576,14 @@ impl Clone for BundleConfig {
             inner: RwLock::new(new_inner),
             passed_config: Arc::clone(&self.passed_config),
         }
+    }
+}
+
+/// Implement ConfigProvider for BundleConfig so IO crates can use it via the trait.
+impl ConfigProvider for BundleConfig {
+    fn get(&self, scope: &Scope, key: &ConfigKey) -> Result<Option<String>, BundlebaseError> {
+        // Delegate to the inherent method
+        BundleConfig::get(self, scope, key)
     }
 }
 
@@ -1240,22 +993,22 @@ mod tests {
         let azure = Scope::try_from("azure").unwrap();
 
         // Secure keys (scoped)
-        assert!(ConfigKey::is_key_secure(&s3, "secret_access_key"));
-        assert!(ConfigKey::is_key_secure(&s3, "session_token"));
-        assert!(ConfigKey::is_key_secure(&azure, "access_key"));
-        assert!(ConfigKey::is_key_secure(&gcs, "service_account_key"));
-        assert!(ConfigKey::is_key_secure(&azure, "client_secret"));
+        assert!(is_key_secure(&s3, "secret_access_key"));
+        assert!(is_key_secure(&s3, "session_token"));
+        assert!(is_key_secure(&azure, "access_key"));
+        assert!(is_key_secure(&gcs, "service_account_key"));
+        assert!(is_key_secure(&azure, "client_secret"));
 
         // Non-secure keys
-        assert!(!ConfigKey::is_key_secure(&s3, "region"));
-        assert!(!ConfigKey::is_key_secure(&azure, "account"));
-        assert!(!ConfigKey::is_key_secure(&s3, "bucket"));
+        assert!(!is_key_secure(&s3, "region"));
+        assert!(!is_key_secure(&azure, "account"));
+        assert!(!is_key_secure(&s3, "bucket"));
 
         // Secure key but wrong scope — not secure
-        assert!(!ConfigKey::is_key_secure(&gcs, "secret_access_key"));
+        assert!(!is_key_secure(&gcs, "secret_access_key"));
 
         // Unknown key — not secure
-        assert!(!ConfigKey::is_key_secure(&s3, "nonexistent_key"));
+        assert!(!is_key_secure(&s3, "nonexistent_key"));
     }
 
     #[test]
@@ -1344,8 +1097,8 @@ mod tests {
 
     #[test]
     fn test_config_scope_rejects_partial_prefix() {
-        // "s3x" is not a registered scope, so Scope::new rejects it
-        assert!(Scope::new("s3x").is_err());
+        // "s3x" is not a registered scope, so validated_scope rejects it
+        assert!(validated_scope("s3x").is_err());
     }
 
     #[test]
@@ -1358,6 +1111,7 @@ mod tests {
         assert!(names.contains(&"azure"));
         assert!(names.contains(&"ftp"));
         assert!(names.contains(&"sftp"));
+        #[cfg(feature = "connector-kaggle")]
         assert!(names.contains(&"kaggle"));
     }
 
@@ -1397,13 +1151,13 @@ mod tests {
     #[test]
     fn test_validate_key_exists() {
         // "region" is in S3 scope
-        assert!(ConfigKey::validate_key_exists(&Scope::try_from("s3").unwrap(), "region").is_ok());
-        assert!(ConfigKey::validate_key_exists(&Scope::try_from("s3/bucket").unwrap(), "region").is_ok());
+        assert!(validate_key_exists(&Scope::try_from("s3").unwrap(), "region").is_ok());
+        assert!(validate_key_exists(&Scope::try_from("s3/bucket").unwrap(), "region").is_ok());
         // "region" is NOT in GCS scope
-        assert!(ConfigKey::validate_key_exists(&Scope::try_from("gs").unwrap(), "region").is_err());
+        assert!(validate_key_exists(&Scope::try_from("gs").unwrap(), "region").is_err());
         // "account" is in Azure scope
-        assert!(ConfigKey::validate_key_exists(&Scope::try_from("azure").unwrap(), "account").is_ok());
-        assert!(ConfigKey::validate_key_exists(&Scope::try_from("s3").unwrap(), "account").is_err());
+        assert!(validate_key_exists(&Scope::try_from("azure").unwrap(), "account").is_ok());
+        assert!(validate_key_exists(&Scope::try_from("s3").unwrap(), "account").is_err());
     }
 
     // ── URL-to-name conversion tests ─────────────────────────────────
@@ -1438,6 +1192,7 @@ mod tests {
         assert_eq!(scope.url_to_name("gs://bucket"), None);
     }
 
+    #[cfg(feature = "connector-kaggle")]
     #[test]
     fn test_config_scope_with_custom_url_to_name() {
         // Test that Kaggle scope (which has a custom url_to_name) works correctly
@@ -1461,7 +1216,8 @@ mod tests {
 
     #[test]
     fn test_scope_parse_unknown_errors() {
-        let result = Scope::try_from("not-a-valid-scope");
+        // validated_scope checks against the registry, so unknown scopes are rejected
+        let result = validated_scope("not-a-valid-scope");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Unknown scope"), "Expected 'Unknown scope' in: {}", err);

@@ -9,7 +9,6 @@ use crate::bundle::command::{BundleCommand, BundleFacadeCommand, CommandParsing,
 use crate::bundle::facade::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::SchemaRef;
-use async_trait::async_trait;
 
 /// Command to show syntax and usage for bundlebase commands.
 #[derive(Debug, Clone)]
@@ -108,7 +107,6 @@ impl CommandParsing for SyntaxCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for SyntaxCommand {
     type Output = String;
 

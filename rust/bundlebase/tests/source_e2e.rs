@@ -1,9 +1,10 @@
+use std::sync::Arc;
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::io::{readable_file_from_url, IOReadWriteDir};
 use bundlebase::source::SyncMode;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
-use bundlebase::{Bundle, BundlebaseError, BundleConfig};
+use bundlebase::{Bundle, BundlebaseError, BundleConfig, ConfigProvider};
 use std::collections::HashMap;
 use url::Url;
 
@@ -31,7 +32,7 @@ async fn copy_test_file(
     target_name: &str,
 ) -> Result<(), BundlebaseError> {
     let source_obj =
-        readable_file_from_url(&Url::parse(test_file)?, BundleConfig::new(None)?.into()).await?;
+        readable_file_from_url(&Url::parse(test_file)?, Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>).await?;
     let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?
@@ -44,7 +45,7 @@ async fn copy_test_file(
 #[tokio::test]
 async fn test_create_source_basic() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Define a source with default patterns
     bundle
@@ -68,7 +69,7 @@ async fn test_create_source_basic() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_create_source_with_patterns() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Define source with specific patterns
     bundle
@@ -91,7 +92,7 @@ async fn test_create_source_with_patterns() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_create_source_default_patterns() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Define source without patterns (function defaults to **/* internally)
     bundle
@@ -126,7 +127,7 @@ async fn test_create_source_auto_attaches_files() -> Result<(), BundlebaseError>
     .await?;
 
     // Create bundle and define source
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -150,7 +151,7 @@ async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
     let bundle_dir = random_memory_dir();
 
     // Create bundle and define source (empty directory)
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -193,7 +194,7 @@ async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source (auto-attaches)
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -228,7 +229,7 @@ async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -275,7 +276,7 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle with parquet-only pattern
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -306,7 +307,7 @@ async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle, define source, commit
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -338,7 +339,7 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -359,7 +360,7 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_create_source_serialization() -> Result<(), BundlebaseError> {
     let bundle_dir = random_memory_dir();
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -393,7 +394,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle, define source, commit
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir1.url().as_str(), None).await?;
 
     bundle
@@ -404,7 +405,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
 
     // Extend to new location
     let loaded = Bundle::open(bundle_dir1.url().as_str(), None).await?;
-    let mut extended = loaded.extend(Some(bundle_dir2.url().as_str())).await?;
+    let extended = loaded.extend(Some(bundle_dir2.url().as_str())).await?;
 
     // Add a new file to source
     copy_test_file(
@@ -439,7 +440,7 @@ async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source (default is copy=true)
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -476,7 +477,7 @@ async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source with copy=false
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
@@ -510,7 +511,7 @@ async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> 
     .await?;
 
     // Create bundle and define source with explicit copy=true
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
@@ -547,7 +548,7 @@ async fn test_create_source_creates_single_change() -> Result<(), BundlebaseErro
     .await?;
 
     // Create bundle and define source
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     // Record change count before create_source (create may add a change)
@@ -602,7 +603,7 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
     .await?;
 
     // Create bundle and define source
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -686,7 +687,7 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source with copy=true (default)
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -760,7 +761,7 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source (default copy=true)
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle

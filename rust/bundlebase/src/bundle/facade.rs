@@ -1,4 +1,4 @@
-use super::column_metadata::{self, ColumnNames};
+use super::column_metadata::ColumnNames;
 use super::command::parser::{is_command_statement, parse_command};
 use super::command::{BundleCommand, ExplainPlanCommand, FacadeCommand, CommandResponse, OutputShape, ImportTempConnectorCommand, ImportTempFunctionCommand};
 use crate::platform::Platform;

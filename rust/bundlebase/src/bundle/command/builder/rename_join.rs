@@ -3,7 +3,6 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RenameJoinOp;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -60,7 +59,6 @@ impl CommandParsing for RenameJoinCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for RenameJoinCommand {
     type Output = String;
 

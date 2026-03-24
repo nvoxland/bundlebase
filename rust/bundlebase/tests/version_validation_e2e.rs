@@ -25,7 +25,7 @@ async fn test_query_fails_when_source_file_changed_csv() -> Result<(), Bundlebas
 
     // 2. Create a bundle and attach the CSV file
     let bundle_url = random_memory_url();
-    let mut builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
+    let builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
     builder.attach(csv_file.url().as_str(), None).await?;
 
     // Verify initial query works
@@ -79,7 +79,7 @@ async fn test_query_succeeds_when_source_unchanged() -> Result<(), BundlebaseErr
 
     // 2. Create a bundle and attach the CSV file
     let bundle_url = random_memory_url();
-    let mut builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
+    let builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
     builder.attach(csv_file.url().as_str(), None).await?;
 
     // 3. Commit the bundle
@@ -151,7 +151,7 @@ async fn test_query_fails_when_source_parquet_changed() -> Result<(), Bundlebase
 
     // 2. Create a bundle and attach the parquet file
     let bundle_url = random_memory_url();
-    let mut builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
+    let builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
     builder.attach(parquet_file.url().as_str(), None).await?;
 
     // Verify initial query works
@@ -204,7 +204,7 @@ async fn test_multiple_queries_with_unchanged_source() -> Result<(), BundlebaseE
 
     // 2. Create a bundle and attach the CSV file
     let bundle_url = random_memory_url();
-    let mut builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
+    let builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
     builder.attach(csv_file.url().as_str(), None).await?;
     builder.commit("Initial commit").await?;
 

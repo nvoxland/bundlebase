@@ -1144,7 +1144,7 @@ mod tests {
         }
 
         let url = Url::parse("memory:///test_dblquote_csv/data.csv")?;
-        let file = ObjectStoreFile::from_url(&url, crate::BundleConfig::new(None)?.into())?;
+        let file = ObjectStoreFile::from_url(&url, crate::test_utils::test_config())?;
         file.write(bytes::Bytes::from(csv.into_bytes())).await?;
 
         let plugin = CsvPlugin::default();
@@ -1187,7 +1187,7 @@ mod tests {
         // First, verify the error actually occurs without our retry logic
         // by using the raw FileReader directly
         let csv_url_str = format!("file://{}", csv_path);
-        let csv_url = Url::parse(&csv_url_str)?;
+        let _csv_url = Url::parse(&csv_url_str)?;
         let config = CsvFormatConfig::default();
         let binding = Bundle::empty(None).await?;
         let file = crate::data::plugin::file_reader::FilePlugin::new(config.clone())

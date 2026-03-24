@@ -6,7 +6,6 @@ use crate::bundle::operation::{AttachBlockOp, CreateSourceOp, SourceInfo};
 use crate::source::{FetchAction, SyncMode};
 use crate::data::ObjectId;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use std::collections::HashMap;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
@@ -141,7 +140,6 @@ impl CommandParsing for CreateSourceCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for CreateSourceCommand {
     type Output = String;
 

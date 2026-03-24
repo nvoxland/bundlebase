@@ -2,7 +2,6 @@
 
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -31,7 +30,6 @@ impl CommandParsing for ResetCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for ResetCommand {
     type Output = String;
 

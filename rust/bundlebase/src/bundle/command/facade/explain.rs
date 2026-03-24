@@ -8,7 +8,6 @@ use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::facade::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::ExplainOption;
 use std::sync::Arc;
@@ -124,7 +123,6 @@ impl CommandParsing for ExplainPlanCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for ExplainPlanCommand {
     type Output = SendableRecordBatchStream;
 

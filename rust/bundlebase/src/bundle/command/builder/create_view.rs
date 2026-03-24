@@ -3,7 +3,6 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::CreateViewOp;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -58,7 +57,6 @@ impl CommandParsing for CreateViewCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for CreateViewCommand {
     type Output = String;
 

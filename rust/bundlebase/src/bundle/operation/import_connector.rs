@@ -7,7 +7,6 @@ use crate::udf::UdfRuntime;
 use crate::data::ObjectId;
 use crate::NamespacedName;
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 
@@ -34,7 +33,6 @@ impl ImportConnectorOp {
     }
 }
 
-#[async_trait]
 impl Operation for ImportConnectorOp {
     fn describe(&self) -> String {
         format!(

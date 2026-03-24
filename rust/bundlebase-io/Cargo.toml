@@ -1,0 +1,45 @@
+[package]
+name = "bundlebase-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Storage abstraction layer for Bundlebase - file://, s3://, tar://, ftp://, sftp://"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+bundlebase-common = { workspace = true }
+datafusion = { workspace = true }
+object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
+url = { version = "2.5", features = ["serde"] }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_yaml_ng = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+tar = { workspace = true }
+russh = "0.57"
+russh-sftp = "2.1"
+russh-keys = "0.49"
+suppaftp = { version = "8.0", features = ["tokio"] }
+tempfile = { workspace = true }
+shellexpand = "3.1"
+parking_lot = { workspace = true }
+log = "0.4"
+rand = "0.9"
+lazy_static = "1.5"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+
+[dev-dependencies]
+rstest = { workspace = true }
+rand = "0.9"

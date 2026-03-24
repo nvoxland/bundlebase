@@ -4,7 +4,6 @@ use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
 use arrow_schema::DataType;
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::{Expr, expr::Cast};
@@ -31,7 +30,6 @@ impl CastColumnOp {
     }
 }
 
-#[async_trait]
 impl Operation for CastColumnOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         bundle.column_name(&self.id)

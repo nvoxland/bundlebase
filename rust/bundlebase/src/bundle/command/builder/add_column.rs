@@ -3,7 +3,6 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::AddColumnOp;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -62,7 +61,6 @@ impl CommandParsing for AddColumnCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for AddColumnCommand {
     type Output = String;
 

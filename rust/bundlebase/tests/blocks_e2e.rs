@@ -10,7 +10,7 @@ mod common;
 #[tokio::test]
 async fn test_adding_blocks() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
@@ -55,7 +55,7 @@ async fn test_adding_blocks() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_column_id_reuse_across_blocks() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)

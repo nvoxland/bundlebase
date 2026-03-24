@@ -3,7 +3,6 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::DropViewOp;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -45,7 +44,6 @@ impl CommandParsing for DropViewCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for DropViewCommand {
     type Output = String;
 

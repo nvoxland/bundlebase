@@ -7,10 +7,9 @@
 use crate::bundle::command::response::OutputShape;
 use crate::bundle::command::{BundleFacadeCommand, CommandParsing, Rule};
 use crate::bundle::facade::BundleFacade;
-use crate::bundle_config::{ConfigKey, Scope};
+use crate::bundle_config::Scope;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use log::info;
 use std::sync::Arc;
 
@@ -120,7 +119,6 @@ impl CommandParsing for SetConfigCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for SetConfigCommand {
     type Output = String;
 
@@ -134,7 +132,7 @@ impl BundleFacadeCommand for SetConfigCommand {
             &self.value,
         ).await?;
 
-        let is_secure = ConfigKey::is_key_secure(&self.scope, &self.key);
+        let is_secure = crate::bundle_config::is_key_secure(&self.scope, &self.key);
         let display_value = if is_secure {
             "'*****'".to_string()
         } else {

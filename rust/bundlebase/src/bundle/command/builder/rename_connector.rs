@@ -3,7 +3,6 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RenameConnectorOp;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -64,7 +63,6 @@ impl CommandParsing for RenameConnectorCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for RenameConnectorCommand {
     type Output = String;
 

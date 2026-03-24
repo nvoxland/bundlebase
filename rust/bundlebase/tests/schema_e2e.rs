@@ -7,7 +7,7 @@ mod common;
 
 #[tokio::test]
 async fn test_schema_tracking_through_operations() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Initially has only the sentinel no_data column
     assert_eq!(1, bundle.schema().await?.fields().len());
@@ -65,7 +65,7 @@ async fn test_schema_tracking_through_operations() -> Result<(), BundlebaseError
 }
 #[tokio::test]
 async fn test_schema_consistency_with_dataframe() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
     bundle.drop_column("title").await?;
     bundle.rename_column("first_name", "given_name").await?;
@@ -95,7 +95,7 @@ async fn test_schema_consistency_with_dataframe() -> Result<(), BundlebaseError>
 }
 #[tokio::test]
 async fn test_schema_types_preserved() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Get original type of 'id' column
@@ -125,7 +125,7 @@ async fn test_schema_types_preserved() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_rename_with_unicode() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Rename to unicode column name
@@ -152,7 +152,7 @@ async fn test_rename_with_unicode() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_column_with_special_characters() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
     // Rename to column name with special characters

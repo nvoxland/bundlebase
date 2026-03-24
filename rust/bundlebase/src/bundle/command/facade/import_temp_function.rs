@@ -16,7 +16,6 @@ use crate::bundle::function_entry::{FunctionEntry, FunctionKind};
 use crate::NamespacedName;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -190,7 +189,6 @@ impl CommandParsing for ImportTempFunctionCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for ImportTempFunctionCommand {
     type Output = String;
 

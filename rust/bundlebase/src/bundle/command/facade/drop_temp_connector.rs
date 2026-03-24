@@ -10,7 +10,6 @@ use crate::platform::Platform;
 use crate::bundle::facade::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Command to drop a session-only connector (not persisted).
@@ -91,7 +90,6 @@ impl CommandParsing for DropTempConnectorCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for DropTempConnectorCommand {
     type Output = String;
 

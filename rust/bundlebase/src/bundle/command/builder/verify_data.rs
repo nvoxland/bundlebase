@@ -11,7 +11,6 @@ use crate::data::BlockId;
 use crate::BundlebaseError;
 use arrow::array::{ArrayRef, BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use std::sync::Arc;
 use datafusion::execution::SendableRecordBatchStream;
 use super::super::BundleBuilderCommand;
@@ -232,7 +231,6 @@ impl CommandParsing for VerifyDataCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for VerifyDataCommand {
     type Output = VerificationResults;
 

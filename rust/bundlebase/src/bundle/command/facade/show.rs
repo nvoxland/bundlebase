@@ -11,7 +11,6 @@ use crate::bundle::facade::BundleFacade;
 use crate::catalog::BUNDLE_INFO_SCHEMA;
 use crate::BundlebaseError;
 use arrow::datatypes::{Schema, SchemaRef};
-use async_trait::async_trait;
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;
 
@@ -47,7 +46,6 @@ macro_rules! show_table_command {
             }
         }
 
-        #[async_trait]
         impl BundleFacadeCommand for $name {
             type Output = SendableRecordBatchStream;
 

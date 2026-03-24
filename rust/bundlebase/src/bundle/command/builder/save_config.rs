@@ -3,9 +3,8 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::command::parser::{escape_string, extract_string_content};
 use crate::bundle::operation::SaveConfigOp;
-use crate::bundle_config::{ConfigKey, Scope};
+use crate::bundle_config::Scope;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -93,7 +92,6 @@ impl CommandParsing for SaveConfigCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for SaveConfigCommand {
     type Output = String;
 
@@ -101,7 +99,7 @@ impl BundleBuilderCommand for SaveConfigCommand {
         let op = SaveConfigOp::setup(&self.scope, &self.key, &self.value);
         builder.apply_operation(op.into()).await?;
 
-        let display_value = if ConfigKey::is_key_secure(&self.scope, &self.key) {
+        let display_value = if crate::bundle_config::is_key_secure(&self.scope, &self.key) {
             "*****".to_string()
         } else {
             self.value.clone()

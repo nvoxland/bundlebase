@@ -1,5 +1,9 @@
 [workspace]
 members = [
+    "rust/bundlebase-common",
+    "rust/bundlebase-io",
+    "rust/bundlebase-connector",
+    "rust/bundlebase-index",
     "rust/bundlebase",
     "rust/bundlebase-python",
     "rust/bundlebase-cli",
@@ -16,6 +20,10 @@ repository = "https://github.com/nvoxland/bundlebase"
 authors = ["Nathan Voxland <nathan@voxland.net>"]
 
 [workspace.dependencies]
+bundlebase-common = { path = "rust/bundlebase-common" }
+bundlebase-connector = { path = "rust/bundlebase-connector" }
+bundlebase-index = { path = "rust/bundlebase-index" }
+bundlebase-io = { path = "rust/bundlebase-io" }
 datafusion = { version = "52.1", features = ["avro"] }
 arrow = { version = "57", features = ["ffi", "pyarrow"] }
 arrow-flight = { version = "57", features = ["flight-sql-experimental"] }

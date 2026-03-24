@@ -3,7 +3,6 @@ use ::bundlebase::bundle::BundleBuilder;
 use ::bundlebase::bundle::{BundleChange, BundleFacade, BundleStatus};
 use ::bundlebase::source::{FetchedBlock, FetchResults, SyncMode};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;

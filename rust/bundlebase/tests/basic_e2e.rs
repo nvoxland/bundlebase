@@ -1,8 +1,9 @@
+use std::sync::Arc;
 use bundlebase;
 use bundlebase::bundle::{BundleFacade, INIT_FILENAME, META_DIR};
 use bundlebase::io::{readable_file_from_path, readable_file_from_url};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
-use bundlebase::BundleConfig;
+use bundlebase::{BundleConfig, ConfigProvider};
 use bundlebase::{op_field, AnyOperation};
 use bundlebase::{test_utils, Bundle, BundlebaseError};
 use url::Url;
@@ -12,7 +13,7 @@ mod common;
 #[tokio::test]
 async fn test_basic_e2e() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("userdata.parquet"), None)
@@ -23,7 +24,7 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
         .await?;
     let version = readable_file_from_url(
         &Url::parse(test_datafile("userdata.parquet"))?,
-        BundleConfig::new(None)?.into(),
+        Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>,
     ).await?
     .version()
     .await?;
@@ -157,7 +158,7 @@ changes:
 #[tokio::test]
 async fn test_empty_bundle() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     assert_eq!(0, bundle.num_rows().await?);
 
@@ -180,7 +181,7 @@ async fn test_empty_bundle() -> Result<(), BundlebaseError> {
 async fn test_save_multiple_operations() -> Result<(), BundlebaseError> {
     let temp_dir = random_memory_dir();
 
-    let mut bundle = bundlebase::BundleBuilder::create(temp_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(temp_dir.url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
     bundle.drop_column("title").await?;
     bundle.drop_column("comments").await?;
@@ -310,7 +311,7 @@ changes:
 #[tokio::test]
 async fn test_name_and_description() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Default should be None
     assert!(bundle.bundle().name().is_none());
@@ -339,7 +340,7 @@ async fn test_name_and_description() -> Result<(), BundlebaseError> {
 #[tokio::test]
 async fn test_attach_csv() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
@@ -445,7 +446,7 @@ changes:
     let layout_file = readable_file_from_path(
         &layout,
         loaded_bundle.data_dir(),
-        BundleConfig::new(None)?.into(),
+        Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>,
     ).await?;
     assert!(
         layout_file.exists().await?,
@@ -459,7 +460,7 @@ changes:
 #[tokio::test]
 async fn test_attach_json() -> Result<(), BundlebaseError> {
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("objects.json"), None)

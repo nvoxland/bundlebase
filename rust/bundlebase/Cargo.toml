@@ -12,7 +12,17 @@ autobenches = false
 [lib]
 crate-type = ["rlib"]
 
+[features]
+default = ["connector-postgres", "connector-kaggle", "connector-web-scrape"]
+connector-postgres = ["bundlebase-connector/connector-postgres"]
+connector-kaggle = ["bundlebase-connector/connector-kaggle"]
+connector-web-scrape = ["bundlebase-connector/connector-web-scrape"]
+
 [dependencies]
+bundlebase-common = { workspace = true }
+bundlebase-connector = { workspace = true }
+bundlebase-index = { workspace = true }
+bundlebase-io = { workspace = true }
 datafusion = { workspace = true }
 arrow = { workspace = true }
 arrow-schema = { workspace = true }
@@ -28,7 +38,6 @@ object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
 futures = { workspace = true }
-glob = "0.3"
 lazy_static = "1.5"
 libloading = "0.8"
 bytes = { workspace = true }
@@ -41,21 +50,11 @@ rand = "0.9"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { workspace = true }
 regex = "1.12.3"
-shellexpand = "3.1"
-lru = "0.16"
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "trace"] }
 opentelemetry-stdout = { version = "0.31", features = ["metrics", "trace"]}
-russh = "0.57"
-russh-sftp = "2.1"
-russh-keys = "0.49"
-suppaftp = { version = "8.0", features = ["tokio"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
-scraper = "0.25"
-zip = { version = "8.1", default-features = false, features = ["deflate"] }
-tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
-postgres-types = { version = "0.2", features = ["derive"] }
-tantivy = "0.25"
+
 tempfile = { workspace = true }
 tokio-util = { workspace = true }
 dashmap = "6"

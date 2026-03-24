@@ -412,7 +412,7 @@ impl DataSource for RowIdOffsetDataSource {
 mod tests {
     use super::*;
     use crate::object_id::ObjectIdAlias;
-    use crate::BundleConfig;
+    
     use url::Url;
 
     #[test]
@@ -427,7 +427,7 @@ mod tests {
 
         let file = ObjectStoreFile::from_url(
             &Url::parse("memory:///test.csv").unwrap(),
-            BundleConfig::new(None).unwrap().into(),
+            crate::test_utils::test_config(),
         )
         .unwrap();
         let schema = Arc::new(arrow::datatypes::Schema::empty());
@@ -449,7 +449,7 @@ mod tests {
 
         let file = ObjectStoreFile::from_url(
             &Url::parse("file:///test.csv").unwrap(),
-            BundleConfig::new(None).unwrap().into(),
+            crate::test_utils::test_config(),
         )
         .unwrap();
         let schema = Arc::new(arrow::datatypes::Schema::empty());

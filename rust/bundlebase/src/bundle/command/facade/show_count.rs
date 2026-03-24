@@ -8,7 +8,6 @@ use crate::bundle::facade::BundleFacade;
 use crate::bundle::CommandResponse;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;
 
@@ -44,7 +43,6 @@ impl CommandParsing for ShowCountCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for ShowCountCommand {
     type Output = SendableRecordBatchStream;
 

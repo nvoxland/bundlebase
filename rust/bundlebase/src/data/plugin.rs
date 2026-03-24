@@ -16,8 +16,6 @@ pub use json_reader::JsonPlugin;
 pub use parquet_reader::ParquetPlugin;
 use std::sync::Arc;
 
-#[cfg(test)]
-pub use mock::MockReader;
 
 use crate::bundle::BundleFacade;
 use crate::object_id::BlockId;

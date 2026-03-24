@@ -6,7 +6,6 @@ use crate::bundle::operation::{AttachBlockOp, CreateJoinOp};
 use crate::bundle::pack::JoinTypeOption;
 use crate::data::ObjectId;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -116,7 +115,6 @@ impl CommandParsing for JoinCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for JoinCommand {
     type Output = String;
 

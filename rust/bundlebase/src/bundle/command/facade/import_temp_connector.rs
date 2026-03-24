@@ -14,7 +14,6 @@ use crate::udf::UdfRuntime;
 use crate::BundlebaseError;
 use crate::NamespacedName;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -144,7 +143,6 @@ impl CommandParsing for ImportTempConnectorCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for ImportTempConnectorCommand {
     type Output = String;
 

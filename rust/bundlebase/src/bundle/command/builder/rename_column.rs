@@ -4,7 +4,6 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::RenameColumnOp;
 use crate::bundle::BundleFacade;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -61,7 +60,6 @@ impl CommandParsing for RenameColumnCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for RenameColumnCommand {
     type Output = String;
 

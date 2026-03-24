@@ -4,7 +4,6 @@ use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::CreateIndexOp;
 use crate::index::IndexType;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::{BundleBuilder, BundleFacade};
 
@@ -85,7 +84,6 @@ impl CommandParsing for CreateIndexCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for CreateIndexCommand {
     type Output = String;
 

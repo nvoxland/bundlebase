@@ -6,7 +6,6 @@ use crate::arrow_types::parse_arrow_type_name;
 use crate::bundle::operation::CastColumnOp;
 use crate::bundle::BundleFacade;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
 
@@ -83,7 +82,6 @@ impl CommandParsing for CastColumnCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for CastColumnCommand {
     type Output = String;
 

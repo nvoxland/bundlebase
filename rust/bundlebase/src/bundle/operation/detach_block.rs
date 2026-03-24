@@ -3,7 +3,6 @@ use crate::bundle::operation::{AnyOperation, Operation};
 use crate::bundle::BundleBuilder;
 use crate::data::BlockId;
 use crate::{Bundle, BundleFacade, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
@@ -59,7 +58,6 @@ impl DetachBlockOp {
     }
 }
 
-#[async_trait]
 impl Operation for DetachBlockOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Check that the block exists in some pack

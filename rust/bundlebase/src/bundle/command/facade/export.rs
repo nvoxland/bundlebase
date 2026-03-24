@@ -10,7 +10,6 @@ use crate::bundle::export::create_export_writer;
 use crate::bundle::facade::BundleFacade;
 use crate::BundlebaseError;
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use async_trait::async_trait;
 use futures::StreamExt;
 use std::sync::Arc;
 
@@ -71,7 +70,6 @@ impl CommandParsing for ExportCommand {
     }
 }
 
-#[async_trait]
 impl BundleFacadeCommand for ExportCommand {
     type Output = String;
 

@@ -3,7 +3,6 @@
 use crate::bundle::command::{CommandParsing, Rule};
 use crate::bundle::operation::FilterOp;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use datafusion::scalar::ScalarValue;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
@@ -57,7 +56,6 @@ impl CommandParsing for FilterCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for FilterCommand {
     type Output = String;
 

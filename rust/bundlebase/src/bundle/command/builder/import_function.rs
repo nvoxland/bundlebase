@@ -11,7 +11,6 @@ use crate::arrow_types::parse_arrow_type_name;
 use crate::bundle::function_entry::{parse_function_name, FunctionKind};
 use crate::bundle::operation::ImportFunctionOp;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use std::collections::HashMap;
 use super::super::BundleBuilderCommand;
 use crate::bundle::BundleBuilder;
@@ -138,7 +137,6 @@ impl CommandParsing for ImportFunctionCommand {
     }
 }
 
-#[async_trait]
 impl BundleBuilderCommand for ImportFunctionCommand {
     type Output = String;
 
