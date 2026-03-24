@@ -1,7 +1,7 @@
 //! SQL command - executes SQL statements and bundlebase commands.
 
 use bundlebase::bundle::{is_command_statement, OutputShape};
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use bundlebase::BundleFacade;
 use datafusion::execution::SendableRecordBatchStream;
 use std::sync::Arc;

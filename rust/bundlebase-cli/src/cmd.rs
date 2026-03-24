@@ -8,7 +8,8 @@ pub mod repl_cmd;
 pub mod server_cmd;
 pub mod setup_agent_cmd;
 
-use bundlebase::{Bundle, BundlebaseError, BundleFacade, PassedBundleConfig};
+use bundlebase::{Bundle, BundleFacade, PassedBundleConfig};
+use bundlebase_common::BundlebaseError;
 use clap::Args;
 use std::path::Path;
 use std::sync::Arc;

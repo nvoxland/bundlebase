@@ -5,7 +5,7 @@
 
 mod cmd;
 
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use clap::{Parser, Subcommand as ClapSubcommand};
 use tracing_log::LogTracer;
 

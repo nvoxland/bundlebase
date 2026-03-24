@@ -4,7 +4,7 @@
 //! display.rs and stream_formatter.rs.
 
 use arrow::record_batch::RecordBatch;
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use comfy_table::{presets::UTF8_FULL, Cell, Color, ContentArrangement, Table};
 
 use super::display::format_array_value;

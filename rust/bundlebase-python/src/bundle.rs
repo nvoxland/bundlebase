@@ -522,10 +522,10 @@ impl PyBundle {
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         let name = name.to_string();
-        let platform: Option<::bundlebase::bundle::Platform> = platform
+        let platform: Option<bundlebase_common::Platform> = platform
             .map(|s| s.parse())
             .transpose()
-            .map_err(|e: ::bundlebase::BundlebaseError| {
+            .map_err(|e: bundlebase_common::BundlebaseError| {
                 PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
             })?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {

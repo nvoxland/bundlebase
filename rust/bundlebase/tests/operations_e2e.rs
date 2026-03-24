@@ -1,7 +1,7 @@
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{field_names, random_memory_url, test_datafile};
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use url::Url;
 
 mod common;

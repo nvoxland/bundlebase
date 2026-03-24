@@ -5,9 +5,10 @@
 //! - Queries succeed when source files remain unchanged
 
 use bundlebase::bundle::BundleFacade;
-use bundlebase::io::IOReadWriteFile;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url};
-use bundlebase::{Bundle, BundlebaseError};
+use bundlebase::Bundle;
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::IOReadWriteFile;
 use bytes::Bytes;
 
 mod common;

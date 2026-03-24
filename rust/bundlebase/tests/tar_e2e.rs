@@ -1,6 +1,7 @@
 use bundlebase::bundle::{BundleBuilder, BundleFacade};
 use bundlebase::test_utils::{random_memory_url, test_datafile};
-use bundlebase::{Bundle, IndexType};
+use bundlebase::Bundle;
+use bundlebase_index::IndexType;
 use tempfile::TempDir;
 
 /// Tests exporting a bundle to tar and reopening it

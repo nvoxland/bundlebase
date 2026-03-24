@@ -2,8 +2,9 @@ use std::sync::Arc;
 /// Shared test utilities for integration tests
 use arrow::datatypes::SchemaRef;
 use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
-use bundlebase::io::{readable_file_from_url, IOReadWriteDir};
-use bundlebase::{BundlebaseError, BundleConfig, ConfigProvider};
+use bundlebase::BundleConfig;
+use bundlebase_common::{BundlebaseError, ConfigProvider};
+use bundlebase_io::{readable_file_from_url, IOReadWriteDir};
 use datafusion::dataframe::DataFrame;
 use url::Url;
 

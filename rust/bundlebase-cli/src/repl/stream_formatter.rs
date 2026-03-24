@@ -4,7 +4,7 @@
 //! based on their expected output shape, producing appropriate terminal output.
 
 use bundlebase::bundle::OutputShape;
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use futures::StreamExt;
 

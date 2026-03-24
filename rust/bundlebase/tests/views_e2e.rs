@@ -1,8 +1,9 @@
-use bundlebase::io::read_yaml;
 use bundlebase::test_utils::{
     assert_vec_regexp, describe_ops, field_names, random_memory_url, test_datafile,
 };
-use bundlebase::{Bundle, BundleBuilder, BundleFacade, BundlebaseError, Operation};
+use bundlebase::{Bundle, BundleBuilder, BundleFacade, Operation};
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::read_yaml;
 
 #[tokio::test]
 async fn test_create_view_basic() -> Result<(), BundlebaseError> {

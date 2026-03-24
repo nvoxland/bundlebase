@@ -12,7 +12,8 @@ pub mod stream_formatter;
 pub mod table_utils;
 
 use crate::OutputFormat;
-use bundlebase::{BundlebaseError, BundleFacade};
+use bundlebase::BundleFacade;
+use bundlebase_common::BundlebaseError;
 use commands::{Command, ReplCommand};
 use completion::BundleCompleter;
 use reedline::{
@@ -66,7 +67,7 @@ pub async fn execute_single(
 ) -> Result<(), BundlebaseError> {
     // Install progress tracker
     let tracker = Box::new(progress_impl::IndicatifTracker::new());
-    bundlebase::progress::set_tracker(tracker);
+    bundlebase_common::progress::set_tracker(tracker);
 
     // Parse all commands (validates all before executing any)
     let cmds = match commands::parse(sql) {
@@ -126,7 +127,7 @@ pub async fn execute_single(
 pub async fn start(bundle: Arc<dyn BundleFacade>, format: OutputFormat) -> Result<(), BundlebaseError> {
     // Install progress tracker for REPL
     let tracker = Box::new(progress_impl::IndicatifTracker::new());
-    bundlebase::progress::set_tracker(tracker);
+    bundlebase_common::progress::set_tracker(tracker);
 
     // Setup history in ~/.bundlebase/history.txt
     let history = Box::new({

@@ -1,4 +1,4 @@
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use std::fs;
 use std::path::{Path, PathBuf};
 

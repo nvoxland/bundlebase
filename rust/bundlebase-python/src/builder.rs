@@ -1253,7 +1253,7 @@ impl PyBundleBuilder {
         };
 
         // Build the IndexType
-        let mut configured_type = bundlebase::IndexType::from_str(index_type)
+        let mut configured_type = bundlebase_index::IndexType::from_str(index_type)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         // Apply args (e.g., tokenizer)

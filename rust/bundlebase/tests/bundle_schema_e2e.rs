@@ -1,6 +1,6 @@
 use arrow::array::StringArray;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::IndexType;
+use bundlebase_index::IndexType;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
 use bundlebase::{Bundle, BundleBuilder};
 use futures::StreamExt;

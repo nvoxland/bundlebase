@@ -4,7 +4,7 @@
 //! `open_bundle` tools to load one. Optionally pass `--bundle` to pre-open.
 
 use super::{open_bundle, BundleArgs};
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use clap::Args;
 
 /// Start MCP (Model Context Protocol) server over stdio

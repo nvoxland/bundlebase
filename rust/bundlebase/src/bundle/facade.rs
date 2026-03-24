@@ -213,7 +213,8 @@ pub trait BundleFacade: Send + Sync {
     ///
     /// # Example
     /// ```no_run
-    /// # use bundlebase::{Bundle, BundleBuilder, BundlebaseError, BundleFacade};
+    /// # use bundlebase::{Bundle, BundleBuilder, BundleFacade};
+    /// # use bundlebase_common::BundlebaseError;
     /// # async fn example(c: &BundleBuilder) -> Result<(), BundlebaseError> {
     /// // Open by name
     /// let view = c.view("adults").await?;

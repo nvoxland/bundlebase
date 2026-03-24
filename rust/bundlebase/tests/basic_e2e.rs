@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use bundlebase;
 use bundlebase::bundle::{BundleFacade, INIT_FILENAME, META_DIR};
-use bundlebase::io::{readable_file_from_path, readable_file_from_url};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
-use bundlebase::{BundleConfig, ConfigProvider};
-use bundlebase::{op_field, AnyOperation};
-use bundlebase::{test_utils, Bundle, BundlebaseError};
+use bundlebase::{op_field, AnyOperation, BundleConfig};
+use bundlebase::{test_utils, Bundle};
+use bundlebase_common::{BundlebaseError, ConfigProvider};
+use bundlebase_io::{readable_file_from_path, readable_file_from_url};
 use url::Url;
 
 mod common;

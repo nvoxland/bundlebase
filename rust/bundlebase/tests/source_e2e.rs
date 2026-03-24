@@ -1,10 +1,11 @@
 use std::sync::Arc;
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::io::{readable_file_from_url, IOReadWriteDir};
 use bundlebase::source::SyncMode;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
-use bundlebase::{Bundle, BundlebaseError, BundleConfig, ConfigProvider};
+use bundlebase::{Bundle, BundleConfig};
+use bundlebase_common::{BundlebaseError, ConfigProvider};
+use bundlebase_io::{readable_file_from_url, IOReadWriteDir};
 use std::collections::HashMap;
 use url::Url;
 

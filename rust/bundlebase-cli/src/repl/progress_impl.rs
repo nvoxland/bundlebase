@@ -3,7 +3,7 @@
 //! This module provides visual progress bars in the terminal for long-running
 //! Bundlebase operations when using the REPL.
 
-use bundlebase::progress::{ProgressId, ProgressTracker};
+use bundlebase_common::progress::{ProgressId, ProgressTracker};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use parking_lot::Mutex;
 use std::collections::HashMap;
