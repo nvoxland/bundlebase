@@ -5,7 +5,6 @@ use crate::bundle::META_DIR;
 use crate::data::ObjectId;
 use crate::io::write_yaml;
 use crate::{Bundle, BundleBuilder, BundleFacade, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::execution::context::SessionContext;
 use datafusion::prelude::DataFrame;
@@ -126,7 +125,6 @@ impl CreateViewOp {
     }
 }
 
-#[async_trait]
 impl Operation for CreateViewOp {
     fn describe(&self) -> String {
         format!("CREATE VIEW: '{}'", self.name)

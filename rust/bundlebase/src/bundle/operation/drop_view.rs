@@ -4,7 +4,6 @@ use crate::bundle::BundleBuilder;
 use crate::bundle::BundleFacade;
 use crate::data::ObjectId;
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
@@ -43,7 +42,6 @@ impl DropViewOp {
     }
 }
 
-#[async_trait]
 impl Operation for DropViewOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Check that the view id exists

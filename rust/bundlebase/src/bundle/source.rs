@@ -3,10 +3,11 @@
 use crate::bundle::{BundleBuilder, CreateSourceOp};
 use crate::data::ObjectId;
 use crate::source::{AttachedFileInfo, FetchAction, ConnectorRegistry, SyncMode, orchestrate_fetch};
-use crate::source::shared_utils;
+use bundlebase_common::source_utils as shared_utils;
 use crate::BundlebaseError;
 use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Represents a data source definition for a pack.
 ///
@@ -149,7 +150,7 @@ impl Source {
             should_copy,
             data_dir.as_ref(),
             &attached_files,
-            &config,
+            &(Arc::clone(&config) as Arc<dyn crate::ConfigProvider>),
         )
         .await
     }

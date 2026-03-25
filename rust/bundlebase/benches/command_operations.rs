@@ -18,6 +18,7 @@ use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_10K, SCALE_1K, SCALE_100K};
 use std::collections::HashMap;
 use std::sync::Arc;
+use bundlebase_command::BundleBuilderExt;
 
 /// Create a bundle with data attached but NOT committed.
 async fn create_uncommitted_bundle(

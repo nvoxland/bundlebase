@@ -3,7 +3,8 @@
 //! Provides an MCP server over stdio that exposes bundlebase tools to AI assistants.
 //! Can start with or without a bundle — use `open_bundle` or `create_bundle` to load one.
 
-use bundlebase::{Bundle, BundleBuilder, BundleFacade, BundlebaseError};
+use bundlebase::{Bundle, BundleBuilder, BundleFacade};
+use bundlebase_common::BundlebaseError;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{

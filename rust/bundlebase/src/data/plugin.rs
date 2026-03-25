@@ -1,50 +1,6 @@
 mod bundlebase_reader;
-mod csv_reader;
-mod file_reader;
-mod json_reader;
-mod parquet_reader;
 
-#[cfg(test)]
-mod mock;
-
-use crate::data::DataReader;
-use arrow_schema::SchemaRef;
-use async_trait::async_trait;
 pub use bundlebase_reader::BundlebasePlugin;
-pub use csv_reader::CsvPlugin;
-pub use json_reader::JsonPlugin;
-pub use parquet_reader::ParquetPlugin;
-use std::sync::Arc;
 
-#[cfg(test)]
-pub use mock::MockReader;
-
-use crate::bundle::BundleFacade;
-use crate::object_id::BlockId;
-use crate::BundlebaseError;
-
-use std::collections::HashMap;
-
-#[async_trait]
-pub trait ReaderPlugin: Send + Sync {
-    /// Create a reader for the given source.
-    ///
-    /// # Arguments
-    /// * `source` - URL or path to the data source
-    /// * `block_id` - ID of the block being read
-    /// * `bundle` - Bundle context (as trait object for flexibility)
-    /// * `schema` - Optional schema (if already known)
-    /// * `layout` - Optional layout file path
-    /// * `expected_version` - If provided, validates version on first data access
-    /// * `read_options` - Format-specific options detected at attach time (e.g., CSV newlines_in_values)
-    async fn reader(
-        &self,
-        source: &str,
-        block_id: &BlockId,
-        bundle: &dyn BundleFacade,
-        schema: Option<SchemaRef>,
-        layout: Option<String>,
-        expected_version: Option<String>,
-        read_options: Option<&HashMap<String, String>>,
-    ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError>;
-}
+// Re-export plugin types from bundlebase-data
+pub use bundlebase_data::plugin::*;

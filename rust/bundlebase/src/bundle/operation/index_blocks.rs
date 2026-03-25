@@ -1,5 +1,4 @@
 use crate::bundle::column_metadata;
-use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::{AnyOperation, Operation};
 use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
@@ -12,7 +11,6 @@ use crate::progress::ProgressScope;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use arrow::record_batch::RecordBatch;
 use arrow_schema::{DataType, SchemaRef};
-use async_trait::async_trait;
 use bytes::Bytes;
 use datafusion::datasource::MemTable;
 use datafusion::error::DataFusionError;
@@ -912,7 +910,6 @@ impl IndexBlocksOp {
     }
 }
 
-#[async_trait]
 impl Operation for IndexBlocksOp {
     fn describe(&self) -> String {
         "INDEX BLOCKS".to_string()

@@ -2,13 +2,21 @@ use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::bundle::JoinTypeOption;
 use bundlebase::test_utils::{field_names, random_memory_url, test_datafile};
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 #[tokio::test]
 async fn test_join_basic() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Get schema before join
@@ -70,7 +78,8 @@ async fn test_join_basic() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_join_appending() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Join with sales regions on Country
@@ -96,7 +105,8 @@ async fn test_join_appending() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_join_with_left_join_type() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Join with a left join
@@ -121,7 +131,8 @@ async fn test_join_with_left_join_type() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_join_without_url_then_attach() -> Result<(), BundlebaseError> {
-    let mut bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create join point without any initial data

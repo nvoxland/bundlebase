@@ -8,7 +8,6 @@ use crate::bundle::operation::Operation;
 use crate::data::ObjectId;
 use crate::namespaced_name::NamespacedName;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 
@@ -73,7 +72,6 @@ impl RenameFunctionOp {
     }
 }
 
-#[async_trait]
 impl Operation for RenameFunctionOp {
     fn describe(&self) -> String {
         let id_strs: Vec<String> = self.ids.iter().map(|id| id.to_string()).collect();

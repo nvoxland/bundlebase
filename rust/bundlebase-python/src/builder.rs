@@ -1,9 +1,9 @@
 use crate::utils::convert_py_params;
+use bundlebase_command::{BundleFacadeCommandExt, BundleBuilderExt};
 use ::bundlebase::bundle::BundleBuilder;
 use ::bundlebase::bundle::{BundleChange, BundleFacade, BundleStatus};
 use ::bundlebase::source::{FetchedBlock, FetchResults, SyncMode};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1254,7 +1254,7 @@ impl PyBundleBuilder {
         };
 
         // Build the IndexType
-        let mut configured_type = bundlebase::IndexType::from_str(index_type)
+        let mut configured_type = bundlebase_index::IndexType::from_str(index_type)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         // Apply args (e.g., tokenizer)

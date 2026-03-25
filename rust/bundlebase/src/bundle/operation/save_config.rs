@@ -1,7 +1,6 @@
 use crate::bundle::operation::Operation;
-use crate::bundle_config::{ConfigKey, Scope};
+use crate::bundle_config::Scope;
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use serde::{Deserialize, Serialize};
 
@@ -41,11 +40,10 @@ impl SaveConfigOp {
     }
 }
 
-#[async_trait]
 impl Operation for SaveConfigOp {
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
-        ConfigKey::validate_key_exists(&self.scope, &self.key)?;
-        if ConfigKey::is_key_secure(&self.scope, &self.key) {
+        crate::bundle_config::validate_key_exists(&self.scope, &self.key)?;
+        if crate::bundle_config::is_key_secure(&self.scope, &self.key) {
             return Err(format!(
                 "Cannot save secure config key '{}'. Use environment variables or pass config at runtime instead.",
                 self.key
@@ -73,7 +71,7 @@ impl Operation for SaveConfigOp {
     }
 
     fn describe(&self) -> String {
-        let display_value = if ConfigKey::is_key_secure(&self.scope, &self.key) {
+        let display_value = if crate::bundle_config::is_key_secure(&self.scope, &self.key) {
             "*****"
         } else {
             &self.value

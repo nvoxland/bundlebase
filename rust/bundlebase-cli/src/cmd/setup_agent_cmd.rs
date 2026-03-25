@@ -1,6 +1,6 @@
 //! The `setup-agent` subcommand — install agent skills for coding agents.
 
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use clap::Args;
 
 /// Install agent skills for coding agents (Claude Code, Cursor, Copilot, etc.)

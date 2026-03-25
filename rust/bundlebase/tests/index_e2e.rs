@@ -1,17 +1,27 @@
+use bundlebase_command::BundleFacadeCommandExt;
 use arrow::array::{Array, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
-use bundlebase::{assert_regexp, Bundle, BundlebaseError, IndexType, Operation, TokenizerConfig};
+use bundlebase::{Bundle, Operation};
+use bundlebase_common::BundlebaseError;
+use bundlebase_index::{IndexType, TokenizerConfig};
 use datafusion::common::ScalarValue;
 use datafusion::logical_expr::ExplainFormat;
 use futures::{StreamExt, TryStreamExt};
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 /// Helper to collect the physical plan text from an explain stream.
-async fn get_physical_plan(
-    bundle: &dyn BundleFacade,
+async fn get_physical_plan<T: BundleFacadeCommandExt + Sync>(
+    bundle: &T,
     sql: Option<&str>,
 ) -> Result<String, BundlebaseError> {
     let mut stream = bundle
@@ -41,9 +51,10 @@ async fn get_physical_plan(
 
 #[tokio::test]
 async fn test_basic_indexing() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
     bundle.commit("No index").await?;
@@ -149,9 +160,10 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
@@ -186,9 +198,10 @@ async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseE
 
 #[tokio::test]
 async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
@@ -220,9 +233,10 @@ async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError
 
 #[tokio::test]
 async fn test_select_without_index_falls_back() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data but DON'T create index
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
@@ -251,9 +265,10 @@ async fn test_select_without_index_falls_back() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
@@ -282,9 +297,10 @@ async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_index_selectivity() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     // Attach CSV data
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
@@ -327,9 +343,10 @@ async fn test_index_selectivity() -> Result<(), BundlebaseError> {
 /// index when one exists. The physical plan should contain RowIdOffsetDataSource.
 #[tokio::test]
 async fn test_query_path_uses_index() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -360,9 +377,10 @@ async fn test_query_path_uses_index() -> Result<(), BundlebaseError> {
 /// RowIdOffsetDataSource (uses a full scan instead).
 #[tokio::test]
 async fn test_query_path_without_index_uses_full_scan() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -388,9 +406,10 @@ async fn test_query_path_without_index_uses_full_scan() -> Result<(), Bundlebase
 /// index usage visible in the subsequent explain.
 #[tokio::test]
 async fn test_filter_path_uses_index() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -409,7 +428,7 @@ async fn test_filter_path_uses_index() -> Result<(), BundlebaseError> {
         .await?;
 
     // Explain the filtered bundle's current plan (no SQL argument)
-    let plan = get_physical_plan(bundle.as_ref(), None).await?;
+    let plan = get_physical_plan(&bundle, None).await?;
 
     assert!(
         plan.contains("RowIdOffsetDataSource"),
@@ -424,9 +443,10 @@ async fn test_filter_path_uses_index() -> Result<(), BundlebaseError> {
 /// even when other columns are indexed.
 #[tokio::test]
 async fn test_query_on_non_indexed_column_uses_full_scan() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -456,9 +476,10 @@ async fn test_query_on_non_indexed_column_uses_full_scan() -> Result<(), Bundleb
 /// the logical plan for partial_filters on the table scan node.
 #[tokio::test]
 async fn test_filters_pushed_down_to_table_scan() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -510,9 +531,10 @@ async fn test_filters_pushed_down_to_table_scan() -> Result<(), BundlebaseError>
 /// Verify index usage via the query path with a parameterized filter.
 #[tokio::test]
 async fn test_query_path_index_with_parameterized_filter() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -542,9 +564,10 @@ async fn test_query_path_index_with_parameterized_filter() -> Result<(), Bundleb
 /// Verify that after reopening a committed bundle, index acceleration still works.
 #[tokio::test]
 async fn test_index_survives_reopen() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -574,9 +597,10 @@ async fn test_index_survives_reopen() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_search_single_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -629,9 +653,10 @@ async fn test_search_single_column() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_search_no_results() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -664,9 +689,10 @@ async fn test_search_no_results() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_search_multi_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -722,9 +748,10 @@ async fn test_search_multi_column() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_search_with_score_ordering() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -774,9 +801,10 @@ async fn test_search_with_score_ordering() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_search_tantivy_boolean_syntax() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -833,9 +861,10 @@ async fn test_search_tantivy_boolean_syntax() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_search_with_additional_where() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -888,9 +917,10 @@ async fn test_search_with_additional_where() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_search_single_arg_with_one_text_index() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -928,9 +958,10 @@ async fn test_search_single_arg_with_one_text_index() -> Result<(), BundlebaseEr
 
 #[tokio::test]
 async fn test_search_single_arg_error_with_multiple_text_indexes() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -979,6 +1010,7 @@ async fn test_search_single_arg_error_with_multiple_text_indexes() -> Result<(),
 
 #[tokio::test]
 async fn test_create_index_after_rename_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1014,6 +1046,7 @@ async fn test_create_index_after_rename_column() -> Result<(), BundlebaseError> 
 
 #[tokio::test]
 async fn test_create_index_after_standardize_column_names() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1049,6 +1082,7 @@ async fn test_create_index_after_standardize_column_names() -> Result<(), Bundle
 
 #[tokio::test]
 async fn test_search_after_standardize_column_names() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1112,6 +1146,7 @@ async fn test_search_after_standardize_column_names() -> Result<(), BundlebaseEr
 
 #[tokio::test]
 async fn test_search_with_projection_and_where_on_score() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1171,6 +1206,7 @@ async fn test_search_with_projection_and_where_on_score() -> Result<(), Bundleba
 
 #[tokio::test]
 async fn test_search_field_specific_after_standardize_column_names() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1233,6 +1269,7 @@ async fn test_search_field_specific_after_standardize_column_names() -> Result<(
 /// E.g., Company → company (standardize) → co (rename) should resolve co → Company for Tantivy.
 #[tokio::test]
 async fn test_search_after_chained_renames() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1300,6 +1337,7 @@ async fn test_search_after_chained_renames() -> Result<(), BundlebaseError> {
 /// The Index column in the CSV is a numeric string — cast it to integer, index it, query with integer filter.
 #[tokio::test]
 async fn test_cast_column_then_create_index() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1338,6 +1376,7 @@ async fn test_cast_column_then_create_index() -> Result<(), BundlebaseError> {
 /// Verify that an existing column index still works after casting a *different* column.
 #[tokio::test]
 async fn test_create_index_then_cast_column_different_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1375,6 +1414,7 @@ async fn test_create_index_then_cast_column_different_column() -> Result<(), Bun
 /// Verify that casting a column that already has an index, then reindexing, works correctly.
 #[tokio::test]
 async fn test_create_index_then_cast_same_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1416,6 +1456,7 @@ async fn test_create_index_then_cast_same_column() -> Result<(), BundlebaseError
 /// This tests the Cast(ScalarFunction(Column)) expression chain.
 #[tokio::test]
 async fn test_cast_column_with_clean_then_create_index() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1456,6 +1497,7 @@ async fn test_cast_column_with_clean_then_create_index() -> Result<(), Bundlebas
 /// Verify that search() includes columns added via add_column.
 #[tokio::test]
 async fn test_search_with_add_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1527,6 +1569,7 @@ async fn test_search_with_add_column() -> Result<(), BundlebaseError> {
 /// Verify that search() reflects cast_column type changes.
 #[tokio::test]
 async fn test_search_with_cast_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1583,6 +1626,7 @@ async fn test_search_with_cast_column() -> Result<(), BundlebaseError> {
 /// Verify that casting one column doesn't break indexing on a different (non-cast) column.
 #[tokio::test]
 async fn test_cast_column_then_create_index_on_different_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1623,6 +1667,7 @@ async fn test_cast_column_then_create_index_on_different_column() -> Result<(), 
 /// Verify that creating a column index on an add_column computed column works.
 #[tokio::test]
 async fn test_create_column_index_on_added_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1686,6 +1731,7 @@ async fn test_create_column_index_on_added_column() -> Result<(), BundlebaseErro
 /// Verify that creating a text index on an add_column computed column works.
 #[tokio::test]
 async fn test_create_text_index_on_added_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1749,6 +1795,7 @@ async fn test_create_text_index_on_added_column() -> Result<(), BundlebaseError>
 /// Verify that indexing a computed column works after renaming a source column.
 #[tokio::test]
 async fn test_create_column_index_on_added_column_after_rename() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1790,6 +1837,7 @@ async fn test_create_column_index_on_added_column_after_rename() -> Result<(), B
 /// Verify that search() results include a computed column when the text index is on a physical column.
 #[tokio::test]
 async fn test_search_with_index_on_added_column() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
@@ -1863,9 +1911,10 @@ async fn test_search_with_index_on_added_column() -> Result<(), BundlebaseError>
 #[tokio::test]
 #[ignore = "Column index across multiple blocks hits range error — known issue to fix"]
 async fn test_column_index_across_multiple_blocks() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)
@@ -1907,9 +1956,10 @@ async fn test_column_index_across_multiple_blocks() -> Result<(), BundlebaseErro
 
 #[tokio::test]
 async fn test_text_search_across_multiple_blocks() -> Result<(), BundlebaseError> {
+    init();
     common::enable_logging();
     let data_dir = random_memory_dir();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)

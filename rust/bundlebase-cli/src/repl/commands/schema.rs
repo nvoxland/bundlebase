@@ -1,7 +1,7 @@
 //! Schema command - displays the bundle's table schema.
 
 use super::{ReplCommandResult, ReplCommand, ReplCommandDef};
-use bundlebase::bundle::CommandResponse;
+use bundlebase_command::CommandResponse;
 use bundlebase::BundleFacade;
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -38,7 +38,7 @@ fn execute(_cmd: &ReplCommand, bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'sta
 mod tests {
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow_schema::SchemaRef;
-    use bundlebase::bundle::CommandResponse;
+    use bundlebase_command::CommandResponse;
     use futures::StreamExt;
     use std::sync::Arc;
 

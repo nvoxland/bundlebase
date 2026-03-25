@@ -3,7 +3,6 @@
 use crate::bundle::operation::Operation;
 use crate::data::ObjectId;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 
@@ -58,7 +57,6 @@ impl DropConnectorOp {
     }
 }
 
-#[async_trait]
 impl Operation for DropConnectorOp {
     fn describe(&self) -> String {
         let id_strs: Vec<String> = self.ids.iter().map(|id| id.to_string()).collect();

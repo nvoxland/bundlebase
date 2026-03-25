@@ -6,7 +6,7 @@
 use arrow::pyarrow::FromPyArrow;
 use arrow::record_batch::RecordBatch;
 use ::bundlebase::source::ffi::NativePythonBridge;
-use ::bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 

@@ -1,13 +1,22 @@
+use std::sync::Arc;
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
-use bundlebase::io::{readable_file_from_url, IOReadWriteDir};
 use bundlebase::source::SyncMode;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
-use bundlebase::{Bundle, BundlebaseError, BundleConfig};
+use bundlebase::{Bundle, BundleConfig};
+use bundlebase_common::{BundlebaseError, ConfigProvider};
+use bundlebase_io::{readable_file_from_url, IOReadWriteDir};
 use std::collections::HashMap;
 use url::Url;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
+
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
 
 /// Helper to sum total changes from FetchResults
 fn total_changes(results: &[bundlebase::source::FetchResults]) -> usize {
@@ -31,7 +40,7 @@ async fn copy_test_file(
     target_name: &str,
 ) -> Result<(), BundlebaseError> {
     let source_obj =
-        readable_file_from_url(&Url::parse(test_file)?, BundleConfig::new(None)?.into()).await?;
+        readable_file_from_url(&Url::parse(test_file)?, Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>).await?;
     let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?
@@ -43,8 +52,9 @@ async fn copy_test_file(
 
 #[tokio::test]
 async fn test_create_source_basic() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Define a source with default patterns
     bundle
@@ -67,8 +77,9 @@ async fn test_create_source_basic() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_with_patterns() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Define source with specific patterns
     bundle
@@ -90,8 +101,9 @@ async fn test_create_source_with_patterns() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_default_patterns() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     // Define source without patterns (function defaults to **/* internally)
     bundle
@@ -113,6 +125,7 @@ async fn test_create_source_default_patterns() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_auto_attaches_files() -> Result<(), BundlebaseError> {
+    init();
     // Create a source directory with test files
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
@@ -126,7 +139,7 @@ async fn test_create_source_auto_attaches_files() -> Result<(), BundlebaseError>
     .await?;
 
     // Create bundle and define source
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -145,12 +158,13 @@ async fn test_create_source_auto_attaches_files() -> Result<(), BundlebaseError>
 
 #[tokio::test]
 async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
+    init();
     // Create a source directory
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
     // Create bundle and define source (empty directory)
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -181,6 +195,7 @@ async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -193,7 +208,7 @@ async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source (auto-attaches)
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -216,6 +231,7 @@ async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -228,7 +244,7 @@ async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -255,6 +271,7 @@ async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -275,7 +292,7 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle with parquet-only pattern
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -294,6 +311,7 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -306,7 +324,7 @@ async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle, define source, commit
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -326,6 +344,7 @@ async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -338,7 +357,7 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -358,8 +377,9 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_serialization() -> Result<(), BundlebaseError> {
+    init();
     let bundle_dir = random_memory_dir();
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -380,6 +400,7 @@ async fn test_create_source_serialization() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir1 = random_memory_dir();
     let bundle_dir2 = random_memory_dir();
@@ -393,7 +414,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle, define source, commit
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir1.url().as_str(), None).await?;
 
     bundle
@@ -404,7 +425,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
 
     // Extend to new location
     let loaded = Bundle::open(bundle_dir1.url().as_str(), None).await?;
-    let mut extended = loaded.extend(Some(bundle_dir2.url().as_str())).await?;
+    let extended = loaded.extend(Some(bundle_dir2.url().as_str())).await?;
 
     // Add a new file to source
     copy_test_file(
@@ -427,6 +448,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -439,7 +461,7 @@ async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source (default is copy=true)
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -464,6 +486,7 @@ async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -476,7 +499,7 @@ async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source with copy=false
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
@@ -498,6 +521,7 @@ async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -510,7 +534,7 @@ async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> 
     .await?;
 
     // Create bundle and define source with explicit copy=true
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
@@ -535,6 +559,7 @@ async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> 
 
 #[tokio::test]
 async fn test_create_source_creates_single_change() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -547,7 +572,7 @@ async fn test_create_source_creates_single_change() -> Result<(), BundlebaseErro
     .await?;
 
     // Create bundle and define source
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     // Record change count before create_source (create may add a change)
@@ -590,6 +615,7 @@ async fn test_create_source_creates_single_change() -> Result<(), BundlebaseErro
 
 #[tokio::test]
 async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -602,7 +628,7 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
     .await?;
 
     // Create bundle and define source
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -674,6 +700,7 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
 
 #[tokio::test]
 async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -686,7 +713,7 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source with copy=true (default)
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -748,6 +775,7 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -760,7 +788,7 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
     .await?;
 
     // Create bundle and define source (default copy=true)
-    let mut bundle =
+    let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
     bundle
@@ -802,6 +830,7 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_fetch_update_replaces_changed_files() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -858,6 +887,7 @@ async fn test_fetch_update_replaces_changed_files() -> Result<(), BundlebaseErro
 
 #[tokio::test]
 async fn test_fetch_sync_adds_and_replaces() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -911,6 +941,7 @@ async fn test_fetch_sync_adds_and_replaces() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_fetch_update_adds_new_and_replaces_changed() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 

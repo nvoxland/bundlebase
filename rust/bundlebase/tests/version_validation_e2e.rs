@@ -5,16 +5,25 @@
 //! - Queries succeed when source files remain unchanged
 
 use bundlebase::bundle::BundleFacade;
-use bundlebase::io::IOReadWriteFile;
+use bundlebase_command::BundleBuilderExt;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url};
-use bundlebase::{Bundle, BundlebaseError};
+use bundlebase::Bundle;
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::IOReadWriteFile;
 use bytes::Bytes;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 /// Test that querying a bundle fails when the source CSV file has been modified.
 #[tokio::test]
 async fn test_query_fails_when_source_file_changed_csv() -> Result<(), BundlebaseError> {
+    init();
     // 1. Create a directory for our test data
     let data_dir = random_memory_dir();
     let csv_file = data_dir.writable_file("test_data.csv")?;
@@ -25,7 +34,7 @@ async fn test_query_fails_when_source_file_changed_csv() -> Result<(), Bundlebas
 
     // 2. Create a bundle and attach the CSV file
     let bundle_url = random_memory_url();
-    let mut builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
+    let builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
     builder.attach(csv_file.url().as_str(), None).await?;
 
     // Verify initial query works
@@ -69,6 +78,7 @@ async fn test_query_fails_when_source_file_changed_csv() -> Result<(), Bundlebas
 /// Test that querying a bundle succeeds when the source file remains unchanged.
 #[tokio::test]
 async fn test_query_succeeds_when_source_unchanged() -> Result<(), BundlebaseError> {
+    init();
     // 1. Create a directory for our test data
     let data_dir = random_memory_dir();
     let csv_file = data_dir.writable_file("test_data.csv")?;
@@ -79,7 +89,7 @@ async fn test_query_succeeds_when_source_unchanged() -> Result<(), BundlebaseErr
 
     // 2. Create a bundle and attach the CSV file
     let bundle_url = random_memory_url();
-    let mut builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
+    let builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
     builder.attach(csv_file.url().as_str(), None).await?;
 
     // 3. Commit the bundle
@@ -102,6 +112,7 @@ async fn test_query_succeeds_when_source_unchanged() -> Result<(), BundlebaseErr
 /// Test that version validation works with Parquet files too.
 #[tokio::test]
 async fn test_query_fails_when_source_parquet_changed() -> Result<(), BundlebaseError> {
+    init();
     use arrow::array::{Int32Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
@@ -151,7 +162,7 @@ async fn test_query_fails_when_source_parquet_changed() -> Result<(), Bundlebase
 
     // 2. Create a bundle and attach the parquet file
     let bundle_url = random_memory_url();
-    let mut builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
+    let builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
     builder.attach(parquet_file.url().as_str(), None).await?;
 
     // Verify initial query works
@@ -194,6 +205,7 @@ async fn test_query_fails_when_source_parquet_changed() -> Result<(), Bundlebase
 /// Test that multiple queries work correctly when file is unchanged.
 #[tokio::test]
 async fn test_multiple_queries_with_unchanged_source() -> Result<(), BundlebaseError> {
+    init();
     // 1. Create a directory for our test data
     let data_dir = random_memory_dir();
     let csv_file = data_dir.writable_file("test_data.csv")?;
@@ -204,7 +216,7 @@ async fn test_multiple_queries_with_unchanged_source() -> Result<(), BundlebaseE
 
     // 2. Create a bundle and attach the CSV file
     let bundle_url = random_memory_url();
-    let mut builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
+    let builder = bundlebase::BundleBuilder::create(bundle_url.as_str(), None).await?;
     builder.attach(csv_file.url().as_str(), None).await?;
     builder.commit("Initial commit").await?;
 

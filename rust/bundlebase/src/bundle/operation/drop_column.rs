@@ -3,7 +3,6 @@ use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
@@ -22,7 +21,6 @@ impl DropColumnOp {
     }
 }
 
-#[async_trait]
 impl Operation for DropColumnOp {
     fn describe(&self) -> String {
         format!("DROP COLUMN: {}", self.id)

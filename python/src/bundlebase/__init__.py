@@ -238,12 +238,13 @@ PyBundleBuilder.to_dict = lambda self: to_dict(self)
 _original_bundle_query = PyBundle.query
 _original_builder_query = _original_methods["query"]
 
-async def _wrapped_bundle_query(self, sql: str, params=None) -> QueryResult:
+async def _wrapped_bundle_query(self, sql: str, params=None, hard_limit=None) -> QueryResult:
     """Execute a SQL query and return streaming results.
 
     Args:
         sql: SQL query string
         params: Optional list of parameter values for $1, $2 placeholders
+        hard_limit: Optional maximum number of rows to return
 
     Returns:
         QueryResult with conversion methods (to_pandas, to_polars, to_dict)
@@ -252,15 +253,16 @@ async def _wrapped_bundle_query(self, sql: str, params=None) -> QueryResult:
         result = await bundle.query("SELECT * FROM bundle WHERE id > $1", [100])
         df = await result.to_pandas()
     """
-    stream = await _original_bundle_query(self, sql, params)
+    stream = await _original_bundle_query(self, sql, params, hard_limit)
     return QueryResult(stream)
 
-async def _wrapped_builder_query(self, sql: str, params=None) -> QueryResult:
+async def _wrapped_builder_query(self, sql: str, params=None, hard_limit=None) -> QueryResult:
     """Execute a SQL query and return streaming results.
 
     Args:
         sql: SQL query string
         params: Optional list of parameter values for $1, $2 placeholders
+        hard_limit: Optional maximum number of rows to return
 
     Returns:
         QueryResult with conversion methods (to_pandas, to_polars, to_dict)
@@ -269,7 +271,7 @@ async def _wrapped_builder_query(self, sql: str, params=None) -> QueryResult:
         result = await builder.query("SELECT * FROM bundle WHERE id > $1", [100])
         df = await result.to_pandas()
     """
-    stream = await _original_builder_query(self, sql, params)
+    stream = await _original_builder_query(self, sql, params, hard_limit)
     return QueryResult(stream)
 
 PyBundle.query = _wrapped_bundle_query

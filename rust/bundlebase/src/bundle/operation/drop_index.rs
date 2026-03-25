@@ -2,7 +2,6 @@ use crate::bundle::operation::Operation;
 use crate::bundle::Bundle;
 use crate::io::ObjectId;
 use crate::BundlebaseError;
-use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +17,6 @@ impl DropIndexOp {
     }
 }
 
-#[async_trait]
 impl Operation for DropIndexOp {
     fn describe(&self) -> String {
         format!("DROP INDEX {}", self.id)

@@ -4,7 +4,8 @@
 //! commands (like ATTACH) and auto-commits.
 
 use super::{auto_commit_message, load_config};
-use bundlebase::{BundleBuilder, BundleFacade, BundlebaseError};
+use bundlebase::{BundleBuilder, BundleFacade};
+use bundlebase_common::BundlebaseError;
 use bundlebase_cli::OutputFormat;
 use clap::Args;
 use std::io::{IsTerminal, Read};

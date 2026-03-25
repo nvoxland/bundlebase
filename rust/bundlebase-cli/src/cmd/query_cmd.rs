@@ -5,7 +5,8 @@
 //! and other non-mutating commands are allowed.
 
 use super::load_config;
-use bundlebase::{Bundle, BundlebaseError};
+use bundlebase::Bundle;
+use bundlebase_common::BundlebaseError;
 use bundlebase_cli::OutputFormat;
 use clap::Args;
 use std::io::Read;

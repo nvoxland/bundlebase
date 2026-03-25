@@ -2,7 +2,6 @@ use crate::bundle::operation::Operation;
 use crate::data::ObjectId;
 use crate::source::validate_connector_args;
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -52,7 +51,6 @@ impl CreateSourceOp {
     }
 }
 
-#[async_trait]
 impl Operation for CreateSourceOp {
     fn describe(&self) -> String {
         let url = self.args.get("url").map(|s| s.as_str()).unwrap_or("<no url>");

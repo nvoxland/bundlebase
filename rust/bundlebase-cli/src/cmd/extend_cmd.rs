@@ -6,7 +6,8 @@
 //! Auto-commits after execution if there are uncommitted changes.
 
 use super::{auto_commit_message, load_config};
-use bundlebase::{Bundle, BundleFacade, BundlebaseError};
+use bundlebase::{Bundle, BundleFacade};
+use bundlebase_common::BundlebaseError;
 use bundlebase_cli::OutputFormat;
 use clap::Args;
 use std::io::Read;

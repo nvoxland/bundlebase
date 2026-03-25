@@ -342,7 +342,7 @@ fn serialize_schema_to_ipc(schema: &Schema) -> Result<Vec<u8>, Status> {
 pub fn do_get_tables(
     cmd: CommandGetTables,
     bundle_schema: Option<Arc<Schema>>,
-    function_entries: &[bundlebase::NamespacedName],
+    function_entries: &[bundlebase_common::NamespacedName],
 ) -> Result<Response<DoGetStream>, Status> {
     let response_schema = get_tables_response_schema(cmd.include_schema);
 

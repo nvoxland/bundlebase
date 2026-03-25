@@ -5,7 +5,7 @@
 
 mod cmd;
 
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use clap::{Parser, Subcommand as ClapSubcommand};
 use tracing_log::LogTracer;
 
@@ -98,6 +98,10 @@ fn parse_log_level(level_str: &str) -> Result<LogConfig, String> {
 async fn main() -> Result<(), BundlebaseError> {
     let cli = Cli::parse();
 
+    // Install catalog schema providers so Bundle/BundleBuilder creation
+    // automatically registers blocks, packs, default, and bundle_info schemas.
+    bundlebase_catalog::init();
+
     init_logging(&cli);
 
     match cli.subcommand {
@@ -177,7 +181,7 @@ mod tests {
         let create_result = BundleBuilder::create(&url, None).await;
         assert!(create_result.is_ok(), "Failed to create bundle");
 
-        let mut builder = create_result.expect("Should succeed");
+        let builder = create_result.expect("Should succeed");
 
         // Commit it so it's persisted
         builder

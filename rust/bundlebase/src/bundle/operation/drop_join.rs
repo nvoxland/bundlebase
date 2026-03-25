@@ -3,7 +3,6 @@ use crate::bundle::operation::Operation;
 use crate::bundle::BundleBuilder;
 use crate::data::ObjectId;
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
@@ -35,7 +34,6 @@ impl DropJoinOp {
     }
 }
 
-#[async_trait]
 impl Operation for DropJoinOp {
     fn describe(&self) -> String {
         format!("DROP JOIN {}", self.id)

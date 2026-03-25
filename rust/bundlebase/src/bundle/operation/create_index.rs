@@ -5,7 +5,6 @@ use crate::io::ObjectId;
 use crate::object_id::ColumnId;
 use crate::BundlebaseError;
 use arrow_schema::DataType;
-use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -35,7 +34,6 @@ impl CreateIndexOp {
     }
 }
 
-#[async_trait]
 impl Operation for CreateIndexOp {
     fn describe(&self) -> String {
         match &self.index_type {

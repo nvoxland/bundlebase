@@ -29,7 +29,7 @@ pub async fn start(
     config: Option<PassedBundleConfig>,
     read_only: bool,
     addr: SocketAddr,
-) -> Result<(), bundlebase::BundlebaseError> {
+) -> Result<(), bundlebase_common::BundlebaseError> {
     info!(
         "Starting Arrow Flight SQL server on {} ({})",
         addr,

@@ -5,7 +5,6 @@ use crate::catalog::BundleViewTable;
 use crate::object_id::ColumnId;
 use crate::{Bundle, BundlebaseError};
 use arrow::array::RecordBatch;
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::{SessionConfig, SessionContext};
@@ -31,7 +30,6 @@ impl AddColumnOp {
     }
 }
 
-#[async_trait]
 impl Operation for AddColumnOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         let schema = bundle.schema().await?;

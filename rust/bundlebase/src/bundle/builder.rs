@@ -1,6 +1,5 @@
-use crate::bundle::command::{BundleBuilderCommand, BundleCommand, CommandResponse, FacadeCommand, FetchAllCommand, FetchCommand};
-use crate::impl_dyn_command_response;
-use crate::bundle::command::response::{single_batch_stream, OutputShape};
+use bundlebase_common::command_response::{CommandResponse, single_batch_stream, OutputShape};
+use bundlebase_common::impl_dyn_command_response;
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::init::InitCommit;
 use crate::bundle::operation::AnyOperation;
@@ -10,11 +9,9 @@ use crate::bundle::function_entry::FunctionRegistry;
 use crate::bundle::{column_metadata, sql, Bundle};
 use crate::source::ConnectorRegistry;
 use crate::data::{BlockId, ObjectId, VersionedBlockId};
-use crate::source::{FetchResults, SyncMode};
-use crate::index::{IndexDefinition, IndexType};
+use crate::index::{IndexDefinition};
 use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
-use crate::bundle_config::Scope;
-use crate::bundle_config::PassedBundleConfig;
+use crate::bundle_config::{PassedBundleConfig, Scope};
 use crate::BundleConfig;
 use crate::BundlebaseError;
 use arrow::array::{Int32Array, RecordBatch, StringArray};
@@ -26,14 +23,13 @@ use datafusion::prelude::{DataFrame, SessionContext};
 use datafusion::scalar::ScalarValue;
 use parking_lot::RwLock;
 use sha2::{Digest, Sha256};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::{Arc, Weak};
 use url::Url;
-use crate::bundle::pack::JoinTypeOption;
 
 /// Format a system time as ISO8601 UTC string (e.g., "2024-01-01T12:34:56Z")
 fn to_iso(time: std::time::SystemTime) -> String {
@@ -215,6 +211,20 @@ pub struct BundleBuilder {
     status: RwLock<BundleStatus>,
 }
 
+impl bundlebase_data::DataContext for BundleBuilder {
+    fn config_provider(&self) -> Arc<dyn crate::ConfigProvider> {
+        self.bundle.config() as Arc<dyn crate::ConfigProvider>
+    }
+
+    fn data_context_dir(&self) -> Arc<dyn crate::io::IOReadWriteDir> {
+        self.bundle.data_dir()
+    }
+
+    fn session_context(&self) -> Arc<datafusion::prelude::SessionContext> {
+        self.bundle.ctx()
+    }
+}
+
 impl Clone for BundleBuilder {
     fn clone(&self) -> Self {
         Self {
@@ -273,7 +283,7 @@ impl BundleBuilder {
         // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
         // This overwrites the Bundle-facade providers registered by empty_internal(),
         // so bundle_info tables show uncommitted changes from BundleBuilder.
-        Bundle::register_schema_providers(&builder.bundle.ctx, Arc::downgrade(&builder) as Weak<dyn BundleFacade>)?;
+        crate::catalog::register_schema_providers(&builder.bundle.ctx, Arc::downgrade(&builder) as Weak<dyn BundleFacade>)?;
 
         Ok(builder)
     }
@@ -318,7 +328,7 @@ impl BundleBuilder {
         // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
         // This overwrites the Bundle-facade providers registered by Bundle::open(),
         // so bundle_info tables show uncommitted changes from BundleBuilder.
-        Bundle::register_schema_providers(&builder.bundle.ctx, Arc::downgrade(&builder) as Weak<dyn BundleFacade>)?;
+        crate::catalog::register_schema_providers(&builder.bundle.ctx, Arc::downgrade(&builder) as Weak<dyn BundleFacade>)?;
 
         Ok(builder)
     }
@@ -496,7 +506,7 @@ impl BundleBuilder {
     ///
     /// Returns an error naming the temporary function if one is found,
     /// or Ok(()) if the SQL is safe to persist.
-    pub(crate) fn check_no_temp_functions_in_sql(
+    pub fn check_no_temp_functions_in_sql(
         &self,
         sql: &str,
         context: &str,
@@ -557,7 +567,7 @@ impl BundleBuilder {
         Ok(())
     }
 
-    pub(in crate::bundle) async fn apply_operation(&self, op: AnyOperation) -> Result<(), BundlebaseError> {
+    pub async fn apply_operation(&self, op: AnyOperation) -> Result<(), BundlebaseError> {
         if self.bundle.is_view() && !op.allowed_on_view() {
             return Err(format!(
                 "Operation '{}' is not allowed on a view",
@@ -590,7 +600,7 @@ impl BundleBuilder {
     ///
     /// # Errors
     /// Returns any error from the closure. On error, the in-progress change is discarded.
-    pub(in crate::bundle) async fn do_change<F>(&self, description: &str, f: F) -> Result<(), BundlebaseError>
+    pub async fn do_change<F>(&self, description: &str, f: F) -> Result<(), BundlebaseError>
     where
         F: for<'a> FnOnce(&'a Self) -> BoxFuture<'a, Result<(), BundlebaseError>>,
     {
@@ -638,24 +648,24 @@ impl BundleBuilder {
         }
     }
 
-    /// Execute a builder command on this BundleBuilder.
+    /// Execute an async operation within a change-tracking context.
     ///
-    /// This is the primary way to execute commands that implement the `BundleBuilderCommand` trait.
-    /// The command's description is used as the change description for tracking.
+    /// This wraps any async operation with change tracking: creating a change record
+    /// before execution, and finalizing or discarding it based on the result.
     ///
     /// # Arguments
-    /// * `cmd` - The command to execute
+    /// * `description` - Human-readable description of the change
+    /// * `future` - The future to execute within the change context
     ///
     /// # Returns
-    /// * `Ok(C::Output)` - Command's output on success
-    /// * `Err(BundlebaseError)` - Execution failed
-    pub async fn execute_command<C: BundleBuilderCommand + 'static>(
+    /// * `Ok(T)` - Operation result on success
+    /// * `Err(BundlebaseError)` - Operation failed
+    pub async fn run_command<T>(
         &self,
-        cmd: C,
-    ) -> Result<C::Output, BundlebaseError> {
+        description: String,
+        future: impl std::future::Future<Output = Result<T, BundlebaseError>>,
+    ) -> Result<T, BundlebaseError> {
         use crate::bundle::operation::BundleChange;
-
-        let description = cmd.to_statement();
 
         // Check for nested changes
         let is_nested = {
@@ -679,7 +689,7 @@ impl BundleBuilder {
 
         // Execute the command
         debug!("Executing command: {}", description);
-        let result = Box::new(cmd).execute(self).await;
+        let result = future.await;
 
         // Only finalize the change if we created it (not nested)
         match &result {
@@ -705,168 +715,6 @@ impl BundleBuilder {
         result
     }
 
-    /// Attach a data block to the bundle.
-    ///
-    /// # Arguments
-    /// * `path` - The location/URL of the data to attach
-    /// * `pack` - The pack to attach to. Use `None` or `"base"` for the base pack,
-    ///            or a join name to attach to that join's pack.
-    pub async fn attach(
-        &self,
-        path: &str,
-        pack: Option<&str>,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::AttachCommand;
-        self.execute_command(AttachCommand::new(path, pack.map(|s| s.to_string()))).await?;
-        Ok(self)
-    }
-
-    /// Detach a data block from the bundle by its location.
-    ///
-    /// This removes a previously attached block from the bundle. The block
-    /// is identified by its location (URL), and the operation stores the
-    /// block ID for deterministic replay.
-    ///
-    /// # Arguments
-    /// * `location` - The location (URL) of the block to detach
-    ///
-    /// # Example
-    /// ```ignore
-    /// builder.detach_block("s3://bucket/data.parquet").await?;
-    /// ```
-    pub async fn detach_block(&self, location: &str) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::DetachBlockCommand;
-        self.execute_command(DetachBlockCommand::new(location)).await?;
-        Ok(self)
-    }
-
-    /// Replace a block's location in the bundle.
-    ///
-    /// This changes where a block's data is read from without changing the
-    /// block's identity. Useful when data files are moved to a new location.
-    ///
-    /// # Arguments
-    /// * `old_location` - The current location (URL) of the block
-    /// * `new_location` - The new location (URL) to read data from
-    ///
-    /// # Example
-    /// ```ignore
-    /// builder.replace_block(
-    ///     "s3://old-bucket/data.parquet",
-    ///     "s3://new-bucket/data.parquet"
-    /// ).await?;
-    /// ```
-    pub async fn replace_block(
-        &self,
-        old_location: &str,
-        new_location: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::ReplaceBlockCommand;
-        self.execute_command(ReplaceBlockCommand::new(old_location, new_location)).await?;
-        Ok(self)
-    }
-
-    /// Create a data source for a pack.
-    ///
-    /// A source specifies where to look for data files (e.g., S3 bucket prefix)
-    /// and patterns to filter which files to include. This enables the `fetch()`
-    /// functionality to discover and auto-attach new files.
-    ///
-    /// # Arguments
-    /// * `function` - Connector name (e.g., "remote_dir")
-    /// * `args` - Function-specific arguments. For "remote_dir":
-    ///   - "url" (required): Directory URL to list (e.g., "s3://bucket/data/")
-    ///   - "patterns" (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
-    /// * `pack` - Which pack to create the source for:
-    ///   - `None` or `Some("base")`: The base pack (default)
-    ///   - `Some(join_name)`: A joined pack by its join name
-    ///
-    /// # Example
-    /// ```ignore
-    /// let builder = BundleBuilder::create("memory:///work", None).await?;
-    /// let mut args = HashMap::new();
-    /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
-    /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
-    /// builder.create_source("remote_dir", args, None).await?;
-    /// builder.fetch("base", SyncMode::Add).await?;
-    /// builder.commit("Initial data from source").await?;
-    /// ```
-    pub async fn create_source(
-        &self,
-        connector: &str,
-        args: HashMap<String, String>,
-        pack: Option<&str>,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::CreateSourceCommand;
-        self.execute_command(CreateSourceCommand::new(connector, args, pack.map(|s| s.to_string()))).await?;
-        Ok(self)
-    }
-
-    /// Load a named connector (persisted).
-    ///
-    /// Creates the connector if it doesn't exist, then adds/replaces the entrypoint
-    /// for the given platform. The operation is persisted into the bundle's
-    /// commit history.
-    ///
-    /// Python runtime cannot be bundled — use `import_temp_connector()` instead.
-    ///
-    /// # Arguments
-    /// * `name` - Dot-separated connector name (e.g., "acme.weather").
-    /// * `runtime` - The runtime: "lib", "java", "docker", or "ipc"
-    /// * `entrypoint` - The entrypoint string (e.g., "./binary" for ipc, "./lib.so" for lib)
-    /// * `platform` - Docker-style platform string (e.g., "linux/amd64", "*/*")
-    pub async fn import_connector(
-        &self,
-        name: &str,
-        from: &str,
-        platform: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::ImportConnectorCommand;
-        use crate::platform::Platform;
-        let platform: Platform = platform.parse()?;
-        self.execute_command(ImportConnectorCommand::new(name, from, platform)).await?;
-        Ok(self)
-    }
-
-    /// Rename a connector to a new dotted name.
-    ///
-    /// Renames all entries and updates sources referencing the old connector name.
-    ///
-    /// # Arguments
-    /// * `old_name` - Current connector name (e.g., "acme.weather")
-    /// * `new_name` - New connector name (e.g., "acme.weather_v2")
-    ///
-    /// # Example
-    /// ```ignore
-    /// let c = BundleBuilder::create("memory:///example", None).await?;
-    /// c.import_connector("acme.weather", "ipc::./weather", "*/*").await?;
-    /// c.rename_connector("acme.weather", "acme.weather_v2").await?;
-    /// c.commit("Renamed connector").await?;
-    /// ```
-    pub async fn rename_connector(
-        &self,
-        old_name: &str,
-        new_name: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::RenameConnectorCommand;
-        self.execute_command(RenameConnectorCommand::new(old_name, new_name)).await?;
-        Ok(self)
-    }
-
-    /// Drop a connector. Without a platform, removes the entire connector definition.
-    /// With a platform, removes only that platform.
-    pub async fn drop_connector(
-        &self,
-        name: &str,
-        platform: Option<&str>,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::DropConnectorCommand;
-        use crate::platform::Platform;
-        let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
-        self.execute_command(DropConnectorCommand::new(name, platform)).await?;
-        Ok(self)
-    }
-
     /// Drop runtime-only connector (session-only, no operation created).
     pub async fn drop_temp_connector(
         &self,
@@ -876,357 +724,6 @@ impl BundleBuilder {
         use crate::platform::Platform;
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
         Ok(self.bundle().connector_registry().write().remove_entry(name, platform.as_ref(), true))
-    }
-
-    /// Fetch from sources for a pack - discover and attach new files.
-    ///
-    /// Lists files from the source URLs, compares with already-attached files,
-    /// and auto-attaches any new files.
-    ///
-    /// # Arguments
-    /// * `pack` - Which pack to fetch sources for (e.g. "base", or a join name)
-    /// * `mode` - Sync mode controlling how fetch handles existing files.
-    ///
-    /// # Returns
-    /// A list of `FetchResults`, one for each source in the pack.
-    /// Each result contains details about blocks added, replaced, and removed.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let builder = BundleBuilder::create("memory:///work", None).await?;
-    /// let mut args = HashMap::new();
-    /// args.insert("url".to_string(), "s3://bucket/data/".to_string());
-    /// args.insert("patterns".to_string(), "**/*.parquet".to_string());
-    /// builder.create_source("remote_dir", args, None).await?;
-    /// let results = builder.fetch("base", SyncMode::Add).await?;
-    /// for result in &results {
-    ///     println!("Source {}: {} added", result.connector, result.added.len());
-    /// }
-    /// ```
-    pub async fn fetch(&self, pack: &str, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
-        self.execute_command(FetchCommand::new(pack.to_string(), mode)).await
-    }
-
-    /// Fetch from all defined sources - discover and attach new files.
-    ///
-    /// Lists files from each source URL, compares with already-attached files,
-    /// and auto-attaches any new files.
-    ///
-    /// # Arguments
-    /// * `mode` - Sync mode controlling how fetch handles existing files.
-    ///
-    /// # Returns
-    /// A list of `FetchResults`, one for each source across all packs.
-    /// Includes results for sources with no changes (empty results).
-    ///
-    /// # Example
-    /// ```ignore
-    /// let builder = BundleBuilder::create("memory:///work", None).await?;
-    /// // Create multiple sources...
-    /// let results = builder.fetch_all(SyncMode::Add).await?;
-    /// for result in &results {
-    ///     println!("Source {}: {} added, {} replaced, {} removed",
-    ///         result.connector,
-    ///         result.added.len(),
-    ///         result.replaced.len(),
-    ///         result.removed.len());
-    /// }
-    /// ```
-    pub async fn fetch_all(&self, mode: SyncMode) -> Result<Vec<FetchResults>, BundlebaseError> {
-        self.execute_command(FetchAllCommand::new(mode)).await
-    }
-
-    /// Create a view from a SQL statement
-    ///
-    /// Creates a named view defined by the SQL query. The view is stored in a subdirectory
-    /// under view_{id}/ and automatically inherits data from the parent bundle.
-    ///
-    /// # Arguments
-    /// * `name` - Name of the view
-    /// * `sql` - SQL query that defines the view (e.g., "SELECT * FROM bundle WHERE age > 21")
-    ///
-    /// # Returns
-    /// The BundleBuilder for the created view
-    ///
-    /// # Example
-    /// ```ignore
-    /// let c = BundleBuilder::create("memory:///container", None).await?;
-    /// c.attach("data.csv", None).await?;
-    /// c.commit("Initial").await?;
-    ///
-    /// let view = c.create_view("adults", "SELECT * FROM bundle WHERE age > 21").await?;
-    /// c.commit("Add adults view").await?;
-    /// ```
-    pub async fn create_view(
-        &self,
-        name: &str,
-        sql: &str,
-    ) -> Result<Arc<BundleBuilder>, BundlebaseError> {
-        use crate::bundle::operation::CreateViewOp;
-
-        self.check_no_temp_functions_in_sql(sql, "view")?;
-
-        let name_clone = name.to_string();
-        let sql_clone = sql.to_string();
-
-        // Use a cell to capture the view_builder from inside the closure.
-        // We use parking_lot::RwLock which doesn't poison on panic.
-        let view_builder_cell: Arc<parking_lot::RwLock<Option<Arc<BundleBuilder>>>> =
-            Arc::new(parking_lot::RwLock::new(None));
-        let view_builder_cell_clone = view_builder_cell.clone();
-
-        self.do_change(&format!("Create view '{}'", name), |builder| {
-            let name = name_clone.clone();
-            let sql = sql_clone.clone();
-            let cell = view_builder_cell_clone.clone();
-            Box::pin(async move {
-                let (op, view_builder) = CreateViewOp::setup(&name, &sql, builder).await?;
-                *cell.write() = Some(view_builder);
-                builder.apply_operation(op.into()).await?;
-                info!("Created view '{}'", name);
-                Ok(())
-            })
-        })
-        .await?;
-
-        // Extract the view builder from the cell
-        let view_builder = view_builder_cell
-            .read()
-            .clone()
-            .ok_or_else(|| BundlebaseError::from("View builder not created"))?;
-
-        Ok(view_builder)
-    }
-
-    /// Rename an existing view
-    ///
-    /// # Arguments
-    /// * `old_name` - The current name of the view
-    /// * `new_name` - The new name for the view
-    ///
-    /// # Example
-    /// ```ignore
-    /// let c = BundleBuilder::create("memory:///example", None).await?;
-    /// c.attach("data.csv", None).await?;
-    /// c.create_view("adults", "SELECT * FROM bundle WHERE age > 21").await?;
-    /// c.rename_view("adults", "adults_view").await?;
-    /// c.commit("Renamed view").await?;
-    /// ```
-    pub async fn rename_view(
-        &self,
-        old_name: &str,
-        new_name: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::RenameViewCommand;
-        self.execute_command(RenameViewCommand::new(old_name, new_name)).await?;
-        Ok(self)
-    }
-
-    /// Drop an existing view
-    ///
-    /// # Arguments
-    /// * `view_name` - The name of the view to drop
-    ///
-    /// # Example
-    /// ```ignore
-    /// let c = BundleBuilder::create("memory:///example", None).await?;
-    /// c.attach("data.csv", None).await?;
-    /// c.create_view("adults", "SELECT * FROM bundle WHERE age > 21").await?;
-    /// c.drop_view("adults").await?;
-    /// c.commit("Dropped view").await?;
-    /// ```
-    pub async fn drop_view(
-        &self,
-        view_name: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::DropViewCommand;
-        self.execute_command(DropViewCommand::new(view_name)).await?;
-        Ok(self)
-    }
-
-    /// Drop an existing join
-    ///
-    /// # Arguments
-    /// * `join_name` - The name of the join to drop
-    ///
-    /// # Example
-    /// ```ignore
-    /// let c = BundleBuilder::create("memory:///example", None).await?;
-    /// c.attach("data.csv", None).await?;
-    /// c.join("customers", "base.customer_id = customers.id", Some("customers.parquet"), JoinTypeOption::Left).await?;
-    /// c.drop_join("customers").await?;
-    /// c.commit("Dropped join").await?;
-    /// ```
-    pub async fn drop_join(&self, join_name: &str) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::DropJoinCommand;
-        self.execute_command(DropJoinCommand::new(join_name)).await?;
-        Ok(self)
-    }
-
-    /// Rename an existing join
-    ///
-    /// # Arguments
-    /// * `old_name` - The current name of the join
-    /// * `new_name` - The new name for the join
-    ///
-    /// # Example
-    /// ```ignore
-    /// let c = BundleBuilder::create("memory:///example", None).await?;
-    /// c.attach("data.csv", None).await?;
-    /// c.join("customers", "base.customer_id = customers.id", Some("customers.parquet"), JoinTypeOption::Left).await?;
-    /// c.rename_join("customers", "clients").await?;
-    /// c.commit("Renamed join").await?;
-    /// ```
-    pub async fn rename_join(
-        &self,
-        old_name: &str,
-        new_name: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::RenameJoinCommand;
-        self.execute_command(RenameJoinCommand::new(old_name, new_name)).await?;
-        Ok(self)
-    }
-
-    /// Drop a column
-    pub async fn drop_column(&self, name: &str) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::DropColumnCommand;
-        self.execute_command(DropColumnCommand::new(name)).await?;
-        Ok(self)
-    }
-
-    /// Rename a column
-    pub async fn rename_column(
-        &self,
-        old_name: &str,
-        new_name: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::RenameColumnCommand;
-        self.execute_command(RenameColumnCommand::new(old_name, new_name)).await?;
-        Ok(self)
-    }
-
-    /// Add a computed column to the bundle.
-    pub async fn add_column(
-        &self,
-        name: &str,
-        expression: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::AddColumnCommand;
-        self.execute_command(AddColumnCommand::new(name, expression))
-            .await?;
-        Ok(self)
-    }
-
-    /// Cast a column to a different data type, optionally cleaning values first.
-    pub async fn cast_column(
-        &self,
-        name: &str,
-        new_type: &str,
-        clean: Option<String>,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::CastColumnCommand;
-        self.execute_command(CastColumnCommand::new(name, new_type, clean))
-            .await?;
-        Ok(self)
-    }
-
-    /// Standardize all column names to lowercase+underscore identifiers.
-    pub async fn standardize_column_names(&self) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::StandardizeColumnNamesCommand;
-        self.execute_command(StandardizeColumnNamesCommand).await?;
-        Ok(self)
-    }
-
-    /// Filter rows with a SELECT query.
-    /// Parameters can be referenced as $1, $2, etc. in the query.
-    pub async fn filter(
-        &self,
-        query: &str,
-        params: Vec<ScalarValue>,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::FilterCommand;
-        self.execute_command(FilterCommand::new(query, params)).await?;
-        Ok(self)
-    }
-
-    /// Join with another data source
-    ///
-    /// If `location` is None, the join point is created without any initial data.
-    /// Data can be attached later using `attach()` or `create_source()` with the `pack` parameter.
-    pub async fn join(
-        &self,
-        name: &str,
-        expression: &str,
-        location: Option<&str>,
-        join_type: JoinTypeOption,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::JoinCommand;
-        self.execute_command(JoinCommand::new(name, expression, location.map(|s| s.to_string()), join_type)).await?;
-        Ok(self)
-    }
-
-    /// Load a persistent function (bundled, not session-only).
-    ///
-    /// Registers the function as a DataFusion UDF and persists the definition
-    /// via an operation. Python runtime cannot be bundled — use `import_temp_function()`.
-    ///
-    /// # Arguments
-    /// * `name` - Dotted function name (e.g., "acme.double_val")
-    /// * `from` - String identifying the function implementation (e.g., "ipc::./my_func")
-    /// * `platform` - Docker-style platform string (e.g., "linux/amd64", "*/*")
-    pub async fn import_function(
-        &self,
-        name: &str,
-        from: &str,
-        platform: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::ImportFunctionCommand;
-        use crate::platform::Platform;
-        let platform: Platform = platform.parse()?;
-        self.execute_command(ImportFunctionCommand::new(
-            name, from, platform,
-        )).await?;
-        Ok(self)
-    }
-
-    /// Rename a function to a new dotted name.
-    ///
-    /// Renames all entries, deregisters old UDFs, and re-registers under the new name.
-    ///
-    /// # Arguments
-    /// * `old_name` - Current function name (e.g., "acme.double_val")
-    /// * `new_name` - New function name (e.g., "acme.double_val_v2")
-    ///
-    /// # Example
-    /// ```ignore
-    /// let c = BundleBuilder::create("memory:///example", None).await?;
-    /// c.import_function("acme.double_val", "ipc::./my_func", "*/*").await?;
-    /// c.rename_function("acme.double_val", "acme.double_val_v2").await?;
-    /// c.commit("Renamed function").await?;
-    /// ```
-    pub async fn rename_function(
-        &self,
-        old_name: &str,
-        new_name: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::RenameFunctionCommand;
-        self.execute_command(RenameFunctionCommand::new(old_name, new_name)).await?;
-        Ok(self)
-    }
-
-    /// Drop a persistent function.
-    ///
-    /// Drop all overloads of a function by name.
-    pub async fn drop_function(
-        &self,
-        name: &str,
-        platform: Option<&str>,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::DropFunctionCommand;
-        use crate::platform::Platform;
-        let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
-        self.execute_command(DropFunctionCommand::new(name, platform)).await?;
-        Ok(self)
     }
 
     /// Drop runtime-only function (session-only, no operation created).
@@ -1242,114 +739,10 @@ impl BundleBuilder {
         Ok(self.bundle().function_registry().write().remove(name, platform.as_ref(), true))
     }
 
-    /// Set the bundle's name
-    pub async fn set_name(&self, name: &str) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::SetNameCommand;
-        self.execute_command(SetNameCommand::new(name)).await?;
-        Ok(self)
-    }
-
-    /// Set the bundle's description
-    pub async fn set_description(
-        &self,
-        description: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::SetDescriptionCommand;
-        self.execute_command(SetDescriptionCommand::new(description)).await?;
-        Ok(self)
-    }
-
-    /// Save a configuration value to the bundle manifest
-    ///
-    /// Config stored via this operation has the lowest priority:
-    /// 1. Explicit config passed to create()/open() (highest)
-    /// 2. Environment variables (BB_*)
-    /// 3. Config from save_config operations (lowest)
-    ///
-    /// # Arguments
-    /// * `scope` - Scope to save config under (e.g., `Scope::try_from("s3")` or `Scope::try_from("s3://bucket")`)
-    /// * `key` - Configuration key (e.g., "region", "access_key_id")
-    /// * `value` - Configuration value
-    pub async fn save_config(
-        &self,
-        scope: &Scope,
-        key: &str,
-        value: &str,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::SaveConfigCommand;
-        self.execute_command(SaveConfigCommand::new(scope.clone(), key, value)).await?;
-        Ok(self)
-    }
-
-    /// Create an index on one or more columns
-    ///
-    /// # Arguments
-    /// * `columns` - The column name(s) to index
-    /// * `index_type` - The type of index to create (Column or Text), already configured
-    /// * `name` - Optional name for the index. If None, auto-generated.
-    ///
-    /// # Example
-    /// ```ignore
-    /// use bundlebase::{IndexType, TokenizerConfig};
-    ///
-    /// // Column index
-    /// builder.create_index(&["email"], IndexType::Column, None).await?;
-    ///
-    /// // Text index — single column, auto-named
-    /// builder.create_index(&["content"], IndexType::text(TokenizerConfig::default()), None).await?;
-    ///
-    /// // Text index — explicit name
-    /// builder.create_index(&["title", "content"], IndexType::text(TokenizerConfig::default()), Some("my_search")).await?;
-    /// ```
-    pub async fn create_index(
-        &self,
-        columns: &[&str],
-        index_type: IndexType,
-        name: Option<&str>,
-    ) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::CreateIndexCommand;
-        let cols: Vec<String> = columns.iter().map(|s| s.to_string()).collect();
-        self.execute_command(CreateIndexCommand::new(cols, index_type, name.map(|s| s.to_string()))).await?;
-        Ok(self)
-    }
-
-    /// Drop an index on a column
-    pub async fn drop_index(&self, column: &str) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::DropIndexCommand;
-        self.execute_command(DropIndexCommand::new(column)).await?;
-        Ok(self)
-    }
-
-    /// Creates index files for anything missing based on the defined indexes.
-    ///
-    /// This method ensures that all blocks have index files for columns that have been
-    /// defined as indexed (via `index()` method). It checks existing indexes to avoid
-    /// redundant work and skips blocks that are already indexed at the current version.
-    ///
-    /// # Behavior
-    /// - Analyzes the logical schema to find physical sources for indexed columns
-    /// - Filters out blocks that already have up-to-date indexes
-    /// - Streams data from each block to build value-to-rowid mappings
-    /// - Registers indexes with the IndexManager
-    /// - Continues processing other columns if one fails (logs warning)
-    ///
-    /// # Returns
-    /// - `Ok(&Self)` - Successfully processed all indexes
-    /// - `Err(BundlebaseError)` - If a critical operation fails (e.g., block not found during setup)
-    ///
-    /// # Note
-    /// This is typically called automatically by `index()` method after defining a new index.
-    /// Manual calls are useful when recovering from partial index creation failures.
-    pub async fn reindex(&self) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::ReindexCommand;
-        self.execute_command(ReindexCommand::new()).await?;
-        Ok(self)
-    }
-
     /// Internal reindex implementation that doesn't wrap in do_change.
     ///
     /// This is used by commands that need to reindex within their own change context.
-    pub(in crate::bundle) async fn reindex_internal(&self) -> Result<(), BundlebaseError> {
+    pub async fn reindex_internal(&self) -> Result<(), BundlebaseError> {
         use crate::object_id::ColumnId;
 
         // Group blocks by (index_id, column_ids) for batching
@@ -1416,18 +809,6 @@ impl BundleBuilder {
         Ok(())
     }
 
-    /// Find the version of a block by its ID
-    fn find_block_version(&self, block_id: &BlockId) -> Option<String> {
-        for pack in self.bundle.packs().read().values() {
-            for block in pack.blocks() {
-                if block.id() == block_id {
-                    return Some(block.version());
-                }
-            }
-        }
-        None
-    }
-
     /// Resolve a pack name to its ObjectId.
     ///
     /// This is a helper method used by commands that operate on packs.
@@ -1448,13 +829,6 @@ impl BundleBuilder {
                 .map(|p| *p.id())
                 .ok_or_else(|| format!("Unknown join '{}'", join_name).into()),
         }
-    }
-
-    /// Rebuild an index on a column
-    pub async fn rebuild_index(&self, column: &str) -> Result<&Self, BundlebaseError> {
-        use crate::bundle::command::RebuildIndexCommand;
-        self.execute_command(RebuildIndexCommand::new(column)).await?;
-        Ok(self)
     }
 
     /// Get the physical source (pack name, column name) for a logical column
@@ -1493,31 +867,14 @@ impl BundleBuilder {
         Ok(analyzer.get_source(logical_name))
     }
 
-    /// Verify the integrity of all files in the bundle by checking SHA256 hashes.
-    ///
-    /// This method checks:
-    /// - All data blocks: Verifies SHA256 hash matches the stored hash from operations
-    /// - Index files: Verifies the files exist (no hash verification for indexes)
-    ///
-    /// # Arguments
-    /// * `update_versions` - If true and hash matches but version changed, add UpdateVersionOp
-    ///   to update stored version metadata
-    ///
-    /// # Returns
-    /// `VerificationResults` with details for each file verified.
-    pub async fn verify_data(
-        &self,
-        update_versions: bool,
-    ) -> Result<super::VerificationResults, BundlebaseError> {
-        use crate::bundle::command::VerifyDataCommand;
-
-        let cmd = VerifyDataCommand::new(update_versions);
-        Box::new(cmd).execute(self).await
-    }
 }
 
 #[async_trait]
 impl BundleFacade for BundleBuilder {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn id(&self) -> String {
         self.bundle.id()
     }
@@ -1693,27 +1050,16 @@ impl BundleFacade for BundleBuilder {
     fn ctx(&self) -> Arc<SessionContext> {
         self.bundle.ctx()
     }
-
-    async fn execute_facade_command(
-        &self,
-        cmd: FacadeCommand,
-    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
-        cmd.execute(self).await
-    }
-
-    async fn execute_command(
-        &self,
-        cmd: BundleCommand,
-    ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
-        // BundleBuilder can execute all commands
-        cmd.execute(self).await
-    }
 }
 
+// NOTE: Builder convenience method tests (attach, filter, drop_column, etc.) are covered
+// by integration tests in tests/ which can use BundleBuilderExt from bundlebase-command.
+// Unit tests here only test core BundleBuilder functionality that doesn't require commands.
+// Due to Rust's dev-dependency type identity limitation, bundlebase-command extension traits
+// cannot be used in unit tests within the bundlebase crate itself.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::test_datafile;
 
     #[tokio::test]
     async fn test_create_empty_bundle() {
@@ -1738,167 +1084,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_schema_after_attach() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        bundle
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-
-        let schema = bundle.bundle.schema().await.unwrap();
-        assert!(
-            !schema.fields().is_empty(),
-            "After attach, schema should have fields"
-        );
-        assert_eq!(schema.fields().len(), 13, "userdata.parquet has 13 columns");
-
-        // Verify specific column names exist
-        let field_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
-        assert!(field_names.contains(&"id".to_string()));
-        assert!(field_names.contains(&"first_name".to_string()));
-        assert!(field_names.contains(&"email".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_schema_after_drop_column() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        bundle
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-
-        let schema_before = &bundle.bundle.schema().await.unwrap();
-        assert_eq!(schema_before.fields().len(), 13);
-
-        bundle.drop_column("title").await.unwrap();
-        let schema_after = &bundle.bundle.schema().await.unwrap();
-        assert_eq!(schema_after.fields().len(), 12);
-
-        // Verify 'title' column is gone
-        let field_names: Vec<String> = schema_after
-            .fields()
-            .iter()
-            .map(|f| f.name().clone())
-            .collect();
-        assert!(!field_names.contains(&"title".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_set_and_get_name() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        assert_eq!(bundle.bundle.name.read().clone(), None, "Empty bundle should have no name");
-
-        bundle.set_name("My Bundle").await.unwrap();
-        let name = bundle.bundle.name.read().as_ref().unwrap().clone();
-        assert_eq!(name, "My Bundle");
-    }
-
-    #[tokio::test]
-    async fn test_set_and_get_description() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        assert_eq!(bundle.bundle.description.read().clone(), None);
-
-        bundle
-            .set_description("This is a test bundle")
-            .await
-            .unwrap();
-        assert_eq!(
-            bundle.bundle.description.read().clone().unwrap_or("NOT SET".to_string()),
-            "This is a test bundle"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_name_doesnt_affect_version() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        bundle
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-
-        let v_no_name = bundle.bundle.version();
-
-        bundle.set_name("Named Bundle").await.unwrap();
-        let v_with_name = bundle.bundle.version();
-
-        // Metadata operations now affect the version hash since they're proper operations
-        assert_ne!(
-            v_no_name, v_with_name,
-            "Name should be tracked as an operation and change version"
-        );
-        // Verify the name was actually set
-        assert_eq!(bundle.bundle.name(), Some("Named Bundle".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_operations_list() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        assert_eq!(
-            bundle.bundle.operations().len(),
-            0,
-        );
-
-        bundle
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-        assert_eq!(bundle.bundle.operations().len(), 1);
-
-        bundle.drop_column("title").await.unwrap();
-        assert_eq!(bundle.bundle.operations().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_version() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-
-        assert_eq!(bundle.version(), "empty");
-
-        bundle
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-
-        assert_eq!(bundle.version(), "UNCOMMITTED");
-    }
-
-    // NOTE: test_clone_independence was removed because BundleBuilder now uses interior
-    // mutability (RwLock) and doesn't support cloning. The interior mutability design
-    // allows using &self methods instead of &mut self, eliminating the need for cloning.
-
-    #[tokio::test]
-    async fn test_multiple_operations_pipeline() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        bundle
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-        bundle.drop_column("title").await.unwrap();
-        bundle
-            .rename_column("first_name", "given_name")
-            .await
-            .unwrap();
-
-        assert_eq!(bundle.bundle.operations.read().len(), 3);
-    }
-
-    #[tokio::test]
     async fn test_create_fails_if_bundle_exists() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let path = tmp_dir.path().to_str().unwrap();
@@ -1919,155 +1104,5 @@ mod tests {
             "Error should mention bundle already exists: {}",
             err_msg
         );
-    }
-
-    #[tokio::test]
-    async fn test_version_uncommitted_with_changes() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        assert_eq!(bundle.version(), "empty");
-
-        bundle
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-        assert_eq!(bundle.version(), "UNCOMMITTED");
-    }
-
-    #[tokio::test]
-    async fn test_version_temp_with_temporary_connector_only() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-
-        bundle
-            .import_temp_connector("test.source", "docker::test-image:latest", "*/*")
-            .await
-            .unwrap();
-
-        assert_eq!(bundle.version(), "TEMP");
-    }
-
-    #[tokio::test]
-    async fn test_version_uncommitted_temp_with_changes_and_temporary_connector() {
-        let bundle = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        bundle
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-
-        bundle
-            .import_temp_connector("test.source", "docker::test-image:latest", "*/*")
-            .await
-            .unwrap();
-
-        assert_eq!(bundle.version(), "UNCOMMITTED+TEMP");
-    }
-
-    #[tokio::test]
-    async fn test_version_uncommitted_temp_via_facade() {
-        let builder = BundleBuilder::create("memory:///test_bundle", None)
-            .await
-            .unwrap();
-        builder
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-
-        builder
-            .import_temp_connector("test.source", "docker::test-image:latest", "*/*")
-            .await
-            .unwrap();
-
-        assert_eq!(builder.version(), "UNCOMMITTED+TEMP");
-    }
-
-    #[tokio::test]
-    async fn test_commit_blocked_by_temp_function_in_filter() {
-        use crate::bundle::function_entry::{FunctionEntry, FunctionKind, parse_function_name};
-        use crate::udf::UdfRuntime;
-        use crate::platform::Platform;
-        use crate::function::ipc_bridge::new_subprocess_cache;
-        use datafusion::logical_expr::ScalarUDF;
-
-        let builder = BundleBuilder::create("memory:///test_temp_guard", None)
-            .await
-            .unwrap();
-        builder
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-
-        // Manually add a temp function entry and register the UDF
-        let entry = FunctionEntry {
-            id: ObjectId::generate(),
-            name: parse_function_name("test.double_val").unwrap(),
-            input_types: vec![DataType::Int32],
-            return_type: DataType::Int32,
-            from: UdfRuntime::parse_from("ipc::fake_binary").unwrap(),
-            platform: Platform::any(),
-            temporary: true,
-            kind: FunctionKind::Scalar,
-        };
-        let func = crate::function::scalar::ScalarFunction::new_composite(
-            vec![entry.clone()],
-            new_subprocess_cache(),
-        )
-        .unwrap();
-        builder.bundle().ctx().register_udf(ScalarUDF::from(func));
-        builder.bundle().function_registry().write().add(entry);
-
-        // Verify temp function is registered
-        let temp_names = builder.bundle().function_registry().read().temporary_only_names();
-        assert!(
-            temp_names.contains(&"test.double_val".to_string()),
-            "Expected 'test.double_val' in temp_names: {:?}",
-            temp_names
-        );
-
-        // Apply a filter that uses the temp function
-        builder
-            .filter("SELECT * FROM bundle WHERE test.double_val(id) > 10", vec![])
-            .await
-            .unwrap();
-
-        // Verify status has the filter operation
-        let status = builder.status();
-        assert!(!status.is_empty(), "Status should have changes after filter");
-
-        // Commit should fail
-        let result = builder.commit("should fail").await;
-        assert!(result.is_err(), "Commit should fail when filter uses temp function");
-        let err = result.err().unwrap();
-        let err_msg = err.to_string();
-        assert!(
-            err_msg.contains("temporary function"),
-            "Error should mention temp function: {}",
-            err_msg
-        );
-    }
-
-    #[tokio::test]
-    async fn test_commit_succeeds_without_temp_function_in_filter() {
-        let builder = BundleBuilder::create("memory:///test_no_temp", None)
-            .await
-            .unwrap();
-        builder
-            .attach(test_datafile("userdata.parquet"), None)
-            .await
-            .unwrap();
-
-        // Filter without temp function
-        builder
-            .filter("SELECT * FROM bundle WHERE id > 10", vec![])
-            .await
-            .unwrap();
-
-        // Commit should succeed
-        let result = builder.commit("should succeed").await;
-        assert!(result.is_ok(), "Commit should succeed: {:?}", result.err());
     }
 }

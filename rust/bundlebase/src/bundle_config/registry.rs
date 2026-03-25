@@ -47,7 +47,7 @@ fn register_builtin_configs(registry: &mut ConfigRegistry) {
     registry.register_scopes(system::system_scopes());
     registry.register_keys(system::system_keys());
 
-    use crate::io::plugin;
+    use bundlebase_io::plugin;
     registry.register_scopes(plugin::object_store::object_store_scopes());
     registry.register_keys(plugin::object_store::s3_keys());
     registry.register_keys(plugin::object_store::gcs_keys());
@@ -59,7 +59,10 @@ fn register_builtin_configs(registry: &mut ConfigRegistry) {
     registry.register_scopes(plugin::sftp::sftp_scopes());
     registry.register_keys(plugin::sftp::sftp_keys());
 
-    use crate::connector::plugin::kaggle;
-    registry.register_scopes(kaggle::scopes());
-    registry.register_keys(kaggle::configs());
+    #[cfg(feature = "connector-kaggle")]
+    {
+        use bundlebase_connector::plugin::kaggle;
+        registry.register_scopes(kaggle::scopes());
+        registry.register_keys(kaggle::configs());
+    }
 }

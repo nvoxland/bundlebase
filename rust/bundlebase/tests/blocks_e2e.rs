@@ -2,15 +2,24 @@ use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::AnyOperation;
 use bundlebase::test_utils::{assert_vec_regexp, random_memory_url, test_datafile};
-use bundlebase::{op_field, BundlebaseError};
+use bundlebase::op_field;
+use bundlebase_common::BundlebaseError;
 use bundlebase::Operation;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 #[tokio::test]
 async fn test_adding_blocks() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
@@ -54,8 +63,9 @@ async fn test_adding_blocks() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_column_id_reuse_across_blocks() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_url();
-    let mut bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
     bundle
         .attach(test_datafile("customers-0-100.csv"), None)

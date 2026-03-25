@@ -1,7 +1,7 @@
 //! The `server` subcommand — Arrow Flight SQL server.
 
 use super::{load_config, BundleArgs};
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use clap::Args;
 use tracing::info;
 

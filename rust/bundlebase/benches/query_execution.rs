@@ -15,6 +15,7 @@ use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_100K, SCALE_10K, SCALE_1K};
 use datafusion::common::ScalarValue;
 use futures::StreamExt;
+use bundlebase_command::BundleBuilderExt;
 
 fn bench_filter_selective(c: &mut Criterion) {
     let rt = create_runtime();

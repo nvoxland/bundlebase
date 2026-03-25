@@ -1,8 +1,20 @@
+use std::sync::{Arc, Once};
 /// Shared test utilities for integration tests
 use arrow::datatypes::SchemaRef;
+
+static INIT: Once = Once::new();
+
+/// Initialize the catalog hook for tests. Safe to call multiple times.
+#[allow(dead_code)]
+pub fn init_catalog() {
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
+}
 use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
-use bundlebase::io::{readable_file_from_url, IOReadWriteDir};
-use bundlebase::{BundlebaseError, BundleConfig};
+use bundlebase::BundleConfig;
+use bundlebase_common::{BundlebaseError, ConfigProvider};
+use bundlebase_io::{readable_file_from_url, IOReadWriteDir};
 use datafusion::dataframe::DataFrame;
 use url::Url;
 
@@ -36,7 +48,7 @@ pub async fn latest_commit(
     match last_file {
         None => Ok(None),
         Some(file) => {
-            let io_file = readable_file_from_url(&file.url, BundleConfig::new(None)?.into()).await?;
+            let io_file = readable_file_from_url(&file.url, Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>).await?;
             let yaml = io_file.read_str().await?;
             Ok(yaml.map(|content| {
                 (

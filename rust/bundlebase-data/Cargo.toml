@@ -1,0 +1,37 @@
+[package]
+name = "bundlebase-data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Data reader plugins and RowId system for Bundlebase"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+bundlebase-common = { workspace = true }
+bundlebase-io = { workspace = true }
+bundlebase-index = { workspace = true }
+
+# Arrow & DataFusion
+arrow = { workspace = true }
+arrow-schema = { workspace = true }
+datafusion = { workspace = true }
+parquet = "57.3.0"
+
+# Async
+async-trait = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+
+# Other
+url = { version = "2.5", features = ["serde"] }
+object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
+log = "0.4"
+
+[dev-dependencies]
+tempfile = { workspace = true }

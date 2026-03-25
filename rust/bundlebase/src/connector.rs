@@ -21,459 +21,44 @@
 //! Orchestration (sync mode handling, materialization, file management)
 //! lives in `source::fetch::orchestrate_fetch()`.
 
-pub mod plugin;
+// Re-export the connector plugin module from the connector crate
+pub use bundlebase_connector::plugin;
 
-use plugin::FfiConnector;
-use plugin::HttpConnector;
-use plugin::IpcConnector;
-use plugin::KaggleConnector;
-use plugin::PostgresConnector;
-use plugin::RemoteDirConnector;
-use plugin::WebScrapeConnector;
-use crate::source::shared_utils;
+use bundlebase_connector::plugin::FfiConnector;
+use bundlebase_connector::plugin::HttpConnector;
+use bundlebase_connector::plugin::IpcConnector;
+#[cfg(feature = "connector-kaggle")]
+use bundlebase_connector::plugin::KaggleConnector;
+#[cfg(feature = "connector-postgres")]
+use bundlebase_connector::plugin::PostgresConnector;
+use bundlebase_connector::plugin::RemoteDirConnector;
+#[cfg(feature = "connector-web-scrape")]
+use bundlebase_connector::plugin::WebScrapeConnector;
 
 use crate::bundle::connector_entry::{self, ConnectorEntry};
-use crate::{BundleConfig, BundlebaseError};
-use arrow::record_batch::RecordBatch;
-use async_trait::async_trait;
-use bytes::Bytes;
-use futures::stream::{self, BoxStream};
-use std::collections::{HashMap, HashSet};
+use crate::BundlebaseError;
+use std::collections::HashMap;
 use std::sync::Arc;
-use url::Url;
 
-/// Data returned by a connector's `data()` method.
-///
-/// Sources that produce structured data (e.g., database queries, IPC subprocess)
-/// return `Arrow` batch streams, and the orchestration layer handles Parquet serialization.
-/// Sources that provide raw file bytes (e.g., Kaggle downloads, SFTP files)
-/// return `RawBytes` as a stream, which is written directly as-is.
-pub enum SourceData {
-    /// Stream of Arrow RecordBatches (will be converted to Parquet by the orchestrator).
-    Arrow(BoxStream<'static, Result<RecordBatch, BundlebaseError>>),
-    /// Raw byte stream (written directly as-is).
-    RawBytes(BoxStream<'static, Result<Bytes, std::io::Error>>),
-}
-
-impl SourceData {
-    /// Create an Arrow variant from a single RecordBatch.
-    ///
-    /// Convenience constructor that wraps a batch in a single-element stream.
-    pub fn from_batch(batch: RecordBatch) -> Self {
-        SourceData::Arrow(Box::pin(stream::once(async { Ok(batch) })))
-    }
-
-    /// Create a RawBytes variant from in-memory bytes.
-    ///
-    /// Convenience constructor that wraps `Bytes` in a single-element stream.
-    pub fn from_bytes(bytes: Bytes) -> Self {
-        SourceData::RawBytes(Box::pin(stream::once(async { Ok(bytes) })))
-    }
-}
-
-/// Describes a connector argument for documentation and validation.
-#[derive(Debug, Clone)]
-pub struct ArgSpec {
-    /// Argument name (key in the args HashMap)
-    pub name: &'static str,
-    /// Human-readable description
-    pub description: &'static str,
-    /// Whether this argument is required
-    pub required: bool,
-    /// Default value if not provided (None means no default)
-    pub default: Option<&'static str>,
-}
-
-/// Signature of a connector: its name and argument specifications.
-#[derive(Debug, Clone)]
-pub struct ConnectorSignature {
-    /// Unique name for this connector (e.g., "remote_dir")
-    pub name: String,
-    /// Argument declarations
-    pub arg_specs: Vec<ArgSpec>,
-    /// When true, unknown arguments are allowed (forwarded to the bridge).
-    pub accepts_extra_args: bool,
-}
-
-/// A partition of source data discovered during the discovery phase.
-///
-/// Each `DiscoveredLocation` becomes one block in the bundle. For file-based
-/// sources (remote_dir, web_scrape, kaggle), partitions map naturally to
-/// individual files. For structured sources (postgres, APIs), the connector
-/// decides how to divide data into partitions — for example,
-/// postgres partitions query results into row-range chunks based on a
-/// sort column.
-///
-/// **Partition stability matters.** During sync, the orchestrator matches
-/// discovered locations against previously-attached blocks by `location`
-/// string. Stable partitioning means unchanged data keeps its existing
-/// blocks (no re-fetch), new data appears as new blocks, and modified or
-/// removed partitions are detected via `version` changes or absence.
-/// If partitioning is unstable (e.g., row boundaries shift when data is
-/// inserted), blocks appear changed even when the underlying data hasn't.
-#[derive(Debug, Clone)]
-pub struct DiscoveredLocation {
-    /// Stable identifier that describes what data this partition contains.
-    ///
-    /// The location should be meaningful to the data's natural structure:
-    /// a file-based source uses a path or URL, a database uses a key range,
-    /// a spreadsheet might use a cell range. The identifier must be consistent
-    /// across `discover()` calls so the orchestrator can match partitions to
-    /// previously-attached blocks during sync.
-    ///
-    /// Examples:
-    /// - **remote_dir:** relative file path (e.g., `"subdir/data.parquet"`)
-    /// - **kaggle:** filename (e.g., `"train.csv"`)
-    /// - **postgres:** JSON range (e.g., `{"sort_col":"id","min":"1","max":"1000"}`)
-    /// - **spreadsheet:** cell range (e.g., `"Sheet1!A1:Z500"`)
-    /// - **ipc:** subprocess-defined identifier
-    pub location: String,
-    /// Whether this location requires copying data into the bundle's data directory.
-    /// True for sources without stable URLs (e.g., Kaggle, Postgres).
-    pub must_copy: bool,
-    /// Data format / file extension (e.g., "parquet", "csv").
-    pub format: String,
-    /// Source-specific version string used for change detection during sync.
-    ///
-    /// The orchestrator compares this against the version stored when the block
-    /// was last attached. A mismatch triggers a re-fetch of this partition.
-    ///
-    /// The meaning varies by connector:
-    /// - **remote_dir:** file metadata such as ETag or Last-Modified
-    /// - **web_scrape:** HTTP ETag or Last-Modified
-    /// - **kaggle:** dataset version number (e.g., `"42"`)
-    /// - **postgres:** `"count:checksum"` — row count and content hash
-    /// - **ipc:** subprocess-defined version string
-    pub version: String,
-}
-
-/// Result of materializing a single data unit from a source.
-#[derive(Debug, Clone)]
-pub struct MaterializedData {
-    /// Location of the materialized file (URL in data_dir or original if not copied)
-    pub attach_location: String,
-    /// Original source location identifier (relative path or row range for storage)
-    pub source_location: String,
-    /// Full URL to the source file (may differ from source_location)
-    pub source_url: String,
-    /// SHA256 hash of the content (full 64-character hex string).
-    /// None if the hash is not yet known (will be computed during attach).
-    pub hash: Option<String>,
-    /// Source-specific version string used for change detection in Update/Sync modes.
-    pub version: String,
-}
-
-/// Metadata about an attached file from a source.
-///
-/// Used during fetch to compare remote files with already-attached files.
-#[derive(Debug, Clone)]
-pub struct AttachedFileInfo {
-    /// The location where this block is currently stored
-    pub location: String,
-    /// Version string from AttachBlockOp (ETag/S3 version/mtime hash)
-    pub version: String,
-    /// File size in bytes (from AttachBlockOp.bytes)
-    pub bytes: Option<usize>,
-}
-
-/// Action to take for a discovered file during fetch.
-#[derive(Debug, Clone)]
-pub enum FetchAction {
-    /// Attach a new file
-    Add(MaterializedData),
-    /// Replace an existing file that has changed
-    Replace {
-        /// The source_location of the old block to detach
-        old_source_location: String,
-        /// The new materialized data to attach
-        data: MaterializedData,
-    },
-    /// Detach a file that no longer exists remotely
-    Remove {
-        /// The source_location of the block to detach
-        source_location: String,
-    },
-}
-
-/// Information about a block that was fetched (added or replaced).
-#[derive(Debug, Clone)]
-pub struct FetchedBlock {
-    /// Location where the block is attached (path in data_dir or URL)
-    pub attach_location: String,
-    /// Original source location identifier
-    pub source_location: String,
-}
-
-/// Results from fetching a single source.
-///
-/// Contains information about the source and all blocks that were
-/// added, replaced, or removed during the fetch operation.
-#[derive(Debug, Clone)]
-pub struct FetchResults {
-    /// Connector name (e.g., "remote_dir", "web_scrape")
-    pub connector: String,
-    /// Source URL or identifier from args
-    pub source_url: String,
-    /// Pack name ("base" or join name)
-    pub pack: String,
-    /// Blocks that were newly added
-    pub added: Vec<FetchedBlock>,
-    /// Blocks that were replaced (updated)
-    pub replaced: Vec<FetchedBlock>,
-    /// Source locations of blocks that were removed
-    pub removed: Vec<String>,
-}
-
-impl FetchResults {
-    /// Create a new FetchResults for a source with no changes.
-    pub fn empty(connector: String, source_url: String, pack: String) -> Self {
-        Self {
-            connector,
-            source_url,
-            pack,
-            added: Vec::new(),
-            replaced: Vec::new(),
-            removed: Vec::new(),
-        }
-    }
-
-    /// Create FetchResults from a list of FetchActions.
-    pub fn from_actions(
-        connector: String,
-        source_url: String,
-        pack: String,
-        actions: Vec<FetchAction>,
-    ) -> Self {
-        let mut added = Vec::new();
-        let mut replaced = Vec::new();
-        let mut removed = Vec::new();
-
-        for action in actions {
-            match action {
-                FetchAction::Add(data) => {
-                    added.push(FetchedBlock {
-                        attach_location: data.attach_location,
-                        source_location: data.source_location,
-                    });
-                }
-                FetchAction::Replace { data, .. } => {
-                    replaced.push(FetchedBlock {
-                        attach_location: data.attach_location,
-                        source_location: data.source_location,
-                    });
-                }
-                FetchAction::Remove { source_location } => {
-                    removed.push(source_location);
-                }
-            }
-        }
-
-        Self {
-            connector,
-            source_url,
-            pack,
-            added,
-            replaced,
-            removed,
-        }
-    }
-
-    /// Total number of actions (added + replaced + removed).
-    pub fn total_count(&self) -> usize {
-        self.added.len() + self.replaced.len() + self.removed.len()
-    }
-
-    /// Check if there were any changes.
-    pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.replaced.is_empty() && self.removed.is_empty()
-    }
-
-    /// Format a single result for display.
-    pub fn summary(&self) -> String {
-        let changes = self.added.len() + self.replaced.len() + self.removed.len();
-        format!("{}: {} changes", self.pack, changes)
-    }
-}
-
-/// Format a slice of FetchResults for display.
-pub fn format_fetch_summary(results: &[FetchResults]) -> String {
-    if results.is_empty() {
-        "No sources to fetch from".to_string()
-    } else {
-        let summary: Vec<String> = results.iter().map(|r| r.summary()).collect();
-        format!("Fetched: {}", summary.join(", "))
-    }
-}
-
-/// Trait for connector implementations.
-///
-/// Connectors define how data is discovered and made available.
-/// Each connector controls:
-/// - What "location" means (file path, row range, filename, etc.)
-/// - How to discover all locations with version info
-/// - How to provide data (either raw bytes or a stable URL)
-///
-/// ## Implementing a Connector
-///
-/// Provide all four methods:
-/// - `signature()` - Name and argument specs
-/// - `discover()` - Find all locations
-/// - `data()` - Return raw bytes (or None to use stable_url)
-/// - `stable_url()` - Return a downloadable URL (or None to use data)
-///
-/// At least one of `data()` or `stable_url()` must return Some for each location.
-#[async_trait]
-pub trait Connector: Send + Sync {
-    /// Return the signature (name + arg specs) for this connector.
-    fn signature(&self) -> ConnectorSignature;
-
-    /// Custom validation for function-specific arguments.
-    ///
-    /// Called after standard validation (required/unknown/copy checks).
-    /// Override to add custom validation. Default does nothing.
-    fn validate_args(&self, _args: &HashMap<String, String>) -> Result<(), BundlebaseError> {
-        Ok(())
-    }
-
-    /// Discover all data partitions from the source.
-    ///
-    /// Each returned [`DiscoveredLocation`] defines one partition of source data
-    /// that will become a block in the bundle. For file-based sources this means
-    /// listing files; for structured sources (databases, APIs) this means deciding
-    /// how to divide data into manageable, stable chunks whose `location` strings
-    /// describe the data they contain (e.g., a key range for a database table,
-    /// a cell range for a spreadsheet, a date range for time-series data).
-    ///
-    /// **Partitioning should be as stable as possible.** The orchestrator matches
-    /// locations by their `location` string against previously-attached blocks.
-    /// Stable partitions let sync detect exactly which blocks have changed, which
-    /// are new, and which have been removed — without re-fetching unchanged data.
-    /// For example, a database source that partitions by ID ranges will correctly
-    /// detect that existing ranges are unchanged while new rows appear as new
-    /// partitions, whereas partitioning by row offset would cause every block to
-    /// appear changed whenever rows are inserted.
-    ///
-    /// Returns ALL matching locations (including already-attached ones).
-    /// The orchestration layer handles filtering based on sync mode.
-    ///
-    /// # Arguments
-    /// * `args` - Source configuration arguments
-    /// * `attached_locations` - Locations already attached (for optional optimization)
-    /// * `config` - Bundle configuration (credentials, etc.)
-    async fn discover(
-        &self,
-        args: &HashMap<String, String>,
-        attached_locations: &HashSet<String>,
-        config: &Arc<BundleConfig>,
-    ) -> Result<Vec<DiscoveredLocation>, BundlebaseError>;
-
-    /// Provide data for a discovered location.
-    ///
-    /// Return `Ok(Some(SourceData::Arrow(batches)))` for structured data (converted to Parquet by orchestrator).
-    /// Return `Ok(Some(SourceData::RawBytes(bytes)))` for raw file bytes (written as-is).
-    /// Return `Ok(None)` if data should be fetched via `stable_url()` instead.
-    ///
-    /// ## Reserved args keys
-    ///
-    /// The `args` map may contain reserved keys prefixed with `_`. Connectors
-    /// MAY check for these to enable optional optimizations:
-    ///
-    /// - **`_columns`** — A comma-separated list of column names that the caller
-    ///   is interested in (e.g., `"col1,col2,col3"`). Connectors that support
-    ///   column pushdown can use this to fetch only the requested columns,
-    ///   reducing data transfer and processing. Connectors that do not support
-    ///   column pushdown can safely ignore this key.
-    async fn data(
-        &self,
-        location: &DiscoveredLocation,
-        args: &HashMap<String, String>,
-        config: &Arc<BundleConfig>,
-    ) -> Result<Option<SourceData>, BundlebaseError>;
-
-    /// Provide a stable URL where the data can be downloaded.
-    ///
-    /// Return `Ok(Some(Url))` with the stable download URL.
-    /// Return `Ok(None)` if data is only available via `data()`.
-    async fn stable_url(
-        &self,
-        location: &DiscoveredLocation,
-        args: &HashMap<String, String>,
-        config: &Arc<BundleConfig>,
-    ) -> Result<Option<Url>, BundlebaseError>;
-}
+// Re-export connector types from common
+pub use bundlebase_common::connector::{
+    ArgSpec, AttachedFileInfo, Connector, ConnectorSignature, DiscoveredLocation,
+    FetchAction, FetchResults, FetchedBlock, MaterializedData, SourceData,
+    format_fetch_summary,
+};
 
 /// Validate arguments against a connector signature.
 ///
-/// Performs standard validation:
-/// - Checks that all required arguments are present
-/// - Checks for unknown arguments
-/// - Validates the `copy` argument if present
-/// - Calls the connector's custom `validate_args` method
+/// Performs standard validation plus shared_utils copy arg validation.
 pub fn validate_connector_args(
     func: &dyn Connector,
     args: &HashMap<String, String>,
 ) -> Result<(), BundlebaseError> {
-    let sig = func.signature();
-    validate_args_standard(&sig, args)?;
+    // Common's validation checks required/unknown args and copy-arg
+    bundlebase_common::connector::validate_connector_args(args, &func.signature())?;
+    // Then connector-specific validation
     func.validate_args(args)?;
     Ok(())
-}
-
-/// Standard argument validation against a signature.
-///
-/// Checks required arguments, validates unknown arguments, and validates `copy` argument.
-fn validate_args_standard(
-    signature: &ConnectorSignature,
-    args: &HashMap<String, String>,
-) -> Result<(), BundlebaseError> {
-    let specs = &signature.arg_specs;
-    let valid_names: HashSet<&str> = specs.iter().map(|s| s.name).collect();
-
-    // Check for required arguments
-    for spec in specs {
-        if spec.required && !args.contains_key(spec.name) {
-            let valid_args = format_arg_list(specs);
-            return Err(format!(
-                "Function '{}' requires a '{}' argument. Valid arguments: {}",
-                signature.name, spec.name, valid_args
-            )
-            .into());
-        }
-    }
-
-    // Check for unknown arguments (skip if the source accepts extra args).
-    // Keys prefixed with "_" are reserved system keys and always allowed.
-    if !signature.accepts_extra_args {
-        for key in args.keys() {
-            if !key.starts_with('_') && !valid_names.contains(key.as_str()) {
-                let valid_args = format_arg_list(specs);
-                return Err(format!(
-                    "Function '{}' does not accept argument '{}'. Valid arguments: {}",
-                    signature.name, key, valid_args
-                )
-                .into());
-            }
-        }
-    }
-
-    shared_utils::validate_copy_arg(&signature.name, args)
-}
-
-/// Format arg specs as a human-readable list for error messages.
-fn format_arg_list(specs: &[ArgSpec]) -> String {
-    let items: Vec<String> = specs
-        .iter()
-        .map(|s| {
-            if s.required {
-                format!("{} (required)", s.name)
-            } else if let Some(default) = s.default {
-                format!("{} (optional, default: {})", s.name, default)
-            } else {
-                format!("{} (optional)", s.name)
-            }
-        })
-        .collect();
-    items.join(", ")
 }
 
 /// Registry for connectors.
@@ -500,9 +85,12 @@ impl ConnectorRegistry {
 
         // Register built-in connectors (ipc/native removed — only via defined sources)
         registry.register(Arc::new(HttpConnector));
+        #[cfg(feature = "connector-kaggle")]
         registry.register(Arc::new(KaggleConnector));
+        #[cfg(feature = "connector-postgres")]
         registry.register(Arc::new(PostgresConnector));
         registry.register(Arc::new(RemoteDirConnector));
+        #[cfg(feature = "connector-web-scrape")]
         registry.register(Arc::new(WebScrapeConnector));
 
         registry
@@ -629,6 +217,7 @@ mod tests {
     fn test_registry_new() {
         let registry = ConnectorRegistry::new();
         assert!(registry.get("remote_dir").is_some());
+        #[cfg(feature = "connector-web-scrape")]
         assert!(registry.get("web_scrape").is_some());
     }
 
@@ -639,6 +228,7 @@ mod tests {
         assert_eq!(func.signature().name, "remote_dir");
     }
 
+    #[cfg(feature = "connector-web-scrape")]
     #[test]
     fn test_registry_get_web_scrape() {
         let registry = ConnectorRegistry::new();
@@ -751,8 +341,11 @@ mod tests {
     fn test_builtins_still_registered() {
         let registry = ConnectorRegistry::new();
         assert!(registry.get("remote_dir").is_some());
+        #[cfg(feature = "connector-kaggle")]
         assert!(registry.get("kaggle").is_some());
+        #[cfg(feature = "connector-web-scrape")]
         assert!(registry.get("web_scrape").is_some());
+        #[cfg(feature = "connector-postgres")]
         assert!(registry.get("postgres").is_some());
     }
 }

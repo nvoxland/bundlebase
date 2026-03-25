@@ -1,21 +1,29 @@
+use std::sync::Arc;
 use bundlebase;
 use bundlebase::bundle::{AnyOperation, BundleFacade, InitCommit, INIT_FILENAME, META_DIR};
-use bundlebase::io::{read_yaml, readable_file_from_url};
 use bundlebase::test_utils::{random_memory_dir, random_memory_url, test_datafile};
-use bundlebase::Bundle;
-use bundlebase::BundleConfig;
-use bundlebase::BundlebaseError;
+use bundlebase::{Bundle, BundleConfig};
+use bundlebase_common::{BundlebaseError, ConfigProvider};
+use bundlebase_io::{read_yaml, readable_file_from_url};
 use url::Url;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 #[tokio::test]
 async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
+    init();
     let temp1 = random_memory_dir();
     let temp2 = random_memory_dir();
 
     // Create and commit first bundle
-    let mut c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
+    let c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
     assert_eq!(None, c1.bundle().from());
     assert_eq!(*temp1.url(), c1.url());
     c1.attach(test_datafile("customers-0-100.csv"), None).await?;
@@ -33,7 +41,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
     assert_eq!(None, opened1.from());
     assert_eq!(*temp1.url(), opened1.url());
 
-    let mut c2 = opened1.extend(Some(&temp2.url().to_string())).await?;
+    let c2 = opened1.extend(Some(&temp2.url().to_string())).await?;
     assert_eq!(Some(temp1.url()), c2.bundle().from().as_ref());
     assert_eq!(*temp2.url(), c2.url());
 
@@ -63,18 +71,19 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_simple_extend_chain() -> Result<(), BundlebaseError> {
+    init();
     let temp1 = random_memory_url();
     let temp2 = random_memory_url();
 
     // Create base bundle
-    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
+    let c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
     c1.attach(test_datafile("customers-0-100.csv"), None).await?;
     c1.commit("Base commit").await?;
 
     // Extend and commit
     let base1 = Bundle::open(&temp1.to_string(), None).await?;
     assert_eq!(1, base1.history().len());
-    let mut c2 = base1.extend(Some(&temp2.to_string())).await?;
+    let c2 = base1.extend(Some(&temp2.to_string())).await?;
     c2.drop_column("Country").await?;
     c2.commit("Extended commit").await?;
 
@@ -96,22 +105,23 @@ async fn test_simple_extend_chain() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_lazy_history_traversal() -> Result<(), BundlebaseError> {
+    init();
     let temp1 = random_memory_url();
     let temp2 = random_memory_url();
     let temp3 = random_memory_url();
 
     // Create 3-level bundle chain
-    let mut c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
+    let c1 = bundlebase::BundleBuilder::create(&temp1.to_string(), None).await?;
     c1.attach(test_datafile("customers-0-100.csv"), None).await?;
     c1.commit("Base commit").await?;
 
     let base1 = Bundle::open(&temp1.to_string(), None).await?;
-    let mut c2 = base1.extend(Some(&temp2.to_string())).await?;
+    let c2 = base1.extend(Some(&temp2.to_string())).await?;
     c2.drop_column("Country").await?;
     c2.commit("Second commit").await?;
 
     let base2 = Bundle::open(&temp2.to_string(), None).await?;
-    let mut c3 = base2.extend(Some(&temp3.to_string())).await?;
+    let c3 = base2.extend(Some(&temp3.to_string())).await?;
     c3.drop_column("Phone 1").await?;
     c3.commit("Third commit").await?;
 
@@ -132,9 +142,10 @@ async fn test_lazy_history_traversal() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
+    init();
     let temp = random_memory_url();
 
-    let mut bundle = bundlebase::BundleBuilder::create(&temp.to_string(), None).await?;
+    let bundle = bundlebase::BundleBuilder::create(&temp.to_string(), None).await?;
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     bundle.drop_column("Country").await?;
@@ -155,11 +166,12 @@ async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
+    init();
     let temp1 = random_memory_dir();
     let temp2 = random_memory_dir();
 
     // Create Bundle A with attachment using RELATIVE path
-    let mut bundle_a = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
+    let bundle_a = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
 
     // Copy test data to bundle's directory with a local name
     let source_file = test_datafile("customers-0-100.csv");
@@ -167,7 +179,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
     // Read source data and write to local location
     let source_obj =
-        readable_file_from_url(&Url::parse(source_file)?, BundleConfig::new(None)?.into()).await?;
+        readable_file_from_url(&Url::parse(source_file)?, Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>).await?;
     let data: bytes::Bytes = source_obj
         .read_bytes()
         .await?
@@ -180,7 +192,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
     // Extend to Bundle B in different location
     let bundle_a_reopened = Bundle::open(&temp1.url().to_string(), None).await?;
-    let mut bundle_b = bundle_a_reopened.extend(Some(&temp2.url().to_string())).await?;
+    let bundle_b = bundle_a_reopened.extend(Some(&temp2.url().to_string())).await?;
     bundle_b.drop_column("Country").await?;
     bundle_b.commit("Bundle B extends A").await?;
 
@@ -220,12 +232,13 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
+    init();
     let temp1 = random_memory_dir();
     let temp2 = random_memory_dir();
     let temp3 = random_memory_dir();
 
     // Create base bundle
-    let mut c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
+    let c1 = bundlebase::BundleBuilder::create(&temp1.url().to_string(), None).await?;
     c1.attach(test_datafile("customers-0-100.csv"), None).await?;
     c1.commit("Initial commit").await?;
 
@@ -241,7 +254,7 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     let base1 = Bundle::open(&temp1.url().to_string(), None).await?;
     assert_eq!(base_id, base1.id(), "Opened bundle should have same ID as InitCommit");
 
-    let mut c2 = base1.extend(Some(&temp2.url().to_string())).await?;
+    let c2 = base1.extend(Some(&temp2.url().to_string())).await?;
     c2.drop_column("Country").await?;
     c2.commit("Second commit").await?;
 
@@ -266,7 +279,7 @@ async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
     );
 
     // Extend again to third bundle and verify ID is still the same
-    let mut c3 = base2.extend(Some(&temp3.url().to_string())).await?;
+    let c3 = base2.extend(Some(&temp3.url().to_string())).await?;
     c3.drop_column("Phone 1").await?;
     c3.commit("Third commit").await?;
 

@@ -59,7 +59,6 @@ pub use crate::bundle::operation::set_name::SetNameOp;
 pub use crate::bundle::operation::update_version::UpdateVersionOp;
 use crate::bundle::column_metadata::ColumnNames;
 use crate::{versioning, Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use datafusion::prelude::{DataFrame, SessionContext};
 use serde::{Deserialize, Serialize};
@@ -93,7 +92,6 @@ impl Display for BundleChange {
 }
 
 /// Trait for all operations
-#[async_trait]
 pub trait Operation: Send + Sync + Clone + Serialize + Debug {
     /// Get a human-readable description of this operation
     fn describe(&self) -> String;
@@ -153,7 +151,6 @@ macro_rules! define_any_operation {
             $( $variant($op_type), )*
         }
 
-        #[async_trait]
         impl Operation for AnyOperation {
             fn describe(&self) -> String {
                 match self {

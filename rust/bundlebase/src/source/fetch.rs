@@ -3,15 +3,14 @@
 use crate::connector::{
     AttachedFileInfo, Connector, DiscoveredLocation, FetchAction, MaterializedData, SourceData,
 };
-use super::shared_utils::{filename_from_url, record_batch_stream_to_parquet, should_copy};
+use bundlebase_common::source_utils::{filename_from_url, record_batch_stream_to_parquet};
 use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};
 use crate::progress::ProgressScope;
-use crate::{BundleConfig, BundlebaseError};
+use crate::{BundlebaseError, ConfigProvider};
 use bytes::Bytes;
 use futures::stream;
-use futures::StreamExt;
 use log::debug;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -126,7 +125,7 @@ pub async fn materialize_url(
     url: &Url,
     should_copy: bool,
     data_dir: &dyn IOReadWriteDir,
-    config: &Arc<BundleConfig>,
+    config: &Arc<dyn ConfigProvider>,
     format_hint: Option<&str>,
 ) -> Result<MaterializeResult, BundlebaseError> {
     if !should_copy {
@@ -166,7 +165,7 @@ async fn get_data_for_location(
     func: &dyn Connector,
     location: &DiscoveredLocation,
     args: &HashMap<String, String>,
-    config: &Arc<BundleConfig>,
+    config: &Arc<dyn ConfigProvider>,
     data_dir: &dyn IOReadWriteDir,
     should_copy: bool,
 ) -> Result<FetchedData, BundlebaseError> {
@@ -250,7 +249,7 @@ pub async fn orchestrate_fetch(
     should_copy: bool,
     data_dir: &dyn IOReadWriteDir,
     attached_files: &HashMap<String, AttachedFileInfo>,
-    config: &Arc<BundleConfig>,
+    config: &Arc<dyn ConfigProvider>,
 ) -> Result<Vec<FetchAction>, BundlebaseError> {
     let attached_locations: HashSet<String> = attached_files.keys().cloned().collect();
     let discovered = func.discover(args, &attached_locations, config).await?;

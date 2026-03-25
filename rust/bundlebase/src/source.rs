@@ -1,8 +1,6 @@
 //! Source module for connector definitions, data discovery, and fetch orchestration.
 
 pub(crate) mod fetch;
-pub(crate) mod shared_utils;
-pub(crate) mod source_utils;
 
 use crate::BundlebaseError;
 
@@ -45,10 +43,13 @@ impl std::fmt::Display for SyncMode {
     }
 }
 
+#[cfg(feature = "connector-kaggle")]
 pub use crate::connector::plugin::kaggle::KaggleConnector;
 pub use crate::connector::plugin::ffi;
+#[cfg(feature = "connector-postgres")]
 pub use crate::connector::plugin::PostgresConnector;
 pub use crate::connector::plugin::RemoteDirConnector;
+#[cfg(feature = "connector-web-scrape")]
 pub use crate::connector::plugin::WebScrapeConnector;
 pub use crate::connector::{
     format_fetch_summary, validate_connector_args, ArgSpec, AttachedFileInfo, DiscoveredLocation,

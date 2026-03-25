@@ -1,4 +1,4 @@
-use ::bundlebase::bundle_config::{PassedBundleConfig, Scope};
+use ::bundlebase::bundle_config::{PassedBundleConfig, Scope, validated_scope};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -11,9 +11,9 @@ pub struct PyBundleConfig {
 /// Parse a scope string from Python into a Scope.
 ///
 /// Handles URLs like "s3://bucket", names like "s3/bucket", and simple names like "s3".
-/// All parsing is delegated to `Scope::try_from`.
+/// Validates against registered scopes so unknown scopes are rejected early.
 pub(crate) fn parse_scope(scope: &str) -> PyResult<Scope> {
-    Scope::try_from(scope)
+    validated_scope(scope)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
 }
 

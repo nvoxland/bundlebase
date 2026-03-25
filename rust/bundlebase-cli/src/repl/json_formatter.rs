@@ -5,8 +5,8 @@
 
 use arrow::array::*;
 use arrow::datatypes::DataType;
-use bundlebase::bundle::OutputShape;
-use bundlebase::BundlebaseError;
+use bundlebase_command::OutputShape;
+use bundlebase_common::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use futures::StreamExt;
 use serde_json::{json, Value};

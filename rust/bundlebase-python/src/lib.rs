@@ -99,6 +99,10 @@ fn bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyFileVerificationResult>()?;
     m.add_class::<PyVerificationResults>()?;
 
+    // Install catalog schema providers so Bundle/BundleBuilder creation
+    // automatically registers blocks, packs, default, and bundle_info schemas.
+    bundlebase_catalog::init();
+
     // Initialize Rust→Python logging bridge
     // This forwards all Rust log::* calls to Python's logging module
     pyo3_log::init();

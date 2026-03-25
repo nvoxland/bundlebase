@@ -3,7 +3,6 @@ use crate::bundle::pack::JoinTypeOption;
 use crate::bundle::Pack;
 use crate::io::ObjectId;
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -33,7 +32,6 @@ impl CreateJoinOp {
     }
 }
 
-#[async_trait]
 impl Operation for CreateJoinOp {
     fn describe(&self) -> String {
         format!("CREATE JOIN '{}' ON {}", &self.name, &self.expression)

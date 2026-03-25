@@ -1,0 +1,50 @@
+[package]
+name = "bundlebase-connector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Data source connectors for Bundlebase - HTTP, Kaggle, Postgres, remote_dir, web_scrape, FFI, IPC"
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["connector-postgres", "connector-kaggle", "connector-web-scrape"]
+connector-postgres = ["dep:tokio-postgres", "dep:postgres-types"]
+connector-kaggle = ["dep:zip"]
+connector-web-scrape = ["dep:scraper"]
+
+[dependencies]
+bundlebase-common = { workspace = true }
+bundlebase-io = { workspace = true }
+
+# Core deps
+arrow = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { version = "2.5", features = ["serde"] }
+log = "0.4"
+glob = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+shellexpand = "3.1"
+tempfile = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+libloading = "0.8"
+
+# Feature-gated connector deps
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"], optional = true }
+postgres-types = { version = "0.2", features = ["derive"], optional = true }
+zip = { version = "8.1", default-features = false, features = ["deflate"], optional = true }
+scraper = { version = "0.25", optional = true }
+
+[dev-dependencies]
+rstest = { workspace = true }
+parking_lot = { workspace = true }
+wiremock = "0.6"

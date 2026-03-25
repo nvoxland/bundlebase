@@ -2,8 +2,8 @@ use arrow::array::{Int32Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
-use crate::bundle::command::response::{single_batch_stream, CommandResponse, OutputShape};
-use crate::impl_dyn_command_response;
+use bundlebase_common::command_response::{single_batch_stream, CommandResponse, OutputShape};
+use bundlebase_common::impl_dyn_command_response;
 use datafusion::execution::SendableRecordBatchStream;
 use crate::bundle::operation::{AnyOperation, BundleChange};
 use crate::BundlebaseError;
@@ -33,8 +33,27 @@ impl BundleCommit {
     }
 }
 
+/// Newtype wrapper around `Vec<BundleCommit>` for `CommandResponse` implementation.
+///
+/// This wrapper exists to satisfy Rust's orphan rules — `CommandResponse` is defined
+/// in `bundlebase_common`, and `Vec<T>` is foreign, so the impl must be on a local type.
+pub struct CommitHistory(pub Vec<BundleCommit>);
+
+impl std::ops::Deref for CommitHistory {
+    type Target = Vec<BundleCommit>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Vec<BundleCommit>> for CommitHistory {
+    fn from(commits: Vec<BundleCommit>) -> Self {
+        CommitHistory(commits)
+    }
+}
+
 /// CommandResponse implementation for displaying commit history.
-impl CommandResponse for Vec<BundleCommit> {
+impl CommandResponse for CommitHistory {
     fn schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("id", DataType::Int32, false),
@@ -51,15 +70,15 @@ impl CommandResponse for Vec<BundleCommit> {
     }
 
     fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        let ids: Vec<i32> = (0..self.len() as i32).collect();
-        let urls: Vec<Option<String>> = self
+        let ids: Vec<i32> = (0..self.0.len() as i32).collect();
+        let urls: Vec<Option<String>> = self.0
             .iter()
             .map(|c| c.url.as_ref().map(|u| u.to_string()))
             .collect();
-        let authors: Vec<&str> = self.iter().map(|c| c.author.as_str()).collect();
-        let messages: Vec<&str> = self.iter().map(|c| c.message.as_str()).collect();
-        let timestamps: Vec<&str> = self.iter().map(|c| c.timestamp.as_str()).collect();
-        let change_counts: Vec<i32> = self.iter().map(|c| c.changes.len() as i32).collect();
+        let authors: Vec<&str> = self.0.iter().map(|c| c.author.as_str()).collect();
+        let messages: Vec<&str> = self.0.iter().map(|c| c.message.as_str()).collect();
+        let timestamps: Vec<&str> = self.0.iter().map(|c| c.timestamp.as_str()).collect();
+        let change_counts: Vec<i32> = self.0.iter().map(|c| c.changes.len() as i32).collect();
 
         let batch = RecordBatch::try_new(
             Self::schema(),
@@ -76,7 +95,7 @@ impl CommandResponse for Vec<BundleCommit> {
         single_batch_stream(Self::schema(), batch)
     }
 
-    impl_dyn_command_response!(Vec<BundleCommit>);
+    impl_dyn_command_response!(CommitHistory);
 }
 
 /// Extracts the version number from a manifest filename.

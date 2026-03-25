@@ -7,7 +7,7 @@ use arrow::array::ArrayRef;
 use arrow::pyarrow::{FromPyArrow, ToPyArrow};
 use bundlebase::function::manifest::ManifestEntry;
 use bundlebase::function::python_bridge::PythonFunctionBridge;
-use bundlebase::BundlebaseError;
+use bundlebase_common::BundlebaseError;
 use datafusion::scalar::ScalarValue;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;

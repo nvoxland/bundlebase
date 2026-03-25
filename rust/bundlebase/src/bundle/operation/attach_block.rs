@@ -9,7 +9,6 @@ use crate::progress::ProgressScope;
 use crate::source::AttachedFileInfo;
 use crate::{Bundle, BundleBuilder, BundlebaseError};
 use arrow_schema::SchemaRef;
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use log::debug;
 use serde::{Deserialize, Serialize};
@@ -184,7 +183,6 @@ impl AttachBlockOp {
     }
 }
 
-#[async_trait]
 impl Operation for AttachBlockOp {
     fn describe(&self) -> String {
         format!("ATTACH: {}", self.location)
@@ -258,11 +256,10 @@ impl Operation for AttachBlockOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::BundleFacade;
     use crate::io::plugin::object_store::ObjectStoreFile;
     use crate::io::IOReadFile;
     use crate::test_utils::{empty_bundle, for_yaml, test_datafile};
-    use crate::BundleConfig;
+    
     use url::Url;
 
     #[tokio::test]
@@ -295,7 +292,7 @@ mod tests {
         let pack = String::from(op.pack);
         let version = ObjectStoreFile::from_url(
             &Url::parse(datafile).unwrap(),
-            BundleConfig::new(None)?.into(),
+            crate::test_utils::test_config(),
         )?
         .version()
         .await?;
@@ -374,42 +371,7 @@ schema:
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_attach_dataframe_schema() -> Result<(), BundlebaseError> {
-        let mut bundle = crate::BundleBuilder::create("memory:///test_bundle", None).await?;
-        bundle.attach(test_datafile("userdata.parquet"), None).await?;
-
-        // Get the DataFrame from the bundle
-        let df = bundle.dataframe().await?;
-        let df_schema = df.schema();
-
-        // Verify DataFrame schema has correct column names and types
-        let schema_string = df_schema
-            .fields()
-            .iter()
-            .map(|f| format!("{}: {}", f.name(), f.data_type()))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        // Expected schema with all column names and their data types from the parquet file
-        let expected_schema = "registration_dttm: Timestamp(ns)\n\
-                               id: Int32\n\
-                               first_name: Utf8View\n\
-                               last_name: Utf8View\n\
-                               email: Utf8View\n\
-                               gender: Utf8View\n\
-                               ip_address: Utf8View\n\
-                               cc: Utf8View\n\
-                               country: Utf8View\n\
-                               birthdate: Utf8View\n\
-                               salary: Float64\n\
-                               title: Utf8View\n\
-                               comments: Utf8View";
-
-        assert_eq!(schema_string, expected_schema,);
-
-        Ok(())
-    }
+    // test_attach_dataframe_schema moved to integration tests (uses BundleBuilderExt)
 
     #[tokio::test]
     async fn test_version() {

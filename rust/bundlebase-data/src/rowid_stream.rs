@@ -1,0 +1,125 @@
+use crate::rowid_provider::RowIdProvider;
+use crate::{RowId, RowIdBatch};
+use bundlebase_common::object_id::ObjectIdAlias;
+use bundlebase_common::BundlebaseError;
+use arrow::record_batch::RecordBatch;
+use datafusion::physical_plan::SendableRecordBatchStream;
+use futures::future::{BoxFuture, Future};
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+
+/// Stream adapter that wraps a RecordBatchStream and adds RowId information
+/// Transforms each batch on-the-fly without collecting into memory
+///
+/// Uses a RowIdProvider trait to generate RowIds for each batch.
+/// Different implementations can use different strategies:
+/// - Pre-loaded from a layout file with caching (CSV)
+/// - Computed on-the-fly based on file metadata (Parquet)
+/// - Fetched from an external index service
+///
+/// The `block_ref` is used to remap the block_ref bits of each RowId
+/// loaded from the provider, so layout files can use a placeholder value
+/// and the caller's ref is substituted at stream time.
+pub struct RowIdStreamAdapter {
+    inner: SendableRecordBatchStream,
+    row_id_provider: Arc<dyn RowIdProvider>,
+    block_ref: ObjectIdAlias,
+    global_row_num: usize,
+    // Pending state: we're waiting for the RowId generation to complete
+    pending: Option<(
+        BoxFuture<'static, Result<Vec<RowId>, BundlebaseError>>,
+        RecordBatch,
+        usize,
+    )>,
+}
+
+impl RowIdStreamAdapter {
+    /// Create a new RowIdStreamAdapter
+    ///
+    /// # Arguments
+    /// * `inner` - The RecordBatchStream to wrap
+    /// * `row_id_provider` - Provider that generates RowIds for each batch
+    /// * `block_ref` - The ObjectIdAlias to embed in each RowId (remaps provider's values)
+    pub fn new(
+        inner: SendableRecordBatchStream,
+        row_id_provider: Arc<dyn RowIdProvider>,
+        block_ref: ObjectIdAlias,
+    ) -> Self {
+        Self {
+            inner,
+            row_id_provider,
+            block_ref,
+            global_row_num: 0,
+            pending: None,
+        }
+    }
+}
+
+impl futures::stream::Stream for RowIdStreamAdapter {
+    type Item = Result<RowIdBatch, BundlebaseError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let block_ref = self.block_ref;
+
+        // If we have a pending RowId generation, poll it first
+        if let Some((mut fut, batch, start_row)) = self.pending.take() {
+            match fut.as_mut().poll(cx) {
+                Poll::Ready(Ok(batch_row_ids)) => {
+                    // RowIds are ready, remap block_ref and return the batch
+                    let remapped: Vec<RowId> = batch_row_ids
+                        .into_iter()
+                        .map(|r| r.with_block_ref(block_ref))
+                        .collect();
+                    self.global_row_num = start_row + batch.num_rows();
+                    return Poll::Ready(Some(RowIdBatch::new(batch, remapped)));
+                }
+                Poll::Ready(Err(e)) => {
+                    return Poll::Ready(Some(Err(e)));
+                }
+                Poll::Pending => {
+                    // Still waiting for RowIds, put it back
+                    self.pending = Some((fut, batch, start_row));
+                    return Poll::Pending;
+                }
+            }
+        }
+
+        // No pending work, poll the inner stream for the next batch
+        match Pin::new(&mut self.inner).poll_next(cx) {
+            Poll::Ready(Some(Ok(batch))) => {
+                let num_rows = batch.num_rows();
+                let start_row = self.global_row_num;
+
+                // Call the trait method to get RowIds
+                let provider = self.row_id_provider.clone();
+                let mut fut =
+                    Box::pin(
+                        async move { provider.get_row_ids(start_row, start_row + num_rows).await },
+                    );
+
+                // Try to poll it immediately (might complete synchronously if cached)
+                match fut.as_mut().poll(cx) {
+                    Poll::Ready(Ok(batch_row_ids)) => {
+                        // Completed immediately (likely from cache), remap block_ref
+                        let remapped: Vec<RowId> = batch_row_ids
+                            .into_iter()
+                            .map(|r| r.with_block_ref(block_ref))
+                            .collect();
+                        self.global_row_num = start_row + num_rows;
+                        Poll::Ready(Some(RowIdBatch::new(batch, remapped)))
+                    }
+                    Poll::Ready(Err(e)) => Poll::Ready(Some(Err(e))),
+                    Poll::Pending => {
+                        // Need to wait for it, store as pending
+                        self.pending = Some((fut, batch, start_row));
+                        Poll::Pending
+                    }
+                }
+            }
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(Box::new(e) as BundlebaseError))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}

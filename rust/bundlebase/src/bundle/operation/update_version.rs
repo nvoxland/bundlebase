@@ -2,7 +2,6 @@ use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId};
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -39,7 +38,6 @@ impl UpdateVersionOp {
     }
 }
 
-#[async_trait]
 impl Operation for UpdateVersionOp {
     fn describe(&self) -> String {
         format!("UPDATE VERSION: block {} -> {}", self.block, self.new_version)

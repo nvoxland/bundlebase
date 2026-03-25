@@ -23,7 +23,7 @@ fn execute(_cmd: &ReplCommand, bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'sta
     let bundle = bundle.clone();
     Box::pin(async move {
         let count = bundle.num_rows().await?;
-        let response: Box<dyn bundlebase::bundle::CommandResponse> = Box::new(count);
+        let response: Box<dyn bundlebase_command::CommandResponse> = Box::new(count);
         let (stream, shape) = super::response_to_stream(response)?;
         Ok(Some((stream, shape)))
     })

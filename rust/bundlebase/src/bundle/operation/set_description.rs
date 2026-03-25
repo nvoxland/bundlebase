@@ -1,6 +1,5 @@
 use crate::bundle::operation::Operation;
 use crate::{Bundle, BundlebaseError};
-use async_trait::async_trait;
 use datafusion::common::DataFusionError;
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +17,6 @@ impl SetDescriptionOp {
     }
 }
 
-#[async_trait]
 impl Operation for SetDescriptionOp {
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
         Ok(())

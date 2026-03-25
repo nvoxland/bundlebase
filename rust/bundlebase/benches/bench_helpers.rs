@@ -13,6 +13,7 @@ use bundlebase::{BundleBuilder, BundlebaseError};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Runtime;
+use bundlebase_command::BundleBuilderExt;
 
 /// Root directory for benchmark temp files, under the system temp directory.
 pub fn bench_tmp_dir() -> PathBuf {
@@ -57,6 +58,7 @@ pub async fn create_benchmark_bundle(
 macro_rules! bench_main {
     ($benches_fn:ident) => {
         fn main() {
+            bundlebase_catalog::init();
             bench_helpers::clean_bench_tmp();
             throttled_store::register_throttle_scheme();
             $benches_fn();

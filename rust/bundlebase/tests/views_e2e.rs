@@ -1,13 +1,22 @@
-use bundlebase::io::read_yaml;
 use bundlebase::test_utils::{
     assert_vec_regexp, describe_ops, field_names, random_memory_url, test_datafile,
 };
-use bundlebase::{Bundle, BundleBuilder, BundleFacade, BundlebaseError, Operation};
+use bundlebase::{Bundle, BundleBuilder, BundleFacade, Operation};
+use bundlebase_common::BundlebaseError;
+use bundlebase_io::read_yaml;
+use bundlebase_command::BundleBuilderExt;
+
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
 
 #[tokio::test]
 async fn test_create_view_basic() -> Result<(), BundlebaseError> {
+    init();
     // Create container and attach data
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -51,6 +60,7 @@ async fn test_create_view_basic() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_view_not_found() -> Result<(), BundlebaseError> {
+    init();
     let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Try to open non-existent view
@@ -64,9 +74,10 @@ async fn test_view_not_found() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
+    init();
     // Create container and view
     let container_url = random_memory_url().to_string();
-    let mut c = BundleBuilder::create(&container_url, None).await?;
+    let c = BundleBuilder::create(&container_url, None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("v1").await?;
 
@@ -80,7 +91,7 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
 
     // Reopen container and add more data to parent
     let c_bundle = Bundle::open(&container_url, None).await?;
-    let mut c_reopened = c_bundle.extend(None).await?;
+    let c_reopened = c_bundle.extend(None).await?;
     c_reopened
         .attach(&test_datafile("customers-101-150.csv"), None)
         .await?;
@@ -102,8 +113,9 @@ async fn test_view_inherits_parent_changes() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
+    init();
     // Create container
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -134,7 +146,8 @@ async fn test_view_with_multiple_operations() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_duplicate_view_name() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial").await?;
 
@@ -154,11 +167,12 @@ async fn test_duplicate_view_name() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
+    init();
     use bundlebase::bundle::{InitCommit, INIT_FILENAME, META_DIR};
 
     // Create container and view
     let container_url = random_memory_url().to_string();
-    let mut c = BundleBuilder::create(&container_url, None).await?;
+    let c = BundleBuilder::create(&container_url, None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("v1").await?;
 
@@ -195,7 +209,8 @@ async fn test_view_has_view_field_in_init() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -224,7 +239,8 @@ async fn test_view_has_parent_data() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_view_is_marked_as_view() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -251,7 +267,8 @@ async fn test_view_is_marked_as_view() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_cannot_attach_to_view() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -264,7 +281,7 @@ async fn test_cannot_attach_to_view() -> Result<(), BundlebaseError> {
         &c.data_dir().as_ref().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
         None,
     ).await?;
-    let mut view_builder = view_bundle.extend(Some(random_memory_url().as_str())).await?;
+    let view_builder = view_bundle.extend(Some(random_memory_url().as_str())).await?;
 
     // Try to attach data to the view - should fail
     let result = view_builder.attach(&test_datafile("customers-101-150.csv"), None).await;
@@ -282,7 +299,8 @@ async fn test_cannot_attach_to_view() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -295,7 +313,7 @@ async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
         &c.data_dir().as_ref().subdir(&format!("view_{}", c.views().keys().next().unwrap()))?.url().to_string(),
         None,
     ).await?;
-    let mut view_builder = view_bundle.extend(Some(random_memory_url().as_str())).await?;
+    let view_builder = view_bundle.extend(Some(random_memory_url().as_str())).await?;
 
     // Try to create a view on the view - should fail
     let result = view_builder.create_view("subview", "select * limit 5").await;
@@ -313,7 +331,8 @@ async fn test_cannot_create_view_on_view() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_cannot_drop_view_from_view() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -330,7 +349,7 @@ async fn test_cannot_drop_view_from_view() -> Result<(), BundlebaseError> {
         &c.data_dir().as_ref().subdir(&format!("view_{}", view1_id))?.url().to_string(),
         None,
     ).await?;
-    let mut view_builder = view_bundle.extend(Some(random_memory_url().as_str())).await?;
+    let view_builder = view_bundle.extend(Some(random_memory_url().as_str())).await?;
 
     // Try to drop view2 from view1 - should fail
     let result = view_builder.drop_view("view2").await;
@@ -348,8 +367,9 @@ async fn test_cannot_drop_view_from_view() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_regular_container_select() -> Result<(), BundlebaseError> {
+    init();
     // Test SELECT on a regular container (not a view) to isolate the issue
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -376,7 +396,8 @@ async fn test_regular_container_select() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -403,7 +424,8 @@ async fn test_view_dataframe_execution() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_views_method() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -428,7 +450,8 @@ async fn test_views_method() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -494,7 +517,8 @@ async fn test_view_lookup_by_name_and_id() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_rename_view_basic() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -526,7 +550,8 @@ async fn test_rename_view_basic() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_rename_view_old_name_not_found() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -544,7 +569,8 @@ async fn test_rename_view_old_name_not_found() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_rename_view_new_name_exists() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -567,7 +593,8 @@ async fn test_rename_view_new_name_exists() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_rename_view_preserves_view_data() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -598,8 +625,9 @@ async fn test_rename_view_preserves_view_data() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_rename_view_commit_and_reopen() -> Result<(), BundlebaseError> {
+    init();
     let container_url = random_memory_url().to_string();
-    let mut c = BundleBuilder::create(&container_url, None).await?;
+    let c = BundleBuilder::create(&container_url, None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -632,9 +660,10 @@ async fn test_rename_view_commit_and_reopen() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_view_with_sql() -> Result<(), BundlebaseError> {
+    init();
     // This test verifies that create_view properly stores the SQL as a select operation
 
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial").await?;
 
@@ -654,7 +683,8 @@ async fn test_create_view_with_sql() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_drop_view_basic() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -685,7 +715,8 @@ async fn test_drop_view_basic() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_drop_view_not_found() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -703,8 +734,9 @@ async fn test_drop_view_not_found() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_drop_view_commit_and_reopen() -> Result<(), BundlebaseError> {
+    init();
     let container_url = random_memory_url().to_string();
-    let mut c = BundleBuilder::create(&container_url, None).await?;
+    let c = BundleBuilder::create(&container_url, None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -731,7 +763,8 @@ async fn test_drop_view_commit_and_reopen() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_drop_view_preserves_other_views() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 
@@ -765,7 +798,8 @@ async fn test_drop_view_preserves_other_views() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_drop_view_twice_fails() -> Result<(), BundlebaseError> {
-    let mut c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
+    init();
+    let c = BundleBuilder::create(random_memory_url().as_str(), None).await?;
     c.attach(&test_datafile("customers-0-100.csv"), None).await?;
     c.commit("Initial data").await?;
 

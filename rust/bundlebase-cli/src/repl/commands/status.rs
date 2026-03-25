@@ -1,7 +1,7 @@
 //! Status command - displays uncommitted changes in the bundle.
 
 use super::{ReplCommandResult, ReplCommand, ReplCommandDef};
-use bundlebase::bundle::CommandResponse;
+use bundlebase_command::CommandResponse;
 use bundlebase::BundleFacade;
 use futures::future::BoxFuture;
 use std::sync::Arc;
@@ -36,7 +36,8 @@ fn execute(_cmd: &ReplCommand, bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'sta
 
 #[cfg(test)]
 mod tests {
-    use bundlebase::bundle::{BundleStatus, CommandResponse};
+    use bundlebase::bundle::BundleStatus;
+use bundlebase_command::CommandResponse;
     use futures::TryStreamExt;
 
     #[tokio::test]
