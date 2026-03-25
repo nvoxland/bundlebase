@@ -44,6 +44,9 @@ enum Subcommand {
     #[command(hide = true)]
     Execute(cmd::extend_cmd::ExtendArgs),
 
+    /// List all bundles found in a directory
+    ListBundles(cmd::list_bundles_cmd::ListBundlesArgs),
+
     /// Start MCP (Model Context Protocol) server over stdio
     Mcp(cmd::mcp_cmd::McpArgs),
 
@@ -109,6 +112,7 @@ async fn main() -> Result<(), BundlebaseError> {
         Subcommand::Create(args) => cmd::create_cmd::run(args).await?,
         Subcommand::Query(args) => cmd::query_cmd::run(args).await?,
         Subcommand::Extend(args) | Subcommand::Execute(args) => cmd::extend_cmd::run(args).await?,
+        Subcommand::ListBundles(args) => cmd::list_bundles_cmd::run(args).await?,
         Subcommand::Mcp(args) => cmd::mcp_cmd::run(args).await?,
         Subcommand::Server(args) => cmd::server_cmd::run(args).await?,
         Subcommand::SetupAgent(args) => cmd::setup_agent_cmd::run(args)?,

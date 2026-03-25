@@ -2,6 +2,7 @@
 
 pub mod create_cmd;
 pub mod extend_cmd;
+pub mod list_bundles_cmd;
 pub mod mcp_cmd;
 pub mod query_cmd;
 pub mod repl_cmd;

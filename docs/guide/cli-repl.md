@@ -48,6 +48,7 @@ For one-shot operations without the interactive REPL:
 - **`bundlebase query`** — Read-only queries (SELECT, EXPLAIN, SHOW, SYNTAX, meta-commands)
 - **`bundlebase create`** — Create a new bundle, optionally with initial commands
 - **`bundlebase extend`** — Mutating commands (ATTACH, FILTER, DROP, etc.) with auto-commit
+- **`bundlebase list-bundles`** — Discover all bundles in a directory
 
 ```bash
 # Read-only query
@@ -194,6 +195,47 @@ Type '/help' for available commands, '/exit' to quit
 ./demo> /exit
 Goodbye!
 ```
+
+## Listing Bundles
+
+The `list-bundles` subcommand discovers all bundles in a directory and prints their name and description.
+
+```bash
+bundlebase list-bundles [path]
+```
+
+### Arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| `path` | `.` | Path or URL to search for bundles |
+
+### Examples
+
+```bash
+# List bundles in the current directory
+bundlebase list-bundles
+
+# List bundles in a specific directory
+bundlebase list-bundles --path /data/bundles
+
+# List bundles in an S3 bucket
+bundlebase list-bundles --path s3://my-bucket/bundles/
+```
+
+```
+$ bundlebase list-bundles /data
+customers : Customer Data
+    US customer records from 2025
+
+sales : Sales Bundle
+    Monthly sales aggregates
+
+inventory : (name not set)
+    (description not set)
+```
+
+If a bundle has a name set, it appears after the directory name separated by ` : `. Descriptions are indented below. Bundles without a name or description show `(name not set)` or `(description not set)`.
 
 ## Agent Skills
 

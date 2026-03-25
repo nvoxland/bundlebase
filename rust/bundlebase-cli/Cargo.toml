@@ -21,6 +21,7 @@ bundlebase = { path = "../bundlebase" }
 bundlebase-catalog = { workspace = true }
 bundlebase-command = { workspace = true }
 bundlebase-common = { path = "../bundlebase-common" }
+bundlebase-io = { workspace = true }
 arrow = { workspace = true }
 arrow-schema = { workspace = true }
 arrow-flight = { workspace = true }

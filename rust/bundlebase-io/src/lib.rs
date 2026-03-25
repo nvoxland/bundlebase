@@ -77,6 +77,15 @@ pub async fn writable_dir_from_url(
     Ok(Arc::from(dir))
 }
 
+/// Create a read-only directory from a URL string.
+pub async fn readable_dir_from_str(
+    url: &str,
+    config: Arc<dyn ConfigProvider>,
+) -> Result<Box<dyn IOReadDir>, BundlebaseError> {
+    let parsed = plugin::object_store::str_to_url(url)?;
+    io_registry().create_lister(&parsed, config).await
+}
+
 /// Create a writable directory from a URL string.
 pub async fn writable_dir_from_str(
     url: &str,

@@ -45,6 +45,7 @@ pub(crate) mod connector;
 pub use crate::bundle::{
     AnyOperation, Bundle, BundleBuilder, BundleChange, BundleCommit, BundleFacade,
     FileVerificationResult, Operation, VerificationResults,
+    META_DIR, INIT_FILENAME,
 };
 pub use crate::bundle_config::{BundleConfig, ConfigScope, ConfigValueDetails, ConfigSource, PassedBundleConfig, Scope};
 pub use bundle::JoinTypeOption;
