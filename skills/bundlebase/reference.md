@@ -64,7 +64,7 @@ MCP mode keeps bundles open across calls — use for multi-step workflows. Start
 bundlebase mcp
 ```
 
-MCP tools: `create_bundle`, `open_bundle`, `close_bundle`, `query` (any SQL/command), `schema`, `count`, `sample`, `status`, `history`.
+MCP tools (all per-bundle tools require a `bundle` parameter): `create_bundle`, `open_bundle`, `close_bundle`, `list_bundles`, `query` (any SQL/command), `schema`, `count`, `sample`, `status`, `history`. Multiple bundles can be open simultaneously.
 
 Prefer CLI (`bundlebase query`) for one-shot queries. Prefer MCP for building bundles or multi-step exploration.
 

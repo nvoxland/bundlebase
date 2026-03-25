@@ -2,7 +2,7 @@
 
 The Bundlebase CLI can run as a [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server over stdio, allowing AI assistants like Claude Code, Cursor, and Copilot to interact with bundles directly through tool calls.
 
-Unlike the CLI `query` command which opens and closes the bundle on every invocation, MCP mode keeps the bundle open for the lifetime of the server process, preserving cache and state between calls.
+Unlike the CLI `query` command which opens and closes the bundle on every invocation, MCP mode keeps bundles open for the lifetime of the server process, preserving cache and state between calls. Multiple bundles can be open simultaneously, each identified by a unique key.
 
 ## Starting the Server
 
@@ -25,7 +25,7 @@ bundlebase mcp --bundle <path> [options]
 # Start without a bundle — agent uses open_bundle/create_bundle tools
 bundlebase mcp
 
-# Start with a bundle pre-opened
+# Start with a bundle pre-opened (key defaults to directory name "my-bundle")
 bundlebase mcp --bundle ./my-bundle
 
 # Start read-only
@@ -34,19 +34,20 @@ bundlebase mcp --bundle ./my-bundle --read-only
 
 ## Available Tools
 
-The MCP server exposes the following tools to AI assistants:
+The MCP server exposes the following tools to AI assistants. All per-bundle tools require a `bundle` parameter that identifies which open bundle to operate on.
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `create_bundle` | `path` (string) | Create a new bundle at the given path |
-| `open_bundle` | `path` (string), `read_only` (bool, optional) | Open an existing bundle |
-| `close_bundle` | *(none)* | Close the current bundle (required before opening another) |
-| `query` | `sql` (string) | Execute any SQL query or bundlebase command |
-| `schema` | *(none)* | Get column names, data types, and nullability |
-| `count` | *(none)* | Get total row count |
-| `sample` | `limit` (integer, optional, default 10) | Preview sample rows as JSON |
-| `status` | *(none)* | Show uncommitted changes |
-| `history` | *(none)* | Show commit history |
+| `create_bundle` | `bundle` (string), `path` (string) | Create a new bundle with the given identifier |
+| `open_bundle` | `bundle` (string), `path` (string), `read_only` (bool, optional) | Open an existing bundle with the given identifier |
+| `close_bundle` | `bundle` (string) | Close an open bundle by its identifier |
+| `list_bundles` | *(none)* | List all open bundles with their identifier, path, name, and description |
+| `query` | `bundle` (string), `sql` (string) | Execute any SQL query or bundlebase command |
+| `schema` | `bundle` (string) | Get column names, data types, and nullability |
+| `count` | `bundle` (string) | Get total row count |
+| `sample` | `bundle` (string), `limit` (integer, optional, default 10) | Preview sample rows as JSON |
+| `status` | `bundle` (string) | Show uncommitted changes |
+| `history` | `bundle` (string) | Show commit history |
 
 ### The `query` Tool
 

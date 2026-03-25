@@ -6,6 +6,7 @@
 use super::{open_bundle, BundleArgs};
 use bundlebase_common::BundlebaseError;
 use clap::Args;
+use std::collections::HashMap;
 
 /// Start MCP (Model Context Protocol) server over stdio
 #[derive(Args, Debug)]
@@ -24,16 +25,26 @@ pub struct McpArgs {
 }
 
 pub async fn run(args: McpArgs) -> Result<(), BundlebaseError> {
-    let state = if let Some(ref bundle_path) = args.bundle {
+    let mut bundles = HashMap::new();
+
+    if let Some(ref bundle_path) = args.bundle {
         let bundle_args = BundleArgs {
             bundle: bundle_path.clone(),
             read_only: args.read_only,
             config: args.config,
         };
-        Some(open_bundle(&bundle_args).await?)
-    } else {
-        None
-    };
+        let facade = open_bundle(&bundle_args).await?;
 
-    bundlebase_cli::mcp::start(state).await
+        // Derive key from the final path/URL component
+        let key = bundle_path
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or(bundle_path)
+            .to_string();
+
+        bundles.insert(key, facade);
+    }
+
+    bundlebase_cli::mcp::start(bundles).await
 }

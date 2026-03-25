@@ -41,26 +41,16 @@ This installs the `bundlebase` CLI command.
 
 Bundlebase offers two agent-friendly modes:
 
-**CLI mode** — Opens and closes the bundle on every call. Best for one-shot operations.
+**MCP mode (`bundlebase mcp`)** — **Always prefer MCP when the server is configured.** It keeps bundles open across calls, preserving cache and state, supports multiple bundles simultaneously, and gives better performance and feedback for any workflow.
+
+**CLI mode** — Only use for true one-off operations where you don't need to interact with the bundle again:
 
 - `bundlebase list-bundles` — discover bundles in a directory
-- `bundlebase query` — read-only queries (SELECT, SHOW, EXPORT TO, EXPLAIN)
+- `bundlebase query` — a single read-only query
 - `bundlebase create` — create a new bundle with initial data
-- `bundlebase extend` — mutate an existing bundle (auto-commits after each call)
+- `bundlebase extend` — a single mutation (auto-commits after each call)
 
-**MCP mode (`bundlebase mcp`)** — Keeps the bundle open across calls, preserving cache and state between operations. Best for multi-step work where you need to inspect intermediate state.
-
-| Scenario | Use |
-|----------|-----|
-| Quick schema check or row count | CLI `query` |
-| Single SELECT query | CLI `query` |
-| One-off ATTACH, FILTER, or other mutation | CLI `extend` |
-| Create bundle + load initial data | CLI `create` |
-| Iterative exploration (query → filter → query → adjust) | MCP |
-| Multi-step transformations with intermediate inspection | MCP |
-| Building up joins and views before committing | MCP |
-
-**Important:** If the bundlebase MCP server is configured, **prefer MCP over CLI for ALL multi-step data work** — it keeps bundles open for better performance and feedback. Only use CLI for true one-shot operations. Do NOT use MCP and CLI on the same bundle simultaneously — close the MCP bundle first.
+**Important:** Do NOT use MCP and CLI on the same bundle simultaneously — close the MCP bundle first.
 
 ## CLI Commands
 
@@ -180,30 +170,33 @@ Add to your MCP settings (e.g., Claude Code `mcp_servers` config). No `--bundle`
 
 ### Available MCP Tools
 
+Multiple bundles can be open simultaneously, each identified by a unique `bundle` name.
+
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `create_bundle` | `path` (string) | Create a new bundle |
-| `open_bundle` | `path` (string), `read_only` (bool, optional) | Open an existing bundle |
-| `close_bundle` | (none) | Close current bundle (required before opening another) |
-| `query` | `sql` (string) | Execute any SQL query or bundlebase command. Returns JSON. 1000-row limit. |
-| `schema` | (none) | Get column names, data types, and nullability |
-| `count` | (none) | Get total row count |
-| `sample` | `limit` (optional, default 10) | Preview sample rows as JSON |
-| `status` | (none) | Show uncommitted changes |
-| `history` | (none) | Show commit history |
+| `create_bundle` | `bundle` (string), `path` (string) | Create a new bundle with the given identifier |
+| `open_bundle` | `bundle` (string), `path` (string), `read_only` (bool, optional) | Open an existing bundle with the given identifier |
+| `close_bundle` | `bundle` (string) | Close a bundle by its identifier |
+| `list_bundles` | (none) | List all open bundles with their identifier, path, name, and description |
+| `query` | `bundle` (string), `sql` (string) | Execute any SQL query or bundlebase command. Returns JSON. 1000-row limit. |
+| `schema` | `bundle` (string) | Get column names, data types, and nullability |
+| `count` | `bundle` (string) | Get total row count |
+| `sample` | `bundle` (string), `limit` (optional, default 10) | Preview sample rows as JSON |
+| `status` | `bundle` (string) | Show uncommitted changes |
+| `history` | `bundle` (string) | Show commit history |
 
 The `query` tool handles everything: SELECT queries, ATTACH, DETACH, FILTER, RENAME, COMMIT, and all other bundlebase SQL commands.
 
 ### MCP Workflow Example
 
 ```
-1. Call `create_bundle` or `open_bundle` to load a bundle
-2. Call `schema` to understand the data structure
-3. Call `sample` to preview the data
-4. Call `query` with SQL to explore and transform
-5. Call `status` to review uncommitted changes
-6. Call `query` with "COMMIT 'message'" to save
-7. Call `close_bundle` when done (or to switch to a different bundle)
+1. Call `create_bundle` or `open_bundle` with a bundle name to load a bundle
+2. Call `schema` with the bundle name to understand the data structure
+3. Call `sample` with the bundle name to preview the data
+4. Call `query` with the bundle name and SQL to explore and transform
+5. Call `status` with the bundle name to review uncommitted changes
+6. Call `query` with the bundle name and "COMMIT 'message'" to save
+7. Call `close_bundle` with the bundle name when done
 ```
 
 ## Delegating Data Research

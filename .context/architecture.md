@@ -343,7 +343,7 @@ Arrow Flight SQL server over gRPC. Each authenticated client gets its own sessio
 
 ### `bundlebase mcp` (MCP Server)
 
-Model Context Protocol server over stdio for AI assistant integration. The bundle opens once at startup and stays alive across tool calls, preserving cache and state. Exposes tools (`query`, `schema`, `count`, `sample`, `status`, `history`) that AI assistants call directly. Uses the `rmcp` crate.
+Model Context Protocol server over stdio for AI assistant integration. Supports multiple bundles open simultaneously, each identified by a unique key. Bundles can be pre-opened via `--bundle` flag or opened/closed dynamically via tools. Exposes tools (`open_bundle`, `create_bundle`, `close_bundle`, `list_bundles`, `query`, `schema`, `count`, `sample`, `status`, `history`) that AI assistants call with a bundle key. Uses the `rmcp` crate.
 
 **Key files:** `mcp.rs`, `mcp/server.rs`, `mcp/tools.rs`
 
