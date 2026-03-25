@@ -19,8 +19,9 @@ mod pest_parser;
 
 // Re-export pest parser infrastructure
 pub use pest_parser::{
-    available_commands, escape_string, extract_string_content, format_pest_error,
-    is_command_statement, parse_join_type, split_statements, BundlebaseParser, Rule,
+    available_commands, escape_string, extract_identifier, extract_string_content,
+    format_pest_error, is_command_statement, parse_join_type, quote_identifier, split_statements,
+    BundlebaseParser, Rule,
 };
 
 use crate::{

@@ -1,5 +1,6 @@
 //! CastColumn command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::parser::{escape_string, extract_string_content};
 use crate::{CommandParsing, Rule};
 use bundlebase_common::arrow_types::parse_arrow_type_name;
@@ -49,7 +50,7 @@ impl CommandParsing for CastColumnCommand {
             match inner.as_rule() {
                 Rule::identifier => {
                     if name.is_none() {
-                        name = Some(inner.as_str().to_string());
+                        name = Some(extract_identifier(&inner));
                     } else {
                         new_type = Some(inner.as_str().to_string());
                     }
@@ -75,9 +76,9 @@ impl CommandParsing for CastColumnCommand {
         match &self.clean {
             Some(pattern) => format!(
                 "CAST COLUMN {} TO {} CLEAN {}",
-                self.name, self.new_type, escape_string(pattern)
+                quote_identifier(&self.name), self.new_type, escape_string(pattern)
             ),
-            None => format!("CAST COLUMN {} TO {}", self.name, self.new_type),
+            None => format!("CAST COLUMN {} TO {}", quote_identifier(&self.name), self.new_type),
         }
     }
 }
@@ -187,6 +188,34 @@ mod tests {
                 assert_eq!(c.name, "price");
                 assert_eq!(c.new_type, "Int64");
                 assert_eq!(c.clean, Some("[^0-9]".to_string()));
+            }
+            other => panic!("Expected CastColumn, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_quoted_column_name() {
+        let cmd = parse_command(r#"CAST COLUMN "ResultMeasureValue" TO Float64"#).unwrap();
+        match cmd {
+            BundleCommand::CastColumn(c) => {
+                assert_eq!(c.name, "ResultMeasureValue");
+                assert_eq!(c.new_type, "Float64");
+            }
+            other => panic!("Expected CastColumn, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_round_trip_quoted() {
+        let cmd = super::CastColumnCommand::new("column/with.special", "Utf8", None);
+        let statement = cmd.to_statement();
+        assert_eq!(statement, r#"CAST COLUMN "column/with.special" TO Utf8"#);
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::CastColumn(c) => {
+                assert_eq!(c.name, "column/with.special");
+                assert_eq!(c.new_type, "Utf8");
             }
             other => panic!("Expected CastColumn, got {:?}", other),
         }

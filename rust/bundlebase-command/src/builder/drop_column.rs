@@ -1,5 +1,6 @@
 //! DropColumn command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::DropColumnOp;
 use bundlebase::bundle::BundleFacade;
@@ -31,7 +32,7 @@ impl CommandParsing for DropColumnCommand {
 
         for inner in pair.into_inner() {
             if inner.as_rule() == Rule::identifier {
-                name = Some(inner.as_str().to_string());
+                name = Some(extract_identifier(&inner));
             }
         }
 
@@ -42,7 +43,7 @@ impl CommandParsing for DropColumnCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("DROP COLUMN {}", self.name)
+        format!("DROP COLUMN {}", quote_identifier(&self.name))
     }
 }
 
@@ -92,6 +93,33 @@ mod parsing_tests {
         match parsed {
             BundleCommand::DropColumn(c) => {
                 assert_eq!(c.name, "temp_col");
+            }
+            _ => panic!("Expected DropColumn variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_quoted_identifier() {
+        let input = r#"DROP COLUMN "weird/column.name""#;
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::DropColumn(c) => {
+                assert_eq!(c.name, "weird/column.name");
+            }
+            _ => panic!("Expected DropColumn variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip_quoted() {
+        let cmd = DropColumnCommand::new("column with spaces");
+        let statement = cmd.to_statement();
+        assert_eq!(statement, r#"DROP COLUMN "column with spaces""#);
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::DropColumn(c) => {
+                assert_eq!(c.name, "column with spaces");
             }
             _ => panic!("Expected DropColumn variant"),
         }

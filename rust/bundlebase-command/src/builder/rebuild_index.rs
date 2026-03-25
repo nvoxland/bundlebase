@@ -1,5 +1,6 @@
 //! RebuildIndex command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
@@ -31,7 +32,7 @@ impl CommandParsing for RebuildIndexCommand {
 
         for inner in pair.into_inner() {
             if inner.as_rule() == Rule::identifier {
-                column = Some(inner.as_str().to_string());
+                column = Some(extract_identifier(&inner));
             }
         }
 
@@ -43,7 +44,7 @@ impl CommandParsing for RebuildIndexCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("REBUILD INDEX ON {}", self.column)
+        format!("REBUILD INDEX ON {}", quote_identifier(&self.column))
     }
 }
 

@@ -4,6 +4,7 @@
 //! (e.g., `IMPORT FUNCTION acme.* FROM 'lib://./mylib.so'`).
 
 use crate::parser::{escape_string, extract_string_content};
+use crate::parser::extract_identifier;
 use crate::{CommandParsing, Rule};
 use bundlebase_common::Platform;
 use bundlebase_udf::runtime::UdfRuntime;
@@ -62,7 +63,7 @@ impl CommandParsing for ImportFunctionCommand {
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut name = None;
         let mut from = None;
-        let mut args = HashMap::new();
+        let mut args: HashMap<String, String> = HashMap::new();
 
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
@@ -80,7 +81,7 @@ impl CommandParsing for ImportFunctionCommand {
                             for part in arg_pair.into_inner() {
                                 match part.as_rule() {
                                     Rule::identifier => {
-                                        key = Some(part.as_str().to_string());
+                                        key = Some(extract_identifier(&part));
                                     }
                                     Rule::quoted_string => {
                                         value = Some(extract_string_content(part.as_str())?);

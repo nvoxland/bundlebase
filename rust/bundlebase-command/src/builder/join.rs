@@ -1,5 +1,6 @@
 //! Join command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use crate::parser::{extract_string_content, parse_join_type};
 use bundlebase::bundle::operation::{AttachBlockOp, CreateJoinOp};
@@ -63,7 +64,7 @@ impl CommandParsing for JoinCommand {
                 }
                 Rule::identifier => {
                     // The AS name
-                    name = Some(inner_pair.as_str().to_string());
+                    name = Some(extract_identifier(&inner_pair));
                 }
                 Rule::join_condition => {
                     expression = Some(inner_pair.as_str().trim().to_string());
@@ -102,13 +103,13 @@ impl CommandParsing for JoinCommand {
                 "{}JOIN {} AS {} ON {}",
                 join_type_str,
                 escape_string(loc),
-                self.name,
+                quote_identifier(&self.name),
                 self.expression
             ),
             None => format!(
                 "{}JOIN AS {} ON {}",
                 join_type_str,
-                self.name,
+                quote_identifier(&self.name),
                 self.expression
             ),
         }
@@ -218,6 +219,19 @@ mod parsing_tests {
             BundleCommand::Join(c) => {
                 assert_eq!(c.name, "items");
                 assert_eq!(c.join_type, JoinTypeOption::Left);
+            }
+            _ => panic!("Expected Join variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_quoted_alias() {
+        let input = r#"JOIN 'data.csv' AS "my join" ON base.id = "my join".id"#;
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::Join(c) => {
+                assert_eq!(c.name, "my join");
+                assert_eq!(c.location, Some("data.csv".to_string()));
             }
             _ => panic!("Expected Join variant"),
         }

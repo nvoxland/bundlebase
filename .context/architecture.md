@@ -352,6 +352,16 @@ Model Context Protocol server over stdio for AI assistant integration. Supports 
 - `repl/json_formatter.rs` — Arrow RecordBatch to JSON conversion
 - `repl/commands/sql.rs` — SQL execution with 1000-row hard limit
 
+## Identifiers and Case Sensitivity
+
+Bundlebase is always case-sensitive. Column names, join aliases, view names, and all other identifiers preserve their exact case. `Revenue`, `revenue`, and `REVENUE` are three different columns.
+
+This is intentional: bundlebase works with disparate data sources (CSVs, APIs, Parquet files, databases) that each have their own casing conventions. Normalizing case would silently break data from sources that rely on specific casing. DataFusion is configured with `enable_ident_normalization = false` (set in `bundle.rs` and all ephemeral `SessionContext` instances).
+
+**Quoted identifiers:** The bundlebase grammar accepts double-quoted identifiers for names containing spaces, dots, or special characters (e.g., `RENAME COLUMN "Result/Value" TO result_value`). Quotes are purely syntactic — they don't affect case behavior.
+
+**Key files:** `grammar.pest` (identifier rule), `pest_parser.rs` (`extract_identifier`, `quote_identifier`), `bundle.rs` (ident normalization config)
+
 ## Design Patterns
 
 1. **Plugin Architecture**: Extensible adapter system for new data sources

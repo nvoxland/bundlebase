@@ -31,6 +31,38 @@ pub fn format_pest_error(error: pest::error::Error<Rule>, sql: &str) -> Bundleba
     .into()
 }
 
+/// Extract identifier content, stripping surrounding double quotes if present.
+///
+/// Handles both bare identifiers (`my_column`) and quoted identifiers (`"My Column"`).
+/// Quoted identifiers allow any characters including spaces, dots, and special characters.
+pub fn extract_identifier(pair: &pest::iterators::Pair<Rule>) -> String {
+    let s = pair.as_str();
+    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+        s[1..s.len() - 1].to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+/// Quote an identifier for use in SQL statements if it contains special characters.
+///
+/// Returns the identifier bare if it only contains `[a-zA-Z0-9_]` and starts with
+/// a letter or underscore. Otherwise wraps it in double quotes.
+pub fn quote_identifier(name: &str) -> String {
+    let needs_quoting = name.is_empty()
+        || !name
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_alphabetic() || c == '_')
+            .unwrap_or(false)
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if needs_quoting {
+        format!("\"{}\"", name)
+    } else {
+        name.to_string()
+    }
+}
+
 /// Extract string content from a quoted string, handling escape sequences.
 ///
 /// Supports both single-quoted ('...') and double-quoted ("...") strings.

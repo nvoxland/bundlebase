@@ -1,6 +1,7 @@
 //! RenameColumn command implementation.
 
 use crate::{CommandParsing, Rule};
+use crate::parser::{extract_identifier, quote_identifier};
 use bundlebase::bundle::operation::RenameColumnOp;
 use bundlebase::bundle::BundleFacade;
 use bundlebase_common::BundlebaseError;
@@ -38,9 +39,9 @@ impl CommandParsing for RenameColumnCommand {
         for inner in pair.into_inner() {
             if inner.as_rule() == Rule::identifier {
                 if old_name.is_none() {
-                    old_name = Some(inner.as_str().to_string());
+                    old_name = Some(extract_identifier(&inner));
                 } else {
-                    new_name = Some(inner.as_str().to_string());
+                    new_name = Some(extract_identifier(&inner));
                 }
             }
         }
@@ -56,7 +57,11 @@ impl CommandParsing for RenameColumnCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("RENAME COLUMN {} TO {}", self.old_name, self.new_name)
+        format!(
+            "RENAME COLUMN {} TO {}",
+            quote_identifier(&self.old_name),
+            quote_identifier(&self.new_name)
+        )
     }
 }
 
@@ -107,6 +112,61 @@ mod parsing_tests {
             BundleCommand::RenameColumn(c) => {
                 assert_eq!(c.old_name, "user_id");
                 assert_eq!(c.new_name, "customer_id");
+            }
+            _ => panic!("Expected RenameColumn variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_quoted_source() {
+        let input = r#"RENAME COLUMN "ResultMeasureValue" TO secchi_depth"#;
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::RenameColumn(c) => {
+                assert_eq!(c.old_name, "ResultMeasureValue");
+                assert_eq!(c.new_name, "secchi_depth");
+            }
+            _ => panic!("Expected RenameColumn variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_quoted_target() {
+        let input = r#"RENAME COLUMN old_name TO "new name with spaces""#;
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::RenameColumn(c) => {
+                assert_eq!(c.old_name, "old_name");
+                assert_eq!(c.new_name, "new name with spaces");
+            }
+            _ => panic!("Expected RenameColumn variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_both_quoted() {
+        let input = r#"RENAME COLUMN "old/name" TO "new.name""#;
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::RenameColumn(c) => {
+                assert_eq!(c.old_name, "old/name");
+                assert_eq!(c.new_name, "new.name");
+            }
+            _ => panic!("Expected RenameColumn variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip_quoted() {
+        let cmd = RenameColumnCommand::new("column with spaces", "new.name");
+        let statement = cmd.to_statement();
+        assert_eq!(statement, r#"RENAME COLUMN "column with spaces" TO "new.name""#);
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::RenameColumn(c) => {
+                assert_eq!(c.old_name, "column with spaces");
+                assert_eq!(c.new_name, "new.name");
             }
             _ => panic!("Expected RenameColumn variant"),
         }

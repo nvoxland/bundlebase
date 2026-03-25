@@ -1,5 +1,22 @@
 # Columns
 
+## Identifiers and Case Sensitivity
+
+**Bundlebase is always case-sensitive.** Column names preserve their exact case — `Revenue`, `revenue`, and `REVENUE` are three different columns. This is intentional: bundlebase works with disparate data sources (CSVs, APIs, Parquet files, databases) that each have their own casing conventions, so no normalization is assumed.
+
+**Quoted identifiers:** Use double quotes for column names containing spaces, dots, slashes, or other special characters:
+
+```sql
+RENAME COLUMN "ResultMeasureValue" TO secchi_depth
+CAST COLUMN "Measure/Unit" TO Utf8
+DROP COLUMN "column with spaces"
+```
+
+Bare identifiers (without quotes) work for names containing only letters, digits, and underscores. Quotes are always optional for such names.
+
+!!! tip
+    If you're working with data that has messy column names (spaces, mixed case, special characters), use `STANDARDIZE COLUMN NAMES` to normalize them all at once.
+
 ## Drop Column
 
 Remove a column from the bundle.

@@ -1,5 +1,6 @@
 //! CreateSource command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use crate::parser::extract_string_content;
 use bundlebase::bundle::operation::{AttachBlockOp, CreateSourceOp, SourceInfo};
@@ -55,7 +56,7 @@ impl CommandParsing for CreateSourceCommand {
                     has_dotted = true;
                 }
                 Rule::identifier => {
-                    identifiers.push(inner_pair.as_str().to_string());
+                    identifiers.push(extract_identifier(&inner_pair));
                 }
                 Rule::source_args => {
                     for arg_pair in inner_pair.into_inner() {
@@ -65,7 +66,7 @@ impl CommandParsing for CreateSourceCommand {
                             for part in arg_pair.into_inner() {
                                 match part.as_rule() {
                                     Rule::identifier => {
-                                        key = Some(part.as_str().to_string());
+                                        key = Some(extract_identifier(&part));
                                     }
                                     Rule::quoted_string => {
                                         value = Some(extract_string_content(part.as_str())?);
@@ -118,7 +119,7 @@ impl CommandParsing for CreateSourceCommand {
         use crate::parser::escape_string;
 
         let pack_part = match &self.pack {
-            Some(pack) if pack != "base" => format!(" FOR {}", pack),
+            Some(pack) if pack != "base" => format!(" FOR {}", quote_identifier(pack)),
             _ => String::new(),
         };
 
@@ -129,7 +130,7 @@ impl CommandParsing for CreateSourceCommand {
         let mut args_str: Vec<String> = self
             .args
             .iter()
-            .map(|(k, v)| format!("{} = {}", k, escape_string(v)))
+            .map(|(k, v)| format!("{} = {}", quote_identifier(k), escape_string(v)))
             .collect();
         args_str.sort(); // Consistent ordering
         let args_joined = args_str.join(", ");

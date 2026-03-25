@@ -1,5 +1,6 @@
 //! Fetch command implementations.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::{AttachBlockOp, DetachBlockOp, SourceInfo};
 use bundlebase_data::ObjectId;
@@ -47,7 +48,7 @@ impl CommandParsing for FetchCommand {
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
                 Rule::identifier => {
-                    pack = Some(inner_pair.as_str().to_string());
+                    pack = Some(extract_identifier(&inner_pair));
                 }
                 Rule::fetch_mode => {
                     mode = Some(SyncMode::from_arg(inner_pair.as_str())?);
@@ -67,9 +68,9 @@ impl CommandParsing for FetchCommand {
 
     fn to_statement(&self) -> String {
         if self.dry_run {
-            format!("FETCH {} {} DRY RUN", self.pack, self.mode)
+            format!("FETCH {} {} DRY RUN", quote_identifier(&self.pack), self.mode)
         } else {
-            format!("FETCH {} {}", self.pack, self.mode)
+            format!("FETCH {} {}", quote_identifier(&self.pack), self.mode)
         }
     }
 }

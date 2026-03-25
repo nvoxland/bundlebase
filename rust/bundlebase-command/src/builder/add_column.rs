@@ -1,5 +1,6 @@
 //! AddColumn command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::AddColumnOp;
 use bundlebase_common::BundlebaseError;
@@ -37,7 +38,7 @@ impl CommandParsing for AddColumnCommand {
         for inner in pair.into_inner() {
             match inner.as_rule() {
                 Rule::identifier => {
-                    name = Some(inner.as_str().to_string());
+                    name = Some(extract_identifier(&inner));
                 }
                 Rule::add_column_expression => {
                     expression = Some(inner.as_str().trim().to_string());
@@ -57,7 +58,7 @@ impl CommandParsing for AddColumnCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("ADD COLUMN {} AS {}", self.name, self.expression)
+        format!("ADD COLUMN {} AS {}", quote_identifier(&self.name), self.expression)
     }
 }
 

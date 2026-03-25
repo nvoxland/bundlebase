@@ -1,6 +1,7 @@
 //! DropIndex command implementation.
 
 use bundlebase::bundle::column_metadata;
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::BundleFacade;
 use bundlebase::bundle::operation::DropIndexOp;
@@ -34,7 +35,7 @@ impl CommandParsing for DropIndexCommand {
 
         for inner_pair in pair.into_inner() {
             if inner_pair.as_rule() == Rule::identifier {
-                identifier = Some(inner_pair.as_str().to_string());
+                identifier = Some(extract_identifier(&inner_pair));
             }
         }
 
@@ -46,7 +47,7 @@ impl CommandParsing for DropIndexCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("DROP INDEX {}", self.identifier)
+        format!("DROP INDEX {}", quote_identifier(&self.identifier))
     }
 }
 

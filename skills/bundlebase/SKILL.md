@@ -228,6 +228,21 @@ bundlebase extend --bundle ./lakes "CREATE SOURCE USING http WITH (url = 'https:
 
 If a download times out, scope it with URL query parameters (date range, geographic filter, row limit).
 
+## Identifiers and Case Sensitivity
+
+**Bundlebase is always case-sensitive.** Column names, join names, view names, and all other identifiers preserve their exact case. `Revenue`, `revenue`, and `REVENUE` are three different columns.
+
+This is intentional: bundlebase works with disparate data sources (CSVs, APIs, Parquet files, databases) that each have their own case conventions. Assuming any normalization would silently break data from sources that rely on specific casing.
+
+**Quoted identifiers:** Use double quotes for identifiers containing spaces, dots, or other special characters:
+```sql
+RENAME COLUMN "ResultMeasureValue" TO secchi_depth
+CAST COLUMN "Measure/Unit" TO Utf8
+DROP COLUMN "column with spaces"
+```
+
+Bare identifiers (no quotes) work for names containing only letters, digits, and underscores. Quotes are optional for such names — `RENAME COLUMN name TO new_name` and `RENAME COLUMN "name" TO "new_name"` are equivalent.
+
 ## Common Mistakes to Avoid
 
 | Don't do this | Why | Do this instead |

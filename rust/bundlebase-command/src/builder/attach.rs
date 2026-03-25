@@ -1,5 +1,6 @@
 //! Attach command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use crate::parser::extract_string_content;
 use bundlebase::bundle::operation::AttachBlockOp;
@@ -46,7 +47,7 @@ impl CommandParsing for AttachCommand {
                 Rule::identifier => {
                     // The identifier after TO is the pack name
                     if pack.is_none() {
-                        pack = Some(inner_pair.as_str().to_string());
+                        pack = Some(extract_identifier(&inner_pair));
                     }
                 }
                 Rule::with_options => {
@@ -82,7 +83,7 @@ impl CommandParsing for AttachCommand {
         use crate::parser::escape_string;
         match &self.pack {
             Some(pack) if pack != "base" => {
-                format!("ATTACH {} TO {}", escape_string(&self.path), pack)
+                format!("ATTACH {} TO {}", escape_string(&self.path), quote_identifier(pack))
             }
             _ => format!("ATTACH {}", escape_string(&self.path)),
         }

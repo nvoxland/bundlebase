@@ -1,5 +1,6 @@
 //! RenameView command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::RenameViewOp;
 use bundlebase_common::BundlebaseError;
@@ -37,9 +38,9 @@ impl CommandParsing for RenameViewCommand {
         for inner_pair in pair.into_inner() {
             if inner_pair.as_rule() == Rule::identifier {
                 if old_name.is_none() {
-                    old_name = Some(inner_pair.as_str().to_string());
+                    old_name = Some(extract_identifier(&inner_pair));
                 } else {
-                    new_name = Some(inner_pair.as_str().to_string());
+                    new_name = Some(extract_identifier(&inner_pair));
                 }
             }
         }
@@ -55,7 +56,7 @@ impl CommandParsing for RenameViewCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("RENAME VIEW {} TO {}", self.old_name, self.new_name)
+        format!("RENAME VIEW {} TO {}", quote_identifier(&self.old_name), quote_identifier(&self.new_name))
     }
 }
 

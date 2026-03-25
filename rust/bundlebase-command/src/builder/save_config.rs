@@ -1,5 +1,6 @@
 //! SaveConfig command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use crate::parser::{escape_string, extract_string_content};
 use bundlebase::bundle::operation::SaveConfigOp;
@@ -51,7 +52,7 @@ impl CommandParsing for SaveConfigCommand {
             match inner.as_rule() {
                 Rule::identifier => {
                     if key.is_none() {
-                        key = Some(inner.as_str().to_string());
+                        key = Some(extract_identifier(&inner));
                     }
                 }
                 Rule::quoted_string => {
@@ -85,7 +86,7 @@ impl CommandParsing for SaveConfigCommand {
     fn to_statement(&self) -> String {
         format!(
             "SAVE CONFIG {} = {} FOR {}",
-            self.key,
+            quote_identifier(&self.key),
             escape_string(&self.value),
             escape_string(self.scope.as_str())
         )

@@ -1,5 +1,6 @@
 //! DropJoin command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::DropJoinOp;
 use bundlebase_common::BundlebaseError;
@@ -30,7 +31,7 @@ impl CommandParsing for DropJoinCommand {
 
         for inner_pair in pair.into_inner() {
             if inner_pair.as_rule() == Rule::identifier {
-                name = Some(inner_pair.as_str().to_string());
+                name = Some(extract_identifier(&inner_pair));
             }
         }
 
@@ -42,7 +43,7 @@ impl CommandParsing for DropJoinCommand {
     }
 
     fn to_statement(&self) -> String {
-        format!("DROP JOIN {}", self.name)
+        format!("DROP JOIN {}", quote_identifier(&self.name))
     }
 }
 

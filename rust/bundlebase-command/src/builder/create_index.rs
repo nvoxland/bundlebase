@@ -1,5 +1,6 @@
 //! CreateIndex command implementation.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::CreateIndexOp;
 use bundlebase_index::IndexType;
@@ -44,7 +45,7 @@ impl CommandParsing for CreateIndexCommand {
                     index_type_str = Some(inner.as_str().to_lowercase());
                 }
                 Rule::identifier => {
-                    column = Some(inner.as_str().to_string());
+                    column = Some(extract_identifier(&inner));
                 }
                 _ => {}
             }
@@ -71,7 +72,10 @@ impl CommandParsing for CreateIndexCommand {
     // the parser grammar to support the full text index syntax.
     fn to_statement(&self) -> String {
         match &self.index_type {
-            IndexType::Column => format!("CREATE COLUMN INDEX ON {}", self.columns.join(", ")),
+            IndexType::Column => {
+                let quoted_cols: Vec<String> = self.columns.iter().map(|c| quote_identifier(c)).collect();
+                format!("CREATE COLUMN INDEX ON {}", quoted_cols.join(", "))
+            }
             IndexType::Text { tokenizer } => {
                 let cols = self.columns.join(", ");
                 if let Some(name) = self.name.as_deref() {

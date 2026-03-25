@@ -4,6 +4,7 @@
 //! indexes, and connectors/functions from the source bundle into the target.
 //! Operations referencing the source base pack are remapped to the join pack.
 
+use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::*;
 use bundlebase_data::ObjectId;
@@ -48,7 +49,7 @@ impl CommandParsing for ImportJoinCommand {
         for inner in pair.into_inner() {
             match inner.as_rule() {
                 Rule::identifier => {
-                    name = Some(inner.as_str().to_string());
+                    name = Some(extract_identifier(&inner));
                 }
                 Rule::import_join_flatten => {
                     flatten = true;
@@ -63,9 +64,9 @@ impl CommandParsing for ImportJoinCommand {
 
     fn to_statement(&self) -> String {
         if self.flatten {
-            format!("IMPORT JOIN {} FLATTEN HISTORY", self.name)
+            format!("IMPORT JOIN {} FLATTEN HISTORY", quote_identifier(&self.name))
         } else {
-            format!("IMPORT JOIN {}", self.name)
+            format!("IMPORT JOIN {}", quote_identifier(&self.name))
         }
     }
 }

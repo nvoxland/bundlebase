@@ -95,3 +95,5 @@ SYNTAX IMPORT FUNCTION  -- detailed syntax for IMPORT FUNCTION
 **Built-in SQL functions**: `search('<index_name>', '<query>')` for full-text search with BM25 scoring.
 
 Standard SQL (SELECT, WITH, etc.) uses Apache DataFusion syntax. The table name is always `bundle`.
+
+**Case sensitivity**: All identifiers are case-sensitive. `Revenue` and `revenue` are different columns. Use double quotes for names with special characters: `RENAME COLUMN "Result/Value" TO result_value`.
