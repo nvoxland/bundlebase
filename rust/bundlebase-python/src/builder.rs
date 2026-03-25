@@ -10,7 +10,7 @@ use std::sync::Arc;
 use bundlebase::bundle::JoinTypeOption;
 use super::commit::PyCommit;
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyChange {
     #[pyo3(get)]
@@ -32,7 +32,7 @@ impl PyChange {
 }
 
 /// Bundle status showing uncommitted changes.
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyBundleStatus {
     #[pyo3(get)]
@@ -101,7 +101,7 @@ impl std::fmt::Display for PyBundleStatus {
 }
 
 /// Information about a block that was fetched (added or replaced).
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyFetchedBlock {
     /// Location where the block is attached (path in data_dir or URL)
@@ -132,7 +132,7 @@ impl PyFetchedBlock {
 }
 
 /// Results from fetching a single source.
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyFetchResults {
     /// Connector name (e.g., "remote_dir", "web_scrape")
@@ -193,7 +193,7 @@ impl PyFetchResults {
     }
 }
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyBundleBuilder {
     inner: Arc<BundleBuilder>,

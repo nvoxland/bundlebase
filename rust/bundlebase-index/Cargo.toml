@@ -26,7 +26,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml_ng = { workspace = true }
 log = "0.4"
-rand = "0.9"
+rand = { workspace = true }
 url = { version = "2.5", features = ["serde"] }
 tempfile = { workspace = true }
 tar = { workspace = true }
@@ -40,4 +40,4 @@ opentelemetry = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }
-object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
+object_store = { workspace = true }

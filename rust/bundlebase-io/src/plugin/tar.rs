@@ -19,15 +19,14 @@ use futures::stream::{self, BoxStream, StreamExt, TryStreamExt};
 use futures::FutureExt;
 use object_store::path::Path as ObjectPath;
 use object_store::{
-    GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore, PutOptions,
-    PutPayload, PutResult, Result as ObjectStoreResult,
+    CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
+    ObjectStoreExt, PutOptions, PutPayload, PutResult, Result as ObjectStoreResult,
 };
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::fs::File;
 use std::io::{Read, Seek};
-use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -329,8 +328,13 @@ impl Display for TarObjectStore {
 
 #[async_trait]
 impl ObjectStore for TarObjectStore {
-    async fn put(&self, location: &ObjectPath, payload: PutPayload) -> ObjectStoreResult<PutResult> {
-        let bytes = payload.into();
+    async fn put_opts(
+        &self,
+        location: &ObjectPath,
+        payload: PutPayload,
+        _opts: PutOptions,
+    ) -> ObjectStoreResult<PutResult> {
+        let bytes: Bytes = payload.into();
         self.append_entry(location, bytes)?;
 
         Ok(PutResult {
@@ -339,28 +343,18 @@ impl ObjectStore for TarObjectStore {
         })
     }
 
-    async fn put_opts(
-        &self,
-        location: &ObjectPath,
-        payload: PutPayload,
-        _opts: PutOptions,
-    ) -> ObjectStoreResult<PutResult> {
-        self.put(location, payload).await
-    }
-
-    async fn put_multipart(&self, _location: &ObjectPath) -> ObjectStoreResult<Box<dyn MultipartUpload>> {
-        Err(object_store::Error::NotImplemented)
-    }
-
     async fn put_multipart_opts(
         &self,
         _location: &ObjectPath,
         _opts: object_store::PutMultipartOptions,
     ) -> ObjectStoreResult<Box<dyn MultipartUpload>> {
-        Err(object_store::Error::NotImplemented)
+        Err(object_store::Error::NotImplemented {
+            operation: "put_multipart_opts".to_string(),
+            implementer: "TarObjectStore".to_string(),
+        })
     }
 
-    async fn get(&self, location: &ObjectPath) -> ObjectStoreResult<GetResult> {
+    async fn get_opts(&self, location: &ObjectPath, _options: GetOptions) -> ObjectStoreResult<GetResult> {
         self.ensure_indexed()?;
 
         let bytes = self.read_entry(location)?;
@@ -382,50 +376,15 @@ impl ObjectStore for TarObjectStore {
         })
     }
 
-    async fn get_opts(&self, location: &ObjectPath, _options: GetOptions) -> ObjectStoreResult<GetResult> {
-        self.get(location).await
-    }
-
-    async fn get_range(&self, location: &ObjectPath, range: Range<u64>) -> ObjectStoreResult<Bytes> {
-        let bytes = self.read_entry(location)?;
-
-        let start = range.start as usize;
-        let end = range.end as usize;
-
-        if end > bytes.len() {
-            return Err(object_store::Error::Generic {
-                store: "TarObjectStore",
-                source: "Range out of bounds".into(),
-            });
-        }
-
-        Ok(bytes.slice(start..end))
-    }
-
-    async fn head(&self, location: &ObjectPath) -> ObjectStoreResult<ObjectMeta> {
-        self.ensure_indexed()?;
-
-        let index = self.index.read();
-        let entry = index.entries.get(location).ok_or_else(|| {
-            object_store::Error::NotFound {
-                path: location.to_string(),
-                source: "File not found in tar archive".into(),
-            }
-        })?;
-
-        Ok(ObjectMeta {
-            location: location.clone(),
-            last_modified: entry.modified,
-            size: entry.size,
-            e_tag: None,
-            version: None,
-        })
-    }
-
-    async fn delete(&self, _location: &ObjectPath) -> ObjectStoreResult<()> {
-        Err(object_store::Error::NotSupported {
-            source: "Tar archives do not support deletion".into(),
-        })
+    fn delete_stream(
+        &self,
+        locations: BoxStream<'static, ObjectStoreResult<ObjectPath>>,
+    ) -> BoxStream<'static, ObjectStoreResult<ObjectPath>> {
+        Box::pin(locations.then(|_| async {
+            Err(object_store::Error::NotSupported {
+                source: "Tar archives do not support deletion".into(),
+            })
+        }))
     }
 
     fn list(&self, prefix: Option<&ObjectPath>) -> BoxStream<'static, ObjectStoreResult<ObjectMeta>> {
@@ -505,27 +464,9 @@ impl ObjectStore for TarObjectStore {
         })
     }
 
-    async fn copy(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
+    async fn copy_opts(&self, _from: &ObjectPath, _to: &ObjectPath, _options: CopyOptions) -> ObjectStoreResult<()> {
         Err(object_store::Error::NotSupported {
             source: "Tar archives do not support copy".into(),
-        })
-    }
-
-    async fn copy_if_not_exists(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
-        Err(object_store::Error::NotSupported {
-            source: "Tar archives do not support copy".into(),
-        })
-    }
-
-    async fn rename(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
-        Err(object_store::Error::NotSupported {
-            source: "Tar archives do not support rename".into(),
-        })
-    }
-
-    async fn rename_if_not_exists(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
-        Err(object_store::Error::NotSupported {
-            source: "Tar archives do not support rename".into(),
         })
     }
 }
@@ -717,24 +658,12 @@ impl Display for ReadOnlyTarObjectStore {
 
 #[async_trait]
 impl ObjectStore for ReadOnlyTarObjectStore {
-    async fn put(&self, _location: &ObjectPath, _payload: PutPayload) -> ObjectStoreResult<PutResult> {
-        Err(object_store::Error::NotSupported {
-            source: "Remote tar archives are read-only".into(),
-        })
-    }
-
     async fn put_opts(
         &self,
         _location: &ObjectPath,
         _payload: PutPayload,
         _opts: PutOptions,
     ) -> ObjectStoreResult<PutResult> {
-        Err(object_store::Error::NotSupported {
-            source: "Remote tar archives are read-only".into(),
-        })
-    }
-
-    async fn put_multipart(&self, _location: &ObjectPath) -> ObjectStoreResult<Box<dyn MultipartUpload>> {
         Err(object_store::Error::NotSupported {
             source: "Remote tar archives are read-only".into(),
         })
@@ -750,7 +679,7 @@ impl ObjectStore for ReadOnlyTarObjectStore {
         })
     }
 
-    async fn get(&self, location: &ObjectPath) -> ObjectStoreResult<GetResult> {
+    async fn get_opts(&self, location: &ObjectPath, _options: GetOptions) -> ObjectStoreResult<GetResult> {
         let bytes = self.read_entry(location).await?;
         let size = bytes.len() as u64;
 
@@ -770,50 +699,15 @@ impl ObjectStore for ReadOnlyTarObjectStore {
         })
     }
 
-    async fn get_opts(&self, location: &ObjectPath, _options: GetOptions) -> ObjectStoreResult<GetResult> {
-        self.get(location).await
-    }
-
-    async fn get_range(&self, location: &ObjectPath, range: Range<u64>) -> ObjectStoreResult<Bytes> {
-        let bytes = self.read_entry(location).await?;
-
-        let start = range.start as usize;
-        let end = range.end as usize;
-
-        if end > bytes.len() {
-            return Err(object_store::Error::Generic {
-                store: "ReadOnlyTarObjectStore",
-                source: "Range out of bounds".into(),
-            });
-        }
-
-        Ok(bytes.slice(start..end))
-    }
-
-    async fn head(&self, location: &ObjectPath) -> ObjectStoreResult<ObjectMeta> {
-        self.ensure_indexed().await?;
-
-        let index = self.index.read();
-        let entry = index.entries.get(location).ok_or_else(|| {
-            object_store::Error::NotFound {
-                path: location.to_string(),
-                source: "File not found in remote tar archive".into(),
-            }
-        })?;
-
-        Ok(ObjectMeta {
-            location: location.clone(),
-            last_modified: entry.modified,
-            size: entry.size,
-            e_tag: None,
-            version: None,
-        })
-    }
-
-    async fn delete(&self, _location: &ObjectPath) -> ObjectStoreResult<()> {
-        Err(object_store::Error::NotSupported {
-            source: "Remote tar archives are read-only".into(),
-        })
+    fn delete_stream(
+        &self,
+        locations: BoxStream<'static, ObjectStoreResult<ObjectPath>>,
+    ) -> BoxStream<'static, ObjectStoreResult<ObjectPath>> {
+        Box::pin(locations.then(|_| async {
+            Err(object_store::Error::NotSupported {
+                source: "Remote tar archives are read-only".into(),
+            })
+        }))
     }
 
     fn list(&self, prefix: Option<&ObjectPath>) -> BoxStream<'static, ObjectStoreResult<ObjectMeta>> {
@@ -891,25 +785,7 @@ impl ObjectStore for ReadOnlyTarObjectStore {
         })
     }
 
-    async fn copy(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
-        Err(object_store::Error::NotSupported {
-            source: "Remote tar archives are read-only".into(),
-        })
-    }
-
-    async fn copy_if_not_exists(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
-        Err(object_store::Error::NotSupported {
-            source: "Remote tar archives are read-only".into(),
-        })
-    }
-
-    async fn rename(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
-        Err(object_store::Error::NotSupported {
-            source: "Remote tar archives are read-only".into(),
-        })
-    }
-
-    async fn rename_if_not_exists(&self, _from: &ObjectPath, _to: &ObjectPath) -> ObjectStoreResult<()> {
+    async fn copy_opts(&self, _from: &ObjectPath, _to: &ObjectPath, _options: CopyOptions) -> ObjectStoreResult<()> {
         Err(object_store::Error::NotSupported {
             source: "Remote tar archives are read-only".into(),
         })

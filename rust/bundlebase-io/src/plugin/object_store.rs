@@ -14,7 +14,7 @@ use bytes::Bytes;
 use datafusion::datasource::object_store::ObjectStoreUrl;
 use futures::stream::{BoxStream, StreamExt, TryStreamExt};
 use object_store::path::Path as ObjectPath;
-use object_store::{ObjectMeta, ObjectStore};
+use object_store::{ObjectMeta, ObjectStore, ObjectStoreExt};
 use sha2::{Digest, Sha256};
 use std::env::current_dir;
 use std::collections::HashMap;

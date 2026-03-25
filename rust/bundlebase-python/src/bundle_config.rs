@@ -2,7 +2,7 @@ use ::bundlebase::bundle_config::{PassedBundleConfig, Scope, validated_scope};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-#[pyclass(name = "BundleConfig")]
+#[pyclass(name = "BundleConfig", skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyBundleConfig {
     pub(crate) inner: PassedBundleConfig,
@@ -42,14 +42,14 @@ impl PyBundleConfig {
 /// Flat top-level string keys are rejected.
 pub fn config_from_python(obj: &Bound<PyAny>) -> PyResult<PassedBundleConfig> {
     // config must be a dict
-    if let Ok(dict) = obj.downcast::<PyDict>() {
+    if let Ok(dict) = obj.cast::<PyDict>() {
         let mut config = PassedBundleConfig::new();
 
         for (key, value) in dict.iter() {
             let key_str: String = key.extract()?;
 
             // Check if value is a nested dict (scope-specific config)
-            if let Ok(nested_dict) = value.downcast::<PyDict>() {
+            if let Ok(nested_dict) = value.cast::<PyDict>() {
                 // Scope-specific override
                 let scope = parse_scope(&key_str)?;
                 for (nested_key, nested_value) in nested_dict.iter() {

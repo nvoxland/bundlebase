@@ -3,7 +3,7 @@ use super::operation::PyOperation;
 use ::bundlebase::bundle::BundleCommit;
 use pyo3::prelude::*;
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyCommit {
     inner: BundleCommit,

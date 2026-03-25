@@ -2,7 +2,7 @@ use arrow::datatypes::SchemaRef;
 use arrow_schema::FieldRef;
 use pyo3::prelude::*;
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PySchemaField {
     inner: FieldRef,
@@ -46,7 +46,7 @@ impl PySchemaField {
     }
 }
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PySchema {
     inner: SchemaRef,

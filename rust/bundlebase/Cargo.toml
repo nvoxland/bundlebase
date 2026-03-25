@@ -36,19 +36,19 @@ serde_yaml_ng = { workspace = true }
 serde_json = { workspace = true }
 tar = { workspace = true }
 url = { version = "2.5", features = ["serde"] }
-object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
+object_store = { workspace = true }
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
 futures = { workspace = true }
 lazy_static = "1.5"
-libloading = "0.8"
+libloading = { workspace = true }
 bytes = { workspace = true }
 log = "0.4"
 tracing = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
 hex = "0.4"
-parquet = "57.3.0"
-rand = "0.9"
+parquet = { workspace = true }
+rand = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { workspace = true }
 regex = "1.12.3"
@@ -67,7 +67,7 @@ bundlebase-catalog = { workspace = true }
 bundlebase-command = { workspace = true }
 rstest = { workspace = true }
 env_logger = "0.11"
-serial_test = "3.3"
+serial_test = { workspace = true }
 wiremock = "0.6"
 criterion = { version = "0.8", features = ["async_tokio"] }
 

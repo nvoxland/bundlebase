@@ -3,7 +3,7 @@ use datafusion::prelude::SessionContext;
 use pyo3::prelude::*;
 use std::sync::Arc;
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PySessionContext {
     inner: Arc<SessionContext>,

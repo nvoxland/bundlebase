@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Result of verifying a single file
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyFileVerificationResult {
     #[pyo3(get)]
@@ -53,7 +53,7 @@ impl PyFileVerificationResult {
 }
 
 /// Complete verification results for a bundle
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyVerificationResults {
     #[pyo3(get)]
@@ -127,7 +127,7 @@ impl PyVerificationResults {
     }
 }
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyBundle {
     inner: Arc<Bundle>,

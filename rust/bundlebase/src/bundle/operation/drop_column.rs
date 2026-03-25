@@ -46,7 +46,7 @@ impl Operation for DropColumnOp {
             .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?
             .clone();
         column_names.remove(&self.id);
-        Ok(df.drop_columns(&[name.as_str()])?)
+        Ok(df.drop_columns(&[datafusion::common::Column::new_unqualified(&name)])?)
     }
 }
 

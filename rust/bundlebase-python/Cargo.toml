@@ -25,8 +25,8 @@ bundlebase-common = { path = "../bundlebase-common" }
 bundlebase-index = { path = "../bundlebase-index" }
 
 # PyO3 dependencies for Python bindings
-pyo3 = { version = "0.26", features = ["experimental-async"] }
-pyo3-async-runtimes = { version = "0.26", features = ["tokio-runtime"] }
+pyo3 = { version = "0.28", features = ["experimental-async"] }
+pyo3-async-runtimes = { version = "0.28", features = ["tokio-runtime"] }
 pyo3-log = "0.13"
 
 # Arrow with PyArrow support for Python interop

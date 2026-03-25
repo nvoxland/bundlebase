@@ -36,7 +36,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "s
 shellexpand = "3.1"
 tempfile = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
-libloading = "0.8"
+libloading = { workspace = true }
 
 # Feature-gated connector deps
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"], optional = true }

@@ -35,7 +35,7 @@ parking_lot = { workspace = true }
 dashmap = "6"
 
 # FFI / IPC
-libloading = "0.8"
+libloading = { workspace = true }
 libc = "0.2"
 
 # Logging

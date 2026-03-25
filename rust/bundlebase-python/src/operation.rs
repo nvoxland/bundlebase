@@ -2,7 +2,7 @@ use ::bundlebase::bundle::AnyOperation;
 use ::bundlebase::Operation;
 use pyo3::prelude::*;
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyOperation {
     inner: AnyOperation,

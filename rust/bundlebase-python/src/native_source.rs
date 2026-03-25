@@ -150,7 +150,7 @@ impl NativePythonBridge for PyNativeBridge {
 
             // Convert list of Location objects to JSON
             let locations = result
-                .downcast::<PyList>()
+                .cast::<PyList>()
                 .map_err(|_| BundlebaseError::from("discover() must return a list"))?;
 
             let mut json_locations = Vec::new();
@@ -282,7 +282,7 @@ impl NativePythonBridge for PyNativeBridge {
                 .map_err(|e| format!("normalize_to_batches failed: {}", e))?;
 
             let py_batch_list = py_batches
-                .downcast::<PyList>()
+                .cast::<PyList>()
                 .map_err(|_| BundlebaseError::from("normalize_to_batches must return a list"))?;
 
             let mut batches = Vec::new();

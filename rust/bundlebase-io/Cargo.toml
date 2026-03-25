@@ -14,7 +14,7 @@ crate-type = ["rlib"]
 [dependencies]
 bundlebase-common = { workspace = true }
 datafusion = { workspace = true }
-object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
+object_store = { workspace = true }
 url = { version = "2.5", features = ["serde"] }
 async-trait = { workspace = true }
 bytes = { workspace = true }
@@ -24,7 +24,7 @@ tokio-util = { workspace = true }
 serde = { workspace = true }
 serde_yaml_ng = { workspace = true }
 serde_json = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 tar = { workspace = true }
@@ -36,10 +36,10 @@ tempfile = { workspace = true }
 shellexpand = "3.1"
 parking_lot = { workspace = true }
 log = "0.4"
-rand = "0.9"
+rand = { workspace = true }
 lazy_static = "1.5"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
 
 [dev-dependencies]
 rstest = { workspace = true }
-rand = "0.9"
+rand = { workspace = true }

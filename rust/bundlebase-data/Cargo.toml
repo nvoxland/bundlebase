@@ -20,7 +20,7 @@ bundlebase-index = { workspace = true }
 arrow = { workspace = true }
 arrow-schema = { workspace = true }
 datafusion = { workspace = true }
-parquet = "57.3.0"
+parquet = { workspace = true }
 
 # Async
 async-trait = { workspace = true }
@@ -30,7 +30,7 @@ bytes = { workspace = true }
 
 # Other
 url = { version = "2.5", features = ["serde"] }
-object_store = { version = "0.12", features = ["aws", "gcp", "azure"] }
+object_store = { workspace = true }
 log = "0.4"
 
 [dev-dependencies]
