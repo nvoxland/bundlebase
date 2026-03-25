@@ -2,11 +2,19 @@ use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase_common::BundlebaseError;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 #[tokio::test]
 async fn test_schema_tracking_through_operations() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Initially has only the sentinel no_data column
@@ -65,6 +73,7 @@ async fn test_schema_tracking_through_operations() -> Result<(), BundlebaseError
 }
 #[tokio::test]
 async fn test_schema_consistency_with_dataframe() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
     bundle.drop_column("title").await?;
@@ -95,6 +104,7 @@ async fn test_schema_consistency_with_dataframe() -> Result<(), BundlebaseError>
 }
 #[tokio::test]
 async fn test_schema_types_preserved() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
@@ -125,6 +135,7 @@ async fn test_schema_types_preserved() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_rename_with_unicode() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
@@ -152,6 +163,7 @@ async fn test_rename_with_unicode() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_column_with_special_characters() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 

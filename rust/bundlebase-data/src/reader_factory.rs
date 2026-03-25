@@ -1,0 +1,82 @@
+use crate::DataContext;
+use crate::plugin::{CsvPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin};
+use crate::{BlockId, DataReader};
+use bundlebase_io::DataStorage;
+use bundlebase_common::BundlebaseError;
+use arrow_schema::SchemaRef;
+use datafusion::common::DataFusionError;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+pub struct DataReaderFactory {
+    plugins: Vec<Arc<dyn ReaderPlugin>>,
+    storage: Arc<DataStorage>,
+}
+
+impl DataReaderFactory {
+    pub fn new(
+        storage: Arc<DataStorage>,
+    ) -> Self {
+        Self {
+            storage: storage.clone(),
+            plugins: vec![
+                Arc::new(CsvPlugin::default()),
+                Arc::new(JsonPlugin::default()),
+                Arc::new(ParquetPlugin::default()),
+            ],
+        }
+    }
+
+    pub fn new_with_plugins(
+        storage: Arc<DataStorage>,
+        plugins: Vec<Arc<dyn ReaderPlugin>>,
+    ) -> Self {
+        Self {
+            storage,
+            plugins,
+        }
+    }
+
+    pub fn storage(&self) -> &Arc<DataStorage> {
+        &self.storage
+    }
+
+    /// Create a reader for the given source.
+    ///
+    /// # Arguments
+    /// * `source` - URL or path to the data source
+    /// * `block_id` - ID of the block being read
+    /// * `bundle` - Bundle context (as trait object for flexibility)
+    /// * `schema` - Optional schema (if already known)
+    /// * `layout` - Optional layout file path
+    /// * `expected_version` - If provided, validates version on first data access.
+    ///   This is used to detect when source files have changed since the bundle was created.
+    pub async fn reader(
+        &self,
+        source: &str,
+        block_id: &BlockId,
+        bundle: &dyn DataContext,
+        schema: Option<SchemaRef>,
+        layout: Option<String>,
+        expected_version: Option<String>,
+        read_options: Option<&HashMap<String, String>>,
+    ) -> Result<Arc<dyn DataReader>, BundlebaseError> {
+        for plugin in &self.plugins {
+            if let Some(reader) = plugin
+                .reader(
+                    source,
+                    block_id,
+                    bundle,
+                    schema.clone(),
+                    layout.clone(),
+                    expected_version.clone(),
+                    read_options,
+                )
+                .await?
+            {
+                return Ok(reader);
+            }
+        }
+        Err(DataFusionError::NotImplemented(format!("No reader found for {}", source)).into())
+    }
+}

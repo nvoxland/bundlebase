@@ -5,9 +5,17 @@ use bundlebase::test_utils::{random_memory_dir, test_datafile};
 use bundlebase::{Bundle, BundleBuilder};
 use futures::StreamExt;
 use futures::TryStreamExt;
+use bundlebase_command::BundleBuilderExt;
+
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
 
 #[tokio::test]
 async fn test_bundle_data_table() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -38,6 +46,7 @@ async fn test_bundle_data_table() {
 
 #[tokio::test]
 async fn test_data_table_schema() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -78,6 +87,7 @@ async fn test_data_table_schema() {
 
 #[tokio::test]
 async fn test_bundle_history_table_empty() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -114,6 +124,7 @@ async fn test_bundle_history_table_empty() {
 
 #[tokio::test]
 async fn test_bundle_history_table_with_commit() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -154,6 +165,7 @@ async fn test_bundle_history_table_with_commit() {
 
 #[tokio::test]
 async fn test_bundle_history_table_multiple_commits() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -195,6 +207,7 @@ async fn test_bundle_history_table_multiple_commits() {
 
 #[tokio::test]
 async fn test_bundle_status_table_empty() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -221,6 +234,7 @@ async fn test_bundle_status_table_empty() {
 
 #[tokio::test]
 async fn test_bundle_status_table_with_uncommitted_changes() {
+    init();
 
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
@@ -254,6 +268,7 @@ async fn test_bundle_status_table_with_uncommitted_changes() {
 
 #[tokio::test]
 async fn test_bundle_status_table_multiple_changes() {
+    init();
 
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
@@ -287,6 +302,7 @@ async fn test_bundle_status_table_multiple_changes() {
 
 #[tokio::test]
 async fn test_bundle_status_table_cleared_after_commit() {
+    init();
 
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
@@ -313,6 +329,7 @@ async fn test_bundle_status_table_cleared_after_commit() {
 
 #[tokio::test]
 async fn test_bundle_status_table_readonly_bundle() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -342,6 +359,7 @@ async fn test_bundle_status_table_readonly_bundle() {
 
 #[tokio::test]
 async fn test_bundle_details_table_schema() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -368,6 +386,7 @@ async fn test_bundle_details_table_schema() {
 
 #[tokio::test]
 async fn test_bundle_details_table_single_row() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -407,6 +426,7 @@ async fn test_bundle_details_table_single_row() {
 
 #[tokio::test]
 async fn test_bundle_views_table_schema() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -433,6 +453,7 @@ async fn test_bundle_views_table_schema() {
 
 #[tokio::test]
 async fn test_bundle_views_table_empty() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -459,6 +480,7 @@ async fn test_bundle_views_table_empty() {
 
 #[tokio::test]
 async fn test_bundle_views_table_with_views() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -494,6 +516,7 @@ async fn test_bundle_views_table_with_views() {
 
 #[tokio::test]
 async fn test_bundle_indexes_table_schema() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -520,6 +543,7 @@ async fn test_bundle_indexes_table_schema() {
 
 #[tokio::test]
 async fn test_bundle_indexes_table_empty() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -546,6 +570,7 @@ async fn test_bundle_indexes_table_empty() {
 
 #[tokio::test]
 async fn test_bundle_indexes_table_with_index() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -581,6 +606,7 @@ async fn test_bundle_indexes_table_with_index() {
 
 #[tokio::test]
 async fn test_bundle_packs_table_schema() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -607,6 +633,7 @@ async fn test_bundle_packs_table_schema() {
 
 #[tokio::test]
 async fn test_bundle_packs_table_base_pack() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -639,6 +666,7 @@ async fn test_bundle_packs_table_base_pack() {
 
 #[tokio::test]
 async fn test_bundle_blocks_table_schema() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -665,6 +693,7 @@ async fn test_bundle_blocks_table_schema() {
 
 #[tokio::test]
 async fn test_bundle_blocks_table_with_data() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await
@@ -695,6 +724,7 @@ async fn test_bundle_blocks_table_with_data() {
 
 #[tokio::test]
 async fn test_bundle_blocks_table_empty() {
+    init();
     let data_dir = random_memory_dir();
     let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
         .await

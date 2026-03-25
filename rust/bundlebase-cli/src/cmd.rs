@@ -107,8 +107,14 @@ pub fn auto_commit_message(sql: &str) -> String {
 mod tests {
     use super::*;
 
+    fn init() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| { bundlebase_catalog::init(); });
+    }
+
     #[tokio::test]
     async fn test_open_nonexistent_bundle_suggests_create() {
+        init();
         let args = BundleArgs {
             bundle: "memory:///nonexistent_bundle_test".to_string(),
             read_only: false,
@@ -131,6 +137,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_open_nonexistent_bundle_readonly_suggests_create() {
+        init();
         let args = BundleArgs {
             bundle: "memory:///nonexistent_readonly_test".to_string(),
             read_only: true,
@@ -153,6 +160,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_existing_bundle_suggests_extend() {
+        init();
         let url = format!(
             "memory:///create_existing_test_{}",
             std::time::SystemTime::now()
@@ -193,6 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_new_bundle_succeeds() {
+        init();
         let url = format!(
             "memory:///create_new_test_{}",
             std::time::SystemTime::now()
@@ -215,6 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_extend_nonexistent_bundle_suggests_create() {
+        init();
         let err = extend_cmd::run(extend_cmd::ExtendArgs {
             bundle: "memory:///extend_nonexistent_test".to_string(),
             to: None,
@@ -241,6 +251,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_extend_with_to_flag() {
+        init();
         let source_url = format!(
             "memory:///extend_to_source_{}",
             std::time::SystemTime::now()

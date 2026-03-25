@@ -21,7 +21,7 @@ fn create(_args: &str) -> Result<ReplCommand, String> {
 
 fn execute(_cmd: &ReplCommand, _bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'static, ReplCommandResult> {
     Box::pin(async {
-        let response: Box<dyn bundlebase::bundle::CommandResponse> = Box::new(help_text());
+        let response: Box<dyn bundlebase_command::CommandResponse> = Box::new(help_text());
         let (stream, shape) = super::response_to_stream(response)?;
         Ok(Some((stream, shape)))
     })
@@ -76,7 +76,7 @@ fn help_text() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bundlebase::bundle::CommandResponse;
+    use bundlebase_command::CommandResponse;
     use futures::StreamExt;
 
     #[tokio::test]

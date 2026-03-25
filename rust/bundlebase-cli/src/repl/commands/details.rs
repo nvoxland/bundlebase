@@ -1,7 +1,7 @@
 //! Details command - displays bundle metadata (id, name, url, version, etc.).
 
 use super::{ReplCommandResult, ReplCommand, ReplCommandDef};
-use bundlebase::bundle::OutputShape;
+use bundlebase_command::OutputShape;
 use bundlebase::BundleFacade;
 use futures::future::BoxFuture;
 use std::sync::Arc;

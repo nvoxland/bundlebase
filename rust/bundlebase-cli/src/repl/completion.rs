@@ -1,5 +1,5 @@
 use crate::repl::commands::{self, ReplCommand};
-use bundlebase::bundle::available_commands;
+use bundlebase_command::parser::available_commands;
 use bundlebase::BundleFacade;
 use reedline::{Completer, Span, Suggestion};
 use std::sync::Arc;

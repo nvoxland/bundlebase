@@ -1,6 +1,16 @@
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 /// Shared test utilities for integration tests
 use arrow::datatypes::SchemaRef;
+
+static INIT: Once = Once::new();
+
+/// Initialize the catalog hook for tests. Safe to call multiple times.
+#[allow(dead_code)]
+pub fn init_catalog() {
+    INIT.call_once(|| {
+        bundlebase_catalog::init();
+    });
+}
 use bundlebase::bundle::{manifest_version, BundleCommit, INIT_FILENAME};
 use bundlebase::BundleConfig;
 use bundlebase_common::{BundlebaseError, ConfigProvider};

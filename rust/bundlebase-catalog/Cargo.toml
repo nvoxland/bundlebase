@@ -1,0 +1,32 @@
+[package]
+name = "bundlebase-catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "DataFusion catalog providers for Bundlebase schema providers and system tables"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+bundlebase = { path = "../bundlebase" }
+bundlebase-common = { workspace = true }
+
+# Arrow & DataFusion
+arrow = { workspace = true }
+arrow-schema = { workspace = true }
+datafusion = { workspace = true }
+
+# Async
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Other
+parking_lot = { workspace = true }
+log = "0.4"
+
+[dev-dependencies]
+rstest = { workspace = true }

@@ -92,13 +92,6 @@ pub fn random_memory_dir() -> Arc<dyn IOReadWriteDir> {
     writable_dir_with_store(&url, store, &object_store::path::Path::from(url.path()), test_config()).unwrap()
 }
 
-/// Internal function for unit tests that need the concrete ObjectStoreDir type.
-/// This is pub(crate) so it's only available within the crate.
-#[cfg(test)]
-pub(crate) fn random_memory_dir_concrete() -> crate::io::plugin::object_store::ObjectStoreDir {
-    crate::io::plugin::object_store::ObjectStoreDir::from_url(&random_memory_url(), test_config()).unwrap()
-}
-
 /// Create a random memory file for testing.
 /// Returns a Box<dyn IOReadWriteFile> that can be used in tests.
 pub fn random_memory_file(path: &str) -> Box<dyn IOReadWriteFile> {

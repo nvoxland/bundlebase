@@ -35,17 +35,8 @@ impl Clone for Pack {
 }
 
 impl Pack {
-    pub(crate) fn table_name(id: &ObjectId) -> String {
+    pub fn table_name(id: &ObjectId) -> String {
         format!("__pack_{}", id)
-    }
-
-    pub(crate) fn parse_id(table_name: &str) -> Option<ObjectId> {
-        // Handle both "packs.__pack_xxx" and "__pack_xxx" formats
-        let name = table_name.strip_prefix("packs.").unwrap_or(table_name);
-        match name.strip_prefix("__pack_") {
-            Some(id) => ObjectId::try_from(id).ok(),
-            None => None,
-        }
     }
 
     /// Create the base pack (ObjectId 0) with no join metadata.

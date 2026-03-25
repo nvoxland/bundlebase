@@ -1,4 +1,5 @@
 use super::commit::PyCommit;
+use bundlebase_command::BundleFacadeCommandExt;
 use arrow::pyarrow::ToPyArrow;
 use ::bundlebase::bundle::BundleFacade;
 use ::bundlebase::{Bundle, FileVerificationResult, VerificationResults};

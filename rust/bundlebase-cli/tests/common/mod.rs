@@ -2,6 +2,12 @@
 //!
 //! This module provides infrastructure for testing the Arrow Flight SQL server.
 
+/// Ensure the catalog schema provider hook is installed for tests.
+pub fn init_catalog() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
 use arrow_flight::flight_service_server::FlightServiceServer;
 use arrow_flight::sql::client::FlightSqlServiceClient;
 use bundlebase::BundleBuilder;
@@ -22,7 +28,6 @@ pub fn get_available_port() -> u16 {
 ///
 /// When dropped, signals the server to shut down.
 pub struct FlightTestServer {
-    pub addr: SocketAddr,
     pub client: FlightSqlServiceClient<Channel>,
     shutdown_tx: Option<oneshot::Sender<()>>,
 }
@@ -30,6 +35,7 @@ pub struct FlightTestServer {
 impl FlightTestServer {
     /// Start a new Flight SQL test server with an empty bundle.
     pub async fn start() -> Self {
+        init_catalog();
         let bundle_path = format!(
             "memory:///flight_test_{}",
             std::time::SystemTime::now()
@@ -107,7 +113,6 @@ impl FlightTestServer {
             .expect("Handshake should succeed with default credentials");
 
         Self {
-            addr,
             client,
             shutdown_tx: Some(shutdown_tx),
         }
@@ -189,7 +194,6 @@ impl FlightTestServer {
         let unauth_client = FlightSqlServiceClient::new(channel);
 
         let server = Self {
-            addr,
             client: auth_client,
             shutdown_tx: Some(shutdown_tx),
         };

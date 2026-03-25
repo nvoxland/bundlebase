@@ -3,7 +3,7 @@
 //! This module provides functions to format `SendableRecordBatchStream` results
 //! based on their expected output shape, producing appropriate terminal output.
 
-use bundlebase::bundle::OutputShape;
+use bundlebase_command::OutputShape;
 use bundlebase_common::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use futures::StreamExt;

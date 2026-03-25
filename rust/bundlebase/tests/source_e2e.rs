@@ -8,8 +8,15 @@ use bundlebase_common::{BundlebaseError, ConfigProvider};
 use bundlebase_io::{readable_file_from_url, IOReadWriteDir};
 use std::collections::HashMap;
 use url::Url;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
+
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
 
 /// Helper to sum total changes from FetchResults
 fn total_changes(results: &[bundlebase::source::FetchResults]) -> usize {
@@ -45,6 +52,7 @@ async fn copy_test_file(
 
 #[tokio::test]
 async fn test_create_source_basic() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_url();
     let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
@@ -69,6 +77,7 @@ async fn test_create_source_basic() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_with_patterns() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_url();
     let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
@@ -92,6 +101,7 @@ async fn test_create_source_with_patterns() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_default_patterns() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_url();
     let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
@@ -115,6 +125,7 @@ async fn test_create_source_default_patterns() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_auto_attaches_files() -> Result<(), BundlebaseError> {
+    init();
     // Create a source directory with test files
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
@@ -147,6 +158,7 @@ async fn test_create_source_auto_attaches_files() -> Result<(), BundlebaseError>
 
 #[tokio::test]
 async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
+    init();
     // Create a source directory
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
@@ -183,6 +195,7 @@ async fn test_fetch_attaches_new_files() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -218,6 +231,7 @@ async fn test_fetch_idempotent() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -257,6 +271,7 @@ async fn test_fetch_incremental() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -296,6 +311,7 @@ async fn test_pattern_filtering() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -328,6 +344,7 @@ async fn test_source_persists_after_commit() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -360,6 +377,7 @@ async fn test_source_in_attach_op() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_serialization() -> Result<(), BundlebaseError> {
+    init();
     let bundle_dir = random_memory_dir();
     let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
@@ -382,6 +400,7 @@ async fn test_create_source_serialization() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir1 = random_memory_dir();
     let bundle_dir2 = random_memory_dir();
@@ -429,6 +448,7 @@ async fn test_extend_preserves_source() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -466,6 +486,7 @@ async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -500,6 +521,7 @@ async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -537,6 +559,7 @@ async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> 
 
 #[tokio::test]
 async fn test_create_source_creates_single_change() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -592,6 +615,7 @@ async fn test_create_source_creates_single_change() -> Result<(), BundlebaseErro
 
 #[tokio::test]
 async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -676,6 +700,7 @@ async fn test_source_location_uses_relative_path() -> Result<(), BundlebaseError
 
 #[tokio::test]
 async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -750,6 +775,7 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -804,6 +830,7 @@ async fn test_fetch_with_copy_no_duplicates() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_fetch_update_replaces_changed_files() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -860,6 +887,7 @@ async fn test_fetch_update_replaces_changed_files() -> Result<(), BundlebaseErro
 
 #[tokio::test]
 async fn test_fetch_sync_adds_and_replaces() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
@@ -913,6 +941,7 @@ async fn test_fetch_sync_adds_and_replaces() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_fetch_update_adds_new_and_replaces_changed() -> Result<(), BundlebaseError> {
+    init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 

@@ -4,11 +4,19 @@ use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase_common::BundlebaseError;
 use datafusion::scalar::ScalarValue;
 use futures::TryStreamExt;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 #[tokio::test]
 async fn test_filter_basic() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle
         .attach(test_datafile("userdata.parquet"), None)
@@ -38,6 +46,7 @@ async fn test_filter_basic() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_filter_multiple_parameters() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle
         .attach(test_datafile("userdata.parquet"), None)
@@ -62,6 +71,7 @@ async fn test_filter_multiple_parameters() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_filter_preserves_schema() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle
         .attach(test_datafile("userdata.parquet"), None)
@@ -93,6 +103,7 @@ async fn test_filter_preserves_schema() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_filter_with_other_operations() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle
         .attach(test_datafile("userdata.parquet"), None)
@@ -117,6 +128,7 @@ async fn test_filter_with_other_operations() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_select_limit() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle
         .attach(test_datafile("userdata.parquet"), None)
@@ -139,6 +151,7 @@ async fn test_select_limit() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_select_with_filter() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle
         .attach(test_datafile("userdata.parquet"), None)

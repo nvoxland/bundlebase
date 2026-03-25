@@ -1,0 +1,165 @@
+//! DropConnector command implementation.
+
+use crate::parser::extract_string_content;
+use crate::{CommandParsing, Rule};
+use bundlebase_common::Platform;
+use bundlebase::bundle::operation::DropConnectorOp;
+use bundlebase_common::BundlebaseError;
+use crate::BundleBuilderCommand;
+use bundlebase::BundleBuilder;
+
+/// Command to drop a connector definition and all its entries, or drop the connector for a specific platform.
+///
+/// Without a platform, removes the entire connector definition and all entries.
+/// With a platform, removes only that platform.
+#[derive(Debug, Clone)]
+pub struct DropConnectorCommand {
+    /// Full dotted connector name
+    pub name: String,
+    /// Optional platform filter
+    pub platform: Option<Platform>,
+}
+
+impl DropConnectorCommand {
+    pub fn new(name: impl Into<String>, platform: Option<Platform>) -> Self {
+        Self {
+            name: name.into(),
+            platform,
+        }
+    }
+}
+
+impl CommandParsing for DropConnectorCommand {
+    fn rule() -> Rule {
+        Rule::drop_connector_stmt
+    }
+
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        let mut name = None;
+        let mut platform = None;
+
+        for inner_pair in pair.into_inner() {
+            match inner_pair.as_rule() {
+                Rule::dotted_identifier => {
+                    name = Some(inner_pair.as_str().to_string());
+                }
+                Rule::quoted_string => {
+                    let s = extract_string_content(inner_pair.as_str())?;
+                    platform = Some(s.parse::<Platform>()?);
+                }
+                _ => {}
+            }
+        }
+
+        let name = name.ok_or_else(|| -> BundlebaseError {
+            "DROP CONNECTOR missing connector name".into()
+        })?;
+
+        Ok(DropConnectorCommand::new(name, platform))
+    }
+
+    fn to_statement(&self) -> String {
+        use crate::parser::escape_string;
+        match &self.platform {
+            Some(p) => format!(
+                "DROP CONNECTOR {} FOR PLATFORM {}",
+                self.name,
+                escape_string(&p.to_string())
+            ),
+            None => format!("DROP CONNECTOR {}", self.name),
+        }
+    }
+}
+
+impl BundleBuilderCommand for DropConnectorCommand {
+    type Output = String;
+
+    async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
+        let op = DropConnectorOp::setup(&self.name, self.platform.as_ref(), builder)?;
+        builder.apply_operation(op.into()).await?;
+
+        match &self.platform {
+            Some(p) => Ok(format!(
+                "Dropped connector {} on platform {}",
+                self.name, p
+            )),
+            None => Ok(format!("Dropped connector {}", self.name)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+    use crate::CommandParsing;
+    use bundlebase_common::Platform;
+    use crate::parser::parse_command;
+    use crate::BundleCommand;
+
+    #[test]
+    fn test_parse_drop_connector() {
+        let input = "DROP CONNECTOR acme.weather";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::DropConnector(c) => {
+                assert_eq!(c.name, "acme.weather");
+                assert_eq!(c.platform, None);
+            }
+            _ => panic!("Expected DropConnector variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_drop_connector_with_platform() {
+        let input = "DROP CONNECTOR acme.weather FOR PLATFORM 'linux/amd64'";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::DropConnector(c) => {
+                assert_eq!(c.name, "acme.weather");
+                assert_eq!(c.platform, Some("linux/amd64".parse::<Platform>().unwrap()));
+            }
+            _ => panic!("Expected DropConnector variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_drop_connector_case_insensitive() {
+        let input = "drop connector acme.weather";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::DropConnector(c) => {
+                assert_eq!(c.name, "acme.weather");
+                assert_eq!(c.platform, None);
+            }
+            _ => panic!("Expected DropConnector variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_drop_connector_roundtrip() {
+        let cmd = DropConnectorCommand::new("acme.weather", None);
+        let statement = cmd.to_statement();
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::DropConnector(c) => {
+                assert_eq!(c.name, "acme.weather");
+                assert_eq!(c.platform, None);
+            }
+            _ => panic!("Expected DropConnector variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_drop_connector_roundtrip_with_platform() {
+        let cmd = DropConnectorCommand::new("acme.weather", Some("linux/amd64".parse().unwrap()));
+        let statement = cmd.to_statement();
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::DropConnector(c) => {
+                assert_eq!(c.name, "acme.weather");
+                assert_eq!(c.platform, Some("linux/amd64".parse::<Platform>().unwrap()));
+            }
+            _ => panic!("Expected DropConnector variant"),
+        }
+    }
+}

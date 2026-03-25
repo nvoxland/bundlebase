@@ -115,25 +115,6 @@ impl PostgresConnector {
         .expect("PartitionLocation serialization cannot fail")
     }
 
-    /// Build a range query with dollar-quoted boundary values.
-    fn build_range_query(
-        query: &str,
-        sort_column: &str,
-        min_val: &str,
-        max_val: &str,
-    ) -> String {
-        let base_query = query.trim_end_matches(';');
-        format!(
-            "SELECT * FROM ({}) AS _q WHERE {} >= {} AND {} <= {} ORDER BY {} ASC",
-            base_query,
-            sort_column,
-            Self::dollar_quote(min_val),
-            sort_column,
-            Self::dollar_quote(max_val),
-            sort_column
-        )
-    }
-
     /// Parse attached_locations to extract existing partition boundaries.
     ///
     /// Returns `Vec<(min, max)>` pairs for locations matching the given sort_column.
@@ -840,47 +821,6 @@ mod tests {
     #[test]
     fn test_parse_location_invalid_json() {
         assert!(PostgresConnector::parse_location("not json").is_err());
-    }
-
-    // --- build_range_query tests ---
-
-    #[test]
-    fn test_build_range_query() {
-        let query = PostgresConnector::build_range_query(
-            "SELECT * FROM users",
-            "id",
-            "1",
-            "100",
-        );
-        assert!(query.contains("$__bb$1$__bb$"));
-        assert!(query.contains("$__bb$100$__bb$"));
-        assert!(query.contains("ORDER BY id ASC"));
-        assert!(query.contains("WHERE id >= "));
-        assert!(query.contains("AND id <= "));
-    }
-
-    #[test]
-    fn test_build_range_query_with_semicolon() {
-        let query = PostgresConnector::build_range_query(
-            "SELECT * FROM users;",
-            "id",
-            "1",
-            "100",
-        );
-        // Should strip trailing semicolon
-        assert!(!query.contains(";;"));
-    }
-
-    #[test]
-    fn test_build_range_query_dollar_quoting_special_values() {
-        let query = PostgresConnector::build_range_query(
-            "SELECT * FROM data",
-            "val",
-            "-50",
-            "2024-01-01T00:00:00",
-        );
-        assert!(query.contains("$__bb$-50$__bb$"));
-        assert!(query.contains("$__bb$2024-01-01T00:00:00$__bb$"));
     }
 
     // --- parse_attached_boundaries tests ---

@@ -1,8 +1,9 @@
 //! History command - displays the bundle's commit history.
 
 use super::{ReplCommandResult, ReplCommand, ReplCommandDef};
-use bundlebase::bundle::CommandResponse;
+use bundlebase_command::CommandResponse;
 use bundlebase::BundleFacade;
+use bundlebase::bundle::CommitHistory;
 use futures::future::BoxFuture;
 use std::sync::Arc;
 
@@ -27,7 +28,7 @@ fn execute(_cmd: &ReplCommand, bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'sta
         let response: Box<dyn CommandResponse> = if commits.is_empty() {
             Box::new("No commit history".to_string())
         } else {
-            Box::new(commits)
+            Box::new(CommitHistory::from(commits))
         };
         let (stream, shape) = super::response_to_stream(response)?;
         Ok(Some((stream, shape)))
@@ -36,13 +37,14 @@ fn execute(_cmd: &ReplCommand, bundle: &Arc<dyn BundleFacade>) -> BoxFuture<'sta
 
 #[cfg(test)]
 mod tests {
-    use bundlebase::bundle::{BundleCommit, CommandResponse};
+    use bundlebase::bundle::{BundleCommit, CommitHistory};
+    use bundlebase_command::CommandResponse;
     use futures::TryStreamExt;
 
     #[tokio::test]
     async fn test_history_result_empty() {
         let commits: Vec<BundleCommit> = vec![];
-        let stream = Box::new(commits).into_stream().unwrap();
+        let stream = Box::new(CommitHistory::from(commits)).into_stream().unwrap();
         let batches: Vec<arrow::array::RecordBatch> = stream.try_collect().await.unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].num_rows(), 0);

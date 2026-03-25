@@ -1,4 +1,5 @@
 use crate::utils::convert_py_params;
+use bundlebase_command::{BundleFacadeCommandExt, BundleBuilderExt};
 use ::bundlebase::bundle::BundleBuilder;
 use ::bundlebase::bundle::{BundleChange, BundleFacade, BundleStatus};
 use ::bundlebase::source::{FetchedBlock, FetchResults, SyncMode};

@@ -1,24 +1,6 @@
 use datafusion::scalar::ScalarValue;
 use pyo3::prelude::*;
 
-/// Convert Python objects to DataFusion ScalarValue (synchronous version)
-///
-/// Use this when you have a `py: Python` reference and need to convert params
-/// synchronously (e.g., in extend() method).
-///
-/// Supported types:
-/// - bool → ScalarValue::Boolean
-/// - int (i64) → ScalarValue::Int64
-/// - float → ScalarValue::Float64
-/// - str → ScalarValue::Utf8
-/// - None → ScalarValue::Null
-///
-/// Returns a descriptive error if an unsupported type is provided,
-/// including the parameter index and the actual type name.
-pub fn convert_py_params_sync(params: Vec<Py<PyAny>>) -> PyResult<Vec<ScalarValue>> {
-    Python::attach(|py| convert_py_params_with_py(py, params))
-}
-
 /// Convert Python objects to DataFusion ScalarValue with an explicit Python context
 fn convert_py_params_with_py(py: Python<'_>, params: Vec<Py<PyAny>>) -> PyResult<Vec<ScalarValue>> {
     params

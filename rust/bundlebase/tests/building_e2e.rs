@@ -6,11 +6,19 @@ use bundlebase::{Bundle, BundleConfig};
 use bundlebase_common::{BundlebaseError, ConfigProvider};
 use bundlebase_io::{read_yaml, readable_file_from_url};
 use url::Url;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 #[tokio::test]
 async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
+    init();
     let temp1 = random_memory_dir();
     let temp2 = random_memory_dir();
 
@@ -63,6 +71,7 @@ async fn test_extend_to_different_directory() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_simple_extend_chain() -> Result<(), BundlebaseError> {
+    init();
     let temp1 = random_memory_url();
     let temp2 = random_memory_url();
 
@@ -96,6 +105,7 @@ async fn test_simple_extend_chain() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_lazy_history_traversal() -> Result<(), BundlebaseError> {
+    init();
     let temp1 = random_memory_url();
     let temp2 = random_memory_url();
     let temp3 = random_memory_url();
@@ -132,6 +142,7 @@ async fn test_lazy_history_traversal() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
+    init();
     let temp = random_memory_url();
 
     let bundle = bundlebase::BundleBuilder::create(&temp.to_string(), None).await?;
@@ -155,6 +166,7 @@ async fn test_operations_stored_in_state() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
+    init();
     let temp1 = random_memory_dir();
     let temp2 = random_memory_dir();
 
@@ -220,6 +232,7 @@ async fn test_extend_with_relative_paths() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_extend_inherits_same_id() -> Result<(), BundlebaseError> {
+    init();
     let temp1 = random_memory_dir();
     let temp2 = random_memory_dir();
     let temp3 = random_memory_dir();

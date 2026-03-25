@@ -3,11 +3,19 @@ use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{field_names, random_memory_url, test_datafile};
 use bundlebase_common::BundlebaseError;
 use url::Url;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 #[tokio::test]
 async fn test_create() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     assert_eq!(0, bundle.num_rows().await?);
     let schema = bundle.dataframe().await?.schema().clone();
@@ -18,6 +26,7 @@ async fn test_create() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_attach() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     let full_path = test_datafile("userdata.parquet");
     bundle.attach(&full_path, None).await?;
@@ -58,6 +67,7 @@ async fn test_attach() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_remove() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
     bundle.drop_column("title").await?;
@@ -73,6 +83,7 @@ async fn test_remove() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_rename() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
     bundle.rename_column("first_name", "new_name").await?;
@@ -121,6 +132,7 @@ async fn test_rename() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_rename_case_sensitive() -> Result<(), BundlebaseError> {
+    init();
     let _ = env_logger::builder().is_test(true).try_init();
 
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
@@ -169,6 +181,7 @@ async fn test_rename_case_sensitive() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_multi_operation_pipeline() -> Result<(), BundlebaseError> {
+    init();
     // Test a realistic workflow: attach -> remove -> rename -> query
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
@@ -195,6 +208,7 @@ async fn test_multi_operation_pipeline() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_sequential_renames() -> Result<(), BundlebaseError> {
+    init();
     // Test multiple renames in sequence
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
@@ -215,6 +229,7 @@ async fn test_sequential_renames() -> Result<(), BundlebaseError> {
 }
 #[tokio::test]
 async fn test_attach_missing_file_error() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     // Should fail when attaching a file that doesn't exist

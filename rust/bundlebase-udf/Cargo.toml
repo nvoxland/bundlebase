@@ -1,0 +1,51 @@
+[package]
+name = "bundlebase-udf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "UDF runtime, function bridges, and entry registries for Bundlebase"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+bundlebase-common = { workspace = true }
+bundlebase-io = { workspace = true }
+
+# Arrow & DataFusion
+arrow = { workspace = true }
+arrow-schema = { workspace = true }
+datafusion = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Async
+async-trait = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+
+# Concurrency
+parking_lot = { workspace = true }
+dashmap = "6"
+
+# FFI / IPC
+libloading = "0.8"
+libc = "0.2"
+
+# Logging
+tracing = { workspace = true }
+log = "0.4"
+
+# Other
+url = { version = "2.5", features = ["serde"] }
+
+[dev-dependencies]
+rstest = { workspace = true }
+serde_yaml_ng = { workspace = true }
+tempfile = { workspace = true }

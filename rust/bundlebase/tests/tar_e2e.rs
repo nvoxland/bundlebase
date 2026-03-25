@@ -3,10 +3,18 @@ use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase::Bundle;
 use bundlebase_index::IndexType;
 use tempfile::TempDir;
+use bundlebase_command::BundleBuilderExt;
+
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
 
 /// Tests exporting a bundle to tar and reopening it
 #[tokio::test]
 async fn test_export_and_reopen_tar() {
+    init();
     let temp_dir = TempDir::new().unwrap();
     let tar_path = temp_dir.path().join("test.tar");
 
@@ -42,6 +50,7 @@ async fn test_export_and_reopen_tar() {
 /// Tests committing to a tar bundle (append mode)
 #[tokio::test]
 async fn test_commit_to_tar() {
+    init();
     let temp_dir = TempDir::new().unwrap();
     let tar_path = temp_dir.path().join("appendable.tar");
 
@@ -78,6 +87,7 @@ async fn test_commit_to_tar() {
 /// Tests multiple commits to tar bundle
 #[tokio::test]
 async fn test_multiple_commits_to_tar() {
+    init();
     let temp_dir = TempDir::new().unwrap();
     let tar_path = temp_dir.path().join("multi_commit.tar");
 
@@ -117,6 +127,7 @@ async fn test_multiple_commits_to_tar() {
 /// Tests that tar bundle preserves metadata correctly
 #[tokio::test]
 async fn test_tar_preserves_metadata() {
+    init();
     let temp_dir = TempDir::new().unwrap();
     let tar_path = temp_dir.path().join("metadata.tar");
 
@@ -147,6 +158,7 @@ async fn test_tar_preserves_metadata() {
 /// Tests creating an index in a tar bundle
 #[tokio::test]
 async fn test_create_index_in_tar() {
+    init();
     let temp_dir = TempDir::new().unwrap();
     let tar_path = temp_dir.path().join("with_index.tar");
 
@@ -185,6 +197,7 @@ async fn test_create_index_in_tar() {
 /// Tests that querying works the same on tar bundles as regular bundles
 #[tokio::test]
 async fn test_tar_query_equivalence() {
+    init();
     let temp_dir = TempDir::new().unwrap();
     let tar_path = temp_dir.path().join("query_test.tar");
 
@@ -217,6 +230,7 @@ async fn test_tar_query_equivalence() {
 /// Tests exporting from a Bundle (read-only) instance
 #[tokio::test]
 async fn test_export_from_bundle() {
+    init();
     let temp_dir = TempDir::new().unwrap();
     let memory_url = random_memory_url();
     let tar_path = temp_dir.path().join("from_bundle.tar");
@@ -249,6 +263,7 @@ async fn test_export_from_bundle() {
 /// Tests exporting from BundleBuilder with no uncommitted changes
 #[tokio::test]
 async fn test_export_from_builder_no_changes() {
+    init();
     let temp_dir = TempDir::new().unwrap();
     let tar_path = temp_dir.path().join("from_builder.tar");
 
@@ -276,6 +291,7 @@ async fn test_export_from_builder_no_changes() {
 /// Tests that exporting from BundleBuilder with uncommitted changes fails
 #[tokio::test]
 async fn test_export_from_builder_with_uncommitted_changes() {
+    init();
     let temp_dir = TempDir::new().unwrap();
     let tar_path = temp_dir.path().join("should_fail.tar");
 
@@ -311,6 +327,7 @@ async fn test_export_from_builder_with_uncommitted_changes() {
 /// Tests that file listing works correctly on tar bundles
 #[tokio::test]
 async fn test_tar_file_listing() {
+    init();
     let temp_dir = TempDir::new().unwrap();
     let tar_path = temp_dir.path().join("listing.tar");
 

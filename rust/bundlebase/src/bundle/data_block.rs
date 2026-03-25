@@ -45,17 +45,8 @@ pub struct DataBlock {
 }
 
 impl DataBlock {
-    pub(crate) fn table_name(id: &BlockId) -> String {
+    pub fn table_name(id: &BlockId) -> String {
         format!("__block_{}", id)
-    }
-
-    pub(crate) fn parse_id(table_name: &str) -> Option<BlockId> {
-        // Handle both "blocks.__block_xxx" and "__block_xxx" formats
-        let name = table_name.strip_prefix("blocks.").unwrap_or(table_name);
-        match name.strip_prefix("__block_") {
-            Some(id) => BlockId::try_from(id).ok(),
-            None => None,
-        }
     }
 
     pub fn new(
@@ -403,12 +394,4 @@ mod tests {
         assert_eq!(table.len(), 8 + 16); // "__block_" + 16 hex chars
     }
 
-    #[test]
-    fn test_parse_id() {
-        let id = BlockId::generate();
-        let table = DataBlock::table_name(&id);
-        assert_eq!(Some(id), DataBlock::parse_id(&table));
-        assert_eq!(None, DataBlock::parse_id("random_table"));
-        assert_eq!(None, DataBlock::parse_id("__block_x"));
-    }
 }

@@ -3,7 +3,7 @@
 //! Each tool handler method uses the existing REPL command infrastructure
 //! to parse and execute commands, then formats results as JSON.
 
-use bundlebase::bundle::OutputShape;
+use bundlebase_command::OutputShape;
 use bundlebase::BundleFacade;
 use serde_json::json;
 use std::sync::Arc;
@@ -121,7 +121,13 @@ mod tests {
     use super::*;
     use bundlebase::BundleBuilder;
 
+    fn init() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| { bundlebase_catalog::init(); });
+    }
+
     async fn create_test_bundle() -> Arc<dyn BundleFacade> {
+        init();
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("System time before UNIX epoch")

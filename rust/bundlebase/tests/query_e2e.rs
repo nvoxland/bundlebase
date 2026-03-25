@@ -1,14 +1,23 @@
+use bundlebase_command::BundleFacadeCommandExt;
 use bundlebase;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase_common::BundlebaseError;
 use datafusion::scalar::ScalarValue;
 use futures::TryStreamExt;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 #[tokio::test]
 async fn test_query_basic_filter() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
@@ -32,6 +41,7 @@ async fn test_query_basic_filter() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_query_star() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
@@ -46,6 +56,7 @@ async fn test_query_star() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_query_lowercase_select() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
@@ -63,6 +74,7 @@ async fn test_query_lowercase_select() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_query_multiple_parameters() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
@@ -90,6 +102,7 @@ async fn test_query_multiple_parameters() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_query_no_parameters() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
@@ -105,6 +118,7 @@ async fn test_query_no_parameters() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_query_with_aggregation() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
@@ -127,6 +141,7 @@ async fn test_query_with_aggregation() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_explain_basic() -> Result<(), BundlebaseError> {
+    init();
     use datafusion::logical_expr::ExplainFormat;
     use futures::StreamExt;
 
@@ -148,6 +163,7 @@ async fn test_explain_basic() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_explain_with_filter() -> Result<(), BundlebaseError> {
+    init();
     use datafusion::logical_expr::ExplainFormat;
     use futures::StreamExt;
 
@@ -172,6 +188,7 @@ async fn test_explain_with_filter() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_query_table_alias_qualified_wildcard() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
     bundle.attach(test_datafile("userdata.parquet"), None).await?;
 
@@ -186,6 +203,7 @@ async fn test_query_table_alias_qualified_wildcard() -> Result<(), BundlebaseErr
 
 #[tokio::test]
 async fn test_query_empty_bundle() -> Result<(), BundlebaseError> {
+    init();
     let bundle = bundlebase::BundleBuilder::create(random_memory_url().as_str(), None).await?;
 
     let stream = bundle.query("SELECT * FROM bundle", vec![], None).await?;

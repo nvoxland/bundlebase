@@ -5,6 +5,7 @@
 //! affect other sessions. Authentication is required for all requests.
 
 use super::metadata;
+use bundlebase_command::BundleFacadeCommandExt;
 use arrow_flight::FlightData;
 use super::prepared_statements::PreparedStatement;
 use crate::auth::BundlebaseAuthenticator;
@@ -514,7 +515,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
             .map_err(|e| Status::internal(format!("Failed to execute: {}", e)))?;
 
         // Refresh schema cache after bundlebase commands that might modify schema
-        if bundlebase::bundle::is_command_statement(&sql) {
+        if bundlebase_command::parser::is_command_statement(&sql) {
             self.refresh_schema_cache(&token, &bundle).await;
         }
 
@@ -632,7 +633,7 @@ impl FlightSqlService for BundlebaseFlightSqlService {
             .map_err(|e| Status::internal(format!("Failed to execute: {}", e)))?;
 
         // Refresh schema cache after bundlebase commands that might modify schema
-        if bundlebase::bundle::is_command_statement(&sql) {
+        if bundlebase_command::parser::is_command_statement(&sql) {
             self.refresh_schema_cache(&token, &bundle).await;
         }
 

@@ -5,6 +5,7 @@
 //! - Queries succeed when source files remain unchanged
 
 use bundlebase::bundle::BundleFacade;
+use bundlebase_command::BundleBuilderExt;
 use bundlebase::test_utils::{random_memory_dir, random_memory_url};
 use bundlebase::Bundle;
 use bundlebase_common::BundlebaseError;
@@ -13,9 +14,16 @@ use bytes::Bytes;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 /// Test that querying a bundle fails when the source CSV file has been modified.
 #[tokio::test]
 async fn test_query_fails_when_source_file_changed_csv() -> Result<(), BundlebaseError> {
+    init();
     // 1. Create a directory for our test data
     let data_dir = random_memory_dir();
     let csv_file = data_dir.writable_file("test_data.csv")?;
@@ -70,6 +78,7 @@ async fn test_query_fails_when_source_file_changed_csv() -> Result<(), Bundlebas
 /// Test that querying a bundle succeeds when the source file remains unchanged.
 #[tokio::test]
 async fn test_query_succeeds_when_source_unchanged() -> Result<(), BundlebaseError> {
+    init();
     // 1. Create a directory for our test data
     let data_dir = random_memory_dir();
     let csv_file = data_dir.writable_file("test_data.csv")?;
@@ -103,6 +112,7 @@ async fn test_query_succeeds_when_source_unchanged() -> Result<(), BundlebaseErr
 /// Test that version validation works with Parquet files too.
 #[tokio::test]
 async fn test_query_fails_when_source_parquet_changed() -> Result<(), BundlebaseError> {
+    init();
     use arrow::array::{Int32Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
@@ -195,6 +205,7 @@ async fn test_query_fails_when_source_parquet_changed() -> Result<(), Bundlebase
 /// Test that multiple queries work correctly when file is unchanged.
 #[tokio::test]
 async fn test_multiple_queries_with_unchanged_source() -> Result<(), BundlebaseError> {
+    init();
     // 1. Create a directory for our test data
     let data_dir = random_memory_dir();
     let csv_file = data_dir.writable_file("test_data.csv")?;

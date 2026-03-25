@@ -21,8 +21,10 @@ connector-web-scrape = ["bundlebase-connector/connector-web-scrape"]
 [dependencies]
 bundlebase-common = { workspace = true }
 bundlebase-connector = { workspace = true }
+bundlebase-data = { workspace = true }
 bundlebase-index = { workspace = true }
 bundlebase-io = { workspace = true }
+bundlebase-udf = { workspace = true }
 datafusion = { workspace = true }
 arrow = { workspace = true }
 arrow-schema = { workspace = true }
@@ -61,6 +63,8 @@ dashmap = "6"
 libc = "0.2"
 
 [dev-dependencies]
+bundlebase-catalog = { workspace = true }
+bundlebase-command = { workspace = true }
 rstest = { workspace = true }
 env_logger = "0.11"
 serial_test = "3.3"

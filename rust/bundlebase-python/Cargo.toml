@@ -19,6 +19,8 @@ extension-module = ["pyo3/extension-module"]
 [dependencies]
 # Depend on core Rust library
 bundlebase = { path = "../bundlebase" }
+bundlebase-catalog = { workspace = true }
+bundlebase-command = { workspace = true }
 bundlebase-common = { path = "../bundlebase-common" }
 bundlebase-index = { path = "../bundlebase-index" }
 

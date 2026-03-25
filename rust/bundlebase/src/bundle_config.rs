@@ -14,8 +14,8 @@ use arrow::array::{BooleanArray, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use std::sync::Arc;
 
-use crate::bundle::command::response::{single_batch_stream, CommandResponse, OutputShape};
-use crate::impl_dyn_command_response;
+use bundlebase_common::command_response::{single_batch_stream, CommandResponse, OutputShape};
+use bundlebase_common::impl_dyn_command_response;
 use crate::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;
 use parking_lot::RwLock;
@@ -587,8 +587,27 @@ impl ConfigProvider for BundleConfig {
     }
 }
 
+/// Newtype wrapper around `Vec<ConfigValueDetails>` for `CommandResponse` implementation.
+///
+/// This wrapper exists to satisfy Rust's orphan rules — `CommandResponse` is defined
+/// in `bundlebase_common`, and `Vec<T>` is foreign, so the impl must be on a local type.
+pub struct ConfigEntries(pub Vec<ConfigValueDetails>);
+
+impl std::ops::Deref for ConfigEntries {
+    type Target = Vec<ConfigValueDetails>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Vec<ConfigValueDetails>> for ConfigEntries {
+    fn from(entries: Vec<ConfigValueDetails>) -> Self {
+        ConfigEntries(entries)
+    }
+}
+
 /// CommandResponse implementation for displaying config entries as a table.
-impl CommandResponse for Vec<ConfigValueDetails> {
+impl CommandResponse for ConfigEntries {
     fn schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
             Field::new("scope", DataType::Utf8, false),
@@ -605,10 +624,10 @@ impl CommandResponse for Vec<ConfigValueDetails> {
     }
 
     fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        let scopes: Vec<String> = self.iter().map(|e| e.scope.as_str().to_string()).collect();
+        let scopes: Vec<String> = self.0.iter().map(|e| e.scope.as_str().to_string()).collect();
         let scope_refs: Vec<&str> = scopes.iter().map(|s| s.as_str()).collect();
-        let keys: Vec<&str> = self.iter().map(|e| e.key.as_str()).collect();
-        let values: Vec<String> = self
+        let keys: Vec<&str> = self.0.iter().map(|e| e.key.as_str()).collect();
+        let values: Vec<String> = self.0
             .iter()
             .map(|e| {
                 if e.secure {
@@ -619,9 +638,9 @@ impl CommandResponse for Vec<ConfigValueDetails> {
             })
             .collect();
         let value_refs: Vec<&str> = values.iter().map(|s| s.as_str()).collect();
-        let sources: Vec<&str> = self.iter().map(|e| e.source.as_str()).collect();
-        let actives: Vec<bool> = self.iter().map(|e| e.active).collect();
-        let secures: Vec<bool> = self.iter().map(|e| e.secure).collect();
+        let sources: Vec<&str> = self.0.iter().map(|e| e.source.as_str()).collect();
+        let actives: Vec<bool> = self.0.iter().map(|e| e.active).collect();
+        let secures: Vec<bool> = self.0.iter().map(|e| e.secure).collect();
 
         let batch = RecordBatch::try_new(
             Self::schema(),
@@ -638,13 +657,13 @@ impl CommandResponse for Vec<ConfigValueDetails> {
         single_batch_stream(Self::schema(), batch)
     }
 
-    impl_dyn_command_response!(Vec<ConfigValueDetails>);
+    impl_dyn_command_response!(ConfigEntries);
 }
 
 /// CommandResponse implementation for displaying a single config entry as a dictionary.
 impl CommandResponse for ConfigValueDetails {
     fn schema() -> SchemaRef {
-        Vec::<ConfigValueDetails>::schema()
+        ConfigEntries::schema()
     }
 
     fn output_shape() -> OutputShape {
@@ -652,7 +671,7 @@ impl CommandResponse for ConfigValueDetails {
     }
 
     fn into_stream(self: Box<Self>) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        Box::new(vec![*self]).into_stream()
+        Box::new(ConfigEntries(vec![*self])).into_stream()
     }
 
     impl_dyn_command_response!(ConfigValueDetails);

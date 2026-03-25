@@ -16,7 +16,8 @@ pub mod exit;
 pub mod help;
 mod sql;
 
-use bundlebase::bundle::{parse_command, split_statements, CommandResponse, OutputShape};
+use bundlebase_command::{CommandResponse, OutputShape};
+use bundlebase_command::parser::{parse_command, split_statements};
 use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
 use datafusion::execution::SendableRecordBatchStream;

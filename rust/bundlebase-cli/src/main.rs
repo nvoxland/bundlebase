@@ -98,6 +98,10 @@ fn parse_log_level(level_str: &str) -> Result<LogConfig, String> {
 async fn main() -> Result<(), BundlebaseError> {
     let cli = Cli::parse();
 
+    // Install catalog schema providers so Bundle/BundleBuilder creation
+    // automatically registers blocks, packs, default, and bundle_info schemas.
+    bundlebase_catalog::init();
+
     init_logging(&cli);
 
     match cli.subcommand {

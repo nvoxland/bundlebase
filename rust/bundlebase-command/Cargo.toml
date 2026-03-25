@@ -1,0 +1,53 @@
+[package]
+name = "bundlebase-command"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Command system for Bundlebase — parser, command structs, and execution"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+bundlebase = { path = "../bundlebase" }
+bundlebase-catalog = { workspace = true }
+bundlebase-common = { workspace = true }
+bundlebase-io = { workspace = true }
+bundlebase-udf = { workspace = true }
+bundlebase-data = { workspace = true }
+bundlebase-index = { workspace = true }
+bundlebase-connector = { workspace = true }
+
+# Arrow & DataFusion
+arrow = { workspace = true }
+arrow-schema = { workspace = true }
+datafusion = { workspace = true }
+
+# Parsing
+pest = { workspace = true }
+pest_derive = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Async
+async-trait = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Other
+url = { version = "2.5", features = ["serde"] }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+log = "0.4"
+uuid = { workspace = true }
+bytes = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true }
+tempfile = { workspace = true }
+serde_yaml_ng = { workspace = true }

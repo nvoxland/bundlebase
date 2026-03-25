@@ -147,7 +147,7 @@ impl Operation for ReplaceBlockOp {
             .reader(
                 &self.new_location,
                 &self.id,
-                bundle as &dyn BundleFacade,
+                bundle as &dyn bundlebase_data::DataContext,
                 Some(old_block.schema()),
                 None, // Layout will be rebuilt if needed
                 Some(self.new_version.clone()), // Validate version during query execution

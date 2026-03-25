@@ -18,6 +18,8 @@ path = "src/lib.rs"
 
 [dependencies]
 bundlebase = { path = "../bundlebase" }
+bundlebase-catalog = { workspace = true }
+bundlebase-command = { workspace = true }
 bundlebase-common = { path = "../bundlebase-common" }
 arrow = { workspace = true }
 arrow-schema = { workspace = true }

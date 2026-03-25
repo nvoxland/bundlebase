@@ -7,11 +7,19 @@ use bundlebase::{test_utils, Bundle};
 use bundlebase_common::{BundlebaseError, ConfigProvider};
 use bundlebase_io::{readable_file_from_path, readable_file_from_url};
 use url::Url;
+use bundlebase_command::BundleBuilderExt;
 
 mod common;
 
+fn init() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| { bundlebase_catalog::init(); });
+}
+
+
 #[tokio::test]
 async fn test_basic_e2e() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
@@ -157,6 +165,7 @@ changes:
 
 #[tokio::test]
 async fn test_empty_bundle() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_url();
     let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
@@ -179,6 +188,7 @@ async fn test_empty_bundle() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_save_multiple_operations() -> Result<(), BundlebaseError> {
+    init();
     let temp_dir = random_memory_dir();
 
     let bundle = bundlebase::BundleBuilder::create(temp_dir.url().as_str(), None).await?;
@@ -310,6 +320,7 @@ changes:
 
 #[tokio::test]
 async fn test_name_and_description() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_url();
     let bundle = bundlebase::BundleBuilder::create(data_dir.as_str(), None).await?;
 
@@ -339,6 +350,7 @@ async fn test_name_and_description() -> Result<(), BundlebaseError> {
 
 #[tokio::test]
 async fn test_attach_csv() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
@@ -459,6 +471,7 @@ changes:
 
 #[tokio::test]
 async fn test_attach_json() -> Result<(), BundlebaseError> {
+    init();
     let data_dir = random_memory_dir();
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 

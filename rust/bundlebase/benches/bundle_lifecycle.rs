@@ -13,6 +13,7 @@ use bench_helpers::{create_runtime, fresh_dir};
 use bundlebase::BundleBuilder;
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_10K, SCALE_1K};
+use bundlebase_command::BundleBuilderExt;
 
 fn bench_create_bundle(c: &mut Criterion) {
     let rt = create_runtime();

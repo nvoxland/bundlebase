@@ -1,6 +1,8 @@
 #![deny(clippy::unwrap_used)]
 
 pub mod arrow_types;
+pub mod command_response;
+pub use command_response::{CommandResponse, OutputShape, single_batch_stream};
 pub mod config;
 pub mod connector;
 pub mod namespaced_name;
