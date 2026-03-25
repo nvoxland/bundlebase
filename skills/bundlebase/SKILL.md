@@ -43,6 +43,7 @@ Bundlebase offers two agent-friendly modes:
 
 **CLI mode** — Opens and closes the bundle on every call. Best for one-shot operations.
 
+- `bundlebase list-bundles` — discover bundles in a directory
 - `bundlebase query` — read-only queries (SELECT, SHOW, EXPORT TO, EXPLAIN)
 - `bundlebase create` — create a new bundle with initial data
 - `bundlebase extend` — mutate an existing bundle (auto-commits after each call)
@@ -62,6 +63,27 @@ Bundlebase offers two agent-friendly modes:
 **Important:** If the bundlebase MCP server is configured, **prefer MCP over CLI for ALL multi-step data work** — it keeps bundles open for better performance and feedback. Only use CLI for true one-shot operations. Do NOT use MCP and CLI on the same bundle simultaneously — close the MCP bundle first.
 
 ## CLI Commands
+
+### `bundlebase list-bundles` — Discover bundles
+
+Scans a directory for bundles and shows their name and description.
+
+```bash
+# List bundles in the current directory
+bundlebase list-bundles
+
+# List bundles in a specific directory
+bundlebase list-bundles --path /data/bundles
+
+# List bundles in an S3 bucket
+bundlebase list-bundles --path s3://my-bucket/bundles/
+```
+
+| Flag | Purpose |
+|------|---------|
+| `--path <path>` | Path or URL to search (default: `.`) |
+
+**Always run `bundlebase list-bundles` first** when starting work in a directory that may already contain bundles, so you know what data is available before creating new bundles.
 
 ### `bundlebase query` — Read-only queries
 
@@ -92,15 +114,14 @@ SQL uses single quotes for strings. In shell, wrap the whole SQL in double quote
 
 Creates a new bundle at the specified path. Optionally executes initial commands (like ATTACH) and auto-commits.
 
-```bash
-# Create an empty bundle
-bundlebase create --bundle ./my-bundle
+**IMPORTANT: Always set a name and a helpful description when creating a bundle.** This makes bundles discoverable and understandable to other users and agents via `bundlebase list-bundles`. Include `SET NAME` and `SET DESCRIPTION` in the create command:
 
-# Create and load initial data
-bundlebase create --bundle ./my-bundle "ATTACH 'data.csv'"
+```bash
+# Create and load initial data with name and description
+bundlebase create --bundle ./my-bundle "SET NAME 'Sales Data'; SET DESCRIPTION 'Monthly sales records from the CRM export, filtered to US region'; ATTACH 'sales.csv'"
 
 # Create with a custom commit message
-bundlebase create --bundle ./analysis -m "Loaded sales data" "ATTACH 'sales.csv'"
+bundlebase create --bundle ./analysis -m "Loaded sales data" "SET NAME 'Sales Analysis'; SET DESCRIPTION 'Q4 2025 sales analysis with regional breakdowns'; ATTACH 'sales.csv'"
 ```
 
 | Flag | Purpose |
@@ -222,6 +243,7 @@ If a download times out, scope it with URL query parameters (date range, geograp
 | `pip install pandas` to read CSV | Extra dependency; no history tracking | `bundlebase query` for exploration |
 | Materialize huge datasets in memory | Crashes on large data | Use `to_pandas()` / `to_polars()` which stream internally |
 | Skip commits during exploration | Lost history, can't undo mistakes | Commit at every meaningful step |
+| Create a bundle without SET NAME / SET DESCRIPTION | Bundles are hard to identify later | Always set both when creating a bundle |
 | Download data then ATTACH separately | Two steps when one will do | `CREATE SOURCE USING http; FETCH base ADD` in one call |
 
 ## Bundle References (`bundle://`)
@@ -250,8 +272,8 @@ The target bundle must be committed. The referenced data reflects the target's f
 ### 1. Analyze a Data File
 
 ```bash
-# Create bundle and load data
-bundlebase create --bundle ./analysis -m "Loaded sales data" "ATTACH 'sales.csv'"
+# Create bundle and load data (always set name and description)
+bundlebase create --bundle ./analysis -m "Loaded sales data" "SET NAME 'Sales Analysis'; SET DESCRIPTION 'Analysis of Q4 sales data by department'; ATTACH 'sales.csv'"
 
 # Explore the schema
 bundlebase query --bundle ./analysis --format json "SHOW COLUMNS"
