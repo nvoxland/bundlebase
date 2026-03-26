@@ -26,8 +26,8 @@ use url::Url;
 pub struct ParquetFormatConfig;
 
 impl FileFormatConfig for ParquetFormatConfig {
-    fn extension(&self) -> &'static str {
-        ".parquet"
+    fn extensions(&self) -> &'static [&'static str] {
+        &[".parquet"]
     }
 
     fn file_format(&self) -> Arc<dyn FileFormat> {

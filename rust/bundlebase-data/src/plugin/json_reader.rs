@@ -23,8 +23,8 @@ use url::Url;
 pub struct JsonFormatConfig;
 
 impl FileFormatConfig for JsonFormatConfig {
-    fn extension(&self) -> &'static str {
-        ".json"
+    fn extensions(&self) -> &'static [&'static str] {
+        &[".json", ".jsonl"]
     }
 
     fn file_format(&self) -> Arc<dyn FileFormat> {
@@ -195,7 +195,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_wrong_file_extension() -> Result<(), BundlebaseError> {
-        // JSON plugin should only adapt .json files
+        // JSON plugin should only adapt .json/.jsonl files
         let plugin = JsonPlugin::default();
 
         let binding = test_context();
@@ -204,6 +204,40 @@ mod tests {
             .await?;
 
         assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_handles_jsonl_extension() -> Result<(), BundlebaseError> {
+        let plugin = JsonPlugin::default();
+
+        let binding = test_context();
+        let reader = plugin
+            .reader(
+                test_datafile("objects.jsonl"),
+                &BlockId::generate(),
+                &binding,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected reader for .jsonl file"))?;
+
+        // Validate schema works for .jsonl files
+        let schema = reader
+            .read_schema()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("Expected schema"))?;
+
+        let actual_columns: Vec<_> = schema.fields().iter().map(|f| f.name().clone()).collect();
+        assert_eq!(
+            vec!["completed", "name", "score", "session"],
+            actual_columns,
+            "JSONL schema should match expected columns"
+        );
 
         Ok(())
     }

@@ -63,8 +63,8 @@ impl CsvFormatConfig {
 }
 
 impl FileFormatConfig for CsvFormatConfig {
-    fn extension(&self) -> &'static str {
-        ".csv"
+    fn extensions(&self) -> &'static [&'static str] {
+        &[".csv"]
     }
 
     fn file_format(&self) -> Arc<dyn FileFormat> {

@@ -20,8 +20,8 @@ use url::Url;
 
 /// Configuration for a file-based format (CSV, JSON, Parquet, etc.)
 pub trait FileFormatConfig: Send + Sync + Default + Clone {
-    /// File extension this format handles (e.g., ".csv")
-    fn extension(&self) -> &'static str;
+    /// File extensions this format handles (e.g., &[".csv"])
+    fn extensions(&self) -> &'static [&'static str];
 
     /// Get the FileFormat object for schema inference
     fn file_format(&self) -> Arc<dyn FileFormat>;
@@ -122,7 +122,7 @@ impl<C: FileFormatConfig> FilePlugin<C> {
 
     /// Check if this plugin handles the given URL (by extension)
     pub fn handles(&self, source: &str) -> bool {
-        source.ends_with(self.config.extension())
+        self.config.extensions().iter().any(|ext| source.ends_with(ext))
     }
 
     /// Create a reader for the given source.
