@@ -160,7 +160,7 @@ async def test_show_columns_with_join():
 
     result = await c.query("SELECT * FROM bundle_info.columns")
     df = await result.to_pandas()
-    column_names = df["Column"].tolist()
+    column_names = df["column"].tolist()
 
     # Base "Country" stays as-is; join pack's duplicate is disambiguated
     assert "Country" in column_names
@@ -168,11 +168,11 @@ async def test_show_columns_with_join():
     assert column_names.count("Country") == 1, "Country should appear exactly once"
 
     # Source column shows which pack each column came from
-    assert "Source" in df.columns, "Should have a Source column"
-    country_row = df[df["Column"] == "Country"].iloc[0]
-    assert country_row["Source"] == "base", "Country should come from base pack"
-    regions_row = df[df["Column"] == "regions_Country"].iloc[0]
-    assert regions_row["Source"] == "regions", "regions_Country should come from regions pack"
+    assert "source" in df.columns, "Should have a source column"
+    country_row = df[df["column"] == "Country"].iloc[0]
+    assert country_row["source"] == "base", "Country should come from base pack"
+    regions_row = df[df["column"] == "regions_Country"].iloc[0]
+    assert regions_row["source"] == "regions", "regions_Country should come from regions pack"
 
 
 @pytest.mark.asyncio

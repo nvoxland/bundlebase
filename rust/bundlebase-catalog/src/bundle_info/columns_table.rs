@@ -38,10 +38,10 @@ impl BundleColumnsTable {
 
     fn output_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
-            Field::new("Column", DataType::Utf8, false),
-            Field::new("Type", DataType::Utf8, false),
-            Field::new("Nullable", DataType::Utf8, false),
-            Field::new("Source", DataType::Utf8, false),
+            Field::new("column", DataType::Utf8, false),
+            Field::new("type", DataType::Utf8, false),
+            Field::new("nullable", DataType::Utf8, false),
+            Field::new("source", DataType::Utf8, false),
         ]))
     }
 }
