@@ -44,15 +44,13 @@ pub(crate) fn find_temp_functions_in_sql(
 /// or `"bundle"` when the expression uses the `bundle.` qualifier.
 pub(crate) async fn parse_join_expr(
     ctx: &SessionContext,
-    base_table: &str,
+    _base_table: &str,
     pack: &Pack,
     accumulated_df: &DataFrame,
 ) -> Result<(Vec<Expr>, &'static str), DataFusionError> {
     let pack_join_type = pack.join_type().expect("Pack must have join_type for join");
     let pack_name = pack.name();
     let pack_expression = pack.expression().expect("Pack must have expression for join");
-
-    let uses_bundle_qualifier = pack_expression.contains("bundle.") || pack_expression.contains("\"bundle\".");
 
     let join_type = match pack_join_type {
         JoinTypeOption::Inner => "INNER JOIN",
@@ -61,42 +59,31 @@ pub(crate) async fn parse_join_expr(
         JoinTypeOption::Full => "FULL OUTER JOIN",
     };
 
-    // When the expression qualifies columns with "bundle.", register the
-    // accumulated dataframe in a temporary schema so DataFusion resolves
-    // bundle.col against the full built-up dataset (base + all prior joins).
-    // Otherwise, parse against the raw base pack table.
+    // Always register the accumulated dataframe so that column resolution
+    // reflects all prior operations (renames, drops, etc.) and prior joins.
     const TEMP_SCHEMA: &str = "__join_tmp";
     const BUNDLE_ALIAS_TABLE: &str = "bundle_data";
-    let registered_alias = if uses_bundle_qualifier {
-        use datafusion::catalog::{MemorySchemaProvider, SchemaProvider};
-        let catalog = ctx.catalog(crate::catalog::CATALOG_NAME)
-            .or_else(|| ctx.catalog("datafusion"));
+    const LEFT_ALIAS: &str = "bundle";
 
-        if let Some(catalog) = catalog {
-            let tmp_schema = std::sync::Arc::new(MemorySchemaProvider::new());
-            tmp_schema.register_table(
-                BUNDLE_ALIAS_TABLE.to_string(),
-                accumulated_df.clone().into_view(),
-            )?;
-            catalog.register_schema(TEMP_SCHEMA, tmp_schema)?;
-            true
-        } else {
-            false
-        }
-    } else {
-        false
-    };
+    use datafusion::catalog::{MemorySchemaProvider, SchemaProvider};
+    let catalog = ctx.catalog(crate::catalog::CATALOG_NAME)
+        .or_else(|| ctx.catalog("datafusion"));
 
-    let (left_table, left_alias) = if registered_alias {
-        (format!("{}.{}", TEMP_SCHEMA, BUNDLE_ALIAS_TABLE), "bundle")
-    } else {
-        (base_table.to_string(), BASE_PACK_NAME)
-    };
+    if let Some(ref catalog) = catalog {
+        let tmp_schema = std::sync::Arc::new(MemorySchemaProvider::new());
+        tmp_schema.register_table(
+            BUNDLE_ALIAS_TABLE.to_string(),
+            accumulated_df.clone().into_view(),
+        )?;
+        catalog.register_schema(TEMP_SCHEMA, tmp_schema)?;
+    }
+
+    let left_table = format!("{}.{}", TEMP_SCHEMA, BUNDLE_ALIAS_TABLE);
 
     let sql = format!(
         "SELECT * FROM {} AS {} {} packs.{} AS {} ON {}",
         left_table,
-        left_alias,
+        LEFT_ALIAS,
         join_type,
         Pack::table_name(pack.id()),
         pack_name,
@@ -106,13 +93,8 @@ pub(crate) async fn parse_join_expr(
     let result = ctx.sql(&sql).await;
 
     // Clean up the temporary schema
-    if registered_alias {
-        let catalog = ctx.catalog(crate::catalog::CATALOG_NAME)
-            .or_else(|| ctx.catalog("datafusion"));
-        if let Some(catalog) = catalog {
-            use datafusion::catalog::MemorySchemaProvider;
-            let _ = catalog.register_schema(TEMP_SCHEMA, std::sync::Arc::new(MemorySchemaProvider::new()));
-        }
+    if let Some(catalog) = catalog {
+        let _ = catalog.register_schema(TEMP_SCHEMA, std::sync::Arc::new(MemorySchemaProvider::new()));
     }
 
     let df = result?;
@@ -120,7 +102,7 @@ pub(crate) async fn parse_join_expr(
 
     let mut preds = Vec::new();
     collect_join_exprs(plan, &mut preds);
-    Ok((preds, left_alias))
+    Ok((preds, LEFT_ALIAS))
 }
 
 fn collect_join_exprs(plan: &LogicalPlan, out: &mut Vec<Expr>) {

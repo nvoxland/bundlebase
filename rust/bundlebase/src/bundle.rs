@@ -594,13 +594,9 @@ impl Bundle {
         base_df: DataFrame,
         pack: &Pack,
     ) -> Result<DataFrame, BundlebaseError> {
-        let base_table = format!(
-            "packs.{}",
-            Pack::table_name(&ObjectId::BASE_PACK)
-        );
         let join_table = format!("packs.{}", Pack::table_name(pack.id()));
 
-        let (expr, left_alias) = sql::parse_join_expr(&self.ctx, &base_table, pack, &base_df).await?;
+        let (expr, left_alias) = sql::parse_join_expr(&self.ctx, "", pack, &base_df).await?;
 
         // Capture base column names before aliasing so we can detect duplicates
         let base_col_names: std::collections::HashSet<String> = base_df
@@ -1068,25 +1064,15 @@ impl BundleFacade for Bundle {
             let table_name = format!("packs.{}", Pack::table_name(&ObjectId::BASE_PACK));
             let mut df = self.ctx.table(&table_name).await?;
 
-            // Collect join packs first (release lock before async calls)
-            let join_packs: Vec<Arc<Pack>> = self
-                .packs
-                .read()
-                .values()
-                .filter(|p| p.is_join())
-                .cloned()
-                .collect();
-
-            // Join all packs that have join metadata
-            for pack in join_packs {
-                debug!("Executing join with pack {}", pack.id());
-                df = self.dataframe_join(df, &pack).await?;
-            }
+            // Snapshot packs so we can look up join packs by ID
+            let packs_snapshot = self.packs.read().clone();
 
             // Clone operations to avoid holding lock across async calls
             let ops = self.operations.read().clone();
 
-            // Apply operations to the base DataFrame
+            // Process operations in order. When we encounter a CreateJoin,
+            // execute the join at that point so that prior operations (renames,
+            // drops, etc.) are already reflected in the DataFrame schema.
             debug!(
                     "dataframe: Applying {} operations to dataframe...",
                     ops.len()
@@ -1095,7 +1081,15 @@ impl BundleFacade for Bundle {
             let mut col_names = column_metadata::initial_column_names(&ops);
             for op in ops.iter() {
                 debug!("Applying to dataframe: {}", &op.describe());
-                df = op.apply_dataframe(df, self.ctx.clone(), &mut col_names).await?;
+                if let AnyOperation::CreateJoin(create_join) = op {
+                    if let Some(pack) = packs_snapshot.get(&create_join.id) {
+                        if pack.is_join() && !pack.is_empty() {
+                            df = self.dataframe_join(df, pack).await?;
+                        }
+                    }
+                } else {
+                    df = op.apply_dataframe(df, self.ctx.clone(), &mut col_names).await?;
+                }
             }
             debug!(
                     "dataframe: Applying {} operations to dataframe...DONE",
