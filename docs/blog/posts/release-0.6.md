@@ -55,7 +55,7 @@ Bundles can now reference other bundles. Attach pulls in another bundle's data, 
 bundle.attach("bundle:///path/to/other/bundle")
 
 # Join bundles on a key
-bundle.join("regions", 'bundle."Country" = regions."Country"',
+bundle.join("regions", 'base."Country" = regions."Country"',
        "bundle:///path/to/regions/bundle")
 ```
 

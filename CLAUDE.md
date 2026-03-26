@@ -127,6 +127,7 @@ Bundlebase uses streaming execution throughout to handle datasets larger than RA
 - Generate code without reading relevant context files first
 - Create new architectural patterns without documentation
 - Override established conventions without clear rationale
+- Update old blog posts when referenced functionality changes — they are point-in-time artifacts
 
 ### When Making Changes
 - Update relevant `.context/` files when making architectural decisions
