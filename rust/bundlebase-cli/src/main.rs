@@ -50,6 +50,9 @@ enum Subcommand {
     /// Start MCP (Model Context Protocol) server over stdio
     Mcp(cmd::mcp_cmd::McpArgs),
 
+    /// Generate a PDF report from markdown with embedded data queries and charts
+    GenerateReport(cmd::report_cmd::ReportArgs),
+
     /// Start Arrow Flight SQL server
     Server(cmd::server_cmd::ServerArgs),
 
@@ -113,6 +116,7 @@ async fn main() -> Result<(), BundlebaseError> {
         Subcommand::Query(args) => cmd::query_cmd::run(args).await?,
         Subcommand::Extend(args) | Subcommand::Execute(args) => cmd::extend_cmd::run(args).await?,
         Subcommand::ListBundles(args) => cmd::list_bundles_cmd::run(args).await?,
+        Subcommand::GenerateReport(args) => cmd::report_cmd::run(args).await?,
         Subcommand::Mcp(args) => cmd::mcp_cmd::run(args).await?,
         Subcommand::Server(args) => cmd::server_cmd::run(args).await?,
         Subcommand::SetupAgent(args) => cmd::setup_agent_cmd::run(args)?,

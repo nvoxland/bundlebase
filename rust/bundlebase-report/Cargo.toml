@@ -1,0 +1,34 @@
+[package]
+name = "bundlebase-report"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bundlebase-common = { workspace = true }
+bundlebase = { path = "../bundlebase" }
+
+# Typst PDF generation
+typst-as-lib = { version = "0.15", features = ["packages", "ureq"] }
+typst-pdf = "0.14"
+typst = "0.14"
+
+tracing = { workspace = true }
+
+# Data processing
+arrow = { workspace = true }
+datafusion = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+
+# Async
+async-trait = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+rstest = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

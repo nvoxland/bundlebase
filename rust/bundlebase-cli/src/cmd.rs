@@ -6,6 +6,7 @@ pub mod list_bundles_cmd;
 pub mod mcp_cmd;
 pub mod query_cmd;
 pub mod repl_cmd;
+pub mod report_cmd;
 pub mod server_cmd;
 pub mod setup_agent_cmd;
 

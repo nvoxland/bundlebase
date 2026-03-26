@@ -80,6 +80,23 @@ pub struct BundleKeyParams {
     pub bundle: String,
 }
 
+/// Parameter struct for the `generate_report` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GenerateReportParams {
+    /// Markdown content with bundlebase code blocks.
+    /// Charts and tables reference bundles by their identifier and include SQL queries.
+    #[schemars(description = "Markdown content with embedded ```bundlebase YAML code blocks. Use type: table for tables, or type: pie/bar/line/horizontal_bar/box_whisker/pyramid/error_bar/violin for charts.")]
+    pub input: String,
+
+    /// Output file path for the PDF (must end in .pdf)
+    #[schemars(description = "Output file path for the PDF report (must end in .pdf)")]
+    pub output: String,
+
+    /// Include 'Created by Bundlebase' footer (default: true)
+    #[schemars(description = "Include 'Created by Bundlebase' footer (default: true)")]
+    pub branding: Option<bool>,
+}
+
 /// MCP server for bundlebase bundles.
 ///
 /// Supports multiple bundles open simultaneously, each identified by a unique bundle name.
@@ -330,6 +347,36 @@ impl BundlebaseMcpServer {
     }
 
     #[tool(
+        name = "generate_report",
+        description = "Generate a PDF report from markdown with embedded data queries and charts. \
+        Use ```bundlebase YAML code blocks to embed live data. \
+        All blocks require: bundle (identifier), query (SQL), type. \
+        Use type: table for tables, or type: pie/bar/line/horizontal_bar/box_whisker/pyramid/error_bar/violin for charts. \
+        Optional title and options fields for styling."
+    )]
+    async fn generate_report(
+        &self,
+        Parameters(params): Parameters<GenerateReportParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let resolver = McpBundleResolver::new(&self.bundles).await;
+
+        match bundlebase_report::generate_report(
+            &params.input,
+            &resolver,
+            &params.output,
+            params.branding.unwrap_or(true),
+        )
+        .await
+        {
+            Ok(msg) => Ok(CallToolResult::success(vec![Content::text(msg)])),
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+                "Report generation failed: {}",
+                e
+            ))])),
+        }
+    }
+
+    #[tool(
         name = "list_bundles",
         description = "List all currently open bundles with their identifier, path, name, and description."
     )]
@@ -374,7 +421,8 @@ impl ServerHandler for BundlebaseMcpServer {
                  Supports multiple bundles open simultaneously, each identified by a unique bundle name. \
                  Start by calling 'create_bundle' or 'open_bundle' with a bundle name, then use \
                  'query', 'schema', 'sample', 'count' with the same bundle name to interact. \
-                 Use 'list_bundles' to see all open bundles, 'close_bundle' to remove one.",
+                 Use 'list_bundles' to see all open bundles, 'close_bundle' to remove one. \
+                 Use 'generate_report' to create PDF reports with embedded charts and tables from bundle data.",
             )
     }
 }
@@ -399,6 +447,42 @@ pub async fn start(
         .map_err(|e| BundlebaseError::from(format!("MCP server error: {}", e)))?;
 
     Ok(())
+}
+
+/// Bundle resolver for MCP context — looks up bundles by key in the open bundles map.
+struct McpBundleResolver {
+    bundles: HashMap<String, Arc<dyn BundleFacade>>,
+}
+
+impl McpBundleResolver {
+    /// Clone the bundle map from the Mutex (cheap Arc increments), releasing the lock immediately.
+    async fn new(bundles: &Arc<Mutex<HashMap<String, Arc<dyn BundleFacade>>>>) -> Self {
+        let guard = bundles.lock().await;
+        Self {
+            bundles: guard.clone(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl bundlebase_report::BundleResolver for McpBundleResolver {
+    async fn resolve(
+        &self,
+        bundle_ref: &str,
+    ) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
+        self.bundles.get(bundle_ref).cloned().ok_or_else(|| {
+            let available: Vec<&str> = self.bundles.keys().map(|k| k.as_str()).collect();
+            BundlebaseError::from(format!(
+                "No bundle is open with identifier '{}'. Open bundles: {}",
+                bundle_ref,
+                if available.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    available.join(", ")
+                }
+            ))
+        })
+    }
 }
 
 #[cfg(test)]

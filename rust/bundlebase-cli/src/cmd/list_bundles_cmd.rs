@@ -61,6 +61,11 @@ async fn find_bundle_urls(path: &str) -> Result<Vec<String>, BundlebaseError> {
 pub async fn run(args: ListBundlesArgs) -> Result<(), BundlebaseError> {
     let bundle_urls = find_bundle_urls(&args.path).await?;
 
+    if bundle_urls.is_empty() {
+        println!("(no bundles)");
+        return Ok(());
+    }
+
     for bundle_url in &bundle_urls {
         // Extract the directory name from the URL for display
         let display_name = bundle_url

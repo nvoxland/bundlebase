@@ -49,6 +49,7 @@ uuid = { workspace = true }
 once_cell = "1.21"
 prost = "0.14"
 base64 = "0.22"
+bundlebase-report = { path = "../bundlebase-report" }
 rmcp = { version = "1.2", features = ["server", "transport-io"] }
 schemars = "1"
 
