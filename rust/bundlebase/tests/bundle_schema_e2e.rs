@@ -1,4 +1,4 @@
-use arrow::array::StringArray;
+use arrow::array::{Array, StringArray};
 use bundlebase::bundle::BundleFacade;
 use bundlebase_index::IndexType;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
@@ -740,4 +740,59 @@ async fn test_bundle_blocks_table_empty() {
         .map(|b| b.num_rows())
         .sum();
     assert_eq!(total_rows, 0, "bundle_info.blocks should be empty when no data attached");
+}
+
+// ==================== bundle_info.columns tests ====================
+
+#[tokio::test]
+async fn test_bundle_columns_table_with_join() {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = BundleBuilder::create(data_dir.url().as_str(), None)
+        .await
+        .unwrap();
+
+    bundle
+        .attach(test_datafile("customers-0-100.csv"), None)
+        .await
+        .unwrap();
+
+    // Join with sales regions on Country (both tables have a "Country" column)
+    bundle
+        .join(
+            "regions",
+            r#"base."Country" = regions."Country""#,
+            Some(test_datafile("sales-regions.csv")),
+            bundlebase::bundle::JoinTypeOption::Inner,
+        )
+        .await
+        .unwrap();
+
+    // SHOW COLUMNS equivalent: query bundle_info.columns
+    let stream = bundle
+        .query("SELECT * FROM bundle_info.columns", vec![], None)
+        .await
+        .unwrap();
+    let batches: Vec<_> = stream.try_collect().await.unwrap();
+
+    assert!(!batches.is_empty(), "Should have at least one batch");
+
+    let batch = &batches[0];
+    let column_col = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
+    let column_names: Vec<&str> = (0..column_col.len()).map(|i| column_col.value(i)).collect();
+
+    // Verify no duplicate column names — the join pack's "Country" should be disambiguated
+    assert!(
+        column_names.contains(&"Country"),
+        "Should contain base Country column"
+    );
+    assert!(
+        column_names.contains(&"regions_Country"),
+        "Should contain disambiguated regions_Country column"
+    );
+    assert_eq!(
+        column_names.iter().filter(|&&n| n == "Country").count(),
+        1,
+        "Country should appear exactly once (no duplicates)"
+    );
 }

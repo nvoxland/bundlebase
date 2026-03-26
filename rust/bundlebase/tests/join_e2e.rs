@@ -64,7 +64,7 @@ async fn test_join_basic() -> Result<(), BundlebaseError> {
             "Email",
             "Subscription Date",
             "Website",
-            "Country",
+            "regions_Country",
             "Sales Region",
             "Region Manager"
         ],

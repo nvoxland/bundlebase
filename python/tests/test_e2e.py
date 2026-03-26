@@ -152,6 +152,23 @@ async def test_join():
 
 
 @pytest.mark.asyncio
+async def test_show_columns_with_join():
+    """SHOW COLUMNS should work when join introduces duplicate column names."""
+    c = await (bundlebase.create(random_bundle())
+               .attach(datafile("customers-0-100.csv"))
+               .join("regions", 'base."Country" = regions."Country"', datafile("sales-regions.csv")))
+
+    result = await c.query("SELECT * FROM bundle_info.columns")
+    df = await result.to_pandas()
+    column_names = df["Column"].tolist()
+
+    # Base "Country" stays as-is; join pack's duplicate is disambiguated
+    assert "Country" in column_names
+    assert "regions_Country" in column_names
+    assert column_names.count("Country") == 1, "Country should appear exactly once"
+
+
+@pytest.mark.asyncio
 async def test_schema():
     c = await bundlebase.create(random_bundle())
     # Attach data first to have a schema

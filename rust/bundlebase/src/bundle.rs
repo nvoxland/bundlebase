@@ -584,7 +584,11 @@ impl Bundle {
         self.ctx.clone()
     }
 
-    /// Joins the pack with join metadata to the base dataframe
+    /// Joins the pack with join metadata to the base dataframe.
+    ///
+    /// After the join, any columns from the join pack whose names collide with
+    /// columns already present in the base DataFrame are renamed to
+    /// `{pack_name}_{column_name}` so the schema never contains ambiguous names.
     async fn dataframe_join(
         &self,
         base_df: DataFrame,
@@ -598,6 +602,14 @@ impl Bundle {
 
         let expr = sql::parse_join_expr(&self.ctx, &base_table, pack).await?;
 
+        // Capture base column names before aliasing so we can detect duplicates
+        let base_col_names: std::collections::HashSet<String> = base_df
+            .schema()
+            .columns()
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+
         let base_df = base_df.alias(sql::BASE_PACK_NAME)?;
 
         let name = pack.name();
@@ -605,11 +617,26 @@ impl Bundle {
         // Safe to unwrap since we only call this for packs with join metadata
         let join_type = pack.join_type().expect("Pack must have join_type for join");
 
-        Ok(base_df.join_on(
-            self.ctx.table(&join_table).await?.alias(name)?,
+        let mut joined_df = base_df.join_on(
+            self.ctx.table(&join_table).await?.alias(&name)?,
             join_type.to_datafusion(),
             expr,
-        )?)
+        )?;
+
+        // Disambiguate: rename join-pack columns that collide with base column names
+        for col in joined_df.schema().columns() {
+            let is_from_join_pack = col.relation.as_ref()
+                .is_some_and(|r| r.table() == name);
+            if is_from_join_pack && base_col_names.contains(&col.name) {
+                let new_name = format!("{}_{}", name, col.name);
+                joined_df = joined_df.with_column_renamed(
+                    col.flat_name(),
+                    &new_name,
+                )?;
+            }
+        }
+
+        Ok(joined_df)
     }
 
     fn resolved_column_names(&self) -> ColumnNames {
