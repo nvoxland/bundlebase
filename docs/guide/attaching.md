@@ -108,9 +108,45 @@ You can attach the query output of another committed bundle using a `bundle://` 
 
 ## Supported Formats
 
-- CSV
-- JSON Line
-- Parquet
+- CSV (`.csv`)
+- JSON Lines (`.json`, `.jsonl`)
+- Parquet (`.parquet`)
+
+## Column Types
+
+**CSV files** are imported with all columns as text (`Utf8`). Because CSV is a text-based format, type inference from sampled rows is unreliable — a column that looks numeric in the first 100 rows might contain non-numeric values later. By defaulting to text, bundlebase avoids silent data corruption.
+
+**JSON files** retain their native types (string, number, boolean) since the JSON format encodes types directly in the data.
+
+**Parquet files** retain their native types since the schema is embedded in the file.
+
+To convert text columns to specific types after attaching CSV data, use `cast_column`:
+
+=== "Async API"
+
+    ```python
+    await bundle.attach("sales.csv")
+    await bundle.cast_column("revenue", "float")
+    await bundle.cast_column("quantity", "integer")
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle.attach("sales.csv")
+    bundle.cast_column("revenue", "float")
+    bundle.cast_column("quantity", "integer")
+    ```
+
+=== "SQL"
+
+    ```sql
+    ATTACH 'sales.csv'
+    CAST COLUMN revenue TO float
+    CAST COLUMN quantity TO integer
+    ```
+
+See [Cast Column](columns.md#cast-column) for more details, including regex cleaning for messy data.
 
 ## Detaching Data
 

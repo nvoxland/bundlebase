@@ -6,7 +6,7 @@ use bundlebase_index::RowIdIndex;
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadWriteDir;
 use bundlebase_common::BundlebaseError;
-use arrow::datatypes::{Schema, SchemaRef};
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use bytes::Buf;
 use datafusion::common::config::CsvOptions;
@@ -218,29 +218,37 @@ fn trim_schema_field_names(schema: SchemaRef) -> SchemaRef {
     ))
 }
 
-/// Infer CSV schema by reading a sample directly from the object store,
-/// bypassing DataFusion's LineDelimiter which can fail on certain CSV patterns.
-async fn infer_schema_from_sample(
+/// Read just the CSV header row and return an all-Utf8 schema.
+///
+/// CSV is a text format, so all columns are naturally text. We skip type
+/// inference entirely because it samples only the first rows and can be
+/// wrong for later data.
+async fn read_csv_header(
     store: &Arc<dyn object_store::ObjectStore>,
     path: &object_store::path::Path,
 ) -> Result<SchemaRef, BundlebaseError> {
     use object_store::GetOptions;
 
-    // Read first 1MB — large enough for reliable type inference from headers +
-    // sample rows, but small enough to avoid downloading entire multi-GB files.
+    // Read first 64KB — more than enough for the header row
     let opts = GetOptions {
-        range: Some((0..1_048_576).into()),
+        range: Some((0..65_536).into()),
         ..Default::default()
     };
     let result = store.get_opts(path, opts).await?;
     let bytes = result.bytes().await?;
 
-    // Use arrow's CSV reader to infer schema from raw bytes
+    // Parse just the header (0 data rows) to get column names
     let format = arrow::csv::reader::Format::default()
         .with_header(true);
+    let (schema, _) = format.infer_schema(bytes.reader(), Some(0))?;
 
-    let (schema, _records_read) = format.infer_schema(bytes.reader(), Some(100))?;
-    Ok(Arc::new(schema))
+    // Build an all-Utf8 schema from the column names
+    let fields: Vec<_> = schema
+        .fields()
+        .iter()
+        .map(|f| Arc::new(Field::new(f.name(), DataType::Utf8, true)))
+        .collect();
+    Ok(Arc::new(Schema::new(fields)))
 }
 
 #[async_trait]
@@ -254,11 +262,17 @@ impl DataReader for CsvReader {
     }
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
-        match self.inner.read_schema().await {
-            Ok(schema) => Ok(schema.map(trim_schema_field_names)),
+        // Read only the header row — all CSV columns are text.
+        // We intentionally skip DataFusion's type inference because it samples
+        // only the first rows, and later rows may contain values that don't
+        // match the inferred types.
+        let store = self.inner.object_store();
+        let path = object_store::path::Path::parse(self.inner.url().path())?;
+        match read_csv_header(&store, &path).await {
+            Ok(schema) => Ok(Some(trim_schema_field_names(schema))),
             Err(e) if is_line_delimiter_error(&e) => {
                 log::info!(
-                    "CSV file {} triggered LineDelimiter error; inferring schema from sample",
+                    "CSV file {} triggered LineDelimiter error; reading header from sample",
                     self.inner.url()
                 );
                 // Enable newlines_in_values for subsequent data reads
@@ -267,10 +281,7 @@ impl DataReader for CsvReader {
                     .newlines_in_values
                     .store(true, Ordering::Release);
 
-                // Infer schema directly from a sample, bypassing the LineDelimiter
-                let store = self.inner.object_store();
-                let path = object_store::path::Path::parse(self.inner.url().path())?;
-                let schema = infer_schema_from_sample(&store, &path).await?;
+                let schema = read_csv_header(&store, &path).await?;
                 Ok(Some(trim_schema_field_names(schema)))
             }
             Err(e) => Err(e),
@@ -535,8 +546,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_schema() -> Result<(), BundlebaseError> {
-        // Test that CSV schema correctly infers data types
+    async fn test_schema_all_utf8() -> Result<(), BundlebaseError> {
+        // CSV columns should always be Utf8 — no type inference
         let plugin = CsvPlugin::default();
         let binding = test_context();
         let reader = plugin
@@ -554,29 +565,15 @@ mod tests {
 
         let schema = reader.read_schema().await?.ok_or_else(|| BundlebaseError::from("Expected schema"))?;
 
-        // Build schema string with column names and types
-        let schema_string = schema
-            .fields()
-            .iter()
-            .map(|f| format!("{}: {}", f.name(), f.data_type()))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        // Expected schema - CSV parser infers types: Index as Int64, Subscription Date as Date32, others as Utf8
-        let expected_schema = "Index: Int64\n\
-                               Customer Id: Utf8\n\
-                               First Name: Utf8\n\
-                               Last Name: Utf8\n\
-                               Company: Utf8\n\
-                               City: Utf8\n\
-                               Country: Utf8\n\
-                               Phone 1: Utf8\n\
-                               Phone 2: Utf8\n\
-                               Email: Utf8\n\
-                               Subscription Date: Date32\n\
-                               Website: Utf8";
-
-        assert_eq!(schema_string, expected_schema);
+        for field in schema.fields() {
+            assert_eq!(
+                field.data_type(),
+                &arrow::datatypes::DataType::Utf8,
+                "Field '{}' should be Utf8 but was {:?}",
+                field.name(),
+                field.data_type()
+            );
+        }
 
         Ok(())
     }

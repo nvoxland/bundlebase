@@ -1196,7 +1196,7 @@ async def test_view_to_polars():
     assert len(df) > 0, "Should have some high index customers"
 
     # Verify all rows have Index > 50
-    assert all(df["Index"] > 50), "All rows should have Index > 50"
+    assert all(df["Index"].cast(polars.Int64) > 50), "All rows should have Index > 50"
 
 
 @pytest.mark.asyncio
@@ -1209,7 +1209,7 @@ async def test_view_to_pandas():
     await c.commit("Initial data")
 
     # Create view for high index values
-    view_builder = await c.create_view("high_index", "select * from bundle where \"Index\" > 80")
+    view_builder = await c.create_view("high_index", "select * from bundle where CAST(\"Index\" AS INT) > 80")
     await c.commit("Add high_index view")
 
     # Open view and convert to Pandas
@@ -1218,7 +1218,7 @@ async def test_view_to_pandas():
 
     assert isinstance(df, pd.DataFrame), "Should return Pandas DataFrame"
     assert len(df) > 0, "Should have some high index customers"
-    assert all(df["Index"] > 80), "All rows should have Index > 80"
+    assert all(df["Index"].astype(int) > 80), "All rows should have Index > 80"
 
 
 @pytest.mark.asyncio

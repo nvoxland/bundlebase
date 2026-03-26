@@ -57,10 +57,12 @@ Operations are recorded and applied in sequence when querying:
 ## Adapter System
 
 Plugin architecture for data sources (`src/data_adapter/`):
-- **CsvPlugin**: CSV file support
-- **JsonPlugin**: Line-delimited JSON support
-- **ParquetPlugin**: Apache Parquet support
+- **CsvPlugin**: CSV file support (`.csv`). All columns import as Utf8 text — type inference from samples is unreliable.
+- **JsonPlugin**: Line-delimited JSON support (`.json`, `.jsonl`). Types are preserved from the JSON data.
+- **ParquetPlugin**: Apache Parquet support (`.parquet`). Types are preserved from the embedded schema.
 - **BundlebasePlugin**: References other committed bundles via `bundle://` (filesystem) or `bundle+<scheme>://` (remote) URLs
+
+Each plugin implements `FileFormatConfig` (extensions, format, file source) and `DataReader` (schema, data source, statistics). The CSV reader reads only the header row for schema inference (no type inference), so all columns are naturally Utf8.
 
 ## User-Defined SQL Functions
 

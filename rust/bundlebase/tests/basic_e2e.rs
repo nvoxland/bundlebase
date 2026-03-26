@@ -383,7 +383,7 @@ changes:
     schema:
       fields:
       - name: Index
-        data_type: Int64
+        data_type: Utf8
         nullable: true
       - name: Customer Id
         data_type: Utf8
@@ -413,7 +413,7 @@ changes:
         data_type: Utf8
         nullable: true
       - name: Subscription Date
-        data_type: Date32
+        data_type: Utf8
         nullable: true
       - name: Website
         data_type: Utf8

@@ -77,7 +77,7 @@ c = await Bundlebase.open("/my/container/dir")
 
 ## Supported Mutation Methods
 
-- `attach(url)` - Add data source
+- `attach(url)` - Add data source (CSV columns import as text; use `cast_column` to convert types)
 - `drop_column(name)` - Remove column
 - `rename_column(old_name, new_name)` - Rename column
 - `standardize_column_names()` - Convert all column names to lowercase+underscore identifiers

@@ -87,6 +87,9 @@ A bundle is no use without data, add it with `attach()`.
     c.attach("https://example.com/additional.json")
     ```
 
+!!! note
+    CSV columns are imported as text. Use `cast_column()` to convert to specific types like integer or float. See [Column Types](../guide/attaching.md#column-types) for details.
+
 ## Transforming Data
 
 Bundlebase provides APIs for transforming your data:
