@@ -176,13 +176,13 @@ mod tests {
         let pack = Pack::new(
             id,
             "customers",
-            "base.id = customers.id",
+            "bundle.id = customers.id",
             JoinTypeOption::Left,
         );
         assert!(!pack.is_base());
         assert!(pack.is_join());
         assert_eq!(pack.name(), "customers");
-        assert_eq!(pack.expression(), Some("base.id = customers.id"));
+        assert_eq!(pack.expression(), Some("bundle.id = customers.id"));
         assert_eq!(pack.join_type(), Some(&JoinTypeOption::Left));
     }
 

@@ -367,7 +367,7 @@ class TestSyncJoin:
         c.attach(datafile("customers-0-100.csv"))
         c.join(
             "regions",
-            'base."Country" = regions."Country"',
+            'bundle."Country" = regions."Country"',
             datafile("sales-regions.csv"),
         )
 

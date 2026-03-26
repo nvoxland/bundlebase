@@ -143,7 +143,7 @@ async def test_join():
     """Test that join() method binding works correctly"""
     c = await (bundlebase.create(random_bundle())
                .attach(datafile("customers-0-100.csv"))
-               .join("regions", 'base."Country" = regions."Country"', datafile("sales-regions.csv")))
+               .join("regions", 'bundle."Country" = regions."Country"', datafile("sales-regions.csv")))
 
     assert await c.num_rows() == 99
 
@@ -156,7 +156,7 @@ async def test_show_columns_with_join():
     """SHOW COLUMNS should work when join introduces duplicate column names."""
     c = await (bundlebase.create(random_bundle())
                .attach(datafile("customers-0-100.csv"))
-               .join("regions", 'base."Country" = regions."Country"', datafile("sales-regions.csv")))
+               .join("regions", 'bundle."Country" = regions."Country"', datafile("sales-regions.csv")))
 
     result = await c.query("SELECT * FROM bundle_info.columns")
     df = await result.to_pandas()
@@ -1738,7 +1738,7 @@ async def test_bundlebase_url_join():
         # Create a customers bundle and join with the regions bundle via bundle://
         c = await bundlebase.create(random_bundle())
         c = await c.attach(datafile("customers-0-100.csv"))
-        c = await c.join("regions", 'base."Country" = regions."Country"', f"bundle://{regions_dir}")
+        c = await c.join("regions", 'bundle."Country" = regions."Country"', f"bundle://{regions_dir}")
 
         # The join should produce results (same as joining with a raw file)
         assert await c.num_rows() == 99

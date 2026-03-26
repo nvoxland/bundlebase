@@ -903,8 +903,8 @@ class PyBundleBuilder:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.join("users", 'base.id = users.user_id', "users.csv")
-            c = await c.join("regions", 'base.country = regions.country')  # attach data later
+            c = await c.join("users", 'bundle.id = users.user_id', "users.csv")
+            c = await c.join("regions", 'bundle.country = regions.country')  # attach data later
         """
         ...
 

@@ -252,7 +252,7 @@ Bare identifiers (no quotes) work for names containing only letters, digits, and
 | Materialize huge datasets in memory | Crashes on large data | Use `to_pandas()` / `to_polars()` which stream internally |
 | Skip commits during exploration | Lost history, can't undo mistakes | Commit at every meaningful step |
 | Create a bundle without SET NAME / SET DESCRIPTION | Bundles are hard to identify later | Always set both when creating a bundle |
-| Download data then ATTACH separately | Two steps when one will do | `CREATE SOURCE USING http; FETCH base ADD` in one call |
+| Download data then ATTACH separately | Two steps when one will do | `CREATE SOURCE USING http; FETCH bundle ADD` in one call |
 
 ## Bundle References (`bundle://`)
 
@@ -314,10 +314,10 @@ bundlebase extend --bundle ./clean -m "Removed rows without email" "FILTER WITH 
 bundlebase create --bundle ./combined "ATTACH 'customers.parquet'"
 
 # Join with a file
-bundlebase extend --bundle ./combined "JOIN 'orders.csv' AS orders ON id = orders.customer_id"
+bundlebase extend --bundle ./combined "JOIN 'orders.csv' AS orders ON bundle.id = orders.customer_id"
 
 # Join with another bundle (reads the target bundle's full query output, including filters/transforms)
-bundlebase extend --bundle ./combined "JOIN 'bundle://./regions' AS regions ON region_code = regions.code"
+bundlebase extend --bundle ./combined "JOIN 'bundle://./regions' AS regions ON bundle.region_code = regions.code"
 
 # Query across joined data
 bundlebase query --bundle ./combined --format json "SELECT c.name, COUNT(orders.id) as order_count FROM bundle c JOIN orders ON c.id = orders.customer_id GROUP BY c.name ORDER BY order_count DESC LIMIT 10"
@@ -413,10 +413,10 @@ bundlebase extend --bundle ./data "DROP INDEX customer_id"
 bundlebase extend --bundle ./pipeline "CREATE SOURCE USING my_connector WITH (url = 's3://bucket/data/')"
 
 # Preview what fetch would do (dry run)
-bundlebase query --bundle ./pipeline --format json "FETCH base ADD DRY RUN"
+bundlebase query --bundle ./pipeline --format json "FETCH bundle ADD DRY RUN"
 
 # Actually fetch new files
-bundlebase extend --bundle ./pipeline "FETCH base ADD"
+bundlebase extend --bundle ./pipeline "FETCH bundle ADD"
 
 # Fetch all sources
 bundlebase extend --bundle ./pipeline "FETCH ALL SYNC"
@@ -488,7 +488,7 @@ bundlebase create --bundle ./housing "CREATE SOURCE USING kaggle WITH (dataset =
 bundlebase create --bundle ./logs "CREATE SOURCE USING remote_dir WITH (url = 's3://my-bucket/data/', patterns = '**/*.parquet')"
 
 # Preview what would be fetched without actually fetching
-bundlebase query --bundle ./logs --format json "FETCH base ADD DRY RUN"
+bundlebase query --bundle ./logs --format json "FETCH bundle ADD DRY RUN"
 ```
 
 **Kaggle note:** The `dataset` parameter uses the `owner/dataset-name` format from the Kaggle URL. For example, `kaggle.com/datasets/tunguz/200000-jeopardy-questions` → `dataset = 'tunguz/200000-jeopardy-questions'`. The kaggle connector calls the Kaggle REST API directly — no need to install the `kaggle` pip package. It only requires `~/.kaggle/kaggle.json` (create at kaggle.com → Settings → API → Create New Token).
@@ -572,7 +572,7 @@ Register and use it:
 # Register the connector (temp = session-only, supports Python runtime)
 bundlebase extend --bundle ./data "IMPORT TEMP CONNECTOR my.api FROM 'python::my_connector.py:MyApiConnector'"
 bundlebase extend --bundle ./data "CREATE SOURCE USING my.api"
-bundlebase extend --bundle ./data "FETCH base ADD"
+bundlebase extend --bundle ./data "FETCH bundle ADD"
 ```
 
 For persistent connectors (survive across sessions), use `ipc` or `ffi` runtimes instead of `python`. See the [Custom Connectors guide](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/index.md) and [Python SDK](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/python.md).

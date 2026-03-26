@@ -2,7 +2,7 @@ use super::Pack;
 use datafusion::common::DataFusionError;
 use datafusion::logical_expr::{Expr, LogicalPlan, Operator};
 use datafusion::prelude::Expr::BinaryExpr;
-use datafusion::prelude::SessionContext;
+use datafusion::prelude::{DataFrame, SessionContext};
 use crate::bundle::pack::JoinTypeOption;
 
 /// The name used to reference the base pack in join expressions
@@ -32,21 +32,27 @@ pub(crate) fn find_temp_functions_in_sql(
         .collect()
 }
 
-/// Parse a WHERE-clause fragment (no leading `WHERE`) into one or more DataFusion `Expr` nodes.
+/// Parse a join ON expression into DataFusion `Expr` nodes.
 ///
 /// - `ctx` is the SessionContext used to parse SQL and resolve names.
-/// - `where_sql` is the condition text (e.g. `a > 10 AND b = 'x'`).
-/// - `table` is the table name to use as the FROM target when the condition references columns.
-///    If `None` a dummy name `t` is used (you can register a temp table with that name beforehand).
+/// - `base_table` is the raw base pack table name (e.g. `packs.__pack_0`).
+/// - `pack` is the join pack with its metadata (name, expression, join type).
+/// - `accumulated_df` is the DataFrame built up so far (base + all prior joins).
+///   When the expression uses `bundle.col`, this resolves against the full
+///   accumulated dataset — not just the base pack's columns.
+/// Returns `(expressions, left_alias)` where `left_alias` is `"base"` normally
+/// or `"bundle"` when the expression uses the `bundle.` qualifier.
 pub(crate) async fn parse_join_expr(
     ctx: &SessionContext,
-    table: &str,
+    base_table: &str,
     pack: &Pack,
-) -> Result<Vec<Expr>, DataFusionError> {
-    // Pack must have join metadata
+    accumulated_df: &DataFrame,
+) -> Result<(Vec<Expr>, &'static str), DataFusionError> {
     let pack_join_type = pack.join_type().expect("Pack must have join_type for join");
     let pack_name = pack.name();
     let pack_expression = pack.expression().expect("Pack must have expression for join");
+
+    let uses_bundle_qualifier = pack_expression.contains("bundle.") || pack_expression.contains("\"bundle\".");
 
     let join_type = match pack_join_type {
         JoinTypeOption::Inner => "INNER JOIN",
@@ -55,22 +61,66 @@ pub(crate) async fn parse_join_expr(
         JoinTypeOption::Full => "FULL OUTER JOIN",
     };
 
+    // When the expression qualifies columns with "bundle.", register the
+    // accumulated dataframe in a temporary schema so DataFusion resolves
+    // bundle.col against the full built-up dataset (base + all prior joins).
+    // Otherwise, parse against the raw base pack table.
+    const TEMP_SCHEMA: &str = "__join_tmp";
+    const BUNDLE_ALIAS_TABLE: &str = "bundle_data";
+    let registered_alias = if uses_bundle_qualifier {
+        use datafusion::catalog::{MemorySchemaProvider, SchemaProvider};
+        let catalog = ctx.catalog(crate::catalog::CATALOG_NAME)
+            .or_else(|| ctx.catalog("datafusion"));
+
+        if let Some(catalog) = catalog {
+            let tmp_schema = std::sync::Arc::new(MemorySchemaProvider::new());
+            tmp_schema.register_table(
+                BUNDLE_ALIAS_TABLE.to_string(),
+                accumulated_df.clone().into_view(),
+            )?;
+            catalog.register_schema(TEMP_SCHEMA, tmp_schema)?;
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    let (left_table, left_alias) = if registered_alias {
+        (format!("{}.{}", TEMP_SCHEMA, BUNDLE_ALIAS_TABLE), "bundle")
+    } else {
+        (base_table.to_string(), BASE_PACK_NAME)
+    };
+
     let sql = format!(
         "SELECT * FROM {} AS {} {} packs.{} AS {} ON {}",
-        table,
-        BASE_PACK_NAME,
+        left_table,
+        left_alias,
         join_type,
         Pack::table_name(pack.id()),
         pack_name,
         pack_expression
     );
 
-    let df = ctx.sql(&sql).await?;
+    let result = ctx.sql(&sql).await;
+
+    // Clean up the temporary schema
+    if registered_alias {
+        let catalog = ctx.catalog(crate::catalog::CATALOG_NAME)
+            .or_else(|| ctx.catalog("datafusion"));
+        if let Some(catalog) = catalog {
+            use datafusion::catalog::MemorySchemaProvider;
+            let _ = catalog.register_schema(TEMP_SCHEMA, std::sync::Arc::new(MemorySchemaProvider::new()));
+        }
+    }
+
+    let df = result?;
     let plan = df.logical_plan();
 
     let mut preds = Vec::new();
     collect_join_exprs(plan, &mut preds);
-    Ok(preds)
+    Ok((preds, left_alias))
 }
 
 fn collect_join_exprs(plan: &LogicalPlan, out: &mut Vec<Expr>) {
@@ -107,7 +157,7 @@ mod tests {
     use std::sync::Arc;
 
     #[tokio::test]
-    async fn test_parse_join() {
+    async fn test_parse_join_unqualified() {
         let ctx = SessionContext::new();
         ctx.register_table(
             "t",
@@ -120,7 +170,6 @@ mod tests {
 
         let join_id = ObjectId::generate();
 
-        // Create and register a packs schema for testing
         use datafusion::catalog::MemorySchemaProvider;
         let packs_schema = Arc::new(MemorySchemaProvider::new());
 
@@ -139,35 +188,64 @@ mod tests {
             )
             .unwrap();
 
+        let base_df = ctx.table("t").await.unwrap();
+
+        // Unqualified columns resolve against the base pack table alias ("base")
         let pack = Pack::new(join_id, "test_join", "a=x", JoinTypeOption::Inner);
-        let preds = parse_join_expr(
-            &ctx,
-            "t",
-            &pack,
-        )
-        .await
-        .unwrap()
-        .iter()
-        .map(|pred| format!("{:?}", pred))
-        .collect::<Vec<_>>()
-        .join("\n");
-        assert_eq!("BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"base\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) })",
-                   preds.as_str());
+        let (exprs, alias) = parse_join_expr(&ctx, "t", &pack, &base_df).await.unwrap();
+        assert_eq!(alias, "base");
+        let preds = exprs.iter().map(|pred| format!("{:?}", pred)).collect::<Vec<_>>().join("\n");
+        assert!(preds.contains(r#"table: "base""#));
+        assert!(preds.contains(r#"name: "a""#));
 
         let pack2 = Pack::new(join_id, "test_join", "a=x and x > 3", JoinTypeOption::Inner);
-        let preds = parse_join_expr(
-            &ctx,
+        let (exprs, _) = parse_join_expr(&ctx, "t", &pack2, &base_df).await.unwrap();
+        let preds = exprs.iter().map(|pred| format!("{:?}", pred)).collect::<Vec<_>>().join("\n");
+        assert!(preds.contains(r#"name: "a""#));
+        assert!(preds.contains("Gt"));
+    }
+
+    #[tokio::test]
+    async fn test_parse_join_with_bundle_qualifier() {
+        let ctx = SessionContext::new();
+        ctx.register_table(
             "t",
-            &pack2,
+            Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
+                Field::new("a", DataType::Int32, false),
+                Field::new("b", DataType::Utf8, false),
+            ])))),
         )
-        .await
-        .unwrap()
-        .iter()
-        .map(|pred| format!("{:?}", pred))
-        .collect::<Vec<_>>()
-        .join("\n");
-        assert_eq!("BinaryExpr(BinaryExpr { left: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"base\" }), name: \"a\" }), op: Eq, right: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }) }), op: And, right: BinaryExpr(BinaryExpr { left: Column(Column { relation: Some(Bare { table: \"test_join\" }), name: \"x\" }), op: Gt, right: Literal(Int64(3), None) }) })",
-                   preds.as_str());
+        .unwrap();
+
+        let join_id = ObjectId::generate();
+
+        use datafusion::catalog::MemorySchemaProvider;
+        let packs_schema = Arc::new(MemorySchemaProvider::new());
+
+        ctx.catalog("datafusion")
+            .unwrap()
+            .register_schema("packs", packs_schema.clone())
+            .unwrap();
+
+        packs_schema
+            .register_table(
+                Pack::table_name(&join_id).to_string(),
+                Arc::new(EmptyTable::new(SchemaRef::new(Schema::new(vec![
+                    Field::new("x", DataType::Int32, false),
+                    Field::new("y", DataType::Utf8, false),
+                ])))),
+            )
+            .unwrap();
+
+        let base_df = ctx.table("t").await.unwrap();
+
+        // bundle.col resolves against the accumulated dataframe
+        let pack = Pack::new(join_id, "test_join", "bundle.a = test_join.x", JoinTypeOption::Inner);
+        let (exprs, alias) = parse_join_expr(&ctx, "t", &pack, &base_df).await.unwrap();
+        assert_eq!(alias, "bundle");
+        let preds = exprs.iter().map(|pred| format!("{:?}", pred)).collect::<Vec<_>>().join("\n");
+        assert!(preds.contains(r#"table: "bundle""#));
+        assert!(preds.contains(r#"name: "a""#));
     }
 
     #[test]

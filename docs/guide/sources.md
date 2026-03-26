@@ -444,7 +444,7 @@ You can define sources for joined packs by specifying the `pack` parameter.
     bundle = await bb.create("my/data").attach("orders.parquet")
 
     # Create a join for customer data
-    bundle = await bundle.join("customers", "base.customer_id = customers.id")
+    bundle = await bundle.join("customers", "bundle.customer_id = customers.id")
 
     # Define a source for the customers pack
     bundle = await bundle.create_source("remote_dir", {
@@ -466,7 +466,7 @@ You can define sources for joined packs by specifying the `pack` parameter.
     bundle = bb.create("my/data").attach("orders.parquet")
 
     # Create a join for customer data
-    bundle = bundle.join("customers", "base.customer_id = customers.id")
+    bundle = bundle.join("customers", "bundle.customer_id = customers.id")
 
     # Define a source for the customers pack
     bundle = bundle.create_source("remote_dir", {

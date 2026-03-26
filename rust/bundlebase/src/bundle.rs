@@ -600,7 +600,7 @@ impl Bundle {
         );
         let join_table = format!("packs.{}", Pack::table_name(pack.id()));
 
-        let expr = sql::parse_join_expr(&self.ctx, &base_table, pack).await?;
+        let (expr, left_alias) = sql::parse_join_expr(&self.ctx, &base_table, pack, &base_df).await?;
 
         // Capture base column names before aliasing so we can detect duplicates
         let base_col_names: std::collections::HashSet<String> = base_df
@@ -610,7 +610,7 @@ impl Bundle {
             .map(|c| c.name.clone())
             .collect();
 
-        let base_df = base_df.alias(sql::BASE_PACK_NAME)?;
+        let base_df = base_df.alias(left_alias)?;
 
         let name = pack.name();
 

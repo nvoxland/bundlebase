@@ -761,7 +761,7 @@ async fn test_bundle_columns_table_with_join() {
     bundle
         .join(
             "regions",
-            r#"base."Country" = regions."Country""#,
+            r#"bundle."Country" = regions."Country""#,
             Some(test_datafile("sales-regions.csv")),
             bundlebase::bundle::JoinTypeOption::Inner,
         )

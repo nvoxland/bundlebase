@@ -226,7 +226,7 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_quoted_alias() {
-        let input = r#"JOIN 'data.csv' AS "my join" ON base.id = "my join".id"#;
+        let input = r#"JOIN 'data.csv' AS "my join" ON bundle.id = "my join".id"#;
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::Join(c) => {

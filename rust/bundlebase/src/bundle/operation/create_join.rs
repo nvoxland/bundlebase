@@ -68,7 +68,7 @@ mod tests {
             id: ObjectId::generate(),
             name: "customers".to_string(),
             join_type: JoinTypeOption::Left,
-            expression: "base.id = customers.id".to_string(),
+            expression: "bundle.id = customers.id".to_string(),
         };
         assert!(op.describe().contains("CREATE JOIN 'customers'"));
     }
@@ -80,13 +80,13 @@ mod tests {
             id: pack_id,
             name: "customers".to_string(),
             join_type: JoinTypeOption::Left,
-            expression: "base.id = customers.id".to_string(),
+            expression: "bundle.id = customers.id".to_string(),
         };
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(serialized.contains("id: 00000000000000a5"));
         assert!(serialized.contains("name: customers"));
         assert!(serialized.contains("joinType: left"));
-        assert!(serialized.contains("expression: base.id = customers.id"));
+        assert!(serialized.contains("expression: bundle.id = customers.id"));
     }
 }
