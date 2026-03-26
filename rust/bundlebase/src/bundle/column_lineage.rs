@@ -1,5 +1,7 @@
+use crate::bundle::Pack;
 use datafusion::logical_expr::{Expr, LogicalPlan};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Maps a logical column name to its physical source
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -8,6 +10,122 @@ pub struct ColumnSource {
     pub pack_name: String,
     /// Physical column name in the source file
     pub physical_name: String,
+}
+
+/// Determine the source pack for each column in the final bundle schema.
+///
+/// Uses the join pack column names and the disambiguation convention
+/// (`{pack_name}_{col}` for collisions) to map each final column back
+/// to its origin pack. Returns a map from logical column name to `ColumnSource`.
+pub fn analyze_column_sources(
+    bundle_schema: &arrow_schema::Schema,
+    packs: &HashMap<crate::io::ObjectId, Arc<Pack>>,
+) -> HashMap<String, ColumnSource> {
+    // Collect join pack column sets: pack_name -> set of column names
+    let join_packs: Vec<(&str, std::collections::HashSet<String>)> = packs
+        .values()
+        .filter(|p| p.is_join())
+        .map(|p| {
+            let col_names: std::collections::HashSet<String> = p
+                .blocks()
+                .iter()
+                .flat_map(|b| {
+                    b.schema()
+                        .fields()
+                        .iter()
+                        .map(|f| f.name().clone())
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            (p.name(), col_names)
+        })
+        .collect();
+
+    let mut sources = HashMap::new();
+
+    for field in bundle_schema.fields() {
+        let col_name = field.name();
+
+        // Check if this column matches a disambiguated join column ({pack}_{col})
+        let mut found = false;
+        for (pack_name, pack_cols) in &join_packs {
+            // Check disambiguated pattern: regions_Country -> pack "regions", physical "Country"
+            let prefix = format!("{}_", pack_name);
+            if let Some(physical) = col_name.strip_prefix(&prefix) {
+                if pack_cols.contains(physical) {
+                    sources.insert(
+                        col_name.clone(),
+                        ColumnSource {
+                            pack_name: pack_name.to_string(),
+                            physical_name: physical.to_string(),
+                        },
+                    );
+                    found = true;
+                    break;
+                }
+            }
+
+            // Check if it's a non-colliding join column (same name, not in base)
+            if pack_cols.contains(col_name.as_str()) {
+                // Could be from base or join - we need to check if base also has it
+                // If base had it, the join column would have been disambiguated
+                // So if we reach here with an un-prefixed name that's in a join pack,
+                // it either came from base (if base also has it) or from the join pack
+                // The disambiguation logic means: if it's NOT prefixed and it's in a
+                // join pack, then base does NOT have a column with this name, so it's
+                // from the join pack.
+                // But we also need to check that base doesn't have this column...
+                // We'll handle this below after checking all join packs.
+            }
+        }
+
+        if !found {
+            // Check if it's a non-disambiguated join-only column
+            // (exists in a join pack but was not renamed because no collision with base)
+            let mut from_join = false;
+            for (pack_name, pack_cols) in &join_packs {
+                if pack_cols.contains(col_name.as_str()) {
+                    // Check if any OTHER pack (including base) also has this column
+                    // If it wasn't disambiguated, it means it only exists in this join pack
+                    // (or the base pack also has it, in which case this IS the base version)
+                    // We can't easily distinguish, so check if the base pack has blocks with this col
+                    let base_has_col = packs
+                        .values()
+                        .filter(|p| !p.is_join())
+                        .any(|p| {
+                            p.blocks().iter().any(|b| {
+                                b.schema().fields().iter().any(|f| f.name() == col_name)
+                            })
+                        });
+
+                    if !base_has_col {
+                        sources.insert(
+                            col_name.clone(),
+                            ColumnSource {
+                                pack_name: pack_name.to_string(),
+                                physical_name: col_name.clone(),
+                            },
+                        );
+                        from_join = true;
+                        break;
+                    }
+                }
+            }
+
+            if !from_join {
+                // Default: column is from base pack
+                sources.insert(
+                    col_name.clone(),
+                    ColumnSource {
+                        pack_name: "base".to_string(),
+                        physical_name: col_name.clone(),
+                    },
+                );
+            }
+        }
+    }
+
+    sources
 }
 
 /// Analyzes a DataFusion LogicalPlan to extract column lineage

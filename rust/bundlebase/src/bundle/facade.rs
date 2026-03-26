@@ -1,3 +1,4 @@
+use super::column_lineage::{analyze_column_sources, ColumnSource};
 use super::column_metadata::ColumnNames;
 use super::operation::BundleChange;
 use crate::bundle::BundleCommit;
@@ -64,6 +65,19 @@ pub trait BundleFacade: Send + Sync {
     }
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError>;
+
+    /// Get the physical source (pack name, column name) for a logical column.
+    ///
+    /// Traces a column back to its origin pack, accounting for renames and joins.
+    /// Returns `None` for computed columns or columns that don't map to a single source.
+    async fn get_column_source(
+        &self,
+        logical_name: &str,
+    ) -> Result<Option<ColumnSource>, BundlebaseError> {
+        let schema = self.schema().await?;
+        let sources = analyze_column_sources(&schema, &self.packs());
+        Ok(sources.get(logical_name).cloned())
+    }
 
     /// Computes the number of rows in the bundle
     async fn num_rows(&self) -> Result<usize, BundlebaseError>;

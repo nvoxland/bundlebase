@@ -24,7 +24,7 @@ use crate::io::EMPTY_SCHEME;
 pub use builder::BundleBuilder;
 pub use builder::BundleStatus;
 pub use verification::{FileVerificationResult, VerificationResults};
-pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource};
+pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource, analyze_column_sources};
 pub use bundlebase_common::command_response::{CommandResponse, OutputShape};
 pub use commit::{manifest_version, BundleCommit, CommitHistory};
 pub use data_block::DataBlock;

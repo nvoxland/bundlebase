@@ -167,6 +167,13 @@ async def test_show_columns_with_join():
     assert "regions_Country" in column_names
     assert column_names.count("Country") == 1, "Country should appear exactly once"
 
+    # Source column shows which pack each column came from
+    assert "Source" in df.columns, "Should have a Source column"
+    country_row = df[df["Column"] == "Country"].iloc[0]
+    assert country_row["Source"] == "base", "Country should come from base pack"
+    regions_row = df[df["Column"] == "regions_Country"].iloc[0]
+    assert regions_row["Source"] == "regions", "regions_Country should come from regions pack"
+
 
 @pytest.mark.asyncio
 async def test_schema():

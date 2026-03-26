@@ -831,42 +831,6 @@ impl BundleBuilder {
         }
     }
 
-    /// Get the physical source (pack name, column name) for a logical column
-    ///
-    /// This analyzes the DataFusion execution plan to trace a column back to its
-    /// original source, accounting for renames and joins.
-    ///
-    /// # Returns
-    /// - `Some(ColumnSource)` - The pack name and physical column name if found
-    /// - `None` - For computed columns or columns that don't map to a single source
-    pub async fn get_column_source(
-        &self,
-        logical_name: &str,
-    ) -> Result<Option<crate::bundle::ColumnSource>, BundlebaseError> {
-        // Get the logical plan
-        let df = self.dataframe().await?;
-        let plan = df.logical_plan();
-
-        // Create analyzer with table-to-pack mappings
-        let mut analyzer = crate::bundle::ColumnLineageAnalyzer::new();
-
-        // Register base pack
-        analyzer.register_table("__base_0".to_string(), "base".to_string());
-
-        // Register joined packs
-        for join_name in self.bundle.join_names() {
-            analyzer.register_table(join_name.clone(), join_name.clone());
-        }
-
-        // Analyze the plan
-        analyzer.analyze(plan).map_err(|e| {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)) as BundlebaseError
-        })?;
-
-        // Query for the specific column
-        Ok(analyzer.get_source(logical_name))
-    }
-
 }
 
 #[async_trait]

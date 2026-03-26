@@ -1,4 +1,4 @@
-use bundlebase::bundle::BundleFacade;
+use bundlebase::bundle::{BundleFacade, analyze_column_sources};
 use arrow::array::{ArrayRef, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -41,6 +41,7 @@ impl BundleColumnsTable {
             Field::new("Column", DataType::Utf8, false),
             Field::new("Type", DataType::Utf8, false),
             Field::new("Nullable", DataType::Utf8, false),
+            Field::new("Source", DataType::Utf8, false),
         ]))
     }
 }
@@ -66,7 +67,8 @@ impl TableProvider for BundleColumnsTable {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let bundle_schema = self.facade()?.schema().await.map_err(|e| {
+        let facade = self.facade()?;
+        let bundle_schema = facade.schema().await.map_err(|e| {
             datafusion::error::DataFusionError::External(e)
         })?;
 
@@ -86,13 +88,27 @@ impl TableProvider for BundleColumnsTable {
             .map(|f| if f.is_nullable() { "Yes" } else { "No" })
             .collect();
 
+        // Compute column sources from pack structure
+        let source_map = analyze_column_sources(&bundle_schema, &facade.packs());
+        let sources: Vec<String> = bundle_schema
+            .fields()
+            .iter()
+            .map(|f| {
+                source_map
+                    .get(f.name())
+                    .map(|s| s.pack_name.clone())
+                    .unwrap_or_else(|| "base".to_string())
+            })
+            .collect();
+
         let columns_array: ArrayRef = Arc::new(StringArray::from(columns));
         let types_array: ArrayRef = Arc::new(StringArray::from(types));
         let nullables_array: ArrayRef = Arc::new(StringArray::from(nullables));
+        let sources_array: ArrayRef = Arc::new(StringArray::from(sources));
 
         let output_schema = Self::output_schema();
         let batch =
-            RecordBatch::try_new(output_schema.clone(), vec![columns_array, types_array, nullables_array])?;
+            RecordBatch::try_new(output_schema.clone(), vec![columns_array, types_array, nullables_array, sources_array])?;
         let mem_table = MemTable::try_new(output_schema, vec![vec![batch]])?;
         mem_table.scan(state, projection, filters, limit).await
     }

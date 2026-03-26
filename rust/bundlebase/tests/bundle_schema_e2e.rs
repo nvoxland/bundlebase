@@ -795,4 +795,15 @@ async fn test_bundle_columns_table_with_join() {
         1,
         "Country should appear exactly once (no duplicates)"
     );
+
+    // Verify Source column shows correct pack origin
+    assert_eq!(batch.num_columns(), 4, "Should have Column, Type, Nullable, Source");
+    let source_col = batch.column(3).as_any().downcast_ref::<StringArray>().unwrap();
+    let sources: Vec<(&str, &str)> = (0..column_col.len())
+        .map(|i| (column_col.value(i), source_col.value(i)))
+        .collect();
+    let country_source = sources.iter().find(|(name, _)| *name == "Country").unwrap().1;
+    assert_eq!(country_source, "base", "Country should come from base pack");
+    let regions_country_source = sources.iter().find(|(name, _)| *name == "regions_Country").unwrap().1;
+    assert_eq!(regions_country_source, "regions", "regions_Country should come from regions pack");
 }
