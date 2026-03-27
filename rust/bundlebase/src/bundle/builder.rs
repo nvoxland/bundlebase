@@ -638,6 +638,19 @@ impl BundleBuilder {
     ) -> Result<std::collections::HashSet<bundlebase_common::RowId>, BundlebaseError> {
         use futures::StreamExt;
 
+        // Build a physical-name → user-visible-name mapping from column renames
+        let ops = self.operations();
+        let initial = column_metadata::initial_column_names(&ops);
+        let resolved = column_metadata::resolved_column_names(&ops);
+        let mut rename_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for (id, resolved_name) in &resolved {
+            if let Some(initial_name) = initial.get(id) {
+                if initial_name != resolved_name {
+                    rename_map.insert(initial_name.clone(), resolved_name.clone());
+                }
+            }
+        }
+
         let mut matching_ids = std::collections::HashSet::new();
         let base_pack = self.bundle.packs().read()
             .get(&ObjectId::BASE_PACK)
@@ -655,6 +668,25 @@ impl BundleBuilder {
                     let rowid_batch = batch_result?;
                     let batch = &rowid_batch.batch;
                     let row_ids = &rowid_batch.row_ids;
+
+                    // Rename columns in the batch to match user-visible names
+                    let batch = if rename_map.is_empty() {
+                        batch.clone()
+                    } else {
+                        let schema = batch.schema();
+                        let new_fields: Vec<arrow::datatypes::Field> = schema.fields().iter().map(|f| {
+                            if let Some(new_name) = rename_map.get(f.name()) {
+                                f.as_ref().clone().with_name(new_name)
+                            } else {
+                                f.as_ref().clone()
+                            }
+                        }).collect();
+                        let new_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
+                            new_fields,
+                            schema.metadata().clone(),
+                        ));
+                        arrow::record_batch::RecordBatch::try_new(new_schema, batch.columns().to_vec())?
+                    };
 
                     let filter_sql = format!(
                         "SELECT _idx FROM (SELECT *, ROW_NUMBER() OVER () - 1 AS _idx FROM __delete_batch) WHERE {}",

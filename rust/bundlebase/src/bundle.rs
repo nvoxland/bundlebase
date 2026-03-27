@@ -19,6 +19,7 @@ pub mod function_entry {
 }
 mod sql;
 pub mod tombstone;
+pub mod tombstone_filter;
 pub mod verification;
 
 use crate::io::EMPTY_SCHEME;

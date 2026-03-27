@@ -5,11 +5,14 @@
 
 use crate::bundle::column_metadata::ColumnNames;
 use crate::bundle::operation::Operation;
+use crate::bundle::{tombstone, META_DIR};
+use crate::object_id::ObjectId;
 use crate::{Bundle, BundlebaseError};
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::prelude::SessionContext;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Operation that records a tombstone file for deleted rows.
@@ -50,8 +53,49 @@ impl Operation for DeleteOp {
         Ok(())
     }
 
-    async fn apply(&self, _bundle: &Bundle) -> Result<(), DataFusionError> {
-        // No-op: tombstones are loaded separately during Bundle::open()
+    async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
+        // Load tombstone file and distribute deleted row numbers to DataBlocks
+        let manifest_dir = bundle.data_dir().writable_subdir(META_DIR)
+            .map_err(|e| DataFusionError::External(e))?;
+        let tomb_file = manifest_dir.file(&self.tombstone)
+            .map_err(|e| DataFusionError::External(e))?;
+        let bytes = tomb_file.read_bytes().await
+            .map_err(|e| DataFusionError::External(e))?;
+
+        let bytes = match bytes {
+            Some(b) => b,
+            None => {
+                log::warn!("Tombstone file not found: {}", self.tombstone);
+                return Ok(());
+            }
+        };
+
+        let row_ids = tombstone::deserialize_tombstone(&bytes)
+            .map_err(|e| DataFusionError::External(e))?;
+
+        // Group RowIds by block_ref -> row numbers
+        let mut by_block: HashMap<u16, Vec<u32>> = HashMap::new();
+        for rid in &row_ids {
+            by_block.entry(rid.block_ref().as_u16()).or_default().push(rid.row_number());
+        }
+
+        // Distribute to the corresponding DataBlocks in the base pack
+        let packs = bundle.packs().read().clone();
+        if let Some(pack) = packs.get(&ObjectId::BASE_PACK) {
+            let blocks = pack.blocks();
+            for (block_idx, row_numbers) in by_block {
+                if let Some(block) = blocks.get(block_idx as usize) {
+                    block.add_deleted_rows(row_numbers.into_iter());
+                }
+            }
+        }
+
+        log::debug!(
+            "Loaded {} tombstoned RowIds from {}",
+            row_ids.len(),
+            self.tombstone
+        );
+
         Ok(())
     }
 

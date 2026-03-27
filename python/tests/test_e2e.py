@@ -2223,3 +2223,165 @@ async def test_delete_query_excludes_rows():
     result = await c.query("SELECT salary FROM bundle WHERE salary > 200000")
     df = await result.to_pandas()
     assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_multiple_deletes():
+    """Test multiple sequential DELETE operations accumulate correctly."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    initial_count = await c.num_rows()
+
+    c = await c.delete("salary > 200000")
+    after_first = await c.num_rows()
+    assert after_first < initial_count
+
+    c = await c.delete("salary < 50000")
+    after_second = await c.num_rows()
+    assert after_second < after_first
+
+    # Verify neither condition appears in results
+    result = await c.query("SELECT salary FROM bundle WHERE salary > 200000 OR salary < 50000")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_multiple_commits_reopen():
+    """Test multiple DELETE + commit cycles persist correctly after reopen."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as temp_dir:
+        c = await bundlebase.create(temp_dir)
+        c = await c.attach(datafile("userdata.parquet"))
+
+        # First delete + commit
+        c = await c.delete("salary > 200000")
+        count_after_first = await c.num_rows()
+        await c.commit("Delete high salary")
+
+        # Second delete + commit
+        c = await c.delete("salary < 50000")
+        count_after_second = await c.num_rows()
+        assert count_after_second < count_after_first
+        await c.commit("Delete low salary")
+
+        # Reopen and verify both deletes persisted
+        c2 = await bundlebase.open(temp_dir)
+        assert await c2.num_rows() == count_after_second
+
+        result = await c2.query("SELECT salary FROM bundle WHERE salary > 200000 OR salary < 50000")
+        df = await result.to_pandas()
+        assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_query_after_reopen():
+    """Test that WHERE queries work correctly against reopened bundle with tombstones."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as temp_dir:
+        c = await bundlebase.create(temp_dir)
+        c = await c.attach(datafile("userdata.parquet"))
+
+        c = await c.delete("salary > 200000")
+        await c.commit("Delete high salary rows")
+
+        # Reopen and verify queries exclude deleted rows
+        c2 = await bundlebase.open(temp_dir)
+        result = await c2.query("SELECT salary FROM bundle WHERE salary > 200000")
+        df = await result.to_pandas()
+        assert len(df) == 0
+
+        # Remaining rows should all have salary <= 200000
+        result = await c2.query("SELECT MAX(salary) as max_sal FROM bundle")
+        df = await result.to_pandas()
+        assert df["max_sal"].iloc[0] <= 200000
+
+
+@pytest.mark.asyncio
+async def test_delete_csv():
+    """Test DELETE works with CSV data (line-oriented format uses TombstoneFilter)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as temp_dir:
+        c = await bundlebase.create(temp_dir)
+        c = await c.attach(datafile("customers-0-100.csv"))
+        initial_count = await c.num_rows()
+        assert initial_count == 100
+
+        # Delete rows where Index > 90
+        c = await c.delete('"Index" > 90')
+        deleted_count = await c.num_rows()
+        assert deleted_count < initial_count
+
+        await c.commit("Delete high index rows")
+
+        # Reopen and verify
+        c2 = await bundlebase.open(temp_dir)
+        assert await c2.num_rows() == deleted_count
+
+        result = await c2.query('SELECT "Index" FROM bundle WHERE "Index" > 90')
+        df = await result.to_pandas()
+        assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_all_rows():
+    """Test DELETE that removes all rows."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    c = await c.delete("salary >= 0")
+    assert await c.num_rows() == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_with_filter():
+    """Test DELETE works correctly when a filter operation was applied before."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    c = await c.filter("SELECT * FROM bundle WHERE salary > 50000")
+    filtered_count = await c.num_rows()
+
+    c = await c.delete("salary > 200000")
+    after_delete = await c.num_rows()
+    assert after_delete < filtered_count
+
+    result = await c.query("SELECT salary FROM bundle WHERE salary > 200000")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_with_rename():
+    """Test DELETE works correctly with renamed columns."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    c = await c.rename_column("salary", "pay")
+    c = await c.delete("pay > 200000")
+
+    result = await c.query("SELECT pay FROM bundle WHERE pay > 200000")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_with_rename_commit_reopen():
+    """Test DELETE with renamed columns persists after commit and reopen."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as temp_dir:
+        c = await bundlebase.create(temp_dir)
+        c = await c.attach(datafile("userdata.parquet"))
+
+        c = await c.rename_column("salary", "pay")
+        c = await c.delete("pay > 200000")
+        deleted_count = await c.num_rows()
+        await c.commit("Rename and delete")
+
+        c2 = await bundlebase.open(temp_dir)
+        assert await c2.num_rows() == deleted_count
+
+        result = await c2.query("SELECT pay FROM bundle WHERE pay > 200000")
+        df = await result.to_pandas()
+        assert len(df) == 0

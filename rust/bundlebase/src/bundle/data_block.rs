@@ -18,6 +18,7 @@ use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use parking_lot::RwLock;
 use std::any::Any;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Candidate index for a query with its estimated selectivity
@@ -42,6 +43,8 @@ pub struct DataBlock {
     source_info: Option<SourceInfo>,
     /// Column IDs for this block's schema fields (positional, matching schema field order)
     column_ids: Vec<ColumnId>,
+    /// Row numbers (within this block) that have been deleted via tombstones
+    deleted_rows: Arc<RwLock<HashSet<u32>>>,
 }
 
 impl DataBlock {
@@ -70,6 +73,7 @@ impl DataBlock {
             config,
             source_info,
             column_ids,
+            deleted_rows: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -92,6 +96,11 @@ impl DataBlock {
     /// Returns the column IDs for this block's schema fields
     pub fn column_ids(&self) -> &[ColumnId] {
         &self.column_ids
+    }
+
+    /// Add deleted row numbers to this block's tombstone set.
+    pub fn add_deleted_rows(&self, rows: impl IntoIterator<Item = u32>) {
+        self.deleted_rows.write().extend(rows);
     }
 
     /// Load index (from cache or disk) and estimate selectivity.
@@ -304,6 +313,7 @@ impl TableProvider for DataBlock {
         limit: Option<usize>,
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         let versioned_block = VersionedBlockId::new(self.id, self.version.clone());
+        let deleted = self.deleted_rows.read().clone();
 
         // Try column index optimization
         let indexable_filters = FilterAnalyzer::extract_indexable(filters);
@@ -339,10 +349,15 @@ impl TableProvider for DataBlock {
                 );
 
                 // Perform lookup using the already-deserialized index (no second disk read)
-                let row_ids = Self::lookup_index(
+                let mut row_ids = Self::lookup_index(
                     &best.index,
                     &best.filter.predicate,
                 );
+
+                // Remove deleted rows from the inclusion set
+                if !deleted.is_empty() {
+                    row_ids.retain(|rid| !deleted.contains(&rid.row_number()));
+                }
 
                 log::debug!(
                     "Index lookup found {} matching rows for column '{}'",
@@ -373,13 +388,22 @@ impl TableProvider for DataBlock {
         }
 
         // Phase 2: Fall back to full scan
-        let exec = DataSourceExec::new(
-            self.reader
-                .data_source(projection, filters, limit, None)
-                .await?
-                .clone(),
-        );
-        Ok(Arc::new(exec))
+        let source = self.reader
+            .data_source(projection, filters, limit, None)
+            .await?;
+
+        if deleted.is_empty() {
+            let exec = DataSourceExec::new(source.clone());
+            Ok(Arc::new(exec))
+        } else {
+            // Wrap with tombstone filter to exclude deleted rows
+            let filtered = crate::bundle::tombstone_filter::TombstoneFilterDataSource::new(
+                source,
+                Arc::new(deleted),
+            );
+            let exec = DataSourceExec::new(Arc::new(filtered));
+            Ok(Arc::new(exec))
+        }
     }
 }
 
