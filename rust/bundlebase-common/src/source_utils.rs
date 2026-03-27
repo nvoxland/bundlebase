@@ -121,13 +121,55 @@ pub struct HttpHeadInfo {
     pub content_type: Option<String>,
 }
 
+/// Build a descriptive error message for an HTTP error status code.
+///
+/// Includes the status code, reason phrase, an actionable hint, and optionally
+/// a truncated snippet of the server response body.
+pub fn http_status_error(
+    url: &Url,
+    status: reqwest::StatusCode,
+    body: Option<&str>,
+) -> String {
+    let hint = match status.as_u16() {
+        401 => " The server requires authentication. Check if credentials are needed.",
+        403 => " Access is forbidden. Check if the URL requires authorization or an API key.",
+        404 => " The URL was not found. Verify the URL is correct and the resource exists.",
+        429 => " Too many requests. Try again later or reduce request frequency.",
+        500 => " The server encountered an internal error. The service may be temporarily unavailable.",
+        502 | 503 | 504 => " The service is temporarily unavailable. Try again later.",
+        _ => " Verify the URL is correct and accessible.",
+    };
+    let body_snippet = match body {
+        Some(b) if !b.trim().is_empty() => {
+            let truncated = if b.len() > 200 { &b[..200] } else { b };
+            format!(" Server response: {}", truncated.trim())
+        }
+        _ => String::new(),
+    };
+    format!(
+        "HTTP {} error from '{}': {}.{}{}",
+        status.as_u16(),
+        url,
+        status.canonical_reason().unwrap_or("Unknown error"),
+        hint,
+        body_snippet,
+    )
+}
+
 /// Read version and content-type from an HTTP(S) URL via HEAD request.
+///
+/// Returns an error if the server responds with a non-success status code.
+/// Redirects (3xx) are followed automatically by the HTTP client.
 pub async fn read_http_head_info(url: &Url) -> Result<HttpHeadInfo, BundlebaseError> {
     let response = reqwest::Client::new()
         .head(url.as_str())
         .send()
         .await
         .map_err(|e| BundlebaseError::from(format!("Failed to HEAD '{}': {}", url, e)))?;
+
+    if !response.status().is_success() {
+        return Err(http_status_error(url, response.status(), None).into());
+    }
 
     let version = if let Some(etag) = response.headers().get("etag") {
         etag.to_str().unwrap_or("unknown").to_string()

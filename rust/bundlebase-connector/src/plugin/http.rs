@@ -90,13 +90,10 @@ impl Connector for HttpConnector {
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
         let url = shared_utils::require_url(args, "http")?;
 
-        // Read HEAD info (version + content-type) in one request
-        let head_info = shared_utils::read_http_head_info(&url)
-            .await
-            .unwrap_or_else(|_| shared_utils::HttpHeadInfo {
-                version: "unknown".to_string(),
-                content_type: None,
-            });
+        // Read HEAD info (version + content-type) in one request.
+        // Propagate server errors (e.g. 500, 503) so we fail early rather than
+        // silently loading error content as data.
+        let head_info = shared_utils::read_http_head_info(&url).await?;
 
         // Format detection priority:
         // 1. Explicit format arg (unless "auto")
@@ -277,12 +274,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_discover_csv_from_url_extension() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert(
-            "url".to_string(),
-            "https://example.com/data/lake_quality.csv".to_string(),
-        );
+        args.insert("url".to_string(), format!("{}/data/lake_quality.csv", server.uri()));
         let config = crate::test_utils::test_config();
 
         let locations = connector
@@ -291,18 +291,20 @@ mod tests {
             .unwrap();
 
         assert_eq!(locations.len(), 1);
-        assert_eq!(locations[0].location, "https://example.com/data/lake_quality.csv");
         assert_eq!(locations[0].format, "csv");
     }
 
     #[tokio::test]
     async fn test_discover_explicit_format() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
         let connector = HttpConnector;
         let mut args = HashMap::new();
-        args.insert(
-            "url".to_string(),
-            "https://api.example.com/download?type=data".to_string(),
-        );
+        args.insert("url".to_string(), format!("{}/download?type=data", server.uri()));
         args.insert("format".to_string(), "json".to_string());
         let config = crate::test_utils::test_config();
 
@@ -483,6 +485,123 @@ mod tests {
             .unwrap();
 
         assert_eq!(locations[0].format, "json");
+    }
+
+    #[tokio::test]
+    async fn test_discover_500_returns_error() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/api/data.csv", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let result = connector.discover(&args, &HashSet::new(), &config).await;
+        assert!(result.is_err());
+        let err = result.err().unwrap().to_string();
+        assert!(err.contains("500"), "Error should mention status code: {}", err);
+        assert!(err.contains("Internal Server Error"), "Error should include reason: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_discover_503_returns_descriptive_error() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/api/data", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let result = connector.discover(&args, &HashSet::new(), &config).await;
+        assert!(result.is_err());
+        let err = result.err().unwrap().to_string();
+        assert!(err.contains("503"), "Error should mention status code: {}", err);
+        assert!(err.contains("unavailable"), "Error should suggest service unavailable: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_discover_404_returns_descriptive_error() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/missing.csv", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let result = connector.discover(&args, &HashSet::new(), &config).await;
+        assert!(result.is_err());
+        let err = result.err().unwrap().to_string();
+        assert!(err.contains("404"), "Error should mention status code: {}", err);
+        assert!(err.contains("not found"), "Error should mention not found: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_discover_401_returns_descriptive_error() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/private/data.csv", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let result = connector.discover(&args, &HashSet::new(), &config).await;
+        assert!(result.is_err());
+        let err = result.err().unwrap().to_string();
+        assert!(err.contains("401"), "Error should mention status code: {}", err);
+        assert!(err.contains("authentication"), "Error should mention authentication: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_discover_follows_redirect() {
+        let server = wiremock::MockServer::start().await;
+
+        // Redirect from /old to /new
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .and(wiremock::matchers::path("/old"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(302)
+                    .insert_header("location", format!("{}/new", server.uri())),
+            )
+            .mount(&server)
+            .await;
+
+        // Final destination returns 200 with content-type
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .and(wiremock::matchers::path("/new"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/csv"),
+            )
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/old", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .unwrap();
+
+        assert_eq!(locations[0].format, "csv");
     }
 
     #[tokio::test]

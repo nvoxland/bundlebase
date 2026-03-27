@@ -3,7 +3,7 @@
 use crate::connector::{
     AttachedFileInfo, Connector, DiscoveredLocation, FetchAction, MaterializedData, SourceData,
 };
-use bundlebase_common::source_utils::{detect_format_from_bytes, filename_from_url, record_batch_stream_to_parquet};
+use bundlebase_common::source_utils::{detect_format_from_bytes, filename_from_url, http_status_error, record_batch_stream_to_parquet};
 use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};
@@ -67,12 +67,9 @@ pub async fn download_http_to_data_dir(
         .map_err(|e| BundlebaseError::from(format!("Failed to download '{}': {}", url, e)))?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Failed to download '{}': HTTP {}",
-            url,
-            response.status()
-        )
-        .into());
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(http_status_error(url, status, Some(&body)).into());
     }
 
     // Log content length if available
