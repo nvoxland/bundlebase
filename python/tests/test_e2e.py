@@ -1191,8 +1191,8 @@ async def test_view_to_polars():
     c = await c.attach(datafile("customers-0-100.csv"))
     await c.commit("Initial data")
 
-    # Create view with a simple filter
-    view_builder = await c.create_view("high_index_polars", "select * from bundle where \"Index\" > 50")
+    # Create view with a simple filter (cast to int since CSV columns are text)
+    view_builder = await c.create_view("high_index_polars", "select * from bundle where CAST(\"Index\" AS INT) > 50")
     await c.commit("Add high_index_polars view")
 
     # Open view and convert to Polars

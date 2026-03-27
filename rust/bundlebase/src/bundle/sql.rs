@@ -172,12 +172,12 @@ mod tests {
 
         let base_df = ctx.table("t").await.unwrap();
 
-        // Unqualified columns resolve against the base pack table alias ("base")
+        // Unqualified columns resolve against the base pack table alias ("bundle")
         let pack = Pack::new(join_id, "test_join", "a=x", JoinTypeOption::Inner);
         let (exprs, alias) = parse_join_expr(&ctx, "t", &pack, &base_df).await.unwrap();
-        assert_eq!(alias, "base");
+        assert_eq!(alias, "bundle");
         let preds = exprs.iter().map(|pred| format!("{:?}", pred)).collect::<Vec<_>>().join("\n");
-        assert!(preds.contains(r#"table: "base""#));
+        assert!(preds.contains(r#"table: "bundle""#));
         assert!(preds.contains(r#"name: "a""#));
 
         let pack2 = Pack::new(join_id, "test_join", "a=x and x > 3", JoinTypeOption::Inner);
