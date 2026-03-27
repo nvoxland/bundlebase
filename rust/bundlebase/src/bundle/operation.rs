@@ -2,6 +2,7 @@ mod add_column;
 mod attach_block;
 mod cast_column;
 mod create_view;
+mod delete;
 mod import_function;
 mod create_index;
 mod drop_function;
@@ -39,6 +40,7 @@ pub use crate::bundle::operation::drop_function::DropFunctionOp;
 pub use crate::bundle::operation::create_join::CreateJoinOp;
 pub use crate::bundle::operation::create_source::CreateSourceOp;
 pub use crate::bundle::operation::import_connector::ImportConnectorOp;
+pub use crate::bundle::operation::delete::DeleteOp;
 pub use crate::bundle::operation::detach_block::DetachBlockOp;
 pub use crate::bundle::operation::drop_connector::DropConnectorOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
@@ -216,6 +218,7 @@ define_any_operation! {
     CreateJoin(CreateJoinOp),
     CreateSource(CreateSourceOp),
     CreateView(CreateViewOp),
+    Delete(DeleteOp),
     ImportConnector(ImportConnectorOp),
     DetachBlock(DetachBlockOp),
     DropColumn(DropColumnOp),

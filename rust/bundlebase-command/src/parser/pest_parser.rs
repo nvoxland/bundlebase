@@ -200,7 +200,7 @@ mod tests {
         // Standard SQL that doesn't start with our keywords
         assert!(!is_command_statement("INSERT INTO table VALUES (1)"));
         assert!(!is_command_statement("UPDATE table SET x = 1"));
-        assert!(!is_command_statement("DELETE FROM table"));
+        assert!(is_command_statement("DELETE FROM bundle WHERE x = 1"));
     }
 
     #[test]

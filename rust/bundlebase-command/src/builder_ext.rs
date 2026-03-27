@@ -19,7 +19,7 @@ use async_trait::async_trait;
 
 use crate::builder::{
     AddColumnCommand, AttachCommand, CastColumnCommand, CreateIndexCommand, CreateSourceCommand,
-    DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
+    DeleteCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
     DropIndexCommand, DropJoinCommand, DropViewCommand, FetchAllCommand, FetchCommand,
     FilterCommand, ImportConnectorCommand, ImportFunctionCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -172,6 +172,10 @@ pub trait BundleBuilderExt {
         query: &str,
         params: Vec<ScalarValue>,
     ) -> Result<&Self, BundlebaseError>;
+
+    /// Delete rows matching a WHERE clause.
+    /// Returns the number of deleted rows.
+    async fn delete(&self, where_clause: &str) -> Result<usize, BundlebaseError>;
 
     /// Join with another data source.
     async fn join(
@@ -454,6 +458,15 @@ impl BundleBuilderExt for BundleBuilder {
         Ok(self)
     }
 
+    async fn delete(&self, where_clause: &str) -> Result<usize, BundlebaseError> {
+        let result = exec_cmd(self, DeleteCommand::new(where_clause)).await?;
+        // Parse count from "Deleted N rows"
+        let count = result.split_whitespace().nth(1)
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+        Ok(count)
+    }
+
     async fn join(
         &self,
         name: &str,
@@ -632,6 +645,9 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
     }
     async fn filter(&self, query: &str, params: Vec<ScalarValue>) -> Result<&Self, BundlebaseError> {
         (**self).filter(query, params).await?; Ok(self)
+    }
+    async fn delete(&self, where_clause: &str) -> Result<usize, BundlebaseError> {
+        (**self).delete(where_clause).await
     }
     async fn join(&self, name: &str, expression: &str, location: Option<&str>, join_type: JoinTypeOption) -> Result<&Self, BundlebaseError> {
         (**self).join(name, expression, location, join_type).await?; Ok(self)

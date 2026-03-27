@@ -65,7 +65,7 @@ pub use parser::Rule;
 // Re-export builder command structs
 pub use builder::{
     AddColumnCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
+    DeleteCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
     DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -365,6 +365,7 @@ impl BundleCommand {
                 // Get the command name for the error message
                 let cmd_name = match &self {
                     BundleCommand::Attach(_) => "ATTACH",
+                    BundleCommand::Delete(_) => "DELETE",
                     BundleCommand::DetachBlock(_) => "DETACH",
                     BundleCommand::Filter(_) => "FILTER",
                     BundleCommand::ImportJoin(_) => "IMPORT JOIN",
@@ -663,6 +664,8 @@ register_commands! {
         // Data modification commands
         Attach(AttachCommand) => Rule::attach_stmt,
             "ATTACH" => "ATTACH '<path>' [TO <pack>] [WITH (<options>)]",
+        Delete(DeleteCommand) => Rule::delete_stmt,
+            "DELETE" => "DELETE FROM bundle WHERE <condition>",
         DetachBlock(DetachBlockCommand) => Rule::detach_stmt,
             "DETACH" => "DETACH '<location>'",
         Filter(FilterCommand) => Rule::filter_stmt,

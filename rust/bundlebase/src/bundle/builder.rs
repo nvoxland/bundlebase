@@ -8,7 +8,7 @@ use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::function_entry::FunctionRegistry;
 use crate::bundle::{column_metadata, sql, Bundle};
 use crate::source::ConnectorRegistry;
-use crate::data::{BlockId, ObjectId, VersionedBlockId};
+use crate::data::{BlockId, ObjectId, ObjectIdAlias, VersionedBlockId};
 use crate::index::{IndexDefinition};
 use crate::io::{writable_dir_from_str, writable_dir_from_url, write_yaml, IOReadWriteDir};
 use crate::bundle_config::{PassedBundleConfig, Scope};
@@ -209,6 +209,8 @@ pub struct BundleBuilder {
     in_progress_change: RwLock<Option<BundleChange>>,
     /// Tracks uncommitted changes for this builder.
     status: RwLock<BundleStatus>,
+    /// RowIds accumulated by DELETE commands, written to a tombstone file on commit.
+    pending_tombstones: RwLock<std::collections::HashSet<bundlebase_common::RowId>>,
 }
 
 impl bundlebase_data::DataContext for BundleBuilder {
@@ -231,6 +233,7 @@ impl Clone for BundleBuilder {
             bundle: Arc::clone(&self.bundle),
             in_progress_change: RwLock::new(self.in_progress_change.read().clone()),
             status: RwLock::new(self.status.read().clone()),
+            pending_tombstones: RwLock::new(self.pending_tombstones.read().clone()),
         }
     }
 }
@@ -278,6 +281,7 @@ impl BundleBuilder {
             bundle,
             in_progress_change: RwLock::new(None),
             status: RwLock::new(BundleStatus::new()),
+            pending_tombstones: RwLock::new(std::collections::HashSet::new()),
         });
 
         // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
@@ -323,6 +327,7 @@ impl BundleBuilder {
             bundle: Arc::new(new_bundle),
             in_progress_change: RwLock::new(None),
             status: RwLock::new(BundleStatus::new()),
+            pending_tombstones: RwLock::new(std::collections::HashSet::new()),
         });
 
         // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
@@ -356,7 +361,7 @@ impl BundleBuilder {
     /// ```
     pub async fn commit(&self, message: &str) -> Result<&Self, BundlebaseError> {
         // Validate no pending filters reference temporary-only functions
-        let changes = self.status.read().changes().clone();
+        let mut changes = self.status.read().changes().clone();
         for change in &changes {
             for op in &change.operations {
                 if let AnyOperation::Filter(filter_op) = op {
@@ -393,6 +398,31 @@ impl BundleBuilder {
         // Get author from environment or use default
         let author = std::env::var("BUNDLEBASE_AUTHOR")
             .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
+
+        // Write tombstone file if there are pending tombstones from DELETE commands
+        let tombstoned_ids = std::mem::take(&mut *self.pending_tombstones.write());
+        if !tombstoned_ids.is_empty() {
+            use crate::bundle::tombstone;
+            use crate::bundle::operation::DeleteOp;
+
+            // Serialize and write tombstone file via content-addressed storage
+            let tomb_bytes = tombstone::serialize_tombstone(&tombstoned_ids);
+            debug!("[DELETE] Writing tombstone file ({} bytes)", tomb_bytes.len());
+            let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(tomb_bytes)]);
+            let write_result = manifest_dir.write_stream(Box::pin(stream), "tomb").await?;
+            let tomb_filename = write_result.file.url().path().split('/').last()
+                .ok_or_else(|| BundlebaseError::from("Failed to extract tombstone filename"))?
+                .to_string();
+            debug!("[DELETE] Tombstone file written: {}", tomb_filename);
+
+            // Add DeleteOp alongside the existing FilterOp.
+            // The FilterOp handles query-time exclusion, the DeleteOp records the tombstone.
+            // On future opens, the tombstone will be loaded for scan-level filtering.
+            let delete_op = DeleteOp::new(&tomb_filename);
+            if let Some(last_change) = changes.last_mut() {
+                last_change.operations.push(AnyOperation::Delete(delete_op));
+            }
+        }
 
         let commit_struct = commit::BundleCommit {
             url: None, //no need to set, we're just writing it and then will re-read it back
@@ -586,6 +616,90 @@ impl BundleBuilder {
             .push(op);
 
         Ok(())
+    }
+
+    /// Add RowIds to the pending tombstone set.
+    ///
+    /// These will be written to a tombstone file on commit.
+    /// Add RowIds to the pending tombstone set.
+    ///
+    /// These will be written to a tombstone file on commit.
+    pub fn mark_deleted(&self, row_ids: std::collections::HashSet<bundlebase_common::RowId>) {
+        self.pending_tombstones.write().extend(row_ids);
+    }
+
+    /// Collect RowIds of rows matching a WHERE clause from all blocks.
+    ///
+    /// Streams through each block with RowIds, evaluates the WHERE condition,
+    /// and returns the set of matching RowIds.
+    pub async fn select_row_ids(
+        &self,
+        where_clause: &str,
+    ) -> Result<std::collections::HashSet<bundlebase_common::RowId>, BundlebaseError> {
+        use futures::StreamExt;
+
+        let mut matching_ids = std::collections::HashSet::new();
+        let base_pack = self.bundle.packs().read()
+            .get(&ObjectId::BASE_PACK)
+            .cloned();
+
+        if let Some(pack) = base_pack {
+            let blocks = pack.blocks();
+            for (idx, block) in blocks.iter().enumerate() {
+                let block_ref = ObjectIdAlias::from(idx as u16);
+                let mut stream = block.reader()
+                    .extract_rowids_stream(block_ref, self.bundle.ctx(), None)
+                    .await?;
+
+                while let Some(batch_result) = stream.next().await {
+                    let rowid_batch = batch_result?;
+                    let batch = &rowid_batch.batch;
+                    let row_ids = &rowid_batch.row_ids;
+
+                    let filter_sql = format!(
+                        "SELECT _idx FROM (SELECT *, ROW_NUMBER() OVER () - 1 AS _idx FROM __delete_batch) WHERE {}",
+                        where_clause
+                    );
+
+                    let mut config = datafusion::prelude::SessionConfig::new();
+                    config.options_mut().sql_parser.enable_ident_normalization = false;
+                    let temp_ctx = SessionContext::new_with_config_rt(
+                        config,
+                        self.bundle.ctx().runtime_env(),
+                    );
+                    let mem_table = datafusion::datasource::MemTable::try_new(
+                        batch.schema(),
+                        vec![vec![batch.clone()]],
+                    )?;
+                    temp_ctx.register_table("__delete_batch", Arc::new(mem_table))?;
+
+                    let idx_df = temp_ctx.sql(&filter_sql).await
+                        .map_err(|e| BundlebaseError::from(e.to_string()))?;
+                    let idx_batches = idx_df.collect().await
+                        .map_err(|e| BundlebaseError::from(e.to_string()))?;
+
+                    for idx_batch in &idx_batches {
+                        if idx_batch.num_rows() > 0 {
+                            let idx_col = idx_batch.column(0);
+                            for i in 0..idx_batch.num_rows() {
+                                let formatter = arrow::util::display::ArrayFormatter::try_new(
+                                    idx_col.as_ref(), &Default::default()
+                                );
+                                if let Ok(f) = formatter {
+                                    if let Ok(val) = f.value(i).to_string().parse::<usize>() {
+                                        if val < row_ids.len() {
+                                            matching_ids.insert(row_ids[val]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(matching_ids)
     }
 
     /// Execute a closure within a change context, managing the change lifecycle automatically.

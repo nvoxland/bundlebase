@@ -616,6 +616,23 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def delete(self, where_clause: str) -> "SyncBundleBuilder":
+        """Delete rows matching a WHERE condition.
+
+        Args:
+            where_clause: SQL WHERE condition (e.g., "salary < 0")
+
+        Returns:
+            Self for fluent chaining
+
+        Example:
+            >>> c.delete("salary < 0")
+            >>> c.delete("status = 'inactive' AND last_login < '2020-01-01'")
+        """
+        coro = _call_original_method(self._async, "delete", where_clause)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
     def join(
         self, name: str, on: str, location: Optional[str] = None, how: str = "inner"
     ) -> "SyncBundleBuilder":

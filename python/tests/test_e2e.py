@@ -2159,3 +2159,67 @@ async def test_describe_data_column_not_found():
 
     with pytest.raises(Exception, match="not found"):
         await c.describe_data(["nonexistent_column"])
+
+
+@pytest.mark.asyncio
+async def test_delete_reduces_count():
+    """Test DELETE reduces row count immediately."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    initial_count = await c.num_rows()
+    assert initial_count == 1000
+
+    # Delete rows where salary > 200000
+    c = await c.delete("salary > 200000")
+
+    # Row count should be reduced
+    new_count = await c.num_rows()
+    assert new_count < initial_count
+    assert new_count > 0  # Not all rows deleted
+
+
+@pytest.mark.asyncio
+async def test_delete_no_match():
+    """Test DELETE with no matching rows."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    initial_count = await c.num_rows()
+    c = await c.delete("salary > 99999999")  # No rows match
+    assert await c.num_rows() == initial_count
+
+
+@pytest.mark.asyncio
+async def test_delete_commit_reopen():
+    """Test DELETE persists after commit and reopen."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as temp_dir:
+        c = await bundlebase.create(temp_dir)
+        c = await c.attach(datafile("userdata.parquet"))
+        initial_count = await c.num_rows()
+
+        c = await c.delete("salary > 200000")
+        deleted_count = await c.num_rows()
+        assert deleted_count < initial_count
+
+        await c.commit("Deleted high salary rows")
+
+        # Reopen and verify
+        c2 = await bundlebase.open(temp_dir)
+        reopened_count = await c2.num_rows()
+        assert reopened_count == deleted_count
+
+
+@pytest.mark.asyncio
+async def test_delete_query_excludes_rows():
+    """Test that queries after DELETE don't include deleted rows."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    c = await c.delete("salary > 200000")
+
+    # Query should not return any rows with salary > 200000
+    result = await c.query("SELECT salary FROM bundle WHERE salary > 200000")
+    df = await result.to_pandas()
+    assert len(df) == 0

@@ -1042,6 +1042,28 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Delete rows matching a WHERE condition.
+    ///
+    /// Returns the number of deleted rows.
+    fn delete<'py>(
+        slf: PyRef<'_, Self>,
+        where_clause: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let where_clause = where_clause.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let count = inner
+                .delete(&where_clause)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to delete rows", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
     fn num_rows<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {

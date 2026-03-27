@@ -18,6 +18,7 @@ pub mod function_entry {
     pub use bundlebase_udf::{FunctionEntry, FunctionKind, FunctionRegistry, parse_function_name, validate_kind_consistency};
 }
 mod sql;
+pub mod tombstone;
 pub mod verification;
 
 use crate::io::EMPTY_SCHEME;

@@ -42,7 +42,8 @@ statement_text  = { (quoted_string | !(";" | EOI) ~ ANY)+ }
 
 // Data modification statements - operations that change bundle data content
 data_modification_stmt = {
-    import_join_stmt
+    delete_stmt
+    | import_join_stmt
     | filter_stmt
     | attach_stmt
     | detach_stmt
@@ -196,6 +197,22 @@ import_join_stmt = {
 }
 
 import_join_flatten = { ^"flatten" ~ ^"history" }
+
+// ============================================================================
+// DELETE Statement
+// ============================================================================
+// Syntax: DELETE FROM bundle WHERE <condition>
+// Examples:
+//   DELETE FROM bundle WHERE salary < 0
+//   DELETE FROM bundle WHERE status = 'inactive' AND last_login < '2020-01-01'
+
+delete_stmt = {
+    ^"delete" ~ ^"from" ~ ^"bundle" ~ ^"where" ~ delete_where_clause
+}
+
+delete_where_clause = @{
+    (!EOI ~ ANY)+
+}
 
 // ============================================================================
 // FILTER Statement

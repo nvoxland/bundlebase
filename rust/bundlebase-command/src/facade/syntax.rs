@@ -163,6 +163,7 @@ fn usage_for_command(command_name: &str) -> Option<&'static str> {
         "UNDO" => Some(include_str!("../syntax/undo.md")),
         "VERIFY DATA" => Some(include_str!("../syntax/verify_data.md")),
         "EXPLAIN" => Some(include_str!("../syntax/explain.md")),
+        "DELETE" => Some(include_str!("../syntax/delete.md")),
         "DESCRIBE CONNECTOR" => Some(include_str!("../syntax/describe_connector.md")),
         "DESCRIBE DATA" => Some(include_str!("../syntax/describe_data.md")),
         "DESCRIBE FUNCTION" => Some(include_str!("../syntax/describe_function.md")),

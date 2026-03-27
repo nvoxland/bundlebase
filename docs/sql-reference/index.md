@@ -72,6 +72,31 @@ REPLACE '<old_location>' WITH '<new_location>'
 
 See [Attaching Data](../guide/attaching.md) for details.
 
+### DELETE
+
+Deletes rows matching a WHERE condition. Deleted rows are tracked via tombstone files and excluded from all subsequent queries. Tombstone files are written on COMMIT.
+
+```sql
+DELETE FROM bundle WHERE <condition>
+```
+
+**Examples:**
+
+```sql
+-- Remove negative sentinel values
+DELETE FROM bundle WHERE depth_m < 0
+
+-- Remove inactive records
+DELETE FROM bundle WHERE status = 'inactive' AND last_login < '2020-01-01'
+```
+
+**Python API:**
+
+```python
+c = await c.delete("depth_m < 0")
+await c.commit("Removed sentinel values")
+```
+
 ### FILTER
 
 Filters the bundle's rows using a SQL query.
