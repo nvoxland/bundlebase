@@ -20,8 +20,32 @@ use url::Url;
 /// Arguments:
 /// - `url` (required): The HTTP(S) URL to download
 /// - `format` (optional): Force the file format (csv, json, parquet).
-///   Auto-detected from the URL extension if omitted.
+///   Auto-detected from Content-Type header, URL extension, or content inspection if omitted.
 pub struct HttpConnector;
+
+/// Map a Content-Type header value to a data format string.
+fn format_from_content_type(content_type: &str) -> Option<&'static str> {
+    let mime = content_type.split(';').next().unwrap_or("").trim().to_lowercase();
+    match mime.as_str() {
+        "text/csv" => Some("csv"),
+        "application/json" | "application/x-ndjson" | "application/jsonl" => Some("json"),
+        "application/vnd.apache.parquet" => Some("parquet"),
+        "text/tab-separated-values" => Some("tsv"),
+        _ => None,
+    }
+}
+
+/// Extract format from URL file extension, if recognized.
+fn format_from_url_extension(url: &Url) -> Option<String> {
+    let filename = shared_utils::filename_from_url(url);
+    let ext = filename.rsplit('.').next()?.to_lowercase();
+    let known = ["csv", "json", "jsonl", "parquet", "tsv", "xml"];
+    if known.contains(&ext.as_str()) {
+        Some(ext)
+    } else {
+        None
+    }
+}
 
 #[async_trait]
 impl Connector for HttpConnector {
@@ -37,9 +61,9 @@ impl Connector for HttpConnector {
                 },
                 ArgSpec {
                     name: "format",
-                    description: "Force file format (csv, json, parquet). Auto-detected from URL if omitted",
+                    description: "File format (csv, json, parquet, auto). Default: auto (detect from Content-Type, URL extension, or content inspection)",
                     required: false,
-                    default: None,
+                    default: Some("auto"),
                 },
             ],
             accepts_extra_args: false,
@@ -66,27 +90,39 @@ impl Connector for HttpConnector {
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
         let url = shared_utils::require_url(args, "http")?;
 
-        // Determine format from explicit arg or URL extension
-        let format = if let Some(fmt) = args.get("format") {
-            fmt.to_lowercase()
-        } else {
-            shared_utils::filename_from_url(&url)
-                .rsplit('.')
-                .next()
-                .unwrap_or("csv")
-                .to_lowercase()
-        };
-
-        // Read version from HTTP headers (ETag/Last-Modified)
-        let version = shared_utils::read_http_version(&url)
+        // Read HEAD info (version + content-type) in one request
+        let head_info = shared_utils::read_http_head_info(&url)
             .await
-            .unwrap_or_else(|_| "unknown".to_string());
+            .unwrap_or_else(|_| shared_utils::HttpHeadInfo {
+                version: "unknown".to_string(),
+                content_type: None,
+            });
+
+        // Format detection priority:
+        // 1. Explicit format arg (unless "auto")
+        // 2. Content-Type header
+        // 3. URL file extension
+        // 4. "auto" — will be resolved by content inspection after download
+        let explicit = args.get("format").map(|f| f.to_lowercase());
+        let format = if let Some(ref fmt) = explicit {
+            if fmt != "auto" {
+                fmt.clone()
+            } else {
+                "auto".to_string()
+            }
+        } else if let Some(fmt) = head_info.content_type.as_deref().and_then(format_from_content_type) {
+            fmt.to_string()
+        } else if let Some(fmt) = format_from_url_extension(&url) {
+            fmt
+        } else {
+            "auto".to_string()
+        };
 
         Ok(vec![DiscoveredLocation {
             location: url.to_string(),
             must_copy: false,
             format,
-            version,
+            version: head_info.version,
         }])
     }
 
@@ -132,6 +168,75 @@ mod tests {
             .arg_specs
             .iter()
             .any(|s| s.name == "format" && !s.required));
+    }
+
+    #[test]
+    fn test_format_from_content_type_csv() {
+        assert_eq!(format_from_content_type("text/csv"), Some("csv"));
+    }
+
+    #[test]
+    fn test_format_from_content_type_csv_with_charset() {
+        assert_eq!(format_from_content_type("text/csv; charset=utf-8"), Some("csv"));
+    }
+
+    #[test]
+    fn test_format_from_content_type_json() {
+        assert_eq!(format_from_content_type("application/json"), Some("json"));
+    }
+
+    #[test]
+    fn test_format_from_content_type_ndjson() {
+        assert_eq!(format_from_content_type("application/x-ndjson"), Some("json"));
+    }
+
+    #[test]
+    fn test_format_from_content_type_parquet() {
+        assert_eq!(format_from_content_type("application/vnd.apache.parquet"), Some("parquet"));
+    }
+
+    #[test]
+    fn test_format_from_content_type_tsv() {
+        assert_eq!(format_from_content_type("text/tab-separated-values"), Some("tsv"));
+    }
+
+    #[test]
+    fn test_format_from_content_type_octet_stream() {
+        assert_eq!(format_from_content_type("application/octet-stream"), None);
+    }
+
+    #[test]
+    fn test_format_from_content_type_html() {
+        assert_eq!(format_from_content_type("text/html"), None);
+    }
+
+    #[test]
+    fn test_format_from_content_type_empty() {
+        assert_eq!(format_from_content_type(""), None);
+    }
+
+    #[test]
+    fn test_format_from_url_extension_csv() {
+        let url = Url::parse("https://example.com/data.csv").unwrap();
+        assert_eq!(format_from_url_extension(&url), Some("csv".to_string()));
+    }
+
+    #[test]
+    fn test_format_from_url_extension_parquet() {
+        let url = Url::parse("https://example.com/data.parquet").unwrap();
+        assert_eq!(format_from_url_extension(&url), Some("parquet".to_string()));
+    }
+
+    #[test]
+    fn test_format_from_url_extension_none_for_api_url() {
+        let url = Url::parse("https://api.example.com/download?type=data").unwrap();
+        assert_eq!(format_from_url_extension(&url), None);
+    }
+
+    #[test]
+    fn test_format_from_url_extension_none_for_unknown() {
+        let url = Url::parse("https://example.com/file.xyz").unwrap();
+        assert_eq!(format_from_url_extension(&url), None);
     }
 
     #[test]
@@ -207,6 +312,176 @@ mod tests {
             .unwrap();
 
         assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0].format, "json");
+    }
+
+    #[tokio::test]
+    async fn test_discover_explicit_auto_skips_content_type_and_extension() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/csv"),
+            )
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/data.csv", server.uri()));
+        args.insert("format".to_string(), "auto".to_string());
+        let config = crate::test_utils::test_config();
+
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .unwrap();
+
+        // Explicit auto bypasses content-type and extension detection
+        assert_eq!(locations[0].format, "auto");
+    }
+
+    #[tokio::test]
+    async fn test_discover_format_from_content_type() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/api/data", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .unwrap();
+
+        assert_eq!(locations[0].format, "json");
+    }
+
+    #[tokio::test]
+    async fn test_discover_explicit_format_overrides_content_type() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/csv"),
+            )
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/api/data", server.uri()));
+        args.insert("format".to_string(), "parquet".to_string());
+        let config = crate::test_utils::test_config();
+
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .unwrap();
+
+        assert_eq!(locations[0].format, "parquet");
+    }
+
+    #[tokio::test]
+    async fn test_discover_content_type_over_url_extension() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json"),
+            )
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/data.csv", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .unwrap();
+
+        // Content-Type wins over URL extension
+        assert_eq!(locations[0].format, "json");
+    }
+
+    #[tokio::test]
+    async fn test_discover_url_extension_when_octet_stream() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/octet-stream"),
+            )
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/data.parquet", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .unwrap();
+
+        // Falls through to URL extension
+        assert_eq!(locations[0].format, "parquet");
+    }
+
+    #[tokio::test]
+    async fn test_discover_auto_when_nothing_matches() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/octet-stream"),
+            )
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/api/data", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .unwrap();
+
+        assert_eq!(locations[0].format, "auto");
+    }
+
+    #[tokio::test]
+    async fn test_discover_no_content_type_falls_to_extension() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/data.json", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let locations = connector
+            .discover(&args, &HashSet::new(), &config)
+            .await
+            .unwrap();
+
         assert_eq!(locations[0].format, "json");
     }
 

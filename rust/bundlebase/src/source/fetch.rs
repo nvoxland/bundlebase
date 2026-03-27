@@ -3,7 +3,7 @@
 use crate::connector::{
     AttachedFileInfo, Connector, DiscoveredLocation, FetchAction, MaterializedData, SourceData,
 };
-use bundlebase_common::source_utils::{filename_from_url, record_batch_stream_to_parquet};
+use bundlebase_common::source_utils::{detect_format_from_bytes, filename_from_url, record_batch_stream_to_parquet};
 use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};
@@ -87,10 +87,26 @@ pub async fn download_http_to_data_dir(
 
     info!("Downloaded {} ({:.1} MB)", url, data.len() as f64 / 1_048_576.0);
 
+    // Resolve "auto" format hint by inspecting content
+    let resolved_hint = match format_hint {
+        Some("auto") => {
+            match detect_format_from_bytes(&data) {
+                Some(fmt) => Some(fmt),
+                None => {
+                    return Err(BundlebaseError::from(format!(
+                        "Could not detect format of data from '{}'. Specify format explicitly with WITH (format='csv')",
+                        url
+                    )));
+                }
+            }
+        }
+        other => other,
+    };
+
     let mut filename = filename_from_url(url);
 
     // If the filename has no recognized data extension and we have a format hint, append it
-    if let Some(fmt) = format_hint {
+    if let Some(fmt) = resolved_hint {
         let known_extensions = ["csv", "json", "jsonl", "parquet", "tsv", "xml"];
         let has_known_ext = filename
             .rsplit('.')

@@ -70,7 +70,13 @@ Downloads data from a single HTTP(S) URL. Use this for any direct link to a CSV,
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `url` | Yes | The HTTP(S) URL to download |
-| `format` | No | Force file format (`csv`, `json`, `parquet`). Auto-detected from URL extension if omitted |
+| `format` | No | File format: `csv`, `json`, `parquet`, `tsv`, or `auto`. Default: `auto` |
+
+**Format auto-detection:** When `format` is `auto` (the default), the connector detects the data format using this priority:
+
+1. **Content-Type header** — from the HTTP response (e.g., `text/csv`, `application/json`)
+2. **URL file extension** — recognized extensions: `.csv`, `.json`, `.jsonl`, `.parquet`, `.tsv`, `.xml`
+3. **Content inspection** — examines the downloaded bytes (Parquet magic bytes, JSON structure, or CSV as default)
 
 === "SQL"
 
@@ -78,7 +84,10 @@ Downloads data from a single HTTP(S) URL. Use this for any direct link to a CSV,
     -- Download a CSV from a URL
     CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv')
 
-    -- Force format when URL has no extension
+    -- API URLs work without specifying format (auto-detected from response)
+    CREATE SOURCE USING http WITH (url = 'https://api.example.com/data?query=results')
+
+    -- Force format when auto-detection doesn't match
     CREATE SOURCE USING http WITH (url = 'https://api.example.com/data?format=csv', format = 'csv')
     ```
 

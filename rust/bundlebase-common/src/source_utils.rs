@@ -112,21 +112,62 @@ pub fn filename_from_url(url: &Url) -> String {
         .unwrap_or_else(|| "data".to_string())
 }
 
-/// Read version from an HTTP(S) URL using ETag or Last-Modified header.
-pub async fn read_http_version(url: &Url) -> Result<String, BundlebaseError> {
+/// Information extracted from an HTTP HEAD response.
+#[derive(Debug, Clone)]
+pub struct HttpHeadInfo {
+    /// Version string derived from ETag or Last-Modified header.
+    pub version: String,
+    /// Raw Content-Type header value, if present (e.g., "text/csv; charset=utf-8").
+    pub content_type: Option<String>,
+}
+
+/// Read version and content-type from an HTTP(S) URL via HEAD request.
+pub async fn read_http_head_info(url: &Url) -> Result<HttpHeadInfo, BundlebaseError> {
     let response = reqwest::Client::new()
         .head(url.as_str())
         .send()
         .await
         .map_err(|e| BundlebaseError::from(format!("Failed to HEAD '{}': {}", url, e)))?;
 
-    if let Some(etag) = response.headers().get("etag") {
-        return Ok(etag.to_str().unwrap_or("unknown").to_string());
+    let version = if let Some(etag) = response.headers().get("etag") {
+        etag.to_str().unwrap_or("unknown").to_string()
+    } else if let Some(lm) = response.headers().get("last-modified") {
+        lm.to_str().unwrap_or("unknown").to_string()
+    } else {
+        format!("status-{}", response.status().as_u16())
+    };
+
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    Ok(HttpHeadInfo {
+        version,
+        content_type,
+    })
+}
+
+/// Detect data format by inspecting the first bytes of content.
+///
+/// Returns `"parquet"`, `"json"`, or `"csv"`. Returns `None` for empty content.
+pub fn detect_format_from_bytes(data: &[u8]) -> Option<&'static str> {
+    if data.len() >= 4 && &data[0..4] == b"PAR1" {
+        return Some("parquet");
     }
-    if let Some(lm) = response.headers().get("last-modified") {
-        return Ok(lm.to_str().unwrap_or("unknown").to_string());
+    // Skip BOM if present
+    let skip = if data.len() >= 3 && &data[0..3] == &[0xEF, 0xBB, 0xBF] {
+        3
+    } else {
+        0
+    };
+    let first_non_ws = data[skip..].iter().find(|b| !b.is_ascii_whitespace());
+    match first_non_ws {
+        Some(b'{') | Some(b'[') => Some("json"),
+        Some(_) => Some("csv"),
+        None => None,
     }
-    Ok(format!("status-{}", response.status().as_u16()))
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +306,51 @@ mod tests {
     fn test_filename_from_url() {
         let url = Url::parse("http://example.com/path/to/file.csv").expect("valid url");
         assert_eq!(filename_from_url(&url), "file.csv");
+    }
+
+    #[test]
+    fn test_detect_format_parquet_magic() {
+        let data = b"PAR1\x00\x00\x00\x00some parquet data";
+        assert_eq!(detect_format_from_bytes(data), Some("parquet"));
+    }
+
+    #[test]
+    fn test_detect_format_json_object() {
+        assert_eq!(detect_format_from_bytes(b"  {\"key\": \"value\"}"), Some("json"));
+    }
+
+    #[test]
+    fn test_detect_format_json_array() {
+        assert_eq!(detect_format_from_bytes(b"[1,2,3]"), Some("json"));
+    }
+
+    #[test]
+    fn test_detect_format_csv() {
+        assert_eq!(detect_format_from_bytes(b"col1,col2\na,b"), Some("csv"));
+    }
+
+    #[test]
+    fn test_detect_format_csv_with_bom() {
+        let mut data = vec![0xEF, 0xBB, 0xBF];
+        data.extend_from_slice(b"col1,col2\na,b");
+        assert_eq!(detect_format_from_bytes(&data), Some("csv"));
+    }
+
+    #[test]
+    fn test_detect_format_json_with_bom() {
+        let mut data = vec![0xEF, 0xBB, 0xBF];
+        data.extend_from_slice(b"{\"key\": 1}");
+        assert_eq!(detect_format_from_bytes(&data), Some("json"));
+    }
+
+    #[test]
+    fn test_detect_format_empty() {
+        assert_eq!(detect_format_from_bytes(b""), None);
+    }
+
+    #[test]
+    fn test_detect_format_whitespace_only() {
+        assert_eq!(detect_format_from_bytes(b"   \n\t  "), None);
     }
 
     #[test]

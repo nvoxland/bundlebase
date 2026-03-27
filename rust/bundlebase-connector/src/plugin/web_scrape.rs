@@ -95,8 +95,9 @@ impl Connector for WebScrapeConnector {
                 .to_string();
 
             // Read version from HTTP headers
-            let version = shared_utils::read_http_version(&url)
+            let version = shared_utils::read_http_head_info(&url)
                 .await
+                .map(|info| info.version)
                 .unwrap_or_else(|_| "unknown".to_string());
 
             locations.push(DiscoveredLocation {
