@@ -17,8 +17,10 @@ mod rename_temp_function;
 mod set_config;
 mod show;
 mod show_count;
+pub mod describe_data;
 mod syntax;
 
+pub use describe_data::DescribeDataCommand;
 pub use describe_connector::DescribeConnectorCommand;
 pub use describe_function::DescribeFunctionCommand;
 pub use export::ExportCommand;

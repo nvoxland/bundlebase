@@ -372,6 +372,23 @@ class SyncBundle:
         async_result = _loop_manager.run_sync(coro)
         return SyncQueryResult(async_result)
 
+    def describe_data(self, columns) -> "SyncQueryResult":
+        """Describe data quality and statistics for specified columns.
+
+        Returns per-column stats: min, max, avg, null counts, top 10 values,
+        and top 10 invalid values (when expected types are specified).
+
+        Args:
+            columns: List of column names (str) or tuples of (column_name, expected_type).
+                     Example: ["age", "salary"] or [("price", "Float64"), "name"]
+
+        Returns:
+            SyncQueryResult with column statistics
+        """
+        coro = _call_original_method(self._async, "describe_data", columns)
+        async_result = _loop_manager.run_sync(coro)
+        return SyncQueryResult(async_result)
+
     def import_temp_connector(
         self, name: str, from_: str,
         platform: str = "*/*"
@@ -680,6 +697,23 @@ class SyncBundleBuilder(SyncBundle):
             SyncQueryResult with function metadata
         """
         coro = _call_original_method(self._async, "describe_function", name)
+        async_result = _loop_manager.run_sync(coro)
+        return SyncQueryResult(async_result)
+
+    def describe_data(self, columns) -> "SyncQueryResult":
+        """Describe data quality and statistics for specified columns.
+
+        Returns per-column stats: min, max, avg, null counts, top 10 values,
+        and top 10 invalid values (when expected types are specified).
+
+        Args:
+            columns: List of column names (str) or tuples of (column_name, expected_type).
+                     Example: ["age", "salary"] or [("price", "Float64"), "name"]
+
+        Returns:
+            SyncQueryResult with column statistics
+        """
+        coro = _call_original_method(self._async, "describe_data", columns)
         async_result = _loop_manager.run_sync(coro)
         return SyncQueryResult(async_result)
 

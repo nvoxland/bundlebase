@@ -277,6 +277,24 @@ async def _wrapped_builder_query(self, sql: str, params=None, hard_limit=None) -
 PyBundle.query = _wrapped_bundle_query
 PyBundleBuilder.query = _wrapped_builder_query
 
+# Wrap describe_data() to return QueryResult
+_original_bundle_describe_data = PyBundle.describe_data
+_original_builder_describe_data = PyBundleBuilder.describe_data
+register_original_method("describe_data", _original_builder_describe_data)
+
+async def _wrapped_bundle_describe_data(self, columns) -> QueryResult:
+    """Describe data quality and statistics for specified columns."""
+    stream = await _original_bundle_describe_data(self, columns)
+    return QueryResult(stream)
+
+async def _wrapped_builder_describe_data(self, columns) -> QueryResult:
+    """Describe data quality and statistics for specified columns."""
+    stream = await _original_builder_describe_data(self, columns)
+    return QueryResult(stream)
+
+PyBundle.describe_data = _wrapped_bundle_describe_data
+PyBundleBuilder.describe_data = _wrapped_builder_describe_data
+
 # Wrap extend() on PyBundle to return an ExtendChain
 _original_extend = PyBundle.extend
 register_original_method("extend", _original_extend)

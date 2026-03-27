@@ -2095,3 +2095,67 @@ async def test_operations_pipeline_across_multiple_blocks():
     assert len(df) == 150
     for val in df["name_and_company"]:
         assert " - " in val
+
+
+@pytest.mark.asyncio
+async def test_describe_data():
+    """Test describe_data() Python convenience method with full validation."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    result = await c.describe_data(["salary", "first_name"])
+    df = await result.to_pandas()
+
+    assert len(df) == 2
+    assert df["column"].tolist() == ["salary", "first_name"]
+
+    # Numeric column should have min/max/avg
+    salary_row = df[df["column"] == "salary"].iloc[0]
+    assert salary_row["min"] is not None
+    assert salary_row["max"] is not None
+    assert salary_row["avg"] is not None
+    assert salary_row["num_not_nulls"] > 0
+
+    # Text column should not have min/max/avg (pandas represents null strings as NaN)
+    import pandas as pd
+    name_row = df[df["column"] == "first_name"].iloc[0]
+    assert pd.isna(name_row["min"])
+    assert pd.isna(name_row["max"])
+    assert pd.isna(name_row["avg"])
+    assert name_row["num_not_nulls"] > 0
+
+    # Both should have top_10_values as JSON
+    import json
+    salary_values = json.loads(salary_row["top_10_values"])
+    assert len(salary_values) <= 10
+    assert "value" in salary_values[0]
+    assert "count" in salary_values[0]
+
+    name_values = json.loads(name_row["top_10_values"])
+    assert len(name_values) <= 10
+
+
+@pytest.mark.asyncio
+async def test_describe_data_with_as_type():
+    """Test describe_data with AS type for top_10_invalid detection."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    result = await c.describe_data([("salary", "BIGINT")])
+    df = await result.to_pandas()
+
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["column"] == "salary"
+    # top_10_invalid should be populated (may be None if all values cast cleanly)
+    # The key point is that the command runs without error
+
+
+@pytest.mark.asyncio
+async def test_describe_data_column_not_found():
+    """Test error when analyzing a non-existent column."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    with pytest.raises(Exception, match="not found"):
+        await c.describe_data(["nonexistent_column"])

@@ -14,7 +14,8 @@ use datafusion::execution::SendableRecordBatchStream;
 use crate::response::{CommandResponse, OutputShape};
 use crate::{BundleCommand, FacadeCommand};
 use crate::parser::{is_command_statement, parse_command};
-use crate::{ExplainPlanCommand, ImportTempConnectorCommand, ImportTempFunctionCommand};
+use crate::{DescribeDataCommand, ExplainPlanCommand, ImportTempConnectorCommand, ImportTempFunctionCommand};
+use crate::facade::describe_data::DescribeDataColumnSpec;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -72,6 +73,15 @@ pub trait BundleFacadeCommandExt {
         from: &str,
         platform: &str,
     ) -> Result<(), BundlebaseError>;
+
+    /// Analyze data quality and statistics for specified columns.
+    ///
+    /// Returns per-column stats: min, max, avg, null counts, top values, and
+    /// invalid values (when expected types are specified).
+    async fn describe_data(
+        &self,
+        columns: Vec<(String, Option<String>)>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError>;
 
     /// Execute a read-only command on this bundle.
     async fn execute_facade_command(
@@ -141,6 +151,24 @@ async fn default_explain(
     response.into_stream()
 }
 
+async fn default_describe_data(
+    ext: &(dyn BundleFacadeCommandExt + Send + Sync),
+    columns: Vec<(String, Option<String>)>,
+) -> Result<SendableRecordBatchStream, BundlebaseError> {
+    let specs: Vec<DescribeDataColumnSpec> = columns
+        .into_iter()
+        .map(|(name, expected_type)| DescribeDataColumnSpec {
+            name,
+            expected_type,
+        })
+        .collect();
+    let cmd = DescribeDataCommand { columns: specs };
+    let response = ext
+        .execute_facade_command(FacadeCommand::DescribeData(cmd))
+        .await?;
+    response.into_stream()
+}
+
 async fn default_import_temp_connector(
     ext: &(dyn BundleFacadeCommandExt + Send + Sync),
     name: &str,
@@ -207,6 +235,13 @@ impl BundleFacadeCommandExt for Bundle {
         default_import_temp_function(self, name, from, platform).await
     }
 
+    async fn describe_data(
+        &self,
+        columns: Vec<(String, Option<String>)>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        default_describe_data(self, columns).await
+    }
+
     async fn execute_facade_command(
         &self,
         cmd: FacadeCommand,
@@ -264,6 +299,13 @@ impl BundleFacadeCommandExt for BundleBuilder {
         platform: &str,
     ) -> Result<(), BundlebaseError> {
         default_import_temp_function(self, name, from, platform).await
+    }
+
+    async fn describe_data(
+        &self,
+        columns: Vec<(String, Option<String>)>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        default_describe_data(self, columns).await
     }
 
     async fn execute_facade_command(
@@ -334,6 +376,13 @@ impl BundleFacadeCommandExt for Arc<dyn BundleFacade> {
         default_import_temp_function(self, name, from, platform).await
     }
 
+    async fn describe_data(
+        &self,
+        columns: Vec<(String, Option<String>)>,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        default_describe_data(self, columns).await
+    }
+
     async fn execute_facade_command(
         &self,
         cmd: FacadeCommand,
@@ -364,6 +413,7 @@ impl BundleFacadeCommandExt for Arc<Bundle> {
     async fn explain(&self, verbose: bool, analyze: bool, format: datafusion::logical_expr::ExplainFormat, sql: Option<&str>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).explain(verbose, analyze, format, sql).await }
     async fn import_temp_connector(&self, name: &str, from: &str, platform: &str) -> Result<(), BundlebaseError> { (**self).import_temp_connector(name, from, platform).await }
     async fn import_temp_function(&self, name: &str, from: &str, platform: &str) -> Result<(), BundlebaseError> { (**self).import_temp_function(name, from, platform).await }
+    async fn describe_data(&self, columns: Vec<(String, Option<String>)>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).describe_data(columns).await }
     async fn execute_facade_command(&self, cmd: FacadeCommand) -> Result<Box<dyn CommandResponse>, BundlebaseError> { (**self).execute_facade_command(cmd).await }
     async fn execute_command(&self, cmd: BundleCommand) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         let facade_cmd = cmd.into_facade_command()?;
@@ -379,6 +429,7 @@ impl BundleFacadeCommandExt for Arc<BundleBuilder> {
     async fn explain(&self, verbose: bool, analyze: bool, format: datafusion::logical_expr::ExplainFormat, sql: Option<&str>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).explain(verbose, analyze, format, sql).await }
     async fn import_temp_connector(&self, name: &str, from: &str, platform: &str) -> Result<(), BundlebaseError> { (**self).import_temp_connector(name, from, platform).await }
     async fn import_temp_function(&self, name: &str, from: &str, platform: &str) -> Result<(), BundlebaseError> { (**self).import_temp_function(name, from, platform).await }
+    async fn describe_data(&self, columns: Vec<(String, Option<String>)>) -> Result<SendableRecordBatchStream, BundlebaseError> { (**self).describe_data(columns).await }
     async fn execute_facade_command(&self, cmd: FacadeCommand) -> Result<Box<dyn CommandResponse>, BundlebaseError> { (**self).execute_facade_command(cmd).await }
     async fn execute_command(&self, cmd: BundleCommand) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         cmd.execute(&**self).await

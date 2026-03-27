@@ -645,6 +645,55 @@ DESCRIBE FUNCTION acme.double_val
 +------------------+--------+-------------+-------------+---------+-------------------------+----------+-----------+
 ```
 
+### DESCRIBE DATA
+
+Returns per-column statistics for specified columns: min, max, average, null counts, most frequent values, and values that fail to cast to an expected type.
+
+```sql
+DESCRIBE DATA IN <col1> [AS <type>], <col2> [AS <type>], ...
+```
+
+The optional `AS <type>` specifies an expected SQL data type (e.g., `BIGINT`, `DOUBLE`, `VARCHAR`). When provided, the `top_10_invalid` column shows values that fail `TRY_CAST` to that type — useful for detecting sentinel values like `-99` or `N/A` in data that should be numeric.
+
+The result is a table with one row per column:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `column` | string | Column name |
+| `data_type` | string | Actual Arrow data type |
+| `min` | string | Minimum value (null for text columns) |
+| `max` | string | Maximum value (null for text columns) |
+| `avg` | string | Average value (null for text and date columns) |
+| `num_nulls` | integer | Count of null values |
+| `num_not_nulls` | integer | Count of non-null values |
+| `top_10_values` | string | JSON array of `[{"value": "x", "count": 5}, ...]` |
+| `top_10_invalid` | string | JSON array of values that fail to cast (only when `AS <type>` specified) |
+
+**Examples:**
+
+```sql
+-- Basic column profiling
+DESCRIBE DATA IN salary, first_name
+
+-- Detect sentinel values: find non-numeric values in a column expected to be DOUBLE
+DESCRIBE DATA IN secchi_depth_m AS DOUBLE, station_name
+
+-- Check for values that can't be cast to integer
+DESCRIBE DATA IN id AS BIGINT
+```
+
+**Python API:**
+
+```python
+# Simple column list
+result = await bundle.describe_data(["salary", "first_name"])
+df = await result.to_pandas()
+
+# With expected type for sentinel detection
+result = await bundle.describe_data([("secchi_depth_m", "DOUBLE"), "station_name"])
+df = await result.to_pandas()
+```
+
 ### Wildcard Function Discovery
 
 Discovers and registers all functions exported by a shared library or IPC executable in a single command using the wildcard `namespace.*` syntax. Uses the manifest discovery protocol.

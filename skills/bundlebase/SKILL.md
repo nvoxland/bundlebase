@@ -702,5 +702,7 @@ For inspecting bundle data and metadata, use SQL commands directly:
 | `SHOW STATUS` | Show uncommitted changes |
 | `SHOW HISTORY` | Show version history |
 | `SHOW DETAILS` | Show bundle metadata |
+| `DESCRIBE DATA IN col1, col2` | Profile columns (min/max/avg/nulls/top values) |
+| `DESCRIBE DATA IN col AS TYPE` | Detect sentinel values that fail to cast |
 
 These SQL commands also work with `bundlebase query`, e.g. `bundlebase query --bundle ./data --format json "SHOW COLUMNS"`.

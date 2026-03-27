@@ -116,6 +116,7 @@ metadata_stmt = {
     | show_columns_stmt
     | show_count_stmt
     | syntax_stmt
+    | describe_data_stmt
     | describe_connector_stmt
     | describe_function_stmt
     | set_name_stmt
@@ -765,4 +766,21 @@ describe_connector_stmt = {
 
 describe_function_stmt = {
     ^"describe" ~ ^"function" ~ dotted_identifier
+}
+
+// ============================================================================
+// DESCRIBE DATA Statement
+// ============================================================================
+// Syntax: DESCRIBE DATA IN <col1> [AS <type>], <col2> [AS <type>], ...
+// Examples:
+//   DESCRIBE DATA IN age, salary
+//   DESCRIBE DATA IN secchi_depth_m AS DOUBLE, station_name
+//   DESCRIBE DATA IN "First Name", id AS BIGINT
+
+describe_data_stmt = {
+    ^"describe" ~ ^"data" ~ ^"in" ~ describe_data_column_spec ~ ("," ~ describe_data_column_spec)*
+}
+
+describe_data_column_spec = {
+    identifier ~ (^"as" ~ identifier)?
 }

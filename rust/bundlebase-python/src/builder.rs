@@ -1158,6 +1158,58 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Describe data quality and statistics for specified columns.
+    ///
+    /// Returns a record batch stream with columns: column, data_type, min, max,
+    /// avg, num_nulls, num_not_nulls, top_10_values, top_10_invalid.
+    ///
+    /// # Arguments
+    /// * `columns` - List of column names (str) or tuples of (column_name, expected_type)
+    fn describe_data<'py>(
+        &self,
+        columns: Vec<Py<PyAny>>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        use pyo3::types::{PyString, PyTuple};
+        let inner = self.inner.clone();
+
+        // Parse columns: accept strings or (name, type) tuples
+        let mut col_specs: Vec<(String, Option<String>)> = Vec::new();
+        for col in &columns {
+            let col_ref = col.bind(py);
+            if let Ok(s) = col_ref.downcast::<PyString>() {
+                col_specs.push((s.to_string(), None));
+            } else if let Ok(t) = col_ref.downcast::<PyTuple>() {
+                let name = t.get_item(0)?.extract::<String>()?;
+                let expected_type = if t.len() > 1 {
+                    Some(t.get_item(1)?.extract::<String>()?)
+                } else {
+                    None
+                };
+                col_specs.push((name, expected_type));
+            } else {
+                return Err(pyo3::exceptions::PyTypeError::new_err(
+                    "describe_data columns must be strings or (name, type) tuples",
+                ));
+            }
+        }
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let stream = inner
+                .describe_data(col_specs)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to describe data", e))?;
+            let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    super::record_batch_stream::PyRecordBatchStream::new(stream, schema),
+                )
+                .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
     /// Describe a registered function's metadata.
     ///
     /// Returns a record batch stream with columns: name, kind, input_types,
