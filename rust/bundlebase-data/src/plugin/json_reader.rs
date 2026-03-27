@@ -1,8 +1,9 @@
 use crate::DataContext;
 use crate::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::plugin::ReaderPlugin;
-use crate::{BlockId, DataReader, LineOrientedFormat};
-use bundlebase_index::RowIdIndex;
+use crate::{BlockId, DataReader, LineOrientedFormat, PhysicalRowGroupDataSource, RowId};
+use crate::physical_row_group_layout::{PhysicalRowGroupLayout, resolve_row_numbers_to_byte_offsets};
+use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadWriteDir;
 use bundlebase_common::BundlebaseError;
 use arrow::datatypes::SchemaRef;
@@ -54,7 +55,7 @@ impl ReaderPlugin for JsonPlugin {
         block_id: &BlockId,
         bundle: &dyn DataContext,
         schema: Option<SchemaRef>,
-        _layout: Option<String>,
+        layout: Option<String>,
         expected_version: Option<String>,
         _read_options: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
@@ -62,11 +63,20 @@ impl ReaderPlugin for JsonPlugin {
             return Ok(None);
         }
 
+        let layout = match layout {
+            None => None,
+            Some(x) => Some(ObjectStoreFile::from_str(
+                x.as_str(),
+                bundle.data_context_dir().as_ref(),
+                bundle.config_provider(),
+            )?),
+        };
+
         let reader = self
             .inner
             .reader(source, bundle, schema, expected_version)
             .await?;
-        Ok(Some(Arc::new(JsonReader::new(reader, *block_id))))
+        Ok(Some(Arc::new(JsonReader::new(reader, block_id, &layout))))
     }
 }
 
@@ -74,11 +84,20 @@ impl ReaderPlugin for JsonPlugin {
 pub struct JsonReader {
     inner: FileReader<JsonFormatConfig>,
     block_id: BlockId,
+    layout: Option<ObjectStoreFile>,
 }
 
 impl JsonReader {
-    pub fn new(inner: FileReader<JsonFormatConfig>, block_id: BlockId) -> Self {
-        Self { inner, block_id }
+    pub fn new(
+        inner: FileReader<JsonFormatConfig>,
+        block_id: &BlockId,
+        layout: &Option<ObjectStoreFile>,
+    ) -> Self {
+        Self {
+            inner,
+            block_id: *block_id,
+            layout: layout.clone(),
+        }
     }
 }
 
@@ -101,10 +120,36 @@ impl DataReader for JsonReader {
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
-        row_ids: Option<&[crate::RowId]>,
+        row_ids: Option<&[RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
+        if let Some(ids) = row_ids {
+            let row_numbers: Vec<u32> = ids.iter().map(|id| id.row_number()).collect();
+            let byte_offsets = resolve_row_numbers_to_byte_offsets(
+                self.inner.file().as_object_store_file(),
+                self.layout.as_ref(),
+                &row_numbers,
+                false, // no header in JSON Lines
+            )
+            .await
+            .map_err(|e| DataFusionError::External(e))?;
+
+            let schema = self
+                .inner
+                .read_schema()
+                .await
+                .map_err(|e| DataFusionError::External(e))?
+                .ok_or_else(|| DataFusionError::Internal("No schema available".to_string()))?;
+
+            return Ok(Arc::new(PhysicalRowGroupDataSource::new(
+                self.inner.file().as_object_store_file(),
+                schema,
+                byte_offsets,
+                projection.cloned(),
+                LineOrientedFormat::JsonLines,
+            )));
+        }
         self.inner
-            .data_source(projection, filters, limit, row_ids)
+            .data_source(projection, filters, limit)
             .await
     }
 
@@ -129,18 +174,14 @@ impl DataReader for JsonReader {
         &self,
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
-        use crate::ObjectIdAlias;
-        // Use ObjectIdAlias(0) as placeholder; the actual ref is remapped by RowIdStreamAdapter
-        let index_file = RowIdIndex::new()
-            .build(
-                self.inner.file().as_object_store_file(),
-                data_dir,
-                ObjectIdAlias::from(0u16),
-                false,
-            )
-            .await?;
+        let result = PhysicalRowGroupLayout::build_and_write(
+            self.inner.file().as_object_store_file(),
+            data_dir,
+            false, // no header to skip in JSON Lines
+        )
+        .await?;
 
-        Ok(Some(index_file))
+        Ok(result)
     }
 }
 

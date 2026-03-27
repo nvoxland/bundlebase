@@ -2,8 +2,9 @@
 
 pub mod plugin;
 pub mod reader_factory;
-mod rowid_offset_data_source;
-mod rowid_provider;
+mod layout_cache;
+pub mod physical_row_group_layout;
+mod physical_row_group_data_source;
 mod rowid_stream;
 
 use bundlebase_common::config::ConfigProvider;
@@ -19,8 +20,9 @@ use datafusion::prelude::SessionContext;
 pub use bundlebase_common::object_id::{BlockId, ObjectId, ObjectIdAlias};
 pub use reader_factory::DataReaderFactory;
 pub use bundlebase_common::row_id::{RowId, RowIdBatch, SendableRowIdBatchStream};
-pub use rowid_offset_data_source::{LineOrientedFormat, RowIdOffsetDataSource};
-pub use rowid_provider::{LayoutRowIdProvider, RowIdProvider};
+pub use layout_cache::GLOBAL_LAYOUT_CACHE;
+pub use physical_row_group_layout::PhysicalRowGroupLayout;
+pub use physical_row_group_data_source::{LineOrientedFormat, PhysicalRowGroupDataSource};
 pub use rowid_stream::RowIdStreamAdapter;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -72,10 +74,6 @@ pub trait DataReader: Sync + Send + Debug {
         Err("read_rows_by_ids not implemented for this adapter".into())
     }
 
-    fn rowid_provider(&self) -> Result<Arc<dyn RowIdProvider>, BundlebaseError> {
-        Err("rowid_generator not implemented for this adapter".into())
-    }
-
     /// Return format-specific options detected during schema inference.
     ///
     /// These options are stored in the attach operation and passed back when
@@ -85,9 +83,8 @@ pub trait DataReader: Sync + Send + Debug {
         HashMap::new()
     }
 
-    /// Stream data with RowIds for index building
-    /// Each batch is paired with RowIds indicating the file position of each row
-    /// Used by CreateIndexOp to build indexes that reference actual file positions
+    /// Stream data with RowIds for index building.
+    /// Each batch is paired with sequential logical RowIds.
     ///
     /// # Arguments
     /// * `block_ref` - The compact ObjectIdAlias to embed in each RowId for this block
@@ -108,11 +105,8 @@ pub trait DataReader: Sync + Send + Debug {
             .open(0, ctx.task_ctx())
             .map_err(|e| Box::new(e) as BundlebaseError)?;
 
-        let provider = self.rowid_provider()?;
-
         Ok(Box::pin(RowIdStreamAdapter::new(
             record_batch_stream,
-            provider,
             block_ref,
         )))
     }

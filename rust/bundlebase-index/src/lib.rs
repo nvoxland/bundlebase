@@ -16,8 +16,6 @@ mod index_trait;
 pub mod index_scan_exec;
 mod index_cache;
 mod index_selector;
-mod rowid_cache;
-mod rowid_index;
 mod temp_dir;
 pub mod text_column_index;
 
@@ -31,7 +29,5 @@ pub use index_definition::{IndexDefinition, IndexType, IndexTypeConfigError, Par
 pub use index_selector::IndexSelector;
 pub use index_trait::Index;
 pub use index_cache::GLOBAL_INDEX_CACHE;
-pub use rowid_cache::GLOBAL_ROWID_CACHE;
-pub use rowid_index::RowIdIndex;
 pub use temp_dir::TempDirManager;
 pub use text_column_index::{TextIndex, TextIndexBuilder};

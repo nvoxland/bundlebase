@@ -8,14 +8,17 @@ Bundlebase provides a column indexing system for query optimization. Indexes acc
 
 ### RowId Structure
 
-Each row has a unique identifier combining block and offset:
+Each row has a unique logical identifier combining block reference and row number:
 
 ```rust
-pub struct RowId {
-    block_id: ObjectId,  // Identifies the data block
-    offset: u64,         // Offset within block (0-based)
-}
+/// RowId encodes a logical row position as a u64:
+/// - Bits 59-44: ObjectIdAlias (compact reference to a block)
+/// - Bits 31-0:  Row number within the block (0-indexed)
+pub struct RowId(u64);
 ```
+
+Physical resolution (byte offsets for CSV, row group mapping for Parquet)
+is handled by the reader/layout layer, not encoded in the RowId.
 
 ### IndexedValue
 

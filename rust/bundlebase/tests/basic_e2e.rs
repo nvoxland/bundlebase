@@ -361,6 +361,18 @@ async fn test_attach_csv() -> Result<(), BundlebaseError> {
     // Find and read the versioned manifest file
     let (contents, commit, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
 
+    let layout_line = match op_field!(
+        commit.operations()[0],
+        AnyOperation::AttachBlock,
+        layout
+    ) {
+        Some(layout_val) => format!(
+            "\n    layout: {}",
+            test_utils::for_yaml(layout_val)
+        ),
+        None => String::new(),
+    };
+
     assert_eq!(
         format!(
             r"
@@ -376,8 +388,7 @@ changes:
     pack: {}
     location: memory:///test_data/customers-0-100.csv
     version: {}
-    hash: f2147696392a019d768a11ff68bab8e8dec77b5af2c93e8e5d5e399bd7bba8b9
-    layout: {}
+    hash: f2147696392a019d768a11ff68bab8e8dec77b5af2c93e8e5d5e399bd7bba8b9{}
     numRows: 100
     bytes: 17160
     schema:
@@ -433,9 +444,7 @@ changes:
                 AnyOperation::AttachBlock,
                 version
             )),
-            test_utils::for_yaml(
-                op_field!(commit.operations()[0], AnyOperation::AttachBlock, layout).unwrap()
-            )
+            layout_line,
         )
         .trim(),
         common::strip_column_ids(&contents).trim()
@@ -453,18 +462,19 @@ changes:
     assert!(batches[0].num_rows() > 0);
     assert!(batches[0].schema().column_with_name("Website").is_some());
 
-    // Verify layout file exists
-    let layout = op_field!(commit.operations()[0], AnyOperation::AttachBlock, layout).unwrap();
-    let layout_file = readable_file_from_path(
-        &layout,
-        loaded_bundle.data_dir(),
-        Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>,
-    ).await?;
-    assert!(
-        layout_file.exists().await?,
-        "Layout file should exist at: {}",
-        layout
-    );
+    // Verify layout file exists if one was created (small files don't need layouts)
+    if let Some(layout) = op_field!(commit.operations()[0], AnyOperation::AttachBlock, layout) {
+        let layout_file = readable_file_from_path(
+            &layout,
+            loaded_bundle.data_dir(),
+            Arc::new(BundleConfig::new(None)?) as Arc<dyn ConfigProvider>,
+        ).await?;
+        assert!(
+            layout_file.exists().await?,
+            "Layout file should exist at: {}",
+            layout
+        );
+    }
 
     Ok(())
 }

@@ -1,8 +1,8 @@
 use crate::DataContext;
 use crate::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::plugin::ReaderPlugin;
-use crate::{BlockId, DataReader, LayoutRowIdProvider, LineOrientedFormat, RowId, RowIdProvider};
-use bundlebase_index::RowIdIndex;
+use crate::{BlockId, DataReader, LineOrientedFormat, PhysicalRowGroupDataSource, RowId};
+use crate::physical_row_group_layout::{PhysicalRowGroupLayout, resolve_row_numbers_to_byte_offsets};
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadWriteDir;
 use bundlebase_common::BundlebaseError;
@@ -135,7 +135,6 @@ pub struct CsvReader {
     inner: FileReader<CsvFormatConfig>,
     block_id: BlockId,
     layout: Option<ObjectStoreFile>,
-    rowid_provider: Option<Arc<dyn RowIdProvider>>,
 }
 
 impl CsvReader {
@@ -144,16 +143,10 @@ impl CsvReader {
         block_id: &BlockId,
         layout: &Option<ObjectStoreFile>,
     ) -> Self {
-        // Create provider if layout file exists
-        let row_id_provider = layout.as_ref().map(|layout_file| {
-            Arc::new(LayoutRowIdProvider::new(layout_file.clone())) as Arc<dyn RowIdProvider>
-        });
-
         Self {
             inner,
             block_id: *block_id,
             layout: layout.clone(),
-            rowid_provider: row_id_provider,
         }
     }
 }
@@ -164,7 +157,6 @@ impl std::fmt::Debug for CsvReader {
             .field("inner", &self.inner)
             .field("block_id", &self.block_id)
             .field("layout", &self.layout)
-            .field("has_provider", &self.rowid_provider.is_some())
             .finish()
     }
 }
@@ -308,8 +300,34 @@ impl DataReader for CsvReader {
         limit: Option<usize>,
         row_ids: Option<&[RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
+        if let Some(ids) = row_ids {
+            let row_numbers: Vec<u32> = ids.iter().map(|id| id.row_number()).collect();
+            let byte_offsets = resolve_row_numbers_to_byte_offsets(
+                self.inner.file().as_object_store_file(),
+                self.layout.as_ref(),
+                &row_numbers,
+                true, // skip CSV header
+            )
+            .await
+            .map_err(|e| DataFusionError::External(e))?;
+
+            let schema = self
+                .inner
+                .read_schema()
+                .await
+                .map_err(|e| DataFusionError::External(e))?
+                .ok_or_else(|| DataFusionError::Internal("No schema available".to_string()))?;
+
+            return Ok(Arc::new(PhysicalRowGroupDataSource::new(
+                self.inner.file().as_object_store_file(),
+                schema,
+                byte_offsets,
+                projection.cloned(),
+                LineOrientedFormat::Csv,
+            )));
+        }
         self.inner
-            .data_source(projection, filters, limit, row_ids)
+            .data_source(projection, filters, limit)
             .await
     }
 
@@ -334,25 +352,14 @@ impl DataReader for CsvReader {
         &self,
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
-        use crate::ObjectIdAlias;
-        // Use ObjectIdAlias(0) as placeholder; the actual ref is remapped by RowIdStreamAdapter
-        let index_file = RowIdIndex::new()
-            .build(
-                self.inner.file().as_object_store_file(),
-                data_dir,
-                ObjectIdAlias::from(0u16),
-                true,
-            )
-            .await?;
+        let result = PhysicalRowGroupLayout::build_and_write(
+            self.inner.file().as_object_store_file(),
+            data_dir,
+            true, // skip CSV header
+        )
+        .await?;
 
-        Ok(Some(index_file))
-    }
-
-    fn rowid_provider(&self) -> Result<Arc<dyn RowIdProvider>, BundlebaseError> {
-        Ok(self
-            .rowid_provider
-            .clone()
-            .expect("CSV rowid_generator requires a layout file".into()))
+        Ok(result)
     }
 }
 

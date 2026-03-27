@@ -99,10 +99,12 @@ impl DataReader for ParquetDataReader {
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
-        row_ids: Option<&[RowId]>,
+        _row_ids: Option<&[RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
+        // Parquet doesn't support selective row reading by RowId;
+        // falls back to full scan (DataFusion handles predicate pushdown natively)
         self.inner
-            .data_source(projection, filters, limit, row_ids)
+            .data_source(projection, filters, limit)
             .await
     }
 
@@ -166,19 +168,18 @@ impl DataReader for ParquetDataReader {
 
         // Transform stream to add RowId information using a wrapper struct
         // that implements Stream
-        let block_ref_bits = (block_ref.as_u16() as u64) << 44;
         let wrapped = RowIdStreamWrapper {
             inner: Box::new(inner_stream),
             global_row_num: 0,
-            block_ref_bits,
+            block_ref,
         };
 
         Ok(Box::pin(wrapped))
     }
 }
 
-/// Wrapper that transforms a RecordBatch stream into a RowIdBatch stream
-/// Adds sequential RowId information to each batch
+/// Wrapper that transforms a RecordBatch stream into a RowIdBatch stream.
+/// Adds sequential logical RowId information to each batch.
 struct RowIdStreamWrapper {
     inner: Box<
         dyn futures::stream::Stream<
@@ -189,8 +190,8 @@ struct RowIdStreamWrapper {
             > + Unpin
             + Send,
     >,
-    global_row_num: u64,
-    block_ref_bits: u64,
+    global_row_num: u32,
+    block_ref: ObjectIdAlias,
 }
 
 impl futures::stream::Stream for RowIdStreamWrapper {
@@ -206,11 +207,15 @@ impl futures::stream::Stream for RowIdStreamWrapper {
                 let num_rows = batch.num_rows();
                 let mut row_ids = Vec::with_capacity(num_rows);
 
-                // Generate RowIds for this batch
+                // Generate logical RowIds for this batch (sequential row numbers)
                 for _ in 0..num_rows {
-                    let row_id = self.block_ref_bits | self.global_row_num;
-                    row_ids.push(RowId::from(row_id));
-                    self.global_row_num += 1;
+                    row_ids.push(RowId::new(self.block_ref, self.global_row_num));
+                    self.global_row_num = match self.global_row_num.checked_add(1) {
+                        Some(n) => n,
+                        None => return Poll::Ready(Some(Err(
+                            "Row count exceeds u32::MAX (~4 billion rows)".into()
+                        ))),
+                    };
                 }
 
                 Poll::Ready(Some(RowIdBatch::new(batch, row_ids)))

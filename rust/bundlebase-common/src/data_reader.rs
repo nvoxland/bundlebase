@@ -16,17 +16,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use url::Url;
 
-/// Trait for providing RowIds within a specific range.
-///
-/// Different implementations can use different strategies:
-/// - Pre-loaded from a layout file with caching (CSV)
-/// - Computed on-the-fly based on file metadata (Parquet)
-#[async_trait]
-pub trait RowIdProvider: Send + Sync {
-    /// Generate RowIds for rows in the range [begin, end)
-    async fn get_row_ids(&self, begin: usize, end: usize) -> Result<Vec<RowId>, BundlebaseError>;
-}
-
 /// Trait for reading data from a storage backend.
 ///
 /// Each data format (CSV, Parquet, JSON) implements this trait to provide
@@ -75,17 +64,13 @@ pub trait DataReader: Sync + Send + Debug {
         Err("read_rows_by_ids not implemented for this adapter".into())
     }
 
-    /// Get a RowId provider for this data reader.
-    fn rowid_provider(&self) -> Result<Arc<dyn RowIdProvider>, BundlebaseError> {
-        Err("rowid_generator not implemented for this adapter".into())
-    }
-
     /// Return format-specific options detected during schema inference.
     fn read_options(&self) -> HashMap<String, String> {
         HashMap::new()
     }
 
     /// Stream data with RowIds for index building.
+    /// Each batch is paired with sequential logical RowIds.
     async fn extract_rowids_stream(
         &self,
         block_ref: ObjectIdAlias,

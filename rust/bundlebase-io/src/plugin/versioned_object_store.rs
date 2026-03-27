@@ -77,7 +77,7 @@ impl VersionedObjectStoreFile {
 
     /// Get access to the inner ObjectStoreFile.
     ///
-    /// Use this when you need direct ObjectStoreFile access (e.g., for RowIdOffsetDataSource).
+    /// Use this when you need direct ObjectStoreFile access (e.g., for PhysicalRowGroupDataSource).
     /// Note: This bypasses version validation, so ensure you've validated first if needed.
     pub fn inner(&self) -> &ObjectStoreFile {
         &self.inner

@@ -119,9 +119,9 @@ mod tests {
     fn test_roundtrip_with_data() {
         let block_ref = ObjectIdAlias::from(1u16);
         let mut row_ids = HashSet::new();
-        row_ids.insert(RowId::new(block_ref, 100, 50));
-        row_ids.insert(RowId::new(block_ref, 200, 50));
-        row_ids.insert(RowId::new(block_ref, 300, 50));
+        row_ids.insert(RowId::new(block_ref, 0));
+        row_ids.insert(RowId::new(block_ref, 1));
+        row_ids.insert(RowId::new(block_ref, 2));
 
         let bytes = serialize_tombstone(&row_ids);
 
@@ -147,9 +147,9 @@ mod tests {
     fn test_sorted_output() {
         let block_ref = ObjectIdAlias::from(1u16);
         let mut row_ids = HashSet::new();
-        row_ids.insert(RowId::new(block_ref, 300, 50));
-        row_ids.insert(RowId::new(block_ref, 100, 50));
-        row_ids.insert(RowId::new(block_ref, 200, 50));
+        row_ids.insert(RowId::new(block_ref, 2));
+        row_ids.insert(RowId::new(block_ref, 0));
+        row_ids.insert(RowId::new(block_ref, 1));
 
         let bytes = serialize_tombstone(&row_ids);
 

@@ -1,5 +1,5 @@
 use crate::DataContext;
-use crate::{LineOrientedFormat, RowId, RowIdOffsetDataSource};
+use crate::LineOrientedFormat;
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::plugin::versioned_object_store::VersionedObjectStoreFile;
 use bundlebase_io::IOReadFile;
@@ -227,33 +227,18 @@ impl<C: FileFormatConfig> FileReader<C> {
         self.file.version().await
     }
 
-    /// Generic data_source implementation for file-based readers
+    /// Generic data_source implementation for file-based readers.
+    ///
+    /// This handles the full-scan path. For index-based selective reads,
+    /// format-specific readers (CsvReader, JsonReader) should resolve
+    /// logical row numbers to byte offsets and create PhysicalRowGroupDataSource
+    /// directly, bypassing this method.
     pub async fn data_source(
         &self,
         projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         limit: Option<usize>,
-        row_ids: Option<&[RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
-        // Return RowIdOffsetDataSource for selective row reading if format supports it
-        if let Some(ids) = row_ids {
-            if let Some(format) = self.config.line_oriented_format() {
-                // For RowIdOffsetDataSource, we need an ObjectStoreFile
-                // Use as_object_store_file() which gives us access to the underlying file
-                // Note: For versioned files, version validation happens on first object_meta() call
-                // which occurs below if we fall through to the full scan path
-                return Ok(Arc::new(RowIdOffsetDataSource::new(
-                    self.file.as_object_store_file(),
-                    self.schema.clone().expect("No schema set"),
-                    ids.to_vec(),
-                    projection.cloned(),
-                    format,
-                )));
-            }
-            // Format doesn't support line-oriented reading, fall back to full scan
-            // This can happen with Parquet files
-        }
-
         let metadata = self.file.object_meta().await.map_err(|e| {
             DataFusionError::Internal(format!("Failed to get object metadata: {}", e))
         })?.ok_or_else(|| {
