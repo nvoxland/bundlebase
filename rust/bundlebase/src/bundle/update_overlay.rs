@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 /// Decoded overlay: RowId → (ColumnId → value).
 /// Only contains columns that were actually SET (bitmask decoded at load time).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UpdateOverlay {
     pub updates: HashMap<RowId, HashMap<ColumnId, ScalarValue>>,
 }
@@ -78,7 +78,14 @@ pub fn write_overlay_parquet(
         let typed_null = ScalarValue::try_from(dt)
             .map_err(|e| BundlebaseError::from(format!("Cannot create null for type {:?}: {}", dt, e)))?;
         let scalars: Vec<ScalarValue> = rows.iter().map(|(_, updates)| {
-            updates.get(col_id).cloned().unwrap_or_else(|| typed_null.clone())
+            match updates.get(col_id) {
+                Some(val) if val.is_null() => typed_null.clone(),
+                Some(val) if val.data_type() != *dt => {
+                    val.cast_to(dt).unwrap_or_else(|_| typed_null.clone())
+                }
+                Some(val) => val.clone(),
+                None => typed_null.clone(),
+            }
         }).collect();
 
         let array = if scalars.is_empty() {

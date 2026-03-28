@@ -42,7 +42,8 @@ statement_text  = { (quoted_string | !(";" | EOI) ~ ANY)+ }
 
 // Data modification statements - operations that change bundle data content
 data_modification_stmt = {
-    always_delete_stmt
+    update_stmt
+    | always_delete_stmt
     | drop_always_delete_stmt
     | delete_stmt
     | import_join_stmt
@@ -237,6 +238,36 @@ delete_stmt = {
 }
 
 delete_where_clause = @{
+    (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// UPDATE Statement
+// ============================================================================
+// Syntax: UPDATE bundle SET col = expr [, col = expr ...] WHERE <condition>
+// Examples:
+//   UPDATE bundle SET salary = salary * 1.1 WHERE department = 'eng'
+//   UPDATE bundle SET status = NULL WHERE inactive = true
+//   UPDATE bundle SET name = 'unknown', age = 0 WHERE name IS NULL
+
+update_stmt = {
+    ^"update" ~ ^"bundle" ~ ^"set" ~ update_set_clause ~ ^"where" ~ update_where_clause
+}
+
+update_set_clause = {
+    update_assignment ~ ("," ~ update_assignment)*
+}
+
+update_assignment = {
+    identifier ~ "=" ~ update_value_expr
+}
+
+// Value expression: everything up to the next comma-assignment or WHERE keyword
+update_value_expr = @{
+    (!(("," ~ WHITESPACE* ~ identifier ~ WHITESPACE* ~ "=") | (WHITESPACE+ ~ ^"where" ~ WHITESPACE+)) ~ ANY)+
+}
+
+update_where_clause = @{
     (!EOI ~ ANY)+
 }
 

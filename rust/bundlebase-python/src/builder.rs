@@ -1105,6 +1105,26 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Execute an UPDATE statement.
+    fn update<'py>(
+        slf: PyRef<'_, Self>,
+        set_where: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let set_where = set_where.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .update(&set_where)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to execute UPDATE", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
     fn num_rows<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {

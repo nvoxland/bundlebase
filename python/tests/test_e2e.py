@@ -2588,3 +2588,102 @@ async def test_always_deletes_info_schema_after_drop_all():
     result = await c.query("SELECT * FROM bundle_info.always_deletes")
     df = await result.to_pandas()
     assert len(df) == 0
+
+
+# ===== Update Tests =====
+
+
+@pytest.mark.asyncio
+async def test_update_basic():
+    """Test basic UPDATE with scalar value."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    c = await c.update("SET salary = 999 WHERE salary > 200000")
+
+    # No rows should have salary > 200000 (they were all set to 999)
+    result = await c.query("SELECT salary FROM bundle WHERE salary > 200000 AND salary != 999")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+    # Updated rows should exist
+    result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary = 999")
+    df = await result.to_pandas()
+    assert df["cnt"].iloc[0] > 0
+
+
+@pytest.mark.asyncio
+async def test_update_to_null():
+    """Test UPDATE that sets a column to NULL."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    result = await c.query("SELECT COUNT(title) as cnt FROM bundle")
+    df = await result.to_pandas()
+    titles_before = df["cnt"].iloc[0]
+
+    c = await c.update("SET title = NULL WHERE salary > 200000")
+
+    result = await c.query("SELECT COUNT(title) as cnt FROM bundle")
+    df = await result.to_pandas()
+    titles_after = df["cnt"].iloc[0]
+    assert titles_after < titles_before
+
+
+@pytest.mark.asyncio
+async def test_update_commit_reopen():
+    """Test UPDATE persists after commit and reopen."""
+    import tempfile, shutil, os
+    with tempfile.TemporaryDirectory() as temp_dir:
+        src = os.path.join(os.path.dirname(__file__), "..", "..", "test_data", "userdata.parquet")
+        data_path = "file://" + os.path.join(temp_dir, "userdata.parquet")
+        shutil.copy2(src, os.path.join(temp_dir, "userdata.parquet"))
+
+        bundle_dir = os.path.join(temp_dir, "bundle")
+        c = await bundlebase.create(bundle_dir)
+        c = await c.attach(data_path)
+
+        c = await c.update("SET salary = 999 WHERE salary > 200000")
+        await c.commit("Updated high salaries")
+
+        b2 = await bundlebase.open(bundle_dir)
+        result = await b2.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary = 999")
+        df = await result.to_pandas()
+        assert df["cnt"].iloc[0] > 0
+
+
+@pytest.mark.asyncio
+async def test_update_preserves_unmodified():
+    """Test that UPDATE doesn't modify columns not in SET."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    result = await c.query("SELECT first_name, salary FROM bundle WHERE id = 1")
+    df = await result.to_pandas()
+    original_name = df["first_name"].iloc[0]
+
+    c = await c.update("SET salary = 999 WHERE id = 1")
+
+    result = await c.query("SELECT first_name, salary FROM bundle WHERE id = 1")
+    df = await result.to_pandas()
+    assert df["salary"].iloc[0] == 999
+    assert df["first_name"].iloc[0] == original_name
+
+
+@pytest.mark.asyncio
+async def test_delete_then_update():
+    """Test DELETE then UPDATE in same transaction."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    initial_count = await c.num_rows()
+    c = await c.delete("salary > 200000")
+
+    deleted_count = await c.num_rows()
+    assert deleted_count < initial_count
+
+    c = await c.update("SET salary = 0 WHERE salary < 50000")
+
+    result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary = 0")
+    df = await result.to_pandas()
+    assert df["cnt"].iloc[0] > 0

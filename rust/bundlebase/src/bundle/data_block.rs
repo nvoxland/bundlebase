@@ -45,6 +45,8 @@ pub struct DataBlock {
     column_ids: Vec<ColumnId>,
     /// Row numbers (within this block) that have been deleted via tombstones
     deleted_rows: Arc<RwLock<HashSet<u32>>>,
+    /// Update overlays to apply at scan time
+    update_overlays: Arc<RwLock<Vec<crate::bundle::update_overlay::UpdateOverlay>>>,
 }
 
 impl DataBlock {
@@ -74,6 +76,7 @@ impl DataBlock {
             source_info,
             column_ids,
             deleted_rows: Arc::new(RwLock::new(HashSet::new())),
+            update_overlays: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -101,6 +104,11 @@ impl DataBlock {
     /// Add deleted row numbers to this block's tombstone set.
     pub fn add_deleted_rows(&self, rows: impl IntoIterator<Item = u32>) {
         self.deleted_rows.write().extend(rows);
+    }
+
+    /// Add an update overlay to this block.
+    pub fn add_update_overlay(&self, overlay: crate::bundle::update_overlay::UpdateOverlay) {
+        self.update_overlays.write().push(overlay);
     }
 
     /// Load index (from cache or disk) and estimate selectivity.
@@ -388,22 +396,48 @@ impl TableProvider for DataBlock {
         }
 
         // Phase 2: Fall back to full scan
-        let source = self.reader
+        let mut source: Arc<dyn datafusion::datasource::source::DataSource> = self.reader
             .data_source(projection, filters, limit, None)
             .await?;
 
-        if deleted.is_empty() {
-            let exec = DataSourceExec::new(source.clone());
-            Ok(Arc::new(exec))
-        } else {
-            // Wrap with tombstone filter to exclude deleted rows
-            let filtered = crate::bundle::tombstone_filter::TombstoneFilterDataSource::new(
+        // Apply tombstone filter if there are deleted rows
+        if !deleted.is_empty() {
+            source = Arc::new(crate::bundle::tombstone_filter::TombstoneFilterDataSource::new(
                 source,
                 Arc::new(deleted),
-            );
-            let exec = DataSourceExec::new(Arc::new(filtered));
-            Ok(Arc::new(exec))
+            ));
         }
+
+        // Apply update overlay if there are updates for this block
+        let overlays = self.update_overlays.read().clone();
+        if !overlays.is_empty() {
+            // Build projected column_ids matching the scan output columns
+            let projected_col_ids = match projection {
+                Some(proj) => proj.iter().filter_map(|&i| self.column_ids.get(i).copied()).collect::<Vec<_>>(),
+                None => self.column_ids.clone(),
+            };
+            let projected_schema = match projection {
+                Some(proj) => {
+                    let fields: Vec<_> = proj.iter()
+                        .filter_map(|&i| self.schema.fields().get(i).cloned())
+                        .collect();
+                    Arc::new(arrow_schema::Schema::new(fields))
+                }
+                None => self.schema.clone(),
+            };
+            let overlay_source = crate::bundle::update_overlay_filter::UpdateOverlayDataSource::new(
+                source.clone(),
+                &overlays,
+                &projected_col_ids,
+                &projected_schema,
+            );
+            if overlay_source.has_updates() {
+                source = Arc::new(overlay_source);
+            }
+        }
+
+        let exec = DataSourceExec::new(source.clone());
+        Ok(Arc::new(exec))
     }
 }
 

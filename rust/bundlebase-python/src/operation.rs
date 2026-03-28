@@ -43,6 +43,7 @@ impl PyOperation {
             AnyOperation::AlwaysDelete(_) => "alwaysDelete".to_string(),
             AnyOperation::Delete(_) => "delete".to_string(),
             AnyOperation::DropAlwaysDelete(_) => "dropAlwaysDelete".to_string(),
+            AnyOperation::UpdateData(_) => "updateData".to_string(),
             AnyOperation::RenameFunction(_) => "renameFunction".to_string(),
         }
     }

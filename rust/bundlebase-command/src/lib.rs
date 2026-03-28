@@ -65,7 +65,7 @@ pub use parser::Rule;
 // Re-export builder command structs
 pub use builder::{
     AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    DeleteCommand, DropAlwaysDeleteCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
+    DeleteCommand, DropAlwaysDeleteCommand, UpdateCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
     DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -376,6 +376,7 @@ impl BundleCommand {
                     BundleCommand::Attach(_) => "ATTACH",
                     BundleCommand::Delete(_) => "DELETE",
                     BundleCommand::DropAlwaysDelete(_) => "DROP ALWAYS DELETE",
+                    BundleCommand::Update(_) => "UPDATE",
                     BundleCommand::DetachBlock(_) => "DETACH",
                     BundleCommand::Filter(_) => "FILTER",
                     BundleCommand::ImportJoin(_) => "IMPORT JOIN",
@@ -680,6 +681,8 @@ register_commands! {
             "DELETE" => "DELETE FROM bundle WHERE <condition>",
         DropAlwaysDelete(DropAlwaysDeleteCommand) => Rule::drop_always_delete_stmt,
             "DROP ALWAYS DELETE" => "DROP ALWAYS DELETE [WHERE <condition>]",
+        Update(UpdateCommand) => Rule::update_stmt,
+            "UPDATE" => "UPDATE bundle SET <col> = <expr> [, ...] WHERE <condition>",
         DetachBlock(DetachBlockCommand) => Rule::detach_stmt,
             "DETACH" => "DETACH '<location>'",
         Filter(FilterCommand) => Rule::filter_stmt,

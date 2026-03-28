@@ -57,8 +57,17 @@ impl Operation for DeleteOp {
         // Load tombstone file and distribute deleted row numbers to DataBlocks
         let manifest_dir = bundle.data_dir().writable_subdir(META_DIR)
             .map_err(|e| DataFusionError::External(e))?;
-        let tomb_file = manifest_dir.file(&self.tombstone)
-            .map_err(|e| DataFusionError::External(e))?;
+        // Tombstone path may include content-addressed subdirectory (e.g., "5f/abc123.tomb")
+        let tomb_file = if self.tombstone.contains('/') {
+            let parts: Vec<&str> = self.tombstone.splitn(2, '/').collect();
+            manifest_dir.subdir(parts[0])
+                .map_err(|e| DataFusionError::External(e))?
+                .file(parts[1])
+                .map_err(|e| DataFusionError::External(e))?
+        } else {
+            manifest_dir.file(&self.tombstone)
+                .map_err(|e| DataFusionError::External(e))?
+        };
         let bytes = tomb_file.read_bytes().await
             .map_err(|e| DataFusionError::External(e))?;
 

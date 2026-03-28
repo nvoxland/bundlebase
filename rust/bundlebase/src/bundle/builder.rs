@@ -211,6 +211,9 @@ pub struct BundleBuilder {
     status: RwLock<BundleStatus>,
     /// RowIds accumulated by DELETE commands, written to a tombstone file on commit.
     pending_tombstones: RwLock<std::collections::HashSet<bundlebase_common::RowId>>,
+    /// Updated cell values accumulated by UPDATE commands, written to an overlay parquet on commit.
+    /// Maps RowId → (ColumnId → ScalarValue).
+    pending_updates: RwLock<std::collections::HashMap<bundlebase_common::RowId, std::collections::HashMap<crate::object_id::ColumnId, datafusion::scalar::ScalarValue>>>,
 }
 
 impl bundlebase_data::DataContext for BundleBuilder {
@@ -234,6 +237,7 @@ impl Clone for BundleBuilder {
             in_progress_change: RwLock::new(self.in_progress_change.read().clone()),
             status: RwLock::new(self.status.read().clone()),
             pending_tombstones: RwLock::new(self.pending_tombstones.read().clone()),
+            pending_updates: RwLock::new(self.pending_updates.read().clone()),
         }
     }
 }
@@ -282,6 +286,7 @@ impl BundleBuilder {
             in_progress_change: RwLock::new(None),
             status: RwLock::new(BundleStatus::new()),
             pending_tombstones: RwLock::new(std::collections::HashSet::new()),
+            pending_updates: RwLock::new(std::collections::HashMap::new()),
         });
 
         // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
@@ -328,6 +333,7 @@ impl BundleBuilder {
             in_progress_change: RwLock::new(None),
             status: RwLock::new(BundleStatus::new()),
             pending_tombstones: RwLock::new(std::collections::HashSet::new()),
+            pending_updates: RwLock::new(std::collections::HashMap::new()),
         });
 
         // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
@@ -410,9 +416,7 @@ impl BundleBuilder {
             debug!("[DELETE] Writing tombstone file ({} bytes)", tomb_bytes.len());
             let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(tomb_bytes)]);
             let write_result = manifest_dir.write_stream(Box::pin(stream), "tomb").await?;
-            let tomb_filename = write_result.file.url().path().split('/').last()
-                .ok_or_else(|| BundlebaseError::from("Failed to extract tombstone filename"))?
-                .to_string();
+            let tomb_filename = manifest_dir.relative_path(write_result.file.as_ref())?;
             debug!("[DELETE] Tombstone file written: {}", tomb_filename);
 
             // Add DeleteOp alongside the existing FilterOp.
@@ -421,6 +425,35 @@ impl BundleBuilder {
             let delete_op = DeleteOp::new(&tomb_filename);
             if let Some(last_change) = changes.last_mut() {
                 last_change.operations.push(AnyOperation::Delete(delete_op));
+            }
+        }
+
+        // Write update overlay file if there are pending updates from UPDATE commands
+        let pending_upd = std::mem::take(&mut *self.pending_updates.write());
+        if !pending_upd.is_empty() {
+            use crate::bundle::update_overlay;
+            use crate::bundle::operation::UpdateDataOp;
+
+            // Collect column types from the bundle schema
+            let schema = self.bundle.schema().await?;
+            let col_names = column_metadata::resolved_column_names(&self.operations());
+            let mut column_types: std::collections::HashMap<crate::object_id::ColumnId, arrow::datatypes::DataType> = std::collections::HashMap::new();
+            for (col_id, col_name) in &col_names {
+                if let Some((_, field)) = schema.column_with_name(col_name) {
+                    column_types.insert(*col_id, field.data_type().clone());
+                }
+            }
+
+            let overlay_bytes = update_overlay::write_overlay_parquet(&pending_upd, &column_types)?;
+            debug!("[UPDATE] Writing overlay file ({} bytes, {} rows)", overlay_bytes.len(), pending_upd.len());
+            let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(overlay_bytes)]);
+            let write_result = manifest_dir.write_stream(Box::pin(stream), "update").await?;
+            let overlay_filename = manifest_dir.relative_path(write_result.file.as_ref())?;
+            debug!("[UPDATE] Overlay file written: {}", overlay_filename);
+
+            let update_op = UpdateDataOp::new(&overlay_filename);
+            if let Some(last_change) = changes.last_mut() {
+                last_change.operations.push(AnyOperation::UpdateData(update_op));
             }
         }
 
@@ -616,6 +649,184 @@ impl BundleBuilder {
             .push(op);
 
         Ok(())
+    }
+
+    /// Evaluate an UPDATE statement: find matching rows, evaluate SET expressions,
+    /// and store results in pending_updates. Returns count of updated rows.
+    /// Evaluate an UPDATE: given column names, expressions, and a WHERE clause,
+    /// find matching rows, evaluate expressions, and store in pending_updates.
+    ///
+    /// `columns` and `expressions` are parallel vectors: columns[i] gets value expressions[i].
+    pub async fn evaluate_update_cols(
+        &self,
+        columns: &[String],
+        expressions: &[String],
+        where_clause: &str,
+    ) -> Result<usize, BundlebaseError> {
+        use futures::StreamExt;
+
+        // Resolve user-visible column names to ColumnIds
+        let ops = self.operations();
+        let resolved = column_metadata::resolved_column_names(&ops);
+        let name_to_id: std::collections::HashMap<String, crate::object_id::ColumnId> = resolved
+            .iter()
+            .map(|(id, name)| (name.clone(), *id))
+            .collect();
+
+        // Build rename map for physical → user-visible names (reuse from select_row_ids)
+        let initial = column_metadata::initial_column_names(&ops);
+        let mut rename_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for (id, resolved_name) in &resolved {
+            if let Some(initial_name) = initial.get(id) {
+                if initial_name != resolved_name {
+                    rename_map.insert(initial_name.clone(), resolved_name.clone());
+                }
+            }
+        }
+
+        // Validate column names
+        let col_ids: Vec<(String, crate::object_id::ColumnId)> = columns.iter()
+            .map(|col_name| {
+                let col_id = name_to_id.get(col_name)
+                    .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", col_name)))?;
+                Ok((col_name.clone(), *col_id))
+            })
+            .collect::<Result<Vec<_>, BundlebaseError>>()?;
+
+        // Build SELECT clause for expression evaluation
+        let select_exprs: Vec<String> = columns.iter().zip(expressions.iter())
+            .map(|(col, expr)| format!("{} AS {}", expr, col))
+            .collect();
+        let select_list = select_exprs.join(", ");
+
+        let mut updated_count = 0usize;
+
+        let base_pack = self.bundle.packs().read()
+            .get(&ObjectId::BASE_PACK)
+            .cloned();
+
+        if let Some(pack) = base_pack {
+            let blocks = pack.blocks();
+            for (idx, block) in blocks.iter().enumerate() {
+                let block_ref = ObjectIdAlias::from(idx as u16);
+                let mut stream = block.reader()
+                    .extract_rowids_stream(block_ref, self.bundle.ctx(), None)
+                    .await?;
+
+                while let Some(batch_result) = stream.next().await {
+                    let rowid_batch = batch_result?;
+                    let batch = &rowid_batch.batch;
+                    let row_ids = &rowid_batch.row_ids;
+
+                    // Rename columns to user-visible names
+                    let batch = if rename_map.is_empty() {
+                        batch.clone()
+                    } else {
+                        let schema = batch.schema();
+                        let new_fields: Vec<arrow::datatypes::Field> = schema.fields().iter().map(|f| {
+                            if let Some(new_name) = rename_map.get(f.name()) {
+                                f.as_ref().clone().with_name(new_name)
+                            } else {
+                                f.as_ref().clone()
+                            }
+                        }).collect();
+                        let new_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
+                            new_fields,
+                            schema.metadata().clone(),
+                        ));
+                        arrow::record_batch::RecordBatch::try_new(new_schema, batch.columns().to_vec())?
+                    };
+
+                    // Evaluate: SELECT _rowid, <set_exprs> FROM (data with _rowid) WHERE <condition>
+                    let eval_sql = format!(
+                        "SELECT CAST(_idx AS BIGINT) AS _idx, {} FROM (SELECT *, ROW_NUMBER() OVER () - 1 AS _idx FROM __update_batch) WHERE {}",
+                        select_list,
+                        where_clause
+                    );
+
+                    let mut config = datafusion::prelude::SessionConfig::new();
+                    config.options_mut().sql_parser.enable_ident_normalization = false;
+                    let temp_ctx = SessionContext::new_with_config_rt(
+                        config,
+                        self.bundle.ctx().runtime_env(),
+                    );
+                    let mem_table = datafusion::datasource::MemTable::try_new(
+                        batch.schema(),
+                        vec![vec![batch.clone()]],
+                    )?;
+                    temp_ctx.register_table("__update_batch", Arc::new(mem_table))?;
+
+                    let result_df = temp_ctx.sql(&eval_sql).await
+                        .map_err(|e| BundlebaseError::from(e.to_string()))?;
+                    let result_batches = result_df.collect().await
+                        .map_err(|e| BundlebaseError::from(e.to_string()))?;
+
+                    let mut pending = self.pending_updates.write();
+                    for result_batch in &result_batches {
+                        let idx_col = result_batch.column(0)
+                            .as_any()
+                            .downcast_ref::<arrow::array::Int64Array>()
+                            .ok_or_else(|| BundlebaseError::from("Expected Int64 _idx column"))?;
+
+                        for row in 0..result_batch.num_rows() {
+                            let batch_idx = idx_col.value(row) as usize;
+                            if batch_idx >= row_ids.len() {
+                                continue;
+                            }
+                            let row_id = row_ids[batch_idx];
+
+                            let cell_updates = pending.entry(row_id).or_insert_with(std::collections::HashMap::new);
+                            for (col_idx, (_, col_id)) in col_ids.iter().enumerate() {
+                                // Column is at position col_idx + 1 (after _idx)
+                                let value = datafusion::scalar::ScalarValue::try_from_array(
+                                    result_batch.column(col_idx + 1),
+                                    row,
+                                ).map_err(|e| BundlebaseError::from(e.to_string()))?;
+                                cell_updates.insert(*col_id, value);
+                            }
+                            updated_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(updated_count)
+    }
+
+    /// Push pending updates to DataBlocks for immediate in-session visibility.
+    pub fn flush_pending_updates_to_blocks(&self) {
+        let pending = self.pending_updates.read();
+        if pending.is_empty() {
+            log::debug!("[UPDATE] No pending updates to flush");
+            return;
+        }
+        log::debug!("[UPDATE] Flushing {} pending updates to blocks", pending.len());
+
+        // Group by block_ref
+        let mut by_block: std::collections::HashMap<u16, crate::bundle::update_overlay::UpdateOverlay> = std::collections::HashMap::new();
+        for (row_id, cell_updates) in pending.iter() {
+            let block_idx = row_id.block_ref().as_u16();
+            let overlay = by_block.entry(block_idx).or_insert_with(|| {
+                crate::bundle::update_overlay::UpdateOverlay {
+                    updates: std::collections::HashMap::new(),
+                }
+            });
+            overlay.updates.insert(*row_id, cell_updates.clone());
+        }
+
+        let packs = self.bundle.packs().read().clone();
+        if let Some(pack) = packs.get(&ObjectId::BASE_PACK) {
+            let blocks = pack.blocks();
+            for (block_idx, overlay) in by_block {
+                if let Some(block) = blocks.get(block_idx as usize) {
+                    block.add_update_overlay(overlay);
+                }
+            }
+        }
+
+        // Clear cached dataframe so next query picks up the overlay
+        self.bundle.dataframe.clear();
     }
 
     /// Returns the current always-delete rules.

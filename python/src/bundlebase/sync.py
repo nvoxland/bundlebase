@@ -633,6 +633,19 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def update(self, set_where: str) -> "SyncBundleBuilder":
+        """Update rows matching a WHERE condition with new values.
+
+        Args:
+            set_where: SET and WHERE clause (e.g., "SET salary = 100 WHERE id = 1")
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "update", set_where)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
     def always_delete(self, where_clause: str) -> "SyncBundleBuilder":
         """Register a persistent always-delete rule and immediately delete matching rows.
 

@@ -19,7 +19,7 @@ use async_trait::async_trait;
 
 use crate::builder::{
     AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CreateIndexCommand, CreateSourceCommand,
-    DeleteCommand, DropAlwaysDeleteCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
+    DeleteCommand, DropAlwaysDeleteCommand, UpdateCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
     DropIndexCommand, DropJoinCommand, DropViewCommand, FetchAllCommand, FetchCommand,
     FilterCommand, ImportConnectorCommand, ImportFunctionCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -176,6 +176,9 @@ pub trait BundleBuilderExt {
     /// Delete rows matching a WHERE clause.
     /// Returns the number of deleted rows.
     async fn delete(&self, where_clause: &str) -> Result<usize, BundlebaseError>;
+
+    /// Update rows matching a WHERE clause with SET assignments.
+    async fn update(&self, set_where: &str) -> Result<&Self, BundlebaseError>;
 
     /// Register a persistent always-delete rule and immediately delete matching rows.
     async fn always_delete(&self, where_clause: &str) -> Result<&Self, BundlebaseError>;
@@ -473,6 +476,19 @@ impl BundleBuilderExt for BundleBuilder {
         Ok(count)
     }
 
+    async fn update(&self, set_where: &str) -> Result<&Self, BundlebaseError> {
+        // Parse "SET col = expr WHERE condition" by wrapping in full UPDATE statement
+        let full_sql = format!("UPDATE bundle {}", set_where);
+        let cmd = crate::parser::parse_command(&full_sql)?;
+        match cmd {
+            crate::BundleCommand::Update(update_cmd) => {
+                exec_cmd(self, update_cmd).await?;
+            }
+            _ => return Err("Failed to parse UPDATE statement".into()),
+        }
+        Ok(self)
+    }
+
     async fn always_delete(&self, where_clause: &str) -> Result<&Self, BundlebaseError> {
         exec_cmd(self, AlwaysDeleteCommand::new(where_clause)).await?;
         Ok(self)
@@ -664,6 +680,9 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
     }
     async fn delete(&self, where_clause: &str) -> Result<usize, BundlebaseError> {
         (**self).delete(where_clause).await
+    }
+    async fn update(&self, set_where: &str) -> Result<&Self, BundlebaseError> {
+        (**self).update(set_where).await?; Ok(self)
     }
     async fn always_delete(&self, where_clause: &str) -> Result<&Self, BundlebaseError> {
         (**self).always_delete(where_clause).await?; Ok(self)

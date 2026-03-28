@@ -54,8 +54,17 @@ impl Operation for UpdateDataOp {
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         let manifest_dir = bundle.data_dir().writable_subdir(META_DIR)
             .map_err(|e| DataFusionError::External(e))?;
-        let overlay_file = manifest_dir.file(&self.overlay)
-            .map_err(|e| DataFusionError::External(e))?;
+        // Overlay path may include content-addressed subdirectory (e.g., "52/abc123.update")
+        let overlay_file = if self.overlay.contains('/') {
+            let parts: Vec<&str> = self.overlay.splitn(2, '/').collect();
+            manifest_dir.subdir(parts[0])
+                .map_err(|e| DataFusionError::External(e))?
+                .file(parts[1])
+                .map_err(|e| DataFusionError::External(e))?
+        } else {
+            manifest_dir.file(&self.overlay)
+                .map_err(|e| DataFusionError::External(e))?
+        };
         let bytes = overlay_file.read_bytes().await
             .map_err(|e| DataFusionError::External(e))?;
 
@@ -70,12 +79,32 @@ impl Operation for UpdateDataOp {
         let overlay = update_overlay::read_overlay_parquet(&bytes)
             .map_err(|e| DataFusionError::External(e))?;
 
-        bundle.add_update_overlay(overlay);
+        let total_rows = overlay.updates.len();
+
+        // Distribute overlay entries to corresponding DataBlocks by block_ref
+        let mut by_block: std::collections::HashMap<u16, update_overlay::UpdateOverlay> = std::collections::HashMap::new();
+        for (row_id, cell_updates) in overlay.updates {
+            let block_idx = row_id.block_ref().as_u16();
+            let block_overlay = by_block.entry(block_idx).or_insert_with(|| update_overlay::UpdateOverlay {
+                updates: std::collections::HashMap::new(),
+            });
+            block_overlay.updates.insert(row_id, cell_updates);
+        }
+
+        let packs = bundle.packs().read().clone();
+        if let Some(pack) = packs.get(&crate::object_id::ObjectId::BASE_PACK) {
+            let blocks = pack.blocks();
+            for (block_idx, block_overlay) in by_block {
+                if let Some(block) = blocks.get(block_idx as usize) {
+                    block.add_update_overlay(block_overlay);
+                }
+            }
+        }
 
         log::debug!(
-            "Loaded update overlay from {} ({} rows)",
-            self.overlay,
-            bundle.update_overlays().last().map(|o| o.updates.len()).unwrap_or(0)
+            "Loaded {} update overlay rows from {}",
+            total_rows,
+            self.overlay
         );
 
         Ok(())

@@ -21,6 +21,7 @@ mod sql;
 pub mod tombstone;
 pub mod tombstone_filter;
 pub mod update_overlay;
+pub mod update_overlay_filter;
 pub mod verification;
 
 use crate::io::EMPTY_SCHEME;
@@ -580,16 +581,6 @@ impl Bundle {
     /// Remove all always-delete rules.
     pub fn clear_always_delete_rules(&self) {
         self.always_delete_rules.write().clear();
-    }
-
-    /// Add an update overlay (loaded from a committed overlay parquet file).
-    pub fn add_update_overlay(&self, overlay: update_overlay::UpdateOverlay) {
-        self.update_overlays.write().push(overlay);
-    }
-
-    /// Returns the current update overlays.
-    pub fn update_overlays(&self) -> Vec<update_overlay::UpdateOverlay> {
-        self.update_overlays.read().clone()
     }
 
     /// Recreate data_dir from the current URL + config.

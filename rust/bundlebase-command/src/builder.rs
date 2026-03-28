@@ -40,6 +40,7 @@ mod save_config;
 mod set_description;
 mod set_name;
 mod undo;
+mod update;
 mod verify_data;
 
 pub use add_column::AddColumnCommand;
@@ -79,4 +80,5 @@ pub use save_config::SaveConfigCommand;
 pub use set_description::SetDescriptionCommand;
 pub use set_name::SetNameCommand;
 pub use undo::UndoCommand;
+pub use update::{UpdateCommand, SetAssignment};
 pub use verify_data::{FileVerificationResult, VerificationResults, VerifyDataCommand};
