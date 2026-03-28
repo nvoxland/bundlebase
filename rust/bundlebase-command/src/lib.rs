@@ -64,8 +64,8 @@ pub use parser::Rule;
 
 // Re-export builder command structs
 pub use builder::{
-    AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    DeleteCommand, DropAlwaysDeleteCommand, UpdateCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
+    AddColumnCommand, AlwaysDeleteCommand, AlwaysUpdateCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
+    DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, UpdateCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
     DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -91,7 +91,7 @@ pub use facade::RenameTempFunctionCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
 pub use facade::{
-    ShowAlwaysDeletesCommand, ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
+    ShowAlwaysDeletesCommand, ShowAlwaysUpdatesCommand, ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
     ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
     ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
     ShowCountCommand,
@@ -373,9 +373,11 @@ impl BundleCommand {
                 // Get the command name for the error message
                 let cmd_name = match &self {
                     BundleCommand::AlwaysDelete(_) => "ALWAYS DELETE",
+                    BundleCommand::AlwaysUpdate(_) => "ALWAYS UPDATE",
                     BundleCommand::Attach(_) => "ATTACH",
                     BundleCommand::Delete(_) => "DELETE",
                     BundleCommand::DropAlwaysDelete(_) => "DROP ALWAYS DELETE",
+                    BundleCommand::DropAlwaysUpdate(_) => "DROP ALWAYS UPDATE",
                     BundleCommand::Update(_) => "UPDATE",
                     BundleCommand::DetachBlock(_) => "DETACH",
                     BundleCommand::Filter(_) => "FILTER",
@@ -411,7 +413,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) => {
+                    BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -425,7 +427,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_))
+        matches!(self, BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_))
     }
 }
 
@@ -675,12 +677,16 @@ register_commands! {
         // Data modification commands
         AlwaysDelete(AlwaysDeleteCommand) => Rule::always_delete_stmt,
             "ALWAYS DELETE" => "ALWAYS DELETE FROM bundle WHERE <condition>",
+        AlwaysUpdate(AlwaysUpdateCommand) => Rule::always_update_stmt,
+            "ALWAYS UPDATE" => "ALWAYS UPDATE bundle SET <col> = <expr> [, ...] WHERE <condition>",
         Attach(AttachCommand) => Rule::attach_stmt,
             "ATTACH" => "ATTACH '<path>' [TO <pack>] [WITH (<options>)]",
         Delete(DeleteCommand) => Rule::delete_stmt,
             "DELETE" => "DELETE FROM bundle WHERE <condition>",
         DropAlwaysDelete(DropAlwaysDeleteCommand) => Rule::drop_always_delete_stmt,
             "DROP ALWAYS DELETE" => "DROP ALWAYS DELETE [WHERE <condition>]",
+        DropAlwaysUpdate(DropAlwaysUpdateCommand) => Rule::drop_always_update_stmt,
+            "DROP ALWAYS UPDATE" => "DROP ALWAYS UPDATE [SET <col> = <expr> [, ...] WHERE <condition>]",
         Update(UpdateCommand) => Rule::update_stmt,
             "UPDATE" => "UPDATE bundle SET <col> = <expr> [, ...] WHERE <condition>",
         DetachBlock(DetachBlockCommand) => Rule::detach_stmt,
@@ -820,6 +826,8 @@ register_commands! {
             "SHOW COUNT" => "SHOW COUNT",
         ShowAlwaysDeletes(ShowAlwaysDeletesCommand) => Rule::show_always_deletes_stmt,
             "SHOW ALWAYS DELETES" => "SHOW ALWAYS DELETES",
+        ShowAlwaysUpdates(ShowAlwaysUpdatesCommand) => Rule::show_always_updates_stmt,
+            "SHOW ALWAYS UPDATES" => "SHOW ALWAYS UPDATES",
         Syntax(SyntaxCommand) => Rule::syntax_stmt,
             "SYNTAX" => "SYNTAX [<command>]",
         DescribeData(DescribeDataCommand) => Rule::describe_data_stmt,

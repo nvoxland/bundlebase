@@ -41,8 +41,10 @@ impl PyOperation {
             AnyOperation::DropFunction(_) => "dropFunction".to_string(),
             AnyOperation::RenameConnector(_) => "renameConnector".to_string(),
             AnyOperation::AlwaysDelete(_) => "alwaysDelete".to_string(),
+            AnyOperation::AlwaysUpdate(_) => "alwaysUpdate".to_string(),
             AnyOperation::Delete(_) => "delete".to_string(),
             AnyOperation::DropAlwaysDelete(_) => "dropAlwaysDelete".to_string(),
+            AnyOperation::DropAlwaysUpdate(_) => "dropAlwaysUpdate".to_string(),
             AnyOperation::UpdateData(_) => "updateData".to_string(),
             AnyOperation::RenameFunction(_) => "renameFunction".to_string(),
         }

@@ -5,12 +5,14 @@
 // Builder command implementations
 mod add_column;
 mod always_delete;
+mod always_update;
 mod attach;
 mod cast_column;
 mod commit;
 mod create_index;
 mod delete;
 mod drop_always_delete;
+mod drop_always_update;
 mod create_source;
 mod create_view;
 mod import_connector;
@@ -45,6 +47,7 @@ mod verify_data;
 
 pub use add_column::AddColumnCommand;
 pub use always_delete::AlwaysDeleteCommand;
+pub use always_update::AlwaysUpdateCommand;
 pub use attach::AttachCommand;
 pub use cast_column::CastColumnCommand;
 pub use commit::CommitCommand;
@@ -55,6 +58,7 @@ pub use import_connector::ImportConnectorCommand;
 pub use import_function::ImportFunctionCommand;
 pub use delete::DeleteCommand;
 pub use drop_always_delete::DropAlwaysDeleteCommand;
+pub use drop_always_update::DropAlwaysUpdateCommand;
 pub use detach_block::DetachBlockCommand;
 pub use drop_column::DropColumnCommand;
 pub use drop_index::DropIndexCommand;

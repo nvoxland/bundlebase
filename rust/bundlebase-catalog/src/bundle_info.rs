@@ -1,4 +1,5 @@
 mod always_deletes_table;
+mod always_updates_table;
 mod blocks_table;
 mod commands_table;
 mod config_table;
@@ -17,6 +18,7 @@ use bundlebase::bundle::BundleFacade;
 
 use async_trait::async_trait;
 use always_deletes_table::BundleAlwaysDeletesTable;
+use always_updates_table::BundleAlwaysUpdatesTable;
 use blocks_table::BundleBlocksTable;
 use commands_table::CommandsTable;
 use config_table::BundleConfigTable;
@@ -65,7 +67,8 @@ impl BundleInfoSchemaProvider {
         tables.insert(tables::CONNECTORS, Arc::new(BundleConnectorsTable::new(bundle.clone())));
         tables.insert(tables::FUNCTIONS, Arc::new(BundleFunctionsTable::new(bundle.clone())));
         tables.insert(tables::COLUMNS, Arc::new(BundleColumnsTable::new(bundle.clone())));
-        tables.insert(tables::ALWAYS_DELETES, Arc::new(BundleAlwaysDeletesTable::new(bundle)));
+        tables.insert(tables::ALWAYS_DELETES, Arc::new(BundleAlwaysDeletesTable::new(bundle.clone())));
+        tables.insert(tables::ALWAYS_UPDATES, Arc::new(BundleAlwaysUpdatesTable::new(bundle)));
         tables.insert(tables::COMMANDS, Arc::new(CommandsTable::new()));
         Self { tables }
     }

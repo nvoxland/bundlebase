@@ -43,6 +43,8 @@ statement_text  = { (quoted_string | !(";" | EOI) ~ ANY)+ }
 // Data modification statements - operations that change bundle data content
 data_modification_stmt = {
     update_stmt
+    | always_update_stmt
+    | drop_always_update_stmt
     | always_delete_stmt
     | drop_always_delete_stmt
     | delete_stmt
@@ -120,6 +122,7 @@ metadata_stmt = {
     | show_columns_stmt
     | show_count_stmt
     | show_always_deletes_stmt
+    | show_always_updates_stmt
     | syntax_stmt
     | describe_data_stmt
     | describe_connector_stmt
@@ -188,6 +191,7 @@ show_functions_stmt  = { ^"show" ~ ^"functions" }
 show_columns_stmt    = { ^"show" ~ ^"columns" }
 show_count_stmt      = { ^"show" ~ ^"count" }
 show_always_deletes_stmt = { ^"show" ~ ^"always" ~ ^"deletes" }
+show_always_updates_stmt = { ^"show" ~ ^"always" ~ ^"updates" }
 
 // ============================================================================
 // IMPORT JOIN Statement
@@ -223,6 +227,28 @@ always_delete_stmt = {
 
 drop_always_delete_stmt = {
     ^"drop" ~ ^"always" ~ ^"delete" ~ (^"where" ~ delete_where_clause)?
+}
+
+// ============================================================================
+// ALWAYS UPDATE Statement
+// ============================================================================
+// Syntax: ALWAYS UPDATE bundle SET <col> = <expr> [, ...] WHERE <condition>
+// Creates a persistent rule that auto-updates matching rows on every future ATTACH.
+// Also immediately updates matching rows in current data.
+
+always_update_stmt = {
+    ^"always" ~ ^"update" ~ ^"bundle" ~ ^"set" ~ update_set_clause ~ ^"where" ~ update_where_clause
+}
+
+// ============================================================================
+// DROP ALWAYS UPDATE Statement
+// ============================================================================
+// Syntax: DROP ALWAYS UPDATE [SET <col> = <expr> [, ...] WHERE <condition>]
+// Without SET/WHERE: removes all always-update rules.
+// With SET/WHERE: removes the specific matching rule.
+
+drop_always_update_stmt = {
+    ^"drop" ~ ^"always" ~ ^"update" ~ (^"set" ~ update_set_clause ~ ^"where" ~ update_where_clause)?
 }
 
 // ============================================================================

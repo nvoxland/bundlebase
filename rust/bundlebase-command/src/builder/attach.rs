@@ -7,6 +7,7 @@ use bundlebase::bundle::operation::AttachBlockOp;
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase::bundle::BundleFacade;
 
 /// Command to attach a data block to the bundle.
 #[derive(Debug, Clone)]
@@ -120,6 +121,45 @@ impl BundleBuilderCommand for AttachCommand {
                     builder.apply_operation(
                         bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![]).into()
                     ).await?;
+                }
+            }
+        }
+
+        // Apply always-update rules to the newly attached data
+        let update_rules = builder.always_update_rules();
+        if !update_rules.is_empty() {
+            for rule in &update_rules {
+                let full_sql = format!("UPDATE bundle SET {} WHERE {}", rule.set_clause, rule.where_clause);
+                let cmd = crate::parser::parse_command(&full_sql)?;
+                if let crate::BundleCommand::Update(update_cmd) = cmd {
+                    let columns: Vec<String> = update_cmd.assignments.iter().map(|a| a.column.clone()).collect();
+                    let expressions: Vec<String> = update_cmd.assignments.iter().map(|a| a.expression.clone()).collect();
+
+                    let updated = builder.evaluate_update_cols(&columns, &expressions, &rule.where_clause).await?;
+                    if updated > 0 {
+                        tracing::debug!(
+                            "[ALWAYS UPDATE] Auto-updated {} rows matching SET {} WHERE {}",
+                            updated,
+                            rule.set_clause,
+                            rule.where_clause
+                        );
+                        builder.flush_pending_updates_to_blocks();
+
+                        let schema = builder.schema().await?;
+                        let select_cols: Vec<String> = schema.fields().iter().map(|f| {
+                            let name = f.name();
+                            let quoted = format!("\"{}\"", name);
+                            if let Some(assignment) = update_cmd.assignments.iter().find(|a| a.column == *name) {
+                                format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", rule.where_clause, assignment.expression, quoted, quoted)
+                            } else {
+                                quoted
+                            }
+                        }).collect();
+                        let filter_query = format!("SELECT {} FROM bundle", select_cols.join(", "));
+                        builder.apply_operation(
+                            bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![]).into()
+                        ).await?;
+                    }
                 }
             }
         }

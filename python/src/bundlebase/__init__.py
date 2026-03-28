@@ -79,6 +79,8 @@ _original_methods = {
     "update": _PyBundleBuilder.update,
     "always_delete": _PyBundleBuilder.always_delete,
     "drop_always_delete": _PyBundleBuilder.drop_always_delete,
+    "always_update": _PyBundleBuilder.always_update,
+    "drop_always_update": _PyBundleBuilder.drop_always_update,
 
     # Query operations
     "query": _PyBundleBuilder.query,
@@ -160,7 +162,7 @@ def _wrap_mutation_method(method_name: str) -> Callable[..., OperationChain]:
 mutation_methods = [
     "attach", "detach_block", "replace_block", "create_source",
     "add_column", "cast_column", "drop_column", "rename_column", "filter", "join",
-    "delete", "update", "always_delete", "drop_always_delete",
+    "delete", "update", "always_delete", "drop_always_delete", "always_update", "drop_always_update",
     "create_view", "rename_view", "drop_view", "drop_join", "rename_join",
     "set_name", "set_description", "save_config", "set_config", "import_function",
     "create_index", "drop_index", "rebuild_index", "reindex",

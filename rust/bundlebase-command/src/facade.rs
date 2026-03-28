@@ -33,7 +33,7 @@ pub use rename_temp_function::RenameTempFunctionCommand;
 pub use explain::ExplainPlanCommand;
 pub use set_config::SetConfigCommand;
 pub use show::{
-    ShowAlwaysDeletesCommand, ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
+    ShowAlwaysDeletesCommand, ShowAlwaysUpdatesCommand, ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
     ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
     ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
 };

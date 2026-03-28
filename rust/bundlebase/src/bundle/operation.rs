@@ -1,10 +1,12 @@
 mod add_column;
 mod always_delete;
+mod always_update;
 mod attach_block;
 mod cast_column;
 mod create_view;
 mod delete;
 mod drop_always_delete;
+mod drop_always_update;
 mod update_data;
 mod import_function;
 mod create_index;
@@ -35,6 +37,7 @@ mod update_version;
 
 pub use crate::bundle::operation::add_column::AddColumnOp;
 pub use crate::bundle::operation::always_delete::AlwaysDeleteOp;
+pub use crate::bundle::operation::always_update::AlwaysUpdateOp;
 pub use crate::bundle::operation::attach_block::{AttachBlockOp, SourceInfo};
 pub use crate::bundle::operation::cast_column::CastColumnOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
@@ -46,6 +49,7 @@ pub use crate::bundle::operation::create_source::CreateSourceOp;
 pub use crate::bundle::operation::import_connector::ImportConnectorOp;
 pub use crate::bundle::operation::delete::DeleteOp;
 pub use crate::bundle::operation::drop_always_delete::DropAlwaysDeleteOp;
+pub use crate::bundle::operation::drop_always_update::DropAlwaysUpdateOp;
 pub use crate::bundle::operation::update_data::UpdateDataOp;
 pub use crate::bundle::operation::detach_block::DetachBlockOp;
 pub use crate::bundle::operation::drop_connector::DropConnectorOp;
@@ -218,6 +222,7 @@ macro_rules! define_any_operation {
 define_any_operation! {
     AddColumn(AddColumnOp),
     AlwaysDelete(AlwaysDeleteOp),
+    AlwaysUpdate(AlwaysUpdateOp),
     AttachBlock(AttachBlockOp),
     CastColumn(CastColumnOp),
     ImportFunction(ImportFunctionOp),
@@ -227,6 +232,7 @@ define_any_operation! {
     CreateView(CreateViewOp),
     Delete(DeleteOp),
     DropAlwaysDelete(DropAlwaysDeleteOp),
+    DropAlwaysUpdate(DropAlwaysUpdateOp),
     UpdateData(UpdateDataOp),
     ImportConnector(ImportConnectorOp),
     DetachBlock(DetachBlockOp),

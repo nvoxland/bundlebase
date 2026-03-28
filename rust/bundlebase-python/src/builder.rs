@@ -1105,6 +1105,47 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Register an always-update rule and immediately update matching rows.
+    fn always_update<'py>(
+        slf: PyRef<'_, Self>,
+        set_where: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let set_where = set_where.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .always_update(&set_where)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to set always-update rule", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    /// Remove always-update rules.
+    #[pyo3(signature = (rule_text=None))]
+    fn drop_always_update<'py>(
+        slf: PyRef<'_, Self>,
+        rule_text: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let rule_text = rule_text.map(|s| s.to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .drop_always_update(rule_text.as_deref())
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to drop always-update rule", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
     /// Execute an UPDATE statement.
     fn update<'py>(
         slf: PyRef<'_, Self>,

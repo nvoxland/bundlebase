@@ -34,6 +34,7 @@ pub mod tables {
     pub static FUNCTIONS: &str = "functions";
     pub static COLUMNS: &str = "columns";
     pub static ALWAYS_DELETES: &str = "always_deletes";
+    pub static ALWAYS_UPDATES: &str = "always_updates";
 }
 
 /// Type alias for the schema provider registration function.

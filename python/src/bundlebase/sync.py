@@ -672,6 +672,32 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def always_update(self, set_where: str) -> "SyncBundleBuilder":
+        """Register a persistent always-update rule and immediately update matching rows.
+
+        Args:
+            set_where: SET and WHERE clause (e.g., "SET salary = 0 WHERE salary < 0")
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "always_update", set_where)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def drop_always_update(self, rule_text: Optional[str] = None) -> "SyncBundleBuilder":
+        """Remove always-update rules.
+
+        Args:
+            rule_text: Specific rule to remove ("SET ... WHERE ..."), or None to remove all
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "drop_always_update", rule_text)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
     def join(
         self, name: str, on: str, location: Optional[str] = None, how: str = "inner"
     ) -> "SyncBundleBuilder":

@@ -18,8 +18,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::builder::{
-    AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CreateIndexCommand, CreateSourceCommand,
-    DeleteCommand, DropAlwaysDeleteCommand, UpdateCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
+    AddColumnCommand, AlwaysDeleteCommand, AlwaysUpdateCommand, AttachCommand, CastColumnCommand, CreateIndexCommand, CreateSourceCommand,
+    DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, UpdateCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
     DropIndexCommand, DropJoinCommand, DropViewCommand, FetchAllCommand, FetchCommand,
     FilterCommand, ImportConnectorCommand, ImportFunctionCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -185,6 +185,12 @@ pub trait BundleBuilderExt {
 
     /// Remove always-delete rules. Pass None to remove all, or Some to remove a specific rule.
     async fn drop_always_delete(&self, where_clause: Option<&str>) -> Result<&Self, BundlebaseError>;
+
+    /// Register a persistent always-update rule and immediately update matching rows.
+    async fn always_update(&self, set_where: &str) -> Result<&Self, BundlebaseError>;
+
+    /// Remove always-update rules. Pass None to remove all, or Some("SET ... WHERE ...") to remove a specific rule.
+    async fn drop_always_update(&self, rule_text: Option<&str>) -> Result<&Self, BundlebaseError>;
 
     /// Join with another data source.
     async fn join(
@@ -499,6 +505,21 @@ impl BundleBuilderExt for BundleBuilder {
         Ok(self)
     }
 
+    async fn always_update(&self, set_where: &str) -> Result<&Self, BundlebaseError> {
+        let full_sql = format!("ALWAYS UPDATE bundle {}", set_where);
+        let cmd = crate::parser::parse_command(&full_sql)?;
+        match cmd {
+            crate::BundleCommand::AlwaysUpdate(cmd) => { exec_cmd(self, cmd).await?; }
+            _ => return Err("Failed to parse ALWAYS UPDATE statement".into()),
+        }
+        Ok(self)
+    }
+
+    async fn drop_always_update(&self, rule_text: Option<&str>) -> Result<&Self, BundlebaseError> {
+        exec_cmd(self, DropAlwaysUpdateCommand::new(rule_text.map(|s| s.to_string()))).await?;
+        Ok(self)
+    }
+
     async fn join(
         &self,
         name: &str,
@@ -689,6 +710,12 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
     }
     async fn drop_always_delete(&self, where_clause: Option<&str>) -> Result<&Self, BundlebaseError> {
         (**self).drop_always_delete(where_clause).await?; Ok(self)
+    }
+    async fn always_update(&self, set_where: &str) -> Result<&Self, BundlebaseError> {
+        (**self).always_update(set_where).await?; Ok(self)
+    }
+    async fn drop_always_update(&self, rule_text: Option<&str>) -> Result<&Self, BundlebaseError> {
+        (**self).drop_always_update(rule_text).await?; Ok(self)
     }
     async fn join(&self, name: &str, expression: &str, location: Option<&str>, join_type: JoinTypeOption) -> Result<&Self, BundlebaseError> {
         (**self).join(name, expression, location, join_type).await?; Ok(self)

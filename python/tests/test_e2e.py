@@ -2706,3 +2706,165 @@ async def test_fluent_chain_with_update_and_delete():
     result = await c.query("SELECT salary FROM bundle WHERE salary < 50000")
     df = await result.to_pandas()
     assert len(df) == 0
+
+
+# ===== Always Update Tests =====
+
+
+@pytest.mark.asyncio
+async def test_always_update_immediate():
+    """Test ALWAYS UPDATE immediately updates matching rows."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Verify some high-salary rows exist
+    result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary > 200000")
+    df = await result.to_pandas()
+    high_salary_count = df["cnt"].iloc[0]
+    assert high_salary_count > 0
+
+    c = await c.always_update("SET salary = 200000 WHERE salary > 200000")
+
+    # No rows should exceed 200000 now
+    result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary > 200000")
+    df = await result.to_pandas()
+    assert df["cnt"].iloc[0] == 0
+
+    # But rows at exactly 200000 should have increased
+    result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary = 200000")
+    df = await result.to_pandas()
+    assert df["cnt"].iloc[0] >= high_salary_count
+
+
+@pytest.mark.asyncio
+async def test_always_update_on_attach():
+    """Test always-update rules auto-apply when new data is attached."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Set always-update rule
+    c = await c.always_update("SET salary = 200000 WHERE salary > 200000")
+
+    # Attach the same data again — matching rows should be auto-updated
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Verify no rows exceed 200000 (rule applied to both copies)
+    result = await c.query("SELECT salary FROM bundle WHERE salary > 200000")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_always_update_multiple_rules():
+    """Test multiple always-update rules accumulate."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    c = await c.always_update("SET salary = 200000 WHERE salary > 200000")
+    c = await c.always_update("SET salary = 50000 WHERE salary < 50000")
+
+    # All salaries should now be between 50000 and 200000
+    result = await c.query("SELECT salary FROM bundle WHERE salary > 200000 OR salary < 50000")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_always_update_commit_reopen():
+    """Test always-update rules persist and auto-apply after reopen + attach."""
+    import tempfile, shutil, os
+    with tempfile.TemporaryDirectory() as temp_dir:
+        src = os.path.join(os.path.dirname(__file__), "..", "..", "test_data", "userdata.parquet")
+        data_path = os.path.join(temp_dir, "userdata.parquet")
+        shutil.copy2(src, data_path)
+
+        data_url = "file://" + data_path
+        bundle_dir = os.path.join(temp_dir, "bundle")
+        c = await bundlebase.create(bundle_dir)
+        c = await c.attach(data_url)
+
+        c = await c.always_update("SET salary = 200000 WHERE salary > 200000")
+        await c.commit("Add always-update rule")
+
+        # Reopen and extend
+        b2 = await bundlebase.open(bundle_dir)
+        c2 = await b2.extend()
+        c2 = await c2.attach(data_url)
+        result = await c2.query("SELECT salary FROM bundle WHERE salary > 200000")
+        df = await result.to_pandas()
+        assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_drop_always_update_specific():
+    """Test DROP ALWAYS UPDATE with specific rule prevents it from applying to future attaches."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    c = await c.always_update("SET salary = 200000 WHERE salary > 200000")
+    c = await c.always_update("SET salary = 50000 WHERE salary < 50000")
+
+    # Verify info schema shows 2 rules
+    result = await c.query("SELECT * FROM bundle_info.always_updates")
+    df = await result.to_pandas()
+    assert len(df) == 2
+
+    c = await c.drop_always_update("SET salary = 200000 WHERE salary > 200000")
+
+    # Verify only 1 rule remains
+    result = await c.query("SELECT * FROM bundle_info.always_updates")
+    df = await result.to_pandas()
+    assert len(df) == 1
+    assert df["where_clause"].iloc[0] == "salary < 50000"
+
+
+@pytest.mark.asyncio
+async def test_drop_always_update_all():
+    """Test DROP ALWAYS UPDATE without args removes all rules."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    c = await c.always_update("SET salary = 200000 WHERE salary > 200000")
+    c = await c.always_update("SET salary = 50000 WHERE salary < 50000")
+
+    # Verify 2 rules exist
+    result = await c.query("SELECT * FROM bundle_info.always_updates")
+    df = await result.to_pandas()
+    assert len(df) == 2
+
+    c = await c.drop_always_update()
+
+    # Verify no rules remain
+    result = await c.query("SELECT * FROM bundle_info.always_updates")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_show_always_updates():
+    """Test SHOW ALWAYS UPDATES and info schema view."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # No rules initially
+    result = await c.query("SELECT * FROM bundle_info.always_updates")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+    # Add rules
+    c = await c.always_update("SET salary = 200000 WHERE salary > 200000")
+    c = await c.always_update("SET salary = 50000 WHERE salary < 50000")
+
+    # Query info schema
+    result = await c.query("SELECT * FROM bundle_info.always_updates")
+    df = await result.to_pandas()
+    assert len(df) == 2
+    assert "set_clause" in df.columns
+    assert "where_clause" in df.columns
+
+    # Drop one rule
+    c = await c.drop_always_update("SET salary = 200000 WHERE salary > 200000")
+    result = await c.query("SELECT * FROM bundle_info.always_updates")
+    df = await result.to_pandas()
+    assert len(df) == 1
+    assert df["where_clause"].iloc[0] == "salary < 50000"

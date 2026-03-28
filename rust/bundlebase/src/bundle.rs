@@ -74,6 +74,28 @@ use url::Url;
 use uuid::Uuid;
 pub static META_DIR: &str = "_bundlebase";
 
+/// A persistent always-update rule: SET assignments + WHERE clause.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlwaysUpdateRule {
+    pub set_clause: String,
+    pub where_clause: String,
+}
+
+impl AlwaysUpdateRule {
+    pub fn new(set_clause: impl Into<String>, where_clause: impl Into<String>) -> Self {
+        Self {
+            set_clause: set_clause.into(),
+            where_clause: where_clause.into(),
+        }
+    }
+
+    /// Returns the canonical text representation used for matching in DROP.
+    pub fn rule_text(&self) -> String {
+        format!("SET {} WHERE {}", self.set_clause, self.where_clause)
+    }
+}
+
 /// A thread-safe Bundle loaded from persistent storage.
 ///
 /// `Bundle` represents a bundle that has been committed and persisted to disk.
@@ -116,6 +138,9 @@ pub struct Bundle {
 
     /// Persistent always-delete rules (WHERE clauses applied to each new attach)
     always_delete_rules: Arc<RwLock<Vec<String>>>,
+
+    /// Persistent always-update rules (SET/WHERE clauses applied to each new attach)
+    always_update_rules: Arc<RwLock<Vec<AlwaysUpdateRule>>>,
 
     /// Update overlays loaded from committed overlay parquet files.
     /// Later entries override earlier ones per-cell.
@@ -179,6 +204,7 @@ impl Clone for Bundle {
             subprocess_cache: Arc::clone(&self.subprocess_cache),
             config: Arc::clone(&self.config),
             always_delete_rules: Arc::clone(&self.always_delete_rules),
+            always_update_rules: Arc::clone(&self.always_update_rules),
             update_overlays: Arc::clone(&self.update_overlays),
             is_view: Arc::clone(&self.is_view),
         }
@@ -271,6 +297,7 @@ impl Bundle {
             column_names: Arc::new(RwLock::new(None)),
             config: bundle_config,
             always_delete_rules: Arc::new(RwLock::new(Vec::new())),
+            always_update_rules: Arc::new(RwLock::new(Vec::new())),
             update_overlays: Arc::new(RwLock::new(Vec::new())),
             is_view: Arc::new(RwLock::new(false)),
         });
@@ -583,6 +610,29 @@ impl Bundle {
         self.always_delete_rules.write().clear();
     }
 
+    /// Returns the current always-update rules.
+    pub fn always_update_rules(&self) -> Vec<AlwaysUpdateRule> {
+        self.always_update_rules.read().clone()
+    }
+
+    /// Add an always-update rule. Deduplicates — adding the same rule twice is a no-op.
+    pub fn add_always_update_rule(&self, rule: &AlwaysUpdateRule) {
+        let mut rules = self.always_update_rules.write();
+        if !rules.contains(rule) {
+            rules.push(rule.clone());
+        }
+    }
+
+    /// Remove a specific always-update rule by its canonical text ("SET ... WHERE ...").
+    pub fn remove_always_update_rule(&self, rule_text: &str) {
+        self.always_update_rules.write().retain(|r| r.rule_text() != rule_text);
+    }
+
+    /// Remove all always-update rules.
+    pub fn clear_always_update_rules(&self) {
+        self.always_update_rules.write().clear();
+    }
+
     /// Recreate data_dir from the current URL + config.
     /// Called after SaveConfigOp changes config.
     pub(crate) async fn refresh_data_dir(&self) -> Result<(), BundlebaseError> {
@@ -615,6 +665,7 @@ impl Bundle {
         *self.data_dir.write() = Arc::clone(&*other.data_dir.read());
         *self.is_view.write() = *other.is_view.read();
         *self.always_delete_rules.write() = other.always_delete_rules.read().clone();
+        *self.always_update_rules.write() = other.always_update_rules.read().clone();
         *self.update_overlays.write() = other.update_overlays.read().clone();
         self.dataframe.clear();
         *self.column_names.write() = None;
@@ -1335,6 +1386,10 @@ impl BundleFacade for Bundle {
 
     fn always_delete_rules(&self) -> Vec<String> {
         Bundle::always_delete_rules(self)
+    }
+
+    fn always_update_rules(&self) -> Vec<AlwaysUpdateRule> {
+        Bundle::always_update_rules(self)
     }
 
     fn data_dir(&self) -> Arc<dyn IOReadWriteDir> {

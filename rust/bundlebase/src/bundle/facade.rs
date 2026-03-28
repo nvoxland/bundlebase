@@ -8,6 +8,7 @@ use crate::index::IndexDefinition;
 use crate::io::{IOReadWriteDir, ObjectId};
 use crate::object_id::ColumnId;
 use crate::bundle_config::Scope;
+use crate::bundle::AlwaysUpdateRule;
 use crate::{AnyOperation, Bundle, BundleBuilder, BundleConfig, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -125,6 +126,9 @@ pub trait BundleFacade: Send + Sync {
 
     /// Returns the current always-delete rules (WHERE clauses)
     fn always_delete_rules(&self) -> Vec<String>;
+
+    /// Returns the current always-update rules (SET/WHERE clauses)
+    fn always_update_rules(&self) -> Vec<AlwaysUpdateRule>;
 
     /// Returns the data directory for this bundle
     fn data_dir(&self) -> Arc<dyn IOReadWriteDir>;

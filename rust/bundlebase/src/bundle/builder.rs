@@ -6,7 +6,7 @@ use crate::bundle::operation::AnyOperation;
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::function_entry::FunctionRegistry;
-use crate::bundle::{column_metadata, sql, Bundle};
+use crate::bundle::{column_metadata, sql, AlwaysUpdateRule, Bundle};
 use crate::source::ConnectorRegistry;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, VersionedBlockId};
 use crate::index::{IndexDefinition};
@@ -836,6 +836,11 @@ impl BundleBuilder {
         self.bundle.always_delete_rules()
     }
 
+    /// Returns the current always-update rules.
+    pub fn always_update_rules(&self) -> Vec<AlwaysUpdateRule> {
+        self.bundle.always_update_rules()
+    }
+
     /// Add RowIds to the pending tombstone set.
     ///
     /// These will be written to a tombstone file on commit.
@@ -1315,6 +1320,10 @@ impl BundleFacade for BundleBuilder {
 
     fn always_delete_rules(&self) -> Vec<String> {
         self.bundle.always_delete_rules()
+    }
+
+    fn always_update_rules(&self) -> Vec<AlwaysUpdateRule> {
+        self.bundle.always_update_rules()
     }
 
     fn data_dir(&self) -> Arc<dyn IOReadWriteDir> {
