@@ -703,6 +703,9 @@ For inspecting bundle data and metadata, use SQL commands directly:
 | `SHOW HISTORY` | Show version history |
 | `SHOW DETAILS` | Show bundle metadata |
 | `DELETE FROM bundle WHERE ...` | Delete rows matching a condition |
+| `ALWAYS DELETE FROM bundle WHERE ...` | Persistent rule: auto-delete matching rows on every future ATTACH |
+| `DROP ALWAYS DELETE [WHERE ...]` | Remove one or all always-delete rules |
+| `SHOW ALWAYS DELETES` | List active always-delete rules |
 | `DESCRIBE DATA IN col1, col2` | Profile columns (min/max/avg/nulls/top values) |
 | `DESCRIBE DATA IN col AS TYPE` | Detect sentinel values that fail to cast |
 

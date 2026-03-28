@@ -97,6 +97,63 @@ c = await c.delete("depth_m < 0")
 await c.commit("Removed sentinel values")
 ```
 
+### ALWAYS DELETE
+
+Registers a persistent delete rule that automatically applies to all future ATTACH operations. Also immediately deletes matching rows from current data.
+
+Multiple rules can be added and they accumulate.
+
+```sql
+ALWAYS DELETE FROM bundle WHERE <condition>
+```
+
+**Examples:**
+
+```sql
+-- Always remove negative sentinel values from new data
+ALWAYS DELETE FROM bundle WHERE depth_m < 0
+
+-- Always remove inactive records
+ALWAYS DELETE FROM bundle WHERE status = 'inactive'
+```
+
+**Python API:**
+
+```python
+c = await c.always_delete("depth_m < 0")
+await c.commit("Add data quality rule")
+```
+
+### DROP ALWAYS DELETE
+
+Removes always-delete rules. Without a WHERE clause, removes all rules.
+
+```sql
+-- Remove a specific rule
+DROP ALWAYS DELETE WHERE depth_m < 0
+
+-- Remove all rules
+DROP ALWAYS DELETE
+```
+
+**Python API:**
+
+```python
+# Remove specific rule
+c = await c.drop_always_delete("depth_m < 0")
+
+# Remove all rules
+c = await c.drop_always_delete()
+```
+
+### SHOW ALWAYS DELETES
+
+Lists all active always-delete rules. Also available as `SELECT * FROM bundle_info.always_deletes`.
+
+```sql
+SHOW ALWAYS DELETES
+```
+
 ### FILTER
 
 Filters the bundle's rows using a SQL query.
