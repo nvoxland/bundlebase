@@ -2687,3 +2687,22 @@ async def test_delete_then_update():
     result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary = 0")
     df = await result.to_pandas()
     assert df["cnt"].iloc[0] > 0
+
+
+@pytest.mark.asyncio
+async def test_fluent_chain_with_update_and_delete():
+    """Test that update and delete work in fluent chains."""
+    c = await (bundlebase.create(random_bundle())
+               .attach(datafile("userdata.parquet"))
+               .update("SET salary = 99999 WHERE salary > 200000")
+               .delete("salary < 50000"))
+
+    # Updated rows should exist
+    result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary = 99999")
+    df = await result.to_pandas()
+    assert df["cnt"].iloc[0] > 0
+
+    # Deleted rows should be gone
+    result = await c.query("SELECT salary FROM bundle WHERE salary < 50000")
+    df = await result.to_pandas()
+    assert len(df) == 0
