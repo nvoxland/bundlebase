@@ -557,9 +557,12 @@ impl Bundle {
         self.always_delete_rules.read().clone()
     }
 
-    /// Add an always-delete rule.
+    /// Add an always-delete rule. Deduplicates — adding the same rule twice is a no-op.
     pub fn add_always_delete_rule(&self, where_clause: &str) {
-        self.always_delete_rules.write().push(where_clause.to_string());
+        let mut rules = self.always_delete_rules.write();
+        if !rules.contains(&where_clause.to_string()) {
+            rules.push(where_clause.to_string());
+        }
     }
 
     /// Remove a specific always-delete rule by WHERE clause.
