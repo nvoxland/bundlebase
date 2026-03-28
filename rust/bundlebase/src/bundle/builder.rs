@@ -414,9 +414,10 @@ impl BundleBuilder {
             // Serialize and write tombstone file via content-addressed storage
             let tomb_bytes = tombstone::serialize_tombstone(&tombstoned_ids);
             debug!("[DELETE] Writing tombstone file ({} bytes)", tomb_bytes.len());
+            let data_dir = self.bundle.data_dir();
             let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(tomb_bytes)]);
-            let write_result = manifest_dir.write_stream(Box::pin(stream), "tomb").await?;
-            let tomb_filename = manifest_dir.relative_path(write_result.file.as_ref())?;
+            let write_result = data_dir.write_stream(Box::pin(stream), "tomb").await?;
+            let tomb_filename = data_dir.relative_path(write_result.file.as_ref())?;
             debug!("[DELETE] Tombstone file written: {}", tomb_filename);
 
             // Add DeleteOp alongside the existing FilterOp.
@@ -446,9 +447,10 @@ impl BundleBuilder {
 
             let overlay_bytes = update_overlay::write_overlay_parquet(&pending_upd, &column_types)?;
             debug!("[UPDATE] Writing overlay file ({} bytes, {} rows)", overlay_bytes.len(), pending_upd.len());
+            let data_dir = self.bundle.data_dir();
             let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(overlay_bytes)]);
-            let write_result = manifest_dir.write_stream(Box::pin(stream), "update").await?;
-            let overlay_filename = manifest_dir.relative_path(write_result.file.as_ref())?;
+            let write_result = data_dir.write_stream(Box::pin(stream), "update").await?;
+            let overlay_filename = data_dir.relative_path(write_result.file.as_ref())?;
             debug!("[UPDATE] Overlay file written: {}", overlay_filename);
 
             let update_op = UpdateDataOp::new(&overlay_filename);

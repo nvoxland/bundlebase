@@ -5,7 +5,7 @@
 
 use crate::bundle::column_metadata::ColumnNames;
 use crate::bundle::operation::Operation;
-use crate::bundle::{tombstone, META_DIR};
+use crate::bundle::tombstone;
 use crate::object_id::ObjectId;
 use crate::{Bundle, BundlebaseError};
 use datafusion::common::DataFusionError;
@@ -55,19 +55,9 @@ impl Operation for DeleteOp {
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
         // Load tombstone file and distribute deleted row numbers to DataBlocks
-        let manifest_dir = bundle.data_dir().writable_subdir(META_DIR)
+        let data_dir = bundle.data_dir();
+        let tomb_file = data_dir.file(&self.tombstone)
             .map_err(|e| DataFusionError::External(e))?;
-        // Tombstone path may include content-addressed subdirectory (e.g., "5f/abc123.tomb")
-        let tomb_file = if self.tombstone.contains('/') {
-            let parts: Vec<&str> = self.tombstone.splitn(2, '/').collect();
-            manifest_dir.subdir(parts[0])
-                .map_err(|e| DataFusionError::External(e))?
-                .file(parts[1])
-                .map_err(|e| DataFusionError::External(e))?
-        } else {
-            manifest_dir.file(&self.tombstone)
-                .map_err(|e| DataFusionError::External(e))?
-        };
         let bytes = tomb_file.read_bytes().await
             .map_err(|e| DataFusionError::External(e))?;
 

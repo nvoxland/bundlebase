@@ -6,7 +6,7 @@
 
 use crate::bundle::column_metadata::ColumnNames;
 use crate::bundle::operation::Operation;
-use crate::bundle::{update_overlay, META_DIR};
+use crate::bundle::update_overlay;
 use crate::{Bundle, BundlebaseError};
 use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
@@ -52,19 +52,9 @@ impl Operation for UpdateDataOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        let manifest_dir = bundle.data_dir().writable_subdir(META_DIR)
+        let data_dir = bundle.data_dir();
+        let overlay_file = data_dir.file(&self.overlay)
             .map_err(|e| DataFusionError::External(e))?;
-        // Overlay path may include content-addressed subdirectory (e.g., "52/abc123.update")
-        let overlay_file = if self.overlay.contains('/') {
-            let parts: Vec<&str> = self.overlay.splitn(2, '/').collect();
-            manifest_dir.subdir(parts[0])
-                .map_err(|e| DataFusionError::External(e))?
-                .file(parts[1])
-                .map_err(|e| DataFusionError::External(e))?
-        } else {
-            manifest_dir.file(&self.overlay)
-                .map_err(|e| DataFusionError::External(e))?
-        };
         let bytes = overlay_file.read_bytes().await
             .map_err(|e| DataFusionError::External(e))?;
 
