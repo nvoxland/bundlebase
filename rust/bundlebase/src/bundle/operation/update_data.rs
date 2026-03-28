@@ -66,27 +66,18 @@ impl Operation for UpdateDataOp {
             }
         };
 
-        let overlay = update_overlay::read_overlay_parquet(&bytes)
+        // read_overlay_parquet returns per-block overlays directly from row groups
+        let block_overlays = update_overlay::read_overlay_parquet(&bytes)
             .map_err(|e| DataFusionError::External(e))?;
 
-        let total_rows = overlay.updates.len();
-
-        // Distribute overlay entries to corresponding DataBlocks by block_ref
-        let mut by_block: std::collections::HashMap<u16, update_overlay::UpdateOverlay> = std::collections::HashMap::new();
-        for (row_id, cell_updates) in overlay.updates {
-            let block_idx = row_id.block_ref().as_u16();
-            let block_overlay = by_block.entry(block_idx).or_insert_with(|| update_overlay::UpdateOverlay {
-                updates: std::collections::HashMap::new(),
-            });
-            block_overlay.updates.insert(row_id, cell_updates);
-        }
-
+        let mut total_rows = 0;
         let packs = bundle.packs().read().clone();
         if let Some(pack) = packs.get(&crate::object_id::ObjectId::BASE_PACK) {
             let blocks = pack.blocks();
-            for (block_idx, block_overlay) in by_block {
+            for (block_idx, overlay) in block_overlays {
+                total_rows += overlay.row_numbers.len();
                 if let Some(block) = blocks.get(block_idx as usize) {
-                    block.add_update_overlay(block_overlay);
+                    block.add_update_overlay(overlay);
                 }
             }
         }

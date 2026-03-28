@@ -1,11 +1,12 @@
 //! Streaming update overlay filter that merges updated values into base data.
 //!
 //! Wraps an inner `DataSource` and replaces cell values where the overlay
-//! has updates for matching RowIds.
+//! has updates for matching row numbers. Uses Arrow arrays directly — no
+//! ScalarValue allocation per cell.
 
 use crate::bundle::update_overlay::UpdateOverlay;
 use crate::object_id::ColumnId;
-use arrow::array::RecordBatch;
+use arrow::array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow::datatypes::SchemaRef;
 use datafusion::common::Statistics;
 use datafusion::datasource::source::DataSource;
@@ -22,15 +23,21 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-/// Pre-merged overlay: row_number → (schema_column_index → ScalarValue).
-/// Built at scan setup time from all overlays for a specific block.
-type MergedOverlay = HashMap<u32, HashMap<usize, ScalarValue>>;
+/// Pre-merged overlay in Arrow-native form.
+/// row_numbers are sorted. Column arrays are indexed by schema column position.
+struct MergedOverlay {
+    /// Sorted row numbers that have updates
+    row_numbers: Vec<u32>,
+    /// For each schema column index: (values array, is_set mask).
+    /// Both have the same length as row_numbers.
+    /// Only columns with at least one update are present.
+    columns: HashMap<usize, (ArrayRef, BooleanArray)>,
+}
 
 /// A DataSource wrapper that merges update overlay values into base data.
 #[derive(Debug, Clone)]
 pub struct UpdateOverlayDataSource {
     inner: Arc<dyn DataSource>,
-    /// Pre-merged overlay keyed by row_number → (column_index → value)
     overlay: Arc<MergedOverlay>,
     updated_row_count: usize,
 }
@@ -48,8 +55,7 @@ impl UpdateOverlayDataSource {
         column_ids: &[ColumnId],
         schema: &SchemaRef,
     ) -> Self {
-        // Pre-merge: combine all overlays, later wins per-cell
-        // Convert ColumnId → schema column index
+        // Build ColumnId → schema column index mapping
         let col_id_to_idx: HashMap<ColumnId, usize> = column_ids.iter().enumerate()
             .filter_map(|(i, cid)| {
                 if i < schema.fields().len() {
@@ -60,30 +66,35 @@ impl UpdateOverlayDataSource {
             })
             .collect();
 
-        let mut merged: MergedOverlay = HashMap::new();
-        for overlay in overlays {
-            for (row_id, cell_updates) in &overlay.updates {
-                let row_num = row_id.row_number();
-                let entry = merged.entry(row_num).or_default();
-                for (col_id, value) in cell_updates {
-                    if let Some(&col_idx) = col_id_to_idx.get(col_id) {
-                        entry.insert(col_idx, value.clone());
-                    }
-                }
+        // Merge all overlays, converting ColumnId keys to schema column indices
+        let merged_overlay = UpdateOverlay::merge(overlays);
+        let mut columns: HashMap<usize, (ArrayRef, BooleanArray)> = HashMap::new();
+        for (col_id, (values, is_set)) in &merged_overlay.columns {
+            if let Some(&col_idx) = col_id_to_idx.get(col_id) {
+                columns.insert(col_idx, (values.clone(), is_set.clone()));
             }
         }
 
-        let updated_row_count = merged.len();
+        let updated_row_count = merged_overlay.row_numbers.len();
 
         Self {
             inner,
-            overlay: Arc::new(merged),
+            overlay: Arc::new(MergedOverlay {
+                row_numbers: merged_overlay.row_numbers,
+                columns,
+            }),
             updated_row_count,
         }
     }
 
     pub fn has_updates(&self) -> bool {
         self.updated_row_count > 0
+    }
+}
+
+impl fmt::Debug for MergedOverlay {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "MergedOverlay({} rows, {} columns)", self.row_numbers.len(), self.columns.len())
     }
 }
 
@@ -166,70 +177,91 @@ impl UpdateOverlayStream {
     fn apply_overlay(&self, batch: &RecordBatch, offset: u32) -> datafusion::common::Result<RecordBatch> {
         let num_rows = batch.num_rows() as u32;
 
-        // No columns to modify (e.g., COUNT(*) projection) or no matching updates
-        if batch.num_columns() == 0 {
+        if batch.num_columns() == 0 || num_rows == 0 {
             return Ok(batch.clone());
         }
 
-        // Check if any rows in this batch have updates
-        let has_updates = (offset..offset + num_rows)
-            .any(|row| self.overlay.contains_key(&row));
+        // Binary search to find overlay rows in [offset, offset + num_rows)
+        let start = self.overlay.row_numbers.partition_point(|&r| r < offset);
+        let end = self.overlay.row_numbers.partition_point(|&r| r < offset + num_rows);
 
-        if !has_updates {
+        if start == end {
+            // No overlay rows in this batch range
             return Ok(batch.clone());
         }
 
         // Build replacement columns
-        let mut new_columns: Vec<arrow::array::ArrayRef> = Vec::with_capacity(batch.num_columns());
+        let mut new_columns: Vec<ArrayRef> = Vec::with_capacity(batch.num_columns());
 
         for col_idx in 0..batch.num_columns() {
             let base_col = batch.column(col_idx);
 
-            // Check if any row in this batch updates this column
-            let col_has_updates = (offset..offset + num_rows)
-                .any(|row| {
-                    self.overlay.get(&row)
-                        .map_or(false, |updates| updates.contains_key(&col_idx))
-                });
+            let overlay_col = match self.overlay.columns.get(&col_idx) {
+                Some(col) => col,
+                None => {
+                    // No updates for this column
+                    new_columns.push(base_col.clone());
+                    continue;
+                }
+            };
 
-            if !col_has_updates {
+            let (values, is_set) = overlay_col;
+
+            // Check if any overlay row in range actually updates this column
+            let has_updates = (start..end).any(|i| is_set.value(i));
+            if !has_updates {
                 new_columns.push(base_col.clone());
                 continue;
             }
 
-            // Build replacement array: for each row, use overlay value or base value
+            // Build replacement array using MutableArrayData for efficiency
             let target_type = base_col.data_type();
+
+            // For each row in the batch, decide: use base or overlay value
             let mut scalars: Vec<ScalarValue> = Vec::with_capacity(num_rows as usize);
+            let mut overlay_pos = start;
+
             for i in 0..num_rows {
                 let row_num = offset + i;
-                if let Some(updates) = self.overlay.get(&row_num) {
-                    if let Some(value) = updates.get(&col_idx) {
-                        // Cast overlay value to match base column type if needed
-                        let cast_value = if value.is_null() {
-                            // Create a typed null matching the base column
-                            ScalarValue::try_from(target_type)
-                                .map_err(|e| datafusion::common::DataFusionError::Internal(
-                                    format!("Failed to create typed null for {:?}: {}", target_type, e)
-                                ))?
-                        } else if value.data_type() == *target_type {
-                            value.clone()
-                        } else {
-                            value.cast_to(target_type)
-                                .map_err(|e| datafusion::common::DataFusionError::Internal(
-                                    format!("Failed to cast overlay value from {:?} to {:?}: {}",
-                                        value.data_type(), target_type, e)
-                                ))?
-                        };
-                        scalars.push(cast_value);
-                        continue;
-                    }
+
+                // Advance overlay_pos to match current row
+                while overlay_pos < end && self.overlay.row_numbers[overlay_pos] < row_num {
+                    overlay_pos += 1;
                 }
-                // Keep base value
-                let base_value = ScalarValue::try_from_array(base_col, i as usize)
-                    .map_err(|e| datafusion::common::DataFusionError::Internal(
-                        format!("Failed to read base value: {}", e)
-                    ))?;
-                scalars.push(base_value);
+
+                if overlay_pos < end
+                    && self.overlay.row_numbers[overlay_pos] == row_num
+                    && is_set.value(overlay_pos)
+                {
+                    // Use overlay value
+                    let value = ScalarValue::try_from_array(values, overlay_pos)
+                        .map_err(|e| datafusion::common::DataFusionError::Internal(
+                            format!("Failed to read overlay value: {}", e)
+                        ))?;
+                    // Cast to target type if needed
+                    let cast_value = if value.is_null() {
+                        ScalarValue::try_from(target_type)
+                            .map_err(|e| datafusion::common::DataFusionError::Internal(
+                                format!("Failed to create typed null for {:?}: {}", target_type, e)
+                            ))?
+                    } else if value.data_type() == *target_type {
+                        value
+                    } else {
+                        value.cast_to(target_type)
+                            .map_err(|e| datafusion::common::DataFusionError::Internal(
+                                format!("Failed to cast overlay value from {:?} to {:?}: {}",
+                                    value.data_type(), target_type, e)
+                            ))?
+                    };
+                    scalars.push(cast_value);
+                } else {
+                    // Keep base value
+                    let base_value = ScalarValue::try_from_array(base_col, i as usize)
+                        .map_err(|e| datafusion::common::DataFusionError::Internal(
+                            format!("Failed to read base value: {}", e)
+                        ))?;
+                    scalars.push(base_value);
+                }
             }
 
             let new_col = ScalarValue::iter_to_array(scalars.into_iter())

@@ -808,22 +808,20 @@ impl BundleBuilder {
         log::debug!("[UPDATE] Flushing {} pending updates to blocks", pending.len());
 
         // Group by block_ref
-        let mut by_block: std::collections::HashMap<u16, crate::bundle::update_overlay::UpdateOverlay> = std::collections::HashMap::new();
+        let mut by_block: std::collections::HashMap<u16, std::collections::HashMap<bundlebase_common::RowId, std::collections::HashMap<crate::object_id::ColumnId, datafusion::scalar::ScalarValue>>> = std::collections::HashMap::new();
         for (row_id, cell_updates) in pending.iter() {
             let block_idx = row_id.block_ref().as_u16();
-            let overlay = by_block.entry(block_idx).or_insert_with(|| {
-                crate::bundle::update_overlay::UpdateOverlay {
-                    updates: std::collections::HashMap::new(),
-                }
-            });
-            overlay.updates.insert(*row_id, cell_updates.clone());
+            by_block.entry(block_idx)
+                .or_default()
+                .insert(*row_id, cell_updates.clone());
         }
 
         let packs = self.bundle.packs().read().clone();
         if let Some(pack) = packs.get(&ObjectId::BASE_PACK) {
             let blocks = pack.blocks();
-            for (block_idx, overlay) in by_block {
+            for (block_idx, block_updates) in by_block {
                 if let Some(block) = blocks.get(block_idx as usize) {
+                    let overlay = crate::bundle::update_overlay::UpdateOverlay::from_pending(&block_updates);
                     block.add_update_overlay(overlay);
                 }
             }
