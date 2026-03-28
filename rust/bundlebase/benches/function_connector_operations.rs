@@ -20,7 +20,7 @@ mod throttled_store;
 use bench_helpers::{create_benchmark_bundle, create_local_benchmark_bundle, create_runtime};
 use bundlebase::bundle::BundleFacade;
 use bundlebase::BundleBuilder;
-use bundlebase_command::{BundleBuilderExt, parser::parse_command};
+use bundlebase_command::{BundleBuilderExt, BundleFacadeCommandExt};
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_10K, SCALE_1K};
 use futures::StreamExt;
@@ -366,10 +366,8 @@ fn bench_go_scalar(c: &mut Criterion) {
                     .expect("setup runtime");
                 srt.block_on(async {
                     let b = create_local_benchmark_bundle(rows, &format).await.expect("bundle");
-                    let cmd = parse_command(&format!(
-                        "IMPORT TEMP FUNCTION bench.* FROM 'ipc::{}'", go_path
-                    )).expect("parse");
-                    cmd.execute(&b).await.expect("import Go function");
+                    b.import_temp_function("bench.*", &format!("ipc::{}", go_path), "*/*")
+                        .await.expect("import Go function");
                     b
                 })
             })
@@ -431,10 +429,8 @@ fn bench_java_scalar(c: &mut Criterion) {
                     .expect("setup runtime");
                 srt.block_on(async {
                     let b = create_local_benchmark_bundle(rows, &format).await.ok()?;
-                    let cmd = parse_command(&format!(
-                        "IMPORT TEMP FUNCTION bench.* FROM '{}'", java_from
-                    )).ok()?;
-                    cmd.execute(&b).await.ok()?;
+                    b.import_temp_function("bench.*", &java_from, "*/*")
+                        .await.ok()?;
                     Some(b)
                 })
             })
@@ -811,10 +807,8 @@ fn bench_function_import(c: &mut Criterion) {
                 |bundle| {
                     let go_path = go_path.clone();
                     async move {
-                        let cmd = parse_command(&format!(
-                            "IMPORT TEMP FUNCTION bench.* FROM 'ipc::{}'", go_path
-                        )).expect("parse");
-                        cmd.execute(&bundle).await.expect("import");
+                        bundle.import_temp_function("bench.*", &format!("ipc::{}", go_path), "*/*")
+                            .await.expect("import");
                     }
                 },
                 criterion::BatchSize::SmallInput,
@@ -845,10 +839,8 @@ fn bench_function_import(c: &mut Criterion) {
                 |bundle| {
                     let java_from = java_from.clone();
                     async move {
-                        let cmd = parse_command(&format!(
-                            "IMPORT TEMP FUNCTION bench.* FROM '{}'", java_from
-                        )).expect("parse");
-                        cmd.execute(&bundle).await.expect("import");
+                        bundle.import_temp_function("bench.*", &java_from, "*/*")
+                            .await.expect("import");
                     }
                 },
                 criterion::BatchSize::SmallInput,

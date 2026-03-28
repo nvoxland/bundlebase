@@ -35,7 +35,20 @@ impl IpcRuntime {
 
 impl UdfEntrypoint for IpcRuntime {
     fn validate_entrypoint(&self) -> Result<(), BundlebaseError> {
-        validate_file_reachable(&self.path, "IPC executable")
+        // For multi-word commands (e.g., "java -cp ... ClassName"), validate only
+        // the first word (the executable). Single-word paths are validated as files.
+        let first_word = self.path.split_whitespace().next().unwrap_or(&self.path);
+        if first_word != self.path {
+            // Multi-word command: check if the executable is on PATH or is an absolute path
+            if std::path::Path::new(first_word).is_absolute() {
+                validate_file_reachable(first_word, "IPC executable")
+            } else {
+                // Assume it's on PATH (e.g., "java", "python3")
+                Ok(())
+            }
+        } else {
+            validate_file_reachable(&self.path, "IPC executable")
+        }
     }
 
     fn can_bundle(&self) -> bool {
