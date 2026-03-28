@@ -118,6 +118,7 @@ metadata_stmt = {
     | show_functions_stmt
     | show_columns_stmt
     | show_count_stmt
+    | show_always_deletes_stmt
     | syntax_stmt
     | describe_data_stmt
     | describe_connector_stmt
@@ -185,6 +186,7 @@ show_connectors_stmt = { ^"show" ~ ^"connectors" }
 show_functions_stmt  = { ^"show" ~ ^"functions" }
 show_columns_stmt    = { ^"show" ~ ^"columns" }
 show_count_stmt      = { ^"show" ~ ^"count" }
+show_always_deletes_stmt = { ^"show" ~ ^"always" ~ ^"deletes" }
 
 // ============================================================================
 // IMPORT JOIN Statement

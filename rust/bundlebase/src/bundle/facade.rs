@@ -123,6 +123,9 @@ pub trait BundleFacade: Send + Sync {
     /// Returns views by name (name -> id mapping)
     fn views_by_name(&self) -> HashMap<String, ObjectId>;
 
+    /// Returns the current always-delete rules (WHERE clauses)
+    fn always_delete_rules(&self) -> Vec<String>;
+
     /// Returns the data directory for this bundle
     fn data_dir(&self) -> Arc<dyn IOReadWriteDir>;
 

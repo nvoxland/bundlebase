@@ -1321,6 +1321,10 @@ impl BundleFacade for Bundle {
         self.views.read().clone()
     }
 
+    fn always_delete_rules(&self) -> Vec<String> {
+        Bundle::always_delete_rules(self)
+    }
+
     fn data_dir(&self) -> Arc<dyn IOReadWriteDir> {
         Bundle::data_dir(self)
     }

@@ -2541,3 +2541,50 @@ async def test_always_delete_csv():
     result = await c.query('SELECT "Index" FROM bundle WHERE "Index" > 90')
     df = await result.to_pandas()
     assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_show_always_deletes():
+    """Test SHOW ALWAYS DELETES and info schema view."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # No rules initially
+    result = await c.query("SELECT * FROM bundle_info.always_deletes")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+    # Add rules
+    c = await c.always_delete("salary > 200000")
+    c = await c.always_delete("salary < 50000")
+
+    # Query info schema
+    result = await c.query("SELECT * FROM bundle_info.always_deletes")
+    df = await result.to_pandas()
+    assert len(df) == 2
+    assert "where_clause" in df.columns
+    clauses = set(df["where_clause"].tolist())
+    assert "salary > 200000" in clauses
+    assert "salary < 50000" in clauses
+
+    # Drop one rule
+    c = await c.drop_always_delete("salary > 200000")
+    result = await c.query("SELECT * FROM bundle_info.always_deletes")
+    df = await result.to_pandas()
+    assert len(df) == 1
+    assert df["where_clause"].iloc[0] == "salary < 50000"
+
+
+@pytest.mark.asyncio
+async def test_always_deletes_info_schema_after_drop_all():
+    """Test info schema reflects dropped rules."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    c = await c.always_delete("salary > 200000")
+    c = await c.always_delete("salary < 50000")
+    c = await c.drop_always_delete()
+
+    result = await c.query("SELECT * FROM bundle_info.always_deletes")
+    df = await result.to_pandas()
+    assert len(df) == 0

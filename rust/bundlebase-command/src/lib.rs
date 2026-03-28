@@ -91,7 +91,7 @@ pub use facade::RenameTempFunctionCommand;
 pub use facade::ExplainPlanCommand;
 pub use facade::SetConfigCommand;
 pub use facade::{
-    ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
+    ShowAlwaysDeletesCommand, ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
     ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
     ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
     ShowCountCommand,
@@ -130,6 +130,7 @@ pub enum FacadeCommand {
     ExplainPlan(ExplainPlanCommand),
     /// Set runtime config value (session-only)
     SetConfig(SetConfigCommand),
+    ShowAlwaysDeletes(ShowAlwaysDeletesCommand),
     ShowDetails(ShowDetailsCommand),
     ShowHistory(ShowHistoryCommand),
     ShowStatus(ShowStatusCommand),
@@ -197,6 +198,10 @@ impl FacadeCommand {
                 Ok(Box::new(result))
             }
             FacadeCommand::SetConfig(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::ShowAlwaysDeletes(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
@@ -277,6 +282,7 @@ impl FacadeCommand {
             FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_schema(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_schema(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_schema(),
+            FacadeCommand::ShowAlwaysDeletes(_) => ShowAlwaysDeletesCommand::output_schema(),
             FacadeCommand::ShowDetails(_) => ShowDetailsCommand::output_schema(),
             FacadeCommand::ShowHistory(_) => ShowHistoryCommand::output_schema(),
             FacadeCommand::ShowStatus(_) => ShowStatusCommand::output_schema(),
@@ -309,6 +315,7 @@ impl FacadeCommand {
             FacadeCommand::RenameTempFunction(_) => RenameTempFunctionCommand::output_shape(),
             FacadeCommand::ExplainPlan(_) => ExplainPlanCommand::output_shape(),
             FacadeCommand::SetConfig(_) => SetConfigCommand::output_shape(),
+            FacadeCommand::ShowAlwaysDeletes(_) => ShowAlwaysDeletesCommand::output_shape(),
             FacadeCommand::ShowDetails(_) => ShowDetailsCommand::output_shape(),
             FacadeCommand::ShowHistory(_) => ShowHistoryCommand::output_shape(),
             FacadeCommand::ShowStatus(_) => ShowStatusCommand::output_shape(),
@@ -346,6 +353,7 @@ impl BundleCommand {
             BundleCommand::RenameTempFunction(cmd) => Ok(FacadeCommand::RenameTempFunction(cmd)),
             BundleCommand::ExplainPlan(cmd) => Ok(FacadeCommand::ExplainPlan(cmd)),
             BundleCommand::SetConfig(cmd) => Ok(FacadeCommand::SetConfig(cmd)),
+            BundleCommand::ShowAlwaysDeletes(cmd) => Ok(FacadeCommand::ShowAlwaysDeletes(cmd)),
             BundleCommand::ShowDetails(cmd) => Ok(FacadeCommand::ShowDetails(cmd)),
             BundleCommand::ShowHistory(cmd) => Ok(FacadeCommand::ShowHistory(cmd)),
             BundleCommand::ShowStatus(cmd) => Ok(FacadeCommand::ShowStatus(cmd)),
@@ -402,7 +410,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) => {
+                    BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -416,7 +424,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_))
+        matches!(self, BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_))
     }
 }
 
@@ -807,6 +815,8 @@ register_commands! {
             "SHOW COLUMNS" => "SHOW COLUMNS",
         ShowCount(ShowCountCommand) => Rule::show_count_stmt,
             "SHOW COUNT" => "SHOW COUNT",
+        ShowAlwaysDeletes(ShowAlwaysDeletesCommand) => Rule::show_always_deletes_stmt,
+            "SHOW ALWAYS DELETES" => "SHOW ALWAYS DELETES",
         Syntax(SyntaxCommand) => Rule::syntax_stmt,
             "SYNTAX" => "SYNTAX [<command>]",
         DescribeData(DescribeDataCommand) => Rule::describe_data_stmt,

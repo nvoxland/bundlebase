@@ -72,6 +72,7 @@ show_table_command!(ShowCommandsCommand, show_commands_stmt, "commands", "COMMAN
 show_table_command!(ShowConnectorsCommand, show_connectors_stmt, "connectors", "CONNECTORS");
 show_table_command!(ShowFunctionsCommand, show_functions_stmt, "functions", "FUNCTIONS");
 show_table_command!(ShowColumnsCommand, show_columns_stmt, "columns", "COLUMNS");
+show_table_command!(ShowAlwaysDeletesCommand, show_always_deletes_stmt, "always_deletes", "ALWAYS DELETES");
 
 #[cfg(test)]
 mod tests {
