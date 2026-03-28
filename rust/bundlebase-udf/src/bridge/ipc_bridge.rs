@@ -103,7 +103,18 @@ pub fn parse_call(call: &str) -> Result<Vec<String>, BundlebaseError> {
             image.to_string(),
         ])
     } else {
-        let parts: Vec<String> = call.split_whitespace().map(|s| s.to_string()).collect();
+        let parts: Vec<String> = call.split_whitespace().map(|s| {
+            // Strip :symbol suffix from path components (added by wildcard import).
+            // e.g., "/path/binary:double_val" → "/path/binary"
+            // Only applies to tokens that look like file paths (contain / or .)
+            if let Some(colon_pos) = s.rfind(':') {
+                let before = &s[..colon_pos];
+                if before.contains('/') || before.contains('.') {
+                    return before.to_string();
+                }
+            }
+            s.to_string()
+        }).collect();
         if parts.is_empty() {
             return Err("Function entrypoint/call string must not be empty".into());
         }

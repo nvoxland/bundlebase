@@ -98,3 +98,7 @@ harness = false
 [[bench]]
 name = "mutation_operations"
 harness = false
+
+[[bench]]
+name = "function_connector_operations"
+harness = false

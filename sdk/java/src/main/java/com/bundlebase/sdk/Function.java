@@ -1,5 +1,6 @@
 package com.bundlebase.sdk;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 
@@ -92,8 +93,8 @@ public class Function {
      */
     public record FunctionMeta(
             String name,
-            List<String> inputTypes,
-            String returnType,
+            @JsonProperty("input_types") List<String> inputTypes,
+            @JsonProperty("return_type") String returnType,
             String kind,
             String symbol
     ) {

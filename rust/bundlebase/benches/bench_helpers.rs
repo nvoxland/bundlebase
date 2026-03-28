@@ -38,6 +38,28 @@ pub fn clean_bench_tmp() {
     std::fs::create_dir_all(&tmp).expect("failed to create bench tmp dir");
 }
 
+/// Create a fresh subdirectory and return a `file://` URL string (no throttle wrapping).
+/// Use for benchmarks that need real filesystem access (e.g., FFI function loading).
+pub fn fresh_local_dir(prefix: &str) -> String {
+    let dir = bench_tmp_dir().join(format!("{}_{}", prefix, rand::random::<u64>()));
+    std::fs::create_dir_all(&dir).expect("failed to create bench tmp dir");
+    format!("file://{}/", dir.display())
+}
+
+/// Create a bundle with synthetic data using local filesystem (no throttling).
+/// Use for benchmarks that need real filesystem access (e.g., FFI function loading).
+pub async fn create_local_benchmark_bundle(
+    rows: usize,
+    format: &Format,
+) -> Result<Arc<BundleBuilder>, BundlebaseError> {
+    let data_url = bench_data::get_data_url(rows, format);
+    let url = fresh_local_dir("bundle");
+    let bundle = BundleBuilder::create(&url, None).await?;
+    bundle.attach(&data_url, None).await?;
+    bundle.commit("Setup").await?;
+    Ok(bundle)
+}
+
 /// Create a multi-threaded tokio runtime for benchmarks.
 pub fn create_runtime() -> Runtime {
     Runtime::new().expect("tokio runtime")
