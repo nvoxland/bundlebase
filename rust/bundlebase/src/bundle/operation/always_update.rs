@@ -20,11 +20,12 @@ use std::sync::Arc;
 /// to data attached after this operation. On bundle open, the rule is
 /// added to `Bundle.always_update_rules`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct AlwaysUpdateOp {
     /// The SET clause (without the "SET" keyword), e.g. "salary = 0, status = 'inactive'"
+    #[serde(rename = "set")]
     pub set_clause: String,
     /// The WHERE clause condition (without the "WHERE" keyword)
+    #[serde(rename = "where")]
     pub where_clause: String,
 }
 
@@ -87,8 +88,8 @@ mod tests {
     fn test_serialization() {
         let op = AlwaysUpdateOp::new("status = 'inactive'", "last_login < '2020-01-01'");
         let yaml = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        assert!(yaml.contains("setClause"));
-        assert!(yaml.contains("whereClause"));
+        assert!(yaml.contains("set:"));
+        assert!(yaml.contains("where:"));
         assert!(yaml.contains("status = 'inactive'"));
 
         let deserialized: AlwaysUpdateOp =

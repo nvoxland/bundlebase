@@ -18,9 +18,9 @@ use std::sync::Arc;
 /// attached after this operation. On bundle open, the rule is
 /// added to `Bundle.always_delete_rules`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct AlwaysDeleteOp {
     /// The WHERE clause condition (without the "WHERE" keyword)
+    #[serde(rename = "where")]
     pub where_clause: String,
 }
 
@@ -78,7 +78,7 @@ mod tests {
     fn test_serialization() {
         let op = AlwaysDeleteOp::new("status = 'inactive'");
         let yaml = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        assert!(yaml.contains("whereClause"));
+        assert!(yaml.contains("where:"));
         assert!(yaml.contains("status = 'inactive'"));
 
         let deserialized: AlwaysDeleteOp =
