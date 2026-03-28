@@ -14,7 +14,6 @@ use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::DisplayFormatType;
 use futures::stream::Stream;
 use std::any::Any;
-use std::collections::HashSet;
 use std::fmt::{self, Formatter};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -24,11 +23,11 @@ use std::task::{Context, Poll};
 #[derive(Debug, Clone)]
 pub struct TombstoneFilterDataSource {
     inner: Arc<dyn DataSource>,
-    deleted_rows: Arc<HashSet<u32>>,
+    deleted_rows: Arc<Vec<u32>>,
 }
 
 impl TombstoneFilterDataSource {
-    pub fn new(inner: Arc<dyn DataSource>, deleted_rows: Arc<HashSet<u32>>) -> Self {
+    pub fn new(inner: Arc<dyn DataSource>, deleted_rows: Arc<Vec<u32>>) -> Self {
         Self {
             inner,
             deleted_rows,
@@ -105,7 +104,7 @@ impl DataSource for TombstoneFilterDataSource {
 /// Stream adapter that filters out deleted rows by ordinal position.
 struct TombstoneFilterStream {
     inner: SendableRecordBatchStream,
-    deleted_rows: Arc<HashSet<u32>>,
+    deleted_rows: Arc<Vec<u32>>,
     row_offset: u32,
     schema: SchemaRef,
 }
@@ -121,24 +120,31 @@ impl Stream for TombstoneFilterStream {
                     let offset = self.row_offset;
                     self.row_offset += num_rows;
 
-                    // Check if any rows in this batch are deleted
-                    let has_deletions = (offset..offset + num_rows)
-                        .any(|row| self.deleted_rows.contains(&row));
+                    // Binary search to find deleted rows in [offset, offset + num_rows)
+                    let start = self.deleted_rows.partition_point(|&r| r < offset);
+                    let end = self.deleted_rows.partition_point(|&r| r < offset + num_rows);
 
-                    if !has_deletions {
+                    if start == end {
+                        // No deleted rows in this batch — pass through
                         return Poll::Ready(Some(Ok(batch)));
                     }
 
-                    // Build boolean mask: true = keep, false = deleted
-                    let mask: BooleanArray = (0..num_rows)
-                        .map(|i| Some(!self.deleted_rows.contains(&(offset + i))))
-                        .collect();
+                    let deleted_in_range = &self.deleted_rows[start..end];
+
+                    if deleted_in_range.len() == num_rows as usize {
+                        // All rows in this batch were deleted, get next batch
+                        continue;
+                    }
+
+                    // Build boolean mask by flipping only deleted positions
+                    let mut mask_buf = vec![true; num_rows as usize];
+                    for &del_row in deleted_in_range {
+                        mask_buf[(del_row - offset) as usize] = false;
+                    }
+                    let mask = BooleanArray::from(mask_buf);
 
                     match filter_record_batch(&batch, &mask) {
-                        Ok(filtered) if filtered.num_rows() == 0 => {
-                            // All rows in this batch were deleted, get next batch
-                            continue;
-                        }
+                        Ok(filtered) if filtered.num_rows() == 0 => continue,
                         Ok(filtered) => return Poll::Ready(Some(Ok(filtered))),
                         Err(e) => return Poll::Ready(Some(Err(e.into()))),
                     }

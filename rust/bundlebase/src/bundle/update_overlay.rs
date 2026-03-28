@@ -88,6 +88,9 @@ impl UpdateOverlay {
     }
 
     /// Merge multiple overlays into one. Later overlays override earlier ones per-cell.
+    ///
+    /// Uses MutableArrayData to copy directly from source overlay arrays,
+    /// avoiding Arrow->ScalarValue->Arrow round-trips.
     pub fn merge(overlays: &[Self]) -> Self {
         if overlays.is_empty() {
             return Self {
@@ -99,53 +102,69 @@ impl UpdateOverlay {
             return overlays[0].clone();
         }
 
-        // Collect all updates back into a HashMap, later wins
-        let mut merged: std::collections::BTreeMap<u32, HashMap<ColumnId, ScalarValue>> =
+        // Pass 1: determine which overlay wins for each (row_number, column_id).
+        // Stores (overlay_idx, position_in_overlay) instead of ScalarValue.
+        let mut winners: std::collections::BTreeMap<u32, HashMap<ColumnId, (usize, usize)>> =
             std::collections::BTreeMap::new();
 
-        for overlay in overlays {
-            for (i, &row_num) in overlay.row_numbers.iter().enumerate() {
-                let entry = merged.entry(row_num).or_default();
-                for (col_id, (values, is_set)) in &overlay.columns {
-                    if is_set.value(i) {
-                        let value = ScalarValue::try_from_array(values, i)
-                            .unwrap_or(ScalarValue::Null);
-                        entry.insert(*col_id, value);
+        for (ov_idx, overlay) in overlays.iter().enumerate() {
+            for (pos, &row_num) in overlay.row_numbers.iter().enumerate() {
+                let entry = winners.entry(row_num).or_default();
+                for (col_id, (_values, is_set)) in &overlay.columns {
+                    if is_set.value(pos) {
+                        entry.insert(*col_id, (ov_idx, pos));
                     }
                 }
             }
         }
 
-        // Convert back to arrays
-        let row_numbers: Vec<u32> = merged.keys().copied().collect();
+        let row_numbers: Vec<u32> = winners.keys().copied().collect();
+        let n = row_numbers.len();
 
+        // Collect all column IDs across overlays
         let mut all_col_ids: std::collections::HashSet<ColumnId> = std::collections::HashSet::new();
-        for updates in merged.values() {
-            all_col_ids.extend(updates.keys());
+        for overlay in overlays {
+            all_col_ids.extend(overlay.columns.keys());
         }
 
+        // Pass 2: build output arrays via MutableArrayData
         let mut columns = HashMap::new();
         for col_id in all_col_ids {
-            let target_type = merged.values()
-                .find_map(|u| u.get(&col_id))
-                .map(|v| v.data_type())
+            // Determine data type from first overlay that has this column
+            let data_type = overlays.iter()
+                .find_map(|ov| ov.columns.get(&col_id).map(|(arr, _)| arr.data_type().clone()))
                 .unwrap_or(arrow::datatypes::DataType::Null);
-            let typed_null = ScalarValue::try_from(&target_type).unwrap_or(ScalarValue::Null);
 
-            let mut values: Vec<ScalarValue> = Vec::with_capacity(row_numbers.len());
-            let mut is_set_vec: Vec<bool> = Vec::with_capacity(row_numbers.len());
+            // Build source array data for MutableArrayData — one per overlay.
+            // Use a 1-element null filler for overlays that lack this column.
+            let null_filler = arrow::array::new_null_array(&data_type, 1);
+            let null_filler_data = null_filler.to_data();
+
+            let source_data: Vec<arrow::array::ArrayData> = overlays.iter()
+                .map(|ov| match ov.columns.get(&col_id) {
+                    Some((arr, _)) => arr.to_data(),
+                    None => null_filler_data.clone(),
+                })
+                .collect();
+            let source_refs: Vec<&arrow::array::ArrayData> = source_data.iter().collect();
+
+            let mut builder = arrow::array::MutableArrayData::new(
+                source_refs, true, n,
+            );
+
+            let mut is_set_vec: Vec<bool> = Vec::with_capacity(n);
+
             for &row_num in &row_numbers {
-                if let Some(val) = merged.get(&row_num).and_then(|u| u.get(&col_id)) {
-                    values.push(val.clone());
+                if let Some(&(ov_idx, src_pos)) = winners.get(&row_num).and_then(|m| m.get(&col_id)) {
+                    builder.extend(ov_idx, src_pos, src_pos + 1);
                     is_set_vec.push(true);
                 } else {
-                    values.push(typed_null.clone());
+                    builder.extend_nulls(1);
                     is_set_vec.push(false);
                 }
             }
 
-            let array = ScalarValue::iter_to_array(values.into_iter())
-                .unwrap_or_else(|_| arrow::array::new_empty_array(&target_type));
+            let array = arrow::array::make_array(builder.freeze());
             let mask = BooleanArray::from(is_set_vec);
             columns.insert(col_id, (array, mask));
         }
@@ -433,8 +452,10 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::array::ArrayRef;
     use arrow::datatypes::DataType;
     use bundlebase_common::ObjectIdAlias;
+    use std::sync::Arc;
 
     #[test]
     fn test_roundtrip_single_column() {
@@ -567,5 +588,136 @@ mod tests {
             ScalarValue::try_from_array(values, 0).expect("read value"),
             ScalarValue::Int64(Some(42))
         );
+    }
+
+    #[test]
+    fn test_merge_overlapping_same_column() {
+        // Two overlays update the same row+column; later overlay wins
+        let col_id = ColumnId::generate();
+
+        let ov1 = UpdateOverlay {
+            row_numbers: vec![5, 10],
+            columns: {
+                let values: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![100, 200]));
+                let is_set = BooleanArray::from(vec![true, true]);
+                let mut m = HashMap::new();
+                m.insert(col_id, (values, is_set));
+                m
+            },
+        };
+        let ov2 = UpdateOverlay {
+            row_numbers: vec![5],
+            columns: {
+                let values: ArrayRef = Arc::new(arrow::array::Int64Array::from(vec![999]));
+                let is_set = BooleanArray::from(vec![true]);
+                let mut m = HashMap::new();
+                m.insert(col_id, (values, is_set));
+                m
+            },
+        };
+
+        let merged = UpdateOverlay::merge(&[ov1, ov2]);
+        assert_eq!(merged.row_numbers, vec![5, 10]);
+
+        let (values, is_set) = merged.columns.get(&col_id).expect("column missing");
+        assert!(is_set.value(0));
+        assert!(is_set.value(1));
+        // Row 5: ov2 wins with 999
+        assert_eq!(
+            ScalarValue::try_from_array(values, 0).expect("read"),
+            ScalarValue::Int64(Some(999))
+        );
+        // Row 10: only ov1 had it, stays 200
+        assert_eq!(
+            ScalarValue::try_from_array(values, 1).expect("read"),
+            ScalarValue::Int64(Some(200))
+        );
+    }
+
+    #[test]
+    fn test_merge_different_columns() {
+        // Two overlays update different columns on the same row
+        let col_a = ColumnId::generate();
+        let col_b = ColumnId::generate();
+
+        let ov1 = UpdateOverlay {
+            row_numbers: vec![3],
+            columns: {
+                let mut m = HashMap::new();
+                m.insert(col_a, (
+                    Arc::new(arrow::array::Int64Array::from(vec![10])) as ArrayRef,
+                    BooleanArray::from(vec![true]),
+                ));
+                m
+            },
+        };
+        let ov2 = UpdateOverlay {
+            row_numbers: vec![3],
+            columns: {
+                let mut m = HashMap::new();
+                m.insert(col_b, (
+                    Arc::new(arrow::array::StringArray::from(vec!["hello"])) as ArrayRef,
+                    BooleanArray::from(vec![true]),
+                ));
+                m
+            },
+        };
+
+        let merged = UpdateOverlay::merge(&[ov1, ov2]);
+        assert_eq!(merged.row_numbers, vec![3]);
+
+        let (val_a, set_a) = merged.columns.get(&col_a).expect("col_a missing");
+        assert!(set_a.value(0));
+        assert_eq!(
+            ScalarValue::try_from_array(val_a, 0).expect("read"),
+            ScalarValue::Int64(Some(10))
+        );
+
+        let (val_b, set_b) = merged.columns.get(&col_b).expect("col_b missing");
+        assert!(set_b.value(0));
+        assert_eq!(
+            ScalarValue::try_from_array(val_b, 0).expect("read"),
+            ScalarValue::Utf8(Some("hello".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_merge_disjoint_rows() {
+        let col_id = ColumnId::generate();
+
+        let ov1 = UpdateOverlay {
+            row_numbers: vec![1, 3],
+            columns: {
+                let mut m = HashMap::new();
+                m.insert(col_id, (
+                    Arc::new(arrow::array::Int64Array::from(vec![10, 30])) as ArrayRef,
+                    BooleanArray::from(vec![true, true]),
+                ));
+                m
+            },
+        };
+        let ov2 = UpdateOverlay {
+            row_numbers: vec![2, 4],
+            columns: {
+                let mut m = HashMap::new();
+                m.insert(col_id, (
+                    Arc::new(arrow::array::Int64Array::from(vec![20, 40])) as ArrayRef,
+                    BooleanArray::from(vec![true, true]),
+                ));
+                m
+            },
+        };
+
+        let merged = UpdateOverlay::merge(&[ov1, ov2]);
+        assert_eq!(merged.row_numbers, vec![1, 2, 3, 4]);
+
+        let (values, is_set) = merged.columns.get(&col_id).expect("column missing");
+        for i in 0..4 {
+            assert!(is_set.value(i));
+        }
+        assert_eq!(ScalarValue::try_from_array(values, 0).expect("r"), ScalarValue::Int64(Some(10)));
+        assert_eq!(ScalarValue::try_from_array(values, 1).expect("r"), ScalarValue::Int64(Some(20)));
+        assert_eq!(ScalarValue::try_from_array(values, 2).expect("r"), ScalarValue::Int64(Some(30)));
+        assert_eq!(ScalarValue::try_from_array(values, 3).expect("r"), ScalarValue::Int64(Some(40)));
     }
 }

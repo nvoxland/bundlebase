@@ -44,7 +44,7 @@ pub struct DataBlock {
     /// Column IDs for this block's schema fields (positional, matching schema field order)
     column_ids: Vec<ColumnId>,
     /// Row numbers (within this block) that have been deleted via tombstones
-    deleted_rows: Arc<RwLock<HashSet<u32>>>,
+    deleted_rows: Arc<RwLock<Vec<u32>>>,
     /// Update overlays to apply at scan time
     update_overlays: Arc<RwLock<Vec<crate::bundle::update_overlay::UpdateOverlay>>>,
 }
@@ -75,7 +75,7 @@ impl DataBlock {
             config,
             source_info,
             column_ids,
-            deleted_rows: Arc::new(RwLock::new(HashSet::new())),
+            deleted_rows: Arc::new(RwLock::new(Vec::new())),
             update_overlays: Arc::new(RwLock::new(Vec::new())),
         }
     }
@@ -103,7 +103,10 @@ impl DataBlock {
 
     /// Add deleted row numbers to this block's tombstone set.
     pub fn add_deleted_rows(&self, rows: impl IntoIterator<Item = u32>) {
-        self.deleted_rows.write().extend(rows);
+        let mut deleted = self.deleted_rows.write();
+        deleted.extend(rows);
+        deleted.sort_unstable();
+        deleted.dedup();
     }
 
     /// Add an update overlay to this block.
@@ -364,7 +367,7 @@ impl TableProvider for DataBlock {
 
                 // Remove deleted rows from the inclusion set
                 if !deleted.is_empty() {
-                    row_ids.retain(|rid| !deleted.contains(&rid.row_number()));
+                    row_ids.retain(|rid| deleted.binary_search(&rid.row_number()).is_err());
                 }
 
                 log::debug!(
