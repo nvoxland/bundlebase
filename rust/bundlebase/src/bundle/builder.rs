@@ -621,9 +621,6 @@ impl BundleBuilder {
     /// Add RowIds to the pending tombstone set.
     ///
     /// These will be written to a tombstone file on commit.
-    /// Add RowIds to the pending tombstone set.
-    ///
-    /// These will be written to a tombstone file on commit.
     pub fn mark_deleted(&self, row_ids: std::collections::HashSet<bundlebase_common::RowId>) {
         self.pending_tombstones.write().extend(row_ids);
     }
@@ -689,7 +686,7 @@ impl BundleBuilder {
                     };
 
                     let filter_sql = format!(
-                        "SELECT _idx FROM (SELECT *, ROW_NUMBER() OVER () - 1 AS _idx FROM __delete_batch) WHERE {}",
+                        "SELECT CAST(_idx AS BIGINT) AS _idx FROM (SELECT *, ROW_NUMBER() OVER () - 1 AS _idx FROM __delete_batch) WHERE {}",
                         where_clause
                     );
 
@@ -711,19 +708,19 @@ impl BundleBuilder {
                         .map_err(|e| BundlebaseError::from(e.to_string()))?;
 
                     for idx_batch in &idx_batches {
-                        if idx_batch.num_rows() > 0 {
-                            let idx_col = idx_batch.column(0);
-                            for i in 0..idx_batch.num_rows() {
-                                let formatter = arrow::util::display::ArrayFormatter::try_new(
-                                    idx_col.as_ref(), &Default::default()
-                                );
-                                if let Ok(f) = formatter {
-                                    if let Ok(val) = f.value(i).to_string().parse::<usize>() {
-                                        if val < row_ids.len() {
-                                            matching_ids.insert(row_ids[val]);
-                                        }
-                                    }
-                                }
+                        let idx_col = idx_batch.column(0);
+                        for i in 0..idx_batch.num_rows() {
+                            use arrow::array::{Array, AsArray};
+                            use arrow::datatypes::DataType;
+                            let val = match idx_col.data_type() {
+                                DataType::UInt64 => idx_col.as_primitive::<arrow::datatypes::UInt64Type>().value(i) as usize,
+                                DataType::Int64 => idx_col.as_primitive::<arrow::datatypes::Int64Type>().value(i) as usize,
+                                dt => return Err(format!(
+                                    "Unexpected column type {:?} from ROW_NUMBER()", dt
+                                ).into()),
+                            };
+                            if val < row_ids.len() {
+                                matching_ids.insert(row_ids[val]);
                             }
                         }
                     }

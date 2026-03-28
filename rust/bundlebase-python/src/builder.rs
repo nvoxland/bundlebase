@@ -1053,7 +1053,7 @@ impl PyBundleBuilder {
         let inner = slf.inner.clone();
         let where_clause = where_clause.to_string();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let count = inner
+            inner
                 .delete(&where_clause)
                 .await
                 .map_err(|e| to_py_error_ctx("Failed to delete rows", e))?;
