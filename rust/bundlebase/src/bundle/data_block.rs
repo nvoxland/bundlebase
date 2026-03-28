@@ -396,8 +396,12 @@ impl TableProvider for DataBlock {
         }
 
         // Phase 2: Fall back to full scan
+        // When update overlays exist, don't push filters to the reader — the overlay
+        // changes column values, so predicates must be evaluated after the overlay.
+        let overlays = self.update_overlays.read().clone();
+        let scan_filters = if overlays.is_empty() { filters } else { &[] };
         let mut source: Arc<dyn datafusion::datasource::source::DataSource> = self.reader
-            .data_source(projection, filters, limit, None)
+            .data_source(projection, scan_filters, limit, None)
             .await?;
 
         // Apply tombstone filter if there are deleted rows
@@ -409,7 +413,6 @@ impl TableProvider for DataBlock {
         }
 
         // Apply update overlay if there are updates for this block
-        let overlays = self.update_overlays.read().clone();
         if !overlays.is_empty() {
             // Build projected column_ids matching the scan output columns
             let projected_col_ids = match projection {

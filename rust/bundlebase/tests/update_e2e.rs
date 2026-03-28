@@ -225,3 +225,96 @@ async fn test_update_multiple_commits() -> Result<(), BundlebaseError> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_update_then_filter_in_session() -> Result<(), BundlebaseError> {
+    // Update then filter: the CASE WHEN FilterOp should transform values at DataFrame level
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+
+    builder.update("SET salary = 99999 WHERE salary > 200000").await?;
+
+    let cnt_before = query_count(builder.as_ref(), "SELECT COUNT(*) as cnt FROM bundle WHERE salary = 99999").await;
+    assert!(cnt_before > 0, "Update should be visible");
+
+    // Filter keeps salary >= 50000 — 99999 passes this filter
+    builder.filter("SELECT * FROM bundle WHERE salary >= 50000", vec![]).await?;
+
+    let cnt_after = query_count(builder.as_ref(), "SELECT COUNT(*) as cnt FROM bundle WHERE salary = 99999").await;
+    assert_eq!(cnt_after, cnt_before, "Updated rows (99999) should survive filter (>= 50000)");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_update_then_delete_in_session() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+
+    builder.update("SET salary = 99999 WHERE salary > 200000").await?;
+    let cnt_updated = query_count(builder.as_ref(), "SELECT COUNT(*) as cnt FROM bundle WHERE salary = 99999").await;
+    assert!(cnt_updated > 0);
+
+    // Delete low salaries — should not affect updated rows (99999 > 50000)
+    builder.delete("salary < 50000").await?;
+
+    let cnt_after = query_count(builder.as_ref(), "SELECT COUNT(*) as cnt FROM bundle WHERE salary = 99999").await;
+    assert_eq!(cnt_after, cnt_updated, "Updated rows should survive delete of low salaries");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_update_survives_rename() -> Result<(), BundlebaseError> {
+    // Rename is a schema-only op (no DataFrame-level data transform),
+    // so it clears the cache but the overlay should still apply.
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+
+    builder.update("SET salary = 999 WHERE salary > 200000").await?;
+    let cnt1 = query_count(builder.as_ref(), "SELECT COUNT(*) as cnt FROM bundle WHERE salary = 999").await;
+    assert!(cnt1 > 0);
+
+    // Rename a different column — forces dataframe rebuild
+    builder.rename_column("first_name", "fname").await?;
+
+    let cnt2 = query_count(builder.as_ref(), "SELECT COUNT(*) as cnt FROM bundle WHERE salary = 999").await;
+    assert_eq!(cnt2, cnt1, "Updated rows should survive rename");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_update_csv() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("customers-0-100.csv"), None).await?;
+
+    builder.update("SET City = 'UPDATED' WHERE Index > 90").await?;
+
+    let cnt = query_count(builder.as_ref(), "SELECT COUNT(*) as cnt FROM bundle WHERE City = 'UPDATED'").await;
+    assert!(cnt > 0, "CSV update should work");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_update_after_rename() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let builder = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    builder.attach(test_datafile("userdata.parquet"), None).await?;
+
+    builder.rename_column("salary", "pay").await?;
+    builder.update("SET pay = 999 WHERE pay > 200000").await?;
+
+    let cnt = query_count(builder.as_ref(), "SELECT COUNT(*) as cnt FROM bundle WHERE pay = 999").await;
+    assert!(cnt > 0, "Update after rename should work");
+    Ok(())
+}

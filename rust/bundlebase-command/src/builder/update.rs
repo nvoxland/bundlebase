@@ -7,6 +7,7 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase::bundle::BundleFacade;
 use tracing::debug;
 
 /// A single SET assignment: column = expression
@@ -101,9 +102,26 @@ impl BundleBuilderCommand for UpdateCommand {
         let updated_count = builder.evaluate_update_cols(&columns, &expressions, &self.where_clause).await?;
         debug!("[UPDATE] Updated {} rows", updated_count);
 
-        // Push updates to DataBlocks for immediate in-session visibility
         if updated_count > 0 {
+            // Push updates to DataBlocks for scan-level visibility (direct queries)
             builder.flush_pending_updates_to_blocks();
+
+            // Also apply a DataFrame-level SQL transform so FilterOp and other
+            // DataFrame-level operations see the updated values.
+            // Uses CASE WHEN to replace values matching the WHERE condition.
+            let schema = builder.schema().await?;
+            let select_cols: Vec<String> = schema.fields().iter().map(|f| {
+                let name = f.name();
+                let quoted = format!("\"{}\"", name);
+                if let Some(assignment) = self.assignments.iter().find(|a| a.column == *name) {
+                    format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", self.where_clause, assignment.expression, quoted, quoted)
+                } else {
+                    quoted
+                }
+            }).collect();
+            let filter_query = format!("SELECT {} FROM bundle", select_cols.join(", "));
+            debug!("[UPDATE] Applying CASE WHEN transform for in-session visibility");
+            builder.apply_operation(bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![]).into()).await?;
         }
 
         Ok(format!("Updated {} rows", updated_count))

@@ -166,6 +166,11 @@ impl UpdateOverlayStream {
     fn apply_overlay(&self, batch: &RecordBatch, offset: u32) -> datafusion::common::Result<RecordBatch> {
         let num_rows = batch.num_rows() as u32;
 
+        // No columns to modify (e.g., COUNT(*) projection) or no matching updates
+        if batch.num_columns() == 0 {
+            return Ok(batch.clone());
+        }
+
         // Check if any rows in this batch have updates
         let has_updates = (offset..offset + num_rows)
             .any(|row| self.overlay.contains_key(&row));
