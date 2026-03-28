@@ -20,6 +20,7 @@ pub mod function_entry {
 mod sql;
 pub mod tombstone;
 pub mod tombstone_filter;
+pub mod update_overlay;
 pub mod verification;
 
 use crate::io::EMPTY_SCHEME;
@@ -115,6 +116,10 @@ pub struct Bundle {
     /// Persistent always-delete rules (WHERE clauses applied to each new attach)
     always_delete_rules: Arc<RwLock<Vec<String>>>,
 
+    /// Update overlays loaded from committed overlay parquet files.
+    /// Later entries override earlier ones per-cell.
+    update_overlays: Arc<RwLock<Vec<update_overlay::UpdateOverlay>>>,
+
     /// True if this bundle is a view (has a view field in init commit)
     is_view: Arc<RwLock<bool>>,
 
@@ -173,6 +178,7 @@ impl Clone for Bundle {
             subprocess_cache: Arc::clone(&self.subprocess_cache),
             config: Arc::clone(&self.config),
             always_delete_rules: Arc::clone(&self.always_delete_rules),
+            update_overlays: Arc::clone(&self.update_overlays),
             is_view: Arc::clone(&self.is_view),
         }
     }
@@ -264,6 +270,7 @@ impl Bundle {
             column_names: Arc::new(RwLock::new(None)),
             config: bundle_config,
             always_delete_rules: Arc::new(RwLock::new(Vec::new())),
+            update_overlays: Arc::new(RwLock::new(Vec::new())),
             is_view: Arc::new(RwLock::new(false)),
         });
 
@@ -575,6 +582,16 @@ impl Bundle {
         self.always_delete_rules.write().clear();
     }
 
+    /// Add an update overlay (loaded from a committed overlay parquet file).
+    pub fn add_update_overlay(&self, overlay: update_overlay::UpdateOverlay) {
+        self.update_overlays.write().push(overlay);
+    }
+
+    /// Returns the current update overlays.
+    pub fn update_overlays(&self) -> Vec<update_overlay::UpdateOverlay> {
+        self.update_overlays.read().clone()
+    }
+
     /// Recreate data_dir from the current URL + config.
     /// Called after SaveConfigOp changes config.
     pub(crate) async fn refresh_data_dir(&self) -> Result<(), BundlebaseError> {
@@ -607,6 +624,7 @@ impl Bundle {
         *self.data_dir.write() = Arc::clone(&*other.data_dir.read());
         *self.is_view.write() = *other.is_view.read();
         *self.always_delete_rules.write() = other.always_delete_rules.read().clone();
+        *self.update_overlays.write() = other.update_overlays.read().clone();
         self.dataframe.clear();
         *self.column_names.write() = None;
     }

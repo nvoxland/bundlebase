@@ -5,6 +5,7 @@ mod cast_column;
 mod create_view;
 mod delete;
 mod drop_always_delete;
+mod update_data;
 mod import_function;
 mod create_index;
 mod drop_function;
@@ -45,6 +46,7 @@ pub use crate::bundle::operation::create_source::CreateSourceOp;
 pub use crate::bundle::operation::import_connector::ImportConnectorOp;
 pub use crate::bundle::operation::delete::DeleteOp;
 pub use crate::bundle::operation::drop_always_delete::DropAlwaysDeleteOp;
+pub use crate::bundle::operation::update_data::UpdateDataOp;
 pub use crate::bundle::operation::detach_block::DetachBlockOp;
 pub use crate::bundle::operation::drop_connector::DropConnectorOp;
 pub use crate::bundle::operation::drop_index::DropIndexOp;
@@ -225,6 +227,7 @@ define_any_operation! {
     CreateView(CreateViewOp),
     Delete(DeleteOp),
     DropAlwaysDelete(DropAlwaysDeleteOp),
+    UpdateData(UpdateDataOp),
     ImportConnector(ImportConnectorOp),
     DetachBlock(DetachBlockOp),
     DropColumn(DropColumnOp),
