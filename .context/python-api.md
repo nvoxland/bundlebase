@@ -87,6 +87,8 @@ c = await Bundlebase.open("/my/container/dir")
 - `delete(where_clause)` - Delete rows matching a WHERE condition
 - `always_delete(where_clause)` - Register persistent auto-delete rule (applies to all future attaches)
 - `drop_always_delete(where_clause=None)` - Remove one or all always-delete rules
+- `always_update(set_where)` - Register persistent auto-update rule (applies to all future attaches)
+- `drop_always_update(rule_text=None)` - Remove one or all always-update rules
 - `filter(query, params)` - Filter rows with a SELECT query (e.g., `"SELECT * FROM bundle WHERE salary > $1"`)
 - `join(url, expression, join_type)` - Join with another source
 - `set_name(name)` - Set container name

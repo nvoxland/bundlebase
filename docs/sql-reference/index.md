@@ -184,6 +184,63 @@ Lists all active always-delete rules. Also available as `SELECT * FROM bundle_in
 SHOW ALWAYS DELETES
 ```
 
+### ALWAYS UPDATE
+
+Registers a persistent update rule that automatically applies to all future ATTACH operations. Also immediately updates matching rows in current data.
+
+Multiple rules can be added and they accumulate.
+
+```sql
+ALWAYS UPDATE bundle SET <col> = <expr> [, ...] WHERE <condition>
+```
+
+**Examples:**
+
+```sql
+-- Always normalize negative depths to zero
+ALWAYS UPDATE bundle SET depth_m = 0 WHERE depth_m < 0
+
+-- Always uppercase status values
+ALWAYS UPDATE bundle SET status = upper(status) WHERE status IS NOT NULL
+```
+
+**Python API:**
+
+```python
+c = await c.always_update("SET depth_m = 0 WHERE depth_m < 0")
+await c.commit("Add data quality rule")
+```
+
+### DROP ALWAYS UPDATE
+
+Removes always-update rules. Without a SET/WHERE clause, removes all rules.
+
+```sql
+-- Remove a specific rule
+DROP ALWAYS UPDATE SET depth_m = 0 WHERE depth_m < 0
+
+-- Remove all rules
+DROP ALWAYS UPDATE
+```
+
+**Python API:**
+
+```python
+# Remove specific rule
+c = await c.drop_always_update("SET depth_m = 0 WHERE depth_m < 0")
+
+# Remove all rules
+c = await c.drop_always_update()
+```
+
+### SHOW ALWAYS UPDATES
+
+Lists all active always-update rules. Also available as `SELECT * FROM bundle_info.always_updates`.
+
+```sql
+SHOW ALWAYS UPDATES
+```
+
 ### FILTER
 
 Filters the bundle's rows using a SQL query.

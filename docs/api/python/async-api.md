@@ -61,6 +61,8 @@ Mutable bundle class returned by `create()` and transformation methods.
         - delete
         - always_delete
         - drop_always_delete
+        - always_update
+        - drop_always_update
         - filter
         - select
         - join

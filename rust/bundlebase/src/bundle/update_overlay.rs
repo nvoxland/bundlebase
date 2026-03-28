@@ -79,14 +79,18 @@ pub fn write_overlay_parquet(
             .map_err(|e| BundlebaseError::from(format!("Cannot create null for type {:?}: {}", dt, e)))?;
         let scalars: Vec<ScalarValue> = rows.iter().map(|(_, updates)| {
             match updates.get(col_id) {
-                Some(val) if val.is_null() => typed_null.clone(),
+                Some(val) if val.is_null() => Ok(typed_null.clone()),
                 Some(val) if val.data_type() != *dt => {
-                    val.cast_to(dt).unwrap_or_else(|_| typed_null.clone())
+                    val.cast_to(dt)
+                        .map_err(|e| BundlebaseError::from(format!(
+                            "Failed to cast column {} from {:?} to {:?}: {}",
+                            col_id, val.data_type(), dt, e
+                        )))
                 }
-                Some(val) => val.clone(),
-                None => typed_null.clone(),
+                Some(val) => Ok(val.clone()),
+                None => Ok(typed_null.clone()),
             }
-        }).collect();
+        }).collect::<Result<Vec<_>, _>>()?;
 
         let array = if scalars.is_empty() {
             arrow::array::new_empty_array(dt)
