@@ -20,7 +20,7 @@ pub fn command_metadata() -> Vec<(&'static str, &'static str, &'static str)> {
         ("JOIN", "[LEFT|RIGHT|FULL|INNER] JOIN '<path>' AS <name> ON <expression>", "read-write"),
         ("REPLACE", "REPLACE '<old_location>' WITH '<new_location>'", "read-write"),
         ("ADD COLUMN", "ADD COLUMN <name> AS <expression>", "read-write"),
-        ("CAST COLUMN", "CAST COLUMN <name> TO <type> [CLEAN '<pattern>']", "read-write"),
+        ("CAST COLUMN", "CAST COLUMN <name> TO <type>", "read-write"),
         ("DROP COLUMN", "DROP COLUMN <name>", "read-write"),
         ("RENAME COLUMN", "RENAME COLUMN <old> TO <new>", "read-write"),
         ("CREATE INDEX", "CREATE <COLUMN|TEXT> INDEX ON <column>", "read-write"),

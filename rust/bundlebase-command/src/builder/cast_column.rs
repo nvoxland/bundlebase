@@ -1,7 +1,6 @@
 //! CastColumn command implementation.
 
 use crate::parser::{extract_identifier, quote_identifier};
-use crate::parser::{escape_string, extract_string_content};
 use crate::{CommandParsing, Rule};
 use bundlebase_common::arrow_types::parse_arrow_type_name;
 use bundlebase::bundle::operation::CastColumnOp;
@@ -17,8 +16,6 @@ pub struct CastColumnCommand {
     pub name: String,
     /// The target type (e.g., "integer", "float", "string")
     pub new_type: String,
-    /// Optional regex pattern to clean the column values before casting
-    pub clean: Option<String>,
 }
 
 impl CastColumnCommand {
@@ -26,12 +23,10 @@ impl CastColumnCommand {
     pub fn new(
         name: impl Into<String>,
         new_type: impl Into<String>,
-        clean: Option<String>,
     ) -> Self {
         Self {
             name: name.into(),
             new_type: new_type.into(),
-            clean,
         }
     }
 }
@@ -44,7 +39,6 @@ impl CommandParsing for CastColumnCommand {
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
         let mut name = None;
         let mut new_type = None;
-        let mut clean = None;
 
         for inner in pair.into_inner() {
             match inner.as_rule() {
@@ -54,9 +48,6 @@ impl CommandParsing for CastColumnCommand {
                     } else {
                         new_type = Some(inner.as_str().to_string());
                     }
-                }
-                Rule::quoted_string => {
-                    clean = Some(extract_string_content(inner.as_str())?);
                 }
                 _ => {}
             }
@@ -69,17 +60,11 @@ impl CommandParsing for CastColumnCommand {
             "CAST COLUMN statement missing target type".into()
         })?;
 
-        Ok(CastColumnCommand::new(name, new_type, clean))
+        Ok(CastColumnCommand::new(name, new_type))
     }
 
     fn to_statement(&self) -> String {
-        match &self.clean {
-            Some(pattern) => format!(
-                "CAST COLUMN {} TO {} CLEAN {}",
-                quote_identifier(&self.name), self.new_type, escape_string(pattern)
-            ),
-            None => format!("CAST COLUMN {} TO {}", quote_identifier(&self.name), self.new_type),
-        }
+        format!("CAST COLUMN {} TO {}", quote_identifier(&self.name), self.new_type)
     }
 }
 
@@ -97,22 +82,15 @@ impl BundleBuilderCommand for CastColumnCommand {
                 CastColumnOp::setup(
                     id,
                     data_type,
-                    self.clean.clone(),
                 )
                 .into(),
             )
             .await?;
 
-        match &self.clean {
-            Some(pattern) => Ok(format!(
-                "Cast column {} to {} (clean: {})",
-                self.name, self.new_type, pattern
-            )),
-            None => Ok(format!(
-                "Cast column {} to {}",
-                self.name, self.new_type
-            )),
-        }
+        Ok(format!(
+            "Cast column {} to {}",
+            self.name, self.new_type
+        ))
     }
 }
 
@@ -128,20 +106,6 @@ mod tests {
             BundleCommand::CastColumn(c) => {
                 assert_eq!(c.name, "price");
                 assert_eq!(c.new_type, "Int64");
-                assert_eq!(c.clean, None);
-            }
-            other => panic!("Expected CastColumn, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_parse_cast_column_with_clean() {
-        let cmd = parse_command("CAST COLUMN price TO Int64 CLEAN '[^0-9]'").unwrap();
-        match cmd {
-            BundleCommand::CastColumn(c) => {
-                assert_eq!(c.name, "price");
-                assert_eq!(c.new_type, "Int64");
-                assert_eq!(c.clean, Some("[^0-9]".to_string()));
             }
             other => panic!("Expected CastColumn, got {:?}", other),
         }
@@ -162,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_round_trip() {
-        let cmd = super::CastColumnCommand::new("price", "Int64", None);
+        let cmd = super::CastColumnCommand::new("price", "Int64");
         let statement = cmd.to_statement();
         assert_eq!(statement, "CAST COLUMN price TO Int64");
 
@@ -171,23 +135,6 @@ mod tests {
             BundleCommand::CastColumn(c) => {
                 assert_eq!(c.name, "price");
                 assert_eq!(c.new_type, "Int64");
-                assert_eq!(c.clean, None);
-            }
-            other => panic!("Expected CastColumn, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_round_trip_with_clean() {
-        let cmd = super::CastColumnCommand::new("price", "Int64", Some("[^0-9]".to_string()));
-        let statement = cmd.to_statement();
-
-        let parsed = parse_command(&statement).unwrap();
-        match parsed {
-            BundleCommand::CastColumn(c) => {
-                assert_eq!(c.name, "price");
-                assert_eq!(c.new_type, "Int64");
-                assert_eq!(c.clean, Some("[^0-9]".to_string()));
             }
             other => panic!("Expected CastColumn, got {:?}", other),
         }
@@ -207,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_round_trip_quoted() {
-        let cmd = super::CastColumnCommand::new("column/with.special", "Utf8", None);
+        let cmd = super::CastColumnCommand::new("column/with.special", "Utf8");
         let statement = cmd.to_statement();
         assert_eq!(statement, r#"CAST COLUMN "column/with.special" TO Utf8"#);
 

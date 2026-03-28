@@ -132,10 +132,9 @@ All operations work synchronously without `await`:
   c.add_column("full_name", "first_name || ' ' || last_name")
   ```
 
-- **`cast_column(name: str, new_type: str, clean: Optional[str] = None)`** - Cast column type
+- **`cast_column(name: str, new_type: str)`** - Cast column type
   ```python
   c.cast_column("price", "integer")
-  c.cast_column("price", "integer", clean="[^0-9]")
   ```
 
 - **`filter(expr: str, params: List = [])`** - Filter rows

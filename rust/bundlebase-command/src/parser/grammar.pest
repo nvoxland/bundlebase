@@ -791,13 +791,12 @@ rename_column_stmt = {
 // ============================================================================
 // CAST COLUMN Statement
 // ============================================================================
-// Syntax: CAST COLUMN <name> TO <type> [CLEAN '<pattern>']
+// Syntax: CAST COLUMN <name> TO <type>
 // Examples:
 //   CAST COLUMN price TO integer
-//   CAST COLUMN price TO integer CLEAN '[^0-9]'
 
 cast_column_stmt = {
-    ^"cast" ~ ^"column" ~ identifier ~ ^"to" ~ identifier ~ (^"clean" ~ quoted_string)?
+    ^"cast" ~ ^"column" ~ identifier ~ ^"to" ~ identifier
 }
 
 // ============================================================================

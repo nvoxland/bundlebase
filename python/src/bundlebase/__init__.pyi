@@ -728,16 +728,15 @@ class PyBundleBuilder:
         """
         ...
 
-    def cast_column(self, name: str, new_type: str, clean: Optional[str] = None) -> "OperationChain":
+    def cast_column(self, name: str, new_type: str) -> "OperationChain":
         """
         Queue a cast_column operation.
 
-        Casts a column to a different data type, with optional regex cleaning.
+        Casts a column to a different data type.
 
         Args:
             name: Name of the column to cast
             new_type: Target type (e.g., "integer", "float", "string")
-            clean: Optional regex pattern to clean values before casting
 
         Returns:
             OperationChain for fluent chaining
@@ -747,7 +746,6 @@ class PyBundleBuilder:
 
         Example:
             c = await c.cast_column("price", "integer")
-            c = await c.cast_column("price", "integer", clean="[^0-9]")
         """
         ...
 
@@ -1377,7 +1375,7 @@ class OperationChain:
         """Queue an add_column operation."""
         ...
 
-    def cast_column(self, name: str, new_type: str, clean: Optional[str] = None) -> "OperationChain":
+    def cast_column(self, name: str, new_type: str) -> "OperationChain":
         """Queue a cast_column operation."""
         ...
 
@@ -1536,7 +1534,7 @@ class CreateChain:
         """Queue an add_column operation."""
         ...
 
-    def cast_column(self, name: str, new_type: str, clean: Optional[str] = None) -> "CreateChain":
+    def cast_column(self, name: str, new_type: str) -> "CreateChain":
         """Queue a cast_column operation."""
         ...
 
@@ -1695,7 +1693,7 @@ class ExtendChain:
         """Queue an add_column operation."""
         ...
 
-    def cast_column(self, name: str, new_type: str, clean: Optional[str] = None) -> "ExtendChain":
+    def cast_column(self, name: str, new_type: str) -> "ExtendChain":
         """Queue a cast_column operation."""
         ...
 

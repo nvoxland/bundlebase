@@ -586,8 +586,8 @@ After attaching data, use computed columns and custom functions to clean and enr
 bundlebase extend --bundle ./data "ADD COLUMN full_name AS first_name || ' ' || last_name"
 bundlebase extend --bundle ./data "ADD COLUMN price_cents AS CAST(price * 100 AS INTEGER)"
 
-# Cast column types with optional regex cleanup (strip non-numeric chars before casting)
-bundlebase extend --bundle ./data "CAST COLUMN price TO integer CLEAN '[^0-9]'"
+# Cast column types
+bundlebase extend --bundle ./data "CAST COLUMN price TO integer"
 
 # Filter out bad rows
 bundlebase extend --bundle ./data "FILTER WITH SELECT * FROM bundle WHERE email IS NOT NULL"

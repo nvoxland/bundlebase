@@ -105,15 +105,12 @@ Computed columns can be indexed just like regular columns.
 
 ## Cast Column
 
-Change a column's data type, with optional regex cleaning to strip invalid characters before conversion.
+Change a column's data type.
 
 === "Async API"
 
     ```python
     await bundle.cast_column("price", "integer")
-
-    # With regex cleaning (removes non-numeric characters before casting)
-    await bundle.cast_column("price", "integer", clean="[^0-9]")
     ```
 
 === "Sync API"
@@ -126,6 +123,4 @@ Change a column's data type, with optional regex cleaning to strip invalid chara
 
     ```sql
     CAST COLUMN price TO integer
-
-    CAST COLUMN price TO integer CLEAN '[^0-9]'
     ```

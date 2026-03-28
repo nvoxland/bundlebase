@@ -563,15 +563,14 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def cast_column(self, name: str, new_type: str, clean: Optional[str] = None) -> "SyncBundleBuilder":
+    def cast_column(self, name: str, new_type: str) -> "SyncBundleBuilder":
         """Cast a column to a different data type.
 
         Args:
             name: Name of the column to cast
             new_type: Target type (e.g., "integer", "float", "string")
-            clean: Optional regex pattern to clean values before casting
         """
-        coro = _call_original_method(self._async, "cast_column", name, new_type, clean)
+        coro = _call_original_method(self._async, "cast_column", name, new_type)
         self._async = _loop_manager.run_sync(coro)
         return self
 

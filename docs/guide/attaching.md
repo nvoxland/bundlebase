@@ -146,7 +146,7 @@ To convert text columns to specific types after attaching CSV data, use `cast_co
     CAST COLUMN quantity TO integer
     ```
 
-See [Cast Column](columns.md#cast-column) for more details, including regex cleaning for messy data.
+See [Cast Column](columns.md#cast-column) for more details.
 
 ## Detaching Data
 

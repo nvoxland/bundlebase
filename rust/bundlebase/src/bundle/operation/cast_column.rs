@@ -8,7 +8,7 @@ use datafusion::common::DataFusionError;
 use datafusion::dataframe::DataFrame;
 use datafusion::logical_expr::{Expr, expr::Cast};
 use datafusion::common::Column;
-use datafusion::prelude::{lit, SessionContext};
+use datafusion::prelude::SessionContext;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -17,15 +17,13 @@ use std::sync::Arc;
 pub struct CastColumnOp {
     pub id: ColumnId,
     pub new_type: DataType,
-    pub clean: Option<String>,
 }
 
 impl CastColumnOp {
-    pub fn setup(id: ColumnId, new_type: DataType, clean: Option<String>) -> Self {
+    pub fn setup(id: ColumnId, new_type: DataType) -> Self {
         Self {
             id,
             new_type,
-            clean,
         }
     }
 }
@@ -34,13 +32,6 @@ impl Operation for CastColumnOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         bundle.column_name(&self.id)
             .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?;
-
-        // Validate clean regex if provided
-        if let Some(ref pattern) = self.clean {
-            regex::Regex::new(pattern).map_err(|e| -> BundlebaseError {
-                format!("Invalid clean regex '{}': {}", pattern, e).into()
-            })?;
-        }
 
         Ok(())
     }
@@ -67,23 +58,8 @@ impl Operation for CastColumnOp {
         for field in schema.fields() {
             let field_name = field.name();
             if field_name == &name {
-                let base_expr = if let Some(ref pattern) = self.clean {
-                    let func = datafusion::functions::regex::regexp_replace();
-                    Expr::ScalarFunction(datafusion::logical_expr::expr::ScalarFunction {
-                        func,
-                        args: vec![
-                            Expr::Column(Column::new_unqualified(field_name)),
-                            lit(pattern.as_str()),
-                            lit(""),
-                            lit("g"),
-                        ],
-                    })
-                } else {
-                    Expr::Column(Column::new_unqualified(field_name))
-                };
-
                 let cast_expr = Expr::Cast(Cast {
-                    expr: Box::new(base_expr),
+                    expr: Box::new(Expr::Column(Column::new_unqualified(field_name))),
                     data_type: self.new_type.clone(),
                 });
 
@@ -98,16 +74,10 @@ impl Operation for CastColumnOp {
     }
 
     fn describe(&self) -> String {
-        match &self.clean {
-            Some(pattern) => format!(
-                "CAST COLUMN: {} to {} (clean: {})",
-                self.id, self.new_type, pattern
-            ),
-            None => format!(
-                "CAST COLUMN: {} to {}",
-                self.id, self.new_type
-            ),
-        }
+        format!(
+            "CAST COLUMN: {} to {}",
+            self.id, self.new_type
+        )
     }
 }
 
@@ -117,33 +87,14 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = CastColumnOp::setup(ColumnId::generate(), DataType::Int64, None);
+        let op = CastColumnOp::setup(ColumnId::generate(), DataType::Int64);
         assert!(op.describe().contains("to Int64"));
-    }
-
-    #[test]
-    fn test_describe_with_clean() {
-        let op = CastColumnOp::setup(ColumnId::generate(), DataType::Int64, Some("[^0-9]".to_string()));
-        assert!(op.describe().contains("to Int64"));
-        assert!(op.describe().contains("clean: [^0-9]"));
     }
 
     #[test]
     fn test_config_serialization() {
         let id = ColumnId::generate();
-        let op = CastColumnOp::setup(id, DataType::Int64, Some("[^0-9]".to_string()));
-
-        let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
-        assert!(serialized.contains("newType: Int64\nclean: '[^0-9]'"));
-
-        let deserialized: CastColumnOp =
-            serde_yaml_ng::from_str(&serialized).expect("Failed to deserialize");
-        assert_eq!(deserialized, op);
-    }
-
-    #[test]
-    fn test_config_serialization_no_clean() {
-        let op = CastColumnOp::setup(ColumnId::generate(), DataType::Int64, None);
+        let op = CastColumnOp::setup(id, DataType::Int64);
 
         let serialized = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         let deserialized: CastColumnOp =
@@ -153,7 +104,7 @@ mod tests {
 
     #[test]
     fn test_version_exact_value() {
-        let op = CastColumnOp::setup(ColumnId::generate(), DataType::Int64, None);
+        let op = CastColumnOp::setup(ColumnId::generate(), DataType::Int64);
         let version = op.version();
         assert!(!version.is_empty());
         assert_eq!(version.len(), 12);

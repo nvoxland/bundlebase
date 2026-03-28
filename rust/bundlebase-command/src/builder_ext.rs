@@ -155,12 +155,11 @@ pub trait BundleBuilderExt {
         expression: &str,
     ) -> Result<&Self, BundlebaseError>;
 
-    /// Cast a column to a different data type, optionally cleaning values first.
+    /// Cast a column to a different data type.
     async fn cast_column(
         &self,
         name: &str,
         new_type: &str,
-        clean: Option<String>,
     ) -> Result<&Self, BundlebaseError>;
 
     /// Standardize all column names to lowercase+underscore identifiers.
@@ -450,9 +449,8 @@ impl BundleBuilderExt for BundleBuilder {
         &self,
         name: &str,
         new_type: &str,
-        clean: Option<String>,
     ) -> Result<&Self, BundlebaseError> {
-        exec_cmd(self,CastColumnCommand::new(name, new_type, clean))
+        exec_cmd(self,CastColumnCommand::new(name, new_type))
             .await?;
         Ok(self)
     }
@@ -690,8 +688,8 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
     async fn add_column(&self, name: &str, expression: &str) -> Result<&Self, BundlebaseError> {
         (**self).add_column(name, expression).await?; Ok(self)
     }
-    async fn cast_column(&self, name: &str, new_type: &str, clean: Option<String>) -> Result<&Self, BundlebaseError> {
-        (**self).cast_column(name, new_type, clean).await?; Ok(self)
+    async fn cast_column(&self, name: &str, new_type: &str) -> Result<&Self, BundlebaseError> {
+        (**self).cast_column(name, new_type).await?; Ok(self)
     }
     async fn standardize_column_names(&self) -> Result<&Self, BundlebaseError> {
         (**self).standardize_column_names().await?; Ok(self)

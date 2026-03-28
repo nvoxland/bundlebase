@@ -704,7 +704,7 @@ register_commands! {
         AddColumn(AddColumnCommand) => Rule::add_column_stmt,
             "ADD COLUMN" => "ADD COLUMN <name> AS <expression>",
         CastColumn(CastColumnCommand) => Rule::cast_column_stmt,
-            "CAST COLUMN" => "CAST COLUMN <name> TO <type> [CLEAN '<pattern>']",
+            "CAST COLUMN" => "CAST COLUMN <name> TO <type>",
         DropColumn(DropColumnCommand) => Rule::drop_column_stmt,
             "DROP COLUMN" => "DROP COLUMN <name>",
         RenameColumn(RenameColumnCommand) => Rule::rename_column_stmt,

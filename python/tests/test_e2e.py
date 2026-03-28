@@ -1904,20 +1904,15 @@ async def test_standardize_column_names():
 
 
 @pytest.mark.asyncio
-async def test_cast_column_with_clean():
-    """Test cast_column with clean regex strips non-numeric chars and casts to integer."""
-    c = await bundlebase.create(random_bundle())
-    c = await c.attach(datafile("userdata.parquet"))
-
-    # The salary column is a float; let's test with a string column approach.
-    # Use a CSV that has string data we can cast.
+async def test_cast_column_type():
+    """Test cast_column casts a column to a different data type."""
     c2 = await bundlebase.create(random_bundle())
     c2 = await c2.attach(datafile("customers-0-100.csv"))
 
     # Standardize first so column names are predictable
     c2 = await c2.standardize_column_names()
 
-    # customer_id is a string like "1", "2", etc. - cast to integer without clean
+    # customer_id is a string like "1", "2", etc. - cast to integer
     c2 = await c2.cast_column("customer_id", "Int64")
 
     schema = await c2.schema()

@@ -82,7 +82,7 @@ c = await Bundlebase.open("/my/container/dir")
 - `rename_column(old_name, new_name)` - Rename column
 - `standardize_column_names()` - Convert all column names to lowercase+underscore identifiers
 - `add_column(name, expression)` - Add a computed column using a SQL expression
-- `cast_column(name, new_type, clean=None)` - Cast column to a different data type
+- `cast_column(name, new_type)` - Cast column to a different data type
 - `update(set_where)` - Update rows matching a condition (e.g., `"SET salary = 100 WHERE id = 1"`)
 - `delete(where_clause)` - Delete rows matching a WHERE condition
 - `always_delete(where_clause)` - Register persistent auto-delete rule (applies to all future attaches)

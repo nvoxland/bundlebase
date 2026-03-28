@@ -14,7 +14,7 @@ bundle.commit("Attached raw data")
 
 bundle.standardize_column_names()
 
-bundle.cast_column("value", "integer", clean="[^0-9]")
+bundle.cast_column("value", "integer")
 
 # bundle.create_index("round", "column")
 # bundle.create_index("category", "column")
