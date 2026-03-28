@@ -97,6 +97,36 @@ c = await c.delete("depth_m < 0")
 await c.commit("Removed sentinel values")
 ```
 
+### UPDATE
+
+Updates rows matching a WHERE condition with new values. Updated values are stored in overlay parquet files and merged at query time. Original data files are not modified.
+
+SET expressions can reference other columns and use SQL functions.
+
+```sql
+UPDATE bundle SET <col> = <expr> [, <col> = <expr> ...] WHERE <condition>
+```
+
+**Examples:**
+
+```sql
+-- Adjust salaries
+UPDATE bundle SET salary = salary * 1.1 WHERE department = 'eng'
+
+-- Set values to NULL
+UPDATE bundle SET status = NULL WHERE inactive = true
+
+-- Update multiple columns
+UPDATE bundle SET name = 'unknown', age = 0 WHERE name IS NULL
+```
+
+**Python API:**
+
+```python
+c = await c.update("SET salary = salary * 1.1 WHERE department = 'eng'")
+await c.commit("Adjusted engineering salaries")
+```
+
 ### ALWAYS DELETE
 
 Registers a persistent delete rule that automatically applies to all future ATTACH operations. Also immediately deletes matching rows from current data.

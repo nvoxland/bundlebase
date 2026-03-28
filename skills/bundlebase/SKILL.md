@@ -702,6 +702,7 @@ For inspecting bundle data and metadata, use SQL commands directly:
 | `SHOW STATUS` | Show uncommitted changes |
 | `SHOW HISTORY` | Show version history |
 | `SHOW DETAILS` | Show bundle metadata |
+| `UPDATE bundle SET col = expr WHERE ...` | Update rows matching a condition |
 | `DELETE FROM bundle WHERE ...` | Delete rows matching a condition |
 | `ALWAYS DELETE FROM bundle WHERE ...` | Persistent rule: auto-delete matching rows on every future ATTACH |
 | `DROP ALWAYS DELETE [WHERE ...]` | Remove one or all always-delete rules |

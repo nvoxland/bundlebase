@@ -29,7 +29,7 @@ The `statement` rule in `grammar.pest` is organized into semantic categories:
 
 | Category | Description | Example Commands |
 |----------|-------------|------------------|
-| `data_modification_stmt` | Operations that change bundle data content | FILTER, ATTACH, DETACH, REPLACE, DELETE, ALWAYS DELETE, DROP ALWAYS DELETE, IMPORT JOIN |
+| `data_modification_stmt` | Operations that change bundle data content | FILTER, ATTACH, DETACH, REPLACE, UPDATE, DELETE, ALWAYS DELETE, DROP ALWAYS DELETE, IMPORT JOIN |
 | `schema_stmt` | Operations that change bundle structure | JOIN, DROP JOIN, RENAME JOIN, columns, views |
 | `source_stmt` | Operations for data sources and functions | CREATE SOURCE, FETCH, IMPORT/DROP/RENAME CONNECTOR, IMPORT/DROP/RENAME FUNCTION (including TEMP variants) |
 | `index_stmt` | Operations for search indexes | CREATE INDEX, DROP INDEX, REBUILD INDEX, REINDEX |

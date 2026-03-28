@@ -57,6 +57,7 @@ Mutable bundle class returned by `create()` and transformation methods.
         - cast_column
         - drop_column
         - rename_column
+        - update
         - delete
         - always_delete
         - drop_always_delete
