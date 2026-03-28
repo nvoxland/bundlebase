@@ -519,6 +519,8 @@ impl BundleBuilder {
 
         // Clear all uncommitted changes
         self.status.write().clear();
+        self.pending_tombstones.write().clear();
+        self.pending_updates.write().clear();
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
