@@ -18,8 +18,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::builder::{
-    AddColumnCommand, AlwaysDeleteCommand, AlwaysUpdateCommand, AttachCommand, CastColumnCommand, CreateIndexCommand, CreateSourceCommand,
-    DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, UpdateCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
+    AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CreateIndexCommand, CreateSourceCommand,
+    DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
     DropIndexCommand, DropJoinCommand, DropViewCommand, FetchAllCommand, FetchCommand,
     FilterCommand, ImportConnectorCommand, ImportFunctionCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,

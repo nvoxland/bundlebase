@@ -1,18 +1,15 @@
 //! Throttled object store helpers for realistic benchmarks.
 //!
 //! Registers a `throttle://` URL scheme so that a throttled `LocalFileSystem`
-//! is created transparently by `parse_url()`. This survives the commit-reopen
-//! cycle because the URL is preserved and the factory is global.
-//!
-//! We implement our own throttling wrapper instead of using `ThrottledStore`
-//! because `ThrottledStore` panics on `GetResultPayload::File` (returned by
-//! `LocalFileSystem`) and doesn't implement `rename`.
+//! is created transparently. This survives the commit-reopen cycle because
+//! the URL is preserved and the factory is global.
 
-use bundlebase::io::register_object_store_scheme;
+use bundlebase_io::{io_registry, register_object_store_scheme};
+use futures::stream::BoxStream;
 use object_store::local::LocalFileSystem;
 use object_store::path::Path as ObjectPath;
 use object_store::{
-    GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
+    CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
     PutMultipartOptions, PutOptions, PutPayload, PutResult,
 };
 use std::sync::Arc;
@@ -38,11 +35,10 @@ pub fn s3_like_config() -> ThrottleConfig {
 }
 
 /// A `LocalFileSystem` wrapper that adds configurable per-call delays to
-/// simulate cloud storage latency. Unlike `object_store::ThrottledStore`,
-/// this handles `GetResultPayload::File` and supports `rename`.
+/// simulate cloud storage latency.
 #[derive(Debug)]
 struct ThrottledLocalStore {
-    inner: LocalFileSystem,
+    inner: Arc<LocalFileSystem>,
     config: ThrottleConfig,
 }
 
@@ -54,15 +50,6 @@ impl std::fmt::Display for ThrottledLocalStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for ThrottledLocalStore {
-    async fn put(
-        &self,
-        location: &ObjectPath,
-        payload: PutPayload,
-    ) -> object_store::Result<PutResult> {
-        tokio::time::sleep(self.config.wait_put_per_call).await;
-        self.inner.put(location, payload).await
-    }
-
     async fn put_opts(
         &self,
         location: &ObjectPath,
@@ -82,11 +69,6 @@ impl ObjectStore for ThrottledLocalStore {
         self.inner.put_multipart_opts(location, opts).await
     }
 
-    async fn get(&self, location: &ObjectPath) -> object_store::Result<GetResult> {
-        tokio::time::sleep(self.config.wait_get_per_call).await;
-        self.inner.get(location).await
-    }
-
     async fn get_opts(
         &self,
         location: &ObjectPath,
@@ -96,20 +78,17 @@ impl ObjectStore for ThrottledLocalStore {
         self.inner.get_opts(location, options).await
     }
 
-    async fn head(&self, location: &ObjectPath) -> object_store::Result<ObjectMeta> {
-        tokio::time::sleep(self.config.wait_get_per_call).await;
-        self.inner.head(location).await
-    }
-
-    async fn delete(&self, location: &ObjectPath) -> object_store::Result<()> {
-        tokio::time::sleep(self.config.wait_delete_per_call).await;
-        self.inner.delete(location).await
+    fn delete_stream(
+        &self,
+        locations: BoxStream<'static, object_store::Result<ObjectPath>>,
+    ) -> BoxStream<'static, object_store::Result<ObjectPath>> {
+        self.inner.delete_stream(locations)
     }
 
     fn list(
         &self,
         prefix: Option<&ObjectPath>,
-    ) -> futures::stream::BoxStream<'static, object_store::Result<ObjectMeta>> {
+    ) -> BoxStream<'static, object_store::Result<ObjectMeta>> {
         self.inner.list(prefix)
     }
 
@@ -121,49 +100,87 @@ impl ObjectStore for ThrottledLocalStore {
         self.inner.list_with_delimiter(prefix).await
     }
 
-    async fn copy(&self, from: &ObjectPath, to: &ObjectPath) -> object_store::Result<()> {
-        tokio::time::sleep(self.config.wait_put_per_call).await;
-        self.inner.copy(from, to).await
-    }
-
-    async fn copy_if_not_exists(
+    async fn copy_opts(
         &self,
         from: &ObjectPath,
         to: &ObjectPath,
+        options: CopyOptions,
     ) -> object_store::Result<()> {
         tokio::time::sleep(self.config.wait_put_per_call).await;
-        self.inner.copy_if_not_exists(from, to).await
-    }
-
-    async fn rename(&self, from: &ObjectPath, to: &ObjectPath) -> object_store::Result<()> {
-        tokio::time::sleep(self.config.wait_put_per_call).await;
-        self.inner.rename(from, to).await
-    }
-
-    async fn rename_if_not_exists(
-        &self,
-        from: &ObjectPath,
-        to: &ObjectPath,
-    ) -> object_store::Result<()> {
-        tokio::time::sleep(self.config.wait_put_per_call).await;
-        self.inner.rename_if_not_exists(from, to).await
+        self.inner.copy_opts(from, to, options).await
     }
 }
 
 /// Register the `throttle://` scheme with S3-like latencies.
 ///
-/// After calling this, any URL like `throttle:///path/to/dir` will create a
-/// throttled `LocalFileSystem` backed by the filesystem path.
-/// Safe to call multiple times (re-registers with the same factory).
+/// Registers at two levels:
+/// 1. ObjectStore custom scheme — so `parse_url` creates a throttled store
+/// 2. IORegistry dynamic factory — so the `io_registry()` dispatches `throttle://` URLs
+///    to the ObjectStore factory which then creates the throttled store
 pub fn register_throttle_scheme() {
     let throttle_config = s3_like_config();
 
+    // Register the throttled ObjectStore factory for the "throttle" scheme
     register_object_store_scheme("throttle", move |url, _config| {
-        let local_store = LocalFileSystem::new();
+        let local_store = Arc::new(LocalFileSystem::new());
         let store = ThrottledLocalStore {
             inner: local_store,
             config: throttle_config.clone(),
         };
         Ok((Arc::new(store), ObjectPath::from(url.path())))
     });
+
+    // Register with the IORegistry so that writable_dir_from_url etc. can resolve "throttle://"
+    // The ObjectStoreIOFactory handles it via parse_url → CUSTOM_SCHEMES
+    let object_store_factory = io_registry()
+        .get_factory("file")
+        .expect("file factory must be registered");
+    io_registry().register_dynamic(Arc::new(ThrottleIOFactory {
+        delegate: object_store_factory,
+    }));
+}
+
+/// IOFactory that delegates to the ObjectStore factory for "throttle://" URLs.
+/// The underlying ObjectStore parse_url will find the throttled store via CUSTOM_SCHEMES.
+struct ThrottleIOFactory {
+    delegate: Arc<dyn bundlebase_io::IOFactory>,
+}
+
+#[async_trait::async_trait]
+impl bundlebase_io::IOFactory for ThrottleIOFactory {
+    fn schemes(&self) -> &[&str] {
+        &["throttle"]
+    }
+
+    async fn create_reader(
+        &self,
+        url: &url::Url,
+        config: Arc<dyn bundlebase_io::ConfigProvider>,
+    ) -> Result<Box<dyn bundlebase_io::IOReadFile>, bundlebase_common::BundlebaseError> {
+        self.delegate.create_reader(url, config).await
+    }
+
+    async fn create_lister(
+        &self,
+        url: &url::Url,
+        config: Arc<dyn bundlebase_io::ConfigProvider>,
+    ) -> Result<Box<dyn bundlebase_io::IOReadDir>, bundlebase_common::BundlebaseError> {
+        self.delegate.create_lister(url, config).await
+    }
+
+    async fn create_writable_lister(
+        &self,
+        url: &url::Url,
+        config: Arc<dyn bundlebase_io::ConfigProvider>,
+    ) -> Result<Option<Box<dyn bundlebase_io::IOReadWriteDir>>, bundlebase_common::BundlebaseError> {
+        self.delegate.create_writable_lister(url, config).await
+    }
+
+    async fn create_writer(
+        &self,
+        url: &url::Url,
+        config: Arc<dyn bundlebase_io::ConfigProvider>,
+    ) -> Result<Option<Box<dyn bundlebase_io::IOReadWriteFile>>, bundlebase_common::BundlebaseError> {
+        self.delegate.create_writer(url, config).await
+    }
 }

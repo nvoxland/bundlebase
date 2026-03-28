@@ -82,6 +82,8 @@ pub trait IOFactory: Send + Sync {
 /// Central registry for IO backends, dispatching by URL scheme.
 pub struct IORegistry {
     factories: HashMap<String, Arc<dyn IOFactory>>,
+    /// Dynamically registered factories (added after initialization via `register_dynamic`).
+    dynamic: parking_lot::RwLock<HashMap<String, Arc<dyn IOFactory>>>,
 }
 
 impl IORegistry {
@@ -91,6 +93,16 @@ impl IORegistry {
     pub fn new() -> Self {
         Self {
             factories: HashMap::new(),
+            dynamic: parking_lot::RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Register a factory dynamically after initialization.
+    /// This is safe to call on the global `io_registry()` singleton.
+    pub fn register_dynamic(&self, factory: Arc<dyn IOFactory>) {
+        let mut dynamic = self.dynamic.write();
+        for scheme in factory.schemes() {
+            dynamic.insert(scheme.to_string(), factory.clone());
         }
     }
 
@@ -102,8 +114,10 @@ impl IORegistry {
     }
 
     /// Get the factory for a URL scheme.
+    /// Checks static factories first, then dynamically registered ones.
     pub fn get_factory(&self, scheme: &str) -> Option<Arc<dyn IOFactory>> {
         self.factories.get(scheme).cloned()
+            .or_else(|| self.dynamic.read().get(scheme).cloned())
     }
 
     /// Check if a URL supports write operations.
