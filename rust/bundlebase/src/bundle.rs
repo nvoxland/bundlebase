@@ -112,6 +112,9 @@ pub struct Bundle {
     /// All config sources (stored, env, passed, runtime) live inside BundleConfig.
     config: Arc<BundleConfig>,
 
+    /// Persistent always-delete rules (WHERE clauses applied to each new attach)
+    always_delete_rules: Arc<RwLock<Vec<String>>>,
+
     /// True if this bundle is a view (has a view field in init commit)
     is_view: Arc<RwLock<bool>>,
 
@@ -169,6 +172,7 @@ impl Clone for Bundle {
             function_registry: Arc::clone(&self.function_registry),
             subprocess_cache: Arc::clone(&self.subprocess_cache),
             config: Arc::clone(&self.config),
+            always_delete_rules: Arc::clone(&self.always_delete_rules),
             is_view: Arc::clone(&self.is_view),
         }
     }
@@ -259,6 +263,7 @@ impl Bundle {
             dataframe,
             column_names: Arc::new(RwLock::new(None)),
             config: bundle_config,
+            always_delete_rules: Arc::new(RwLock::new(Vec::new())),
             is_view: Arc::new(RwLock::new(false)),
         });
 
@@ -547,6 +552,26 @@ impl Bundle {
         Arc::clone(&self.config)
     }
 
+    /// Returns the current always-delete rules (WHERE clauses).
+    pub fn always_delete_rules(&self) -> Vec<String> {
+        self.always_delete_rules.read().clone()
+    }
+
+    /// Add an always-delete rule.
+    pub fn add_always_delete_rule(&self, where_clause: &str) {
+        self.always_delete_rules.write().push(where_clause.to_string());
+    }
+
+    /// Remove a specific always-delete rule by WHERE clause.
+    pub fn remove_always_delete_rule(&self, where_clause: &str) {
+        self.always_delete_rules.write().retain(|r| r != where_clause);
+    }
+
+    /// Remove all always-delete rules.
+    pub fn clear_always_delete_rules(&self) {
+        self.always_delete_rules.write().clear();
+    }
+
     /// Recreate data_dir from the current URL + config.
     /// Called after SaveConfigOp changes config.
     pub(crate) async fn refresh_data_dir(&self) -> Result<(), BundlebaseError> {
@@ -578,6 +603,7 @@ impl Bundle {
         self.config.reload_stored(&other.config);
         *self.data_dir.write() = Arc::clone(&*other.data_dir.read());
         *self.is_view.write() = *other.is_view.read();
+        *self.always_delete_rules.write() = other.always_delete_rules.read().clone();
         self.dataframe.clear();
         *self.column_names.write() = None;
     }

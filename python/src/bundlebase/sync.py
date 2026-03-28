@@ -633,6 +633,32 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
+    def always_delete(self, where_clause: str) -> "SyncBundleBuilder":
+        """Register a persistent always-delete rule and immediately delete matching rows.
+
+        Args:
+            where_clause: SQL WHERE condition (e.g., "salary < 0")
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "always_delete", where_clause)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def drop_always_delete(self, where_clause: Optional[str] = None) -> "SyncBundleBuilder":
+        """Remove always-delete rules.
+
+        Args:
+            where_clause: Specific rule to remove, or None to remove all rules
+
+        Returns:
+            Self for fluent chaining
+        """
+        coro = _call_original_method(self._async, "drop_always_delete", where_clause)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
     def join(
         self, name: str, on: str, location: Optional[str] = None, how: str = "inner"
     ) -> "SyncBundleBuilder":

@@ -618,6 +618,11 @@ impl BundleBuilder {
         Ok(())
     }
 
+    /// Returns the current always-delete rules.
+    pub fn always_delete_rules(&self) -> Vec<String> {
+        self.bundle.always_delete_rules()
+    }
+
     /// Add RowIds to the pending tombstone set.
     ///
     /// These will be written to a tombstone file on commit.

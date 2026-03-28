@@ -64,8 +64,8 @@ pub use parser::Rule;
 
 // Re-export builder command structs
 pub use builder::{
-    AddColumnCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    DeleteCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
+    AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
+    DeleteCommand, DropAlwaysDeleteCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
     DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -364,8 +364,10 @@ impl BundleCommand {
             _ => {
                 // Get the command name for the error message
                 let cmd_name = match &self {
+                    BundleCommand::AlwaysDelete(_) => "ALWAYS DELETE",
                     BundleCommand::Attach(_) => "ATTACH",
                     BundleCommand::Delete(_) => "DELETE",
+                    BundleCommand::DropAlwaysDelete(_) => "DROP ALWAYS DELETE",
                     BundleCommand::DetachBlock(_) => "DETACH",
                     BundleCommand::Filter(_) => "FILTER",
                     BundleCommand::ImportJoin(_) => "IMPORT JOIN",
@@ -662,10 +664,14 @@ macro_rules! register_commands {
 register_commands! {
     message {
         // Data modification commands
+        AlwaysDelete(AlwaysDeleteCommand) => Rule::always_delete_stmt,
+            "ALWAYS DELETE" => "ALWAYS DELETE FROM bundle WHERE <condition>",
         Attach(AttachCommand) => Rule::attach_stmt,
             "ATTACH" => "ATTACH '<path>' [TO <pack>] [WITH (<options>)]",
         Delete(DeleteCommand) => Rule::delete_stmt,
             "DELETE" => "DELETE FROM bundle WHERE <condition>",
+        DropAlwaysDelete(DropAlwaysDeleteCommand) => Rule::drop_always_delete_stmt,
+            "DROP ALWAYS DELETE" => "DROP ALWAYS DELETE [WHERE <condition>]",
         DetachBlock(DetachBlockCommand) => Rule::detach_stmt,
             "DETACH" => "DETACH '<location>'",
         Filter(FilterCommand) => Rule::filter_stmt,

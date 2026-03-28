@@ -42,7 +42,9 @@ statement_text  = { (quoted_string | !(";" | EOI) ~ ANY)+ }
 
 // Data modification statements - operations that change bundle data content
 data_modification_stmt = {
-    delete_stmt
+    always_delete_stmt
+    | drop_always_delete_stmt
+    | delete_stmt
     | import_join_stmt
     | filter_stmt
     | attach_stmt
@@ -197,6 +199,28 @@ import_join_stmt = {
 }
 
 import_join_flatten = { ^"flatten" ~ ^"history" }
+
+// ============================================================================
+// ALWAYS DELETE Statement
+// ============================================================================
+// Syntax: ALWAYS DELETE FROM bundle WHERE <condition>
+// Creates a persistent rule that auto-deletes matching rows on every future ATTACH.
+// Also immediately deletes matching rows from current data.
+
+always_delete_stmt = {
+    ^"always" ~ ^"delete" ~ ^"from" ~ ^"bundle" ~ ^"where" ~ delete_where_clause
+}
+
+// ============================================================================
+// DROP ALWAYS DELETE Statement
+// ============================================================================
+// Syntax: DROP ALWAYS DELETE [WHERE <condition>]
+// Without WHERE: removes all always-delete rules.
+// With WHERE: removes the specific matching rule.
+
+drop_always_delete_stmt = {
+    ^"drop" ~ ^"always" ~ ^"delete" ~ (^"where" ~ delete_where_clause)?
+}
 
 // ============================================================================
 // DELETE Statement

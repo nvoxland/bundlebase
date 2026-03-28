@@ -18,8 +18,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::builder::{
-    AddColumnCommand, AttachCommand, CastColumnCommand, CreateIndexCommand, CreateSourceCommand,
-    DeleteCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
+    AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CreateIndexCommand, CreateSourceCommand,
+    DeleteCommand, DropAlwaysDeleteCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
     DropIndexCommand, DropJoinCommand, DropViewCommand, FetchAllCommand, FetchCommand,
     FilterCommand, ImportConnectorCommand, ImportFunctionCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -176,6 +176,12 @@ pub trait BundleBuilderExt {
     /// Delete rows matching a WHERE clause.
     /// Returns the number of deleted rows.
     async fn delete(&self, where_clause: &str) -> Result<usize, BundlebaseError>;
+
+    /// Register a persistent always-delete rule and immediately delete matching rows.
+    async fn always_delete(&self, where_clause: &str) -> Result<&Self, BundlebaseError>;
+
+    /// Remove always-delete rules. Pass None to remove all, or Some to remove a specific rule.
+    async fn drop_always_delete(&self, where_clause: Option<&str>) -> Result<&Self, BundlebaseError>;
 
     /// Join with another data source.
     async fn join(
@@ -467,6 +473,16 @@ impl BundleBuilderExt for BundleBuilder {
         Ok(count)
     }
 
+    async fn always_delete(&self, where_clause: &str) -> Result<&Self, BundlebaseError> {
+        exec_cmd(self, AlwaysDeleteCommand::new(where_clause)).await?;
+        Ok(self)
+    }
+
+    async fn drop_always_delete(&self, where_clause: Option<&str>) -> Result<&Self, BundlebaseError> {
+        exec_cmd(self, DropAlwaysDeleteCommand::new(where_clause.map(|s| s.to_string()))).await?;
+        Ok(self)
+    }
+
     async fn join(
         &self,
         name: &str,
@@ -648,6 +664,12 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
     }
     async fn delete(&self, where_clause: &str) -> Result<usize, BundlebaseError> {
         (**self).delete(where_clause).await
+    }
+    async fn always_delete(&self, where_clause: &str) -> Result<&Self, BundlebaseError> {
+        (**self).always_delete(where_clause).await?; Ok(self)
+    }
+    async fn drop_always_delete(&self, where_clause: Option<&str>) -> Result<&Self, BundlebaseError> {
+        (**self).drop_always_delete(where_clause).await?; Ok(self)
     }
     async fn join(&self, name: &str, expression: &str, location: Option<&str>, join_type: JoinTypeOption) -> Result<&Self, BundlebaseError> {
         (**self).join(name, expression, location, join_type).await?; Ok(self)

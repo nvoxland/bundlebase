@@ -100,6 +100,30 @@ impl BundleBuilderCommand for AttachCommand {
         let op = AttachBlockOp::setup(&pack_id, &self.path, None, None, builder).await?;
         builder.apply_operation(op.into()).await?;
 
+        // Apply always-delete rules to the newly attached data
+        let rules = builder.always_delete_rules();
+        if !rules.is_empty() {
+            for rule in &rules {
+                let delete_rowids = builder.select_row_ids(rule).await?;
+                if !delete_rowids.is_empty() {
+                    tracing::debug!(
+                        "[ALWAYS DELETE] Auto-deleted {} rows matching WHERE {}",
+                        delete_rowids.len(),
+                        rule
+                    );
+                    builder.mark_deleted(delete_rowids);
+
+                    let filter_query = format!(
+                        "SELECT * FROM bundle WHERE NOT ({})",
+                        rule
+                    );
+                    builder.apply_operation(
+                        bundlebase::bundle::operation::FilterOp::new(&filter_query, vec![]).into()
+                    ).await?;
+                }
+            }
+        }
+
         Ok(format!("Attached {} to {}", self.path, pack_name))
     }
 }

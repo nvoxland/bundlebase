@@ -1064,6 +1064,47 @@ impl PyBundleBuilder {
         })
     }
 
+    /// Register an always-delete rule and immediately delete matching rows.
+    fn always_delete<'py>(
+        slf: PyRef<'_, Self>,
+        where_clause: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let where_clause = where_clause.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .always_delete(&where_clause)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to set always-delete rule", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    /// Remove always-delete rules.
+    #[pyo3(signature = (where_clause=None))]
+    fn drop_always_delete<'py>(
+        slf: PyRef<'_, Self>,
+        where_clause: Option<&str>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let where_clause = where_clause.map(|s| s.to_string());
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .drop_always_delete(where_clause.as_deref())
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to drop always-delete rule", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
     fn num_rows<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {

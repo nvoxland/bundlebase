@@ -2385,3 +2385,159 @@ async def test_delete_with_rename_commit_reopen():
         result = await c2.query("SELECT pay FROM bundle WHERE pay > 200000")
         df = await result.to_pandas()
         assert len(df) == 0
+
+
+# ===== Always Delete Tests =====
+
+
+@pytest.mark.asyncio
+async def test_always_delete_immediate():
+    """Test ALWAYS DELETE immediately deletes matching rows."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    initial_count = await c.num_rows()
+    c = await c.always_delete("salary > 200000")
+
+    new_count = await c.num_rows()
+    assert new_count < initial_count
+
+
+@pytest.mark.asyncio
+async def test_always_delete_on_attach():
+    """Test always-delete rules auto-apply when new data is attached."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Set always-delete rule
+    c = await c.always_delete("salary > 200000")
+    count_after_rule = await c.num_rows()
+
+    # Attach the same data again — matching rows should be auto-deleted
+    c = await c.attach(datafile("userdata.parquet"))
+    count_after_second_attach = await c.num_rows()
+
+    # Should be roughly 2x the filtered count (both copies filtered)
+    assert count_after_second_attach > count_after_rule
+    # Verify no high-salary rows exist
+    result = await c.query("SELECT salary FROM bundle WHERE salary > 200000")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_always_delete_multiple_rules():
+    """Test multiple always-delete rules accumulate."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    c = await c.always_delete("salary > 200000")
+    after_first = await c.num_rows()
+
+    c = await c.always_delete("salary < 50000")
+    after_second = await c.num_rows()
+    assert after_second < after_first
+
+    # Both rules should apply
+    result = await c.query("SELECT salary FROM bundle WHERE salary > 200000 OR salary < 50000")
+    df = await result.to_pandas()
+    assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_always_delete_commit_reopen():
+    """Test always-delete rules persist and auto-apply after reopen + attach."""
+    import tempfile, shutil, os
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Copy test data to temp dir so it's accessible after reopen
+        src = os.path.join(os.path.dirname(__file__), "..", "..", "test_data", "userdata.parquet")
+        data_path = os.path.join(temp_dir, "userdata.parquet")
+        shutil.copy2(src, data_path)
+
+        data_url = "file://" + data_path
+        bundle_dir = os.path.join(temp_dir, "bundle")
+        c = await bundlebase.create(bundle_dir)
+        c = await c.attach(data_url)
+
+        c = await c.always_delete("salary > 200000")
+        count_with_rule = await c.num_rows()
+        await c.commit("Add always-delete rule")
+
+        # Reopen and extend
+        b2 = await bundlebase.open(bundle_dir)
+        assert await b2.num_rows() == count_with_rule
+
+        c2 = await b2.extend()
+        c2 = await c2.attach(data_url)
+        result = await c2.query("SELECT salary FROM bundle WHERE salary > 200000")
+        df = await result.to_pandas()
+        assert len(df) == 0
+
+
+@pytest.mark.asyncio
+async def test_drop_always_delete_specific():
+    """Test DROP ALWAYS DELETE WHERE prevents the rule from applying to future attaches."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Add two rules then drop one
+    c = await c.always_delete("salary > 200000")
+    c = await c.always_delete("salary < 50000")
+    c = await c.drop_always_delete("salary > 200000")
+
+    # Count mid-range salary rows before second attach
+    result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary >= 50000 AND salary <= 200000")
+    df = await result.to_pandas()
+    mid_count_before = df["cnt"].iloc[0]
+
+    # Attach more data — only salary < 50000 rule should auto-apply
+    c = await c.attach(datafile("userdata.parquet"))
+
+    # Mid-range rows should have doubled (no rule deletes them)
+    result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary >= 50000 AND salary <= 200000")
+    df = await result.to_pandas()
+    mid_count_after = df["cnt"].iloc[0]
+    assert mid_count_after > mid_count_before
+
+
+@pytest.mark.asyncio
+async def test_drop_always_delete_all():
+    """Test DROP ALWAYS DELETE without WHERE removes all rules."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("userdata.parquet"))
+    initial_count = await c.num_rows()
+
+    c = await c.always_delete("salary > 200000")
+    c = await c.always_delete("salary < 50000")
+    c = await c.drop_always_delete()
+
+    # After dropping all rules, attaching data should not auto-delete anything
+    # The mid-range salary rows (not affected by any filter) tell the story
+    result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary >= 50000 AND salary <= 200000")
+    df = await result.to_pandas()
+    mid_before = df["cnt"].iloc[0]
+
+    c = await c.attach(datafile("userdata.parquet"))
+
+    result = await c.query("SELECT COUNT(*) as cnt FROM bundle WHERE salary >= 50000 AND salary <= 200000")
+    df = await result.to_pandas()
+    mid_after = df["cnt"].iloc[0]
+    # Should have exactly doubled — no rule deleted anything in new data
+    assert mid_after == mid_before * 2
+
+
+@pytest.mark.asyncio
+async def test_always_delete_csv():
+    """Test always-delete works with CSV data."""
+    c = await bundlebase.create(random_bundle())
+    c = await c.attach(datafile("customers-0-100.csv"))
+
+    c = await c.always_delete('"Index" > 90')
+    count_after = await c.num_rows()
+    assert count_after < 100
+
+    # Attach again — rule should auto-apply
+    c = await c.attach(datafile("customers-0-100.csv"))
+    result = await c.query('SELECT "Index" FROM bundle WHERE "Index" > 90')
+    df = await result.to_pandas()
+    assert len(df) == 0
