@@ -14,7 +14,6 @@ use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream, TaskCo
 use datafusion::physical_expr::projection::ProjectionExprs;
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::DisplayFormatType;
-use datafusion::scalar::ScalarValue;
 use futures::stream::Stream;
 use std::any::Any;
 use std::collections::HashMap;
@@ -214,15 +213,28 @@ impl UpdateOverlayStream {
                 continue;
             }
 
-            // Build replacement array using MutableArrayData for efficiency
-            let target_type = base_col.data_type();
+            // Cast overlay values to match base column type if needed
+            let overlay_values: &dyn arrow::array::Array = if values.data_type() == base_col.data_type() {
+                values.as_ref()
+            } else {
+                // Type mismatch — fall back to base column (overlay values incompatible)
+                new_columns.push(base_col.clone());
+                continue;
+            };
 
-            // For each row in the batch, decide: use base or overlay value
-            let mut scalars: Vec<ScalarValue> = Vec::with_capacity(num_rows as usize);
+            // Use MutableArrayData to copy ranges from base (source 0) or overlay (source 1)
+            // without per-cell ScalarValue allocation
+            let base_data = base_col.to_data();
+            let overlay_data = overlay_values.to_data();
+            let mut builder = arrow::array::MutableArrayData::new(
+                vec![&base_data, &overlay_data], false, num_rows as usize,
+            );
+
             let mut overlay_pos = start;
+            let mut base_run_start: usize = 0; // start of current contiguous base range
 
-            for i in 0..num_rows {
-                let row_num = offset + i;
+            for i in 0..num_rows as usize {
+                let row_num = offset + i as u32;
 
                 // Advance overlay_pos to match current row
                 while overlay_pos < end && self.overlay.row_numbers[overlay_pos] < row_num {
@@ -233,41 +245,21 @@ impl UpdateOverlayStream {
                     && self.overlay.row_numbers[overlay_pos] == row_num
                     && is_set.value(overlay_pos)
                 {
-                    // Use overlay value
-                    let value = ScalarValue::try_from_array(values, overlay_pos)
-                        .map_err(|e| datafusion::common::DataFusionError::Internal(
-                            format!("Failed to read overlay value: {}", e)
-                        ))?;
-                    // Cast to target type if needed
-                    let cast_value = if value.is_null() {
-                        ScalarValue::try_from(target_type)
-                            .map_err(|e| datafusion::common::DataFusionError::Internal(
-                                format!("Failed to create typed null for {:?}: {}", target_type, e)
-                            ))?
-                    } else if value.data_type() == *target_type {
-                        value
-                    } else {
-                        value.cast_to(target_type)
-                            .map_err(|e| datafusion::common::DataFusionError::Internal(
-                                format!("Failed to cast overlay value from {:?} to {:?}: {}",
-                                    value.data_type(), target_type, e)
-                            ))?
-                    };
-                    scalars.push(cast_value);
-                } else {
-                    // Keep base value
-                    let base_value = ScalarValue::try_from_array(base_col, i as usize)
-                        .map_err(|e| datafusion::common::DataFusionError::Internal(
-                            format!("Failed to read base value: {}", e)
-                        ))?;
-                    scalars.push(base_value);
+                    // Flush any pending base rows
+                    if base_run_start < i {
+                        builder.extend(0, base_run_start, i);
+                    }
+                    // Copy one row from overlay (source 1)
+                    builder.extend(1, overlay_pos, overlay_pos + 1);
+                    base_run_start = i + 1;
                 }
             }
+            // Flush remaining base rows
+            if base_run_start < num_rows as usize {
+                builder.extend(0, base_run_start, num_rows as usize);
+            }
 
-            let new_col = ScalarValue::iter_to_array(scalars.into_iter())
-                .map_err(|e| datafusion::common::DataFusionError::Internal(
-                    format!("Failed to build overlay array: {}", e)
-                ))?;
+            let new_col = arrow::array::make_array(builder.freeze());
             new_columns.push(new_col);
         }
 
