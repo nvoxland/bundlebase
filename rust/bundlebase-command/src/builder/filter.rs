@@ -1,7 +1,9 @@
 //! Filter command implementation.
 
 use crate::{CommandParsing, Rule};
+use bundlebase::bundle::column_metadata;
 use bundlebase::bundle::operation::FilterOp;
+use bundlebase::bundle::BundleFacade;
 use bundlebase_common::BundlebaseError;
 use datafusion::scalar::ScalarValue;
 use crate::BundleBuilderCommand;
@@ -60,8 +62,12 @@ impl BundleBuilderCommand for FilterCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
+        // Translate user-visible column names to stable col_<id> references
+        let col_names = builder.column_names();
+        let translated_query = column_metadata::translate_sql_to_col_ids(&self.query, &col_names);
+
         builder
-            .apply_operation(FilterOp::new(&self.query, self.params.clone()).into())
+            .apply_operation(FilterOp::new(&translated_query, self.params.clone()).into())
             .await?;
         Ok(format!("Filtered: {}", self.query))
     }

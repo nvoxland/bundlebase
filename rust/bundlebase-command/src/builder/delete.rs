@@ -7,7 +7,9 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase::bundle::column_metadata;
 use bundlebase::bundle::operation::FilterOp;
+use bundlebase::bundle::BundleFacade;
 use tracing::debug;
 
 /// Command to delete rows matching a WHERE condition.
@@ -59,10 +61,12 @@ impl BundleBuilderCommand for DeleteCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let where_clause = &self.where_clause;
+        // Translate user-visible column names to stable col_<id> references
+        let col_names = builder.column_names();
+        let where_clause = column_metadata::translate_sql_to_col_ids(&self.where_clause, &col_names);
 
         // Collect RowIds matching the WHERE clause
-        let delete_rowids = builder.select_row_ids(where_clause).await?;
+        let delete_rowids = builder.select_row_ids(&where_clause).await?;
         let deleted_count = delete_rowids.len();
         debug!("[DELETE] Collected {} RowIds for WHERE {}", deleted_count, where_clause);
 
@@ -71,7 +75,7 @@ impl BundleBuilderCommand for DeleteCommand {
         }
 
         // Store deleted RowIds for commit
-        builder.mark_deleted(delete_rowids, where_clause);
+        builder.mark_deleted(delete_rowids, &where_clause);
 
         // Apply a negated filter to immediately exclude deleted rows from queries
         let filter_query = format!(

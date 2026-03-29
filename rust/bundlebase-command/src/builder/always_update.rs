@@ -7,6 +7,7 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase::bundle::column_metadata;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::bundle::operation::{AlwaysUpdateOp, FilterOp};
 use tracing::debug;
@@ -95,23 +96,35 @@ impl BundleBuilderCommand for AlwaysUpdateCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let columns: Vec<String> = self.assignments.iter().map(|a| a.column.clone()).collect();
-        let expressions: Vec<String> = self.assignments.iter().map(|a| a.expression.clone()).collect();
-        let set_clause = self.set_clause_text();
+        // Translate user-visible column names to stable col_<id> references
+        let col_names = builder.column_names();
+        let where_clause = column_metadata::translate_sql_to_col_ids(&self.where_clause, &col_names);
+
+        let columns: Vec<String> = self.assignments.iter().map(|a| {
+            column_metadata::translate_sql_to_col_ids(&a.column, &col_names)
+        }).collect();
+        let expressions: Vec<String> = self.assignments.iter().map(|a| {
+            column_metadata::translate_sql_to_col_ids(&a.expression, &col_names)
+        }).collect();
+
+        // Build set clause with col_<id> names
+        let set_clause: String = columns.iter().zip(expressions.iter())
+            .map(|(c, e)| format!("{} = {}", c, e))
+            .collect::<Vec<_>>()
+            .join(", ");
 
         // 1. Immediately update matching rows (same as regular UPDATE)
-        let updated_count = builder.evaluate_update_cols(&columns, &expressions, &self.where_clause).await?;
+        let updated_count = builder.evaluate_update_cols(&columns, &expressions, &where_clause).await?;
         debug!("[ALWAYS UPDATE] Updated {} existing rows", updated_count);
 
         if updated_count > 0 {
             builder.flush_pending_updates_to_blocks();
 
-            let schema = builder.schema().await?;
-            let select_cols: Vec<String> = schema.fields().iter().map(|f| {
-                let name = f.name();
-                let quoted = format!("\"{}\"", name);
-                if let Some(assignment) = self.assignments.iter().find(|a| a.column == *name) {
-                    format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", self.where_clause, assignment.expression, quoted, quoted)
+            let select_cols: Vec<String> = col_names.keys().map(|col_id| {
+                let col_name = column_metadata::col_id_name(col_id);
+                let quoted = format!("\"{}\"", col_name);
+                if let Some(col_expr) = columns.iter().zip(expressions.iter()).find(|(c, _)| c.as_str() == col_name) {
+                    format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", where_clause, col_expr.1, quoted, quoted)
                 } else {
                     quoted
                 }
@@ -120,8 +133,8 @@ impl BundleBuilderCommand for AlwaysUpdateCommand {
             builder.apply_operation(FilterOp::new(&filter_query, vec![]).into()).await?;
         }
 
-        // 2. Register the persistent always-update rule
-        builder.apply_operation(AlwaysUpdateOp::new(&set_clause, &self.where_clause).into()).await?;
+        // 2. Register the persistent always-update rule (stored with col_<id> names)
+        builder.apply_operation(AlwaysUpdateOp::new(&set_clause, &where_clause).into()).await?;
 
         Ok(format!("Always-update rule added (updated {} existing rows)", updated_count))
     }

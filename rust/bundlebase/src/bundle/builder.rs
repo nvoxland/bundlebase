@@ -683,35 +683,17 @@ impl BundleBuilder {
     ) -> Result<usize, BundlebaseError> {
         use futures::StreamExt;
 
-        // Resolve user-visible column names to ColumnIds
-        let ops = self.operations();
-        let resolved = column_metadata::resolved_column_names(&ops);
-        let name_to_id: std::collections::HashMap<String, crate::object_id::ColumnId> = resolved
-            .iter()
-            .map(|(id, name)| (name.clone(), *id))
-            .collect();
-
-        // Build rename map for physical → user-visible names (reuse from select_row_ids)
-        let initial = column_metadata::initial_column_names(&ops);
-        let mut rename_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        for (id, resolved_name) in &resolved {
-            if let Some(initial_name) = initial.get(id) {
-                if initial_name != resolved_name {
-                    rename_map.insert(initial_name.clone(), resolved_name.clone());
-                }
-            }
-        }
-
-        // Validate column names
+        // Resolve column names to ColumnIds.
+        // columns/expressions/where_clause use col_<id> names.
         let col_ids: Vec<(String, crate::object_id::ColumnId)> = columns.iter()
             .map(|col_name| {
-                let col_id = name_to_id.get(col_name)
-                    .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", col_name)))?;
-                Ok((col_name.clone(), *col_id))
+                let col_id = column_metadata::parse_col_id_name(col_name)
+                    .ok_or_else(|| BundlebaseError::from(format!("Column '{}' is not a valid col_<id> name", col_name)))?;
+                Ok((col_name.clone(), col_id))
             })
             .collect::<Result<Vec<_>, BundlebaseError>>()?;
 
-        // Build SELECT clause for expression evaluation
+        // Build SELECT clause for expression evaluation (already in col_<id> terms)
         let select_exprs: Vec<String> = columns.iter().zip(expressions.iter())
             .map(|(col, expr)| format!("{} AS {}", expr, col))
             .collect();
@@ -736,18 +718,16 @@ impl BundleBuilder {
                     let batch = &rowid_batch.batch;
                     let row_ids = &rowid_batch.row_ids;
 
-                    // Rename columns to user-visible names
-                    let batch = if rename_map.is_empty() {
-                        batch.clone()
-                    } else {
+                    // Rename columns from physical names to col_<id> names
+                    let batch = {
                         let schema = batch.schema();
-                        let new_fields: Vec<arrow::datatypes::Field> = schema.fields().iter().map(|f| {
-                            if let Some(new_name) = rename_map.get(f.name()) {
-                                f.as_ref().clone().with_name(new_name)
-                            } else {
-                                f.as_ref().clone()
-                            }
-                        }).collect();
+                        let col_id_list = block.column_ids();
+                        let new_fields: Vec<arrow::datatypes::Field> = schema.fields().iter()
+                            .zip(col_id_list.iter())
+                            .map(|(f, col_id)| {
+                                f.as_ref().clone().with_name(column_metadata::col_id_name(col_id))
+                            })
+                            .collect();
                         let new_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
                             new_fields,
                             schema.metadata().clone(),
@@ -877,19 +857,6 @@ impl BundleBuilder {
     ) -> Result<std::collections::HashSet<bundlebase_common::RowId>, BundlebaseError> {
         use futures::StreamExt;
 
-        // Build a physical-name → user-visible-name mapping from column renames
-        let ops = self.operations();
-        let initial = column_metadata::initial_column_names(&ops);
-        let resolved = column_metadata::resolved_column_names(&ops);
-        let mut rename_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        for (id, resolved_name) in &resolved {
-            if let Some(initial_name) = initial.get(id) {
-                if initial_name != resolved_name {
-                    rename_map.insert(initial_name.clone(), resolved_name.clone());
-                }
-            }
-        }
-
         let mut matching_ids = std::collections::HashSet::new();
         let base_pack = self.bundle.packs().read()
             .get(&ObjectId::BASE_PACK)
@@ -908,18 +875,16 @@ impl BundleBuilder {
                     let batch = &rowid_batch.batch;
                     let row_ids = &rowid_batch.row_ids;
 
-                    // Rename columns in the batch to match user-visible names
-                    let batch = if rename_map.is_empty() {
-                        batch.clone()
-                    } else {
+                    // Rename columns from physical names to col_<id> names
+                    let batch = {
                         let schema = batch.schema();
-                        let new_fields: Vec<arrow::datatypes::Field> = schema.fields().iter().map(|f| {
-                            if let Some(new_name) = rename_map.get(f.name()) {
-                                f.as_ref().clone().with_name(new_name)
-                            } else {
-                                f.as_ref().clone()
-                            }
-                        }).collect();
+                        let col_ids = block.column_ids();
+                        let new_fields: Vec<arrow::datatypes::Field> = schema.fields().iter()
+                            .zip(col_ids.iter())
+                            .map(|(f, col_id)| {
+                                f.as_ref().clone().with_name(column_metadata::col_id_name(col_id))
+                            })
+                            .collect();
                         let new_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
                             new_fields,
                             schema.metadata().clone(),

@@ -3,7 +3,9 @@
 use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use crate::parser::{extract_string_content, parse_join_type};
+use bundlebase::bundle::column_metadata;
 use bundlebase::bundle::operation::{AttachBlockOp, CreateJoinOp};
+use bundlebase::bundle::BundleFacade;
 use bundlebase::JoinTypeOption;
 use bundlebase_data::ObjectId;
 use bundlebase_common::BundlebaseError;
@@ -120,11 +122,18 @@ impl BundleBuilderCommand for JoinCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        // Step 1: Create a new pack with join metadata
+        // Translate user-visible column names in the join expression to stable col_<id> references.
+        // Note: join expressions reference columns from both the base pack and the join pack.
+        // At this point only base pack columns are known; join pack columns will be added
+        // to the translation at dataframe_join time.
+        let col_names = builder.column_names();
+        let translated_expression = column_metadata::translate_sql_to_col_ids(&self.expression, &col_names);
+
+        // Step 1: Create a new pack with join metadata (stored with col_<id> names)
         let join_pack_id = ObjectId::generate();
         builder
             .apply_operation(
-                CreateJoinOp::setup(&join_pack_id, &self.name, &self.expression, self.join_type)
+                CreateJoinOp::setup(&join_pack_id, &self.name, &translated_expression, self.join_type)
                     .await?
                     .into(),
             )

@@ -220,7 +220,23 @@ impl BundleBuilder {
 
 **See**: [architecture.md](architecture.md), [python-api.md](python-api.md)
 
-### 2.3 Lazy Evaluation
+### 2.3 Internal Column Naming (col_<id>)
+
+**Rule**: All internal column references use the stable `col_<column_id>` format. User-visible names are only applied at the final output boundary.
+
+**How it works**:
+1. `DataBlock.schema()` returns fields named `col_<hex_id>` (not physical file names)
+2. Operations' `apply_dataframe()` methods work with `col_<id>` columns throughout
+3. The command layer translates user input to `col_<id>` before creating operations
+4. `dataframe()` in `bundle.rs` applies a final rename from `col_<id>` → user-visible names
+
+**When adding a new command that stores SQL**: Always call `column_metadata::translate_sql_to_col_ids()` on user-provided SQL before storing it in an operation. The `builder.column_names()` method provides the `ColumnId → user_name` map needed for translation.
+
+**When adding a new operation with `apply_dataframe()`**: Columns in the incoming DataFrame are `col_<id>`. Use `column_metadata::col_id_name(&id)` to reference columns. The `column_names` parameter tracks `ColumnId → user_name` for the final rename step.
+
+**Key files**: `column_metadata.rs`, `data_block.rs`, `schema_rename_filter.rs`
+
+### 2.4 Lazy Evaluation
 
 **Rule**: Operations are recorded when called, executed only during query time.
 

@@ -32,9 +32,11 @@ impl AddColumnOp {
 
 impl Operation for AddColumnOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
+        use crate::bundle::column_metadata;
+
         let schema = bundle.schema().await?;
 
-        // Check column doesn't already exist
+        // Check column doesn't already exist (using user-visible names)
         if schema.field_with_name(&self.name).is_ok() {
             return Err(format!(
                 "Column '{}' already exists in the schema",
@@ -43,15 +45,29 @@ impl Operation for AddColumnOp {
             .into());
         }
 
-        // Validate the expression by planning it against an empty DataFrame
+        // Build a col_<id> schema for validation since the expression uses col_<id> references.
+        // Get the internal schema by renaming the user-visible schema fields to col_<id>.
+        let resolved = bundle.resolved_column_names();
+        let col_id_fields: Vec<std::sync::Arc<arrow::datatypes::Field>> = schema.fields().iter().filter_map(|f| {
+            // Find the ColumnId for this user-visible name
+            resolved.iter()
+                .find(|(_, name)| name.as_str() == f.name())
+                .map(|(id, _)| {
+                    std::sync::Arc::new(f.as_ref().clone().with_name(column_metadata::col_id_name(id)))
+                })
+        }).collect();
+        let col_id_schema = std::sync::Arc::new(arrow::datatypes::Schema::new(col_id_fields));
+
+        // Validate the expression by planning it against an empty DataFrame with col_<id> schema
+        let col_name = column_metadata::col_id_name(&self.id);
         let sql = format!(
             "SELECT *, ({}) AS \"{}\" FROM bundle",
-            self.expression, self.name
+            self.expression, col_name
         );
         let mut config = SessionConfig::new();
         config.options_mut().sql_parser.enable_ident_normalization = false;
         let ctx = SessionContext::new_with_config(config);
-        let empty_batch = RecordBatch::new_empty(schema);
+        let empty_batch = RecordBatch::new_empty(col_id_schema);
         ctx.register_batch("bundle", empty_batch)
             .map_err(|e| BundlebaseError::from(format!("Failed to validate expression: {}", e)))?;
         ctx.state()

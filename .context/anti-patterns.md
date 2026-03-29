@@ -422,6 +422,26 @@ impl PyBundle {
 
 ## 4. Architecture Anti-Patterns
 
+### ❌ NEVER: Use User-Visible Column Names in Stored Operations
+
+**The Problem**: Stored SQL in operations (WHERE clauses, expressions, filters) must use stable `col_<id>` references, not user-visible column names. User-visible names change when columns are renamed, breaking stored operations.
+
+**Wrong**:
+```rust
+// ❌ BAD: Stores user-visible name that breaks after rename
+AlwaysDeleteOp::new("salary < 0")
+```
+
+**Right**:
+```rust
+// ✅ GOOD: Translate at command creation time
+let col_names = builder.column_names();
+let translated = column_metadata::translate_sql_to_col_ids("salary < 0", &col_names);
+AlwaysDeleteOp::new(&translated)  // stores "col_0a3f1b2c9d4e7f80 < 0"
+```
+
+**Key Rule**: The command layer translates user input → `col_<id>` before creating operations. Operations never see user-visible column names. See `column_metadata::translate_sql_to_col_ids()`.
+
 ### ❌ NEVER: Mutate Bundle (Read-Only)
 
 **The Problem**: Bundle is designed to be immutable - attempting mutation breaks the architecture.

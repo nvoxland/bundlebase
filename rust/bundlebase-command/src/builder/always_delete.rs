@@ -6,7 +6,9 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase::bundle::column_metadata;
 use bundlebase::bundle::operation::{AlwaysDeleteOp, FilterOp};
+use bundlebase::bundle::BundleFacade;
 use tracing::debug;
 
 /// Command to register an always-delete rule.
@@ -57,15 +59,17 @@ impl BundleBuilderCommand for AlwaysDeleteCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let where_clause = &self.where_clause;
+        // Translate user-visible column names to stable col_<id> references
+        let col_names = builder.column_names();
+        let where_clause = column_metadata::translate_sql_to_col_ids(&self.where_clause, &col_names);
 
         // 1. Immediately delete matching rows (same as regular DELETE)
-        let delete_rowids = builder.select_row_ids(where_clause).await?;
+        let delete_rowids = builder.select_row_ids(&where_clause).await?;
         let deleted_count = delete_rowids.len();
         debug!("[ALWAYS DELETE] Collected {} RowIds for WHERE {}", deleted_count, where_clause);
 
         if !delete_rowids.is_empty() {
-            builder.mark_deleted(delete_rowids, where_clause);
+            builder.mark_deleted(delete_rowids, &where_clause);
 
             let filter_query = format!(
                 "SELECT * FROM bundle WHERE NOT ({})",
@@ -74,8 +78,8 @@ impl BundleBuilderCommand for AlwaysDeleteCommand {
             builder.apply_operation(FilterOp::new(&filter_query, vec![]).into()).await?;
         }
 
-        // 2. Register the persistent always-delete rule
-        builder.apply_operation(AlwaysDeleteOp::new(where_clause).into()).await?;
+        // 2. Register the persistent always-delete rule (stored with col_<id> names)
+        builder.apply_operation(AlwaysDeleteOp::new(&where_clause).into()).await?;
 
         Ok(format!("Always-delete rule added (deleted {} existing rows)", deleted_count))
     }

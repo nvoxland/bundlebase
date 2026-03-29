@@ -7,6 +7,7 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase::bundle::column_metadata;
 use bundlebase::bundle::BundleFacade;
 use tracing::debug;
 
@@ -96,10 +97,19 @@ impl BundleBuilderCommand for UpdateCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let columns: Vec<String> = self.assignments.iter().map(|a| a.column.clone()).collect();
-        let expressions: Vec<String> = self.assignments.iter().map(|a| a.expression.clone()).collect();
+        // Translate user-visible column names to stable col_<id> references
+        let col_names = builder.column_names();
+        let where_clause = column_metadata::translate_sql_to_col_ids(&self.where_clause, &col_names);
 
-        let updated_count = builder.evaluate_update_cols(&columns, &expressions, &self.where_clause).await?;
+        // Translate column names and expressions to col_<id>
+        let columns: Vec<String> = self.assignments.iter().map(|a| {
+            column_metadata::translate_sql_to_col_ids(&a.column, &col_names)
+        }).collect();
+        let expressions: Vec<String> = self.assignments.iter().map(|a| {
+            column_metadata::translate_sql_to_col_ids(&a.expression, &col_names)
+        }).collect();
+
+        let updated_count = builder.evaluate_update_cols(&columns, &expressions, &where_clause).await?;
         debug!("[UPDATE] Updated {} rows", updated_count);
 
         if updated_count > 0 {
@@ -109,12 +119,12 @@ impl BundleBuilderCommand for UpdateCommand {
             // Also apply a DataFrame-level SQL transform so FilterOp and other
             // DataFrame-level operations see the updated values.
             // Uses CASE WHEN to replace values matching the WHERE condition.
-            let schema = builder.schema().await?;
-            let select_cols: Vec<String> = schema.fields().iter().map(|f| {
-                let name = f.name();
-                let quoted = format!("\"{}\"", name);
-                if let Some(assignment) = self.assignments.iter().find(|a| a.column == *name) {
-                    format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", self.where_clause, assignment.expression, quoted, quoted)
+            // Build using col_<id> names from the internal column map.
+            let select_cols: Vec<String> = col_names.keys().map(|col_id| {
+                let col_name = column_metadata::col_id_name(col_id);
+                let quoted = format!("\"{}\"", col_name);
+                if let Some(col_assignment) = columns.iter().zip(expressions.iter()).find(|(c, _)| c.as_str() == col_name) {
+                    format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", where_clause, col_assignment.1, quoted, quoted)
                 } else {
                     quoted
                 }

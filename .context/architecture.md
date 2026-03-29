@@ -306,14 +306,18 @@ await c.attach("users2.parquet")  # 500 rows
 results = await c.to_dict()       # 1500 total rows
 ```
 
-## Schema Tracking
+## Column Identity and Internal Naming
 
-Schema is stored as `Arc<LinkedHashMap<String, String>>`:
-- **LinkedHashMap**: Preserves column insertion order
-- **Arc**: Cheap cloning when creating new containers
-- **String → String**: Maps column name → Arrow type string (e.g., "Int32", "Utf8View")
+Each column has a stable `ColumnId` (64-bit hex, e.g., `0a3f1b2c9d4e7f80`) assigned at attach time. Internally, all column names use the format `col_<column_id>` throughout the pipeline:
 
-Schema updates are immediate - `container.schema()` work instantly without executing the query.
+- **DataBlock** (`data_block.rs`): The `TableProvider::schema()` returns `col_<id>` field names. Reader batches are renamed from physical names to `col_<id>` at scan time (zero-copy schema swap).
+- **Operations**: `apply_dataframe()` methods work with `col_<id>` column names in the DataFrame. `RenameColumnOp` is metadata-only (just updates the name map). `DropColumnOp`/`CastColumnOp` reference `col_<id>` directly.
+- **SQL in operations**: All stored SQL (WHERE clauses, expressions, filters) uses `col_<id>` references. The command layer translates user-visible names to `col_<id>` at creation time via `translate_sql_to_col_ids()`.
+- **Final rename**: `dataframe()` in `bundle.rs` applies all operations, then as the last step renames every `col_<id>` column to its user-visible name using the `col_names` map.
+
+This design means stored operations are resilient to column renames — an `ALWAYS DELETE WHERE col_<id> < 0` remains valid even if the column is renamed.
+
+**Key files**: `column_metadata.rs` (helpers: `col_id_name()`, `parse_col_id_name()`, `translate_sql_to_col_ids()`), `data_block.rs`, `schema_rename_filter.rs`.
 
 ## CLI Modes
 

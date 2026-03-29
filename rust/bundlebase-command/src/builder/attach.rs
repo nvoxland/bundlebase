@@ -145,11 +145,12 @@ impl BundleBuilderCommand for AttachCommand {
                         );
                         builder.flush_pending_updates_to_blocks();
 
-                        let schema = builder.schema().await?;
-                        let select_cols: Vec<String> = schema.fields().iter().map(|f| {
-                            let name = f.name();
-                            let quoted = format!("\"{}\"", name);
-                            if let Some(assignment) = update_cmd.assignments.iter().find(|a| a.column == *name) {
+                        // Build CASE WHEN using col_<id> column names from the internal schema
+                        let col_names_map = builder.column_names();
+                        let select_cols: Vec<String> = col_names_map.keys().map(|col_id| {
+                            let col_name = bundlebase::bundle::column_metadata::col_id_name(col_id);
+                            let quoted = format!("\"{}\"", col_name);
+                            if let Some(assignment) = update_cmd.assignments.iter().find(|a| a.column == col_name) {
                                 format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", rule.where_clause, assignment.expression, quoted, quoted)
                             } else {
                                 quoted
