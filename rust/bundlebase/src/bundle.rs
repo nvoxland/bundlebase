@@ -1,3 +1,4 @@
+pub mod block_cache;
 mod builder;
 mod column_lineage;
 pub mod column_metadata;

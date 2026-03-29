@@ -1,3 +1,4 @@
+use crate::bundle::block_cache::GLOBAL_BLOCK_CACHE;
 use crate::bundle::operation::SourceInfo;
 use crate::data::{DataReader, VersionedBlockId};
 use crate::index::{
@@ -13,6 +14,7 @@ use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::memory::DataSourceExec;
 use datafusion::catalog::{Session, TableProvider};
+use datafusion::datasource::memory::MemorySourceConfig;
 use datafusion::datasource::TableType;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
@@ -47,6 +49,8 @@ pub struct DataBlock {
     deleted_rows: Arc<RwLock<Vec<u32>>>,
     /// Update overlays to apply at scan time
     update_overlays: Arc<RwLock<Vec<crate::bundle::update_overlay::UpdateOverlay>>>,
+    /// Whether this block's version has been validated (first scan reads through reader).
+    version_validated: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl DataBlock {
@@ -77,6 +81,7 @@ impl DataBlock {
             column_ids,
             deleted_rows: Arc::new(RwLock::new(Vec::new())),
             update_overlays: Arc::new(RwLock::new(Vec::new())),
+            version_validated: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -101,7 +106,21 @@ impl DataBlock {
         &self.column_ids
     }
 
+    /// Cache key for this block.
+    ///
+    /// Uses the data URL + version hash. The version hash is a SHA-256 of the
+    /// file contents at commit time, so if the file changes the hash won't
+    /// match and we'll get a different cache key on the next commit.
+    /// For uncommitted data (version "TEMP"), includes the data_dir URL
+    /// to prevent cross-instance collisions.
+    fn cache_key(&self) -> String {
+        format!("{}:{}:{}", self.data_dir.url(), self.reader.url(), self.version)
+    }
+
     /// Add deleted row numbers to this block's tombstone set.
+    ///
+    /// The block cache is NOT invalidated here — cached batches are the base
+    /// data, and tombstones are applied as a filter on top at query time.
     pub fn add_deleted_rows(&self, rows: impl IntoIterator<Item = u32>) {
         let mut deleted = self.deleted_rows.write();
         deleted.extend(rows);
@@ -110,6 +129,9 @@ impl DataBlock {
     }
 
     /// Add an update overlay to this block.
+    ///
+    /// The block cache is NOT invalidated here — cached batches are the base
+    /// data, and overlays are applied as a filter on top at query time.
     pub fn add_update_overlay(&self, overlay: crate::bundle::update_overlay::UpdateOverlay) {
         self.update_overlays.write().push(overlay);
     }
@@ -318,7 +340,7 @@ impl TableProvider for DataBlock {
 
     async fn scan(
         &self,
-        _state: &dyn Session,
+        state: &dyn Session,
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
@@ -398,39 +420,64 @@ impl TableProvider for DataBlock {
             }
         }
 
-        // Phase 2: Fall back to full scan
-        // When update overlays exist, only push filters that don't reference
-        // overlayed columns — those columns may have changed values.
+        // Phase 2: Full scan with block cache
         let overlays = self.update_overlays.read().clone();
-        let scan_filters = if overlays.is_empty() {
-            filters.to_vec()
-        } else {
-            // Collect ColumnIds that have overlay updates
-            let overlayed_col_ids: std::collections::HashSet<crate::object_id::ColumnId> = overlays.iter()
-                .flat_map(|ov| ov.columns.keys().copied())
-                .collect();
+        let cache_key = self.cache_key();
+        let validated = self.version_validated.load(std::sync::atomic::Ordering::Relaxed);
 
-            // Map overlayed ColumnIds to schema column names
-            let overlayed_names: std::collections::HashSet<&str> = self.column_ids.iter()
-                .enumerate()
-                .filter(|(_, cid)| overlayed_col_ids.contains(cid))
-                .filter_map(|(i, _)| self.schema.field(i).name().as_str().into())
-                .collect();
+        // Try to serve from the block cache (stores base data, all columns).
+        // Only use cache after version has been validated (first scan reads through reader).
+        let mut source: Arc<dyn datafusion::datasource::source::DataSource> =
+            if validated {
+                if let Some(cached) = GLOBAL_BLOCK_CACHE.get(&cache_key) {
+                    log::debug!("Block cache hit for {}", cache_key);
+                    Arc::new(MemorySourceConfig::try_new(
+                        &[cached.batches.as_ref().clone()],
+                        self.schema.clone(),
+                        projection.cloned(),
+                    )?)
+                } else {
+                    // Validated but not cached (evicted or first scan after validation).
+                    // Read through reader, cache result.
+                    let base_source = self.reader
+                        .data_source(None, &[], None, None)
+                        .await?;
+                    let task_ctx = Arc::new(
+                        datafusion::execution::TaskContext::default()
+                            .with_runtime(Arc::clone(state.runtime_env())),
+                    );
+                    let stream = base_source.open(0, task_ctx)?;
+                    let batches: Vec<arrow::record_batch::RecordBatch> =
+                        datafusion::physical_plan::common::collect(stream).await?;
+                    GLOBAL_BLOCK_CACHE.insert(cache_key.clone(), batches.clone());
+                    Arc::new(MemorySourceConfig::try_new(
+                        &[batches],
+                        self.schema.clone(),
+                        projection.cloned(),
+                    )?)
+                }
+            } else {
+                // First scan: read through reader (validates version), then cache.
+                let base_source = self.reader
+                    .data_source(None, &[], None, None)
+                    .await?;
+                let task_ctx = Arc::new(
+                    datafusion::execution::TaskContext::default()
+                        .with_runtime(Arc::clone(state.runtime_env())),
+                );
+                let stream = base_source.open(0, task_ctx)?;
+                let batches: Vec<arrow::record_batch::RecordBatch> =
+                    datafusion::physical_plan::common::collect(stream).await?;
 
-            // Keep filters that don't reference any overlayed column
-            filters.iter()
-                .filter(|expr| {
-                    let col_refs = expr.column_refs();
-                    !col_refs.iter().any(|col| overlayed_names.contains(col.name()))
-                })
-                .cloned()
-                .collect()
-        };
-        let scan_filters_ref = scan_filters.iter().collect::<Vec<_>>();
-        let scan_filters_slice: &[Expr] = &scan_filters;
-        let mut source: Arc<dyn datafusion::datasource::source::DataSource> = self.reader
-            .data_source(projection, scan_filters_slice, limit, None)
-            .await?;
+                // Version validated successfully — mark and cache
+                self.version_validated.store(true, std::sync::atomic::Ordering::Relaxed);
+                GLOBAL_BLOCK_CACHE.insert(cache_key.clone(), batches.clone());
+                Arc::new(MemorySourceConfig::try_new(
+                    &[batches],
+                    self.schema.clone(),
+                    projection.cloned(),
+                )?)
+            };
 
         // Apply tombstone filter if there are deleted rows
         if !deleted.is_empty() {
