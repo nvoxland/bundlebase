@@ -236,6 +236,15 @@ impl SearchResultTableProvider {
                     .await
                     .map_err(|e| DataFusionError::External(e))?;
             }
+
+            // Final rename: col_<id> → user-visible names
+            for (id, user_name) in &col_names {
+                let col_name = column_metadata::col_id_name(id);
+                if df.schema().has_column_with_unqualified_name(&col_name) {
+                    df = df.with_column_renamed(&col_name, user_name)?;
+                }
+            }
+
             Ok::<_, DataFusionError>(Arc::new(df.schema().as_arrow().clone()))
         });
 
@@ -245,35 +254,32 @@ impl SearchResultTableProvider {
         })
     }
 
-    /// Rewrite logical field names in a search query to physical field names.
-    /// E.g., after renaming "Answer" → "answer", rewrites "answer:foo" → "Answer:foo"
+    /// Rewrite user-visible field names in a search query to col_<id> field names.
+    /// The text index stores fields using stable col_<id> names, so queries like
+    /// "Company:group" need to be rewritten to "col_<id>:group".
     fn rewrite_query_fields(&self, query: &str) -> String {
         let index_column_ids = self.index_def.column_ids();
 
         let id_to_current = column_metadata::resolved_column_names(&self.operations);
-        let id_to_original = column_metadata::initial_column_names(&self.operations);
 
-        let mut logical_to_physical: HashMap<String, String> = HashMap::new();
+        // Map user-visible name → col_<id> name for indexed columns
+        let mut user_to_col_id: HashMap<String, String> = HashMap::new();
         for col_id in index_column_ids.iter() {
-            if let (Some(current_name), Some(original_name)) = (
-                id_to_current.get(col_id),
-                id_to_original.get(col_id),
-            ) {
-                if current_name != original_name {
-                    logical_to_physical.insert(current_name.clone(), original_name.clone());
-                }
+            if let Some(current_name) = id_to_current.get(col_id) {
+                let col_id_name = column_metadata::col_id_name(col_id);
+                user_to_col_id.insert(current_name.clone(), col_id_name);
             }
         }
 
-        if logical_to_physical.is_empty() {
+        if user_to_col_id.is_empty() {
             return query.to_string();
         }
 
         let mut result = query.to_string();
-        for (logical, physical) in &logical_to_physical {
+        for (user_name, col_id_name) in &user_to_col_id {
             result = result.replace(
-                &format!("{}:", logical),
-                &format!("{}:", physical),
+                &format!("{}:", user_name),
+                &format!("{}:", col_id_name),
             );
         }
         result
@@ -637,8 +643,14 @@ impl DataSource for SearchDataSource {
                         })?;
                 }
 
-                // Re-register the transformed DataFrame as "bundle" to get _score back
-                // Operations only act on bundle columns, so _score passes through
+                // Final rename: col_<id> → user-visible names
+                for (id, user_name) in &col_names {
+                    let col_name = column_metadata::col_id_name(id);
+                    if df.schema().has_column_with_unqualified_name(&col_name) {
+                        df = df.with_column_renamed(&col_name, user_name)?;
+                    }
+                }
+
                 let result_batches: Vec<RecordBatch> = df
                     .collect()
                     .await?;

@@ -53,13 +53,8 @@ impl Operation for RenameColumnOp {
         _ctx: Arc<SessionContext>,
         column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
-        let old_name = column_names.get(&self.id)
-            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?
-            .clone();
-
-        let df = df
-            .with_column_renamed(&old_name, &self.new_name)
-            .map_err(|e| Box::new(e) as BundlebaseError)?;
+        // Metadata-only: update the name map for the final rename step.
+        // The DataFrame columns stay as col_<id> throughout the pipeline.
         column_names.insert(self.id, self.new_name.clone());
         Ok(df)
     }

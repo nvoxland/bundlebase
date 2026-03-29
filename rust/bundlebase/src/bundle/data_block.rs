@@ -1,4 +1,5 @@
 use crate::bundle::block_cache::GLOBAL_BLOCK_CACHE;
+use crate::bundle::column_metadata;
 use crate::bundle::operation::SourceInfo;
 use crate::data::{DataReader, VersionedBlockId};
 use crate::index::{
@@ -36,7 +37,9 @@ struct IndexCandidate<'a> {
 pub struct DataBlock {
     id: BlockId,
     version: String,
-    schema: SchemaRef,
+    /// Schema with stable `col_<id>` field names, used by the TableProvider interface.
+    /// Built from the stored physical schema; updated with actual reader types on first scan.
+    schema: Arc<parking_lot::RwLock<SchemaRef>>,
     reader: Arc<dyn DataReader>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     data_dir: Arc<dyn IOReadWriteDir>,
@@ -60,7 +63,7 @@ impl DataBlock {
 
     pub fn new(
         id: BlockId,
-        schema: SchemaRef,
+        physical_schema: SchemaRef,
         version: &str,
         reader: Arc<dyn DataReader>,
         indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
@@ -69,10 +72,24 @@ impl DataBlock {
         source_info: Option<SourceInfo>,
         column_ids: Vec<ColumnId>,
     ) -> Self {
+        // Build ID-based schema: rename each field to `col_<column_id>`
+        let id_fields: Vec<Arc<arrow_schema::Field>> = physical_schema
+            .fields()
+            .iter()
+            .zip(column_ids.iter())
+            .map(|(field, col_id)| {
+                Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+            })
+            .collect();
+        let schema = Arc::new(arrow_schema::Schema::new_with_metadata(
+            id_fields,
+            physical_schema.metadata().clone(),
+        ));
+
         Self {
             id,
             version: version.to_string(),
-            schema,
+            schema: Arc::new(parking_lot::RwLock::new(schema)),
             reader,
             indexes,
             data_dir,
@@ -89,11 +106,35 @@ impl DataBlock {
         &self.id
     }
 
-    /// Resolve a physical column name to its ColumnId
-    fn column_id_for_physical_name(&self, name: &str) -> Option<ColumnId> {
-        self.schema
-            .column_with_name(name)
-            .and_then(|(idx, _)| self.column_ids.get(idx).copied())
+    /// Rename batches from physical column names to stable `col_<id>` names.
+    /// Uses the batch's actual field types to build the `col_<id>` schema.
+    fn rename_batches_with_col_ids(
+        batches: Vec<arrow::record_batch::RecordBatch>,
+        column_ids: &[ColumnId],
+    ) -> Vec<arrow::record_batch::RecordBatch> {
+        batches
+            .into_iter()
+            .map(|batch| {
+                let batch_schema = batch.schema();
+                let id_fields: Vec<Arc<arrow_schema::Field>> = batch_schema
+                    .fields()
+                    .iter()
+                    .zip(column_ids.iter())
+                    .map(|(field, col_id)| {
+                        Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+                    })
+                    .collect();
+                let id_schema = Arc::new(arrow_schema::Schema::new_with_metadata(
+                    id_fields,
+                    batch_schema.metadata().clone(),
+                ));
+                arrow::record_batch::RecordBatch::try_new(
+                    id_schema,
+                    batch.columns().to_vec(),
+                )
+                .unwrap_or(batch)
+            })
+            .collect()
     }
 
     /// Returns source information if this block was attached via a source fetch
@@ -224,7 +265,7 @@ impl DataBlock {
     }
 
     pub fn schema(&self) -> SchemaRef {
-        self.schema.clone()
+        self.schema.read().clone()
     }
 
     pub fn version(&self) -> String {
@@ -247,10 +288,10 @@ impl DataBlock {
 
         // Evaluate each indexable filter
         for filter in indexable_filters {
-            // Resolve filter column name to ColumnId via block's column_ids
-            let column_id = match self.column_id_for_physical_name(&filter.column) {
+            // Resolve filter column name (col_<id> format) to ColumnId
+            let column_id = match column_metadata::parse_col_id_name(&filter.column) {
                 Some(id) => id,
-                None => continue, // Column not found in schema, skip
+                None => continue, // Not a col_<id> name, skip
             };
 
             // Try to find a column index for this filter
@@ -319,7 +360,7 @@ impl TableProvider for DataBlock {
     }
 
     fn schema(&self) -> SchemaRef {
-        self.schema.clone()
+        self.schema.read().clone()
     }
 
     fn table_type(&self) -> TableType {
@@ -403,13 +444,35 @@ impl TableProvider for DataBlock {
                 span.set_outcome(OperationOutcome::Success);
                 timer.finish(OperationOutcome::Success);
 
-                // Use optimized data source with row IDs
-                let exec = DataSourceExec::new(
-                    self.reader
-                        .data_source(projection, filters, limit, Some(&row_ids))
-                        .await?
-                        .clone(),
+                // Use optimized data source with row IDs, wrapped for col_<id> renaming
+                let inner_source = self.reader
+                    .data_source(projection, filters, limit, Some(&row_ids))
+                    .await?
+                    .clone();
+                let projected_col_ids: Vec<ColumnId> = match projection {
+                    Some(proj) => proj.iter().filter_map(|&i| self.column_ids.get(i).copied()).collect(),
+                    None => self.column_ids.clone(),
+                };
+                // Use self.schema for planning (types may not match reader exactly, but
+                // SchemaRenameDataSource will use actual batch types at runtime)
+                let current_schema = self.schema.read().clone();
+                let projected_schema = match projection {
+                    Some(proj) => {
+                        let fields: Vec<_> = proj.iter()
+                            .filter_map(|&i| current_schema.fields().get(i).cloned())
+                            .collect();
+                        Arc::new(arrow_schema::Schema::new(fields))
+                    }
+                    None => current_schema,
+                };
+                let source = Arc::new(
+                    crate::bundle::schema_rename_filter::SchemaRenameDataSource::new(
+                        inner_source,
+                        projected_schema,
+                        projected_col_ids,
+                    ),
                 );
+                let exec = DataSourceExec::new(source);
                 return Ok(Arc::new(exec));
             } else {
                 // No suitable index found (all had high selectivity or errors)
@@ -425,20 +488,24 @@ impl TableProvider for DataBlock {
         let cache_key = self.cache_key();
         let validated = self.version_validated.load(std::sync::atomic::Ordering::Relaxed);
 
-        // Try to serve from the block cache (stores base data, all columns).
+        // Try to serve from the block cache (stores base data with col_<id> names).
         // Only use cache after version has been validated (first scan reads through reader).
         let mut source: Arc<dyn datafusion::datasource::source::DataSource> =
             if validated {
                 if let Some(cached) = GLOBAL_BLOCK_CACHE.get(&cache_key) {
                     log::debug!("Block cache hit for {}", cache_key);
+                    // Use the cached batch's own schema (derived from the reader's actual types)
+                    let batch_schema = cached.batches.first()
+                        .map(|b| b.schema())
+                        .unwrap_or_else(|| self.schema.read().clone());
                     Arc::new(MemorySourceConfig::try_new(
                         &[cached.batches.as_ref().clone()],
-                        self.schema.clone(),
+                        batch_schema,
                         projection.cloned(),
                     )?)
                 } else {
                     // Validated but not cached (evicted or first scan after validation).
-                    // Read through reader, cache result.
+                    // Read through reader, rename to col_<id>, cache result.
                     let base_source = self.reader
                         .data_source(None, &[], None, None)
                         .await?;
@@ -449,15 +516,19 @@ impl TableProvider for DataBlock {
                     let stream = base_source.open(0, task_ctx)?;
                     let batches: Vec<arrow::record_batch::RecordBatch> =
                         datafusion::physical_plan::common::collect(stream).await?;
+                    let batches = Self::rename_batches_with_col_ids(batches, &self.column_ids);
+                    let batch_schema = batches.first()
+                        .map(|b| b.schema())
+                        .unwrap_or_else(|| self.schema.read().clone());
                     GLOBAL_BLOCK_CACHE.insert(cache_key.clone(), batches.clone());
                     Arc::new(MemorySourceConfig::try_new(
                         &[batches],
-                        self.schema.clone(),
+                        batch_schema,
                         projection.cloned(),
                     )?)
                 }
             } else {
-                // First scan: read through reader (validates version), then cache.
+                // First scan: read through reader (validates version), rename, then cache.
                 let base_source = self.reader
                     .data_source(None, &[], None, None)
                     .await?;
@@ -468,13 +539,21 @@ impl TableProvider for DataBlock {
                 let stream = base_source.open(0, task_ctx)?;
                 let batches: Vec<arrow::record_batch::RecordBatch> =
                     datafusion::physical_plan::common::collect(stream).await?;
+                let batches = Self::rename_batches_with_col_ids(batches, &self.column_ids);
+                let batch_schema = batches.first()
+                    .map(|b| b.schema())
+                    .unwrap_or_else(|| self.schema.read().clone());
 
-                // Version validated successfully — mark and cache
+                // Version validated successfully — mark and cache.
+                // Update self.schema with actual reader types for consistent planning.
                 self.version_validated.store(true, std::sync::atomic::Ordering::Relaxed);
+                if let Some(first) = batches.first() {
+                    *self.schema.write() = first.schema();
+                }
                 GLOBAL_BLOCK_CACHE.insert(cache_key.clone(), batches.clone());
                 Arc::new(MemorySourceConfig::try_new(
                     &[batches],
-                    self.schema.clone(),
+                    batch_schema,
                     projection.cloned(),
                 )?)
             };
@@ -494,14 +573,15 @@ impl TableProvider for DataBlock {
                 Some(proj) => proj.iter().filter_map(|&i| self.column_ids.get(i).copied()).collect::<Vec<_>>(),
                 None => self.column_ids.clone(),
             };
+            let current_schema = self.schema.read().clone();
             let projected_schema = match projection {
                 Some(proj) => {
                     let fields: Vec<_> = proj.iter()
-                        .filter_map(|&i| self.schema.fields().get(i).cloned())
+                        .filter_map(|&i| current_schema.fields().get(i).cloned())
                         .collect();
                     Arc::new(arrow_schema::Schema::new(fields))
                 }
-                None => self.schema.clone(),
+                None => current_schema,
             };
             let overlay_source = crate::bundle::update_overlay_filter::UpdateOverlayDataSource::new(
                 source.clone(),

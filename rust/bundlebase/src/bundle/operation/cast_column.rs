@@ -44,25 +44,19 @@ impl Operation for CastColumnOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        column_names: &mut ColumnNames,
+        _column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
         let schema = df.schema().clone();
+        let col_name = crate::bundle::column_metadata::col_id_name(&self.id);
 
-        // Resolve the column name from the column names map
-        let name = column_names.get(&self.id)
-            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?
-            .clone();
-
-        // Build SELECT expression list
         let mut select_exprs: Vec<Expr> = Vec::new();
         for field in schema.fields() {
             let field_name = field.name();
-            if field_name == &name {
+            if field_name == &col_name {
                 let cast_expr = Expr::Cast(Cast {
                     expr: Box::new(Expr::Column(Column::new_unqualified(field_name))),
                     data_type: self.new_type.clone(),
                 });
-
                 select_exprs.push(cast_expr.alias(field_name.as_str()));
             } else {
                 select_exprs.push(Expr::Column(Column::new_unqualified(field_name)));

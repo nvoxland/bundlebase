@@ -42,11 +42,9 @@ impl Operation for DropColumnOp {
         _ctx: Arc<SessionContext>,
         column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
-        let name = column_names.get(&self.id)
-            .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?
-            .clone();
         column_names.remove(&self.id);
-        Ok(df.drop_columns(&[datafusion::common::Column::new_unqualified(&name)])?)
+        let col_name = crate::bundle::column_metadata::col_id_name(&self.id);
+        Ok(df.drop_columns(&[datafusion::common::Column::new_unqualified(&col_name)])?)
     }
 }
 

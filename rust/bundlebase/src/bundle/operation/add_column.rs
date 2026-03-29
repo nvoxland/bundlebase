@@ -72,9 +72,14 @@ impl Operation for AddColumnOp {
         ctx: Arc<SessionContext>,
         column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
+        use crate::bundle::column_metadata;
+
+        // Translate user-visible column names in the expression to col_<id> names
+        let translated_expr = column_metadata::translate_sql_to_col_ids(&self.expression, column_names);
+        let col_name = column_metadata::col_id_name(&self.id);
         let sql = format!(
             "SELECT *, ({}) AS \"{}\" FROM bundle",
-            self.expression, self.name
+            translated_expr, col_name
         );
 
         let mut config = SessionConfig::new();

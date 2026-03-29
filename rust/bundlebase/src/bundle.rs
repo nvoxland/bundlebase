@@ -21,6 +21,7 @@ pub mod function_entry {
 mod sql;
 pub mod tombstone;
 pub mod deleted_row_filter;
+pub mod schema_rename_filter;
 pub mod update_overlay;
 pub mod update_overlay_filter;
 pub mod verification;
@@ -685,10 +686,43 @@ impl Bundle {
         &self,
         base_df: DataFrame,
         pack: &Pack,
+        col_names: &mut column_metadata::ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
         let join_table = format!("packs.{}", Pack::table_name(pack.id()));
 
-        let (expr, left_alias) = sql::parse_join_expr(&self.ctx, "", pack, &base_df).await?;
+        // Translate the join expression from user-visible names to col_<id> names.
+        // Build a combined name map from base pack columns AND join pack columns.
+        let pack_expression = pack.expression().expect("Pack must have expression for join");
+        let mut combined_names = col_names.clone();
+        // Add join pack's column names from AttachBlock operations targeting this pack
+        let ops = self.operations.read().clone();
+        for op in &ops {
+            if let AnyOperation::AttachBlock(attach) = op {
+                if &attach.pack == pack.id() {
+                    if let Some(schema) = &attach.schema {
+                        for (field, col_id) in schema.fields().iter().zip(attach.column_ids.iter()) {
+                            combined_names.entry(*col_id).or_insert_with(|| field.name().clone());
+                        }
+                    }
+                }
+            }
+        }
+        let translated_expression = column_metadata::translate_sql_to_col_ids(pack_expression, &combined_names);
+
+        // Create a temporary pack with translated expression for parsing
+        let translated_pack = Pack::new(
+            *pack.id(),
+            &pack.name(),
+            &translated_expression,
+            *pack.join_type().expect("Pack must have join_type"),
+        );
+
+        let (expr, left_alias) = sql::parse_join_expr(&self.ctx, "", &translated_pack, &base_df).await?;
+
+        let base_df = base_df.alias(left_alias)?;
+
+        let name = pack.name();
+        let join_type = pack.join_type().expect("Pack must have join_type for join");
 
         // Capture base column names before aliasing so we can detect duplicates
         let base_col_names: std::collections::HashSet<String> = base_df
@@ -698,29 +732,41 @@ impl Bundle {
             .map(|c| c.name.clone())
             .collect();
 
-        let base_df = base_df.alias(left_alias)?;
-
-        let name = pack.name();
-
-        // Safe to unwrap since we only call this for packs with join metadata
-        let join_type = pack.join_type().expect("Pack must have join_type for join");
-
         let mut joined_df = base_df.join_on(
             self.ctx.table(&join_table).await?.alias(&name)?,
             join_type.to_datafusion(),
             expr,
         )?;
 
-        // Disambiguate: rename join-pack columns that collide with base column names
+        // Disambiguate: rename join-pack col_<id> columns that collide with base columns.
+        // This happens when both packs share a column with the same ColumnId (same logical column).
         for col in joined_df.schema().columns() {
             let is_from_join_pack = col.relation.as_ref()
                 .is_some_and(|r| r.table() == name);
             if is_from_join_pack && base_col_names.contains(&col.name) {
-                let new_name = format!("{}_{}", name, col.name);
+                // Rename to disambiguated internal name
+                let new_internal_name = format!("{}_{}", name, col.name);
                 joined_df = joined_df.with_column_renamed(
                     col.flat_name(),
-                    &new_name,
+                    &new_internal_name,
                 )?;
+                // Add a col_names entry so the final rename maps this to a user-visible name.
+                // The user-visible name is pack_name + user_visible_original_name.
+                if let Some(col_id) = column_metadata::parse_col_id_name(&col.name) {
+                    let user_name = col_names.get(&col_id)
+                        .map(|n| format!("{}_{}", name, n))
+                        .unwrap_or_else(|| new_internal_name.clone());
+                    // Generate a new ColumnId for this disambiguated column so the
+                    // final rename picks it up (it renames col_<id> → user_name)
+                    let disambig_id = ColumnId::generate();
+                    col_names.insert(disambig_id, user_name);
+                    // Also rename to the new col_<disambig_id> so final rename works
+                    let final_internal = column_metadata::col_id_name(&disambig_id);
+                    joined_df = joined_df.with_column_renamed(
+                        &new_internal_name,
+                        &final_internal,
+                    )?;
+                }
             }
         }
 
@@ -1176,7 +1222,7 @@ impl BundleFacade for Bundle {
                 if let AnyOperation::CreateJoin(create_join) = op {
                     if let Some(pack) = packs_snapshot.get(&create_join.id) {
                         if pack.is_join() && !pack.is_empty() {
-                            df = self.dataframe_join(df, pack).await?;
+                            df = self.dataframe_join(df, pack, &mut col_names).await?;
                         }
                     }
                 } else {
@@ -1187,6 +1233,18 @@ impl BundleFacade for Bundle {
                     "dataframe: Applying {} operations to dataframe...DONE",
                     ops.len()
                 );
+
+            // Final rename: replace col_<id> names with user-visible names.
+            // Use col_names (which includes dynamically added entries like
+            // disambiguated join columns) rather than recalculating from ops.
+            for (id, user_name) in &col_names {
+                let col_name = column_metadata::col_id_name(id);
+                if df.schema().has_column_with_unqualified_name(&col_name) {
+                    df = df
+                        .with_column_renamed(&col_name, user_name)
+                        .map_err(|e| Box::new(e) as BundlebaseError)?;
+                }
+            }
 
             df
         } else {

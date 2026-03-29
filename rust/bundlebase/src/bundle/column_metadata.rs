@@ -8,8 +8,23 @@ use std::sync::Arc;
 pub const COLUMN_ID_KEY: &str = "bundlebase:column_id";
 pub const ORIGINAL_NAME_KEY: &str = "bundlebase:original_name";
 
-/// Lightweight map of column ID → current name, threaded through apply_dataframe calls.
+/// Prefix used for stable internal column names: `col_<hex_id>`.
+const COL_ID_PREFIX: &str = "col_";
+
+/// Lightweight map of column ID → current user-visible name, threaded through apply_dataframe calls.
 pub type ColumnNames = HashMap<ColumnId, String>;
+
+/// Return the stable internal column name for a ColumnId: `col_<hex_id>`.
+pub fn col_id_name(id: &ColumnId) -> String {
+    format!("{}{}", COL_ID_PREFIX, id)
+}
+
+/// Parse a `col_<hex_id>` string back into a ColumnId.
+/// Returns `None` if the string doesn't match the expected format.
+pub fn parse_col_id_name(name: &str) -> Option<ColumnId> {
+    name.strip_prefix(COL_ID_PREFIX)
+        .and_then(|hex| ColumnId::try_from(hex).ok())
+}
 
 /// Build initial ColumnNames from an operation list.
 ///
@@ -182,7 +197,11 @@ pub fn unified_physical_schema(operations: &[AnyOperation]) -> (SchemaRef, Vec<C
             if let Some(schema) = &attach.schema {
                 for (field, col_id) in schema.fields().iter().zip(attach.column_ids.iter()) {
                     if seen_ids.insert(*col_id) {
-                        fields.push(field.clone());
+                        // Use col_<id> name for consistent internal naming
+                        let renamed_field = Arc::new(
+                            field.as_ref().clone().with_name(col_id_name(col_id))
+                        );
+                        fields.push(renamed_field);
                         column_ids.push(*col_id);
                     }
                 }
@@ -207,6 +226,68 @@ pub fn physical_column_name(operations: &[AnyOperation], id: &ColumnId) -> Optio
         }
     }
     None
+}
+
+/// Build a reverse map of user-visible name → `col_<id>` name from a ColumnNames map.
+pub fn name_to_col_id_map(column_names: &ColumnNames) -> HashMap<String, String> {
+    column_names
+        .iter()
+        .map(|(id, user_name)| (user_name.clone(), col_id_name(id)))
+        .collect()
+}
+
+/// Translate user-visible column names in a SQL fragment to stable `col_<id>` names.
+///
+/// Uses word-boundary matching: only replaces identifiers that appear as whole words
+/// (not inside other identifiers). Handles both bare and double-quoted identifiers.
+/// Longer names are replaced first to avoid partial matches.
+pub fn translate_sql_to_col_ids(sql: &str, column_names: &ColumnNames) -> String {
+    let name_map = name_to_col_id_map(column_names);
+
+    // Sort by name length descending to avoid partial matches (e.g., "id" inside "identity")
+    let mut names: Vec<(&String, &String)> = name_map.iter().collect();
+    names.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+
+    let mut result = sql.to_string();
+    for (user_name, col_id) in names {
+        // Replace double-quoted identifiers: "name" → "col_<id>"
+        let quoted = format!("\"{}\"", user_name);
+        let quoted_replacement = format!("\"{}\"", col_id);
+        result = result.replace(&quoted, &quoted_replacement);
+
+        // Replace bare identifiers using word-boundary matching
+        // A word boundary is: start of string, non-alphanumeric/underscore character
+        let mut new_result = String::with_capacity(result.len());
+        let name_bytes = user_name.as_bytes();
+        let result_bytes = result.as_bytes();
+        let mut i = 0;
+        while i < result_bytes.len() {
+            if i + name_bytes.len() <= result_bytes.len()
+                && &result_bytes[i..i + name_bytes.len()] == name_bytes
+            {
+                // Check left boundary: start of string or non-identifier char
+                let left_ok = i == 0 || !is_ident_char(result_bytes[i - 1]);
+                // Check right boundary: end of string or non-identifier char
+                let right_ok = i + name_bytes.len() == result_bytes.len()
+                    || !is_ident_char(result_bytes[i + name_bytes.len()]);
+
+                if left_ok && right_ok {
+                    new_result.push_str(col_id);
+                    i += name_bytes.len();
+                    continue;
+                }
+            }
+            new_result.push(result_bytes[i] as char);
+            i += 1;
+        }
+        result = new_result;
+    }
+
+    result
+}
+
+fn is_ident_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 #[cfg(test)]
@@ -423,9 +504,10 @@ mod tests {
         let (schema, col_ids) = unified_physical_schema(&ops);
         assert_eq!(schema.fields().len(), 3, "Should have 3 unique fields: a, b, c");
         assert_eq!(col_ids.len(), 3);
-        assert_eq!(schema.field(0).name(), "col_a");
-        assert_eq!(schema.field(1).name(), "col_b");
-        assert_eq!(schema.field(2).name(), "col_c");
+        // Fields are now named col_<id> instead of physical names
+        assert_eq!(schema.field(0).name(), &col_id_name(&id_a));
+        assert_eq!(schema.field(1).name(), &col_id_name(&id_b));
+        assert_eq!(schema.field(2).name(), &col_id_name(&id_c));
     }
 
     // --- is_computed_column tests ---
@@ -497,5 +579,67 @@ mod tests {
         assert_eq!(physical_column_name(&ops, &id_a), Some("col_a".to_string()));
         assert_eq!(physical_column_name(&ops, &id_computed), None, "Computed column has no physical name");
         assert_eq!(physical_column_name(&ops, &id_unknown), None, "Unknown column has no physical name");
+    }
+
+    // --- col_id_name / parse_col_id_name tests ---
+
+    #[test]
+    fn test_col_id_name_roundtrip() {
+        let id = ColumnId::generate();
+        let name = col_id_name(&id);
+        assert!(name.starts_with("col_"));
+        let parsed = parse_col_id_name(&name).expect("should parse back");
+        assert_eq!(parsed, id);
+    }
+
+    #[test]
+    fn test_parse_col_id_name_invalid() {
+        assert_eq!(parse_col_id_name("not_a_col_id"), None);
+        assert_eq!(parse_col_id_name("col_"), None);
+        assert_eq!(parse_col_id_name("col_zzzz"), None);
+        assert_eq!(parse_col_id_name(""), None);
+    }
+
+    // --- translate_sql_to_col_ids tests ---
+
+    #[test]
+    fn test_translate_sql_basic() {
+        let id_salary = ColumnId::generate();
+        let id_name = ColumnId::generate();
+        let mut names = ColumnNames::new();
+        names.insert(id_salary, "salary".to_string());
+        names.insert(id_name, "name".to_string());
+
+        let sql = "SELECT salary, name FROM bundle WHERE salary > 100";
+        let result = translate_sql_to_col_ids(sql, &names);
+        assert!(result.contains(&col_id_name(&id_salary)));
+        assert!(result.contains(&col_id_name(&id_name)));
+        assert!(!result.contains("salary"));
+        assert!(!result.contains(" name"));
+    }
+
+    #[test]
+    fn test_translate_sql_avoids_partial_match() {
+        let id_id = ColumnId::generate();
+        let mut names = ColumnNames::new();
+        names.insert(id_id, "id".to_string());
+
+        let sql = "SELECT identity, id FROM bundle";
+        let result = translate_sql_to_col_ids(sql, &names);
+        // "identity" should NOT be touched, only "id" should be replaced
+        assert!(result.contains("identity"));
+        assert!(result.contains(&col_id_name(&id_id)));
+    }
+
+    #[test]
+    fn test_translate_sql_quoted_identifiers() {
+        let id_col = ColumnId::generate();
+        let mut names = ColumnNames::new();
+        names.insert(id_col, "my col".to_string());
+
+        let sql = r#"SELECT "my col" FROM bundle"#;
+        let result = translate_sql_to_col_ids(sql, &names);
+        let expected_quoted = format!("\"{}\"", col_id_name(&id_col));
+        assert!(result.contains(&expected_quoted));
     }
 }

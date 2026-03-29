@@ -208,21 +208,10 @@ impl IndexBlocksOp {
             column_metadata::is_computed_column(&operations, id)
         });
 
-        // Resolve column names for the appropriate context
-        let columns: Vec<String> = if is_computed {
-            // For computed columns, use current (resolved) names
-            let resolved = column_metadata::resolved_column_names(&operations);
-            column_ids.iter()
-                .map(|id| resolved.get(id).cloned()
-                    .ok_or_else(|| BundlebaseError::from(format!("Column ID '{}' not found in operations", id))))
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            // For physical columns, use physical names from AttachBlock schema
-            column_ids.iter()
-                .map(|id| column_metadata::physical_column_name(&operations, id)
-                    .ok_or_else(|| BundlebaseError::from(format!("Physical column name not found for ID '{}'", id))))
-                .collect::<Result<Vec<_>, _>>()?
-        };
+        // Use stable col_<id> names — these match the DataBlock schema
+        let columns: Vec<String> = column_ids.iter()
+            .map(|id| column_metadata::col_id_name(id))
+            .collect();
 
         // Dispatch to appropriate index building method
         match &index_type {
@@ -592,12 +581,32 @@ impl IndexBlocksOp {
     /// Apply all operations to a raw batch and extract the computed column values.
     ///
     /// Returns the result batches containing only the target column.
+    /// The input batch has physical column names; this method renames to `col_<id>`
+    /// before applying operations.
     async fn apply_ops_to_batch(
         batch: &RecordBatch,
         column: &str,
         operations: &[AnyOperation],
         ctx: &SessionContext,
+        column_ids: &[ColumnId],
     ) -> Result<Vec<RecordBatch>, BundlebaseError> {
+        // Rename batch columns from physical names to col_<id> names
+        let schema = batch.schema();
+        let id_fields: Vec<std::sync::Arc<arrow_schema::Field>> = schema
+            .fields()
+            .iter()
+            .zip(column_ids.iter())
+            .map(|(field, col_id)| {
+                std::sync::Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+            })
+            .collect();
+        let id_schema = std::sync::Arc::new(arrow_schema::Schema::new_with_metadata(
+            id_fields,
+            schema.metadata().clone(),
+        ));
+        let batch = RecordBatch::try_new(id_schema, batch.columns().to_vec())
+            .map_err(|e| BundlebaseError::from(format!("Failed to rename batch schema: {}", e)))?;
+
         let mut config = SessionConfig::new();
         config.options_mut().sql_parser.enable_ident_normalization = false;
         let op_ctx = SessionContext::new_with_config_rt(config, ctx.runtime_env());
@@ -691,6 +700,7 @@ impl IndexBlocksOp {
                     column,
                     &operations,
                     bundle.ctx().as_ref(),
+                    block.column_ids(),
                 )
                 .await?;
 
@@ -799,6 +809,23 @@ impl IndexBlocksOp {
                 let batch = &rowid_batch.batch;
                 let row_ids = &rowid_batch.row_ids;
 
+                // Rename batch columns from physical names to col_<id>
+                let phys_schema = batch.schema();
+                let id_fields: Vec<std::sync::Arc<arrow_schema::Field>> = phys_schema
+                    .fields()
+                    .iter()
+                    .zip(block.column_ids().iter())
+                    .map(|(field, col_id)| {
+                        std::sync::Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+                    })
+                    .collect();
+                let id_schema = std::sync::Arc::new(arrow_schema::Schema::new_with_metadata(
+                    id_fields,
+                    phys_schema.metadata().clone(),
+                ));
+                let renamed_batch = RecordBatch::try_new(id_schema, batch.columns().to_vec())
+                    .map_err(|e| BundlebaseError::from(format!("Failed to rename batch schema: {}", e)))?;
+
                 // Apply operations and select all text columns
                 let mut config = SessionConfig::new();
                 config.options_mut().sql_parser.enable_ident_normalization = false;
@@ -806,7 +833,7 @@ impl IndexBlocksOp {
                     SessionContext::new_with_config_rt(config, bundle.ctx().runtime_env());
 
                 let mem_table =
-                    MemTable::try_new(batch.schema(), vec![vec![batch.clone()]]).map_err(|e| {
+                    MemTable::try_new(renamed_batch.schema(), vec![vec![renamed_batch.clone()]]).map_err(|e| {
                         BundlebaseError::from(format!("Failed to create MemTable: {}", e))
                     })?;
                 op_ctx.register_table("bundle", Arc::new(mem_table)).map_err(|e| {

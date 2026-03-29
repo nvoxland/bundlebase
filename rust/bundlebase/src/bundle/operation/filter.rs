@@ -46,37 +46,35 @@ impl Operation for FilterOp {
         &self,
         df: DataFrame,
         ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
+        use crate::bundle::column_metadata;
+
         let mut span = start_span(OperationCategory::Select, "filter");
         span.set_attribute("sql", &self.query);
         span.set_attribute("param_count", self.parameters.len().to_string());
 
         let timer = OperationTimer::start(OperationCategory::Select, "filter");
 
-        // Create an isolated SessionContext for this filter operation that shares
-        // the RuntimeEnv (including object stores) from the original context.
-        // This avoids temp table management and SQL string replacement.
+        // Translate user-visible column names in the SQL to stable col_<id> names
+        let translated_query = column_metadata::translate_sql_to_col_ids(&self.query, column_names);
+
         let mut config = SessionConfig::new();
         config.options_mut().sql_parser.enable_ident_normalization = false;
         let filter_ctx = SessionContext::new_with_config_rt(config, ctx.runtime_env());
 
-        // Register the input DataFrame as "bundle" using BundleViewTable
-        // This supports filter pushdown for index-based query acceleration
         filter_ctx.register_table("bundle", Arc::new(BundleViewTable::new(df)))?;
 
-        // Convert parameters to ScalarValues
         let params: Vec<ScalarValue> = self
             .parameters
             .iter()
             .map(|p| p.to_scalar_value())
             .collect();
 
-        // Create and execute the plan directly - no SQL replacement needed
         let result = async {
             let plan = filter_ctx
                 .state()
-                .create_logical_plan(&self.query)
+                .create_logical_plan(&translated_query)
                 .await
                 .map_err(|e| Box::new(e) as BundlebaseError)?;
 

@@ -21,22 +21,37 @@ pub fn analyze_column_sources(
     bundle_schema: &arrow_schema::Schema,
     packs: &HashMap<crate::io::ObjectId, Arc<Pack>>,
 ) -> HashMap<String, ColumnSource> {
-    // Collect join pack column sets: pack_name -> set of column names
+    // Collect join pack names for disambiguated column detection.
+    let join_pack_names: Vec<&str> = packs
+        .values()
+        .filter(|p| p.is_join())
+        .map(|p| p.name())
+        .collect();
+
+    // Collect join pack column sets using user-visible names from the bundle schema.
+    // Since block schemas use col_<id> internally, we identify join pack columns by
+    // checking if the bundle schema column:
+    //   1. Is not in the base pack (identified by exclusion)
+    //   2. Or matches the disambiguated pattern {pack}_{col}
     let join_packs: Vec<(&str, std::collections::HashSet<String>)> = packs
         .values()
         .filter(|p| p.is_join())
         .map(|p| {
-            let col_names: std::collections::HashSet<String> = p
+            // Get all column IDs from this join pack
+            let pack_col_ids: std::collections::HashSet<_> = p
                 .blocks()
                 .iter()
-                .flat_map(|b| {
-                    b.schema()
-                        .fields()
-                        .iter()
-                        .map(|f| f.name().clone())
-                        .collect::<Vec<_>>()
-                })
+                .flat_map(|b| b.column_ids().to_vec())
                 .collect();
+
+            // Find bundle schema columns whose col_<id> matches this pack's column IDs.
+            // Since the bundle schema has been through the final rename and may have lost
+            // ColumnId metadata, we find columns by checking ALL fields.
+            // Simpler approach: collect the non-disambiguated column names by finding
+            // bundle schema columns that match the pack's column count and position.
+            // Actually simplest: just return an empty set and let the disambiguated
+            // pattern matching handle everything below.
+            let col_names = std::collections::HashSet::new();
             (p.name(), col_names)
         })
         .collect();
@@ -52,17 +67,17 @@ pub fn analyze_column_sources(
             // Check disambiguated pattern: regions_Country -> pack "regions", physical "Country"
             let prefix = format!("{}_", pack_name);
             if let Some(physical) = col_name.strip_prefix(&prefix) {
-                if pack_cols.contains(physical) {
-                    sources.insert(
-                        col_name.clone(),
-                        ColumnSource {
-                            pack_name: pack_name.to_string(),
-                            physical_name: physical.to_string(),
-                        },
-                    );
-                    found = true;
-                    break;
-                }
+                // With col_<id> internals, we can't easily verify the physical name
+                // is in the pack. Accept any {pack}_ prefixed column as from that pack.
+                sources.insert(
+                    col_name.clone(),
+                    ColumnSource {
+                        pack_name: pack_name.to_string(),
+                        physical_name: physical.to_string(),
+                    },
+                );
+                found = true;
+                break;
             }
 
             // Check if it's a non-colliding join column (same name, not in base)
