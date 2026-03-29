@@ -910,9 +910,15 @@ impl BundleBuilder {
                     temp_ctx.register_table("__delete_batch", Arc::new(mem_table))?;
 
                     let idx_df = temp_ctx.sql(&filter_sql).await
-                        .map_err(|e| BundlebaseError::from(e.to_string()))?;
+                        .map_err(|e| BundlebaseError::from(format!(
+                            "Failed to evaluate WHERE clause '{}' on block {}: {}",
+                            where_clause, idx, e
+                        )))?;
                     let idx_batches = idx_df.collect().await
-                        .map_err(|e| BundlebaseError::from(e.to_string()))?;
+                        .map_err(|e| BundlebaseError::from(format!(
+                            "Failed to collect filtered rows for WHERE '{}' on block {}: {}",
+                            where_clause, idx, e
+                        )))?;
 
                     for idx_batch in &idx_batches {
                         let idx_col = idx_batch.column(0);

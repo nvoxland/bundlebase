@@ -4,6 +4,8 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase::bundle::column_metadata;
+use bundlebase::bundle::BundleFacade;
 use bundlebase::bundle::operation::DropAlwaysDeleteOp;
 
 /// Command to remove always-delete rules.
@@ -48,7 +50,14 @@ impl BundleBuilderCommand for DropAlwaysDeleteCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let op = DropAlwaysDeleteOp::new(self.where_clause.clone());
+        // Translate user-visible column names to stable col_<id> references
+        // so the WHERE clause matches the stored rule format.
+        let translated = self.where_clause.as_ref().map(|wc| {
+            let col_names = builder.column_names();
+            column_metadata::translate_sql_to_col_ids(wc, &col_names)
+        });
+
+        let op = DropAlwaysDeleteOp::new(translated.clone());
         builder.apply_operation(op.into()).await?;
 
         match &self.where_clause {

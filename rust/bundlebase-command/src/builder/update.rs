@@ -120,11 +120,15 @@ impl BundleBuilderCommand for UpdateCommand {
             // DataFrame-level operations see the updated values.
             // Uses CASE WHEN to replace values matching the WHERE condition.
             // Build using col_<id> names from the internal column map.
+            let assignment_map: std::collections::HashMap<&str, &str> = columns.iter()
+                .zip(expressions.iter())
+                .map(|(c, e)| (c.as_str(), e.as_str()))
+                .collect();
             let select_cols: Vec<String> = col_names.keys().map(|col_id| {
                 let col_name = column_metadata::col_id_name(col_id);
                 let quoted = format!("\"{}\"", col_name);
-                if let Some(col_assignment) = columns.iter().zip(expressions.iter()).find(|(c, _)| c.as_str() == col_name) {
-                    format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", where_clause, col_assignment.1, quoted, quoted)
+                if let Some(expr) = assignment_map.get(col_name.as_str()) {
+                    format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", where_clause, expr, quoted, quoted)
                 } else {
                     quoted
                 }

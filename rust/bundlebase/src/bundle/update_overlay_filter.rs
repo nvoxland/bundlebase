@@ -71,6 +71,8 @@ impl UpdateOverlayDataSource {
         for (col_id, (values, is_set)) in &merged_overlay.columns {
             if let Some(&col_idx) = col_id_to_idx.get(col_id) {
                 columns.insert(col_idx, (values.clone(), is_set.clone()));
+            } else {
+                log::warn!("Overlay column {:?} not found in block schema — skipping", col_id);
             }
         }
 
@@ -218,6 +220,10 @@ impl UpdateOverlayStream {
                 values.as_ref()
             } else {
                 // Type mismatch — fall back to base column (overlay values incompatible)
+                log::warn!(
+                    "Overlay type mismatch for column {}: overlay={:?}, base={:?} — skipping update",
+                    col_idx, values.data_type(), base_col.data_type()
+                );
                 new_columns.push(base_col.clone());
                 continue;
             };

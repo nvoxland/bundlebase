@@ -5,6 +5,8 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
+use bundlebase::bundle::column_metadata;
+use bundlebase::bundle::BundleFacade;
 use bundlebase::bundle::operation::DropAlwaysUpdateOp;
 
 /// Command to remove always-update rules.
@@ -88,7 +90,14 @@ impl BundleBuilderCommand for DropAlwaysUpdateCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let op = DropAlwaysUpdateOp::new(self.rule_text.clone());
+        // Translate user-visible column names to stable col_<id> references
+        // so the rule text matches the stored rule format.
+        let translated = self.rule_text.as_ref().map(|rt| {
+            let col_names = builder.column_names();
+            column_metadata::translate_sql_to_col_ids(rt, &col_names)
+        });
+
+        let op = DropAlwaysUpdateOp::new(translated.clone());
         builder.apply_operation(op.into()).await?;
 
         match &self.rule_text {

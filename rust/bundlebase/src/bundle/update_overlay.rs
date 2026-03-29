@@ -424,14 +424,16 @@ pub fn read_overlay_parquet(bytes: &[u8]) -> Result<Vec<(u16, UpdateOverlay)>, B
         let mut columns: HashMap<ColumnId, (ArrayRef, BooleanArray)> = HashMap::new();
         for (col_id, (value_chunks, mask_chunks)) in all_columns {
             let values = if value_chunks.len() == 1 {
-                value_chunks.into_iter().next().expect("checked len==1")
+                value_chunks.into_iter().next()
+                    .ok_or_else(|| BundlebaseError::from("Expected single value chunk"))?
             } else {
                 let refs: Vec<&dyn arrow::array::Array> = value_chunks.iter().map(|a| a.as_ref()).collect();
                 arrow::compute::concat(&refs)
                     .map_err(|e| BundlebaseError::from(format!("Failed to concat overlay arrays: {}", e)))?
             };
             let mask = if mask_chunks.len() == 1 {
-                mask_chunks.into_iter().next().expect("checked len==1")
+                mask_chunks.into_iter().next()
+                    .ok_or_else(|| BundlebaseError::from("Expected single mask chunk"))?
             } else {
                 let refs: Vec<&dyn arrow::array::Array> = mask_chunks.iter().map(|a| a as &dyn arrow::array::Array).collect();
                 let combined = arrow::compute::concat(&refs)

@@ -87,6 +87,7 @@ pub fn deserialize_tombstone(bytes: &[u8]) -> Result<HashSet<RowId>, BundlebaseE
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use bundlebase_common::ObjectIdAlias;
@@ -139,9 +140,9 @@ mod tests {
         let bytes = serialize_tombstone(&row_ids);
 
         // Read raw RowIds from the bytes to verify sorting
-        let id1 = u64::from_le_bytes(bytes[16..24].try_into().expect("bad slice"));
-        let id2 = u64::from_le_bytes(bytes[24..32].try_into().expect("bad slice"));
-        let id3 = u64::from_le_bytes(bytes[32..40].try_into().expect("bad slice"));
+        let id1 = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
+        let id2 = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
+        let id3 = u64::from_le_bytes(bytes[32..40].try_into().unwrap());
         assert!(id1 < id2);
         assert!(id2 < id3);
     }

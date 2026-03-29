@@ -506,6 +506,10 @@ impl TableProvider for DataBlock {
                 } else {
                     // Validated but not cached (evicted or first scan after validation).
                     // Read through reader, rename to col_<id>, cache result.
+                    // NOTE: collect() is intentional here — we materialize the block to populate
+                    // the LRU block cache for subsequent queries. Block sizes are bounded by the
+                    // source row-group size (typically ~128MB), and the cache enforces a global
+                    // memory budget via eviction.
                     let base_source = self.reader
                         .data_source(None, &[], None, None)
                         .await?;
@@ -519,7 +523,10 @@ impl TableProvider for DataBlock {
                     let batches = Self::rename_batches_with_col_ids(batches, &self.column_ids);
                     let batch_schema = batches.first()
                         .map(|b| b.schema())
-                        .unwrap_or_else(|| self.schema.read().clone());
+                        .unwrap_or_else(|| {
+                            log::debug!("Block {} returned no batches on re-read; using stored schema", self.id);
+                            self.schema.read().clone()
+                        });
                     GLOBAL_BLOCK_CACHE.insert(cache_key.clone(), batches.clone());
                     Arc::new(MemorySourceConfig::try_new(
                         &[batches],
@@ -529,6 +536,7 @@ impl TableProvider for DataBlock {
                 }
             } else {
                 // First scan: read through reader (validates version), rename, then cache.
+                // NOTE: collect() is intentional — see comment above for rationale.
                 let base_source = self.reader
                     .data_source(None, &[], None, None)
                     .await?;
@@ -542,7 +550,10 @@ impl TableProvider for DataBlock {
                 let batches = Self::rename_batches_with_col_ids(batches, &self.column_ids);
                 let batch_schema = batches.first()
                     .map(|b| b.schema())
-                    .unwrap_or_else(|| self.schema.read().clone());
+                    .unwrap_or_else(|| {
+                        log::debug!("Block {} returned no batches on first scan; using stored schema", self.id);
+                        self.schema.read().clone()
+                    });
 
                 // Version validated successfully — mark and cache.
                 // Update self.schema with actual reader types for consistent planning.
