@@ -35,7 +35,11 @@ impl FileFormatConfig for ParquetFormatConfig {
     }
 
     fn file_source(&self, schema: SchemaRef) -> Arc<dyn FileSource> {
-        Arc::new(ParquetSource::new(schema))
+        Arc::new(
+            ParquetSource::new(schema)
+                .with_pushdown_filters(true)
+                .with_reorder_filters(true),
+        )
     }
 }
 

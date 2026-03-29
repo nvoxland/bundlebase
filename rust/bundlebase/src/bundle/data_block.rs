@@ -399,12 +399,37 @@ impl TableProvider for DataBlock {
         }
 
         // Phase 2: Fall back to full scan
-        // When update overlays exist, don't push filters to the reader — the overlay
-        // changes column values, so predicates must be evaluated after the overlay.
+        // When update overlays exist, only push filters that don't reference
+        // overlayed columns — those columns may have changed values.
         let overlays = self.update_overlays.read().clone();
-        let scan_filters = if overlays.is_empty() { filters } else { &[] };
+        let scan_filters = if overlays.is_empty() {
+            filters.to_vec()
+        } else {
+            // Collect ColumnIds that have overlay updates
+            let overlayed_col_ids: std::collections::HashSet<crate::object_id::ColumnId> = overlays.iter()
+                .flat_map(|ov| ov.columns.keys().copied())
+                .collect();
+
+            // Map overlayed ColumnIds to schema column names
+            let overlayed_names: std::collections::HashSet<&str> = self.column_ids.iter()
+                .enumerate()
+                .filter(|(_, cid)| overlayed_col_ids.contains(cid))
+                .filter_map(|(i, _)| self.schema.field(i).name().as_str().into())
+                .collect();
+
+            // Keep filters that don't reference any overlayed column
+            filters.iter()
+                .filter(|expr| {
+                    let col_refs = expr.column_refs();
+                    !col_refs.iter().any(|col| overlayed_names.contains(col.name()))
+                })
+                .cloned()
+                .collect()
+        };
+        let scan_filters_ref = scan_filters.iter().collect::<Vec<_>>();
+        let scan_filters_slice: &[Expr] = &scan_filters;
         let mut source: Arc<dyn datafusion::datasource::source::DataSource> = self.reader
-            .data_source(projection, scan_filters, limit, None)
+            .data_source(projection, scan_filters_slice, limit, None)
             .await?;
 
         // Apply tombstone filter if there are deleted rows

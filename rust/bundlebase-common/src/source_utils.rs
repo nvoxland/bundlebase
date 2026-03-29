@@ -273,7 +273,14 @@ pub async fn record_batch_stream_to_parquet(
     let schema = first_batch.schema();
     let mut buffer = Vec::new();
     {
-        let props = parquet::file::properties::WriterProperties::builder().build();
+        let props = parquet::file::properties::WriterProperties::builder()
+            .set_compression(parquet::basic::Compression::ZSTD(
+                parquet::basic::ZstdLevel::try_new(3)
+                    .unwrap_or(parquet::basic::ZstdLevel::default()),
+            ))
+            .set_max_row_group_size(128 * 1024) // 128K rows per row group
+            .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
+            .build();
         let mut writer =
             parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
                 .map_err(|e| format!("Failed to create parquet writer: {}", e))?;
