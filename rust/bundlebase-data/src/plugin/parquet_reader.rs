@@ -9,8 +9,11 @@ use datafusion::common::stats::Precision;
 use datafusion::common::{DataFusionError, Statistics};
 use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::datasource::file_format::FileFormat;
-use datafusion::datasource::physical_plan::{FileSource, ParquetSource};
+use datafusion::datasource::physical_plan::{
+    parquet::CachedParquetFileReaderFactory, FileSource, ParquetFileReaderFactory, ParquetSource,
+};
 use datafusion::datasource::source::DataSource;
+use datafusion::execution::cache::cache_manager::FileMetadataCache;
 use datafusion::logical_expr::Expr;
 use datafusion::parquet::arrow::async_reader::{
     ParquetObjectReader, ParquetRecordBatchStreamBuilder,
@@ -68,7 +71,16 @@ impl ReaderPlugin for ParquetPlugin {
             .inner
             .reader(source, bundle, schema, expected_version)
             .await?;
-        Ok(Some(Arc::new(ParquetDataReader::new(reader, *block_id))))
+        let metadata_cache = bundle
+            .session_context()
+            .runtime_env()
+            .cache_manager
+            .get_file_metadata_cache();
+        Ok(Some(Arc::new(ParquetDataReader::new(
+            reader,
+            *block_id,
+            metadata_cache,
+        ))))
     }
 }
 
@@ -76,11 +88,22 @@ impl ReaderPlugin for ParquetPlugin {
 pub struct ParquetDataReader {
     inner: FileReader<ParquetFormatConfig>,
     block_id: BlockId,
+    reader_factory: Arc<dyn ParquetFileReaderFactory>,
 }
 
 impl ParquetDataReader {
-    pub fn new(inner: FileReader<ParquetFormatConfig>, block_id: BlockId) -> Self {
-        Self { inner, block_id }
+    pub fn new(
+        inner: FileReader<ParquetFormatConfig>,
+        block_id: BlockId,
+        metadata_cache: Arc<dyn FileMetadataCache>,
+    ) -> Self {
+        let store = inner.file().store();
+        let reader_factory = Arc::new(CachedParquetFileReaderFactory::new(store, metadata_cache));
+        Self {
+            inner,
+            block_id,
+            reader_factory,
+        }
     }
 }
 
@@ -101,15 +124,46 @@ impl DataReader for ParquetDataReader {
     async fn data_source(
         &self,
         projection: Option<&Vec<usize>>,
-        filters: &[Expr],
+        _filters: &[Expr],
         limit: Option<usize>,
         _row_ids: Option<&[RowId]>,
     ) -> Result<Arc<dyn DataSource>, DataFusionError> {
-        // Parquet doesn't support selective row reading by RowId;
-        // falls back to full scan (DataFusion handles predicate pushdown natively)
-        self.inner
-            .data_source(projection, filters, limit)
-            .await
+        use datafusion::datasource::listing::PartitionedFile;
+        use datafusion::datasource::physical_plan::FileScanConfigBuilder;
+
+        let metadata = self.inner.file().object_meta().await.map_err(|e| {
+            DataFusionError::Internal(format!("Failed to get object metadata: {}", e))
+        })?.ok_or_else(|| {
+            DataFusionError::Internal(format!(
+                "File metadata not available for: {}",
+                self.inner.file().url()
+            ))
+        })?;
+
+        let partitioned_file = PartitionedFile::from(metadata);
+        let schema = self.inner.schema().clone().expect("No schema set");
+
+        // Build ParquetSource with cached reader factory and pushdown filters
+        let parquet_source = ParquetSource::new(schema)
+            .with_pushdown_filters(true)
+            .with_reorder_filters(true)
+            .with_parquet_file_reader_factory(self.reader_factory.clone());
+
+        let mut builder = FileScanConfigBuilder::new(
+            self.inner.file().store_url(),
+            Arc::new(parquet_source),
+        )
+        .with_file(partitioned_file);
+
+        if let Some(proj) = projection {
+            builder = builder.with_projection_indices(Some(proj.to_vec()))?;
+        }
+
+        if let Some(lim) = limit {
+            builder = builder.with_limit(Some(lim));
+        }
+
+        Ok(Arc::new(builder.build()))
     }
 
     async fn read_version(&self) -> Result<String, BundlebaseError> {

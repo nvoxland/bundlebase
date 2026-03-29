@@ -201,6 +201,11 @@ impl<C: FileFormatConfig> FileReader<C> {
         &self.config
     }
 
+    /// Get the cached schema, if set
+    pub fn schema(&self) -> &Option<SchemaRef> {
+        &self.schema
+    }
+
     /// Get the object store
     pub fn object_store(&self) -> Arc<dyn ObjectStore> {
         self.file.store()
