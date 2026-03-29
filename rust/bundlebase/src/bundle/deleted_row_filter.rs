@@ -1,4 +1,4 @@
-//! Streaming tombstone filter that excludes deleted rows from a DataSource.
+//! Streaming filter that excludes deleted rows from a DataSource.
 //!
 //! Wraps an inner `DataSource` and drops rows whose ordinal position
 //! (within the block) appears in the deleted row set.
@@ -21,12 +21,12 @@ use std::task::{Context, Poll};
 
 /// A DataSource wrapper that filters out rows at deleted ordinal positions.
 #[derive(Debug, Clone)]
-pub struct TombstoneFilterDataSource {
+pub struct DeletedRowFilterDataSource {
     inner: Arc<dyn DataSource>,
     deleted_rows: Arc<Vec<u32>>,
 }
 
-impl TombstoneFilterDataSource {
+impl DeletedRowFilterDataSource {
     pub fn new(inner: Arc<dyn DataSource>, deleted_rows: Arc<Vec<u32>>) -> Self {
         Self {
             inner,
@@ -35,13 +35,13 @@ impl TombstoneFilterDataSource {
     }
 }
 
-impl fmt::Display for TombstoneFilterDataSource {
+impl fmt::Display for DeletedRowFilterDataSource {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "TombstoneFilter({} deleted)", self.deleted_rows.len())
+        write!(f, "DeletedRowFilter({} deleted)", self.deleted_rows.len())
     }
 }
 
-impl DataSource for TombstoneFilterDataSource {
+impl DataSource for DeletedRowFilterDataSource {
     fn open(
         &self,
         partition: usize,
@@ -49,7 +49,7 @@ impl DataSource for TombstoneFilterDataSource {
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
         let inner_stream = self.inner.open(partition, context)?;
         let schema = inner_stream.schema();
-        Ok(Box::pin(TombstoneFilterStream {
+        Ok(Box::pin(DeletedRowFilterStream {
             inner: inner_stream,
             deleted_rows: self.deleted_rows.clone(),
             row_offset: 0,
@@ -62,7 +62,7 @@ impl DataSource for TombstoneFilterDataSource {
     }
 
     fn fmt_as(&self, _t: DisplayFormatType, f: &mut Formatter) -> fmt::Result {
-        write!(f, "TombstoneFilterDataSource({} deleted)", self.deleted_rows.len())
+        write!(f, "DeletedRowFilterDataSource({} deleted)", self.deleted_rows.len())
     }
 
     fn output_partitioning(&self) -> Partitioning {
@@ -86,7 +86,7 @@ impl DataSource for TombstoneFilterDataSource {
 
     fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn DataSource>> {
         self.inner.with_fetch(limit).map(|inner| {
-            Arc::new(TombstoneFilterDataSource {
+            Arc::new(DeletedRowFilterDataSource {
                 inner,
                 deleted_rows: self.deleted_rows.clone(),
             }) as Arc<dyn DataSource>
@@ -102,14 +102,14 @@ impl DataSource for TombstoneFilterDataSource {
 }
 
 /// Stream adapter that filters out deleted rows by ordinal position.
-struct TombstoneFilterStream {
+struct DeletedRowFilterStream {
     inner: SendableRecordBatchStream,
     deleted_rows: Arc<Vec<u32>>,
     row_offset: u32,
     schema: SchemaRef,
 }
 
-impl Stream for TombstoneFilterStream {
+impl Stream for DeletedRowFilterStream {
     type Item = datafusion::common::Result<arrow::record_batch::RecordBatch>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -157,7 +157,7 @@ impl Stream for TombstoneFilterStream {
     }
 }
 
-impl RecordBatchStream for TombstoneFilterStream {
+impl RecordBatchStream for DeletedRowFilterStream {
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }

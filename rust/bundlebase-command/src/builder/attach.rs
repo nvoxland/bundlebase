@@ -112,7 +112,7 @@ impl BundleBuilderCommand for AttachCommand {
                         delete_rowids.len(),
                         rule
                     );
-                    builder.mark_deleted(delete_rowids);
+                    builder.mark_deleted(delete_rowids, rule);
 
                     let filter_query = format!(
                         "SELECT * FROM bundle WHERE NOT ({})",

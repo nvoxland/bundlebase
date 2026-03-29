@@ -25,12 +25,16 @@ use std::sync::Arc;
 pub struct DeleteOp {
     /// Filename of the tombstone file (e.g., "a3f8b2c1d4e5.tomb")
     pub tombstone: String,
+    /// The WHERE clause(s) that produced this delete, stored for historical reference only.
+    #[serde(rename = "where")]
+    pub where_clause: String,
 }
 
 impl DeleteOp {
-    pub fn new(tombstone: impl Into<String>) -> Self {
+    pub fn new(tombstone: impl Into<String>, where_clause: impl Into<String>) -> Self {
         Self {
             tombstone: tombstone.into(),
+            where_clause: where_clause.into(),
         }
     }
 }
@@ -90,7 +94,7 @@ impl Operation for DeleteOp {
         }
 
         log::debug!(
-            "Loaded {} tombstoned RowIds from {}",
+            "Loaded {} deleted RowIds from {}",
             row_ids.len(),
             self.tombstone
         );
@@ -104,7 +108,7 @@ impl Operation for DeleteOp {
         _ctx: Arc<SessionContext>,
         _column_names: &mut ColumnNames,
     ) -> Result<DataFrame, BundlebaseError> {
-        // No-op: tombstone filtering happens at the DataBlock/reader scan level,
+        // No-op: deleted row filtering happens at the DataBlock/reader scan level,
         // before operations are applied to the DataFrame.
         Ok(df)
     }
@@ -120,19 +124,22 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = DeleteOp::new("a3f8b2c1d4e5.tomb");
+        let op = DeleteOp::new("a3f8b2c1d4e5.tomb", "id = 1");
         assert_eq!(op.describe(), "DELETE: a3f8b2c1d4e5.tomb");
     }
 
     #[test]
     fn test_serialization() {
-        let op = DeleteOp::new("abc123def456.tomb");
+        let op = DeleteOp::new("abc123def456.tomb", "salary < 0");
         let yaml = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(yaml.contains("tombstone"));
         assert!(yaml.contains("abc123def456.tomb"));
+        assert!(yaml.contains("where"));
+        assert!(yaml.contains("salary < 0"));
 
         let deserialized: DeleteOp =
             serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
         assert_eq!(deserialized.tombstone, "abc123def456.tomb");
+        assert_eq!(deserialized.where_clause, "salary < 0");
     }
 }

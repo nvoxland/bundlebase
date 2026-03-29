@@ -20,7 +20,7 @@ pub mod function_entry {
 }
 mod sql;
 pub mod tombstone;
-pub mod tombstone_filter;
+pub mod deleted_row_filter;
 pub mod update_overlay;
 pub mod update_overlay_filter;
 pub mod verification;

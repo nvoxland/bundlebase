@@ -1,7 +1,7 @@
 //! Delete command implementation.
 //!
 //! Deletes rows matching a WHERE clause by collecting their RowIds
-//! and adding them to the bundle's in-memory tombstone set.
+//! and adding them to the bundle's in-memory deleted set.
 
 use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
@@ -70,8 +70,8 @@ impl BundleBuilderCommand for DeleteCommand {
             return Ok("Deleted 0 rows".to_string());
         }
 
-        // Store tombstoned RowIds for commit
-        builder.mark_deleted(delete_rowids);
+        // Store deleted RowIds for commit
+        builder.mark_deleted(delete_rowids, where_clause);
 
         // Apply a negated filter to immediately exclude deleted rows from queries
         let filter_query = format!(

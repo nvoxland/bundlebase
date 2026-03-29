@@ -210,10 +210,14 @@ pub struct BundleBuilder {
     /// Tracks uncommitted changes for this builder.
     status: RwLock<BundleStatus>,
     /// RowIds accumulated by DELETE commands, written to a tombstone file on commit.
-    pending_tombstones: RwLock<std::collections::HashSet<bundlebase_common::RowId>>,
+    pending_deletes: RwLock<std::collections::HashSet<bundlebase_common::RowId>>,
+    /// WHERE clauses from DELETE commands, stored for historical reference in the operation log.
+    pending_delete_wheres: RwLock<Vec<String>>,
     /// Updated cell values accumulated by UPDATE commands, written to an overlay parquet on commit.
     /// Maps RowId → (ColumnId → ScalarValue).
     pending_updates: RwLock<std::collections::HashMap<bundlebase_common::RowId, std::collections::HashMap<crate::object_id::ColumnId, datafusion::scalar::ScalarValue>>>,
+    /// WHERE clauses from UPDATE commands, stored for historical reference in the operation log.
+    pending_update_wheres: RwLock<Vec<String>>,
 }
 
 impl bundlebase_data::DataContext for BundleBuilder {
@@ -236,8 +240,10 @@ impl Clone for BundleBuilder {
             bundle: Arc::clone(&self.bundle),
             in_progress_change: RwLock::new(self.in_progress_change.read().clone()),
             status: RwLock::new(self.status.read().clone()),
-            pending_tombstones: RwLock::new(self.pending_tombstones.read().clone()),
+            pending_deletes: RwLock::new(self.pending_deletes.read().clone()),
+            pending_delete_wheres: RwLock::new(self.pending_delete_wheres.read().clone()),
             pending_updates: RwLock::new(self.pending_updates.read().clone()),
+            pending_update_wheres: RwLock::new(self.pending_update_wheres.read().clone()),
         }
     }
 }
@@ -285,8 +291,10 @@ impl BundleBuilder {
             bundle,
             in_progress_change: RwLock::new(None),
             status: RwLock::new(BundleStatus::new()),
-            pending_tombstones: RwLock::new(std::collections::HashSet::new()),
+            pending_deletes: RwLock::new(std::collections::HashSet::new()),
+            pending_delete_wheres: RwLock::new(Vec::new()),
             pending_updates: RwLock::new(std::collections::HashMap::new()),
+            pending_update_wheres: RwLock::new(Vec::new()),
         });
 
         // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
@@ -332,8 +340,10 @@ impl BundleBuilder {
             bundle: Arc::new(new_bundle),
             in_progress_change: RwLock::new(None),
             status: RwLock::new(BundleStatus::new()),
-            pending_tombstones: RwLock::new(std::collections::HashSet::new()),
+            pending_deletes: RwLock::new(std::collections::HashSet::new()),
+            pending_delete_wheres: RwLock::new(Vec::new()),
             pending_updates: RwLock::new(std::collections::HashMap::new()),
+            pending_update_wheres: RwLock::new(Vec::new()),
         });
 
         // Re-register schema providers with BundleBuilder as facade (using Weak to avoid Arc cycle).
@@ -405,14 +415,15 @@ impl BundleBuilder {
         let author = std::env::var("BUNDLEBASE_AUTHOR")
             .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
 
-        // Write tombstone file if there are pending tombstones from DELETE commands
-        let tombstoned_ids = std::mem::take(&mut *self.pending_tombstones.write());
-        if !tombstoned_ids.is_empty() {
+        // Write tombstone file if there are pending deletes
+        let deleted_ids = std::mem::take(&mut *self.pending_deletes.write());
+        let delete_wheres = std::mem::take(&mut *self.pending_delete_wheres.write());
+        if !deleted_ids.is_empty() {
             use crate::bundle::tombstone;
             use crate::bundle::operation::DeleteOp;
 
             // Serialize and write tombstone file via content-addressed storage
-            let tomb_bytes = tombstone::serialize_tombstone(&tombstoned_ids);
+            let tomb_bytes = tombstone::serialize_tombstone(&deleted_ids);
             debug!("[DELETE] Writing tombstone file ({} bytes)", tomb_bytes.len());
             let data_dir = self.bundle.data_dir();
             let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(tomb_bytes)]);
@@ -423,7 +434,7 @@ impl BundleBuilder {
             // Add DeleteOp alongside the existing FilterOp.
             // The FilterOp handles query-time exclusion, the DeleteOp records the tombstone.
             // On future opens, the tombstone will be loaded for scan-level filtering.
-            let delete_op = DeleteOp::new(&tomb_filename);
+            let delete_op = DeleteOp::new(&tomb_filename, delete_wheres.join("; "));
             if let Some(last_change) = changes.last_mut() {
                 last_change.operations.push(AnyOperation::Delete(delete_op));
             }
@@ -431,6 +442,7 @@ impl BundleBuilder {
 
         // Write update overlay file if there are pending updates from UPDATE commands
         let pending_upd = std::mem::take(&mut *self.pending_updates.write());
+        let update_wheres = std::mem::take(&mut *self.pending_update_wheres.write());
         if !pending_upd.is_empty() {
             use crate::bundle::update_overlay;
             use crate::bundle::operation::UpdateDataOp;
@@ -453,7 +465,7 @@ impl BundleBuilder {
             let overlay_filename = data_dir.relative_path(write_result.file.as_ref())?;
             debug!("[UPDATE] Overlay file written: {}", overlay_filename);
 
-            let update_op = UpdateDataOp::new(&overlay_filename);
+            let update_op = UpdateDataOp::new(&overlay_filename, update_wheres.join("; "));
             if let Some(last_change) = changes.last_mut() {
                 last_change.operations.push(AnyOperation::UpdateData(update_op));
             }
@@ -521,8 +533,10 @@ impl BundleBuilder {
 
         // Clear all uncommitted changes
         self.status.write().clear();
-        self.pending_tombstones.write().clear();
+        self.pending_deletes.write().clear();
+        self.pending_delete_wheres.write().clear();
         self.pending_updates.write().clear();
+        self.pending_update_wheres.write().clear();
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
@@ -795,6 +809,10 @@ impl BundleBuilder {
             }
         }
 
+        if updated_count > 0 {
+            self.pending_update_wheres.write().push(where_clause.to_string());
+        }
+
         Ok(updated_count)
     }
 
@@ -841,11 +859,12 @@ impl BundleBuilder {
         self.bundle.always_update_rules()
     }
 
-    /// Add RowIds to the pending tombstone set.
+    /// Add RowIds to the pending delete set.
     ///
     /// These will be written to a tombstone file on commit.
-    pub fn mark_deleted(&self, row_ids: std::collections::HashSet<bundlebase_common::RowId>) {
-        self.pending_tombstones.write().extend(row_ids);
+    pub fn mark_deleted(&self, row_ids: std::collections::HashSet<bundlebase_common::RowId>, where_clause: &str) {
+        self.pending_deletes.write().extend(row_ids);
+        self.pending_delete_wheres.write().push(where_clause.to_string());
     }
 
     /// Collect RowIds of rows matching a WHERE clause from all blocks.

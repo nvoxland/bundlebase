@@ -65,7 +65,7 @@ impl BundleBuilderCommand for AlwaysDeleteCommand {
         debug!("[ALWAYS DELETE] Collected {} RowIds for WHERE {}", deleted_count, where_clause);
 
         if !delete_rowids.is_empty() {
-            builder.mark_deleted(delete_rowids);
+            builder.mark_deleted(delete_rowids, where_clause);
 
             let filter_query = format!(
                 "SELECT * FROM bundle WHERE NOT ({})",

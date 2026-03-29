@@ -45,7 +45,7 @@ pub struct DataBlock {
     source_info: Option<SourceInfo>,
     /// Column IDs for this block's schema fields (positional, matching schema field order)
     column_ids: Vec<ColumnId>,
-    /// Row numbers (within this block) that have been deleted via tombstones
+    /// Row numbers (within this block) that have been deleted
     deleted_rows: Arc<RwLock<Vec<u32>>>,
     /// Update overlays to apply at scan time
     update_overlays: Arc<RwLock<Vec<crate::bundle::update_overlay::UpdateOverlay>>>,
@@ -117,10 +117,10 @@ impl DataBlock {
         format!("{}:{}:{}", self.data_dir.url(), self.reader.url(), self.version)
     }
 
-    /// Add deleted row numbers to this block's tombstone set.
+    /// Add deleted row numbers to this block's deleted set.
     ///
     /// The block cache is NOT invalidated here — cached batches are the base
-    /// data, and tombstones are applied as a filter on top at query time.
+    /// data, and deleted rows are applied as a filter on top at query time.
     pub fn add_deleted_rows(&self, rows: impl IntoIterator<Item = u32>) {
         let mut deleted = self.deleted_rows.write();
         deleted.extend(rows);
@@ -479,9 +479,9 @@ impl TableProvider for DataBlock {
                 )?)
             };
 
-        // Apply tombstone filter if there are deleted rows
+        // Apply deleted row filter if there are deleted rows
         if !deleted.is_empty() {
-            source = Arc::new(crate::bundle::tombstone_filter::TombstoneFilterDataSource::new(
+            source = Arc::new(crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
                 source,
                 Arc::new(deleted),
             ));

@@ -24,12 +24,16 @@ use std::sync::Arc;
 pub struct UpdateDataOp {
     /// Filename of the overlay parquet file (e.g., "a3f8b2c1d4e5.update")
     pub overlay: String,
+    /// The WHERE clause(s) that produced this update, stored for historical reference only.
+    #[serde(rename = "where")]
+    pub where_clause: String,
 }
 
 impl UpdateDataOp {
-    pub fn new(overlay: impl Into<String>) -> Self {
+    pub fn new(overlay: impl Into<String>, where_clause: impl Into<String>) -> Self {
         Self {
             overlay: overlay.into(),
+            where_clause: where_clause.into(),
         }
     }
 }
@@ -112,19 +116,22 @@ mod tests {
 
     #[test]
     fn test_describe() {
-        let op = UpdateDataOp::new("abc123.update");
+        let op = UpdateDataOp::new("abc123.update", "id = 1");
         assert_eq!(op.describe(), "UPDATE DATA: abc123.update");
     }
 
     #[test]
     fn test_serialization() {
-        let op = UpdateDataOp::new("abc123def456.update");
+        let op = UpdateDataOp::new("abc123def456.update", "department = 'eng'");
         let yaml = serde_yaml_ng::to_string(&op).expect("Failed to serialize");
         assert!(yaml.contains("overlay"));
         assert!(yaml.contains("abc123def456.update"));
+        assert!(yaml.contains("where"));
+        assert!(yaml.contains("department = 'eng'"));
 
         let deserialized: UpdateDataOp =
             serde_yaml_ng::from_str(&yaml).expect("Failed to deserialize");
         assert_eq!(deserialized.overlay, "abc123def456.update");
+        assert_eq!(deserialized.where_clause, "department = 'eng'");
     }
 }

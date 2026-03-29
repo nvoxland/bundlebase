@@ -1,4 +1,4 @@
-Delete rows matching a WHERE condition. Deleted rows are tracked via tombstone files and excluded from all subsequent queries.
+Delete rows matching a WHERE condition. Deleted rows are excluded from all subsequent queries.
 
 Deletes accumulate in memory until COMMIT, when a single tombstone file is written.
 
