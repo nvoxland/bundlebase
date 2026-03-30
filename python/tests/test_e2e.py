@@ -1868,8 +1868,8 @@ async def test_search_wrong_index_name_error():
 
 
 @pytest.mark.asyncio
-async def test_standardize_column_names():
-    """Test that standardize_column_names() converts column names to lowercase+underscore."""
+async def test_normalize_column_names():
+    """Test that normalize_column_names() converts column names to lowercase+underscore."""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
 
@@ -1881,7 +1881,7 @@ async def test_standardize_column_names():
     assert "Phone 1" in original_names
 
     # Standardize
-    c = await c.standardize_column_names()
+    c = await c.normalize_column_names()
 
     # After standardization, all names should be lowercase+underscore only
     schema_after = await c.schema()
@@ -1907,7 +1907,7 @@ async def test_cast_column_type():
     c2 = await c2.attach(datafile("customers-0-100.csv"))
 
     # Standardize first so column names are predictable
-    c2 = await c2.standardize_column_names()
+    c2 = await c2.normalize_column_names()
 
     # customer_id is a string like "1", "2", etc. - cast to integer
     c2 = await c2.cast_column("customer_id", "Int64")
@@ -1945,7 +1945,7 @@ async def test_add_column():
     """Test add_column() adds a computed column to the bundle."""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
-    c = await c.standardize_column_names()
+    c = await c.normalize_column_names()
 
     # Add a computed column combining first_name and company
     c = await c.add_column("name_and_company", "first_name || ' - ' || company")
@@ -1968,7 +1968,7 @@ async def test_add_column_duplicate():
     """Test add_column with existing column name raises an error."""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
-    c = await c.standardize_column_names()
+    c = await c.normalize_column_names()
 
     with pytest.raises(Exception, match="already exists"):
         await c.add_column("first_name", "first_name || ' test'")
@@ -1979,7 +1979,7 @@ async def test_add_column_invalid_expression():
     """Test add_column with an invalid expression raises an error at check time."""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
-    c = await c.standardize_column_names()
+    c = await c.normalize_column_names()
 
     with pytest.raises(Exception):
         await c.add_column("bad_col", "nonexistent_column + 1")
@@ -1990,7 +1990,7 @@ async def test_drop_nonexistent_column():
     """Test drop_column with a column that doesn't exist raises an error."""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
-    c = await c.standardize_column_names()
+    c = await c.normalize_column_names()
 
     with pytest.raises(Exception):
         await c.drop_column("nonexistent_column")
@@ -2001,7 +2001,7 @@ async def test_rename_to_existing_column():
     """Test rename_column to an already-existing column name raises an error."""
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
-    c = await c.standardize_column_names()
+    c = await c.normalize_column_names()
 
     with pytest.raises(Exception, match="already exists"):
         await c.rename_column("first_name", "last_name")
@@ -2013,7 +2013,7 @@ async def test_rename_column_across_multiple_blocks():
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
     c = await c.attach(datafile("customers-101-150.csv"))
-    c = await c.standardize_column_names()
+    c = await c.normalize_column_names()
 
     c = await c.rename_column("first_name", "given_name")
 
@@ -2030,7 +2030,7 @@ async def test_drop_column_across_multiple_blocks():
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
     c = await c.attach(datafile("customers-101-150.csv"))
-    c = await c.standardize_column_names()
+    c = await c.normalize_column_names()
 
     c = await c.drop_column("country")
 
@@ -2046,7 +2046,7 @@ async def test_add_column_across_multiple_blocks():
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
     c = await c.attach(datafile("customers-101-150.csv"))
-    c = await c.standardize_column_names()
+    c = await c.normalize_column_names()
 
     c = await c.add_column("name_and_company", "first_name || ' - ' || company")
 
@@ -2068,7 +2068,7 @@ async def test_operations_pipeline_across_multiple_blocks():
     c = await bundlebase.create(random_bundle())
     c = await c.attach(datafile("customers-0-100.csv"))
     c = await c.attach(datafile("customers-101-150.csv"))
-    c = await c.standardize_column_names()
+    c = await c.normalize_column_names()
 
     c = await c.rename_column("first_name", "given_name")
     c = await c.drop_column("country")

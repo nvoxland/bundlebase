@@ -24,7 +24,7 @@ use crate::builder::{
     FilterCommand, ImportConnectorCommand, ImportFunctionCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
     RenameFunctionCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand,
-    SaveConfigCommand, SetDescriptionCommand, SetNameCommand, StandardizeColumnNamesCommand,
+    SaveConfigCommand, SetDescriptionCommand, SetNameCommand, NormalizeColumnNamesCommand,
     VerifyDataCommand,
 };
 use crate::BundleBuilderCommand;
@@ -163,7 +163,7 @@ pub trait BundleBuilderExt {
     ) -> Result<&Self, BundlebaseError>;
 
     /// Standardize all column names to lowercase+underscore identifiers.
-    async fn standardize_column_names(&self) -> Result<&Self, BundlebaseError>;
+    async fn normalize_column_names(&self) -> Result<&Self, BundlebaseError>;
 
     /// Filter rows with a SELECT query.
     async fn filter(
@@ -455,8 +455,8 @@ impl BundleBuilderExt for BundleBuilder {
         Ok(self)
     }
 
-    async fn standardize_column_names(&self) -> Result<&Self, BundlebaseError> {
-        exec_cmd(self,StandardizeColumnNamesCommand)
+    async fn normalize_column_names(&self) -> Result<&Self, BundlebaseError> {
+        exec_cmd(self,NormalizeColumnNamesCommand)
             .await?;
         Ok(self)
     }
@@ -691,8 +691,8 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
     async fn cast_column(&self, name: &str, new_type: &str) -> Result<&Self, BundlebaseError> {
         (**self).cast_column(name, new_type).await?; Ok(self)
     }
-    async fn standardize_column_names(&self) -> Result<&Self, BundlebaseError> {
-        (**self).standardize_column_names().await?; Ok(self)
+    async fn normalize_column_names(&self) -> Result<&Self, BundlebaseError> {
+        (**self).normalize_column_names().await?; Ok(self)
     }
     async fn filter(&self, query: &str, params: Vec<ScalarValue>) -> Result<&Self, BundlebaseError> {
         (**self).filter(query, params).await?; Ok(self)

@@ -465,6 +465,12 @@ bundlebase query --bundle ./analysis --format json "SELECT department, COUNT(*) 
 **MCP workflow (preferred for multi-step cleaning):**
 
 ```
+# Step 0: Normalize column names — do this immediately after loading external data
+# Converts verbose names like "MonitoringLocationIdentifier" to "monitoring_location_identifier"
+# This eliminates the need for double-quoting in all subsequent queries
+mcp__bundlebase__query(bundle="data", sql="NORMALIZE COLUMN NAMES")
+mcp__bundlebase__query(bundle="data", sql="COMMIT 'Normalized column names'")
+
 # Step 1: Profile the data to understand what needs cleaning
 mcp__bundlebase__query(bundle="data", sql="DESCRIBE DATA IN price, status, email")
 

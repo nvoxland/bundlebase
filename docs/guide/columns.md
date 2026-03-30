@@ -15,7 +15,7 @@ DROP COLUMN "column with spaces"
 Bare identifiers (without quotes) work for names containing only letters, digits, and underscores. Quotes are always optional for such names.
 
 !!! tip
-    If you're working with data that has messy column names (spaces, mixed case, special characters), use `STANDARDIZE COLUMN NAMES` to normalize them all at once.
+    If you're working with data that has messy column names (spaces, mixed case, special characters), use `NORMALIZE COLUMN NAMES` to normalize them all at once.
 
 ## Drop Column
 
@@ -61,7 +61,7 @@ Rename an existing column.
     RENAME COLUMN first_name TO name
     ```
 
-## Standardize Column Names
+## Normalize Column Names
 
 Convert all column names to lowercase, underscore-separated identifiers that work without quoting in SQL. Spaces, dashes, dots, and other special characters are replaced with underscores, consecutive underscores are collapsed, and leading/trailing underscores are stripped.
 
@@ -70,13 +70,13 @@ For example, `"Customer Id"` becomes `customer_id` and `"Phone 1"` becomes `phon
 === "Async API"
 
     ```python
-    await bundle.standardize_column_names()
+    await bundle.normalize_column_names()
     ```
 
 === "Sync API"
 
     ```python
-    bundle.standardize_column_names()
+    bundle.normalize_column_names()
     ```
 
 ## Add Column

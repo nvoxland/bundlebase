@@ -122,9 +122,9 @@ All operations work synchronously without `await`:
   c.rename_column("old_name", "new_name")
   ```
 
-- **`standardize_column_names()`** - Convert all column names to lowercase+underscore identifiers
+- **`normalize_column_names()`** - Convert all column names to lowercase+underscore identifiers
   ```python
-  c.standardize_column_names()
+  c.normalize_column_names()
   ```
 
 - **`add_column(name: str, expression: str)`** - Add a computed column

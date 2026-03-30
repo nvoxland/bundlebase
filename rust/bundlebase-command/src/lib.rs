@@ -71,7 +71,7 @@ pub use builder::{
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
     RenameFunctionCommand, RenameJoinCommand, RenameViewCommand,
     ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand,
-    StandardizeColumnNamesCommand, UndoCommand, VerifyDataCommand,
+    NormalizeColumnNamesCommand, UndoCommand, VerifyDataCommand,
 };
 
 // Re-export verification result types
@@ -388,6 +388,7 @@ impl BundleCommand {
                     BundleCommand::CastColumn(_) => "CAST COLUMN",
                     BundleCommand::DropColumn(_) => "ALTER TABLE DROP COLUMN",
                     BundleCommand::RenameColumn(_) => "ALTER TABLE RENAME COLUMN",
+                    BundleCommand::NormalizeColumnNames(_) => "NORMALIZE COLUMN NAMES",
                     BundleCommand::CreateIndex(_) => "CREATE INDEX",
                     BundleCommand::DropIndex(_) => "DROP INDEX",
                     BundleCommand::RebuildIndex(_) => "REBUILD INDEX",
@@ -709,6 +710,8 @@ register_commands! {
             "DROP COLUMN" => "DROP COLUMN <name>",
         RenameColumn(RenameColumnCommand) => Rule::rename_column_stmt,
             "RENAME COLUMN" => "RENAME COLUMN <old> TO <new>",
+        NormalizeColumnNames(NormalizeColumnNamesCommand) => Rule::normalize_column_names_stmt,
+            "NORMALIZE COLUMN NAMES" => "NORMALIZE COLUMN NAMES",
         CreateIndex(CreateIndexCommand) => Rule::create_index_stmt,
             "CREATE INDEX" => "CREATE <COLUMN|TEXT> INDEX ON <column>",
         DropIndex(DropIndexCommand) => Rule::drop_index_stmt,

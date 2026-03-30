@@ -70,7 +70,7 @@ _original_methods = {
     "cast_column": _PyBundleBuilder.cast_column,
     "drop_column": _PyBundleBuilder.drop_column,
     "rename_column": _PyBundleBuilder.rename_column,
-    "standardize_column_names": _PyBundleBuilder.standardize_column_names,
+    "normalize_column_names": _PyBundleBuilder.normalize_column_names,
 
     # Row operations
     "filter": _PyBundleBuilder.filter,

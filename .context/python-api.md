@@ -80,7 +80,7 @@ c = await Bundlebase.open("/my/container/dir")
 - `attach(url)` - Add data source (CSV columns import as text; use `cast_column` to convert types)
 - `drop_column(name)` - Remove column
 - `rename_column(old_name, new_name)` - Rename column
-- `standardize_column_names()` - Convert all column names to lowercase+underscore identifiers
+- `normalize_column_names()` - Convert all column names to lowercase+underscore identifiers
 - `add_column(name, expression)` - Add a computed column using a SQL expression
 - `cast_column(name, new_type)` - Cast column to a different data type
 - `update(set_where)` - Update rows matching a condition (e.g., `"SET salary = 100 WHERE id = 1"`)

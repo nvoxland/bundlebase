@@ -130,6 +130,7 @@ fn usage_for_command(command_name: &str) -> Option<&'static str> {
         "CAST COLUMN" => Some(include_str!("../syntax/cast_column.md")),
         "DROP COLUMN" => Some(include_str!("../syntax/drop_column.md")),
         "RENAME COLUMN" => Some(include_str!("../syntax/rename_column.md")),
+        "NORMALIZE COLUMN NAMES" => Some(include_str!("../syntax/normalize_column_names.md")),
         "CREATE INDEX" => Some(include_str!("../syntax/create_index.md")),
         "DROP INDEX" => Some(include_str!("../syntax/drop_index.md")),
         "REBUILD INDEX" => Some(include_str!("../syntax/rebuild_index.md")),

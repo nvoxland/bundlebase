@@ -574,9 +574,9 @@ class SyncBundleBuilder(SyncBundle):
         self._async = _loop_manager.run_sync(coro)
         return self
 
-    def standardize_column_names(self) -> "SyncBundleBuilder":
-        """Standardize all column names to lowercase+underscore identifiers."""
-        coro = _call_original_method(self._async, "standardize_column_names")
+    def normalize_column_names(self) -> "SyncBundleBuilder":
+        """Normalize all column names to lowercase+underscore identifiers."""
+        coro = _call_original_method(self._async, "normalize_column_names")
         self._async = _loop_manager.run_sync(coro)
         return self
 

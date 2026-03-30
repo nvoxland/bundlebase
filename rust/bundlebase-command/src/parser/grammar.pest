@@ -64,6 +64,7 @@ schema_stmt = {
     | rename_column_stmt
     | cast_column_stmt
     | add_column_stmt
+    | normalize_column_names_stmt
     | create_view_stmt
     | drop_view_stmt
     | rename_view_stmt
@@ -813,6 +814,12 @@ add_column_stmt = {
 
 add_column_expression = @{
     (!EOI ~ ANY)+
+}
+
+// NORMALIZE COLUMN NAMES Statement
+// Renames all columns to lowercase+underscore identifiers.
+normalize_column_names_stmt = {
+    ^"normalize" ~ ^"column" ~ ^"names"
 }
 
 // ============================================================================

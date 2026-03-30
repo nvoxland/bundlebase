@@ -583,16 +583,16 @@ impl PyBundleBuilder {
         })
     }
 
-    fn standardize_column_names<'py>(
+    fn normalize_column_names<'py>(
         slf: PyRef<'_, Self>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = slf.inner.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .standardize_column_names()
+                .normalize_column_names()
                 .await
-                .map_err(|e| to_py_error_ctx("Failed to standardize column names", e))?;
+                .map_err(|e| to_py_error_ctx("Failed to normalize column names", e))?;
             Python::attach(|py| {
                 Py::new(py, PyBundleBuilder { inner })
                     .map_err(|e| to_py_error(e))

@@ -12,7 +12,7 @@ bundle.create_source("kaggle", {"dataset": "tunguz/200000-jeopardy-questions"})
 
 bundle.commit("Attached raw data")
 
-bundle.standardize_column_names()
+bundle.normalize_column_names()
 
 bundle.cast_column("value", "integer")
 

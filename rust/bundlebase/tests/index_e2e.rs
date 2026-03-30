@@ -1045,7 +1045,7 @@ async fn test_create_index_after_rename_column() -> Result<(), BundlebaseError> 
 }
 
 #[tokio::test]
-async fn test_create_index_after_standardize_column_names() -> Result<(), BundlebaseError> {
+async fn test_create_index_after_normalize_column_names() -> Result<(), BundlebaseError> {
     init();
     common::enable_logging();
     let data_dir = random_memory_dir();
@@ -1055,8 +1055,8 @@ async fn test_create_index_after_standardize_column_names() -> Result<(), Bundle
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
 
-    // standardize_column_names lowercases and replaces spaces/special chars
-    bundle.standardize_column_names().await?;
+    // normalize_column_names lowercases and replaces spaces/special chars
+    bundle.normalize_column_names().await?;
     bundle
         .create_index(&["city"], IndexType::Column, None)
         .await?;
@@ -1081,7 +1081,7 @@ async fn test_create_index_after_standardize_column_names() -> Result<(), Bundle
 }
 
 #[tokio::test]
-async fn test_search_after_standardize_column_names() -> Result<(), BundlebaseError> {
+async fn test_search_after_normalize_column_names() -> Result<(), BundlebaseError> {
     init();
     common::enable_logging();
     let data_dir = random_memory_dir();
@@ -1091,8 +1091,8 @@ async fn test_search_after_standardize_column_names() -> Result<(), BundlebaseEr
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
 
-    // standardize_column_names lowercases column names (e.g. "Company" -> "company")
-    bundle.standardize_column_names().await?;
+    // normalize_column_names lowercases column names (e.g. "Company" -> "company")
+    bundle.normalize_column_names().await?;
 
     // Create a text index using the standardized (lowercase) column names
     bundle
@@ -1119,7 +1119,7 @@ async fn test_search_after_standardize_column_names() -> Result<(), BundlebaseEr
 
     assert!(
         num_rows > 0,
-        "search() after standardize_column_names should return matching rows"
+        "search() after normalize_column_names should return matching rows"
     );
 
     // Verify every returned row actually contains "group" in the company column
@@ -1205,7 +1205,7 @@ async fn test_search_with_projection_and_where_on_score() -> Result<(), Bundleba
 }
 
 #[tokio::test]
-async fn test_search_field_specific_after_standardize_column_names() -> Result<(), BundlebaseError> {
+async fn test_search_field_specific_after_normalize_column_names() -> Result<(), BundlebaseError> {
     init();
     common::enable_logging();
     let data_dir = random_memory_dir();
@@ -1215,7 +1215,7 @@ async fn test_search_field_specific_after_standardize_column_names() -> Result<(
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
 
-    bundle.standardize_column_names().await?;
+    bundle.normalize_column_names().await?;
 
     bundle
         .create_index(
@@ -1286,7 +1286,7 @@ async fn test_search_after_chained_renames() -> Result<(), BundlebaseError> {
         )
         .await?;
 
-    bundle.standardize_column_names().await?;
+    bundle.normalize_column_names().await?;
     bundle.rename_column("company", "co").await?;
     bundle.commit("Text index with chained renames").await?;
 

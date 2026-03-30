@@ -1,4 +1,4 @@
-//! StandardizeColumnNames command implementation.
+//! NormalizeColumnNames command implementation.
 
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::RenameColumnOp;
@@ -9,28 +9,26 @@ use std::collections::HashMap;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
 
-/// Command to standardize all column names to lowercase+underscore identifiers.
+/// Command to normalize all column names to lowercase+underscore identifiers.
 #[derive(Debug, Clone)]
-pub struct StandardizeColumnNamesCommand;
+pub struct NormalizeColumnNamesCommand;
 
-impl CommandParsing for StandardizeColumnNamesCommand {
+impl CommandParsing for NormalizeColumnNamesCommand {
     fn rule() -> Rule {
-        // This command is not parsed from SQL, but CommandParsing requires a rule.
-        // Use an arbitrary rule; from_statement will never be called.
-        Rule::identifier
+        Rule::normalize_column_names_stmt
     }
 
     fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        Err("STANDARDIZE COLUMN NAMES cannot be parsed from SQL".into())
+        Ok(NormalizeColumnNamesCommand)
     }
 
     fn to_statement(&self) -> String {
-        "STANDARDIZE COLUMN NAMES".to_string()
+        "NORMALIZE COLUMN NAMES".to_string()
     }
 }
 
-/// Standardize a single column name to a lowercase+underscore identifier.
-fn standardize_single_name(name: &str) -> String {
+/// Normalize a single column name to a lowercase+underscore identifier.
+fn normalize_single_name(name: &str) -> String {
     // 1. Convert to lowercase
     let lowered = name.to_lowercase();
 
@@ -58,7 +56,7 @@ fn standardize_single_name(name: &str) -> String {
     // 4. Strip leading/trailing underscores
     let trimmed = collapsed.trim_matches('_').to_string();
 
-    // 5. If empty after standardization, use "column"
+    // 5. If empty after normalization, use "column"
     if trimmed.is_empty() {
         return "column".to_string();
     }
@@ -78,14 +76,14 @@ fn compute_renames(schema: &SchemaRef) -> Vec<(String, String)> {
     let mut renames = Vec::new();
 
     for name in &field_names {
-        let standardized = standardize_single_name(name);
-        let count = counts.entry(standardized.clone()).or_insert(0);
+        let normalized = normalize_single_name(name);
+        let count = counts.entry(normalized.clone()).or_insert(0);
         *count += 1;
 
         let final_name = if *count == 1 {
-            standardized
+            normalized
         } else {
-            format!("{}_{}", standardized, count)
+            format!("{}_{}", normalized, count)
         };
 
         // Only record renames where the name actually changed
@@ -97,7 +95,7 @@ fn compute_renames(schema: &SchemaRef) -> Vec<(String, String)> {
     renames
 }
 
-impl BundleBuilderCommand for StandardizeColumnNamesCommand {
+impl BundleBuilderCommand for NormalizeColumnNamesCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
@@ -115,48 +113,66 @@ impl BundleBuilderCommand for StandardizeColumnNamesCommand {
                 .await?;
         }
 
-        Ok(format!("Standardized column names: {} columns renamed", count))
+        Ok(format!("Normalized column names: {} columns renamed", count))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
-    fn test_standardize_single_name() {
+    fn test_parse_normalize_column_names() {
+        use crate::parser::parse_command;
+        use crate::BundleCommand;
+
+        let cmd = parse_command("NORMALIZE COLUMN NAMES").expect("Should parse");
+        assert!(matches!(cmd, BundleCommand::NormalizeColumnNames(_)));
+
+        // Case insensitive
+        let cmd = parse_command("normalize column names").expect("Should parse lowercase");
+        assert!(matches!(cmd, BundleCommand::NormalizeColumnNames(_)));
+    }
+
+    #[test]
+    fn test_roundtrip() {
+        let cmd = NormalizeColumnNamesCommand;
+        assert_eq!(cmd.to_statement(), "NORMALIZE COLUMN NAMES");
+    }
+
+    #[test]
+    fn test_normalize_single_name() {
         // Spaces become underscores
-        assert_eq!(standardize_single_name("Customer Id"), "customer_id");
-        assert_eq!(standardize_single_name("First Name"), "first_name");
-        assert_eq!(standardize_single_name("Phone 1"), "phone_1");
+        assert_eq!(normalize_single_name("Customer Id"), "customer_id");
+        assert_eq!(normalize_single_name("First Name"), "first_name");
+        assert_eq!(normalize_single_name("Phone 1"), "phone_1");
 
         // Dots and dashes
-        assert_eq!(standardize_single_name("file.name"), "file_name");
-        assert_eq!(standardize_single_name("first-name"), "first_name");
+        assert_eq!(normalize_single_name("file.name"), "file_name");
+        assert_eq!(normalize_single_name("first-name"), "first_name");
 
         // Uppercase
-        assert_eq!(standardize_single_name("UPPER_CASE"), "upper_case");
-        assert_eq!(standardize_single_name("CamelCase"), "camelcase");
+        assert_eq!(normalize_single_name("UPPER_CASE"), "upper_case");
+        assert_eq!(normalize_single_name("CamelCase"), "camelcase");
 
         // Leading digits
-        assert_eq!(standardize_single_name("1st_column"), "_1st_column");
+        assert_eq!(normalize_single_name("1st_column"), "_1st_column");
 
         // Empty
-        assert_eq!(standardize_single_name(""), "column");
-        assert_eq!(standardize_single_name("___"), "column");
+        assert_eq!(normalize_single_name(""), "column");
+        assert_eq!(normalize_single_name("___"), "column");
 
         // Already simple
-        assert_eq!(standardize_single_name("simple"), "simple");
-        assert_eq!(standardize_single_name("already_good"), "already_good");
+        assert_eq!(normalize_single_name("simple"), "simple");
+        assert_eq!(normalize_single_name("already_good"), "already_good");
 
         // Consecutive special chars
-        assert_eq!(standardize_single_name("a--b"), "a_b");
-        assert_eq!(standardize_single_name("a  b"), "a_b");
+        assert_eq!(normalize_single_name("a--b"), "a_b");
+        assert_eq!(normalize_single_name("a  b"), "a_b");
 
         // Leading/trailing special chars
-        assert_eq!(standardize_single_name(" name "), "name");
-        assert_eq!(standardize_single_name("_name_"), "name");
+        assert_eq!(normalize_single_name(" name "), "name");
+        assert_eq!(normalize_single_name("_name_"), "name");
     }
 
     #[test]
@@ -175,7 +191,7 @@ mod tests {
             ("Last Name".to_string(), "last_name".to_string()),
         ]);
 
-        // Duplicates after standardization
+        // Duplicates after normalization
         let schema = Arc::new(Schema::new(vec![
             Field::new("User Name", DataType::Utf8, false),
             Field::new("user-name", DataType::Utf8, false),
