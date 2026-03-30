@@ -97,17 +97,37 @@ impl TableProvider for BundleColumnsTable {
                 block_to_pack.insert(*block.id(), pack.name().to_string());
             }
         }
+        // Build pack name list for disambiguated join column detection
+        let pack_names: Vec<String> = packs.values()
+            .filter(|p| p.is_join())
+            .map(|p| p.name().to_string())
+            .collect();
+
         let sources: Vec<String> = bundle_schema
             .fields()
             .iter()
             .map(|f| {
-                bs.column_id(f.name())
-                    .and_then(|col_id| {
-                        bs.blocks_for_column(&col_id)
-                            .first()
-                            .and_then(|(block_id, _)| block_to_pack.get(block_id).cloned())
-                    })
-                    .unwrap_or_else(|| "computed".to_string())
+                let name = f.name();
+                // Direct lookup: column name is known to BundleSchema
+                if let Some(col_id) = bs.column_id(name) {
+                    if let Some(pack_name) = bs.blocks_for_column(&col_id)
+                        .first()
+                        .and_then(|(block_id, _)| block_to_pack.get(block_id).cloned())
+                    {
+                        return pack_name;
+                    }
+                    if bs.is_computed(&col_id) {
+                        return "computed".to_string();
+                    }
+                }
+                // Disambiguated join column: "{pack_name}_{col}" pattern
+                for pack_name in &pack_names {
+                    let prefix = format!("{}_", pack_name);
+                    if name.starts_with(&prefix) {
+                        return pack_name.clone();
+                    }
+                }
+                "base".to_string()
             })
             .collect();
 
