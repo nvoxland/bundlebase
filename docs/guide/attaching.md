@@ -109,12 +109,13 @@ You can attach the query output of another committed bundle using a `bundle://` 
 ## Supported Formats
 
 - CSV (`.csv`)
+- TSV (`.tsv`) — tab-separated values
 - JSON Lines (`.json`, `.jsonl`)
 - Parquet (`.parquet`)
 
 ## Column Types
 
-**CSV files** are imported with all columns as text (`Utf8`). Because CSV is a text-based format, type inference from sampled rows is unreliable — a column that looks numeric in the first 100 rows might contain non-numeric values later. By defaulting to text, bundlebase avoids silent data corruption.
+**CSV and TSV files** are imported with all columns as text (`Utf8`). Because these are text-based formats, type inference from sampled rows is unreliable — a column that looks numeric in the first 100 rows might contain non-numeric values later. By defaulting to text, bundlebase avoids silent data corruption.
 
 **JSON files** retain their native types (string, number, boolean) since the JSON format encodes types directly in the data.
 

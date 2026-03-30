@@ -181,7 +181,7 @@ This enables query optimization and deferred execution.
 - ✅ Commit-based versioning with manifest history
 - ✅ Streaming execution with constant memory usage
 - ✅ Python async/await and synchronous APIs
-- ✅ Multi-format support (CSV, JSON, Parquet, custom functions)
+- ✅ Multi-format support (CSV, TSV, JSON, Parquet, custom functions)
 - ✅ Row indexing for fast lookups
 - ✅ SQL query integration via DataFusion
 

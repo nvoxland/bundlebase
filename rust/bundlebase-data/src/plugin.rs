@@ -1,7 +1,8 @@
-mod csv_reader;
+pub mod csv_reader;
 pub mod file_reader;
 mod json_reader;
 mod parquet_reader;
+mod tsv_reader;
 
 use crate::DataReader;
 use arrow_schema::SchemaRef;
@@ -9,6 +10,7 @@ use async_trait::async_trait;
 pub use csv_reader::CsvPlugin;
 pub use json_reader::JsonPlugin;
 pub use parquet_reader::ParquetPlugin;
+pub use tsv_reader::TsvPlugin;
 use std::sync::Arc;
 
 use crate::DataContext;

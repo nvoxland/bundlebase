@@ -31,40 +31,55 @@ use url::Url;
 #[derive(Debug, Clone)]
 pub struct CsvFormatConfig {
     newlines_in_values: Arc<AtomicBool>,
+    delimiter: u8,
+    extensions: &'static [&'static str],
 }
 
 impl Default for CsvFormatConfig {
     fn default() -> Self {
         Self {
             newlines_in_values: Arc::new(AtomicBool::new(false)),
+            delimiter: b',',
+            extensions: &[".csv"],
         }
     }
 }
 
 impl CsvFormatConfig {
+    /// Create a TSV config (tab-delimited).
+    pub fn tsv() -> Self {
+        Self {
+            newlines_in_values: Arc::new(AtomicBool::new(false)),
+            delimiter: b'\t',
+            extensions: &[".tsv"],
+        }
+    }
+
     /// Create a config with specific options.
-    fn from_read_options(opts: &HashMap<String, String>) -> Self {
+    pub fn from_read_options(opts: &HashMap<String, String>, delimiter: u8) -> Self {
         let niv = opts
             .get("newlines_in_values")
             .map(|v| v == "true")
             .unwrap_or(false);
         Self {
             newlines_in_values: Arc::new(AtomicBool::new(niv)),
+            delimiter,
+            extensions: if delimiter == b'\t' { &[".tsv"] } else { &[".csv"] },
         }
     }
 
     fn csv_options(&self) -> CsvOptions {
+        let mut opts = CsvOptions::default().with_delimiter(self.delimiter);
         if self.newlines_in_values.load(Ordering::Acquire) {
-            CsvOptions::default().with_newlines_in_values(true)
-        } else {
-            CsvOptions::default()
+            opts = opts.with_newlines_in_values(true);
         }
+        opts
     }
 }
 
 impl FileFormatConfig for CsvFormatConfig {
     fn extensions(&self) -> &'static [&'static str] {
-        &[".csv"]
+        self.extensions
     }
 
     fn file_format(&self) -> Arc<dyn FileFormat> {
@@ -111,7 +126,7 @@ impl ReaderPlugin for CsvPlugin {
 
         // Use stored read_options if provided, otherwise default config
         let config = match read_options {
-            Some(opts) if !opts.is_empty() => CsvFormatConfig::from_read_options(opts),
+            Some(opts) if !opts.is_empty() => CsvFormatConfig::from_read_options(opts, b','),
             _ => self.config.clone(),
         };
         let plugin = FilePlugin::new(config);
@@ -218,6 +233,7 @@ fn trim_schema_field_names(schema: SchemaRef) -> SchemaRef {
 async fn read_csv_header(
     store: &Arc<dyn object_store::ObjectStore>,
     path: &object_store::path::Path,
+    delimiter: u8,
 ) -> Result<SchemaRef, BundlebaseError> {
     use object_store::GetOptions;
 
@@ -231,7 +247,8 @@ async fn read_csv_header(
 
     // Parse just the header (0 data rows) to get column names
     let format = arrow::csv::reader::Format::default()
-        .with_header(true);
+        .with_header(true)
+        .with_delimiter(delimiter);
     let (schema, _) = format.infer_schema(bytes.reader(), Some(0))?;
 
     // Build an all-Utf8 schema from the column names
@@ -260,7 +277,8 @@ impl DataReader for CsvReader {
         // match the inferred types.
         let store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())?;
-        match read_csv_header(&store, &path).await {
+        let delimiter = self.inner.config().delimiter;
+        match read_csv_header(&store, &path, delimiter).await {
             Ok(schema) => Ok(Some(trim_schema_field_names(schema))),
             Err(e) if is_line_delimiter_error(&e) => {
                 log::info!(
@@ -273,7 +291,7 @@ impl DataReader for CsvReader {
                     .newlines_in_values
                     .store(true, Ordering::Release);
 
-                let schema = read_csv_header(&store, &path).await?;
+                let schema = read_csv_header(&store, &path, delimiter).await?;
                 Ok(Some(trim_schema_field_names(schema)))
             }
             Err(e) => Err(e),

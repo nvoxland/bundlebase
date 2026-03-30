@@ -317,7 +317,7 @@ mcp__bundlebase__query(bundle="customers", sql="RENAME COLUMN fname TO first_nam
 
 When using sub-agents to search for data sources, include these constraints in the delegation prompt:
 
-> "I'm using bundlebase to build a versioned, queryable dataset. I need URLs that can be used with bundlebase's http connector: `CREATE SOURCE USING http WITH (url = '...')`. Find direct-download CSV/JSON/Parquet URLs. Do NOT test URLs with curl or wget — just find and return them. Prefer smaller, scoped datasets over huge bulk downloads. If the source supports query parameters (date range, filters), include those to keep downloads fast."
+> "I'm using bundlebase to build a versioned, queryable dataset. I need URLs that can be used with bundlebase's http connector: `CREATE SOURCE USING http WITH (url = '...')`. Find direct-download CSV/TSV/JSON/Parquet URLs. Do NOT test URLs with curl or wget — just find and return them. Prefer smaller, scoped datasets over huge bulk downloads. If the source supports query parameters (date range, filters), include those to keep downloads fast."
 
 This prevents sub-agents from falling back to curl/wget and ensures the URLs work with bundlebase.
 
@@ -860,7 +860,7 @@ Bundlebase has built-in connectors for common data sources. The pattern is: CREA
 
 | Data source | Connector | Example |
 |------------|-----------|---------|
-| Any URL (CSV, JSON, Parquet) | `http` | `CREATE SOURCE USING http WITH (url = 'https://...')` |
+| Any URL (CSV, TSV, JSON, Parquet) | `http` | `CREATE SOURCE USING http WITH (url = 'https://...')` |
 | Kaggle dataset | `kaggle` | `CREATE SOURCE USING kaggle WITH (dataset = 'owner/name')` |
 | S3/GCS/Azure/local directory | `remote_dir` | `CREATE SOURCE USING remote_dir WITH (url = 's3://...')` |
 | FTP server | `ftp_directory` | `CREATE SOURCE USING ftp_directory WITH (url = 'ftp://...')` |
@@ -884,7 +884,7 @@ CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv',
 ```
 
 ```bash
-# URL: download CSV/JSON/Parquet from any HTTP(S) URL
+# URL: download CSV/TSV/JSON/Parquet from any HTTP(S) URL
 bundlebase create --bundle ./lake-data "CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv')"
 
 # Kaggle: fetch a public dataset (requires ~/.kaggle/kaggle.json)

@@ -63,7 +63,7 @@ Bundlebase ships with several common connectors, but custom connectors can also 
 
 ### http
 
-Downloads data from a single HTTP(S) URL. Use this for any direct link to a CSV, JSON, or Parquet file — including REST API endpoints that return data.
+Downloads data from a single HTTP(S) URL. Use this for any direct link to a CSV, TSV, JSON, or Parquet file — including REST API endpoints that return data.
 
 **Arguments:**
 

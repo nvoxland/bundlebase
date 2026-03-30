@@ -1,5 +1,5 @@
 use crate::DataContext;
-use crate::plugin::{CsvPlugin, JsonPlugin, ParquetPlugin, ReaderPlugin};
+use crate::plugin::{CsvPlugin, JsonPlugin, ParquetPlugin, TsvPlugin, ReaderPlugin};
 use crate::{BlockId, DataReader};
 use bundlebase_io::DataStorage;
 use bundlebase_common::BundlebaseError;
@@ -21,6 +21,7 @@ impl DataReaderFactory {
             storage: storage.clone(),
             plugins: vec![
                 Arc::new(CsvPlugin::default()),
+                Arc::new(TsvPlugin::default()),
                 Arc::new(JsonPlugin::default()),
                 Arc::new(ParquetPlugin::default()),
             ],

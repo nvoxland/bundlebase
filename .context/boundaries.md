@@ -105,7 +105,8 @@ pub trait DataAdapter {
 **Supported formats:**
 - Parquet (primary format, columnar, compressed)
 - CSV (via DataFusion CSV reader)
-- JSON (future)
+- TSV (tab-separated, via CSV reader with tab delimiter)
+- JSON Lines (via DataFusion JSON reader)
 - Arrow IPC (future)
 
 **See:** [architecture.md](architecture.md#adapters)

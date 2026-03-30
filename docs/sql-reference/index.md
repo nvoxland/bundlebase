@@ -10,7 +10,7 @@ Commands that change bundle data content.
 
 ### ATTACH
 
-Adds a data file to the bundle. Supports CSV, Parquet, JSON files, and `bundle://` URLs to reference other bundles.
+Adds a data file to the bundle. Supports CSV, TSV, Parquet, JSON files, and `bundle://` URLs to reference other bundles.
 
 ```sql
 ATTACH '<path>' [TO <pack>] [WITH (<key> = <value>, ...)]
