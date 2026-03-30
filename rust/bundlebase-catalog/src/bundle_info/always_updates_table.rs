@@ -48,16 +48,29 @@ impl BundleAlwaysUpdatesTable {
     }
 
     fn build_batch(&self) -> Result<RecordBatch> {
-        let rules = self.facade()?.always_update_rules();
+        let facade = self.facade()?;
+        let rules = facade.always_update_rules();
 
-        let set_clauses: Vec<&str> = rules.iter().map(|r| r.set_clause.as_str()).collect();
-        let where_clauses: Vec<&str> = rules.iter().map(|r| r.where_clause.as_str()).collect();
+        // Translate internal column names back to user-visible names for display
+        let bs = facade.bundle_schema();
+        let translate = |s: &str| -> String {
+            let mut result = s.to_string();
+            for (id, name) in bs.columns() {
+                let internal = bundlebase::bundle::bundle_schema::generate_internal_name(id);
+                result = result.replace(&internal, name);
+            }
+            result
+        };
+        let set_clauses: Vec<String> = rules.iter().map(|r| translate(&r.set_clause)).collect();
+        let where_clauses: Vec<String> = rules.iter().map(|r| translate(&r.where_clause)).collect();
+        let set_refs: Vec<&str> = set_clauses.iter().map(|s| s.as_str()).collect();
+        let where_refs: Vec<&str> = where_clauses.iter().map(|s| s.as_str()).collect();
 
         let batch = RecordBatch::try_new(
             Arc::clone(&self.schema),
             vec![
-                Arc::new(StringArray::from(set_clauses)),
-                Arc::new(StringArray::from(where_clauses)),
+                Arc::new(StringArray::from(set_refs)),
+                Arc::new(StringArray::from(where_refs)),
             ],
         )?;
 

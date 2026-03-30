@@ -3,10 +3,7 @@
 import logging
 from io import StringIO
 
-import maturin_import_hook
 import pytest
-
-maturin_import_hook.install()
 
 import bundlebase
 from conftest import datafile, random_bundle

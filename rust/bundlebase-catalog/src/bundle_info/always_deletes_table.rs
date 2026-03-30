@@ -47,8 +47,19 @@ impl BundleAlwaysDeletesTable {
     }
 
     fn build_batch(&self) -> Result<RecordBatch> {
-        let rules = self.facade()?.always_delete_rules();
+        let facade = self.facade()?;
+        let rules = facade.always_delete_rules();
 
+        // Translate internal column names back to user-visible names for display
+        let bs = facade.bundle_schema();
+        let rules: Vec<String> = rules.iter().map(|r| {
+            let mut result = r.clone();
+            for (id, name) in bs.columns() {
+                let internal = bundlebase::bundle::bundle_schema::generate_internal_name(id);
+                result = result.replace(&internal, name);
+            }
+            result
+        }).collect();
         let clauses: Vec<&str> = rules.iter().map(|s| s.as_str()).collect();
 
         let batch = RecordBatch::try_new(

@@ -8,10 +8,7 @@ which use the in-process PyO3 bridge.
 import os
 import tempfile
 
-import maturin_import_hook
 import pytest
-
-maturin_import_hook.install()
 
 import bundlebase
 from conftest import datafile, random_bundle

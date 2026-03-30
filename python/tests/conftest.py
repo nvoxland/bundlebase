@@ -7,6 +7,9 @@ import os
 # preventing full rebuilds when switching between maturin-dev.sh and cargo builds
 os.environ['CARGO_TARGET_DIR'] = 'target/maturin'
 
+import maturin_import_hook
+maturin_import_hook.install(enable_rs_file_importer=False)
+
 import bundlebase
 
 

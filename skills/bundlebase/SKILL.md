@@ -682,7 +682,15 @@ bundlebase query --bundle s3://mybucket/my-bundle --format json "SHOW COLUMNS"
 
 ### 13. Generate PDF Reports
 
-When the user asks for a report, use `generate_report` to create a PDF with tables and charts from bundle data. The input is markdown with embedded `bundlebase` YAML code blocks that reference open bundles by their identifier.
+When the user asks for a report, use `generate_report` to create a PDF. **Do NOT write static markdown tables or embed query results as text.** Instead, use ` ```bundlebase ` fenced YAML code blocks to define live queries — the report engine executes them and renders proper styled tables and charts automatically.
+
+**IMPORTANT:** Every data table and chart in the report MUST be a ` ```bundlebase ` code block with a `bundle`, `query`, and `type` field. Do not copy-paste query results into the markdown. The report engine handles:
+- Running the SQL queries against open bundles
+- Rendering tables with headers, zebra striping, and borders
+- Rendering charts (pie, bar, line, etc.) with proper styling
+- Formatting numbers and handling nulls
+
+Write the narrative text as regular markdown (headings, paragraphs, bullet points). Use ` ```bundlebase ` blocks for all data.
 
 **Available chart types:** `table`, `pie`, `bar`, `line`, `horizontal_bar`, `box_whisker`, `pyramid`, `error_bar`, `violin`
 
@@ -734,6 +742,28 @@ title: Orders by Region
 - The bundle must be open via MCP before generating the report
 - You can reference multiple different bundles in the same report
 - Surround data blocks with regular markdown for headings, commentary, and structure
+
+**Reproducibility section:** Every report MUST end with a "Data Sources" section listing all bundles referenced in the report. Before generating the report, query each bundle's details with `SHOW DETAILS` and `SELECT * FROM bundle_info.connectors` to gather this information. Include for each bundle:
+- **Path** (relative path or URL used to open it)
+- **Name** and **version**
+- **Sources** — describe each data source (connector type, URL/dataset, and what it provides)
+
+Example ending for a report:
+
+```markdown
+---
+
+## Data Sources
+
+**sales** (`./sales-data`, version a3f8c1b2)
+Sales transaction records from the CRM system.
+- *http connector:* `https://api.example.com/sales.csv` — monthly sales export
+- *kaggle connector:* `acme/product-catalog` — product reference data
+
+**regions** (`./regions`, version 7e2d4f91)
+Geographic region definitions and population data.
+- *http connector:* `https://data.census.gov/regions.csv` — Census Bureau region boundaries
+```
 
 **CLI equivalent:**
 

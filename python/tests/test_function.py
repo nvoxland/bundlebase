@@ -7,10 +7,7 @@ end-to-end Python UDF execution through the DataFusion bridge.
 
 import tempfile
 
-import maturin_import_hook
 import pytest
-
-maturin_import_hook.install()
 
 import bundlebase
 from conftest import datafile, random_bundle

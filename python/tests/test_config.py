@@ -1,9 +1,6 @@
 """E2E tests for BundleConfig functionality."""
 
-import maturin_import_hook
 import pytest
-
-maturin_import_hook.install()
 
 import bundlebase
 from conftest import random_bundle

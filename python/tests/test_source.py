@@ -9,11 +9,8 @@ import os
 import shutil
 import tempfile
 
-import maturin_import_hook
 import pyarrow as pa
 import pytest
-
-maturin_import_hook.install()
 
 import bundlebase
 from bundlebase_sdk import Connector, Location, StableUrl

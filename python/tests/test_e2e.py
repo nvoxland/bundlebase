@@ -1,13 +1,10 @@
 import os
 import tempfile
 
-import maturin_import_hook
 import polars
 import pyarrow as pa
 import pytest
 import yaml
-
-maturin_import_hook.install()
 
 import bundlebase
 from conftest import datafile, random_bundle

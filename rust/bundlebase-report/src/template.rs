@@ -54,20 +54,128 @@ pub fn template_preamble(show_branding: bool) -> String {
 /// - Italic (*text* → _text_)
 /// - Bullet lists (- → -)
 /// - Numbered lists (1. → 1.)
+/// - Horizontal rules (--- → #line)
+/// - Pipe tables (| col | col | → #table)
 pub fn markdown_to_typst(markdown: &str) -> String {
     let mut output = String::new();
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut i = 0;
 
-    for line in markdown.lines() {
-        let converted = convert_line(line);
+    while i < lines.len() {
+        // Check for markdown table: a line with pipes followed by a separator line
+        if is_table_row(lines[i]) && i + 1 < lines.len() && is_table_separator(lines[i + 1]) {
+            // Collect all contiguous table rows
+            let header = lines[i];
+            let mut data_rows = Vec::new();
+            // Skip header and separator
+            let mut j = i + 2;
+            while j < lines.len() && is_table_row(lines[j]) {
+                data_rows.push(lines[j]);
+                j += 1;
+            }
+            output.push_str(&convert_markdown_table(header, &data_rows));
+            output.push('\n');
+            i = j;
+            continue;
+        }
+
+        let converted = convert_line(lines[i]);
         output.push_str(&converted);
         output.push('\n');
+        i += 1;
     }
 
     output
 }
 
+/// Check if a line looks like a markdown table row (starts and contains pipes).
+fn is_table_row(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.len() > 1
+}
+
+/// Check if a line is a markdown table separator (|---|---|).
+fn is_table_separator(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+        return false;
+    }
+    // All cells should contain only dashes, colons, and spaces
+    trimmed[1..trimmed.len() - 1]
+        .split('|')
+        .all(|cell| {
+            let c = cell.trim();
+            !c.is_empty() && c.chars().all(|ch| ch == '-' || ch == ':')
+        })
+}
+
+/// Parse cells from a markdown table row.
+fn parse_table_cells(line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    // Strip leading and trailing pipes
+    let inner = &trimmed[1..trimmed.len() - 1];
+    inner
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
+}
+
+/// Convert a markdown pipe table to a styled Typst table.
+fn convert_markdown_table(header_line: &str, data_rows: &[&str]) -> String {
+    let headers = parse_table_cells(header_line);
+    let num_cols = headers.len();
+
+    let mut lines = Vec::new();
+
+    lines.push("#table(".to_string());
+    lines.push(format!("  columns: ({}),", vec!["auto"; num_cols].join(", ")));
+    lines.push(format!("  stroke: {},", crate::defaults::TABLE_BORDER));
+    lines.push("  inset: (x: 8pt, y: 5pt),".to_string());
+    lines.push(format!(
+        "  fill: (_, y) => if y == 0 {{ rgb(\"{}\") }} else if calc.rem(y, 2) == 0 {{ rgb(\"{}\") }},",
+        crate::defaults::TABLE_HEADER_FILL,
+        crate::defaults::TABLE_ZEBRA_COLOR,
+    ));
+
+    // Header row
+    lines.push("  table.header(".to_string());
+    for h in &headers {
+        lines.push(format!("    [*{}*],", escape_typst(h)));
+    }
+    lines.push("  ),".to_string());
+
+    // Data rows
+    for row in data_rows {
+        let cells = parse_table_cells(row);
+        for cell in &cells {
+            lines.push(format!("  [{}],", escape_typst(cell)));
+        }
+    }
+
+    lines.push(")".to_string());
+    lines.join("\n")
+}
+
+/// Escape special Typst characters in text content.
+fn escape_typst(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('#', "\\#")
+        .replace('$', "\\$")
+        .replace('@', "\\@")
+        .replace('<', "\\<")
+        .replace('>', "\\>")
+}
+
 /// Convert a single markdown line to Typst.
 fn convert_line(line: &str) -> String {
+    // Horizontal rule: --- or *** or ___ → Typst line
+    let trimmed = line.trim();
+    if (trimmed == "---" || trimmed == "***" || trimmed == "___")
+        || (trimmed.len() >= 3 && trimmed.chars().all(|c| c == '-'))
+    {
+        return "#line(length: 100%, stroke: 0.5pt + rgb(\"#cccccc\"))".to_string();
+    }
+
     // Headings: # → =
     if let Some(rest) = line.strip_prefix("##### ") {
         return format!("===== {}", convert_inline(rest));
@@ -222,5 +330,38 @@ mod tests {
         assert!(result.contains("*bold*"));
         assert!(result.contains("_italic_"));
         assert!(result.contains("- bullet"));
+    }
+
+    #[test]
+    fn test_horizontal_rule() {
+        assert!(convert_line("---").contains("#line("));
+        assert!(convert_line("***").contains("#line("));
+    }
+
+    #[test]
+    fn test_markdown_table_conversion() {
+        let md = "| Name | Age |\n|------|-----|\n| Alice | 30 |\n| Bob | 25 |";
+        let result = markdown_to_typst(md);
+        assert!(result.contains("#table("), "Should contain Typst table");
+        assert!(result.contains("[*Name*]"), "Should have bold header");
+        assert!(result.contains("[*Age*]"), "Should have bold header");
+        assert!(result.contains("[Alice]"), "Should have data cell");
+        assert!(result.contains("[30]"), "Should have data cell");
+        assert!(result.contains("table.header("), "Should have header section");
+    }
+
+    #[test]
+    fn test_table_separator_detection() {
+        assert!(is_table_separator("|------|-----|"));
+        assert!(is_table_separator("| --- | --- |"));
+        assert!(is_table_separator("|:---:|---:|"));
+        assert!(!is_table_separator("| data | data |"));
+        assert!(!is_table_separator("not a table"));
+    }
+
+    #[test]
+    fn test_angle_bracket_escaping() {
+        assert_eq!(convert_inline("x < 5"), "x \\< 5");
+        assert_eq!(convert_inline("x > 5"), "x \\> 5");
     }
 }

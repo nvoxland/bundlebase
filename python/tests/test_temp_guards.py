@@ -8,10 +8,7 @@ Verifies that:
 - fetch fails with helpful message when connector is missing after reopen
 """
 
-import maturin_import_hook
 import pytest
-
-maturin_import_hook.install()
 
 import bundlebase
 from conftest import datafile, random_bundle
