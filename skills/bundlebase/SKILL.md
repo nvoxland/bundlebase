@@ -39,16 +39,26 @@ This installs the `bundlebase` CLI command.
 
 ## Choosing CLI vs MCP Mode
 
-Bundlebase offers two agent-friendly modes:
+**Check if bundlebase MCP tools are available before deciding which mode to use.**
 
-**MCP mode (`bundlebase mcp`)** — **Always prefer MCP when the server is configured.** It keeps bundles open across calls, preserving cache and state, supports multiple bundles simultaneously, and gives better performance and feedback for any workflow.
+Bundlebase has two modes: CLI commands (run via shell) and MCP tools (direct function calls like `mcp__bundlebase__query`). Both work, but they have different strengths.
 
-**CLI mode** — Only use for true one-off operations where you don't need to interact with the bundle again:
+**Decision rule:**
+1. **Single operation** (one query, one rename, one attach) → **CLI is fine.** It's simple and self-contained.
+2. **Multi-step work** (exploration, analysis, building up a bundle) → **Use MCP if available.** MCP keeps bundles open with cached state across calls — no re-opening, no shell overhead, and you can hold multiple bundles open simultaneously.
+3. **MCP tools not available** → use CLI for everything.
 
-- `bundlebase list-bundles` — discover bundles in a directory
-- `bundlebase query` — a single read-only query
-- `bundlebase create` — create a new bundle with initial data
-- `bundlebase extend` — a single mutation (auto-commits after each call)
+**Use CLI for:**
+- `bundlebase list-bundles` to discover bundles in a directory
+- A single query: `bundlebase query --bundle ./data "SELECT COUNT(*) FROM bundle"`
+- A single mutation: `bundlebase extend --bundle ./data "RENAME COLUMN x TO y"`
+
+**Use MCP for:**
+- Any workflow involving more than one operation on the same bundle
+- Exploration (schema → sample → query → query → ...)
+- Data transformation (attach → rename → filter → commit)
+- Cross-bundle analysis with multiple sources open at once
+- Any iterative or analytical work
 
 **Important:** Do NOT use MCP and CLI on the same bundle simultaneously — close the MCP bundle first.
 
@@ -153,11 +163,11 @@ Query results are hard-limited to 1000 rows. Use `LIMIT` in SQL for fewer.
 
 ## MCP Mode
 
-MCP mode runs bundlebase as a Model Context Protocol server over stdio. Configure it as an MCP server in your AI assistant (Claude Code, Cursor, etc.) and the tools become available directly.
+**This is the preferred way to use bundlebase.** MCP tools are available as `mcp__bundlebase__*` function calls when the MCP server is configured. They keep bundles open across calls, preserving cache and state.
 
 ### MCP Server Configuration
 
-Add to your MCP settings (e.g., Claude Code `mcp_servers` config). No `--bundle` needed — the agent opens bundles dynamically using tools:
+Add to your MCP settings (e.g., Claude Code `mcp_servers` config):
 
 ```json
 {
@@ -172,32 +182,93 @@ Add to your MCP settings (e.g., Claude Code `mcp_servers` config). No `--bundle`
 
 Multiple bundles can be open simultaneously, each identified by a unique `bundle` name.
 
-| Tool | Parameters | Description |
+| MCP Tool Name | Parameters | Description |
 |------|------------|-------------|
-| `create_bundle` | `bundle` (string), `path` (string) | Create a new bundle with the given identifier |
-| `open_bundle` | `bundle` (string), `path` (string), `read_only` (bool, optional) | Open an existing bundle with the given identifier |
-| `close_bundle` | `bundle` (string) | Close a bundle by its identifier |
-| `list_bundles` | (none) | List all open bundles with their identifier, path, name, and description |
-| `query` | `bundle` (string), `sql` (string) | Execute any SQL query or bundlebase command. Returns JSON. 1000-row limit. |
-| `schema` | `bundle` (string) | Get column names, data types, and nullability |
-| `count` | `bundle` (string) | Get total row count |
-| `sample` | `bundle` (string), `limit` (optional, default 10) | Preview sample rows as JSON |
-| `status` | `bundle` (string) | Show uncommitted changes |
-| `history` | `bundle` (string) | Show commit history |
+| `mcp__bundlebase__create_bundle` | `bundle` (string), `path` (string) | Create a new bundle with the given identifier |
+| `mcp__bundlebase__open_bundle` | `bundle` (string), `path` (string), `read_only` (bool, optional) | Open an existing bundle with the given identifier |
+| `mcp__bundlebase__close_bundle` | `bundle` (string) | Close a bundle by its identifier |
+| `mcp__bundlebase__list_bundles` | (none) | List all open bundles with their identifier, path, name, and description |
+| `mcp__bundlebase__query` | `bundle` (string), `sql` (string) | Execute any SQL query or bundlebase command. Returns JSON. 1000-row limit. |
+| `mcp__bundlebase__schema` | `bundle` (string) | Get column names, data types, and nullability |
+| `mcp__bundlebase__count` | `bundle` (string) | Get total row count |
+| `mcp__bundlebase__sample` | `bundle` (string), `limit` (optional, default 10) | Preview sample rows as JSON |
+| `mcp__bundlebase__status` | `bundle` (string) | Show uncommitted changes |
+| `mcp__bundlebase__history` | `bundle` (string) | Show commit history |
+| `mcp__bundlebase__generate_report` | `input` (string), `output` (string), `branding` (bool, optional) | Generate a PDF report from markdown with embedded data queries and charts |
 
 The `query` tool handles everything: SELECT queries, ATTACH, DETACH, FILTER, RENAME, COMMIT, and all other bundlebase SQL commands.
 
 ### MCP Workflow Example
 
 ```
-1. Call `create_bundle` or `open_bundle` with a bundle name to load a bundle
-2. Call `schema` with the bundle name to understand the data structure
-3. Call `sample` with the bundle name to preview the data
-4. Call `query` with the bundle name and SQL to explore and transform
-5. Call `status` with the bundle name to review uncommitted changes
-6. Call `query` with the bundle name and "COMMIT 'message'" to save
-7. Call `close_bundle` with the bundle name when done
+1. mcp__bundlebase__create_bundle(bundle="sales", path="./sales-data")
+   — or mcp__bundlebase__open_bundle(bundle="sales", path="./sales-data")
+2. mcp__bundlebase__query(bundle="sales", sql="SET NAME 'Sales Data'; SET DESCRIPTION 'Q4 sales records'")
+3. mcp__bundlebase__query(bundle="sales", sql="ATTACH 'sales.csv'")
+4. mcp__bundlebase__schema(bundle="sales")
+5. mcp__bundlebase__sample(bundle="sales")
+6. mcp__bundlebase__query(bundle="sales", sql="SELECT department, COUNT(*) as cnt FROM bundle GROUP BY department")
+7. mcp__bundlebase__query(bundle="sales", sql="RENAME COLUMN fname TO first_name")
+8. mcp__bundlebase__query(bundle="sales", sql="COMMIT 'Loaded and cleaned sales data'")
+9. mcp__bundlebase__close_bundle(bundle="sales")
 ```
+
+Notice how steps 3-7 all reuse the same open bundle — no re-opening, no `--bundle` flag, no shell overhead. This is why MCP is preferred for any multi-step workflow.
+
+### Working with Multiple Bundles and Cross-Bundle Analysis
+
+MCP can hold multiple bundles open simultaneously. Use this to keep data sources separate during exploration, then combine them on demand.
+
+**Best practice: one bundle per data source during exploration.** Create a separate bundle for each data source you're pulling in. This lets you explore, clean, and understand each source independently before combining them.
+
+When you need to query across sources, create a temporary `memory://` bundle that joins the source bundles together. The `memory://` bundle exists only in memory — no files on disk — so it's perfect for ad-hoc cross-source analysis. Close it when you're done.
+
+**Multi-bundle exploration workflow:**
+
+```
+# Step 1: Create separate bundles for each data source
+mcp__bundlebase__create_bundle(bundle="customers", path="./customers")
+mcp__bundlebase__query(bundle="customers", sql="SET NAME 'Customers'; SET DESCRIPTION 'Customer records from CRM export'")
+mcp__bundlebase__query(bundle="customers", sql="ATTACH 'customers.csv'")
+mcp__bundlebase__query(bundle="customers", sql="COMMIT 'Loaded customer data'")
+
+mcp__bundlebase__create_bundle(bundle="orders", path="./orders")
+mcp__bundlebase__query(bundle="orders", sql="SET NAME 'Orders'; SET DESCRIPTION 'Order history from fulfillment system'")
+mcp__bundlebase__query(bundle="orders", sql="ATTACH 'orders.csv'")
+mcp__bundlebase__query(bundle="orders", sql="COMMIT 'Loaded order data'")
+
+# Step 2: Explore each source independently
+mcp__bundlebase__schema(bundle="customers")
+mcp__bundlebase__sample(bundle="customers")
+mcp__bundlebase__schema(bundle="orders")
+mcp__bundlebase__sample(bundle="orders")
+
+# Step 3: Create a temporary memory bundle to query across sources
+mcp__bundlebase__create_bundle(bundle="analysis", path="memory://")
+mcp__bundlebase__query(bundle="analysis", sql="ATTACH 'bundle://./customers'")
+mcp__bundlebase__query(bundle="analysis", sql="JOIN 'bundle://./orders' AS orders ON bundle.id = orders.customer_id")
+
+# Step 4: Run cross-source queries against the temporary bundle
+mcp__bundlebase__query(bundle="analysis", sql="SELECT name, COUNT(orders.order_id) as order_count, SUM(orders.total) as lifetime_value FROM bundle JOIN orders ON bundle.id = orders.customer_id GROUP BY name ORDER BY lifetime_value DESC LIMIT 20")
+
+# Step 5: Close the temporary bundle when done (nothing to commit — it's in-memory)
+mcp__bundlebase__close_bundle(bundle="analysis")
+
+# The source bundles remain open for further work
+mcp__bundlebase__query(bundle="customers", sql="RENAME COLUMN fname TO first_name")
+```
+
+**When to use this pattern:**
+- Pulling data from multiple APIs, files, or Kaggle datasets
+- Exploring how different data sources relate before deciding on a final schema
+- Running ad-hoc analytical queries that span multiple sources
+- Comparing or validating data across sources
+
+**Key points:**
+- `memory://` bundles have no disk footprint — create and discard them freely
+- `bundle://./path` references read committed data from another bundle at query time
+- Source bundles stay open and independent — changes to one don't affect others
+- If the analysis proves useful, you can create a permanent bundle with the same joins instead of using `memory://`
 
 ## Delegating Data Research
 
@@ -242,6 +313,102 @@ DROP COLUMN "column with spaces"
 ```
 
 Bare identifiers (no quotes) work for names containing only letters, digits, and underscores. Quotes are optional for such names — `RENAME COLUMN name TO new_name` and `RENAME COLUMN "name" TO "new_name"` are equivalent.
+
+## Important: Don't Drop Columns Preemptively
+
+Do NOT drop columns just because they aren't used in the current analysis. Bundles are designed for reuse — columns that seem irrelevant now may be valuable for future analysis, joins, or other users. Only drop columns when the user explicitly asks to remove them.
+
+## Operation Ordering
+
+When cleaning data, always FILTER out bad rows BEFORE adding computed columns that depend on those values. Otherwise CAST or arithmetic may fail on dirty data. Use `TRY_CAST` instead of `CAST` for defensive type conversion.
+
+```
+# BAD: computed column fails because some rows have non-numeric values
+mcp__bundlebase__query(bundle="data", sql="ADD COLUMN price_cents AS CAST(price AS DOUBLE) * 100")
+
+# GOOD: check for dirty data first
+mcp__bundlebase__query(bundle="data", sql="SELECT price, COUNT(*) as cnt FROM bundle WHERE TRY_CAST(price AS DOUBLE) IS NULL GROUP BY price")
+
+# Then filter out bad rows, then compute
+mcp__bundlebase__query(bundle="data", sql="FILTER WITH SELECT * FROM bundle WHERE TRY_CAST(price AS DOUBLE) IS NOT NULL")
+mcp__bundlebase__query(bundle="data", sql="ADD COLUMN price_cents AS CAST(price AS DOUBLE) * 100")
+```
+
+## Data Quality Checks
+
+**Always run `DESCRIBE DATA` before casting or computing on a column.** It profiles columns and reveals dirty data, sentinel values, NULLs, and type mismatches that would cause CAST failures.
+
+```
+# Profile columns to see min/max/avg/nulls/top values — do this FIRST
+mcp__bundlebase__query(bundle="data", sql="DESCRIBE DATA IN price, quantity")
+
+# Before casting a text column to a number, use DESCRIBE DATA ... AS TYPE
+# to find values that won't convert (e.g., "N/A", ">2", "10,5")
+mcp__bundlebase__query(bundle="data", sql="DESCRIBE DATA IN price AS DOUBLE")
+
+# Then fix or remove the bad values before casting (see "Cleaning Data" below)
+mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = NULL WHERE TRY_CAST(price AS DOUBLE) IS NULL")
+mcp__bundlebase__query(bundle="data", sql="CAST COLUMN price TO DOUBLE")
+```
+
+**The pattern for type conversion:**
+1. `DESCRIBE DATA IN col AS TARGET_TYPE` — find values that won't cast
+2. `UPDATE` to fix or NULL out bad values, or `DELETE` to remove bad rows
+3. `CAST COLUMN col TO TARGET_TYPE` — now safe to cast
+
+## Cleaning Data with UPDATE and DELETE
+
+Use `UPDATE` and `DELETE` for targeted data cleaning instead of rebuilding the entire bundle. These are more precise than FILTER for fixing specific issues.
+
+```
+# Fix known sentinel values
+mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = NULL WHERE price = 'N/A'")
+mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = NULL WHERE price = '-'")
+
+# Standardize formats (e.g., European decimals)
+mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = REPLACE(price, ',', '.') WHERE price LIKE '%,%'")
+
+# Trim whitespace
+mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET name = TRIM(name)")
+
+# Standardize categorical values
+mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET status = 'active' WHERE LOWER(status) IN ('active', 'act', 'a', 'yes')")
+
+# Delete rows that are clearly invalid
+mcp__bundlebase__query(bundle="data", sql="DELETE FROM bundle WHERE created_date IS NULL AND name IS NULL")
+
+# Delete duplicates (keep first occurrence)
+mcp__bundlebase__query(bundle="data", sql="DELETE FROM bundle WHERE rowid NOT IN (SELECT MIN(rowid) FROM bundle GROUP BY email)")
+
+# Use ALWAYS DELETE for rules that should apply to future data too
+mcp__bundlebase__query(bundle="data", sql="ALWAYS DELETE FROM bundle WHERE test_record = true")
+```
+
+**When to use UPDATE vs DELETE vs FILTER:**
+
+| Operation | Use when |
+|-----------|----------|
+| `UPDATE` | Fixing values in-place — standardizing formats, replacing sentinels, trimming whitespace |
+| `DELETE` | Removing specific bad rows while keeping the rest |
+| `FILTER` | Keeping only rows that match a condition (inverse of DELETE, but creates a new filtered view of all data) |
+| `ALWAYS DELETE` | A persistent rule that should also apply to data attached in the future |
+
+## Shell Escaping
+
+When using CLI mode in zsh, `!` in double-quoted strings is expanded by the shell. Use `<>` instead of `!=` in SQL, or wrap the SQL in single quotes:
+
+```bash
+# BAD: zsh expands ! in double quotes
+bundlebase query --bundle ./data "SELECT * FROM bundle WHERE status != 'active'"
+
+# GOOD: use <> operator instead
+bundlebase query --bundle ./data "SELECT * FROM bundle WHERE status <> 'active'"
+
+# GOOD: use single quotes (but then escape inner single quotes)
+bundlebase query --bundle ./data 'SELECT * FROM bundle WHERE status != '"'"'active'"'"''
+```
+
+This is not an issue in MCP mode — another reason to prefer MCP for complex queries.
 
 ## Common Mistakes to Avoid
 
@@ -295,16 +462,38 @@ bundlebase query --bundle ./analysis --format json "SELECT department, COUNT(*) 
 
 ### 2. Clean and Transform Data
 
+**MCP workflow (preferred for multi-step cleaning):**
+
+```
+# Step 1: Profile the data to understand what needs cleaning
+mcp__bundlebase__query(bundle="data", sql="DESCRIBE DATA IN price, status, email")
+
+# Step 2: Check columns before casting — find values that won't convert
+mcp__bundlebase__query(bundle="data", sql="DESCRIBE DATA IN price AS DOUBLE")
+
+# Step 3: Fix bad values with UPDATE
+mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = NULL WHERE price IN ('N/A', '-', '')")
+mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = REPLACE(price, ',', '.') WHERE price LIKE '%,%'")
+mcp__bundlebase__query(bundle="data", sql="COMMIT 'Fixed price column values'")
+
+# Step 4: Now safe to cast
+mcp__bundlebase__query(bundle="data", sql="CAST COLUMN price TO DOUBLE")
+
+# Step 5: Delete bad rows
+mcp__bundlebase__query(bundle="data", sql="DELETE FROM bundle WHERE email IS NULL AND name IS NULL")
+
+# Step 6: Rename and add computed columns
+mcp__bundlebase__query(bundle="data", sql="RENAME COLUMN fname TO first_name")
+mcp__bundlebase__query(bundle="data", sql="RENAME COLUMN lname TO last_name")
+mcp__bundlebase__query(bundle="data", sql="ADD COLUMN full_name AS first_name || ' ' || last_name")
+mcp__bundlebase__query(bundle="data", sql="COMMIT 'Cleaned and standardized columns'")
+```
+
+**CLI equivalent (for simple one-off changes):**
+
 ```bash
-# Drop unnecessary columns and rename others (committed together)
-bundlebase extend --bundle ./clean -m "Removed internal columns" "DROP COLUMN internal_id; DROP COLUMN debug_notes"
 bundlebase extend --bundle ./clean -m "Standardized names" "RENAME COLUMN fname TO first_name; RENAME COLUMN lname TO last_name"
-
-# Add a computed column
-bundlebase extend --bundle ./clean "ADD COLUMN full_name first_name || ' ' || last_name"
-
-# Filter out bad data
-bundlebase extend --bundle ./clean -m "Removed rows without email" "FILTER WITH SELECT * FROM bundle WHERE email IS NOT NULL"
+bundlebase extend --bundle ./clean "ADD COLUMN full_name AS first_name || ' ' || last_name"
 ```
 
 ### 3. Join Multiple Data Sources
@@ -341,18 +530,51 @@ bundlebase extend --bundle ./multi "REPLACE 'data.csv' WITH 'data_v2.csv'"
 bundlebase extend --bundle ./multi "DETACH 'extra.json'"
 ```
 
-### 5. Create Views for Reusable Queries
+### 5. Save Useful Queries as Views
+
+When you discover an interesting or potentially reusable transformation during exploration, save it as a view. Views are named queries stored in the bundle — they don't duplicate data, but let you (or future users/agents) reuse the transformation without remembering the SQL.
+
+**When to create a view:**
+- You've written a query that filters, aggregates, or reshapes data in a useful way
+- You find yourself running the same query pattern repeatedly
+- You want to capture a meaningful subset of the data for others to use
+- You've built a complex join or transformation that would be hard to reconstruct
+
+**MCP example — exploratory workflow that leads to views:**
+
+```
+# Exploring sales data...
+mcp__bundlebase__query(bundle="sales", sql="SELECT region, COUNT(*) as orders, SUM(total) as revenue FROM bundle GROUP BY region ORDER BY revenue DESC")
+# ^ This is useful — save it as a view
+
+mcp__bundlebase__query(bundle="sales", sql="CREATE VIEW revenue_by_region AS SELECT region, COUNT(*) as orders, SUM(total) as revenue FROM bundle GROUP BY region")
+
+# Now you or any future agent can just query the view
+mcp__bundlebase__query(bundle="sales", sql="SELECT * FROM revenue_by_region WHERE revenue > 100000")
+
+# Create more views as you find useful slices
+mcp__bundlebase__query(bundle="sales", sql="CREATE VIEW active_customers AS SELECT * FROM bundle WHERE last_order_date > '2025-01-01'")
+mcp__bundlebase__query(bundle="sales", sql="CREATE VIEW high_value_orders AS SELECT * FROM bundle WHERE total > 500")
+
+# Views compose — query one view from another
+mcp__bundlebase__query(bundle="sales", sql="SELECT region, AVG(total) FROM high_value_orders GROUP BY region")
+
+# List existing views
+mcp__bundlebase__query(bundle="sales", sql="SHOW VIEWS")
+
+# Commit to persist the views
+mcp__bundlebase__query(bundle="sales", sql="COMMIT 'Added analytical views'")
+
+# Drop a view if no longer needed
+mcp__bundlebase__query(bundle="sales", sql="DROP VIEW high_value_orders")
+```
+
+**CLI equivalent:**
 
 ```bash
-# Create named views
 bundlebase extend --bundle ./reports "CREATE VIEW active_users AS SELECT * FROM bundle WHERE status = 'active'"
-bundlebase extend --bundle ./reports "CREATE VIEW high_value AS SELECT * FROM bundle WHERE lifetime_value > 10000"
-
-# Query views like tables
 bundlebase query --bundle ./reports --format json "SELECT * FROM active_users LIMIT 5"
-
-# Drop a view
-bundlebase extend --bundle ./reports "DROP VIEW high_value"
+bundlebase extend --bundle ./reports "DROP VIEW active_users"
 ```
 
 ### 6. Full-Text Search
@@ -456,6 +678,67 @@ bundlebase query --bundle s3://mybucket/my-bundle --format json "SELECT COUNT(*)
 
 # Read-only schema check
 bundlebase query --bundle s3://mybucket/my-bundle --format json "SHOW COLUMNS"
+```
+
+### 13. Generate PDF Reports
+
+When the user asks for a report, use `generate_report` to create a PDF with tables and charts from bundle data. The input is markdown with embedded `bundlebase` YAML code blocks that reference open bundles by their identifier.
+
+**Available chart types:** `table`, `pie`, `bar`, `line`, `horizontal_bar`, `box_whisker`, `pyramid`, `error_bar`, `violin`
+
+**MCP example — generate a sales report:**
+
+```
+# First, make sure the bundle is open
+mcp__bundlebase__open_bundle(bundle="sales", path="./sales-data")
+
+# Generate a PDF report with tables and charts
+mcp__bundlebase__generate_report(
+  output="sales-report.pdf",
+  input="""
+# Q4 Sales Report
+
+## Revenue by Region
+
+```bundlebase
+bundle: sales
+query: "SELECT region, SUM(revenue) as total_revenue FROM bundle GROUP BY region ORDER BY total_revenue DESC"
+type: bar
+title: Revenue by Region
+```
+
+## Top 10 Customers
+
+```bundlebase
+bundle: sales
+query: "SELECT name, SUM(total) as lifetime_value FROM bundle GROUP BY name ORDER BY lifetime_value DESC LIMIT 10"
+type: table
+title: Top Customers by Lifetime Value
+```
+
+## Order Distribution
+
+```bundlebase
+bundle: sales
+query: "SELECT region, COUNT(*) as order_count FROM bundle GROUP BY region"
+type: pie
+title: Orders by Region
+```
+"""
+)
+```
+
+**Key points:**
+- Each `bundlebase` code block needs: `bundle` (identifier of an open bundle), `query` (SQL), and `type` (table or chart type)
+- Add an optional `title` for labeling
+- The bundle must be open via MCP before generating the report
+- You can reference multiple different bundles in the same report
+- Surround data blocks with regular markdown for headings, commentary, and structure
+
+**CLI equivalent:**
+
+```bash
+bundlebase generate-report --input report.md --output report.pdf --bundle sales=./sales-data
 ```
 
 ## Fetching External Data with Connectors
@@ -663,7 +946,32 @@ bundlebase query --bundle s3://team-bucket/shared-analysis --format json "SHOW C
 
 ## SQL Reference Summary
 
-The table name for bundle data is always `bundle`. Standard SQL (Apache DataFusion syntax) is supported for SELECT queries.
+The table name for bundle data is always `bundle`. Bundlebase uses **Apache DataFusion** as its SQL engine, so all standard DataFusion SQL syntax is supported. If you already know DataFusion's functions and syntax, use them directly. For reference, see the [DataFusion SQL documentation](https://datafusion.apache.org/user-guide/sql/index.html).
+
+**Statistical and analytical functions** — DataFusion includes many built-in aggregate and statistical functions. Do NOT fall back to Python/pandas for analysis that SQL can handle. Key functions include:
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `CORR(x, y)` | Pearson correlation coefficient | `SELECT CORR(price, sqft) FROM bundle` |
+| `COVAR_POP(x, y)` | Population covariance | `SELECT COVAR_POP(x, y) FROM bundle` |
+| `COVAR_SAMP(x, y)` | Sample covariance | `SELECT COVAR_SAMP(x, y) FROM bundle` |
+| `STDDEV(x)` / `STDDEV_SAMP(x)` | Sample standard deviation | `SELECT STDDEV(price) FROM bundle` |
+| `STDDEV_POP(x)` | Population standard deviation | `SELECT STDDEV_POP(price) FROM bundle` |
+| `VAR_POP(x)` / `VAR_SAMP(x)` | Variance | `SELECT VAR_POP(score) FROM bundle` |
+| `MEDIAN(x)` | Median value | `SELECT MEDIAN(price) FROM bundle` |
+| `APPROX_PERCENTILE_CONT(x, p)` | Approximate percentile | `SELECT APPROX_PERCENTILE_CONT(price, 0.95) FROM bundle` |
+| `REGR_SLOPE(y, x)` | Linear regression slope | `SELECT REGR_SLOPE(price, sqft) FROM bundle` |
+| `REGR_INTERCEPT(y, x)` | Linear regression intercept | `SELECT REGR_INTERCEPT(price, sqft) FROM bundle` |
+| `REGR_R2(y, x)` | R-squared | `SELECT REGR_R2(price, sqft) FROM bundle` |
+
+**Window functions** are also supported for ranking, running totals, and moving averages:
+
+```sql
+SELECT name, revenue,
+  RANK() OVER (ORDER BY revenue DESC) as rank,
+  SUM(revenue) OVER (ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) as rolling_7day
+FROM bundle
+```
 
 **String quoting in SQL:** Use single quotes for string values. To include a literal single quote, double it: `'O''Brien'`. Example: `COMMIT 'Added O''Brien data'`.
 

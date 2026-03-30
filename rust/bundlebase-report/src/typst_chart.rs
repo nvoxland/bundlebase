@@ -723,6 +723,8 @@ fn escape_typst(s: &str) -> String {
         .replace('#', "\\#")
         .replace('$', "\\$")
         .replace('@', "\\@")
+        .replace('<', "\\<")
+        .replace('>', "\\>")
 }
 
 #[cfg(test)]
@@ -812,6 +814,7 @@ mod tests {
     #[test]
     fn test_escape_typst() {
         assert_eq!(escape_typst("hello #world $100"), "hello \\#world \\$100");
+        assert_eq!(escape_typst("x < 5 and y > 10"), "x \\< 5 and y \\> 10");
     }
 
     #[test]

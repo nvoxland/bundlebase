@@ -136,6 +136,8 @@ fn convert_inline(text: &str) -> String {
             '#' => result.push_str("\\#"),
             '$' => result.push_str("\\$"),
             '@' => result.push_str("\\@"),
+            '<' => result.push_str("\\<"),
+            '>' => result.push_str("\\>"),
             _ => result.push(chars[i]),
         }
         i += 1;

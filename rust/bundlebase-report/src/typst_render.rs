@@ -42,6 +42,7 @@ pub fn assemble_document(elements: &[ResolvedElement], show_branding: bool) -> S
 pub fn compile_to_pdf(typst_source: &str) -> Result<Vec<u8>, BundlebaseError> {
     let engine = TypstEngine::builder()
         .main_file(typst_source)
+        .search_fonts_with(typst_as_lib::typst_kit_options::TypstKitFontOptions::default())
         .with_package_file_resolver()
         .build();
 

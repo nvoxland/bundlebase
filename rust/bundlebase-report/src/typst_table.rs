@@ -155,6 +155,8 @@ fn escape_typst(s: &str) -> String {
         .replace('#', "\\#")
         .replace('$', "\\$")
         .replace('@', "\\@")
+        .replace('<', "\\<")
+        .replace('>', "\\>")
 }
 
 #[cfg(test)]

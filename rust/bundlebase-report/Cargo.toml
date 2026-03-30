@@ -9,7 +9,7 @@ bundlebase-common = { workspace = true }
 bundlebase = { path = "../bundlebase" }
 
 # Typst PDF generation
-typst-as-lib = { version = "0.15", features = ["packages", "ureq"] }
+typst-as-lib = { version = "0.15", features = ["packages", "ureq", "typst-kit-fonts", "typst-kit-embed-fonts"] }
 typst-pdf = "0.14"
 typst = "0.14"
 
