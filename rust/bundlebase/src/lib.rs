@@ -3,6 +3,7 @@ extern crate core;
 
 // Internal aliases for bundlebase-common modules (crate-private)
 pub(crate) use bundlebase_common::*;
+pub use bundlebase_common::BundlebaseError;
 pub use bundlebase_common::impl_dyn_command_response;
 pub(crate) use bundlebase_common::arrow_types;
 pub(crate) use bundlebase_common::namespaced_name;

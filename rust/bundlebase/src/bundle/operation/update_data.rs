@@ -4,7 +4,7 @@
 //! updated values. The actual value merging happens at scan time in
 //! `DataBlock::scan()`, not in `apply_dataframe()`.
 
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::bundle::update_overlay;
 use crate::{Bundle, BundlebaseError};
@@ -99,7 +99,7 @@ impl Operation for UpdateDataOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        _bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         // No-op: overlay merging happens at the DataBlock scan level
         Ok(df)

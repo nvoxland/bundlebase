@@ -15,7 +15,7 @@
 //! SELECT * FROM search('query')
 //! ```
 
-use crate::bundle::column_metadata;
+use crate::bundle::bundle_schema;
 use crate::bundle::{AnyOperation, BundleFacade, Operation, Pack};
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId};
 use crate::index::TextIndex;
@@ -172,6 +172,7 @@ impl TableFunctionImpl for SearchTableFunction {
             data_dir,
             config,
             packs,
+            bundle_schema: facade.bundle_schema(),
             operations: facade.operations(),
         }))
     }
@@ -186,6 +187,7 @@ struct SearchResultTableProvider {
     data_dir: Arc<dyn crate::io::IOReadWriteDir>,
     config: Arc<crate::BundleConfig>,
     packs: HashMap<ObjectId, Arc<Pack>>,
+    bundle_schema: bundle_schema::BundleSchema,
     operations: Vec<AnyOperation>,
 }
 
@@ -199,16 +201,10 @@ impl std::fmt::Debug for SearchResultTableProvider {
 }
 
 impl SearchResultTableProvider {
-    /// Returns the unified physical schema derived from all AttachBlock operations,
-    /// plus the corresponding column IDs.
-    fn physical_schema_and_ids(&self) -> (SchemaRef, Vec<crate::object_id::ColumnId>) {
-        column_metadata::unified_physical_schema(&self.operations)
-    }
-
     /// Returns the physical schema plus `_score` column.
     /// This is the schema of raw search result batches before operations are applied.
     fn physical_output_schema(&self) -> SchemaRef {
-        let (physical, _) = self.physical_schema_and_ids();
+        let physical = self.bundle_schema.physical_schema();
         let mut fields: Vec<Arc<Field>> = physical.fields().iter().cloned().collect();
         fields.push(Arc::new(Field::new("_score", DataType::Float64, false)));
         Arc::new(Schema::new(fields))
@@ -229,21 +225,17 @@ impl SearchResultTableProvider {
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
             let mut df = ctx.table("bundle").await?;
 
-            let mut col_names = column_metadata::initial_column_names(&self.operations);
+            let mut bundle_schema = bundle_schema::BundleSchema::initial(&self.operations);
             for op in self.operations.iter() {
                 df = op
-                    .apply_dataframe(df, ctx.clone().into(), &mut col_names)
+                    .apply_dataframe(df, ctx.clone().into(), &mut bundle_schema)
                     .await
                     .map_err(|e| DataFusionError::External(e))?;
             }
 
-            // Final rename: col_<id> → user-visible names
-            for (id, user_name) in &col_names {
-                let col_name = column_metadata::col_id_name(id);
-                if df.schema().has_column_with_unqualified_name(&col_name) {
-                    df = df.with_column_renamed(&col_name, user_name)?;
-                }
-            }
+            // Final rename: internal names → user-visible names
+            df = bundle_schema.rename_to_real_names(df)
+                .map_err(|e| DataFusionError::External(e))?;
 
             Ok::<_, DataFusionError>(Arc::new(df.schema().as_arrow().clone()))
         });
@@ -254,32 +246,30 @@ impl SearchResultTableProvider {
         })
     }
 
-    /// Rewrite user-visible field names in a search query to col_<id> field names.
-    /// The text index stores fields using stable col_<id> names, so queries like
-    /// "Company:group" need to be rewritten to "col_<id>:group".
+    /// Rewrite user-visible field names in a search query to internal names.
+    /// The text index stores fields using stable internal names, so queries like
+    /// "Company:group" need to be rewritten to "col_<hex>:group".
     fn rewrite_query_fields(&self, query: &str) -> String {
         let index_column_ids = self.index_def.column_ids();
 
-        let id_to_current = column_metadata::resolved_column_names(&self.operations);
-
-        // Map user-visible name → col_<id> name for indexed columns
-        let mut user_to_col_id: HashMap<String, String> = HashMap::new();
+        // Map user-visible name → internal name for indexed columns
+        let mut user_to_internal_name: HashMap<String, String> = HashMap::new();
         for col_id in index_column_ids.iter() {
-            if let Some(current_name) = id_to_current.get(col_id) {
-                let col_id_name = column_metadata::col_id_name(col_id);
-                user_to_col_id.insert(current_name.clone(), col_id_name);
+            if let Some(current_name) = self.bundle_schema.get(col_id) {
+                let internal_name = self.bundle_schema.internal_name(col_id).expect("column ID from schema");
+                user_to_internal_name.insert(current_name.clone(), internal_name);
             }
         }
 
-        if user_to_col_id.is_empty() {
+        if user_to_internal_name.is_empty() {
             return query.to_string();
         }
 
         let mut result = query.to_string();
-        for (user_name, col_id_name) in &user_to_col_id {
+        for (user_name, internal_name) in &user_to_internal_name {
             result = result.replace(
                 &format!("{}:", user_name),
-                &format!("{}:", col_id_name),
+                &format!("{}:", internal_name),
             );
         }
         result
@@ -415,6 +405,7 @@ impl TableProvider for SearchResultTableProvider {
             block_id_to_ref: Arc::new(block_id_to_ref),
             packs: self.packs.clone(),
             ctx: self.ctx.clone(),
+            bundle_schema: self.bundle_schema.clone(),
             operations: self.operations.clone(),
             fetch: limit,
         };
@@ -455,6 +446,7 @@ struct SearchDataSource {
     block_id_to_ref: Arc<HashMap<BlockId, u16>>,
     packs: HashMap<ObjectId, Arc<Pack>>,
     ctx: Arc<datafusion::prelude::SessionContext>,
+    bundle_schema: bundle_schema::BundleSchema,
     /// Operations to apply to raw search results to produce logical output.
     operations: Vec<AnyOperation>,
     fetch: Option<usize>,
@@ -493,6 +485,7 @@ impl DataSource for SearchDataSource {
         let block_id_to_ref = self.block_id_to_ref.clone();
         let ctx = self.ctx.clone();
         let projection = self.projection.clone();
+        let bundle_schema = self.bundle_schema.clone();
         let operations = self.operations.clone();
 
         let matching_block_refs = self.matching_block_refs.clone();
@@ -527,9 +520,9 @@ impl DataSource for SearchDataSource {
 
             // Build a mapping from ColumnId → position in unified schema.
             // With shared ColumnIds across blocks, we can align by ID directly.
-            let (_, unified_column_ids) = column_metadata::unified_physical_schema(&operations);
+            let physical_col_ids = bundle_schema.physical_column_ids();
             let num_physical_cols = physical_output_schema.fields().len() - 1;
-            let unified_id_to_pos: HashMap<crate::object_id::ColumnId, usize> = unified_column_ids
+            let unified_id_to_pos: HashMap<crate::object_id::ColumnId, usize> = physical_col_ids
                 .iter()
                 .enumerate()
                 .map(|(i, id)| (*id, i))
@@ -633,23 +626,19 @@ impl DataSource for SearchDataSource {
                 let mut df = op_ctx.table("bundle").await?;
 
                 // Apply each operation to transform the data
-                let mut col_names = column_metadata::initial_column_names(&operations);
+                let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
                 for op in operations.iter() {
                     df = op
-                        .apply_dataframe(df, op_ctx.clone().into(), &mut col_names)
+                        .apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema)
                         .await
                         .map_err(|e: crate::BundlebaseError| {
                             DataFusionError::External(e)
                         })?;
                 }
 
-                // Final rename: col_<id> → user-visible names
-                for (id, user_name) in &col_names {
-                    let col_name = column_metadata::col_id_name(id);
-                    if df.schema().has_column_with_unqualified_name(&col_name) {
-                        df = df.with_column_renamed(&col_name, user_name)?;
-                    }
-                }
+                // Final rename: internal names → user-visible names
+                df = bundle_schema.rename_to_real_names(df)
+                    .map_err(|e| DataFusionError::External(e))?;
 
                 let result_batches: Vec<RecordBatch> = df
                     .collect()

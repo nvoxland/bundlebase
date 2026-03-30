@@ -3,7 +3,7 @@
 //! `DeleteOp` stores only the tombstone filename. The actual row exclusion
 //! happens at scan time in `DataBlock::scan()`, not in `apply_dataframe()`.
 
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::bundle::tombstone;
 use crate::object_id::ObjectId;
@@ -106,7 +106,7 @@ impl Operation for DeleteOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        _bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         // No-op: deleted row filtering happens at the DataBlock/reader scan level,
         // before operations are applied to the DataFrame.

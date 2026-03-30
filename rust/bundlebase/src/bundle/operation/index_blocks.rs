@@ -1,4 +1,4 @@
-use crate::bundle::column_metadata;
+use crate::bundle::bundle_schema;
 use crate::bundle::operation::{AnyOperation, Operation};
 use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
@@ -8,7 +8,7 @@ use crate::index::{
 };
 use crate::object_id::ColumnId;
 use crate::progress::ProgressScope;
-use crate::{Bundle, BundleBuilder, BundlebaseError};
+use crate::{Bundle, BundleBuilder, BundleFacade, BundlebaseError};
 use arrow::record_batch::RecordBatch;
 use arrow_schema::{DataType, SchemaRef};
 use bytes::Bytes;
@@ -204,13 +204,12 @@ impl IndexBlocksOp {
         let operations = builder.bundle().operations.read().clone();
 
         // Check if any indexed column is computed
-        let is_computed = column_ids.iter().any(|id| {
-            column_metadata::is_computed_column(&operations, id)
-        });
+        let bs = builder.bundle_schema();
+        let is_computed = column_ids.iter().any(|id| bs.is_computed(id));
 
-        // Use stable col_<id> names — these match the DataBlock schema
+        // Use stable internal names — these match the DataBlock schema
         let columns: Vec<String> = column_ids.iter()
-            .map(|id| column_metadata::col_id_name(id))
+            .map(|id| bundle_schema::generate_internal_name(id))
             .collect();
 
         // Dispatch to appropriate index building method
@@ -412,11 +411,11 @@ impl IndexBlocksOp {
 
             // Find column indices for all text columns
             let mut col_indices = Vec::new();
-            for col_name in text_columns {
-                let (col_idx, field) = schema.column_with_name(col_name).ok_or_else(|| {
+            for internal_name in text_columns {
+                let (col_idx, field) = schema.column_with_name(internal_name).ok_or_else(|| {
                     BundlebaseError::from(format!(
                         "Column '{}' not found in block {}",
-                        col_name, block_id,
+                        internal_name, block_id,
                     ))
                 })?;
 
@@ -426,7 +425,7 @@ impl IndexBlocksOp {
                     other => {
                         return Err(BundlebaseError::from(format!(
                             "Text index requires string column, but '{}' in block {} has type {:?}",
-                            col_name, block_id, other
+                            internal_name, block_id, other
                         )));
                     }
                 }
@@ -548,10 +547,10 @@ impl IndexBlocksOp {
                 .map_err(|e| DataFusionError::External(Box::new(e)))?;
             let mut df = ctx.table("bundle").await?;
 
-            let mut col_names = column_metadata::initial_column_names(&operations);
+            let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
             for op in operations.iter() {
                 df = op
-                    .apply_dataframe(df, ctx.clone().into(), &mut col_names)
+                    .apply_dataframe(df, ctx.clone().into(), &mut bundle_schema)
                     .await
                     .map_err(|e| DataFusionError::External(e))?;
             }
@@ -581,7 +580,7 @@ impl IndexBlocksOp {
     /// Apply all operations to a raw batch and extract the computed column values.
     ///
     /// Returns the result batches containing only the target column.
-    /// The input batch has physical column names; this method renames to `col_<id>`
+    /// The input batch has physical column names; this method renames to internal names
     /// before applying operations.
     async fn apply_ops_to_batch(
         batch: &RecordBatch,
@@ -590,14 +589,14 @@ impl IndexBlocksOp {
         ctx: &SessionContext,
         column_ids: &[ColumnId],
     ) -> Result<Vec<RecordBatch>, BundlebaseError> {
-        // Rename batch columns from physical names to col_<id> names
+        // Rename batch columns from physical names to internal names
         let schema = batch.schema();
         let id_fields: Vec<std::sync::Arc<arrow_schema::Field>> = schema
             .fields()
             .iter()
             .zip(column_ids.iter())
             .map(|(field, col_id)| {
-                std::sync::Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+                std::sync::Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
             })
             .collect();
         let id_schema = std::sync::Arc::new(arrow_schema::Schema::new_with_metadata(
@@ -621,9 +620,9 @@ impl IndexBlocksOp {
             .await
             .map_err(|e| BundlebaseError::from(format!("Failed to get table: {}", e)))?;
 
-        let mut col_names = column_metadata::initial_column_names(&operations);
+        let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
         for op in operations.iter() {
-            df = op.apply_dataframe(df, op_ctx.clone().into(), &mut col_names).await?;
+            df = op.apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema).await?;
         }
 
         // .collect() is acceptable here: operates on a single block's batch, not the full dataset
@@ -809,14 +808,14 @@ impl IndexBlocksOp {
                 let batch = &rowid_batch.batch;
                 let row_ids = &rowid_batch.row_ids;
 
-                // Rename batch columns from physical names to col_<id>
+                // Rename batch columns from physical names to internal names
                 let phys_schema = batch.schema();
                 let id_fields: Vec<std::sync::Arc<arrow_schema::Field>> = phys_schema
                     .fields()
                     .iter()
                     .zip(block.column_ids().iter())
                     .map(|(field, col_id)| {
-                        std::sync::Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+                        std::sync::Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
                     })
                     .collect();
                 let id_schema = std::sync::Arc::new(arrow_schema::Schema::new_with_metadata(
@@ -843,9 +842,9 @@ impl IndexBlocksOp {
                     BundlebaseError::from(format!("Failed to get table: {}", e))
                 })?;
 
-                let mut col_names = column_metadata::initial_column_names(&operations);
+                let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
                 for op in operations.iter() {
-                    df = op.apply_dataframe(df, op_ctx.clone().into(), &mut col_names).await?;
+                    df = op.apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema).await?;
                 }
 
                 let col_refs: Vec<&str> = text_columns.iter().map(|s| s.as_str()).collect();

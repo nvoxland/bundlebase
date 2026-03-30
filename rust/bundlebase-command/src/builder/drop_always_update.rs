@@ -5,7 +5,6 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
-use bundlebase::bundle::column_metadata;
 use bundlebase::bundle::BundleFacade;
 use bundlebase::bundle::operation::DropAlwaysUpdateOp;
 
@@ -90,11 +89,11 @@ impl BundleBuilderCommand for DropAlwaysUpdateCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        // Translate user-visible column names to stable col_<id> references
+        // Translate user-visible column names to stable internal name references
         // so the rule text matches the stored rule format.
         let translated = self.rule_text.as_ref().map(|rt| {
-            let col_names = builder.column_names();
-            column_metadata::translate_sql_to_col_ids(rt, &col_names)
+            let bundle_schema = builder.bundle_schema();
+            bundle_schema.translate_sql(rt)
         });
 
         let op = DropAlwaysUpdateOp::new(translated.clone());

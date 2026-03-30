@@ -1,5 +1,4 @@
-use super::column_lineage::{analyze_column_sources, ColumnSource};
-use super::column_metadata::ColumnNames;
+use super::bundle_schema::BundleSchema;
 use super::operation::BundleChange;
 use crate::bundle::BundleCommit;
 use crate::bundle::BundleStatus;
@@ -49,35 +48,41 @@ pub trait BundleFacade: Send + Sync {
     /// All operations applied to this bundle
     fn operations(&self) -> Vec<AnyOperation>;
 
-    /// Returns the fully-resolved column ID -> name map after all operations.
-    fn column_names(&self) -> ColumnNames;
+    /// Returns the full BundleSchema with column registry and cached schemas.
+    fn bundle_schema(&self) -> BundleSchema;
 
     /// Resolve a column name to its ColumnId using the current operations.
     fn column_id(&self, name: &str) -> Option<ColumnId> {
-        self.column_names()
-            .iter()
-            .find(|(_, n)| n.as_str() == name)
-            .map(|(id, _)| *id)
+        self.bundle_schema().column_id(name)
     }
 
     /// Resolve a ColumnId to its current column name using the current operations.
     fn column_name(&self, id: &ColumnId) -> Option<String> {
-        self.column_names().get(id).cloned()
+        self.bundle_schema().column_name(id)
     }
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError>;
 
-    /// Get the physical source (pack name, column name) for a logical column.
+    /// Returns the schema with internal column names instead of user-visible names.
     ///
-    /// Traces a column back to its origin pack, accounting for renames and joins.
-    /// Returns `None` for computed columns or columns that don't map to a single source.
-    async fn get_column_source(
-        &self,
-        logical_name: &str,
-    ) -> Result<Option<ColumnSource>, BundlebaseError> {
+    /// Uses the BundleSchema's cached internal schema if available,
+    /// otherwise computes it from the user-visible schema and column registry.
+    async fn internal_schema(&self) -> Result<SchemaRef, BundlebaseError> {
+        let bs = self.bundle_schema();
+        if let Some(cached) = bs.internal_schema() {
+            return Ok(cached);
+        }
+        // Fallback: compute from schema + column_names
+        use super::bundle_schema;
         let schema = self.schema().await?;
-        let sources = analyze_column_sources(&schema, &self.packs());
-        Ok(sources.get(logical_name).cloned())
+        let col_id_fields: Vec<Arc<arrow_schema::Field>> = schema.fields().iter().filter_map(|f| {
+            bs.iter()
+                .find(|(_, name)| name.as_str() == f.name())
+                .map(|(id, _)| {
+                    Arc::new(f.as_ref().clone().with_name(bundle_schema::generate_internal_name(id)))
+                })
+        }).collect();
+        Ok(Arc::new(arrow_schema::Schema::new(col_id_fields)))
     }
 
     /// Computes the number of rows in the bundle

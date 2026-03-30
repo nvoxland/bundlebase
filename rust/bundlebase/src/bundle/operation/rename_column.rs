@@ -1,4 +1,4 @@
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;
@@ -31,8 +31,8 @@ impl Operation for RenameColumnOp {
             .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", self.id)))?;
 
         // Check that the new name doesn't conflict with an existing column
-        let schema = bundle.schema().await?;
-        if schema.field_with_name(&self.new_name).is_ok() {
+        let bs = bundle.bundle_schema();
+        if bs.column_id(&self.new_name).is_some() {
             return Err(format!(
                 "Column '{}' already exists in the schema",
                 self.new_name
@@ -51,11 +51,11 @@ impl Operation for RenameColumnOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        column_names: &mut ColumnNames,
+        bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         // Metadata-only: update the name map for the final rename step.
-        // The DataFrame columns stay as col_<id> throughout the pipeline.
-        column_names.insert(self.id, self.new_name.clone());
+        // The DataFrame columns stay as internal names throughout the pipeline.
+        bundle_schema.insert(self.id, self.new_name.clone());
         Ok(df)
     }
 

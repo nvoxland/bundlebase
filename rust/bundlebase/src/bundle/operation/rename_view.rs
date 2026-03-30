@@ -1,4 +1,4 @@
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleBuilder;
 use crate::data::ObjectId;
@@ -91,7 +91,7 @@ impl Operation for RenameViewOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        _bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         // RenameViewOp doesn't modify the dataframe (metadata-only operation)
         Ok(df)

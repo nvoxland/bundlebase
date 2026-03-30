@@ -103,9 +103,9 @@ impl BundleBuilderCommand for CreateIndexCommand {
         };
 
         let mut column_ids = Vec::with_capacity(columns.len());
-        for col_name in &columns {
-            let id = builder.column_id(col_name)
-                .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", col_name)))?;
+        for real_name in &columns {
+            let id = builder.column_id(real_name)
+                .ok_or_else(|| BundlebaseError::from(format!("Column '{}' not found", real_name)))?;
             column_ids.push(id);
         }
 

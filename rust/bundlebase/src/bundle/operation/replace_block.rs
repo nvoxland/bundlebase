@@ -1,4 +1,4 @@
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::{AnyOperation, Operation, SourceInfo};
 use crate::bundle::BundleFacade;
 use crate::bundle::DataBlock;
@@ -206,7 +206,7 @@ impl Operation for ReplaceBlockOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        _bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         // ReplaceBlockOp doesn't modify the dataframe (metadata-only operation)
         Ok(df)

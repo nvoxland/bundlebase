@@ -1,5 +1,5 @@
 use crate::bundle::block_cache::GLOBAL_BLOCK_CACHE;
-use crate::bundle::column_metadata;
+use crate::bundle::bundle_schema;
 use crate::bundle::operation::SourceInfo;
 use crate::data::{DataReader, VersionedBlockId};
 use crate::index::{
@@ -37,7 +37,7 @@ struct IndexCandidate<'a> {
 pub struct DataBlock {
     id: BlockId,
     version: String,
-    /// Schema with stable `col_<id>` field names, used by the TableProvider interface.
+    /// Schema with stable internal name fields, used by the TableProvider interface.
     /// Built from the stored physical schema; updated with actual reader types on first scan.
     schema: Arc<parking_lot::RwLock<SchemaRef>>,
     reader: Arc<dyn DataReader>,
@@ -78,7 +78,7 @@ impl DataBlock {
             .iter()
             .zip(column_ids.iter())
             .map(|(field, col_id)| {
-                Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+                Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
             })
             .collect();
         let schema = Arc::new(arrow_schema::Schema::new_with_metadata(
@@ -106,9 +106,9 @@ impl DataBlock {
         &self.id
     }
 
-    /// Rename batches from physical column names to stable `col_<id>` names.
-    /// Uses the batch's actual field types to build the `col_<id>` schema.
-    fn rename_batches_with_col_ids(
+    /// Rename batches from physical column names to stable internal names.
+    /// Uses the batch's actual field types to build the internal name schema.
+    fn rename_batches_with_internal_names(
         batches: Vec<arrow::record_batch::RecordBatch>,
         column_ids: &[ColumnId],
     ) -> Vec<arrow::record_batch::RecordBatch> {
@@ -121,7 +121,7 @@ impl DataBlock {
                     .iter()
                     .zip(column_ids.iter())
                     .map(|(field, col_id)| {
-                        Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+                        Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
                     })
                     .collect();
                 let id_schema = Arc::new(arrow_schema::Schema::new_with_metadata(
@@ -288,10 +288,10 @@ impl DataBlock {
 
         // Evaluate each indexable filter
         for filter in indexable_filters {
-            // Resolve filter column name (col_<id> format) to ColumnId
-            let column_id = match column_metadata::parse_col_id_name(&filter.column) {
+            // Resolve filter column internal name to ColumnId
+            let column_id = match bundle_schema::parse_internal_name(&filter.column) {
                 Some(id) => id,
-                None => continue, // Not a col_<id> name, skip
+                None => continue, // Not an internal name, skip
             };
 
             // Try to find a column index for this filter
@@ -444,7 +444,7 @@ impl TableProvider for DataBlock {
                 span.set_outcome(OperationOutcome::Success);
                 timer.finish(OperationOutcome::Success);
 
-                // Use optimized data source with row IDs, wrapped for col_<id> renaming
+                // Use optimized data source with row IDs, wrapped for internal name renaming
                 let inner_source = self.reader
                     .data_source(projection, filters, limit, Some(&row_ids))
                     .await?
@@ -488,7 +488,7 @@ impl TableProvider for DataBlock {
         let cache_key = self.cache_key();
         let validated = self.version_validated.load(std::sync::atomic::Ordering::Relaxed);
 
-        // Try to serve from the block cache (stores base data with col_<id> names).
+        // Try to serve from the block cache (stores base data with internal names).
         // Only use cache after version has been validated (first scan reads through reader).
         let mut source: Arc<dyn datafusion::datasource::source::DataSource> =
             if validated {
@@ -505,7 +505,7 @@ impl TableProvider for DataBlock {
                     )?)
                 } else {
                     // Validated but not cached (evicted or first scan after validation).
-                    // Read through reader, rename to col_<id>, cache result.
+                    // Read through reader, rename to internal names, cache result.
                     // NOTE: collect() is intentional here — we materialize the block to populate
                     // the LRU block cache for subsequent queries. Block sizes are bounded by the
                     // source row-group size (typically ~128MB), and the cache enforces a global
@@ -520,7 +520,7 @@ impl TableProvider for DataBlock {
                     let stream = base_source.open(0, task_ctx)?;
                     let batches: Vec<arrow::record_batch::RecordBatch> =
                         datafusion::physical_plan::common::collect(stream).await?;
-                    let batches = Self::rename_batches_with_col_ids(batches, &self.column_ids);
+                    let batches = Self::rename_batches_with_internal_names(batches, &self.column_ids);
                     let batch_schema = batches.first()
                         .map(|b| b.schema())
                         .unwrap_or_else(|| {
@@ -547,7 +547,7 @@ impl TableProvider for DataBlock {
                 let stream = base_source.open(0, task_ctx)?;
                 let batches: Vec<arrow::record_batch::RecordBatch> =
                     datafusion::physical_plan::common::collect(stream).await?;
-                let batches = Self::rename_batches_with_col_ids(batches, &self.column_ids);
+                let batches = Self::rename_batches_with_internal_names(batches, &self.column_ids);
                 let batch_schema = batches.first()
                     .map(|b| b.schema())
                     .unwrap_or_else(|| {

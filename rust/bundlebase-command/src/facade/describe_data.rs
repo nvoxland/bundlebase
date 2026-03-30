@@ -63,11 +63,11 @@ impl CommandParsing for DescribeDataCommand {
                 let name = parts
                     .next()
                     .ok_or_else(|| BundlebaseError::from("DESCRIBE DATA missing column name"))?;
-                let col_name = strip_quotes(name.as_str());
+                let real_name = strip_quotes(name.as_str());
                 let expected_type = parts.next().map(|p| p.as_str().to_string());
 
                 columns.push(DescribeDataColumnSpec {
-                    name: col_name,
+                    name: real_name,
                     expected_type,
                 });
             }
@@ -271,7 +271,7 @@ impl BundleFacadeCommand for DescribeDataCommand {
             .map_err(|e| BundlebaseError::from(e.to_string()))?;
 
         // Extract results from the single stats batch
-        let mut col_names: Vec<String> = Vec::new();
+        let mut real_names: Vec<String> = Vec::new();
         let mut col_data_types: Vec<String> = Vec::new();
         let mut mins: Vec<Option<String>> = Vec::new();
         let mut maxs: Vec<Option<String>> = Vec::new();
@@ -284,7 +284,7 @@ impl BundleFacadeCommand for DescribeDataCommand {
         for (i, info) in col_infos.iter().enumerate() {
             let base_idx = i * 5; // 5 columns per analyzed column (min, max, avg, nulls, not_nulls)
 
-            col_names.push(info.name.clone());
+            real_names.push(info.name.clone());
             col_data_types.push(format!("{}", info.data_type));
 
             mins.push(extract_string_from_batch(&stats_batch, base_idx));
@@ -323,7 +323,7 @@ impl BundleFacadeCommand for DescribeDataCommand {
         let batch = RecordBatch::try_new(
             Arc::clone(&output_schema),
             vec![
-                Arc::new(StringArray::from(col_names)) as ArrayRef,
+                Arc::new(StringArray::from(real_names)) as ArrayRef,
                 Arc::new(StringArray::from(col_data_types)) as ArrayRef,
                 Arc::new(StringArray::from(mins)) as ArrayRef,
                 Arc::new(StringArray::from(maxs)) as ArrayRef,

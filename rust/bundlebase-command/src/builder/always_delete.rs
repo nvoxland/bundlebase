@@ -6,7 +6,6 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
-use bundlebase::bundle::column_metadata;
 use bundlebase::bundle::operation::{AlwaysDeleteOp, FilterOp};
 use bundlebase::bundle::BundleFacade;
 use tracing::debug;
@@ -59,9 +58,9 @@ impl BundleBuilderCommand for AlwaysDeleteCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        // Translate user-visible column names to stable col_<id> references
-        let col_names = builder.column_names();
-        let where_clause = column_metadata::translate_sql_to_col_ids(&self.where_clause, &col_names);
+        // Translate user-visible column names to stable internal name references
+        let bundle_schema = builder.bundle_schema();
+        let where_clause = bundle_schema.translate_sql(&self.where_clause);
 
         // 1. Immediately delete matching rows (same as regular DELETE)
         let delete_rowids = builder.select_row_ids(&where_clause).await?;
@@ -78,7 +77,7 @@ impl BundleBuilderCommand for AlwaysDeleteCommand {
             builder.apply_operation(FilterOp::new(&filter_query, vec![]).into()).await?;
         }
 
-        // 2. Register the persistent always-delete rule (stored with col_<id> names)
+        // 2. Register the persistent always-delete rule (stored with internal name names)
         builder.apply_operation(AlwaysDeleteOp::new(&where_clause).into()).await?;
 
         Ok(format!("Always-delete rule added (deleted {} existing rows)", deleted_count))

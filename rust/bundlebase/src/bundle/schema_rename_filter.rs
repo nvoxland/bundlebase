@@ -1,7 +1,7 @@
 //! Zero-copy DataSource wrapper that renames batch columns from physical
-//! names to stable `col_<id>` names.
+//! names to stable internal names.
 
-use crate::bundle::column_metadata;
+use crate::bundle::bundle_schema;
 use crate::object_id::ColumnId;
 use arrow::datatypes::SchemaRef;
 use datafusion::common::Statistics;
@@ -18,12 +18,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 /// Wraps a DataSource and replaces field names on emitted batches
-/// using stable `col_<id>` names derived from ColumnIds.
+/// using stable internal names derived from ColumnIds.
 /// The column data is unchanged (zero-copy); only field names change.
 #[derive(Debug, Clone)]
 pub struct SchemaRenameDataSource {
     inner: Arc<dyn DataSource>,
-    /// The col_<id> schema used for DataFusion planning.
+    /// The internal name schema used for DataFusion planning.
     planning_schema: SchemaRef,
     /// Column IDs used to rename each batch's fields dynamically.
     column_ids: Vec<ColumnId>,
@@ -75,7 +75,7 @@ impl DataSource for SchemaRenameDataSource {
     }
 
     fn eq_properties(&self) -> EquivalenceProperties {
-        // Use the inner source's eq_properties schema, renamed with col_<id> names.
+        // Use the inner source's eq_properties schema, renamed with internal names.
         // This ensures types match the actual batch types, not the stored schema.
         let inner_schema = self.inner.eq_properties().schema().clone();
         let id_fields: Vec<Arc<arrow::datatypes::Field>> = inner_schema
@@ -83,7 +83,7 @@ impl DataSource for SchemaRenameDataSource {
             .iter()
             .zip(self.column_ids.iter())
             .map(|(field, col_id)| {
-                Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+                Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
             })
             .collect();
         let renamed_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
@@ -133,14 +133,14 @@ impl Stream for SchemaRenameStream {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match Pin::new(&mut self.inner).poll_next(cx) {
             Poll::Ready(Some(Ok(batch))) => {
-                // Build col_<id> schema from the batch's actual field types
+                // Build internal name schema from the batch's actual field types
                 let batch_schema = batch.schema();
                 let id_fields: Vec<Arc<arrow::datatypes::Field>> = batch_schema
                     .fields()
                     .iter()
                     .zip(self.column_ids.iter())
                     .map(|(field, col_id)| {
-                        Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+                        Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
                     })
                     .collect();
                 let id_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
@@ -161,14 +161,14 @@ impl Stream for SchemaRenameStream {
 
 impl RecordBatchStream for SchemaRenameStream {
     fn schema(&self) -> SchemaRef {
-        // Use the inner stream's schema renamed with col_<id> names
+        // Use the inner stream's schema renamed with internal names
         let inner_schema = self.inner.schema();
         let id_fields: Vec<Arc<arrow::datatypes::Field>> = inner_schema
             .fields()
             .iter()
             .zip(self.column_ids.iter())
             .map(|(field, col_id)| {
-                Arc::new(field.as_ref().clone().with_name(column_metadata::col_id_name(col_id)))
+                Arc::new(field.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id)))
             })
             .collect();
         Arc::new(arrow::datatypes::Schema::new_with_metadata(

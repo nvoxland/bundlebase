@@ -47,8 +47,8 @@ impl ImportTempFunctionCommand {
 
     /// Validates a function entry and registers it with the facade.
     ///
-    /// Performs IPC entrypoint string validation and kind consistency checks,
-    /// then adds to the registry and re-registers UDFs.
+    /// Validates IPC entrypoint string, adds to registry with kind consistency check,
+    /// and registers with DataFusion.
     async fn validate_and_register(
         facade: &dyn BundleFacade,
         entry: FunctionEntry,
@@ -58,25 +58,7 @@ impl ImportTempFunctionCommand {
             bundlebase::function::ipc_bridge::parse_call(&entry.from.build_call_string())?;
         }
 
-        // Validate kind consistency before adding
-        let name = entry.name.to_string();
-        {
-            let existing = facade.function_registry().read().resolve_all(&name);
-            if !existing.is_empty() {
-                let existing_kind = existing[0].kind;
-                if entry.kind != existing_kind {
-                    return Err(format!(
-                        "Function '{}' has overloads with mixed kinds (scalar and aggregate). \
-                         All overloads of a function must be the same kind.",
-                        name
-                    ).into());
-                }
-            }
-        }
-
-        // Add to registry then re-register all overloads for this name
-        facade.function_registry().write().add(entry);
-        facade.function_registry().read().register_functions_for_name(&name)?;
+        facade.function_registry().write().add_and_register(entry)?;
         facade.function_registry().read().refresh_version_udf(facade.version());
         Ok(())
     }

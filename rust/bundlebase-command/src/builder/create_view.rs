@@ -2,7 +2,6 @@
 
 use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::column_metadata;
 use bundlebase::bundle::operation::CreateViewOp;
 use bundlebase::bundle::BundleFacade;
 use bundlebase_common::BundlebaseError;
@@ -66,9 +65,9 @@ impl BundleBuilderCommand for CreateViewCommand {
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
         builder.check_no_temp_functions_in_sql(&self.sql, "view")?;
 
-        // Translate user-visible column names to stable col_<id> references
-        let col_names = builder.column_names();
-        let translated_sql = column_metadata::translate_sql_to_col_ids(&self.sql, &col_names);
+        // Translate user-visible column names to stable internal name references
+        let bundle_schema = builder.bundle_schema();
+        let translated_sql = bundle_schema.translate_sql(&self.sql);
 
         let (op, _view_builder) = CreateViewOp::setup(&self.name, &translated_sql, builder).await?;
         builder.apply_operation(op.into()).await?;

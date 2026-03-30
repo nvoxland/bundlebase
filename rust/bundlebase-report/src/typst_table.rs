@@ -62,8 +62,8 @@ pub fn render_table(table: &TableBlock, data: &BoundedQueryResult) -> Result<Str
 
     // Header row
     lines.push("  table.header(".to_string());
-    for col_name in &data.columns {
-        lines.push(format!("    [*{}*],", escape_typst(col_name)));
+    for real_name in &data.columns {
+        lines.push(format!("    [*{}*],", escape_typst(real_name)));
     }
     lines.push("  ),".to_string());
 

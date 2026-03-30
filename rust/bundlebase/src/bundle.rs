@@ -1,7 +1,6 @@
 pub mod block_cache;
 mod builder;
-mod column_lineage;
-pub mod column_metadata;
+pub mod bundle_schema;
 pub mod command_metadata;
 mod commit;
 mod data_block;
@@ -30,7 +29,6 @@ use crate::io::EMPTY_SCHEME;
 pub use builder::BundleBuilder;
 pub use builder::BundleStatus;
 pub use verification::{FileVerificationResult, VerificationResults};
-pub use column_lineage::{ColumnLineageAnalyzer, ColumnSource, analyze_column_sources};
 pub use bundlebase_common::command_response::{CommandResponse, OutputShape};
 pub use commit::{manifest_version, BundleCommit, CommitHistory};
 pub use data_block::DataBlock;
@@ -59,7 +57,7 @@ use crate::index::IndexDefinition;
 use crate::io::{read_yaml, readable_file_from_url, writable_dir_from_str, writable_dir_from_url, DataStorage, IOReadWriteDir, EMPTY_URL};
 use crate::bundle_config::Scope;
 use crate::bundle_config::PassedBundleConfig;
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::{BundleConfig, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -125,7 +123,7 @@ pub struct Bundle {
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     views: Arc<RwLock<HashMap<String, ObjectId>>>,
     dataframe: DataFrameHolder,
-    column_names: Arc<RwLock<Option<ColumnNames>>>,
+    bundle_schema: Arc<RwLock<BundleSchema>>,
 
     ctx: Arc<SessionContext>,
     storage: Arc<DataStorage>,
@@ -197,7 +195,7 @@ impl Clone for Bundle {
             dataframe: DataFrameHolder {
                 dataframe: Arc::new(RwLock::new(self.dataframe.dataframe.read().clone())),
             },
-            column_names: Arc::clone(&self.column_names),
+            bundle_schema: Arc::clone(&self.bundle_schema),
             ctx: Arc::clone(&self.ctx),
             storage: Arc::clone(&self.storage),
             reader_factory: Arc::clone(&self.reader_factory),
@@ -296,7 +294,7 @@ impl Bundle {
             data_dir,
             commits,
             dataframe,
-            column_names: Arc::new(RwLock::new(None)),
+            bundle_schema: Arc::new(RwLock::new(BundleSchema::new())),
             config: bundle_config,
             always_delete_rules: Arc::new(RwLock::new(Vec::new())),
             always_update_rules: Arc::new(RwLock::new(Vec::new())),
@@ -573,7 +571,7 @@ impl Bundle {
         self.compute_version();
         // clear cached values
         self.dataframe.clear();
-        *self.column_names.write() = None;
+        *self.bundle_schema.write() = BundleSchema::new();
         debug!("Cleared dataframe");
 
         debug!("Applying operation to bundle: {}...DONE", &description);
@@ -670,7 +668,7 @@ impl Bundle {
         *self.always_update_rules.write() = other.always_update_rules.read().clone();
         *self.update_overlays.write() = other.update_overlays.read().clone();
         self.dataframe.clear();
-        *self.column_names.write() = None;
+        *self.bundle_schema.write() = BundleSchema::new();
     }
 
     pub fn ctx(&self) -> Arc<SessionContext> {
@@ -686,14 +684,14 @@ impl Bundle {
         &self,
         base_df: DataFrame,
         pack: &Pack,
-        col_names: &mut column_metadata::ColumnNames,
+        bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         let join_table = format!("packs.{}", Pack::table_name(pack.id()));
 
-        // Translate the join expression from user-visible names to col_<id> names.
+        // Translate the join expression from user-visible names to internal names.
         // Build a combined name map from base pack columns AND join pack columns.
         let pack_expression = pack.expression().expect("Pack must have expression for join");
-        let mut combined_names = col_names.clone();
+        let mut combined_names = bundle_schema.clone();
         // Add join pack's column names from AttachBlock operations targeting this pack
         let ops = self.operations.read().clone();
         for op in &ops {
@@ -707,7 +705,7 @@ impl Bundle {
                 }
             }
         }
-        let translated_expression = column_metadata::translate_sql_to_col_ids(pack_expression, &combined_names);
+        let translated_expression = combined_names.translate_sql(pack_expression);
 
         // Create a temporary pack with translated expression for parsing
         let translated_pack = Pack::new(
@@ -738,7 +736,7 @@ impl Bundle {
             expr,
         )?;
 
-        // Disambiguate: rename join-pack col_<id> columns that collide with base columns.
+        // Disambiguate: rename join-pack internal name columns that collide with base columns.
         // This happens when both packs share a column with the same ColumnId (same logical column).
         for col in joined_df.schema().columns() {
             let is_from_join_pack = col.relation.as_ref()
@@ -752,16 +750,16 @@ impl Bundle {
                 )?;
                 // Add a col_names entry so the final rename maps this to a user-visible name.
                 // The user-visible name is pack_name + user_visible_original_name.
-                if let Some(col_id) = column_metadata::parse_col_id_name(&col.name) {
-                    let user_name = col_names.get(&col_id)
+                if let Some(col_id) = bundle_schema::parse_internal_name(&col.name) {
+                    let user_name = bundle_schema.get(&col_id)
                         .map(|n| format!("{}_{}", name, n))
                         .unwrap_or_else(|| new_internal_name.clone());
                     // Generate a new ColumnId for this disambiguated column so the
-                    // final rename picks it up (it renames col_<id> → user_name)
+                    // final rename picks it up (it renames internal_name → user_name)
                     let disambig_id = ColumnId::generate();
-                    col_names.insert(disambig_id, user_name);
-                    // Also rename to the new col_<disambig_id> so final rename works
-                    let final_internal = column_metadata::col_id_name(&disambig_id);
+                    bundle_schema.insert(disambig_id, user_name);
+                    // Also rename to the new disambiguated internal name so final rename works
+                    let final_internal = bundle_schema.internal_name(&disambig_id).expect("just inserted");
                     joined_df = joined_df.with_column_renamed(
                         &new_internal_name,
                         &final_internal,
@@ -773,14 +771,13 @@ impl Bundle {
         Ok(joined_df)
     }
 
-    fn resolved_column_names(&self) -> ColumnNames {
-        {
-            if let Some(cached) = self.column_names.read().as_ref() {
-                return cached.clone();
-            }
+    fn resolved_bundle_schema(&self) -> BundleSchema {
+        let current = self.bundle_schema.read().clone();
+        if !current.is_empty() {
+            return current;
         }
-        let resolved = column_metadata::resolved_column_names(&self.operations.read());
-        *self.column_names.write() = Some(resolved.clone());
+        let resolved = BundleSchema::resolved(&self.operations.read());
+        *self.bundle_schema.write() = resolved.clone();
         resolved
     }
 
@@ -830,7 +827,7 @@ impl Bundle {
         self.data_dir = Arc::new(RwLock::new(current_data_dir));
         self.last_manifest_version = Arc::new(RwLock::new(current_manifest_version));
         self.operations = Arc::new(RwLock::new(current_operations));
-        self.column_names = Arc::new(RwLock::new(None));
+        self.bundle_schema = Arc::new(RwLock::new(BundleSchema::new()));
     }
 
     /// Find a join pack by its name
@@ -1164,8 +1161,8 @@ impl BundleFacade for Bundle {
         self.operations.read().clone()
     }
 
-    fn column_names(&self) -> ColumnNames {
-        self.resolved_column_names()
+    fn bundle_schema(&self) -> BundleSchema {
+        self.resolved_bundle_schema()
     }
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {
@@ -1216,17 +1213,17 @@ impl BundleFacade for Bundle {
                     ops.len()
                 );
 
-            let mut col_names = column_metadata::initial_column_names(&ops);
+            let mut bundle_schema = BundleSchema::initial(&ops);
             for op in ops.iter() {
                 debug!("Applying to dataframe: {}", &op.describe());
                 if let AnyOperation::CreateJoin(create_join) = op {
                     if let Some(pack) = packs_snapshot.get(&create_join.id) {
                         if pack.is_join() && !pack.is_empty() {
-                            df = self.dataframe_join(df, pack, &mut col_names).await?;
+                            df = self.dataframe_join(df, pack, &mut bundle_schema).await?;
                         }
                     }
                 } else {
-                    df = op.apply_dataframe(df, self.ctx.clone(), &mut col_names).await?;
+                    df = op.apply_dataframe(df, self.ctx.clone(), &mut bundle_schema).await?;
                 }
             }
             debug!(
@@ -1234,17 +1231,13 @@ impl BundleFacade for Bundle {
                     ops.len()
                 );
 
-            // Final rename: replace col_<id> names with user-visible names.
-            // Use col_names (which includes dynamically added entries like
-            // disambiguated join columns) rather than recalculating from ops.
-            for (id, user_name) in &col_names {
-                let col_name = column_metadata::col_id_name(id);
-                if df.schema().has_column_with_unqualified_name(&col_name) {
-                    df = df
-                        .with_column_renamed(&col_name, user_name)
-                        .map_err(|e| Box::new(e) as BundlebaseError)?;
-                }
-            }
+            // Final rename: replace internal names with user-visible names
+            df = bundle_schema.rename_to_real_names(df)?;
+
+            // Cache the schema on the BundleSchema
+            let schema = Arc::new(df.schema().as_arrow().clone());
+            bundle_schema.set_schema(schema);
+            *self.bundle_schema.write() = bundle_schema;
 
             df
         } else {
@@ -1472,10 +1465,7 @@ impl BundleFacade for Bundle {
         name: &str,
         platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError> {
-        // Deregister from DataFusion (try both UDF and UDAF)
-        let _ = self.ctx.deregister_udf(name);
-        let _ = self.ctx.deregister_udaf(name);
-        Ok(self.function_registry.write().remove(name, platform, true))
+        self.function_registry.write().drop_temp(name, platform)
     }
 
     async fn rename_temp_connector(
@@ -1524,34 +1514,7 @@ impl BundleFacade for Bundle {
         new_name: &str,
     ) -> Result<(), BundlebaseError> {
         let new_namespaced = crate::NamespacedName::parse(new_name, "Function")?;
-
-        // Validate old name has temporary entries
-        {
-            let registry = self.function_registry.read();
-            let has_temp = registry.entries().iter().any(|e| e.temporary && e.name == old_name);
-            if !has_temp {
-                return Err(format!(
-                    "No temporary function entries found for '{}'. Use IMPORT TEMP FUNCTION first.",
-                    old_name
-                ).into());
-            }
-            // Check new name doesn't conflict
-            if registry.has(new_name) {
-                return Err(format!(
-                    "Function '{}' already exists. Drop it first or choose a different name.",
-                    new_name
-                ).into());
-            }
-        }
-
-        // Deregister old UDF/UDAF
-        let _ = self.ctx.deregister_udf(old_name);
-        let _ = self.ctx.deregister_udaf(old_name);
-
-        self.function_registry.write().rename_temp_entries(old_name, &new_namespaced);
-
-        // Re-register under the new name
-        self.function_registry.read().register_functions_for_name(new_name)?;
+        self.function_registry.write().rename_temp(&old_name, &new_namespaced)?;
         self.function_registry.read().refresh_version_udf("TEMP".to_string());
         Ok(())
     }

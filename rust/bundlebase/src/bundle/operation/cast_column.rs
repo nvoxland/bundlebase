@@ -1,4 +1,4 @@
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;
@@ -44,15 +44,15 @@ impl Operation for CastColumnOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         let schema = df.schema().clone();
-        let col_name = crate::bundle::column_metadata::col_id_name(&self.id);
+        let internal_name = bundle_schema.internal_name(&self.id)?;
 
         let mut select_exprs: Vec<Expr> = Vec::new();
         for field in schema.fields() {
             let field_name = field.name();
-            if field_name == &col_name {
+            if field_name == &internal_name {
                 let cast_expr = Expr::Cast(Cast {
                     expr: Box::new(Expr::Column(Column::new_unqualified(field_name))),
                     data_type: self.new_type.clone(),

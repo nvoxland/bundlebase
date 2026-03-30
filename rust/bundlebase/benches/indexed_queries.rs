@@ -17,6 +17,7 @@ use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_100K, SCALE_10K};
 use futures::StreamExt;
 use std::sync::Arc;
+use bundlebase_command::BundleBuilderExt;
 
 /// Create a committed bundle with a column index on the specified column.
 async fn create_bundle_with_column_index(

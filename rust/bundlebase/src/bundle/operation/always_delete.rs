@@ -3,7 +3,7 @@
 //! `AlwaysDeleteOp` stores a WHERE clause that is automatically applied
 //! to newly attached data. The rule persists across commits and reopens.
 
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::{Bundle, BundlebaseError};
 use datafusion::common::DataFusionError;
@@ -53,7 +53,7 @@ impl Operation for AlwaysDeleteOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        _bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         // No-op: always-delete rules apply at attach time, not query time
         Ok(df)

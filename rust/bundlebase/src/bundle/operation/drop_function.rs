@@ -82,26 +82,8 @@ impl Operation for DropFunctionOp {
     }
 
     async fn apply(&self, bundle: &Bundle) -> Result<(), DataFusionError> {
-        // Look up the function name before removing entries
-        let name = {
-            let registry = bundle.function_registry();
-            let reg = registry.read();
-            reg.entries().iter()
-                .find(|e| self.ids.contains(&e.id))
-                .map(|e| e.name.to_string())
-        };
-
-        // Remove entries by ID
-        bundle.function_registry().write().remove_by_ids(&self.ids);
-
-        // Deregister existing UDF/UDAF and re-register remaining overloads
-        if let Some(name) = name {
-            let _ = bundle.ctx().deregister_udf(&name);
-            let _ = bundle.ctx().deregister_udaf(&name);
-            bundle.function_registry().read().register_functions_for_name(&name)
-                .map_err(|e| DataFusionError::Execution(e.to_string()))?;
-        }
-
+        bundle.function_registry().write().drop_by_ids(&self.ids)
+            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
         Ok(())
     }
 }

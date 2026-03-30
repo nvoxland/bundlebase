@@ -1,4 +1,4 @@
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::{AnyOperation, Operation};
 use crate::bundle::BundleBuilder;
 use crate::data::BlockId;
@@ -95,7 +95,7 @@ impl Operation for DetachBlockOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        _bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         // DetachBlockOp doesn't modify the dataframe (metadata-only operation)
         Ok(df)

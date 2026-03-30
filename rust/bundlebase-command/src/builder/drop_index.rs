@@ -1,6 +1,6 @@
 //! DropIndex command implementation.
 
-use bundlebase::bundle::column_metadata;
+use bundlebase::bundle::bundle_schema;
 use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::BundleFacade;
@@ -64,7 +64,7 @@ impl BundleBuilderCommand for DropIndexCommand {
 
             // Fall back to matching by column name -> column ID -> index
             let index = index.or_else(|| {
-                let col_names = column_metadata::resolved_column_names(&builder.operations());
+                let col_names = builder.bundle_schema();
                 // Find the ColumnId for the given column name
                 let target_col_id = col_names.iter()
                     .find(|(_, name)| name.as_str() == self.identifier)

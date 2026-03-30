@@ -1,5 +1,5 @@
 use crate::bundle::operation::parameter_value::ParameterValue;
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::catalog::BundleViewTable;
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
@@ -46,9 +46,9 @@ impl Operation for FilterOp {
         &self,
         df: DataFrame,
         ctx: Arc<SessionContext>,
-        column_names: &mut ColumnNames,
+        bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
-        use crate::bundle::column_metadata;
+        use crate::bundle::bundle_schema;
 
         let mut span = start_span(OperationCategory::Select, "filter");
         span.set_attribute("sql", &self.query);
@@ -56,8 +56,8 @@ impl Operation for FilterOp {
 
         let timer = OperationTimer::start(OperationCategory::Select, "filter");
 
-        // Translate user-visible column names in the SQL to stable col_<id> names
-        let translated_query = column_metadata::translate_sql_to_col_ids(&self.query, column_names);
+        // Translate user-visible column names in the SQL to stable internal names
+        let translated_query = bundle_schema.translate_sql(&self.query);
 
         let mut config = SessionConfig::new();
         config.options_mut().sql_parser.enable_ident_normalization = false;

@@ -6,7 +6,7 @@ use crate::bundle::operation::AnyOperation;
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::function_entry::FunctionRegistry;
-use crate::bundle::{column_metadata, sql, AlwaysUpdateRule, Bundle};
+use crate::bundle::{bundle_schema, sql, AlwaysUpdateRule, Bundle};
 use crate::source::ConnectorRegistry;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, VersionedBlockId};
 use crate::index::{IndexDefinition};
@@ -449,10 +449,10 @@ impl BundleBuilder {
 
             // Collect column types from the bundle schema
             let schema = self.bundle.schema().await?;
-            let col_names = column_metadata::resolved_column_names(&self.operations());
+            let col_names = bundle_schema::BundleSchema::resolved(&self.operations());
             let mut column_types: std::collections::HashMap<crate::object_id::ColumnId, arrow::datatypes::DataType> = std::collections::HashMap::new();
-            for (col_id, col_name) in &col_names {
-                if let Some((_, field)) = schema.column_with_name(col_name) {
+            for (col_id, real_name) in col_names.columns() {
+                if let Some((_, field)) = schema.column_with_name(real_name) {
                     column_types.insert(*col_id, field.data_type().clone());
                 }
             }
@@ -684,16 +684,16 @@ impl BundleBuilder {
         use futures::StreamExt;
 
         // Resolve column names to ColumnIds.
-        // columns/expressions/where_clause use col_<id> names.
+        // columns/expressions/where_clause use internal names.
         let col_ids: Vec<(String, crate::object_id::ColumnId)> = columns.iter()
-            .map(|col_name| {
-                let col_id = column_metadata::parse_col_id_name(col_name)
-                    .ok_or_else(|| BundlebaseError::from(format!("Column '{}' is not a valid col_<id> name", col_name)))?;
-                Ok((col_name.clone(), col_id))
+            .map(|internal_name| {
+                let col_id = bundle_schema::parse_internal_name(internal_name)
+                    .ok_or_else(|| BundlebaseError::from(format!("Column '{}' is not a valid internal name", internal_name)))?;
+                Ok((internal_name.clone(), col_id))
             })
             .collect::<Result<Vec<_>, BundlebaseError>>()?;
 
-        // Build SELECT clause for expression evaluation (already in col_<id> terms)
+        // Build SELECT clause for expression evaluation (already in internal name terms)
         let select_exprs: Vec<String> = columns.iter().zip(expressions.iter())
             .map(|(col, expr)| format!("{} AS {}", expr, col))
             .collect();
@@ -718,14 +718,14 @@ impl BundleBuilder {
                     let batch = &rowid_batch.batch;
                     let row_ids = &rowid_batch.row_ids;
 
-                    // Rename columns from physical names to col_<id> names
+                    // Rename columns from physical names to internal names
                     let batch = {
                         let schema = batch.schema();
                         let col_id_list = block.column_ids();
                         let new_fields: Vec<arrow::datatypes::Field> = schema.fields().iter()
                             .zip(col_id_list.iter())
                             .map(|(f, col_id)| {
-                                f.as_ref().clone().with_name(column_metadata::col_id_name(col_id))
+                                f.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id))
                             })
                             .collect();
                         let new_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
@@ -875,14 +875,14 @@ impl BundleBuilder {
                     let batch = &rowid_batch.batch;
                     let row_ids = &rowid_batch.row_ids;
 
-                    // Rename columns from physical names to col_<id> names
+                    // Rename columns from physical names to internal names
                     let batch = {
                         let schema = batch.schema();
                         let col_ids = block.column_ids();
                         let new_fields: Vec<arrow::datatypes::Field> = schema.fields().iter()
                             .zip(col_ids.iter())
                             .map(|(f, col_id)| {
-                                f.as_ref().clone().with_name(column_metadata::col_id_name(col_id))
+                                f.as_ref().clone().with_name(bundle_schema::generate_internal_name(col_id))
                             })
                             .collect();
                         let new_schema = Arc::new(arrow::datatypes::Schema::new_with_metadata(
@@ -1090,9 +1090,7 @@ impl BundleBuilder {
     ) -> Result<usize, BundlebaseError> {
         use crate::platform::Platform;
         let platform: Option<Platform> = platform.map(|s| s.parse()).transpose()?;
-        let _ = self.bundle().ctx().deregister_udf(name);
-        let _ = self.bundle().ctx().deregister_udaf(name);
-        Ok(self.bundle().function_registry().write().remove(name, platform.as_ref(), true))
+        self.bundle().function_registry().write().drop_temp(name, platform.as_ref())
     }
 
     /// Internal reindex implementation that doesn't wrap in do_change.
@@ -1126,7 +1124,7 @@ impl BundleBuilder {
             debug!("Checking index on column IDs {:?}", &index_column_ids);
 
             // Use blocks_for_column to find which blocks need indexing
-            let candidate_blocks = column_metadata::blocks_for_column(&operations, first_col_id);
+            let candidate_blocks = self.bundle_schema().blocks_for_column(first_col_id);
 
             for (block_id, block_version) in candidate_blocks {
                 let versioned_block = VersionedBlockId::new(block_id, block_version.clone());
@@ -1237,8 +1235,8 @@ impl BundleFacade for BundleBuilder {
         ops
     }
 
-    fn column_names(&self) -> column_metadata::ColumnNames {
-        column_metadata::resolved_column_names(&self.operations())
+    fn bundle_schema(&self) -> bundle_schema::BundleSchema {
+        bundle_schema::BundleSchema::resolved(&self.operations())
     }
 
     async fn schema(&self) -> Result<SchemaRef, BundlebaseError> {
@@ -1337,9 +1335,7 @@ impl BundleFacade for BundleBuilder {
         name: &str,
         platform: Option<&crate::platform::Platform>,
     ) -> Result<usize, BundlebaseError> {
-        let _ = self.bundle.ctx().deregister_udf(name);
-        let _ = self.bundle.ctx().deregister_udaf(name);
-        Ok(self.bundle.function_registry().write().remove(name, platform, true))
+        self.bundle.function_registry().write().drop_temp(name, platform)
     }
 
     async fn rename_temp_connector(

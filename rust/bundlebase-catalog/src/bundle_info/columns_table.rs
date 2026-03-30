@@ -1,4 +1,4 @@
-use bundlebase::bundle::{BundleFacade, analyze_column_sources};
+use bundlebase::bundle::BundleFacade;
 use arrow::array::{ArrayRef, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -88,16 +88,26 @@ impl TableProvider for BundleColumnsTable {
             .map(|f| if f.is_nullable() { "Yes" } else { "No" })
             .collect();
 
-        // Compute column sources from pack structure
-        let source_map = analyze_column_sources(&bundle_schema, &facade.packs());
+        // Compute column sources by mapping ColumnId → blocks → pack name
+        let bs = facade.bundle_schema();
+        let packs = facade.packs();
+        let mut block_to_pack = std::collections::HashMap::new();
+        for pack in packs.values() {
+            for block in pack.blocks() {
+                block_to_pack.insert(*block.id(), pack.name().to_string());
+            }
+        }
         let sources: Vec<String> = bundle_schema
             .fields()
             .iter()
             .map(|f| {
-                source_map
-                    .get(f.name())
-                    .map(|s| s.pack_name.clone())
-                    .unwrap_or_else(|| "base".to_string())
+                bs.column_id(f.name())
+                    .and_then(|col_id| {
+                        bs.blocks_for_column(&col_id)
+                            .first()
+                            .and_then(|(block_id, _)| block_to_pack.get(block_id).cloned())
+                    })
+                    .unwrap_or_else(|| "computed".to_string())
             })
             .collect();
 

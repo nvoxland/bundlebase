@@ -1,6 +1,6 @@
 //! Drop always-update operation — removes persistent update rules.
 
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::{Bundle, BundlebaseError};
 use datafusion::common::DataFusionError;
@@ -69,7 +69,7 @@ impl Operation for DropAlwaysUpdateOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        _bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         Ok(df)
     }

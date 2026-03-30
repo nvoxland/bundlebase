@@ -5,7 +5,7 @@
 //! across commits and reopens.
 
 use crate::bundle::AlwaysUpdateRule;
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::{Bundle, BundlebaseError};
 use datafusion::common::DataFusionError;
@@ -63,7 +63,7 @@ impl Operation for AlwaysUpdateOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        _bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         // No-op: always-update rules apply at attach time, not query time
         Ok(df)

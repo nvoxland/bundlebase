@@ -118,7 +118,9 @@ impl FunctionRegistry {
         }
     }
 
-    /// Add a function entry to the registry.
+    /// Add a function entry to the registry without registering with DataFusion.
+    /// Prefer `add_and_register` for production use — it also validates kind consistency
+    /// and registers with DataFusion.
     pub fn add(&mut self, entry: FunctionEntry) {
         self.entries.push(entry);
     }
@@ -352,13 +354,15 @@ impl FunctionRegistry {
         results
     }
 
-    /// Remove function entries by their IDs.
-    pub fn remove_by_ids(&mut self, ids: &[ObjectId]) {
+    /// Remove function entries by their IDs (low-level).
+    /// Prefer `drop_by_ids` which also handles deregistration and re-registration.
+    fn remove_by_ids(&mut self, ids: &[ObjectId]) {
         self.entries.retain(|e| !ids.contains(&e.id));
     }
 
-    /// Rename function entries matching the given IDs to a new name.
-    pub fn rename_entries(&mut self, ids: &[ObjectId], new_name: &NamespacedName) {
+    /// Rename function entries matching the given IDs to a new name (low-level).
+    /// Prefer `rename_by_ids` which also handles deregistration and re-registration.
+    fn rename_entries(&mut self, ids: &[ObjectId], new_name: &NamespacedName) {
         for entry in &mut self.entries {
             if ids.contains(&entry.id) {
                 entry.name = new_name.clone();
@@ -366,8 +370,9 @@ impl FunctionRegistry {
         }
     }
 
-    /// Rename only temporary function entries matching the old name to a new name.
-    pub fn rename_temp_entries(&mut self, old_name: &str, new_name: &NamespacedName) {
+    /// Rename only temporary function entries matching the old name to a new name (low-level).
+    /// Prefer `rename_temp` which also handles validation, deregistration, and re-registration.
+    fn rename_temp_entries(&mut self, old_name: &str, new_name: &NamespacedName) {
         for entry in &mut self.entries {
             if entry.temporary && entry.name == old_name {
                 entry.name = new_name.clone();
@@ -392,6 +397,110 @@ impl FunctionRegistry {
                 });
             }
         }
+    }
+
+    // --- Composite operations (mutate + register) ---
+
+    /// Deregister a function from DataFusion by name (both UDF and UDAF).
+    fn deregister(&self, name: &str) {
+        let _ = self.ctx.deregister_udf(name);
+        let _ = self.ctx.deregister_udaf(name);
+    }
+
+    /// Look up a function name from a set of entry IDs.
+    pub fn name_for_ids(&self, ids: &[ObjectId]) -> Option<String> {
+        self.entries.iter()
+            .find(|e| ids.contains(&e.id))
+            .map(|e| e.name.to_string())
+    }
+
+    /// Add a function entry, validate kind consistency, and register with DataFusion.
+    ///
+    /// This is the preferred way to add function entries. It:
+    /// 1. Validates that the new entry's kind matches existing overloads
+    /// 2. Adds the entry to the registry
+    /// 3. Registers all overloads for the name with DataFusion
+    pub fn add_and_register(&mut self, entry: FunctionEntry) -> Result<(), BundlebaseError> {
+        let name = entry.name.to_string();
+
+        // Validate kind consistency with existing entries
+        let existing = self.resolve_all(&name);
+        if !existing.is_empty() {
+            let existing_kind = existing[0].kind;
+            if entry.kind != existing_kind {
+                return Err(format!(
+                    "Function '{}' has overloads with mixed kinds (scalar and aggregate). \
+                     All overloads of a function must be the same kind.",
+                    name
+                ).into());
+            }
+        }
+
+        self.add(entry);
+        self.register_functions_for_name(&name)
+    }
+
+    /// Remove function entries by ID, deregister from DataFusion, and re-register remaining overloads.
+    pub fn drop_by_ids(&mut self, ids: &[ObjectId]) -> Result<(), BundlebaseError> {
+        let name = self.name_for_ids(ids);
+        self.remove_by_ids(ids);
+
+        if let Some(name) = name {
+            self.deregister(&name);
+            self.register_functions_for_name(&name)?;
+        }
+        Ok(())
+    }
+
+    /// Rename function entries by ID, deregister old name, and register under new name.
+    pub fn rename_by_ids(&mut self, ids: &[ObjectId], new_name: &NamespacedName) -> Result<(), BundlebaseError> {
+        if let Some(old_name) = self.name_for_ids(ids) {
+            self.deregister(&old_name);
+        }
+
+        self.rename_entries(ids, new_name);
+        self.register_functions_for_name(&new_name.to_string())
+    }
+
+    /// Remove temporary function entries, deregister, and re-register remaining overloads.
+    pub fn drop_temp(
+        &mut self,
+        name: &str,
+        platform: Option<&Platform>,
+    ) -> Result<usize, BundlebaseError> {
+        self.deregister(name);
+        let removed = self.remove(name, platform, true);
+        self.register_functions_for_name(name)?;
+        Ok(removed)
+    }
+
+    /// Rename temporary function entries, with validation, deregistration, and re-registration.
+    pub fn rename_temp(
+        &mut self,
+        old_name: &str,
+        new_name: &NamespacedName,
+    ) -> Result<(), BundlebaseError> {
+        // Validate old name has temporary entries
+        let has_temp = self.entries.iter().any(|e| e.temporary && e.name == old_name);
+        if !has_temp {
+            return Err(format!(
+                "No temporary function entries found for '{}'. Use IMPORT TEMP FUNCTION first.",
+                old_name
+            ).into());
+        }
+
+        // Check new name doesn't conflict
+        let new_name_str = new_name.to_string();
+        if self.has(&new_name_str) {
+            return Err(format!(
+                "Function '{}' already exists. Drop it first or choose a different name.",
+                new_name_str
+            ).into());
+        }
+
+        self.deregister(old_name);
+        self.rename_temp_entries(old_name, new_name);
+        self.register_functions_for_name(&new_name_str)
     }
 }
 

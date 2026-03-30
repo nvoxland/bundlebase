@@ -1,4 +1,4 @@
-use crate::bundle::column_metadata;
+use crate::bundle::bundle_schema;
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
@@ -132,10 +132,10 @@ impl AttachBlockOp {
         // Reuse existing ColumnIds for columns whose names match existing columns.
         // This ensures the same logical column shares a ColumnId across blocks.
         let existing_ops = builder.operations();
-        let resolved = column_metadata::resolved_column_names(&existing_ops);
+        let resolved = bundle_schema::BundleSchema::resolved(&existing_ops);
         let name_to_id: HashMap<String, ColumnId> = resolved
-            .into_iter()
-            .map(|(id, name)| (name, id))
+            .columns().iter()
+            .map(|(id, name)| (name.clone(), *id))
             .collect();
 
         let column_ids = schema.as_ref()

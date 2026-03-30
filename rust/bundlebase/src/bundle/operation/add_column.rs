@@ -1,4 +1,4 @@
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::catalog::BundleViewTable;
@@ -32,12 +32,11 @@ impl AddColumnOp {
 
 impl Operation for AddColumnOp {
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
-        use crate::bundle::column_metadata;
+        use crate::bundle::bundle_schema;
 
-        let schema = bundle.schema().await?;
-
-        // Check column doesn't already exist (using user-visible names)
-        if schema.field_with_name(&self.name).is_ok() {
+        // Check column doesn't already exist
+        let bs = bundle.bundle_schema();
+        if bs.column_id(&self.name).is_some() {
             return Err(format!(
                 "Column '{}' already exists in the schema",
                 self.name
@@ -45,29 +44,16 @@ impl Operation for AddColumnOp {
             .into());
         }
 
-        // Build a col_<id> schema for validation since the expression uses col_<id> references.
-        // Get the internal schema by renaming the user-visible schema fields to col_<id>.
-        let resolved = bundle.resolved_column_names();
-        let col_id_fields: Vec<std::sync::Arc<arrow::datatypes::Field>> = schema.fields().iter().filter_map(|f| {
-            // Find the ColumnId for this user-visible name
-            resolved.iter()
-                .find(|(_, name)| name.as_str() == f.name())
-                .map(|(id, _)| {
-                    std::sync::Arc::new(f.as_ref().clone().with_name(column_metadata::col_id_name(id)))
-                })
-        }).collect();
-        let col_id_schema = std::sync::Arc::new(arrow::datatypes::Schema::new(col_id_fields));
-
-        // Validate the expression by planning it against an empty DataFrame with col_<id> schema
-        let col_name = column_metadata::col_id_name(&self.id);
+        // Validate the expression by planning it against an empty DataFrame with internal name schema
+        let internal_name = bundle_schema::generate_internal_name(&self.id);
         let sql = format!(
             "SELECT *, ({}) AS \"{}\" FROM bundle",
-            self.expression, col_name
+            self.expression, internal_name
         );
         let mut config = SessionConfig::new();
         config.options_mut().sql_parser.enable_ident_normalization = false;
         let ctx = SessionContext::new_with_config(config);
-        let empty_batch = RecordBatch::new_empty(col_id_schema);
+        let empty_batch = RecordBatch::new_empty(bundle.internal_schema().await?);
         ctx.register_batch("bundle", empty_batch)
             .map_err(|e| BundlebaseError::from(format!("Failed to validate expression: {}", e)))?;
         ctx.state()
@@ -86,16 +72,16 @@ impl Operation for AddColumnOp {
         &self,
         df: DataFrame,
         ctx: Arc<SessionContext>,
-        column_names: &mut ColumnNames,
+        bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
-        use crate::bundle::column_metadata;
+        use crate::bundle::bundle_schema;
 
-        // Translate user-visible column names in the expression to col_<id> names
-        let translated_expr = column_metadata::translate_sql_to_col_ids(&self.expression, column_names);
-        let col_name = column_metadata::col_id_name(&self.id);
+        // Translate user-visible column names in the expression to internal names
+        let translated_expr = bundle_schema.translate_sql(&self.expression);
+        let internal_name = bundle_schema::generate_internal_name(&self.id);
         let sql = format!(
             "SELECT *, ({}) AS \"{}\" FROM bundle",
-            translated_expr, col_name
+            translated_expr, internal_name
         );
 
         let mut config = SessionConfig::new();
@@ -114,7 +100,7 @@ impl Operation for AddColumnOp {
             .await
             .map_err(|e| Box::new(e) as BundlebaseError)?;
 
-        column_names.insert(self.id, self.name.clone());
+        bundle_schema.insert_computed(self.id, self.name.clone());
         Ok(result)
     }
 

@@ -114,35 +114,8 @@ impl Operation for RenameFunctionOp {
         let new_namespaced = NamespacedName::parse(&self.new_name, "Function")
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
 
-        // Look up the old name before renaming
-        let old_name = {
-            let registry = bundle.function_registry();
-            let reg = registry.read();
-            reg.entries()
-                .iter()
-                .find(|e| self.ids.contains(&e.id))
-                .map(|e| e.name.to_string())
-        };
-
-        // Deregister old UDF/UDAF
-        if let Some(ref old_name) = old_name {
-            let _ = bundle.ctx().deregister_udf(old_name);
-            let _ = bundle.ctx().deregister_udaf(old_name);
-        }
-
-        // Rename entries in the function registry
-        bundle
-            .function_registry()
-            .write()
-            .rename_entries(&self.ids, &new_namespaced);
-
-        // Re-register under the new name
-        bundle
-            .function_registry()
-            .read()
-            .register_functions_for_name(&self.new_name)
+        bundle.function_registry().write().rename_by_ids(&self.ids, &new_namespaced)
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
-
         Ok(())
     }
 }

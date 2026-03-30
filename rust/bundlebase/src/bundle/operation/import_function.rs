@@ -81,14 +81,11 @@ impl Operation for ImportFunctionOp {
             temporary: false,
             kind: self.kind,
         };
-        // Warn if overwriting an existing definition
         if bundle.function_registry().read().has(&self.name) {
             tracing::warn!("Overwriting existing function definition for '{}'", self.name);
         }
 
-        // Add to registry first so resolve_all can find all overloads
-        bundle.function_registry().write().add(entry);
-        bundle.function_registry().read().register_functions_for_name(&self.name)
+        bundle.function_registry().write().add_and_register(entry)
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
         Ok(())
     }

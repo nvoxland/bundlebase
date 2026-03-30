@@ -11,6 +11,7 @@ mod throttled_store;
 use bench_data::{Format, ALL_FORMATS};
 use bench_helpers::{create_benchmark_bundle, create_runtime};
 use bundlebase::bundle::BundleFacade;
+use bundlebase_command::BundleBuilderExt;
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use data_generator::{SCALE_100K, SCALE_10K, SCALE_1M};
 use futures::StreamExt;

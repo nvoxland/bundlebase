@@ -1,4 +1,4 @@
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleBuilder;
 use crate::bundle::BundleFacade;
@@ -70,7 +70,7 @@ impl Operation for DropViewOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        _column_names: &mut ColumnNames,
+        _bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
         // DropViewOp doesn't modify the dataframe (metadata-only operation)
         Ok(df)

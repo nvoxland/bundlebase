@@ -7,7 +7,7 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
-use bundlebase::bundle::column_metadata;
+use bundlebase::bundle::bundle_schema;
 use bundlebase::bundle::BundleFacade;
 use tracing::debug;
 
@@ -97,16 +97,16 @@ impl BundleBuilderCommand for UpdateCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        // Translate user-visible column names to stable col_<id> references
-        let col_names = builder.column_names();
-        let where_clause = column_metadata::translate_sql_to_col_ids(&self.where_clause, &col_names);
+        // Translate user-visible column names to stable internal name references
+        let bundle_schema = builder.bundle_schema();
+        let where_clause = bundle_schema.translate_sql(&self.where_clause);
 
-        // Translate column names and expressions to col_<id>
+        // Translate column names and expressions to internal name
         let columns: Vec<String> = self.assignments.iter().map(|a| {
-            column_metadata::translate_sql_to_col_ids(&a.column, &col_names)
+            bundle_schema.translate_sql(&a.column)
         }).collect();
         let expressions: Vec<String> = self.assignments.iter().map(|a| {
-            column_metadata::translate_sql_to_col_ids(&a.expression, &col_names)
+            bundle_schema.translate_sql(&a.expression)
         }).collect();
 
         let updated_count = builder.evaluate_update_cols(&columns, &expressions, &where_clause).await?;
@@ -119,15 +119,15 @@ impl BundleBuilderCommand for UpdateCommand {
             // Also apply a DataFrame-level SQL transform so FilterOp and other
             // DataFrame-level operations see the updated values.
             // Uses CASE WHEN to replace values matching the WHERE condition.
-            // Build using col_<id> names from the internal column map.
+            // Build using internal name names from the internal column map.
             let assignment_map: std::collections::HashMap<&str, &str> = columns.iter()
                 .zip(expressions.iter())
                 .map(|(c, e)| (c.as_str(), e.as_str()))
                 .collect();
-            let select_cols: Vec<String> = col_names.keys().map(|col_id| {
-                let col_name = column_metadata::col_id_name(col_id);
-                let quoted = format!("\"{}\"", col_name);
-                if let Some(expr) = assignment_map.get(col_name.as_str()) {
+            let select_cols: Vec<String> = bundle_schema.keys().map(|col_id| {
+                let internal_name = bundle_schema.internal_name(col_id).expect("column ID from schema keys");
+                let quoted = format!("\"{}\"", internal_name);
+                if let Some(expr) = assignment_map.get(internal_name.as_str()) {
                     format!("CASE WHEN ({}) THEN ({}) ELSE {} END AS {}", where_clause, expr, quoted, quoted)
                 } else {
                     quoted

@@ -2,7 +2,6 @@
 
 use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::column_metadata;
 use bundlebase::bundle::operation::AddColumnOp;
 use bundlebase::bundle::BundleFacade;
 use bundlebase_common::BundlebaseError;
@@ -68,9 +67,9 @@ impl BundleBuilderCommand for AddColumnCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        // Translate column names in the expression to stable col_<id> references
-        let col_names = builder.column_names();
-        let translated_expression = column_metadata::translate_sql_to_col_ids(&self.expression, &col_names);
+        // Translate column names in the expression to stable internal name references
+        let bundle_schema = builder.bundle_schema();
+        let translated_expression = bundle_schema.translate_sql(&self.expression);
 
         builder
             .apply_operation(

@@ -7,7 +7,7 @@ use crate::{CommandParsing, Rule};
 use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
-use bundlebase::bundle::column_metadata;
+use bundlebase::bundle::bundle_schema;
 use bundlebase::bundle::operation::FilterOp;
 use bundlebase::bundle::BundleFacade;
 use tracing::debug;
@@ -61,9 +61,9 @@ impl BundleBuilderCommand for DeleteCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        // Translate user-visible column names to stable col_<id> references
-        let col_names = builder.column_names();
-        let where_clause = column_metadata::translate_sql_to_col_ids(&self.where_clause, &col_names);
+        // Translate user-visible column names to stable internal name references
+        let bundle_schema = builder.bundle_schema();
+        let where_clause = bundle_schema.translate_sql(&self.where_clause);
 
         // Collect RowIds matching the WHERE clause
         let delete_rowids = builder.select_row_ids(&where_clause).await?;

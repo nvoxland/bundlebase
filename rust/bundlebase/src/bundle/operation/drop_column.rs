@@ -1,4 +1,4 @@
-use crate::bundle::column_metadata::ColumnNames;
+use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::Operation;
 use crate::bundle::BundleFacade;
 use crate::object_id::ColumnId;
@@ -40,11 +40,11 @@ impl Operation for DropColumnOp {
         &self,
         df: DataFrame,
         _ctx: Arc<SessionContext>,
-        column_names: &mut ColumnNames,
+        bundle_schema: &mut BundleSchema,
     ) -> Result<DataFrame, BundlebaseError> {
-        column_names.remove(&self.id);
-        let col_name = crate::bundle::column_metadata::col_id_name(&self.id);
-        Ok(df.drop_columns(&[datafusion::common::Column::new_unqualified(&col_name)])?)
+        let col = bundle_schema.internal_column(&self.id)?;
+        bundle_schema.remove(&self.id);
+        Ok(df.drop_columns(&[col])?)
     }
 }
 

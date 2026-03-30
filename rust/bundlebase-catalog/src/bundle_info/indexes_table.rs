@@ -51,7 +51,7 @@ impl BundleIndexesTable {
     fn build_batch(&self) -> Result<RecordBatch> {
         let facade = self.facade()?;
         let indexes = facade.indexes();
-        let col_names = facade.column_names();
+        let col_names = facade.bundle_schema().columns().clone();
 
         let ids: Vec<String> = indexes.iter().map(|idx| idx.id().to_string()).collect();
         let names: Vec<&str> = indexes.iter().map(|idx| idx.name()).collect();
