@@ -72,6 +72,25 @@ pub async fn download_http_to_data_dir(
         return Err(http_status_error(url, status, Some(&body)).into());
     }
 
+    // Check Content-Type for error responses disguised as 200 OK.
+    // If the server returns text/html when we expect data, it's likely an error page.
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_lowercase());
+    if let Some(ref ct) = content_type {
+        let mime = ct.split(';').next().unwrap_or("").trim();
+        if mime == "text/html" || mime == "application/xhtml+xml" {
+            return Err(BundlebaseError::from(format!(
+                "URL '{}' returned HTML content (Content-Type: {}). \
+                 This is likely an error page or login redirect, not a data file. \
+                 Verify the URL points directly to downloadable data.",
+                url, ct
+            )));
+        }
+    }
+
     // Log content length if available
     if let Some(len) = response.content_length() {
         info!("Downloading {} ({:.1} MB)", url, len as f64 / 1_048_576.0);

@@ -869,6 +869,20 @@ Bundlebase has built-in connectors for common data sources. The pattern is: CREA
 | PostgreSQL database | `postgres` | `CREATE SOURCE USING postgres WITH (url = 'postgres://...')` |
 | Custom API with pagination/auth | Python connector | See "Building a Custom Connector" below |
 
+**http connector `format` option:** When the URL doesn't have a file extension (e.g., API endpoints), the http connector auto-detects format from the Content-Type header. If that also fails, specify the format explicitly:
+
+```sql
+CREATE SOURCE USING http WITH (url = 'https://api.example.com/data?query=lakes', format = 'csv')
+```
+
+Valid formats: `csv`, `json`, `jsonl`, `parquet`, `tsv`. If omitted, format is auto-detected from Content-Type, then URL extension, then content inspection.
+
+**http connector `head_supported` option:** The http connector makes a HEAD request to check the URL before downloading. Some servers (e.g., data.mn.gov, some government APIs) don't support HEAD requests properly. If you see an error mentioning HEAD request failure, retry with `head_supported = 'false'` to skip the HEAD check and go straight to downloading:
+
+```sql
+CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv', head_supported = 'false')
+```
+
 ```bash
 # URL: download CSV/JSON/Parquet from any HTTP(S) URL
 bundlebase create --bundle ./lake-data "CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv')"

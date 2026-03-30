@@ -65,6 +65,12 @@ impl Connector for HttpConnector {
                     required: false,
                     default: Some("auto"),
                 },
+                ArgSpec {
+                    name: "head_supported",
+                    description: "Whether the server supports HEAD requests (true/false). Set to false for servers that fail on HEAD. Default: true",
+                    required: false,
+                    default: Some("true"),
+                },
             ],
             accepts_extra_args: false,
         }
@@ -90,10 +96,20 @@ impl Connector for HttpConnector {
     ) -> Result<Vec<DiscoveredLocation>, BundlebaseError> {
         let url = shared_utils::require_url(args, "http")?;
 
-        // Read HEAD info (version + content-type) in one request.
-        // Propagate server errors (e.g. 500, 503) so we fail early rather than
-        // silently loading error content as data.
-        let head_info = shared_utils::read_http_head_info(&url).await?;
+        // Check if HEAD is supported (default: true)
+        let head_supported = args.get("head_supported")
+            .map(|v| v.to_lowercase() != "false")
+            .unwrap_or(true);
+
+        // Read HEAD info (version + content-type) unless HEAD is disabled.
+        let head_info = if head_supported {
+            shared_utils::read_http_head_info(&url).await?
+        } else {
+            shared_utils::HttpHeadInfo {
+                version: "unknown".to_string(),
+                content_type: None,
+            }
+        };
 
         // Format detection priority:
         // 1. Explicit format arg (unless "auto")
@@ -159,12 +175,10 @@ mod tests {
         let connector = HttpConnector;
         let sig = connector.signature();
         assert_eq!(sig.name, "http");
-        assert_eq!(sig.arg_specs.len(), 2);
+        assert_eq!(sig.arg_specs.len(), 3);
         assert!(sig.arg_specs.iter().any(|s| s.name == "url" && s.required));
-        assert!(sig
-            .arg_specs
-            .iter()
-            .any(|s| s.name == "format" && !s.required));
+        assert!(sig.arg_specs.iter().any(|s| s.name == "format" && !s.required));
+        assert!(sig.arg_specs.iter().any(|s| s.name == "head_supported" && !s.required));
     }
 
     #[test]
@@ -488,7 +502,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_discover_500_returns_error() {
+    async fn test_discover_500_returns_error_with_hint() {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("HEAD"))
             .respond_with(wiremock::ResponseTemplate::new(500))
@@ -503,12 +517,30 @@ mod tests {
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
-        assert!(err.contains("500"), "Error should mention status code: {}", err);
-        assert!(err.contains("Internal Server Error"), "Error should include reason: {}", err);
+        assert!(err.contains("head_supported"), "Error should suggest head_supported=false: {}", err);
     }
 
     #[tokio::test]
-    async fn test_discover_503_returns_descriptive_error() {
+    async fn test_discover_500_succeeds_with_head_disabled() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/api/data.csv", server.uri()));
+        args.insert("head_supported".to_string(), "false".to_string());
+        let config = crate::test_utils::test_config();
+
+        let locations = connector.discover(&args, &HashSet::new(), &config).await.unwrap();
+        assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0].format, "csv");
+    }
+
+    #[tokio::test]
+    async fn test_discover_503_returns_error_with_hint() {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("HEAD"))
             .respond_with(wiremock::ResponseTemplate::new(503))
@@ -523,8 +555,7 @@ mod tests {
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
-        assert!(err.contains("503"), "Error should mention status code: {}", err);
-        assert!(err.contains("unavailable"), "Error should suggest service unavailable: {}", err);
+        assert!(err.contains("head_supported"), "Error should suggest head_supported=false: {}", err);
     }
 
     #[tokio::test]

@@ -158,17 +158,29 @@ pub fn http_status_error(
 
 /// Read version and content-type from an HTTP(S) URL via HEAD request.
 ///
-/// Returns an error if the server responds with a non-success status code.
-/// Redirects (3xx) are followed automatically by the HTTP client.
+/// Returns an error if the HEAD request fails or returns a non-success status.
+/// Some servers don't support HEAD properly — use `head_supported=false` on the
+/// http connector to skip this check entirely.
 pub async fn read_http_head_info(url: &Url) -> Result<HttpHeadInfo, BundlebaseError> {
     let response = reqwest::Client::new()
         .head(url.as_str())
         .send()
         .await
-        .map_err(|e| BundlebaseError::from(format!("Failed to HEAD '{}': {}", url, e)))?;
+        .map_err(|e| BundlebaseError::from(format!(
+            "HEAD request failed for '{}': {}. \
+             If this server doesn't support HEAD requests, retry with: \
+             head_supported = 'false'",
+            url, e
+        )))?;
 
     if !response.status().is_success() {
-        return Err(http_status_error(url, response.status(), None).into());
+        let status = response.status();
+        let base_err = http_status_error(url, status, None);
+        return Err(format!(
+            "{}. If this server doesn't support HEAD requests, retry with: \
+             head_supported = 'false'",
+            base_err
+        ).into());
     }
 
     let version = if let Some(etag) = response.headers().get("etag") {
