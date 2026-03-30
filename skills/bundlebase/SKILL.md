@@ -215,6 +215,20 @@ The `query` tool handles everything: SELECT queries, ATTACH, DETACH, FILTER, REN
 
 Notice how steps 3-7 all reuse the same open bundle — no re-opening, no `--bundle` flag, no shell overhead. This is why MCP is preferred for any multi-step workflow.
 
+### Verify Before Committing
+
+In MCP mode, operations are **uncommitted** until you explicitly run `COMMIT`. This means you can test your changes before making them permanent:
+
+- Run queries against the uncommitted state to verify results look correct
+- Use `SHOW STATUS` to review what changed
+- Use `SAMPLE` to spot-check the data
+- If the last operation was wrong, use `UNDO` to revert just that change (can be called repeatedly)
+- If everything is wrong, use `RESET` to discard all uncommitted changes at once
+
+**Only commit once you've verified the results.** This test-then-commit cycle is the key advantage of MCP over CLI — use it.
+
+**WARNING about CLI `extend`:** The `bundlebase extend` command **auto-commits after every call**. There is no way to undo a committed change (short of recreating the bundle). This is why CLI is only appropriate for single, well-understood operations. For any workflow where you might need to check results or iterate, use MCP.
+
 ### Working with Multiple Bundles and Cross-Bundle Analysis
 
 MCP can hold multiple bundles open simultaneously. Use this to keep data sources separate during exploration, then combine them on demand.
@@ -492,6 +506,16 @@ mcp__bundlebase__query(bundle="data", sql="DELETE FROM bundle WHERE email IS NUL
 mcp__bundlebase__query(bundle="data", sql="RENAME COLUMN fname TO first_name")
 mcp__bundlebase__query(bundle="data", sql="RENAME COLUMN lname TO last_name")
 mcp__bundlebase__query(bundle="data", sql="ADD COLUMN full_name AS first_name || ' ' || last_name")
+
+# Step 7: VERIFY before committing — query the uncommitted state to check your work
+mcp__bundlebase__sample(bundle="data")
+mcp__bundlebase__query(bundle="data", sql="SELECT COUNT(*) as rows FROM bundle")
+# If the last operation looks wrong, UNDO reverts just that one change:
+# mcp__bundlebase__query(bundle="data", sql="UNDO")
+# If everything is wrong, RESET discards ALL uncommitted changes:
+# mcp__bundlebase__query(bundle="data", sql="RESET")
+
+# Step 8: Commit only after verifying
 mcp__bundlebase__query(bundle="data", sql="COMMIT 'Cleaned and standardized columns'")
 ```
 
@@ -598,22 +622,37 @@ bundlebase query --bundle ./docs --format json "SELECT * FROM search('descriptio
 
 ### 7. Version Control
 
-```bash
+**MCP (preferred — UNDO and RESET only work on uncommitted changes):**
+
+```
 # View history
-bundlebase query --bundle ./data --format json "SHOW HISTORY"
+mcp__bundlebase__query(bundle="data", sql="SHOW HISTORY")
 
 # View uncommitted changes
+mcp__bundlebase__query(bundle="data", sql="SHOW STATUS")
+
+# Undo the last uncommitted change (keeps earlier uncommitted changes)
+mcp__bundlebase__query(bundle="data", sql="UNDO")
+
+# Discard ALL uncommitted changes (back to last committed state)
+mcp__bundlebase__query(bundle="data", sql="RESET")
+
+# Verify data integrity
+mcp__bundlebase__query(bundle="data", sql="VERIFY DATA")
+```
+
+**CLI:**
+
+```bash
+# View history and status (read-only — works with query)
+bundlebase query --bundle ./data --format json "SHOW HISTORY"
 bundlebase query --bundle ./data --format json "SHOW STATUS"
-
-# Undo last commit
-bundlebase extend --bundle ./data "UNDO"
-
-# Discard uncommitted changes
-bundlebase extend --bundle ./data "RESET"
 
 # Verify data integrity
 bundlebase query --bundle ./data "VERIFY DATA"
 ```
+
+**Note:** `UNDO` and `RESET` are not useful with CLI `extend` because extend auto-commits — there are no uncommitted changes to undo. Use MCP for workflows where you need to test and undo.
 
 ### 8. Indexes for Performance
 

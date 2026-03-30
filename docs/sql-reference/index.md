@@ -958,7 +958,7 @@ See [Versioning](../guide/versioning.md) for details.
 
 ### UNDO
 
-Reverts the last committed change.
+Reverts the last uncommitted change, keeping earlier uncommitted changes intact. Can be called multiple times.
 
 ```sql
 UNDO
