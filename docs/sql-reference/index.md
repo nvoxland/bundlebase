@@ -958,10 +958,11 @@ See [Versioning](../guide/versioning.md) for details.
 
 ### UNDO
 
-Reverts the last uncommitted change, keeping earlier uncommitted changes intact. Can be called multiple times.
+Reverts the last uncommitted change, keeping earlier uncommitted changes intact. Use `UNDO LAST N` to undo multiple changes at once. Errors if N exceeds the number of uncommitted changes.
 
 ```sql
 UNDO
+UNDO LAST 3
 ```
 
 See [Versioning](../guide/versioning.md) for details.

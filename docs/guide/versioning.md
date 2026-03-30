@@ -122,7 +122,7 @@ Discard all uncommitted changes, reverting to the last committed state.
 
 ## Undo
 
-Undo the last uncommitted operation. Can be called multiple times to undo several operations.
+Undo the last uncommitted operation. Can be called multiple times to undo several operations, or use `UNDO LAST N` to undo multiple at once.
 
 === "Async API"
 
@@ -144,6 +144,7 @@ Undo the last uncommitted operation. Can be called multiple times to undo severa
 
     ```sql
     UNDO
+    UNDO LAST 3
     ```
 
 ## Verify Data

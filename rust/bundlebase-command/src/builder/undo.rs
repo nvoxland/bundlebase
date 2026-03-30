@@ -5,14 +5,23 @@ use bundlebase_common::BundlebaseError;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
 
-/// Command to undo the last uncommitted change.
-#[derive(Debug, Clone, Default)]
-pub struct UndoCommand;
+/// Command to undo the last uncommitted change(s).
+#[derive(Debug, Clone)]
+pub struct UndoCommand {
+    /// Number of changes to undo (default 1).
+    pub count: usize,
+}
 
 impl UndoCommand {
-    /// Create a new UndoCommand.
-    pub fn new() -> Self {
-        Self
+    /// Create a new UndoCommand that undoes `count` changes.
+    pub fn new(count: usize) -> Self {
+        Self { count }
+    }
+}
+
+impl Default for UndoCommand {
+    fn default() -> Self {
+        Self { count: 1 }
     }
 }
 
@@ -21,12 +30,27 @@ impl CommandParsing for UndoCommand {
         Rule::undo_stmt
     }
 
-    fn from_statement(_pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
-        Ok(UndoCommand::new())
+    fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
+        let mut count = 1usize;
+        for inner in pair.into_inner() {
+            if inner.as_rule() == Rule::undo_count {
+                count = inner.as_str().parse::<usize>().map_err(|e| {
+                    BundlebaseError::from(format!("Invalid UNDO count: {}", e))
+                })?;
+                if count == 0 {
+                    return Err("UNDO count must be at least 1".into());
+                }
+            }
+        }
+        Ok(UndoCommand::new(count))
     }
 
     fn to_statement(&self) -> String {
-        "UNDO".to_string()
+        if self.count == 1 {
+            "UNDO".to_string()
+        } else {
+            format!("UNDO LAST {}", self.count)
+        }
     }
 }
 
@@ -34,8 +58,26 @@ impl BundleBuilderCommand for UndoCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        builder.undo().await?;
-        Ok("Undid last operation".to_string())
+        let available = builder.status().changes().len();
+        if self.count > available {
+            return Err(format!(
+                "Cannot undo {} change{}: only {} uncommitted change{} available",
+                self.count,
+                if self.count == 1 { "" } else { "s" },
+                available,
+                if available == 1 { "" } else { "s" },
+            ).into());
+        }
+
+        if self.count == 1 {
+            let description = builder.undo().await?;
+            Ok(format!("UNDONE: {}", description))
+        } else {
+            for _ in 0..self.count {
+                builder.undo().await?;
+            }
+            Ok(format!("UNDONE: LAST {}", self.count))
+        }
     }
 }
 
@@ -51,21 +93,37 @@ mod parsing_tests {
         let input = "UNDO";
         let cmd = parse_command(input).unwrap();
         match cmd {
-            BundleCommand::Undo(_) => {}
+            BundleCommand::Undo(c) => assert_eq!(c.count, 1),
+            _ => panic!("Expected Undo variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_undo_last() {
+        let input = "UNDO LAST 5";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::Undo(c) => assert_eq!(c.count, 5),
+            _ => panic!("Expected Undo variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_undo_last_case_insensitive() {
+        let input = "undo last 3";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::Undo(c) => assert_eq!(c.count, 3),
             _ => panic!("Expected Undo variant"),
         }
     }
 
     #[test]
     fn test_round_trip() {
-        let cmd = UndoCommand::new();
-        let statement = cmd.to_statement();
-        assert_eq!(statement, "UNDO");
+        let cmd = UndoCommand::new(1);
+        assert_eq!(cmd.to_statement(), "UNDO");
 
-        let parsed = parse_command(&statement).unwrap();
-        match parsed {
-            BundleCommand::Undo(_) => {}
-            _ => panic!("Expected Undo variant"),
-        }
+        let cmd = UndoCommand::new(3);
+        assert_eq!(cmd.to_statement(), "UNDO LAST 3");
     }
 }

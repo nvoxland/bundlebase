@@ -559,13 +559,15 @@ impl BundleBuilder {
     /// builder.undo().await?; // Discards only the filter change
     /// // Bundle now has only the attach change pending
     /// ```
-    pub async fn undo(&self) -> Result<&Self, BundlebaseError> {
+    pub async fn undo(&self) -> Result<String, BundlebaseError> {
         if self.status().is_empty() {
             return Err("No uncommitted changes to undo".into());
         }
 
-        // Remove the last change
-        self.status.write().pop();
+        // Remove the last change and capture its description
+        let undone = self.status.write().pop_change()
+            .expect("status was non-empty");
+        let description = undone.description.clone();
 
         // Reload the bundle from the last committed state
         self.reload_bundle().await?;
@@ -578,9 +580,9 @@ impl BundleBuilder {
             }
         }
 
-        info!("Last operation undone");
+        info!("UNDONE: {}", description);
 
-        Ok(self)
+        Ok(description)
     }
 
     /// Check that a SQL string does not reference any temporary-only functions.

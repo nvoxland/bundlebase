@@ -139,7 +139,7 @@ REINDEX
 -- Version control
 COMMIT '<message>'
 RESET
-UNDO
+UNDO [LAST <count>]
 EXPLAIN [ANALYZE] [VERBOSE] [FORMAT format] [sql]
 
 -- Metadata

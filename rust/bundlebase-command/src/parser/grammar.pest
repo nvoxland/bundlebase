@@ -662,8 +662,10 @@ reset_stmt = {
 // Syntax: UNDO
 
 undo_stmt = {
-    ^"undo"
+    ^"undo" ~ (^"last" ~ undo_count)?
 }
+
+undo_count = @{ ASCII_DIGIT+ }
 
 // ============================================================================
 // COMMIT Statement

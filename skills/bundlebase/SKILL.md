@@ -250,7 +250,8 @@ mcp__bundlebase__query(bundle="data", sql="COMMIT 'Loaded and renamed columns'")
 ```
 
 **UNDO vs RESET:**
-- `UNDO` — removes the last uncommitted change only. Can be called multiple times to walk back one change at a time. Use when the most recent operation went wrong but earlier ones are fine.
+- `UNDO` — removes the last uncommitted change only. Returns the command that was undone (e.g., `"UNDONE: RENAME COLUMN x TO y"`).
+- `UNDO LAST N` — removes the last N uncommitted changes at once. Errors if N exceeds the number of available changes.
 - `RESET` — discards ALL uncommitted changes at once, reverting to the last committed state. Use when you want to start over completely.
 
 **Only commit once you've verified the results.** This check-then-commit cycle is the key advantage of MCP over CLI — use it.
@@ -540,6 +541,8 @@ mcp__bundlebase__sample(bundle="data")
 mcp__bundlebase__query(bundle="data", sql="SELECT COUNT(*) as rows FROM bundle")
 # If the last operation looks wrong, UNDO reverts just that one change:
 # mcp__bundlebase__query(bundle="data", sql="UNDO")
+# Or undo the last N changes at once:
+# mcp__bundlebase__query(bundle="data", sql="UNDO LAST 3")
 # If everything is wrong, RESET discards ALL uncommitted changes:
 # mcp__bundlebase__query(bundle="data", sql="RESET")
 
@@ -661,6 +664,9 @@ mcp__bundlebase__query(bundle="data", sql="SHOW STATUS")
 
 # Undo the last uncommitted change (keeps earlier uncommitted changes)
 mcp__bundlebase__query(bundle="data", sql="UNDO")
+
+# Or undo the last N changes at once
+mcp__bundlebase__query(bundle="data", sql="UNDO LAST 3")
 
 # Discard ALL uncommitted changes (back to last committed state)
 mcp__bundlebase__query(bundle="data", sql="RESET")
