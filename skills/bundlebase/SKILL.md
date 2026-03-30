@@ -217,15 +217,43 @@ Notice how steps 3-7 all reuse the same open bundle — no re-opening, no `--bun
 
 ### Verify Before Committing
 
-In MCP mode, operations are **uncommitted** until you explicitly run `COMMIT`. This means you can test your changes before making them permanent:
+In MCP mode, operations are **uncommitted** until you explicitly run `COMMIT`. This means you can test your changes before making them permanent.
 
-- Run queries against the uncommitted state to verify results look correct
-- Use `SHOW STATUS` to review what changed
-- Use `SAMPLE` to spot-check the data
-- If the last operation was wrong, use `UNDO` to revert just that change (can be called repeatedly)
-- If everything is wrong, use `RESET` to discard all uncommitted changes at once
+**`SHOW STATUS`** is your key tool for understanding uncommitted state. It lists every pending change with an id, description, and operation count. Use it to:
+- See what's pending before committing
+- Verify an operation was recorded after running it
+- Confirm an UNDO removed what you expected
 
-**Only commit once you've verified the results.** This test-then-commit cycle is the key advantage of MCP over CLI — use it.
+**Workflow for checking and rolling back:**
+
+```
+# Check current uncommitted state
+mcp__bundlebase__query(bundle="data", sql="SHOW STATUS")
+# Returns a table of pending changes, e.g.:
+#   id | description              | operation_count
+#   0  | ATTACH 'sales.csv'       | 2
+#   1  | RENAME COLUMN x TO y     | 1
+#   2  | FETCH bundle ADD          | 3
+
+# Something went wrong with the fetch — undo just that last change
+mcp__bundlebase__query(bundle="data", sql="UNDO")
+
+# Verify it was removed
+mcp__bundlebase__query(bundle="data", sql="SHOW STATUS")
+# Now shows only changes 0 and 1
+
+# The earlier changes are still intact — query the data to verify
+mcp__bundlebase__sample(bundle="data")
+
+# If everything looks good, commit
+mcp__bundlebase__query(bundle="data", sql="COMMIT 'Loaded and renamed columns'")
+```
+
+**UNDO vs RESET:**
+- `UNDO` — removes the last uncommitted change only. Can be called multiple times to walk back one change at a time. Use when the most recent operation went wrong but earlier ones are fine.
+- `RESET` — discards ALL uncommitted changes at once, reverting to the last committed state. Use when you want to start over completely.
+
+**Only commit once you've verified the results.** This check-then-commit cycle is the key advantage of MCP over CLI — use it.
 
 **WARNING about CLI `extend`:** The `bundlebase extend` command **auto-commits after every call**. There is no way to undo a committed change (short of recreating the bundle). This is why CLI is only appropriate for single, well-understood operations. For any workflow where you might need to check results or iterate, use MCP.
 
