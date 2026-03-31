@@ -2,6 +2,7 @@
 
 pub mod arrow_types;
 pub mod command_response;
+pub mod excel;
 pub use command_response::{CommandResponse, OutputShape, single_batch_stream};
 pub mod config;
 pub mod connector;

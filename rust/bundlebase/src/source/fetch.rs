@@ -3,6 +3,7 @@
 use crate::connector::{
     AttachedFileInfo, Connector, DiscoveredLocation, FetchAction, MaterializedData, SourceData,
 };
+use bundlebase_common::excel::{excel_to_parquet, is_excel_format};
 use bundlebase_common::source_utils::{detect_format_from_bytes, filename_from_url, http_status_error, record_batch_stream_to_parquet};
 use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
@@ -123,7 +124,7 @@ pub async fn download_http_to_data_dir(
 
     // If the filename has no recognized data extension and we have a format hint, append it
     if let Some(fmt) = resolved_hint {
-        let known_extensions = ["csv", "json", "jsonl", "parquet", "tsv", "xml"];
+        let known_extensions = ["csv", "json", "jsonl", "parquet", "tsv", "xml", "xlsx", "xls", "ods"];
         let has_known_ext = filename
             .rsplit('.')
             .next()
@@ -132,6 +133,17 @@ pub async fn download_http_to_data_dir(
         if !has_known_ext {
             filename = format!("{}.{}", filename, fmt);
         }
+    }
+
+    // Convert Excel files to Parquet automatically
+    if is_excel_format(&filename) {
+        info!("Converting Excel file to Parquet: {}", filename);
+        let parquet_bytes = excel_to_parquet(&data, None)?;
+        let parquet_filename = filename
+            .rsplit_once('.')
+            .map(|(base, _)| format!("{}.parquet", base))
+            .unwrap_or_else(|| format!("{}.parquet", filename));
+        return download_to_data_dir(parquet_bytes, &parquet_filename, data_dir).await;
     }
 
     download_to_data_dir(data, &filename, data_dir).await

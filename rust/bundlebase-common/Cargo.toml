@@ -40,6 +40,7 @@ chrono = { version = "0.4", features = ["serde"] }
 glob = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
 parquet = { workspace = true }
+calamine = "0.34"
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tempfile = { workspace = true }

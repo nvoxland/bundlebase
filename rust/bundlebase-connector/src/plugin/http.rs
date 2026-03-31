@@ -39,7 +39,7 @@ fn format_from_content_type(content_type: &str) -> Option<&'static str> {
 fn format_from_url_extension(url: &Url) -> Option<String> {
     let filename = shared_utils::filename_from_url(url);
     let ext = filename.rsplit('.').next()?.to_lowercase();
-    let known = ["csv", "json", "jsonl", "parquet", "tsv", "xml"];
+    let known = ["csv", "json", "jsonl", "parquet", "tsv", "xml", "xlsx", "xls", "ods"];
     if known.contains(&ext.as_str()) {
         Some(ext)
     } else {
