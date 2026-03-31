@@ -4,7 +4,7 @@
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
 use bundlebase_common::connector::{
-    ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, DataFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_io::file::IOReadFile;
@@ -103,11 +103,12 @@ impl Connector for RemoteDirConnector {
             }
 
             // Get format from file extension
-            let format = relative_path
-                .rsplit('.')
-                .next()
-                .unwrap_or("dat")
-                .to_string();
+            let format = DataFormat::from_extension(
+                relative_path
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or("dat"),
+            );
 
             // Read version from remote file
             let version = Self::read_remote_version(&file.url, config).await

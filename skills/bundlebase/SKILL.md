@@ -883,6 +883,29 @@ Valid formats: `csv`, `json`, `jsonl`, `parquet`, `tsv`. If omitted, format is a
 CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv', head_supported = 'false')
 ```
 
+**`SAVE AS` clause (all sources):** Controls how fetched data is stored. Add after the `WITH` block:
+
+| Value | Behavior |
+|-------|----------|
+| `AUTO` (default) | Reference attachable formats by URL when possible; copy when required by the connector; convert non-attachable formats (Excel) to Parquet |
+| `COPY` | Download and copy original bytes into the bundle. Only valid for attachable formats (CSV, TSV, JSON, Parquet) |
+| `PARQUET` | Convert everything to Parquet before storing |
+| `REF` | Reference the remote URL directly — no download. Only valid for attachable formats and connectors that support it |
+
+```sql
+-- Default: auto (references CSV by URL, converts Excel to Parquet)
+CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv')
+
+-- Force download into the bundle (self-contained, works offline)
+CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') SAVE AS COPY
+
+-- Force Parquet conversion for all data
+CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') SAVE AS PARQUET
+
+-- Excel files are automatically converted to Parquet
+CREATE SOURCE USING http WITH (url = 'https://example.com/data.xlsx')
+```
+
 ```bash
 # URL: download CSV/TSV/JSON/Parquet from any HTTP(S) URL
 bundlebase create --bundle ./lake-data "CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv')"

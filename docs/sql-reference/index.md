@@ -357,7 +357,7 @@ Commands for managing data sources.
 Defines a source for automatic file discovery.
 
 ```sql
-CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<key> = '<value>', ...)]
+CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<key> = '<value>', ...)] [SAVE AS <AUTO|COPY|PARQUET|REF>]
 ```
 
 See [Data Sources](../guide/sources.md) for details.

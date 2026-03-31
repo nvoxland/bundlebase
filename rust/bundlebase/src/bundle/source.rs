@@ -1,9 +1,9 @@
 //! Source struct representing a data source definition for a pack.
 
 use crate::bundle::{BundleBuilder, CreateSourceOp};
+use crate::connector::SaveAs;
 use crate::data::ObjectId;
 use crate::source::{AttachedFileInfo, FetchAction, ConnectorRegistry, SyncMode, orchestrate_fetch};
-use bundlebase_common::source_utils as shared_utils;
 use crate::BundlebaseError;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -20,8 +20,9 @@ pub struct Source {
     /// Connector name (e.g., "remote_dir" for built-in, "acme.weather" for custom)
     connector: RwLock<String>,
     /// Connector-specific configuration arguments
-    /// For "remote_dir": "url" (required), "patterns" (optional)
     args: HashMap<String, String>,
+    /// How to save fetched data.
+    save_as: SaveAs,
     /// Attached files from this source, keyed by source_location
     attached_files: RwLock<HashMap<String, AttachedFileInfo>>,
 }
@@ -32,12 +33,14 @@ impl Source {
         pack: ObjectId,
         connector: String,
         args: HashMap<String, String>,
+        save_as: SaveAs,
     ) -> Self {
         Self {
             id,
             pack,
             connector: RwLock::new(connector),
             args,
+            save_as,
             attached_files: RwLock::new(HashMap::new()),
         }
     }
@@ -47,18 +50,22 @@ impl Source {
         registry: &ConnectorRegistry,
     ) -> Result<Self, BundlebaseError> {
         if !op.connector.contains('.') {
-            // Built-in connector: validate it exists in the registry
             registry
                 .get(&op.connector)
                 .ok_or_else(|| format!("Unknown connector '{}'", op.connector))?;
         }
-        // Dotted names are validated at check() time against source_definitions
+
+        let save_as = op.save_as.as_deref()
+            .map(SaveAs::parse)
+            .transpose()?
+            .unwrap_or(SaveAs::Auto);
 
         Ok(Self::new(
             op.id,
             op.pack,
             op.connector.clone(),
             op.args.clone(),
+            save_as,
         ))
     }
 
@@ -141,13 +148,12 @@ impl Source {
 
         // Get attached files directly from self
         let attached_files = self.attached_files();
-        let should_copy = shared_utils::should_copy(&resolved_args);
 
         orchestrate_fetch(
             func.as_ref(),
             &resolved_args,
             mode,
-            should_copy,
+            &self.save_as,
             data_dir.as_ref(),
             &attached_files,
             &(Arc::clone(&config) as Arc<dyn crate::ConfigProvider>),
@@ -203,6 +209,7 @@ mod tests {
             pack,
             "remote_dir".to_string(),
             make_args("s3://bucket/data/", Some("**/*")),
+            SaveAs::Auto,
         );
 
         assert_eq!(source.id(), &id);
@@ -223,6 +230,7 @@ mod tests {
             pack,
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
+            save_as: None,
         };
 
         let source = Source::from_op(&op, &registry).unwrap();
@@ -244,6 +252,7 @@ mod tests {
             pack: ObjectId::generate(),
             connector: "remote_dir".to_string(),
             args: args.clone(),
+            save_as: None,
         };
 
         // from_op succeeds, validation happens in check()
@@ -262,6 +271,7 @@ mod tests {
             pack: ObjectId::generate(),
             connector: "unknown_function".to_string(),
             args: HashMap::new(),
+            save_as: None,
         };
 
         let result = Source::from_op(&op, &registry);

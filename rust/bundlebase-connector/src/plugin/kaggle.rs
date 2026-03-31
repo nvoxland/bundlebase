@@ -4,7 +4,7 @@
 //! Authentication is read from `~/.kaggle/kaggle.json`.
 
 use bundlebase_common::connector::{
-    ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, DataFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::{config_keys, config_scopes, ConfigKey, ConfigScope};
@@ -172,11 +172,12 @@ impl Connector for KaggleConnector {
         let locations = all_files
             .into_iter()
             .map(|kf| {
-                let format = kf.filename
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or("dat")
-                    .to_string();
+                let format = DataFormat::from_extension(
+                    kf.filename
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or("dat"),
+                );
                 DiscoveredLocation {
                     location: kf.filename,
                     must_copy: true,

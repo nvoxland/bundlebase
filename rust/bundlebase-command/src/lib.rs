@@ -757,7 +757,7 @@ register_commands! {
         DropFunction(DropFunctionCommand) => Rule::drop_function_stmt,
             "DROP FUNCTION" => "DROP FUNCTION <name>",
         CreateSource(CreateSourceCommand) => Rule::create_source_stmt,
-            "CREATE SOURCE" => "CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<args>)]",
+            "CREATE SOURCE" => "CREATE SOURCE [FOR <pack>] USING <connector> [WITH (<args>)] [SAVE AS <AUTO|COPY|PARQUET|REF>]",
 
         // Transaction commands
         Reset(ResetCommand) => Rule::reset_stmt,

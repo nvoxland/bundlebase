@@ -62,6 +62,80 @@ pub struct ConnectorSignature {
     pub accepts_extra_args: bool,
 }
 
+/// Extension and attachability for a data format.
+#[derive(Debug, Clone, Copy)]
+pub struct DataFormatInfo {
+    /// File extension without leading dot (e.g., "csv", "parquet").
+    pub extension: &'static str,
+    /// Whether the reader system can directly attach this format without conversion.
+    pub attachable: bool,
+}
+
+/// Data format describing what a connector produces.
+///
+/// Used on `DiscoveredLocation` to identify the input format.
+/// The `SaveStrategy` on the source determines how this data gets saved.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DataFormat {
+    Csv,
+    Tsv,
+    JsonL,
+    Parquet,
+    Xlsx,
+    Xls,
+    Ods,
+    /// Format not yet determined — will be detected from content after download.
+    Auto,
+}
+
+impl DataFormat {
+    /// Parse a format string (file extension or name) into a DataFormat.
+    pub fn from_extension(ext: &str) -> Self {
+        match ext.to_lowercase().as_str() {
+            "csv" => DataFormat::Csv,
+            "tsv" => DataFormat::Tsv,
+            "json" | "jsonl" => DataFormat::JsonL,
+            "parquet" => DataFormat::Parquet,
+            "xlsx" => DataFormat::Xlsx,
+            "xls" => DataFormat::Xls,
+            "ods" => DataFormat::Ods,
+            "auto" | _ => DataFormat::Auto,
+        }
+    }
+
+    /// Extension and attachability for this format.
+    pub fn info(&self) -> DataFormatInfo {
+        match self {
+            DataFormat::Csv => DataFormatInfo { extension: "csv", attachable: true },
+            DataFormat::Tsv => DataFormatInfo { extension: "tsv", attachable: true },
+            DataFormat::JsonL => DataFormatInfo { extension: "json", attachable: true },
+            DataFormat::Parquet => DataFormatInfo { extension: "parquet", attachable: true },
+            DataFormat::Xlsx => DataFormatInfo { extension: "xlsx", attachable: false },
+            DataFormat::Xls => DataFormatInfo { extension: "xls", attachable: false },
+            DataFormat::Ods => DataFormatInfo { extension: "ods", attachable: false },
+            DataFormat::Auto => DataFormatInfo { extension: "dat", attachable: false },
+        }
+    }
+
+    /// File extension for this format (without leading dot).
+    pub fn extension(&self) -> &'static str {
+        self.info().extension
+    }
+
+    /// Whether this format can be directly attached by the reader system.
+    pub fn is_attachable(&self) -> bool {
+        self.info().attachable
+    }
+}
+
+impl std::fmt::Display for DataFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.extension())
+    }
+}
+
+
 /// A partition of source data discovered during the discovery phase.
 ///
 /// Each `DiscoveredLocation` becomes one block in the bundle.
@@ -71,8 +145,9 @@ pub struct DiscoveredLocation {
     pub location: String,
     /// Whether this location requires copying data into the bundle's data directory.
     pub must_copy: bool,
-    /// Data format / file extension (e.g., "parquet", "csv").
-    pub format: String,
+    /// Input data format describing what the connector produces.
+    /// This is the format of the data, not how it will be saved — save policy is on the Source.
+    pub format: DataFormat,
     /// Source-specific version string used for change detection during sync.
     pub version: String,
 }
@@ -283,10 +358,12 @@ pub fn validate_connector_args(
 
     // Check for unknown arguments (skip if the source accepts extra args).
     // Keys prefixed with "_" are reserved system keys and always allowed.
+    // "save_as" and "copy" are source-level framework args, not connector args.
+    const SOURCE_FRAMEWORK_ARGS: &[&str] = &["copy"];
     if !sig.accepts_extra_args {
         let valid_names: HashSet<&str> = specs.iter().map(|s| s.name).collect();
         for key in args.keys() {
-            if !key.starts_with('_') && !valid_names.contains(key.as_str()) {
+            if !key.starts_with('_') && !SOURCE_FRAMEWORK_ARGS.contains(&key.as_str()) && !valid_names.contains(key.as_str()) {
                 let valid_args = format_arg_list(specs);
                 return Err(format!(
                     "Function '{}' does not accept argument '{}'. Valid arguments: {}",

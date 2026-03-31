@@ -9,7 +9,7 @@
 //!   registered by the Python bindings at init time (PyO3 + `FromPyArrow`).
 
 use bundlebase_common::connector::{
-    ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, DataFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::system_config::is_external_code_allowed;
@@ -285,7 +285,7 @@ fn location_json(location: &DiscoveredLocation) -> Result<String, BundlebaseErro
     serde_json::to_string(&serde_json::json!({
         "location": location.location,
         "must_copy": location.must_copy,
-        "format": location.format,
+        "format": location.format.extension(),
         "version": location.version,
     }))
     .map_err(|e| format!("Failed to serialize location: {}", e).into())
@@ -343,11 +343,11 @@ fn parse_discover_json(json: &str) -> Result<Vec<DiscoveredLocation>, Bundlebase
             .get("must_copy")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        let format = loc
-            .get("format")
-            .and_then(|v| v.as_str())
-            .unwrap_or("parquet")
-            .to_string();
+        let format = DataFormat::from_extension(
+            loc.get("format")
+                .and_then(|v| v.as_str())
+                .unwrap_or("parquet"),
+        );
         let version = loc
             .get("version")
             .and_then(|v| v.as_str())
@@ -586,11 +586,11 @@ mod tests {
         assert_eq!(locations.len(), 2);
         assert_eq!(locations[0].location, "file1.parquet");
         assert!(locations[0].must_copy);
-        assert_eq!(locations[0].format, "parquet");
+        assert_eq!(locations[0].format, DataFormat::Parquet);
         assert_eq!(locations[0].version, "v1");
         assert_eq!(locations[1].location, "file2.csv");
         assert!(!locations[1].must_copy);
-        assert_eq!(locations[1].format, "csv");
+        assert_eq!(locations[1].format, DataFormat::Csv);
         assert_eq!(locations[1].version, "");
     }
 
@@ -614,7 +614,7 @@ mod tests {
         let loc = DiscoveredLocation {
             location: "test.parquet".to_string(),
             must_copy: true,
-            format: "parquet".to_string(),
+            format: DataFormat::Parquet,
             version: "v1".to_string(),
         };
         let json = location_json(&loc).expect("should serialize");
@@ -650,7 +650,7 @@ mod tests {
         let location = DiscoveredLocation {
             location: "test.parquet".to_string(),
             must_copy: true,
-            format: "parquet".to_string(),
+            format: DataFormat::Parquet,
             version: "v1".to_string(),
         };
 
@@ -668,7 +668,7 @@ mod tests {
         let location = DiscoveredLocation {
             location: "test.parquet".to_string(),
             must_copy: true,
-            format: "parquet".to_string(),
+            format: DataFormat::Parquet,
             version: "v1".to_string(),
         };
 

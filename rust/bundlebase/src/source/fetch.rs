@@ -1,10 +1,10 @@
 //! Fetch orchestration for source data discovery and materialization.
 
 use crate::connector::{
-    AttachedFileInfo, Connector, DiscoveredLocation, FetchAction, MaterializedData, SourceData,
+    AttachedFileInfo, Connector, SaveAs, DiscoveredLocation, FetchAction, MaterializedData,
+    ResolvedSaveAs, SourceData,
 };
-use bundlebase_common::excel::{excel_to_parquet, is_excel_format};
-use bundlebase_common::source_utils::{detect_format_from_bytes, filename_from_url, http_status_error, record_batch_stream_to_parquet};
+use bundlebase_common::source_utils::{convert_to_parquet, detect_format_from_bytes, filename_from_url, http_status_error, record_batch_stream_to_parquet};
 use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};
@@ -12,6 +12,7 @@ use crate::progress::ProgressScope;
 use crate::{BundlebaseError, ConfigProvider};
 use bytes::Bytes;
 use futures::stream;
+use futures::StreamExt;
 use log::debug;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -135,18 +136,19 @@ pub async fn download_http_to_data_dir(
         }
     }
 
-    // Convert Excel files to Parquet automatically
-    if is_excel_format(&filename) {
-        info!("Converting Excel file to Parquet: {}", filename);
-        let parquet_bytes = excel_to_parquet(&data, None)?;
-        let parquet_filename = filename
-            .rsplit_once('.')
-            .map(|(base, _)| format!("{}.parquet", base))
-            .unwrap_or_else(|| format!("{}.parquet", filename));
-        return download_to_data_dir(parquet_bytes, &parquet_filename, data_dir).await;
-    }
-
     download_to_data_dir(data, &filename, data_dir).await
+}
+
+/// Collect a byte stream into a single Bytes buffer.
+async fn collect_byte_stream(
+    mut stream: futures::stream::BoxStream<'static, Result<Bytes, std::io::Error>>,
+) -> Result<Bytes, BundlebaseError> {
+    let mut buffer = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| BundlebaseError::from(format!("Failed to read byte stream: {}", e)))?;
+        buffer.extend_from_slice(&chunk);
+    }
+    Ok(Bytes::from(buffer))
 }
 
 /// Result of materializing a file, containing the file reference and its hash.
@@ -211,66 +213,125 @@ async fn get_data_for_location(
     args: &HashMap<String, String>,
     config: &Arc<dyn ConfigProvider>,
     data_dir: &dyn IOReadWriteDir,
-    should_copy: bool,
+    copy_as: &SaveAs,
 ) -> Result<FetchedData, BundlebaseError> {
+    // Resolve copy strategy based on source's copy_as, format, and must_copy
+    let strategy = copy_as.resolve(&location.format, location.must_copy)?;
+
     // Try data() first
     if let Some(source_data) = func.data(location, args, config).await? {
-        match source_data {
-            SourceData::Arrow(batch_stream) => {
-                let bytes = record_batch_stream_to_parquet(batch_stream).await?;
-                let filename = format!("data.{}", location.format);
-                let result = download_to_data_dir(bytes, &filename, data_dir).await?;
-                let attach_location = data_dir
-                    .relative_path(result.file.as_ref())
-                    .unwrap_or_else(|_| result.file.url().to_string());
-                return Ok(FetchedData {
-                    attach_location,
-                    source_url: location.location.clone(),
-                    hash: Some(result.hash),
-                });
-            }
-            SourceData::RawBytes(byte_stream) => {
-                let ext = location.format.as_str();
-                let result = data_dir.write_stream(byte_stream, ext).await?;
-                let attach_location = data_dir
-                    .relative_path(result.file.as_ref())
-                    .unwrap_or_else(|_| result.file.url().to_string());
-                return Ok(FetchedData {
-                    attach_location,
-                    source_url: location.location.clone(),
-                    hash: Some(result.hash),
-                });
-            }
-        }
+        return save_source_data(source_data, &strategy, &location.format, &location.location, data_dir).await;
     }
 
     // Try stable_url()
     if let Some(stable) = func.stable_url(location, args, config).await? {
-        if should_copy || location.must_copy {
-            // Download the file into data_dir
-            let result = materialize_url(&stable, true, data_dir, config, Some(&location.format)).await?;
+        match &strategy {
+            ResolvedSaveAs::Ref => {
+                // Reference URL directly — no download
+                return Ok(FetchedData {
+                    attach_location: stable.to_string(),
+                    source_url: stable.to_string(),
+                    hash: None,
+                });
+            }
+            _ => {
+                return save_from_url(&stable, &strategy, &location.format, data_dir, config).await;
+            }
+        }
+    }
+
+    Err(format!(
+        "Connector returned neither data nor stable_url for location '{}'",
+        location.location
+    )
+    .into())
+}
+
+/// Save SourceData (Arrow or RawBytes) to the data directory using the resolved save strategy.
+async fn save_source_data(
+    source_data: SourceData,
+    strategy: &ResolvedSaveAs,
+    format: &crate::connector::DataFormat,
+    source_url: &str,
+    data_dir: &dyn IOReadWriteDir,
+) -> Result<FetchedData, BundlebaseError> {
+    match (source_data, strategy) {
+        // Arrow data always serializes to Parquet regardless of strategy.
+        // Arrow batches can't be "copied" or "ref'd" as files.
+        (SourceData::Arrow(batch_stream), _) => {
+            let bytes = record_batch_stream_to_parquet(batch_stream).await?;
+            let result = download_to_data_dir(bytes, "data.parquet", data_dir).await?;
+            Ok(make_fetched_data(data_dir, &result, source_url))
+        }
+        (SourceData::RawBytes(byte_stream), ResolvedSaveAs::Copy) => {
+            let result = data_dir.write_stream(byte_stream, format.extension()).await?;
+            Ok(make_fetched_data(data_dir, &result, source_url))
+        }
+        (SourceData::RawBytes(byte_stream), ResolvedSaveAs::Parquet) => {
+            let bytes = collect_byte_stream(byte_stream).await?;
+            let parquet_bytes = convert_to_parquet(&bytes, format)?;
+            let result = download_to_data_dir(parquet_bytes, "data.parquet", data_dir).await?;
+            Ok(make_fetched_data(data_dir, &result, source_url))
+        }
+        (SourceData::RawBytes(_), ResolvedSaveAs::Ref) => {
+            // Ref with data() shouldn't happen — data() returns bytes to store,
+            // not a URL reference. This would be a connector bug.
+            Err("Connector returned data bytes but copy_as resolved to 'ref'. \
+                 This is unexpected — connectors that support ref should use stable_url().".into())
+        }
+    }
+}
+
+/// Download from a URL and save using the resolved save strategy.
+async fn save_from_url(
+    url: &Url,
+    strategy: &ResolvedSaveAs,
+    format: &crate::connector::DataFormat,
+    data_dir: &dyn IOReadWriteDir,
+    config: &Arc<dyn ConfigProvider>,
+) -> Result<FetchedData, BundlebaseError> {
+    match strategy {
+        ResolvedSaveAs::Copy => {
+            let result = materialize_url(url, true, data_dir, config, Some(format.extension())).await?;
             let attach_location = data_dir
                 .relative_path(result.file.as_ref())
                 .unwrap_or_else(|_| result.file.url().to_string());
             Ok(FetchedData {
                 attach_location,
-                source_url: stable.to_string(),
+                source_url: url.to_string(),
                 hash: Some(result.hash),
             })
-        } else {
-            // Reference URL directly, hash will be computed during attach
-            Ok(FetchedData {
-                attach_location: stable.to_string(),
-                source_url: stable.to_string(),
-                hash: None,
-            })
         }
-    } else {
-        Err(format!(
-            "Connector returned neither data nor stable_url for location '{}'",
-            location.location
-        )
-        .into())
+        ResolvedSaveAs::Parquet => {
+            // Download raw bytes, convert to Parquet, then write
+            let response = reqwest::get(url.as_str())
+                .await
+                .map_err(|e| BundlebaseError::from(format!("Failed to download '{}': {}", url, e)))?;
+            if !response.status().is_success() {
+                return Err(http_status_error(url, response.status(), None).into());
+            }
+            let raw_bytes = response.bytes().await
+                .map_err(|e| BundlebaseError::from(format!("Failed to read '{}': {}", url, e)))?;
+            let parquet_bytes = convert_to_parquet(&raw_bytes, format)?;
+            let result = download_to_data_dir(parquet_bytes, "data.parquet", data_dir).await?;
+            Ok(make_fetched_data(data_dir, &result, url.as_str()))
+        }
+        ResolvedSaveAs::Ref => {
+            // Ref is handled in get_data_for_location before calling save_from_url
+            unreachable!("Ref strategy should not reach save_from_url")
+        }
+    }
+}
+
+/// Build FetchedData from a WriteResult.
+fn make_fetched_data(data_dir: &dyn IOReadWriteDir, result: &WriteResult, source_url: &str) -> FetchedData {
+    let attach_location = data_dir
+        .relative_path(result.file.as_ref())
+        .unwrap_or_else(|_| result.file.url().to_string());
+    FetchedData {
+        attach_location,
+        source_url: source_url.to_string(),
+        hash: Some(result.hash.clone()),
     }
 }
 
@@ -290,11 +351,12 @@ pub async fn orchestrate_fetch(
     func: &dyn Connector,
     args: &HashMap<String, String>,
     mode: SyncMode,
-    should_copy: bool,
+    save_as: &SaveAs,
     data_dir: &dyn IOReadWriteDir,
     attached_files: &HashMap<String, AttachedFileInfo>,
     config: &Arc<dyn ConfigProvider>,
 ) -> Result<Vec<FetchAction>, BundlebaseError> {
+
     let attached_locations: HashSet<String> = attached_files.keys().cloned().collect();
     let discovered = func.discover(args, &attached_locations, config).await?;
 
@@ -326,7 +388,7 @@ pub async fn orchestrate_fetch(
                         args,
                         config,
                         data_dir,
-                        should_copy,
+                        &save_as,
                     )
                     .await?;
                     actions.push(FetchAction::Replace {
@@ -345,7 +407,7 @@ pub async fn orchestrate_fetch(
         } else {
             // New file — add it
             let data =
-                get_data_for_location(func, location, args, config, data_dir, should_copy).await?;
+                get_data_for_location(func, location, args, config, data_dir, &save_as).await?;
             actions.push(FetchAction::Add(MaterializedData {
                 attach_location: data.attach_location,
                 source_location: location.location.clone(),

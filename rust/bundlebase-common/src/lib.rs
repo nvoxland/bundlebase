@@ -7,6 +7,7 @@ pub use command_response::{CommandResponse, OutputShape, single_batch_stream};
 pub mod config;
 pub mod connector;
 pub mod namespaced_name;
+pub mod save_as;
 pub mod source_utils;
 pub mod data_reader;
 pub mod indexed_blocks;

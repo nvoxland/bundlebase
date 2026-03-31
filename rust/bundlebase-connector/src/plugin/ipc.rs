@@ -5,7 +5,7 @@
 //! This enables users to write connectors in any language.
 
 use bundlebase_common::connector::{
-    ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, DataFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::system_config::is_external_code_allowed;
@@ -438,11 +438,11 @@ impl Connector for IpcConnector {
                 .get("must_copy")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            let format = loc
-                .get("format")
-                .and_then(|v| v.as_str())
-                .unwrap_or("parquet")
-                .to_string();
+            let format = DataFormat::from_extension(
+                loc.get("format")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("parquet"),
+            );
             let version = loc
                 .get("version")
                 .and_then(|v| v.as_str())
@@ -643,7 +643,7 @@ mod tests {
         let location = DiscoveredLocation {
             location: "test.parquet".to_string(),
             must_copy: true,
-            format: "parquet".to_string(),
+            format: DataFormat::Parquet,
             version: "v1".to_string(),
         };
 
@@ -698,7 +698,7 @@ mod tests {
 
         assert_eq!(locations.len(), 2);
         assert_eq!(locations[0].location, "test_file_1.parquet");
-        assert_eq!(locations[0].format, "parquet");
+        assert_eq!(locations[0].format, DataFormat::Parquet);
         assert_eq!(locations[0].version, "v1");
         assert!(locations[0].must_copy);
         assert_eq!(locations[1].location, "test_file_2.parquet");
@@ -865,7 +865,7 @@ mod tests {
 
         assert_eq!(locations.len(), 2);
         assert_eq!(locations[0].location, "test_file_1.parquet");
-        assert_eq!(locations[0].format, "parquet");
+        assert_eq!(locations[0].format, DataFormat::Parquet);
         assert_eq!(locations[0].version, "v1");
         assert!(locations[0].must_copy);
         assert_eq!(locations[1].location, "test_file_2.parquet");
@@ -950,7 +950,7 @@ mod tests {
 
         assert_eq!(locations.len(), 2);
         assert_eq!(locations[0].location, "test_file_1.parquet");
-        assert_eq!(locations[0].format, "parquet");
+        assert_eq!(locations[0].format, DataFormat::Parquet);
         assert_eq!(locations[0].version, "v1");
         assert!(locations[0].must_copy);
         assert_eq!(locations[1].location, "test_file_2.parquet");

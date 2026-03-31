@@ -20,6 +20,8 @@ pub struct CreateSourceCommand {
     pub args: HashMap<String, String>,
     /// The pack to create the source for (None or "base" for base pack)
     pub pack: Option<String>,
+    /// How to save fetched data (auto, copy, parquet, ref). None = auto.
+    pub save_as: Option<String>,
 }
 
 impl CreateSourceCommand {
@@ -33,6 +35,7 @@ impl CreateSourceCommand {
             connector: connector.into(),
             args,
             pack,
+            save_as: None,
         }
     }
 }
@@ -47,11 +50,11 @@ impl CommandParsing for CreateSourceCommand {
         let mut identifiers: Vec<String> = Vec::new();
         let mut has_dotted = false;
         let mut dotted_name = None;
+        let mut save_as = None;
 
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
                 Rule::dotted_identifier => {
-                    // Dotted identifier is always the connector (after USING)
                     dotted_name = Some(inner_pair.as_str().to_string());
                     has_dotted = true;
                 }
@@ -79,6 +82,9 @@ impl CommandParsing for CreateSourceCommand {
                             }
                         }
                     }
+                }
+                Rule::save_as_value => {
+                    save_as = Some(inner_pair.as_str().to_lowercase());
                 }
                 _ => {}
             }
@@ -112,7 +118,9 @@ impl CommandParsing for CreateSourceCommand {
             return Err("CREATE SOURCE requires at least one argument in WITH clause".into());
         }
 
-        Ok(CreateSourceCommand::new(connector, args, pack))
+        let mut cmd = CreateSourceCommand::new(connector, args, pack);
+        cmd.save_as = save_as;
+        Ok(cmd)
     }
 
     fn to_statement(&self) -> String {
@@ -123,8 +131,13 @@ impl CommandParsing for CreateSourceCommand {
             _ => String::new(),
         };
 
+        let save_as_part = match &self.save_as {
+            Some(s) => format!(" SAVE AS {}", s.to_uppercase()),
+            None => String::new(),
+        };
+
         if self.args.is_empty() {
-            return format!("CREATE SOURCE{} USING {}", pack_part, self.connector);
+            return format!("CREATE SOURCE{} USING {}{}", pack_part, self.connector, save_as_part);
         }
 
         let mut args_str: Vec<String> = self
@@ -132,11 +145,11 @@ impl CommandParsing for CreateSourceCommand {
             .iter()
             .map(|(k, v)| format!("{} = {}", quote_identifier(k), escape_string(v)))
             .collect();
-        args_str.sort(); // Consistent ordering
+        args_str.sort();
         let args_joined = args_str.join(", ");
         format!(
-            "CREATE SOURCE{} USING {} WITH ({})",
-            pack_part, self.connector, args_joined
+            "CREATE SOURCE{} USING {} WITH ({}){}",
+            pack_part, self.connector, args_joined, save_as_part
         )
     }
 }
@@ -148,7 +161,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
         let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
         let source_id = ObjectId::generate();
         let connector_name = self.connector.clone();
-        let op = CreateSourceOp::setup(source_id, pack_id, self.connector.clone(), self.args.clone());
+        let op = CreateSourceOp::setup(source_id, pack_id, self.connector.clone(), self.args.clone(), self.save_as.clone());
 
         builder.apply_operation(op.into()).await?;
 
@@ -301,6 +314,76 @@ mod parsing_tests {
             BundleCommand::CreateSource(c) => {
                 assert_eq!(c.connector, "remote_dir");
                 assert_eq!(c.pack, Some("users".to_string()));
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_save_as_clause() {
+        let input = "CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') SAVE AS COPY";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.connector, "http");
+                assert_eq!(c.save_as, Some("copy".to_string()));
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_save_as_parquet() {
+        let input = "CREATE SOURCE USING http WITH (url = 'https://example.com/data.xlsx') SAVE AS PARQUET";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.save_as, Some("parquet".to_string()));
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_save_as_ref() {
+        let input = "CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') SAVE AS REF";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.save_as, Some("ref".to_string()));
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_no_save_as_defaults_to_none() {
+        let input = "CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv')";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.save_as, None);
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_round_trip_with_save_as() {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "https://example.com/data.csv".to_string());
+        let mut cmd = CreateSourceCommand::new("http", args, None);
+        cmd.save_as = Some("copy".to_string());
+        let statement = cmd.to_statement();
+        assert_eq!(
+            statement,
+            "CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') SAVE AS COPY"
+        );
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.save_as, Some("copy".to_string()));
             }
             _ => panic!("Expected CreateSource variant"),
         }

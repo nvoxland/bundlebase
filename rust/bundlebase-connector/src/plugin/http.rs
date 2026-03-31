@@ -4,7 +4,7 @@
 //! parses HTML pages for links, this connector treats the URL as a direct
 //! link to a data file (CSV, JSON, Parquet, etc.).
 
-use bundlebase_common::connector::{ArgSpec, Connector, ConnectorSignature, DiscoveredLocation, SourceData};
+use bundlebase_common::connector::{ArgSpec, Connector, ConnectorSignature, DataFormat, DiscoveredLocation, SourceData};
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::{ConfigProvider, BundlebaseError};
 use async_trait::async_trait;
@@ -117,7 +117,7 @@ impl Connector for HttpConnector {
         // 3. URL file extension
         // 4. "auto" — will be resolved by content inspection after download
         let explicit = args.get("format").map(|f| f.to_lowercase());
-        let format = if let Some(ref fmt) = explicit {
+        let format_str = if let Some(ref fmt) = explicit {
             if fmt != "auto" {
                 fmt.clone()
             } else {
@@ -130,6 +130,7 @@ impl Connector for HttpConnector {
         } else {
             "auto".to_string()
         };
+        let format = DataFormat::from_extension(&format_str);
 
         Ok(vec![DiscoveredLocation {
             location: url.to_string(),
@@ -305,7 +306,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(locations.len(), 1);
-        assert_eq!(locations[0].format, "csv");
+        assert_eq!(locations[0].format, DataFormat::Csv);
     }
 
     #[tokio::test]
@@ -328,7 +329,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(locations.len(), 1);
-        assert_eq!(locations[0].format, "json");
+        assert_eq!(locations[0].format, DataFormat::JsonL);
     }
 
     #[tokio::test]
@@ -354,7 +355,7 @@ mod tests {
             .unwrap();
 
         // Explicit auto bypasses content-type and extension detection
-        assert_eq!(locations[0].format, "auto");
+        assert_eq!(locations[0].format, DataFormat::Auto);
     }
 
     #[tokio::test]
@@ -378,7 +379,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(locations[0].format, "json");
+        assert_eq!(locations[0].format, DataFormat::JsonL);
     }
 
     #[tokio::test]
@@ -403,7 +404,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(locations[0].format, "parquet");
+        assert_eq!(locations[0].format, DataFormat::Parquet);
     }
 
     #[tokio::test]
@@ -428,7 +429,7 @@ mod tests {
             .unwrap();
 
         // Content-Type wins over URL extension
-        assert_eq!(locations[0].format, "json");
+        assert_eq!(locations[0].format, DataFormat::JsonL);
     }
 
     #[tokio::test]
@@ -453,7 +454,7 @@ mod tests {
             .unwrap();
 
         // Falls through to URL extension
-        assert_eq!(locations[0].format, "parquet");
+        assert_eq!(locations[0].format, DataFormat::Parquet);
     }
 
     #[tokio::test]
@@ -477,7 +478,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(locations[0].format, "auto");
+        assert_eq!(locations[0].format, DataFormat::Auto);
     }
 
     #[tokio::test]
@@ -498,7 +499,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(locations[0].format, "json");
+        assert_eq!(locations[0].format, DataFormat::JsonL);
     }
 
     #[tokio::test]
@@ -536,7 +537,7 @@ mod tests {
 
         let locations = connector.discover(&args, &HashSet::new(), &config).await.unwrap();
         assert_eq!(locations.len(), 1);
-        assert_eq!(locations[0].format, "csv");
+        assert_eq!(locations[0].format, DataFormat::Csv);
     }
 
     #[tokio::test]
@@ -632,7 +633,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(locations[0].format, "csv");
+        assert_eq!(locations[0].format, DataFormat::Csv);
     }
 
     #[tokio::test]
@@ -641,7 +642,7 @@ mod tests {
         let location = DiscoveredLocation {
             location: "https://example.com/data.csv".to_string(),
             must_copy: false,
-            format: "csv".to_string(),
+            format: DataFormat::Csv,
             version: "v1".to_string(),
         };
         let config = crate::test_utils::test_config();

@@ -316,6 +316,21 @@ pub async fn record_batch_stream_to_parquet(
     Ok(Bytes::from(buffer))
 }
 
+/// Convert raw bytes in a known format to Parquet bytes.
+///
+/// This is the pluggable extension point for format conversion. To add support
+/// for a new input format, add a match arm here.
+pub fn convert_to_parquet(data: &[u8], format: &crate::connector::DataFormat) -> Result<Bytes, BundlebaseError> {
+    use crate::connector::DataFormat;
+    match format {
+        DataFormat::Xlsx | DataFormat::Xls | DataFormat::Ods => crate::excel::excel_to_parquet(data, None),
+        other => Err(format!(
+            "Cannot convert format '{}' to Parquet",
+            other
+        ).into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

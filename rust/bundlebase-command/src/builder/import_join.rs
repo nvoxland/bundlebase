@@ -529,6 +529,7 @@ mod tests {
             pack: ObjectId::BASE_PACK,
             connector: "http".to_string(),
             args: HashMap::new(),
+            save_as: None,
         });
 
         let remapped = remap_operation(&op, &pack_remap, &HashMap::new()).unwrap();

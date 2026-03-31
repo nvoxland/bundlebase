@@ -712,17 +712,18 @@ async fn test_copy_true_uses_relative_path() -> Result<(), BundlebaseError> {
     )
     .await?;
 
-    // Create bundle and define source with copy=true (default)
+    // Create bundle and define source with SAVE AS COPY to force download
     let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
-    bundle
-        .create_source(
-            "remote_dir",
-            make_source_args(source_dir.url().as_str(), Some("**/*.parquet")),
-            None,
-        )
-        .await?;
+    let source_url = source_dir.url().to_string();
+    let sql = format!(
+        "CREATE SOURCE USING remote_dir WITH (url = '{}', patterns = '**/*.parquet') SAVE AS COPY",
+        source_url
+    );
+    use bundlebase_command::parser::parse_command;
+    let cmd = parse_command(&sql).expect("should parse");
+    cmd.execute(&bundle).await.expect("should execute");
 
     bundle.commit("Defined source").await?;
 

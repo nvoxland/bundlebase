@@ -33,6 +33,10 @@ pub struct CreateSourceOp {
     /// - "patterns": Comma-separated glob patterns (optional, defaults to "**/*")
     #[serde(default)]
     pub args: HashMap<String, String>,
+
+    /// How to save fetched data (auto, copy, parquet, ref). None = auto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub save_as: Option<String>,
 }
 
 impl CreateSourceOp {
@@ -41,12 +45,14 @@ impl CreateSourceOp {
         pack: ObjectId,
         connector: String,
         args: HashMap<String, String>,
+        save_as: Option<String>,
     ) -> Self {
         Self {
             id,
             pack,
             connector,
             args,
+            save_as,
         }
     }
 }
@@ -117,6 +123,7 @@ mod tests {
             pack,
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
+            save_as: None,
         };
 
         assert_eq!(
@@ -134,6 +141,7 @@ mod tests {
             pack,
             connector: "custom_function".to_string(),
             args: HashMap::new(),
+            save_as: None,
         };
 
         assert_eq!(
@@ -149,6 +157,7 @@ mod tests {
             ObjectId::generate(),
             "remote_dir".to_string(),
             make_args("s3://bucket/", None),
+            None,
         );
 
         assert_eq!(op.connector, "remote_dir");
@@ -162,6 +171,7 @@ mod tests {
             ObjectId::generate(),
             "remote_dir".to_string(),
             make_args("s3://bucket/", Some("**/*.parquet,**/*.csv")),
+            None,
         );
 
         assert_eq!(op.connector, "remote_dir");
@@ -181,6 +191,7 @@ mod tests {
             ObjectId::generate(),
             "custom_function".to_string(),
             args.clone(),
+            None,
         );
 
         assert_eq!(op.connector, "custom_function");
@@ -196,6 +207,7 @@ mod tests {
             pack,
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
+            save_as: None,
         };
 
         let yaml = serde_yaml_ng::to_string(&op).unwrap();

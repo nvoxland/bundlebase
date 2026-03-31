@@ -42,6 +42,7 @@ impl DataReaderFactory {
         &self.storage
     }
 
+
     /// Create a reader for the given source.
     ///
     /// # Arguments

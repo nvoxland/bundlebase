@@ -4,7 +4,7 @@
 //! and downloads files that match specified glob patterns.
 
 use bundlebase_common::connector::{
-    ArgSpec, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, DataFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::{ConfigProvider, BundlebaseError};
@@ -88,11 +88,12 @@ impl Connector for WebScrapeConnector {
             }
 
             // Get format from URL extension
-            let format = shared_utils::filename_from_url(&url)
-                .rsplit('.')
-                .next()
-                .unwrap_or("dat")
-                .to_string();
+            let format = DataFormat::from_extension(
+                shared_utils::filename_from_url(&url)
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or("dat"),
+            );
 
             // Read version from HTTP headers
             let version = shared_utils::read_http_head_info(&url)
