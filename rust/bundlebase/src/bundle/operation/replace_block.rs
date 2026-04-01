@@ -2,6 +2,7 @@ use crate::bundle::bundle_schema::BundleSchema;
 use crate::bundle::operation::{AnyOperation, Operation, SourceInfo};
 use crate::bundle::BundleFacade;
 use crate::bundle::DataBlock;
+use crate::connector::AttachFormat;
 use crate::data::{BlockId, ObjectId};
 use crate::io::readable_file_from_path;
 use crate::source::AttachedFileInfo;
@@ -25,7 +26,7 @@ pub struct ReplaceBlockOp {
     /// The new location to read data from
     pub new_location: String,
     /// The data format for reading the new block.
-    pub format: bundlebase_data::attach_format::AttachFormat,
+    pub format: AttachFormat,
     /// The version at the new location
     pub new_version: String,
     /// SHA256 hash of the content at the new location
@@ -44,7 +45,7 @@ impl ReplaceBlockOp {
     pub async fn setup(
         old_location: &str,
         new_location: &str,
-        format: bundlebase_data::attach_format::AttachFormat,
+        format: AttachFormat,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         // Find block ID by searching AttachBlockOp operations for matching location
@@ -231,7 +232,7 @@ mod tests {
         let op = ReplaceBlockOp {
             id: block_id,
             new_location: "s3://bucket/new_data.parquet".to_string(),
-            format: bundlebase_data::attach_format::AttachFormat::Parquet,
+            format: AttachFormat::Parquet,
             new_version: "etag:abc123".to_string(),
             new_hash: "0".repeat(64),
             source_info: None,
@@ -248,7 +249,7 @@ mod tests {
         let op = ReplaceBlockOp {
             id: block_id,
             new_location: "file:///new/path.csv".to_string(),
-            format: bundlebase_data::attach_format::AttachFormat::Csv,
+            format: AttachFormat::Csv,
             new_version: "etag:abc123".to_string(),
             new_hash: "0".repeat(64),
             source_info: None,
@@ -272,7 +273,7 @@ mod tests {
         let op = ReplaceBlockOp {
             id: block_id,
             new_location: "file:///new/path.csv".to_string(),
-            format: bundlebase_data::attach_format::AttachFormat::Csv,
+            format: AttachFormat::Csv,
             new_version: "etag:abc123".to_string(),
             new_hash: "0".repeat(64),
             source_info: Some(SourceInfo {

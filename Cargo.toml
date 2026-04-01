@@ -68,6 +68,11 @@ sha2 = "0.10"
 serial_test = "3.3"
 rand = "0.9"
 
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
 [profile.dev]
 opt-level = 0
 lto = false

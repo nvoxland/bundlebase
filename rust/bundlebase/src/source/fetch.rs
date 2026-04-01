@@ -213,10 +213,10 @@ async fn get_data_for_location(
     args: &HashMap<String, String>,
     config: &Arc<dyn ConfigProvider>,
     data_dir: &dyn IOReadWriteDir,
-    copy_as: &SaveAs,
+    save_as: &SaveAs,
 ) -> Result<FetchedData, BundlebaseError> {
-    // Resolve copy strategy based on source's copy_as, format, and must_copy
-    let strategy = copy_as.resolve(&location.format, location.must_copy)?;
+    // Resolve copy strategy based on source's save_as, format, and must_copy
+    let strategy = save_as.resolve(&location.format, location.must_copy)?;
 
     // Try data() first
     if let Some(source_data) = func.data(location, args, config).await? {
@@ -276,7 +276,7 @@ async fn save_source_data(
         (SourceData::RawBytes(_), ResolvedSaveAs::Ref) => {
             // Ref with data() shouldn't happen — data() returns bytes to store,
             // not a URL reference. This would be a connector bug.
-            Err("Connector returned data bytes but copy_as resolved to 'ref'. \
+            Err("Connector returned data bytes but save_as resolved to 'ref'. \
                  This is unexpected — connectors that support ref should use stable_url().".into())
         }
     }

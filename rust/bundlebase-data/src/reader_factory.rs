@@ -63,7 +63,7 @@ impl DataReaderFactory {
             }
         }
         Err(DataFusionError::NotImplemented(format!(
-            "No reader found for '{}'. Supported formats: .csv, .tsv, .json, .jsonl, .parquet",
+            "No reader found for '{}'. Supported formats: .csv, .tsv, .jsonl, .parquet",
             source
         )).into())
     }
