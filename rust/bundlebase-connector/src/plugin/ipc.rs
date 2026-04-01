@@ -5,7 +5,7 @@
 //! This enables users to write connectors in any language.
 
 use bundlebase_common::connector::{
-    ArgSpec, DataFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::system_config::is_external_code_allowed;
@@ -372,14 +372,7 @@ impl Connector for IpcConnector {
     fn signature(&self) -> ConnectorSignature {
         ConnectorSignature {
             name: "ipc".to_string(),
-            arg_specs: vec![
-                ArgSpec {
-                    name: "copy",
-                    description: "Whether to copy data into the bundle (default: true)",
-                    required: false,
-                    default: Some("true"),
-                },
-            ],
+            arg_specs: vec![],
             // call is injected by source definition resolution; user kwargs pass through
             accepts_extra_args: true,
         }
@@ -396,11 +389,11 @@ impl Connector for IpcConnector {
         }
         self.ensure_spawned(args).await?;
 
-        // Build params: pass all args except "call" and "copy",
+        // Build params: pass all args except "call",
         // plus attached_locations so the subprocess can optimize discovery.
         let filtered_args: HashMap<String, String> = args
             .iter()
-            .filter(|(k, _)| k.as_str() != "call" && k.as_str() != "copy")
+            .filter(|(k, _)| k.as_str() != "call")
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
 
@@ -438,7 +431,7 @@ impl Connector for IpcConnector {
                 .get("must_copy")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            let format = DataFormat::from_extension(
+            let format = SourceFormat::from_extension(
                 loc.get("format")
                     .and_then(|v| v.as_str())
                     .unwrap_or("parquet"),
@@ -462,7 +455,7 @@ impl Connector for IpcConnector {
 
     /// Sends a JSON-RPC `data` request to the subprocess.
     ///
-    /// All args (except `call` and `copy`) are forwarded, including reserved
+    /// All args (except `call`) are forwarded, including reserved
     /// keys like `_columns`. Subprocess connectors that support column pushdown
     /// can read `_columns` from the request params to limit returned columns.
     async fn data(
@@ -478,7 +471,7 @@ impl Connector for IpcConnector {
 
         let filtered_args: HashMap<String, String> = args
             .iter()
-            .filter(|(k, _)| k.as_str() != "call" && k.as_str() != "copy")
+            .filter(|(k, _)| k.as_str() != "call")
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
 
@@ -613,9 +606,7 @@ mod tests {
         let sig = func.signature();
         assert_eq!(sig.name, "ipc");
         // call is no longer in arg_specs — it's injected by source definition resolution
-        assert_eq!(sig.arg_specs.len(), 1);
-        assert_eq!(sig.arg_specs[0].name, "copy");
-        assert!(!sig.arg_specs[0].required);
+        assert_eq!(sig.arg_specs.len(), 0);
         assert!(sig.accepts_extra_args);
     }
 
@@ -643,7 +634,7 @@ mod tests {
         let location = DiscoveredLocation {
             location: "test.parquet".to_string(),
             must_copy: true,
-            format: DataFormat::Parquet,
+            format: SourceFormat::Parquet,
             version: "v1".to_string(),
         };
 
@@ -698,7 +689,7 @@ mod tests {
 
         assert_eq!(locations.len(), 2);
         assert_eq!(locations[0].location, "test_file_1.parquet");
-        assert_eq!(locations[0].format, DataFormat::Parquet);
+        assert_eq!(locations[0].format, SourceFormat::Parquet);
         assert_eq!(locations[0].version, "v1");
         assert!(locations[0].must_copy);
         assert_eq!(locations[1].location, "test_file_2.parquet");
@@ -865,7 +856,7 @@ mod tests {
 
         assert_eq!(locations.len(), 2);
         assert_eq!(locations[0].location, "test_file_1.parquet");
-        assert_eq!(locations[0].format, DataFormat::Parquet);
+        assert_eq!(locations[0].format, SourceFormat::Parquet);
         assert_eq!(locations[0].version, "v1");
         assert!(locations[0].must_copy);
         assert_eq!(locations[1].location, "test_file_2.parquet");
@@ -950,7 +941,7 @@ mod tests {
 
         assert_eq!(locations.len(), 2);
         assert_eq!(locations[0].location, "test_file_1.parquet");
-        assert_eq!(locations[0].format, DataFormat::Parquet);
+        assert_eq!(locations[0].format, SourceFormat::Parquet);
         assert_eq!(locations[0].version, "v1");
         assert!(locations[0].must_copy);
         assert_eq!(locations[1].location, "test_file_2.parquet");

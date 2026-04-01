@@ -2,6 +2,7 @@ use crate::bundle::bundle_schema;
 use crate::bundle::facade::BundleFacade;
 use crate::bundle::operation::Operation;
 use crate::bundle::DataBlock;
+use crate::connector::AttachFormat;
 use crate::data::{BlockId, ObjectId};
 use crate::io::readable_file_from_path;
 use crate::object_id::ColumnId;
@@ -36,6 +37,7 @@ pub struct AttachBlockOp {
     pub id: BlockId,
     pub pack: ObjectId,
     pub location: String,
+    pub format: AttachFormat,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_options: Option<HashMap<String, String>>,
     pub version: String,
@@ -72,6 +74,7 @@ impl AttachBlockOp {
     pub async fn setup(
         pack: &ObjectId,
         location: &str,
+        format: AttachFormat,
         hash: Option<&str>,
         source_info: Option<SourceInfo>,
         builder: &BundleBuilder,
@@ -92,7 +95,7 @@ impl AttachBlockOp {
                     let temp_id = BlockId::generate();
                     let adapter_factory = builder.bundle().reader_factory.clone();
                     let adapter = adapter_factory
-                        .reader(location, &temp_id, builder, None, None, None, None)
+                        .reader(location, &format, &temp_id, builder, None, None, None, None)
                         .await?;
                     let version = adapter.read_version().await?;
 
@@ -112,7 +115,7 @@ impl AttachBlockOp {
         progress.update(2, Some("Creating adapter"));
         let adapter_factory = builder.bundle().reader_factory.clone();
         let adapter = adapter_factory
-            .reader(location, &block_id, builder, None, None, None, None)
+            .reader(location, &format, &block_id, builder, None, None, None, None)
             .await?;
 
         progress.update(3, Some("Reading version"));
@@ -148,6 +151,7 @@ impl AttachBlockOp {
 
         let mut op = AttachBlockOp {
             location: location.to_string(),
+            format,
             num_rows: None,
             bytes: None,
             version,
@@ -211,6 +215,7 @@ impl Operation for AttachBlockOp {
             .reader_factory
             .reader(
                 self.location.as_str(),
+                &self.format,
                 &self.id,
                 bundle,
                 self.schema.clone(),
@@ -266,6 +271,7 @@ mod tests {
     async fn test_describe() {
         let op = AttachBlockOp {
             location: "file:///test/data.csv".to_string(),
+            format: AttachFormat::Csv,
             version: "test-version".to_string(),
             hash: "0".repeat(64),
             id: BlockId::generate(),
@@ -287,7 +293,7 @@ mod tests {
         let datafile = test_datafile("userdata.parquet");
         let bundle = empty_bundle().await;
         let op =
-            AttachBlockOp::setup(&ObjectId::generate(), datafile, None, None, bundle.as_ref()).await?;
+            AttachBlockOp::setup(&ObjectId::generate(), datafile, AttachFormat::Parquet, None, None, bundle.as_ref()).await?;
         let block_id = String::from(op.id);
         let pack = String::from(op.pack);
         let version = ObjectStoreFile::from_url(
@@ -304,6 +310,7 @@ mod tests {
             r#"id: {}
 pack: {}
 location: memory:///test_data/userdata.parquet
+format: parquet
 version: {}
 hash: 59d4fdcdd71e5b6ab79d0bc8fae8ee6f144d3639250facb4b519b36b92c8a5cc
 numRows: 1000
@@ -377,6 +384,7 @@ schema:
     async fn test_version() {
         let op = AttachBlockOp {
             location: "file:///test/data.csv".to_string(),
+            format: AttachFormat::Csv,
             version: "test-version".to_string(),
             hash: "0".repeat(64),
             id: BlockId::generate(),

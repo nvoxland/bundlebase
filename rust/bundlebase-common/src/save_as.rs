@@ -3,7 +3,7 @@
 //! Configured on the source via the `SAVE AS` clause of `CREATE SOURCE`.
 //! Controls how data from connectors gets stored in the bundle.
 
-use crate::connector::DataFormat;
+use crate::connector::SourceFormat;
 use crate::BundlebaseError;
 
 /// How fetched data should be stored.
@@ -47,10 +47,11 @@ impl SaveAs {
     }
 
     /// Resolve to a concrete strategy based on format and must_copy.
-    pub fn resolve(&self, format: &DataFormat, must_copy: bool) -> Result<ResolvedSaveAs, BundlebaseError> {
+    pub fn resolve(&self, format: &SourceFormat, must_copy: bool) -> Result<ResolvedSaveAs, BundlebaseError> {
         match self {
             SaveAs::Copy => {
-                if format.is_attachable() {
+                let is_attachable = matches!(format, SourceFormat::Csv | SourceFormat::Tsv | SourceFormat::JsonL | SourceFormat::Parquet);
+                if is_attachable {
                     Ok(ResolvedSaveAs::Copy)
                 } else {
                     Err(format!(
@@ -66,7 +67,8 @@ impl SaveAs {
                     return Err("save_as='ref' is not supported for this source — \
                         the connector requires data to be copied into the bundle.".into());
                 }
-                if !format.is_attachable() {
+                let is_attachable = matches!(format, SourceFormat::Csv | SourceFormat::Tsv | SourceFormat::JsonL | SourceFormat::Parquet);
+                if !is_attachable {
                     return Err(format!(
                         "save_as='ref' is not valid for format '{}'. \
                          Non-attachable formats must be converted. Use save_as='parquet'.",
@@ -76,7 +78,8 @@ impl SaveAs {
                 Ok(ResolvedSaveAs::Ref)
             }
             SaveAs::Auto => {
-                if !format.is_attachable() {
+                let is_attachable = matches!(format, SourceFormat::Csv | SourceFormat::Tsv | SourceFormat::JsonL | SourceFormat::Parquet);
+                if !is_attachable {
                     Ok(ResolvedSaveAs::Parquet)
                 } else if must_copy {
                     Ok(ResolvedSaveAs::Copy)

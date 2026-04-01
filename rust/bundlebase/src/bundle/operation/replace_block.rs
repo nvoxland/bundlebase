@@ -24,6 +24,8 @@ pub struct ReplaceBlockOp {
     pub id: BlockId,
     /// The new location to read data from
     pub new_location: String,
+    /// The data format for reading the new block.
+    pub format: bundlebase_data::attach_format::AttachFormat,
     /// The version at the new location
     pub new_version: String,
     /// SHA256 hash of the content at the new location
@@ -42,6 +44,7 @@ impl ReplaceBlockOp {
     pub async fn setup(
         old_location: &str,
         new_location: &str,
+        format: bundlebase_data::attach_format::AttachFormat,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         // Find block ID by searching AttachBlockOp operations for matching location
@@ -55,7 +58,7 @@ impl ReplaceBlockOp {
         let temp_id = BlockId::generate();
         let adapter_factory = builder.bundle().reader_factory.clone();
         let adapter = adapter_factory
-            .reader(new_location, &temp_id, builder, None, None, None, None)
+            .reader(new_location, &format, &temp_id, builder, None, None, None, None)
             .await?;
         let new_version = adapter.read_version().await?;
 
@@ -75,6 +78,7 @@ impl ReplaceBlockOp {
         Ok(Self {
             id: block_id,
             new_location: new_location.to_string(),
+            format,
             new_version,
             new_hash,
             source_info,
@@ -146,11 +150,12 @@ impl Operation for ReplaceBlockOp {
             .reader_factory
             .reader(
                 &self.new_location,
+                &self.format,
                 &self.id,
                 bundle as &dyn bundlebase_data::DataContext,
                 Some(old_block.schema()),
-                None, // Layout will be rebuilt if needed
-                Some(self.new_version.clone()), // Validate version during query execution
+                None,
+                Some(self.new_version.clone()),
                 None,
             )
             .await?;
@@ -226,6 +231,7 @@ mod tests {
         let op = ReplaceBlockOp {
             id: block_id,
             new_location: "s3://bucket/new_data.parquet".to_string(),
+            format: bundlebase_data::attach_format::AttachFormat::Parquet,
             new_version: "etag:abc123".to_string(),
             new_hash: "0".repeat(64),
             source_info: None,
@@ -242,6 +248,7 @@ mod tests {
         let op = ReplaceBlockOp {
             id: block_id,
             new_location: "file:///new/path.csv".to_string(),
+            format: bundlebase_data::attach_format::AttachFormat::Csv,
             new_version: "etag:abc123".to_string(),
             new_hash: "0".repeat(64),
             source_info: None,
@@ -265,6 +272,7 @@ mod tests {
         let op = ReplaceBlockOp {
             id: block_id,
             new_location: "file:///new/path.csv".to_string(),
+            format: bundlebase_data::attach_format::AttachFormat::Csv,
             new_version: "etag:abc123".to_string(),
             new_hash: "0".repeat(64),
             source_info: Some(SourceInfo {
@@ -289,6 +297,7 @@ mod tests {
     fn test_deserialization_without_source() {
         let yaml = r#"id: 00000000000000a5
 newLocation: file:///new/path.csv
+format: csv
 newVersion: 'etag:abc123'
 newHash: 0000000000000000000000000000000000000000000000000000000000000000
 "#;
@@ -306,6 +315,7 @@ newHash: 0000000000000000000000000000000000000000000000000000000000000000
     fn test_deserialization_with_source() {
         let yaml = r#"id: 00000000000000a5
 newLocation: file:///new/path.csv
+format: csv
 newVersion: 'etag:abc123'
 newHash: 0000000000000000000000000000000000000000000000000000000000000000
 source:

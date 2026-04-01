@@ -177,9 +177,14 @@ impl BundleBuilderCommand for CreateSourceCommand {
         for action in actions {
             match action {
                 FetchAction::Add(data) => {
+                    let temp_reader = builder.bundle().reader_factory
+                        .detect(&data.attach_location, &bundlebase_data::BlockId::generate(), builder)
+                        .await?;
+                    let format = temp_reader.format();
                     let op = AttachBlockOp::setup(
                         &pack_id,
                         &data.attach_location,
+                        format,
                         data.hash.as_deref(),
                         Some(SourceInfo {
                             id: source_id,

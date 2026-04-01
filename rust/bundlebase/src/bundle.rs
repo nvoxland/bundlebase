@@ -274,7 +274,7 @@ impl Bundle {
                 vec![
                     Arc::new(crate::data::plugin::CsvPlugin::default()),
                     Arc::new(crate::data::plugin::BundlebasePlugin),
-                    Arc::new(crate::data::plugin::JsonPlugin::default()),
+                    Arc::new(crate::data::plugin::JsonlPlugin::default()),
                     Arc::new(crate::data::plugin::ParquetPlugin::default()),
                 ],
             )

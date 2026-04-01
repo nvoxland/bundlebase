@@ -98,7 +98,13 @@ impl BundleBuilderCommand for AttachCommand {
         let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
         let pack_name = self.pack.as_deref().unwrap_or("base");
 
-        let op = AttachBlockOp::setup(&pack_id, &self.path, None, None, builder).await?;
+        // Detect format by probing the file — validates extension and content
+        let temp_reader = builder.bundle().reader_factory
+            .detect(&self.path, &bundlebase_data::BlockId::generate(), builder)
+            .await?;
+        let format = temp_reader.format();
+
+        let op = AttachBlockOp::setup(&pack_id, &self.path, format, None, None, builder).await?;
         builder.apply_operation(op.into()).await?;
 
         // Apply always-delete rules to the newly attached data

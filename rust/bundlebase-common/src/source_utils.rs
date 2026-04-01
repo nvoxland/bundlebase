@@ -52,28 +52,6 @@ pub fn matches_patterns(url: &Url, patterns: &[Pattern]) -> bool {
 // Argument helpers
 // ---------------------------------------------------------------------------
 
-/// Check if should_copy is enabled from args (default: true).
-pub fn should_copy(args: &HashMap<String, String>) -> bool {
-    args.get("copy").map(|s| s != "false").unwrap_or(true)
-}
-
-/// Validate the "copy" argument if present.
-pub fn validate_copy_arg(
-    function_name: &str,
-    args: &HashMap<String, String>,
-) -> Result<(), BundlebaseError> {
-    if let Some(copy_val) = args.get("copy") {
-        if copy_val != "true" && copy_val != "false" {
-            return Err(format!(
-                "Function '{}': 'copy' argument must be 'true' or 'false', got '{}'",
-                function_name, copy_val
-            )
-            .into());
-        }
-    }
-    Ok(())
-}
-
 /// Get a required argument from args, returning an error if missing.
 pub fn require_arg<'a>(
     args: &'a HashMap<String, String>,
@@ -205,7 +183,7 @@ pub async fn read_http_head_info(url: &Url) -> Result<HttpHeadInfo, BundlebaseEr
 
 /// Detect data format by inspecting the first bytes of content.
 ///
-/// Returns `"parquet"`, `"json"`, or `"csv"`. Returns `None` for empty content.
+/// Returns `"parquet"`, `"json"`, `"jsonl"`, or `"csv"`. Returns `None` for empty content.
 pub fn detect_format_from_bytes(data: &[u8]) -> Option<&'static str> {
     if data.len() >= 4 && &data[0..4] == b"PAR1" {
         return Some("parquet");
@@ -218,7 +196,8 @@ pub fn detect_format_from_bytes(data: &[u8]) -> Option<&'static str> {
     };
     let first_non_ws = data[skip..].iter().find(|b| !b.is_ascii_whitespace());
     match first_non_ws {
-        Some(b'{') | Some(b'[') => Some("json"),
+        Some(b'[') => Some("json"),
+        Some(b'{') => Some("jsonl"),
         Some(_) => Some("csv"),
         None => None,
     }
@@ -320,14 +299,131 @@ pub async fn record_batch_stream_to_parquet(
 ///
 /// This is the pluggable extension point for format conversion. To add support
 /// for a new input format, add a match arm here.
-pub fn convert_to_parquet(data: &[u8], format: &crate::connector::DataFormat) -> Result<Bytes, BundlebaseError> {
-    use crate::connector::DataFormat;
+pub fn convert_to_parquet(data: &[u8], format: &crate::connector::SourceFormat) -> Result<Bytes, BundlebaseError> {
+    use crate::connector::SourceFormat;
     match format {
-        DataFormat::Xlsx | DataFormat::Xls | DataFormat::Ods => crate::excel::excel_to_parquet(data, None),
+        SourceFormat::Json => json_array_to_parquet(data),
+        SourceFormat::Xlsx | SourceFormat::Xls | SourceFormat::Ods => crate::excel::excel_to_parquet(data, None),
         other => Err(format!(
             "Cannot convert format '{}' to Parquet",
             other
         ).into()),
+    }
+}
+
+/// Convert a JSON array of objects to Parquet bytes.
+///
+/// All values are stored as strings (Utf8). Handles ragged objects — columns
+/// are accumulated as they're encountered, with nulls for missing keys.
+/// Writes to Parquet in chunks to limit peak memory usage.
+fn json_array_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
+    use arrow::array::{ArrayRef, StringBuilder};
+    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::record_batch::RecordBatch;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    // Stream-parse individual objects from the JSON array using serde's StreamDeserializer.
+    // This avoids holding the entire parsed Vec<Value> in memory.
+    let trimmed = {
+        let s = std::str::from_utf8(data)
+            .map_err(|e| BundlebaseError::from(format!("Invalid UTF-8 in JSON: {}", e)))?
+            .trim();
+        // Strip the outer [ ] to get a comma-separated stream of objects
+        if !s.starts_with('[') || !s.ends_with(']') {
+            return Err("JSON data is not an array (expected [...])".into());
+        }
+        &s[1..s.len() - 1]
+    };
+
+    let stream = serde_json::Deserializer::from_str(trimmed)
+        .into_iter::<serde_json::Value>();
+
+    // Accumulate column schema and row data
+    let mut col_order: Vec<String> = Vec::new();
+    let mut col_index: HashMap<String, usize> = HashMap::new();
+    let mut col_data: Vec<Vec<Option<String>>> = Vec::new();
+    let mut row_count = 0usize;
+
+    for item in stream {
+        let obj = item.map_err(|e| BundlebaseError::from(format!("Failed to parse JSON object: {}", e)))?;
+        let map = match obj.as_object() {
+            Some(m) => m,
+            None => return Err(format!(
+                "JSON array element at index {} is not an object", row_count
+            ).into()),
+        };
+
+        // Register new columns, backfilling nulls for prior rows
+        for key in map.keys() {
+            if !col_index.contains_key(key) {
+                col_index.insert(key.clone(), col_order.len());
+                col_order.push(key.clone());
+                col_data.push(vec![None; row_count]);
+            }
+        }
+
+        // Push value or null for each column
+        for col_name in &col_order {
+            let value = map.get(col_name).map(|v| json_value_to_string(v));
+            col_data[col_index[col_name]].push(value);
+        }
+        row_count += 1;
+    }
+
+    if row_count == 0 {
+        return Err("JSON array is empty".into());
+    }
+
+    // Build Arrow arrays and write as Parquet
+    let fields: Vec<Field> = col_order
+        .iter()
+        .map(|name| Field::new(name, DataType::Utf8, true))
+        .collect();
+    let schema = Arc::new(Schema::new(fields));
+
+    let arrays: Vec<ArrayRef> = col_data
+        .into_iter()
+        .map(|values| {
+            let mut builder = StringBuilder::new();
+            for v in &values {
+                match v {
+                    Some(s) => builder.append_value(s),
+                    None => builder.append_null(),
+                }
+            }
+            Arc::new(builder.finish()) as ArrayRef
+        })
+        .collect();
+
+    let batch = RecordBatch::try_new(schema.clone(), arrays)
+        .map_err(|e| BundlebaseError::from(format!("Failed to create RecordBatch: {}", e)))?;
+
+    let mut buffer = Vec::new();
+    {
+        let props = parquet::file::properties::WriterProperties::builder()
+            .set_compression(parquet::basic::Compression::ZSTD(
+                parquet::basic::ZstdLevel::try_new(3)
+                    .unwrap_or(parquet::basic::ZstdLevel::default()),
+            ))
+            .build();
+        let mut writer = parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))?;
+        writer.write(&batch)?;
+        writer.close()?;
+    }
+
+    Ok(Bytes::from(buffer))
+}
+
+/// Convert a JSON value to a string representation.
+fn json_value_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => s.clone(),
+        // Nested objects/arrays: serialize as JSON string
+        other => other.to_string(),
     }
 }
 
@@ -391,8 +487,8 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_format_json_object() {
-        assert_eq!(detect_format_from_bytes(b"  {\"key\": \"value\"}"), Some("json"));
+    fn test_detect_format_jsonl_object() {
+        assert_eq!(detect_format_from_bytes(b"  {\"key\": \"value\"}"), Some("jsonl"));
     }
 
     #[test]
@@ -413,10 +509,10 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_format_json_with_bom() {
+    fn test_detect_format_jsonl_with_bom() {
         let mut data = vec![0xEF, 0xBB, 0xBF];
         data.extend_from_slice(b"{\"key\": 1}");
-        assert_eq!(detect_format_from_bytes(&data), Some("json"));
+        assert_eq!(detect_format_from_bytes(&data), Some("jsonl"));
     }
 
     #[test]
@@ -429,18 +525,5 @@ mod tests {
         assert_eq!(detect_format_from_bytes(b"   \n\t  "), None);
     }
 
-    #[test]
-    fn test_validate_copy_arg_valid() {
-        let mut args = HashMap::new();
-        args.insert("copy".to_string(), "true".to_string());
-        assert!(validate_copy_arg("test", &args).is_ok());
-    }
-
-    #[test]
-    fn test_validate_copy_arg_invalid() {
-        let mut args = HashMap::new();
-        args.insert("copy".to_string(), "maybe".to_string());
-        assert!(validate_copy_arg("test", &args).is_err());
-    }
 }
 

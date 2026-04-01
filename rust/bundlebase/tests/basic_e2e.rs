@@ -65,6 +65,7 @@ changes:
     id: {}
     pack: {}
     location: memory:///test_data/userdata.parquet
+    format: parquet
     version: {}
     hash: 59d4fdcdd71e5b6ab79d0bc8fae8ee6f144d3639250facb4b519b36b92c8a5cc
     numRows: 1000
@@ -217,6 +218,7 @@ changes:
     id: {}
     pack: {}
     location: memory:///test_data/userdata.parquet
+    format: parquet
     version: {}
     hash: 59d4fdcdd71e5b6ab79d0bc8fae8ee6f144d3639250facb4b519b36b92c8a5cc
     numRows: 1000
@@ -387,6 +389,7 @@ changes:
     id: {}
     pack: {}
     location: memory:///test_data/customers-0-100.csv
+    format: csv
     version: {}
     hash: f2147696392a019d768a11ff68bab8e8dec77b5af2c93e8e5d5e399bd7bba8b9{}
     numRows: 100
@@ -486,7 +489,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
 
     bundle
-        .attach(test_datafile("objects.json"), None)
+        .attach(test_datafile("objects.jsonl"), None)
         .await?
         .rename_column("score", "points")
         .await?;
@@ -500,7 +503,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     assert!(contents.contains("author: "));
     assert!(contents.contains("message: JSON commit"));
     assert!(contents.contains("type: attachBlock"));
-    assert!(contents.contains("location: memory:///test_data/objects.json"));
+    assert!(contents.contains("location: memory:///test_data/objects.jsonl"));
     assert!(contents.contains("type: renameColumn"));
     // oldName is no longer serialized (resolved at runtime from column ID)
     assert!(!contents.contains("oldName: score"));
@@ -510,7 +513,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     // Verify the attach operation metadata
     match &commit.operations()[0] {
         AnyOperation::AttachBlock(op) => {
-            assert_eq!(op.location, "memory:///test_data/objects.json");
+            assert_eq!(op.location, "memory:///test_data/objects.jsonl");
             assert_eq!(op.num_rows, Some(4));
             // Version is present and not empty
             assert!(!op.version.is_empty());
@@ -524,7 +527,7 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     // Verify data can be queried
     let df = loaded_bundle.dataframe().await?;
     let batches = df.as_ref().clone().collect().await?;
-    assert_eq!(batches[0].num_rows(), 4); // objects.json has 4 rows
+    assert_eq!(batches[0].num_rows(), 4); // objects.jsonl has 4 rows
     assert!(batches[0].schema().column_with_name("points").is_some());
     assert!(!batches[0].schema().column_with_name("score").is_some());
 

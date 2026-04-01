@@ -10,7 +10,7 @@
 //! - `batch_size` (optional): Rows per output file (default: 1000000)
 
 use bundlebase_common::connector::{
-    ArgSpec, DataFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::{ConfigProvider, BundlebaseError};
@@ -613,7 +613,7 @@ impl Connector for PostgresConnector {
             .map(|p| DiscoveredLocation {
                 location: p.location,
                 must_copy: true,
-                format: DataFormat::Parquet,
+                format: SourceFormat::Parquet,
                 version: p.version,
             })
             .collect())

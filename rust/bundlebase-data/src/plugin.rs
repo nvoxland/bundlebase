@@ -1,6 +1,6 @@
 pub mod csv_reader;
 pub mod file_reader;
-mod json_reader;
+mod jsonl_reader;
 mod parquet_reader;
 mod tsv_reader;
 
@@ -8,7 +8,7 @@ use crate::DataReader;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 pub use csv_reader::CsvPlugin;
-pub use json_reader::JsonPlugin;
+pub use jsonl_reader::JsonlPlugin;
 pub use parquet_reader::ParquetPlugin;
 pub use tsv_reader::TsvPlugin;
 use std::sync::Arc;
@@ -21,16 +21,12 @@ use std::collections::HashMap;
 
 #[async_trait]
 pub trait ReaderPlugin: Send + Sync {
-    /// Create a reader for the given source.
+    /// Try to create a reader for the given source.
     ///
-    /// # Arguments
-    /// * `source` - URL or path to the data source
-    /// * `block_id` - ID of the block being read
-    /// * `bundle` - Bundle context (as trait object for flexibility)
-    /// * `schema` - Optional schema (if already known)
-    /// * `layout` - Optional layout file path
-    /// * `expected_version` - If provided, validates version on first data access
-    /// * `read_options` - Format-specific options detected at attach time (e.g., CSV newlines_in_values)
+    /// The plugin decides whether it can handle the source by checking the file
+    /// extension and optionally validating content (magic bytes, format structure).
+    /// Returns `Some(reader)` if this plugin handles the source, `None` otherwise.
+    /// The returned reader's `format()` method indicates the detected AttachFormat.
     async fn reader(
         &self,
         source: &str,

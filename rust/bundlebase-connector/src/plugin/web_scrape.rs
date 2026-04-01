@@ -4,7 +4,7 @@
 //! and downloads files that match specified glob patterns.
 
 use bundlebase_common::connector::{
-    ArgSpec, DataFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::{ConfigProvider, BundlebaseError};
@@ -22,8 +22,6 @@ use url::Url;
 /// - `url` (required): The webpage URL to fetch and parse for links
 /// - `patterns` (optional): Comma-separated glob patterns to match href attributes
 ///   (e.g., "*.parquet,*.csv"). Defaults to "**/*" (all links)
-/// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
-///   "false" to reference files at their original URL
 pub struct WebScrapeConnector;
 
 #[async_trait]
@@ -43,12 +41,6 @@ impl Connector for WebScrapeConnector {
                     description: "Comma-separated glob patterns to match href attributes",
                     required: false,
                     default: Some("**/*"),
-                },
-                ArgSpec {
-                    name: "copy",
-                    description: "Whether to copy files into bundle's data directory",
-                    required: false,
-                    default: Some("true"),
                 },
             ],
             accepts_extra_args: false,
@@ -88,7 +80,7 @@ impl Connector for WebScrapeConnector {
             }
 
             // Get format from URL extension
-            let format = DataFormat::from_extension(
+            let format = SourceFormat::from_extension(
                 shared_utils::filename_from_url(&url)
                     .rsplit('.')
                     .next()
@@ -214,16 +206,12 @@ mod tests {
         let func = WebScrapeConnector;
         let sig = func.signature();
         assert_eq!(sig.name, "web_scrape");
-        assert_eq!(sig.arg_specs.len(), 3);
+        assert_eq!(sig.arg_specs.len(), 2);
         assert!(sig.arg_specs.iter().any(|s| s.name == "url" && s.required));
         assert!(sig
             .arg_specs
             .iter()
             .any(|s| s.name == "patterns" && !s.required));
-        assert!(sig
-            .arg_specs
-            .iter()
-            .any(|s| s.name == "copy" && !s.required));
     }
 
     #[test]
@@ -280,50 +268,6 @@ mod tests {
             .expect("expected error")
             .to_string()
             .contains("must be http:// or https://"));
-    }
-
-    #[test]
-    fn test_validate_args_copy_true() {
-        let func = WebScrapeConnector;
-        let mut args = HashMap::new();
-        args.insert(
-            "url".to_string(),
-            "https://example.com/data/".to_string(),
-        );
-        args.insert("copy".to_string(), "true".to_string());
-        assert!(func.validate_args(&args).is_ok());
-    }
-
-    #[test]
-    fn test_validate_args_copy_false() {
-        let func = WebScrapeConnector;
-        let mut args = HashMap::new();
-        args.insert(
-            "url".to_string(),
-            "https://example.com/data/".to_string(),
-        );
-        args.insert("copy".to_string(), "false".to_string());
-        assert!(func.validate_args(&args).is_ok());
-    }
-
-    #[test]
-    fn test_validate_connector_args_copy_invalid() {
-        
-        let func = WebScrapeConnector;
-        let mut args = HashMap::new();
-        args.insert(
-            "url".to_string(),
-            "https://example.com/data/".to_string(),
-        );
-        args.insert("copy".to_string(), "invalid".to_string());
-
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig) };
-        assert!(result.is_err());
-        assert!(result
-            .err()
-            .expect("expected error")
-            .to_string()
-            .contains("'copy' argument must be 'true' or 'false'"));
     }
 
     #[test]

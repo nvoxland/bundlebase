@@ -42,10 +42,11 @@ use std::sync::Arc;
 
 // Re-export connector types from common
 pub use bundlebase_common::connector::{
-    ArgSpec, AttachedFileInfo, Connector, ConnectorSignature, DataFormat, DataFormatInfo,
+    ArgSpec, AttachedFileInfo, Connector, ConnectorSignature, SourceFormat,
     DiscoveredLocation, FetchAction, FetchResults, FetchedBlock, MaterializedData,
     SourceData, format_fetch_summary,
 };
+pub use bundlebase_data::attach_format::AttachFormat;
 pub use bundlebase_common::save_as::{SaveAs, ResolvedSaveAs};
 
 /// Validate arguments against a connector signature.
@@ -298,12 +299,12 @@ mod tests {
         let loc = DiscoveredLocation {
             location: "subdir/file.parquet".to_string(),
             must_copy: false,
-            format: DataFormat::Parquet,
+            format: SourceFormat::Parquet,
             version: "etag-123".to_string(),
         };
         assert_eq!(loc.location, "subdir/file.parquet");
         assert!(!loc.must_copy);
-        assert_eq!(loc.format, DataFormat::Parquet);
+        assert_eq!(loc.format, SourceFormat::Parquet);
         assert_eq!(loc.version, "etag-123");
     }
 
@@ -350,42 +351,45 @@ mod tests {
         assert!(registry.get("postgres").is_some());
     }
 
-    // --- DataFormat tests ---
+    // --- SourceFormat tests ---
 
     #[test]
     fn test_data_format_from_extension() {
-        assert_eq!(DataFormat::from_extension("csv"), DataFormat::Csv);
-        assert_eq!(DataFormat::from_extension("CSV"), DataFormat::Csv);
-        assert_eq!(DataFormat::from_extension("tsv"), DataFormat::Tsv);
-        assert_eq!(DataFormat::from_extension("json"), DataFormat::JsonL);
-        assert_eq!(DataFormat::from_extension("jsonl"), DataFormat::JsonL);
-        assert_eq!(DataFormat::from_extension("parquet"), DataFormat::Parquet);
-        assert_eq!(DataFormat::from_extension("xlsx"), DataFormat::Xlsx);
-        assert_eq!(DataFormat::from_extension("xls"), DataFormat::Xls);
-        assert_eq!(DataFormat::from_extension("ods"), DataFormat::Ods);
-        assert_eq!(DataFormat::from_extension("auto"), DataFormat::Auto);
-        assert_eq!(DataFormat::from_extension("unknown"), DataFormat::Auto);
+        assert_eq!(SourceFormat::from_extension("csv"), SourceFormat::Csv);
+        assert_eq!(SourceFormat::from_extension("CSV"), SourceFormat::Csv);
+        assert_eq!(SourceFormat::from_extension("tsv"), SourceFormat::Tsv);
+        assert_eq!(SourceFormat::from_extension("json"), SourceFormat::Json);
+        assert_eq!(SourceFormat::from_extension("jsonl"), SourceFormat::JsonL);
+        assert_eq!(SourceFormat::from_extension("parquet"), SourceFormat::Parquet);
+        assert_eq!(SourceFormat::from_extension("xlsx"), SourceFormat::Xlsx);
+        assert_eq!(SourceFormat::from_extension("xls"), SourceFormat::Xls);
+        assert_eq!(SourceFormat::from_extension("ods"), SourceFormat::Ods);
+        assert_eq!(SourceFormat::from_extension("auto"), SourceFormat::Auto);
+        assert_eq!(SourceFormat::from_extension("unknown"), SourceFormat::Auto);
     }
 
     #[test]
     fn test_data_format_extension() {
-        assert_eq!(DataFormat::Csv.extension(), "csv");
-        assert_eq!(DataFormat::Tsv.extension(), "tsv");
-        assert_eq!(DataFormat::JsonL.extension(), "json");
-        assert_eq!(DataFormat::Parquet.extension(), "parquet");
-        assert_eq!(DataFormat::Xlsx.extension(), "xlsx");
+        assert_eq!(SourceFormat::Csv.extension(), "csv");
+        assert_eq!(SourceFormat::Tsv.extension(), "tsv");
+        assert_eq!(SourceFormat::Json.extension(), "json");
+        assert_eq!(SourceFormat::JsonL.extension(), "jsonl");
+        assert_eq!(SourceFormat::Parquet.extension(), "parquet");
+        assert_eq!(SourceFormat::Xlsx.extension(), "xlsx");
     }
 
     #[test]
-    fn test_data_format_is_attachable() {
-        assert!(DataFormat::Csv.is_attachable());
-        assert!(DataFormat::Tsv.is_attachable());
-        assert!(DataFormat::JsonL.is_attachable());
-        assert!(DataFormat::Parquet.is_attachable());
-        assert!(!DataFormat::Xlsx.is_attachable());
-        assert!(!DataFormat::Xls.is_attachable());
-        assert!(!DataFormat::Ods.is_attachable());
-        assert!(!DataFormat::Auto.is_attachable());
+    fn test_to_attach_format() {
+        use bundlebase_data::attach_format::AttachFormat;
+        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Csv), Some(AttachFormat::Csv));
+        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Tsv), Some(AttachFormat::Tsv));
+        assert_eq!(AttachFormat::from_source_format(&SourceFormat::JsonL), Some(AttachFormat::JsonL));
+        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Parquet), Some(AttachFormat::Parquet));
+        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Json), None);
+        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Xlsx), None);
+        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Xls), None);
+        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Ods), None);
+        assert_eq!(AttachFormat::from_source_format(&SourceFormat::Auto), None);
     }
 
     // --- SaveAs tests ---
@@ -402,55 +406,55 @@ mod tests {
 
     #[test]
     fn test_save_as_resolve_copy_attachable() {
-        let result = SaveAs::Copy.resolve(&DataFormat::Csv, false);
+        let result = SaveAs::Copy.resolve(&SourceFormat::Csv, false);
         assert_eq!(result.expect("ok"), ResolvedSaveAs::Copy);
     }
 
     #[test]
     fn test_save_as_resolve_copy_non_attachable_errors() {
-        let result = SaveAs::Copy.resolve(&DataFormat::Xlsx, false);
+        let result = SaveAs::Copy.resolve(&SourceFormat::Xlsx, false);
         assert!(result.is_err());
         assert!(result.err().expect("err").to_string().contains("not valid for format"));
     }
 
     #[test]
     fn test_save_as_resolve_parquet_always_works() {
-        assert_eq!(SaveAs::Parquet.resolve(&DataFormat::Csv, false).expect("ok"), ResolvedSaveAs::Parquet);
-        assert_eq!(SaveAs::Parquet.resolve(&DataFormat::Xlsx, true).expect("ok"), ResolvedSaveAs::Parquet);
+        assert_eq!(SaveAs::Parquet.resolve(&SourceFormat::Csv, false).expect("ok"), ResolvedSaveAs::Parquet);
+        assert_eq!(SaveAs::Parquet.resolve(&SourceFormat::Xlsx, true).expect("ok"), ResolvedSaveAs::Parquet);
     }
 
     #[test]
     fn test_save_as_resolve_ref_attachable() {
-        assert_eq!(SaveAs::Ref.resolve(&DataFormat::Csv, false).expect("ok"), ResolvedSaveAs::Ref);
+        assert_eq!(SaveAs::Ref.resolve(&SourceFormat::Csv, false).expect("ok"), ResolvedSaveAs::Ref);
     }
 
     #[test]
     fn test_save_as_resolve_ref_must_copy_errors() {
-        let result = SaveAs::Ref.resolve(&DataFormat::Csv, true);
+        let result = SaveAs::Ref.resolve(&SourceFormat::Csv, true);
         assert!(result.is_err());
         assert!(result.err().expect("err").to_string().contains("requires data to be copied"));
     }
 
     #[test]
     fn test_save_as_resolve_ref_non_attachable_errors() {
-        let result = SaveAs::Ref.resolve(&DataFormat::Xlsx, false);
+        let result = SaveAs::Ref.resolve(&SourceFormat::Xlsx, false);
         assert!(result.is_err());
         assert!(result.err().expect("err").to_string().contains("not valid for format"));
     }
 
     #[test]
     fn test_save_as_resolve_auto_attachable_must_copy_copies() {
-        assert_eq!(SaveAs::Auto.resolve(&DataFormat::Csv, true).expect("ok"), ResolvedSaveAs::Copy);
+        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Csv, true).expect("ok"), ResolvedSaveAs::Copy);
     }
 
     #[test]
     fn test_save_as_resolve_auto_attachable_no_must_copy_refs() {
-        assert_eq!(SaveAs::Auto.resolve(&DataFormat::Csv, false).expect("ok"), ResolvedSaveAs::Ref);
+        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Csv, false).expect("ok"), ResolvedSaveAs::Ref);
     }
 
     #[test]
     fn test_save_as_resolve_auto_non_attachable_converts() {
-        assert_eq!(SaveAs::Auto.resolve(&DataFormat::Xlsx, false).expect("ok"), ResolvedSaveAs::Parquet);
-        assert_eq!(SaveAs::Auto.resolve(&DataFormat::Ods, true).expect("ok"), ResolvedSaveAs::Parquet);
+        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Xlsx, false).expect("ok"), ResolvedSaveAs::Parquet);
+        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Ods, true).expect("ok"), ResolvedSaveAs::Parquet);
     }
 }

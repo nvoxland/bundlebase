@@ -39,7 +39,8 @@ impl ReaderPlugin for TsvPlugin {
         expected_version: Option<String>,
         read_options: Option<&HashMap<String, String>>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
-        if !source.ends_with(".tsv") {
+        let lower = source.to_lowercase();
+        if !lower.ends_with(".tsv") {
             return Ok(None);
         }
 
@@ -60,6 +61,6 @@ impl ReaderPlugin for TsvPlugin {
                 bundle.config_provider(),
             )?),
         };
-        Ok(Some(Arc::new(CsvReader::new(reader, block_id, &layout))))
+        Ok(Some(Arc::new(CsvReader::new(reader, block_id, &layout, crate::attach_format::AttachFormat::Tsv))))
     }
 }

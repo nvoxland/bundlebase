@@ -1,8 +1,9 @@
 use crate::DataContext;
-use crate::plugin::{CsvPlugin, JsonPlugin, ParquetPlugin, TsvPlugin, ReaderPlugin};
+use crate::plugin::{CsvPlugin, JsonlPlugin, ParquetPlugin, TsvPlugin, ReaderPlugin};
 use crate::{BlockId, DataReader};
 use bundlebase_io::DataStorage;
 use bundlebase_common::BundlebaseError;
+use crate::attach_format::AttachFormat;
 use arrow_schema::SchemaRef;
 use datafusion::common::DataFusionError;
 use std::collections::HashMap;
@@ -22,7 +23,7 @@ impl DataReaderFactory {
             plugins: vec![
                 Arc::new(CsvPlugin::default()),
                 Arc::new(TsvPlugin::default()),
-                Arc::new(JsonPlugin::default()),
+                Arc::new(JsonlPlugin::default()),
                 Arc::new(ParquetPlugin::default()),
             ],
         }
@@ -42,20 +43,38 @@ impl DataReaderFactory {
         &self.storage
     }
 
-
-    /// Create a reader for the given source.
+    /// Detect the format and create a reader by probing the file.
     ///
-    /// # Arguments
-    /// * `source` - URL or path to the data source
-    /// * `block_id` - ID of the block being read
-    /// * `bundle` - Bundle context (as trait object for flexibility)
-    /// * `schema` - Optional schema (if already known)
-    /// * `layout` - Optional layout file path
-    /// * `expected_version` - If provided, validates version on first data access.
-    ///   This is used to detect when source files have changed since the bundle was created.
+    /// Each plugin checks if it can handle the source (by extension and/or content
+    /// validation). The first plugin that accepts returns a reader whose `format()`
+    /// method indicates the detected AttachFormat.
+    pub async fn detect(
+        &self,
+        source: &str,
+        block_id: &BlockId,
+        bundle: &dyn DataContext,
+    ) -> Result<Arc<dyn DataReader>, BundlebaseError> {
+        for plugin in &self.plugins {
+            if let Some(reader) = plugin
+                .reader(source, block_id, bundle, None, None, None, None)
+                .await?
+            {
+                return Ok(reader);
+            }
+        }
+        Err(DataFusionError::NotImplemented(format!(
+            "No reader found for '{}'. Supported formats: .csv, .tsv, .json, .jsonl, .parquet",
+            source
+        )).into())
+    }
+
+    /// Create a reader for a known format (used when re-reading existing blocks).
+    ///
+    /// The `format` parameter selects the reader plugin directly.
     pub async fn reader(
         &self,
         source: &str,
+        format: &AttachFormat,
         block_id: &BlockId,
         bundle: &dyn DataContext,
         schema: Option<SchemaRef>,
@@ -76,9 +95,11 @@ impl DataReaderFactory {
                 )
                 .await?
             {
-                return Ok(reader);
+                if reader.format() == *format {
+                    return Ok(reader);
+                }
             }
         }
-        Err(DataFusionError::NotImplemented(format!("No reader found for {}", source)).into())
+        Err(DataFusionError::NotImplemented(format!("No reader found for {} (format: {})", source, format)).into())
     }
 }

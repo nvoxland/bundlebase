@@ -63,7 +63,8 @@ impl ReaderPlugin for ParquetPlugin {
         expected_version: Option<String>,
         _read_options: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
-        if !self.inner.handles(source) {
+        let lower = source.to_lowercase();
+        if !lower.ends_with(".parquet") {
             return Ok(None);
         }
 
@@ -115,6 +116,10 @@ impl DataReader for ParquetDataReader {
 
     fn block_id(&self) -> BlockId {
         self.block_id
+    }
+
+    fn format(&self) -> crate::attach_format::AttachFormat {
+        crate::attach_format::AttachFormat::Parquet
     }
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
@@ -302,7 +307,7 @@ mod tests {
             .reader("file:///test.csv", &BlockId::generate(), &binding, None, None, None, None)
             .await?;
 
-        assert!(result.is_none());
+        assert!(result.is_none(), "ParquetPlugin should reject non-Parquet format");
 
         Ok(())
     }

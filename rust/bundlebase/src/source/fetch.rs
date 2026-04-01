@@ -251,7 +251,7 @@ async fn get_data_for_location(
 async fn save_source_data(
     source_data: SourceData,
     strategy: &ResolvedSaveAs,
-    format: &crate::connector::DataFormat,
+    format: &crate::connector::SourceFormat,
     source_url: &str,
     data_dir: &dyn IOReadWriteDir,
 ) -> Result<FetchedData, BundlebaseError> {
@@ -286,7 +286,7 @@ async fn save_source_data(
 async fn save_from_url(
     url: &Url,
     strategy: &ResolvedSaveAs,
-    format: &crate::connector::DataFormat,
+    format: &crate::connector::SourceFormat,
     data_dir: &dyn IOReadWriteDir,
     config: &Arc<dyn ConfigProvider>,
 ) -> Result<FetchedData, BundlebaseError> {

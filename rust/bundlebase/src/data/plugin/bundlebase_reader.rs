@@ -18,7 +18,7 @@ use std::any::Any;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use url::Url;
-
+use bundlebase_data::attach_format::AttachFormat;
 use bundlebase_data::RowId;
 
 pub struct BundlebasePlugin;
@@ -93,6 +93,10 @@ impl DataReader for BundlebaseDataReader {
 
     fn block_id(&self) -> BlockId {
         self.block_id
+    }
+
+    fn format(&self) -> AttachFormat {
+        AttachFormat::Parquet
     }
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {

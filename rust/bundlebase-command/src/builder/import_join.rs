@@ -476,6 +476,7 @@ mod tests {
             id: "00000000000000cc".try_into().unwrap(),
             pack: ObjectId::BASE_PACK,
             location: "old://data.csv".to_string(),
+            format: bundlebase_data::attach_format::AttachFormat::Csv,
             read_options: None,
             version: "1".to_string(),
             hash: "0".repeat(64),
@@ -592,7 +593,7 @@ mod tests {
 
         match remap_operation(&AnyOperation::ReplaceBlock(ReplaceBlockOp {
             id: "00000000000000cc".try_into().unwrap(),
-            new_location: "old://f.csv".into(), new_version: "2".into(), new_hash: "0".repeat(64), source_info: None,
+            new_location: "old://f.csv".into(), format: bundlebase_data::attach_format::AttachFormat::Csv, new_version: "2".into(), new_hash: "0".repeat(64), source_info: None,
         }), &HashMap::new(), &loc).unwrap() {
             AnyOperation::ReplaceBlock(r) => assert_eq!(r.new_location, "new://f.csv"),
             _ => panic!("Expected ReplaceBlock"),

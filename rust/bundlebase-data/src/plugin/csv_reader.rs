@@ -1,6 +1,7 @@
 use crate::DataContext;
 use crate::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::plugin::ReaderPlugin;
+use crate::attach_format::AttachFormat;
 use crate::{BlockId, DataReader, LineOrientedFormat, PhysicalRowGroupDataSource, RowId};
 use crate::physical_row_group_layout::{PhysicalRowGroupLayout, resolve_row_numbers_to_byte_offsets};
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
@@ -120,7 +121,8 @@ impl ReaderPlugin for CsvPlugin {
         expected_version: Option<String>,
         read_options: Option<&HashMap<String, String>>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
-        if !source.ends_with(".csv") {
+        let lower = source.to_lowercase();
+        if !lower.ends_with(".csv") {
             return Ok(None);
         }
 
@@ -142,7 +144,7 @@ impl ReaderPlugin for CsvPlugin {
                 bundle.config_provider(),
             )?),
         };
-        Ok(Some(Arc::new(CsvReader::new(reader, block_id, &layout))))
+        Ok(Some(Arc::new(CsvReader::new(reader, block_id, &layout, AttachFormat::Csv))))
     }
 }
 
@@ -150,6 +152,7 @@ pub struct CsvReader {
     inner: FileReader<CsvFormatConfig>,
     block_id: BlockId,
     layout: Option<ObjectStoreFile>,
+    attach_format: AttachFormat,
 }
 
 impl CsvReader {
@@ -157,11 +160,13 @@ impl CsvReader {
         inner: FileReader<CsvFormatConfig>,
         block_id: &BlockId,
         layout: &Option<ObjectStoreFile>,
+        attach_format: AttachFormat,
     ) -> Self {
         Self {
             inner,
             block_id: *block_id,
             layout: layout.clone(),
+            attach_format,
         }
     }
 }
@@ -172,6 +177,7 @@ impl std::fmt::Debug for CsvReader {
             .field("inner", &self.inner)
             .field("block_id", &self.block_id)
             .field("layout", &self.layout)
+            .field("attach_format", &self.attach_format)
             .finish()
     }
 }
@@ -268,6 +274,10 @@ impl DataReader for CsvReader {
 
     fn block_id(&self) -> BlockId {
         self.block_id
+    }
+
+    fn format(&self) -> crate::attach_format::AttachFormat {
+        self.attach_format.clone()
     }
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
@@ -431,7 +441,7 @@ mod tests {
     use futures::stream::StreamExt;
 
     #[tokio::test]
-    async fn test_wrong_file_extension() -> Result<(), BundlebaseError> {
+    async fn test_wrong_format() -> Result<(), BundlebaseError> {
         let plugin = CsvPlugin::default();
 
         let binding = test_context();
@@ -439,7 +449,7 @@ mod tests {
             .reader("file:///test.parquet", &BlockId::generate(), &binding, None, None, None, None)
             .await?;
 
-        assert!(result.is_none());
+        assert!(result.is_none(), "CsvPlugin should reject non-Csv format");
 
         Ok(())
     }

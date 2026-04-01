@@ -79,6 +79,13 @@ The published end-user facing documentation is manged in the `docs` directory.
 
 See [.context/development.md](.context/development.md) for full development workflow.
 
+## Build Performance
+
+Compiling bundlebase takes 1-3 minutes per `cargo test --profile test` run.
+Plan edits to minimize compile cycles — batch related changes together, fix
+all known issues before rebuilding, and use targeted crate builds (`-p
+bundlebase-command`) when possible to avoid full rebuilds.
+
 ## Build Tools
 
 **CRITICAL: Always use the correct build script for Python package builds**

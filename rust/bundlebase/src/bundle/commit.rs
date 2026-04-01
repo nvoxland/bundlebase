@@ -628,6 +628,7 @@ changes:
 
         let attach_config = AttachBlockOp {
             location: "memory:///test".to_string(),
+            format: crate::connector::AttachFormat::Parquet,
             version: "v1".to_string(),
             hash: "abcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab".to_string(),
             id: BlockId::generate(),
@@ -694,6 +695,7 @@ changes:
   - type: attachBlock
     pack: '000000000000003b'
     location: memory:///test_data/userdata.parquet
+    format: parquet
     version: test-version
     hash: 0000000000000000000000000000000000000000000000000000000000000000
     id: '000000000000002a'
@@ -733,6 +735,7 @@ changes:
   operations:
   - type: attachBlock
     location: memory:///test_data/userdata.parquet
+    format: parquet
     version: '2'
     hash: 0000000000000000000000000000000000000000000000000000000000000000
     id: '00000000000000cc'

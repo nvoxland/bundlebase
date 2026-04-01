@@ -21,9 +21,9 @@ use url::Url;
 
 /// Configuration for JSON format
 #[derive(Debug, Clone, Default)]
-pub struct JsonFormatConfig;
+pub struct JsonlFormatConfig;
 
-impl FileFormatConfig for JsonFormatConfig {
+impl FileFormatConfig for JsonlFormatConfig {
     fn extensions(&self) -> &'static [&'static str] {
         &[".json", ".jsonl"]
     }
@@ -41,14 +41,14 @@ impl FileFormatConfig for JsonFormatConfig {
     }
 }
 
-/// JSON plugin - uses generic FilePlugin and creates JsonReader
+/// JSON plugin - uses generic FilePlugin and creates JsonlReader
 #[derive(Default)]
-pub struct JsonPlugin {
-    inner: FilePlugin<JsonFormatConfig>,
+pub struct JsonlPlugin {
+    inner: FilePlugin<JsonlFormatConfig>,
 }
 
 #[async_trait]
-impl ReaderPlugin for JsonPlugin {
+impl ReaderPlugin for JsonlPlugin {
     async fn reader(
         &self,
         source: &str,
@@ -59,7 +59,8 @@ impl ReaderPlugin for JsonPlugin {
         expected_version: Option<String>,
         _read_options: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
-        if !self.inner.handles(source) {
+        let lower = source.to_lowercase();
+        if !lower.ends_with(".json") && !lower.ends_with(".jsonl") {
             return Ok(None);
         }
 
@@ -76,20 +77,20 @@ impl ReaderPlugin for JsonPlugin {
             .inner
             .reader(source, bundle, schema, expected_version)
             .await?;
-        Ok(Some(Arc::new(JsonReader::new(reader, block_id, &layout))))
+        Ok(Some(Arc::new(JsonlReader::new(reader, block_id, &layout))))
     }
 }
 
 #[derive(Debug)]
-pub struct JsonReader {
-    inner: FileReader<JsonFormatConfig>,
+pub struct JsonlReader {
+    inner: FileReader<JsonlFormatConfig>,
     block_id: BlockId,
     layout: Option<ObjectStoreFile>,
 }
 
-impl JsonReader {
+impl JsonlReader {
     pub fn new(
-        inner: FileReader<JsonFormatConfig>,
+        inner: FileReader<JsonlFormatConfig>,
         block_id: &BlockId,
         layout: &Option<ObjectStoreFile>,
     ) -> Self {
@@ -102,7 +103,7 @@ impl JsonReader {
 }
 
 #[async_trait]
-impl DataReader for JsonReader {
+impl DataReader for JsonlReader {
     fn url(&self) -> &Url {
         self.inner.url()
     }
@@ -111,7 +112,32 @@ impl DataReader for JsonReader {
         self.block_id
     }
 
+    fn format(&self) -> crate::attach_format::AttachFormat {
+        crate::attach_format::AttachFormat::JsonL
+    }
+
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
+        // Validate the file is JSONL (one object per line), not a JSON array.
+        let store = self.inner.object_store();
+        let path = object_store::path::Path::parse(self.inner.url().path())?;
+        let opts = object_store::GetOptions {
+            range: Some((0..64).into()),
+            ..Default::default()
+        };
+        let result = store.get_opts(&path, opts).await?;
+        let head = result.bytes().await?;
+        let first_char = head.iter()
+            .find(|b| !b.is_ascii_whitespace())
+            .copied();
+        if first_char == Some(b'[') {
+            return Err(BundlebaseError::from(format!(
+                "File '{}' contains a JSON array, not JSON Lines. \
+                 Use a connector with SAVE AS PARQUET to convert JSON arrays, \
+                 or convert the file to JSONL format (one JSON object per line).",
+                self.inner.url()
+            )));
+        }
+
         self.inner.read_schema().await
     }
 
@@ -185,7 +211,7 @@ impl DataReader for JsonReader {
     }
 }
 
-impl JsonReader {
+impl JsonlReader {
     /// Count the number of JSON rows and get file size by reading the file
     /// Assumes line-delimited JSON format (JSONL)
     /// Returns (row_count, file_size_in_bytes)
@@ -237,21 +263,21 @@ mod tests {
     #[tokio::test]
     async fn test_wrong_file_extension() -> Result<(), BundlebaseError> {
         // JSON plugin should only adapt .json/.jsonl files
-        let plugin = JsonPlugin::default();
+        let plugin = JsonlPlugin::default();
 
         let binding = test_context();
         let result = plugin
             .reader("file:///test.csv", &BlockId::generate(), &binding, None, None, None, None)
             .await?;
 
-        assert!(result.is_none());
+        assert!(result.is_none(), "JsonlPlugin should reject non-JsonL format");
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_handles_jsonl_extension() -> Result<(), BundlebaseError> {
-        let plugin = JsonPlugin::default();
+        let plugin = JsonlPlugin::default();
 
         let binding = test_context();
         let reader = plugin
@@ -285,16 +311,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_json_file() -> Result<(), BundlebaseError> {
-        let plugin = JsonPlugin::default();
+        let plugin = JsonlPlugin::default();
 
         let binding = test_context();
         let invalid_reader = plugin
-            .reader("file:///invalid.json", &BlockId::generate(), &binding, None, None, None, None)
+            .reader("file:///invalid.jsonl", &BlockId::generate(), &binding, None, None, None, None)
             .await?;
 
         assert!(
             invalid_reader.is_some(),
-            "Plugin should return reader for .json URL even if file doesn't exist"
+            "Plugin should return reader for .jsonl URL even if file doesn't exist"
         );
 
         // Schema access should fail for nonexistent file
@@ -310,12 +336,12 @@ mod tests {
     #[tokio::test]
     async fn read() -> Result<(), BundlebaseError> {
         // Test complete JSON file read and data validation
-        let plugin = JsonPlugin::default();
+        let plugin = JsonlPlugin::default();
 
         let binding = test_context();
         let reader = plugin
             .reader(
-                test_datafile("objects.json"),
+                test_datafile("objects.jsonl"),
                 &BlockId::generate(),
                 &binding,
                 None,
@@ -326,7 +352,7 @@ mod tests {
             .await?
             .ok_or_else(|| BundlebaseError::from("Expected reader"))?;
 
-        // Expected column names from objects.json
+        // Expected column names from objects.jsonl
         let column_names = vec!["completed", "name", "score", "session"];
 
         // Validate schema
@@ -345,7 +371,7 @@ mod tests {
         // Validate data reading
         let reader = plugin
             .reader(
-                test_datafile("objects.json"),
+                test_datafile("objects.jsonl"),
                 &BlockId::generate(),
                 &binding,
                 Some(schema),
@@ -401,12 +427,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_statistics() -> Result<(), BundlebaseError> {
-        let plugin = JsonPlugin::default();
+        let plugin = JsonlPlugin::default();
 
         let binding = test_context();
         let reader = plugin
             .reader(
-                test_datafile("objects.json"),
+                test_datafile("objects.jsonl"),
                 &BlockId::generate(),
                 &binding,
                 None,
@@ -424,7 +450,7 @@ mod tests {
         let rows = stats.num_rows.get_value().ok_or_else(|| BundlebaseError::from("Expected row count"))?;
 
         // Now JSON statistics should return the actual row count by reading the file
-        // objects.json has 4 JSON objects (4 lines in JSONL format)
+        // objects.jsonl has 4 JSON objects (4 lines in JSONL format)
         assert_eq!(
             &4, rows,
             "JSON statistics should return actual row count from file. Got {} rows",
@@ -437,7 +463,7 @@ mod tests {
             _ => 0,
         };
 
-        // objects.json is 280 bytes
+        // objects.jsonl is 280 bytes
         assert_eq!(
             280, bytes,
             "JSON statistics should return correct file size in bytes. Got {} bytes",

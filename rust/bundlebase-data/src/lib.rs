@@ -1,5 +1,6 @@
 #![deny(clippy::unwrap_used)]
 
+pub mod attach_format;
 pub mod plugin;
 pub mod reader_factory;
 mod layout_cache;
@@ -42,6 +43,9 @@ pub trait DataReader: Sync + Send + Debug {
     fn url(&self) -> &Url;
 
     fn block_id(&self) -> BlockId;
+
+    /// The attach format this reader handles.
+    fn format(&self) -> crate::attach_format::AttachFormat;
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError>;
 

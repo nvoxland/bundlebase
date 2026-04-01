@@ -4,7 +4,7 @@
 //! parses HTML pages for links, this connector treats the URL as a direct
 //! link to a data file (CSV, JSON, Parquet, etc.).
 
-use bundlebase_common::connector::{ArgSpec, Connector, ConnectorSignature, DataFormat, DiscoveredLocation, SourceData};
+use bundlebase_common::connector::{ArgSpec, Connector, ConnectorSignature, SourceFormat, DiscoveredLocation, SourceData};
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::{ConfigProvider, BundlebaseError};
 use async_trait::async_trait;
@@ -28,7 +28,8 @@ fn format_from_content_type(content_type: &str) -> Option<&'static str> {
     let mime = content_type.split(';').next().unwrap_or("").trim().to_lowercase();
     match mime.as_str() {
         "text/csv" => Some("csv"),
-        "application/json" | "application/x-ndjson" | "application/jsonl" => Some("json"),
+        "application/json" => Some("json"),
+        "application/x-ndjson" | "application/jsonl" => Some("jsonl"),
         "application/vnd.apache.parquet" => Some("parquet"),
         "text/tab-separated-values" => Some("tsv"),
         _ => None,
@@ -130,7 +131,7 @@ impl Connector for HttpConnector {
         } else {
             "auto".to_string()
         };
-        let format = DataFormat::from_extension(&format_str);
+        let format = SourceFormat::from_extension(&format_str);
 
         Ok(vec![DiscoveredLocation {
             location: url.to_string(),
@@ -199,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_format_from_content_type_ndjson() {
-        assert_eq!(format_from_content_type("application/x-ndjson"), Some("json"));
+        assert_eq!(format_from_content_type("application/x-ndjson"), Some("jsonl"));
     }
 
     #[test]
@@ -306,7 +307,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(locations.len(), 1);
-        assert_eq!(locations[0].format, DataFormat::Csv);
+        assert_eq!(locations[0].format, SourceFormat::Csv);
     }
 
     #[tokio::test]
@@ -329,7 +330,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(locations.len(), 1);
-        assert_eq!(locations[0].format, DataFormat::JsonL);
+        assert_eq!(locations[0].format, SourceFormat::Json);
     }
 
     #[tokio::test]
@@ -355,7 +356,7 @@ mod tests {
             .unwrap();
 
         // Explicit auto bypasses content-type and extension detection
-        assert_eq!(locations[0].format, DataFormat::Auto);
+        assert_eq!(locations[0].format, SourceFormat::Auto);
     }
 
     #[tokio::test]
@@ -379,7 +380,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(locations[0].format, DataFormat::JsonL);
+        assert_eq!(locations[0].format, SourceFormat::Json);
     }
 
     #[tokio::test]
@@ -404,7 +405,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(locations[0].format, DataFormat::Parquet);
+        assert_eq!(locations[0].format, SourceFormat::Parquet);
     }
 
     #[tokio::test]
@@ -429,7 +430,7 @@ mod tests {
             .unwrap();
 
         // Content-Type wins over URL extension
-        assert_eq!(locations[0].format, DataFormat::JsonL);
+        assert_eq!(locations[0].format, SourceFormat::Json);
     }
 
     #[tokio::test]
@@ -454,7 +455,7 @@ mod tests {
             .unwrap();
 
         // Falls through to URL extension
-        assert_eq!(locations[0].format, DataFormat::Parquet);
+        assert_eq!(locations[0].format, SourceFormat::Parquet);
     }
 
     #[tokio::test]
@@ -478,7 +479,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(locations[0].format, DataFormat::Auto);
+        assert_eq!(locations[0].format, SourceFormat::Auto);
     }
 
     #[tokio::test]
@@ -499,7 +500,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(locations[0].format, DataFormat::JsonL);
+        assert_eq!(locations[0].format, SourceFormat::Json);
     }
 
     #[tokio::test]
@@ -537,7 +538,7 @@ mod tests {
 
         let locations = connector.discover(&args, &HashSet::new(), &config).await.unwrap();
         assert_eq!(locations.len(), 1);
-        assert_eq!(locations[0].format, DataFormat::Csv);
+        assert_eq!(locations[0].format, SourceFormat::Csv);
     }
 
     #[tokio::test]
@@ -633,7 +634,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(locations[0].format, DataFormat::Csv);
+        assert_eq!(locations[0].format, SourceFormat::Csv);
     }
 
     #[tokio::test]
@@ -642,7 +643,7 @@ mod tests {
         let location = DiscoveredLocation {
             location: "https://example.com/data.csv".to_string(),
             must_copy: false,
-            format: DataFormat::Csv,
+            format: SourceFormat::Csv,
             version: "v1".to_string(),
         };
         let config = crate::test_utils::test_config();

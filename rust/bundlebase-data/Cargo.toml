@@ -22,6 +22,9 @@ arrow-schema = { workspace = true }
 datafusion = { workspace = true }
 parquet = { workspace = true }
 
+# Serialization
+serde = { workspace = true }
+
 # Async
 async-trait = { workspace = true }
 tokio = { workspace = true }

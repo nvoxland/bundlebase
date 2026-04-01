@@ -68,7 +68,11 @@ impl BundleBuilderCommand for ReplaceBlockCommand {
     type Output = String;
 
     async fn execute(self: Box<Self>, builder: &BundleBuilder) -> Result<String, BundlebaseError> {
-        let op = ReplaceBlockOp::setup(&self.old_location, &self.new_location, builder).await?;
+        let temp_reader = builder.bundle().reader_factory
+            .detect(&self.new_location, &bundlebase_data::BlockId::generate(), builder)
+            .await?;
+        let format = temp_reader.format();
+        let op = ReplaceBlockOp::setup(&self.old_location, &self.new_location, format, builder).await?;
         builder.apply_operation(op.into()).await?;
         Ok(format!("Replaced {} with {}", self.old_location, self.new_location))
     }

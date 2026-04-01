@@ -485,12 +485,11 @@ async fn test_create_source_copy_default() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
+async fn test_create_source_save_as_ref() -> Result<(), BundlebaseError> {
     init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
-    // Copy test file to source directory
     copy_test_file(
         test_datafile("userdata.parquet"),
         source_dir.as_ref(),
@@ -498,21 +497,22 @@ async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
     )
     .await?;
 
-    // Create bundle and define source with copy=false
+    // Create bundle and define source with SAVE AS REF
     let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
-    let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
-    args.insert("copy".to_string(), "false".to_string());
-
-    bundle.create_source("remote_dir", args, None).await?;
+    let sql = format!(
+        "CREATE SOURCE USING remote_dir WITH (url = '{}', patterns = '**/*.parquet') SAVE AS REF",
+        source_dir.url()
+    );
+    use bundlebase_command::parser::parse_command;
+    let cmd = parse_command(&sql).expect("should parse");
+    cmd.execute(&bundle).await.expect("should execute");
 
     bundle.commit("Defined source").await?;
 
-    // Verify commit file contains attach operation with location at original source
+    // Verify the location references the original source URL (not copied)
     let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
-
-    // The location should be the original source URL (not copied)
     assert!(contents.contains(source_dir.url().as_str()),
         "AttachBlock location should reference original source: {}", contents);
 
@@ -520,12 +520,11 @@ async fn test_create_source_copy_false() -> Result<(), BundlebaseError> {
 }
 
 #[tokio::test]
-async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> {
+async fn test_create_source_save_as_copy() -> Result<(), BundlebaseError> {
     init();
     let source_dir = random_memory_dir();
     let bundle_dir = random_memory_dir();
 
-    // Copy test file to source directory
     copy_test_file(
         test_datafile("userdata.parquet"),
         source_dir.as_ref(),
@@ -533,25 +532,23 @@ async fn test_create_source_copy_true_explicit() -> Result<(), BundlebaseError> 
     )
     .await?;
 
-    // Create bundle and define source with explicit copy=true
+    // Create bundle and define source with SAVE AS COPY
     let bundle =
         bundlebase::BundleBuilder::create(bundle_dir.url().as_str(), None).await?;
 
-    let mut args = make_source_args(source_dir.url().as_str(), Some("**/*.parquet"));
-    args.insert("copy".to_string(), "true".to_string());
-
-    bundle.create_source("remote_dir", args, None).await?;
+    let sql = format!(
+        "CREATE SOURCE USING remote_dir WITH (url = '{}', patterns = '**/*.parquet') SAVE AS COPY",
+        source_dir.url()
+    );
+    use bundlebase_command::parser::parse_command;
+    let cmd = parse_command(&sql).expect("should parse");
+    cmd.execute(&bundle).await.expect("should execute");
 
     bundle.commit("Defined source").await?;
 
-    // Verify commit file contains attach operation with location in bundle data_dir
+    // Verify the data was copied (not referenced) and is queryable
     let (contents, _, _) = common::latest_commit(bundle.data_dir().as_ref()).await?.unwrap();
-
-    // The location should be in the bundle data_dir (copied)
-    // And source should contain the original location
     assert!(contents.contains("source:"), "AttachBlock should have source: {}", contents);
-
-    // Data should be queryable
     assert_eq!(bundle.num_rows().await?, 1000);
 
     Ok(())

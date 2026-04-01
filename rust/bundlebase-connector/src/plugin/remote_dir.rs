@@ -4,7 +4,7 @@
 //! any URL scheme (file, s3, gs, azure, ftp, sftp, tar, etc.).
 
 use bundlebase_common::connector::{
-    ArgSpec, DataFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    ArgSpec, SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_io::file::IOReadFile;
@@ -29,8 +29,6 @@ use url::Url;
 /// - `url` (required): The directory URL to list (e.g., "s3://bucket/data/")
 /// - `patterns` (optional): Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
 ///   Defaults to "**/*" (all files)
-/// - `copy` (optional): "true" to copy files into bundle's data_dir (default),
-///   "false" to reference files at their original URL
 /// - `key_path` (optional): SSH key path for SFTP sources
 pub struct RemoteDirConnector;
 
@@ -51,12 +49,6 @@ impl Connector for RemoteDirConnector {
                     description: "Comma-separated glob patterns to filter files",
                     required: false,
                     default: Some("**/*"),
-                },
-                ArgSpec {
-                    name: "copy",
-                    description: "Whether to copy files into bundle's data directory",
-                    required: false,
-                    default: Some("true"),
                 },
                 ArgSpec {
                     name: "key_path",
@@ -103,7 +95,7 @@ impl Connector for RemoteDirConnector {
             }
 
             // Get format from file extension
-            let format = DataFormat::from_extension(
+            let format = SourceFormat::from_extension(
                 relative_path
                     .rsplit('.')
                     .next()
@@ -269,16 +261,12 @@ mod tests {
         let func = RemoteDirConnector;
         let sig = func.signature();
         assert_eq!(sig.name, "remote_dir");
-        assert_eq!(sig.arg_specs.len(), 4);
+        assert_eq!(sig.arg_specs.len(), 3);
         assert!(sig.arg_specs.iter().any(|s| s.name == "url" && s.required));
         assert!(sig
             .arg_specs
             .iter()
             .any(|s| s.name == "patterns" && !s.required));
-        assert!(sig
-            .arg_specs
-            .iter()
-            .any(|s| s.name == "copy" && !s.required));
         assert!(sig
             .arg_specs
             .iter()
@@ -324,42 +312,6 @@ mod tests {
 
         let relative = RemoteDirConnector::relative_path(&source_url, &file_url);
         assert_eq!(relative, "file.parquet");
-    }
-
-    #[test]
-    fn test_validate_args_copy_true() {
-        let func = RemoteDirConnector;
-        let mut args = HashMap::new();
-        args.insert("url".to_string(), "s3://bucket/data/".to_string());
-        args.insert("copy".to_string(), "true".to_string());
-        // Note: full validation including copy is done via validate_connector_args
-        assert!(func.validate_args(&args).is_ok());
-    }
-
-    #[test]
-    fn test_validate_args_copy_false() {
-        let func = RemoteDirConnector;
-        let mut args = HashMap::new();
-        args.insert("url".to_string(), "s3://bucket/data/".to_string());
-        args.insert("copy".to_string(), "false".to_string());
-        assert!(func.validate_args(&args).is_ok());
-    }
-
-    #[test]
-    fn test_validate_connector_args_copy_invalid() {
-        
-        let func = RemoteDirConnector;
-        let mut args = HashMap::new();
-        args.insert("url".to_string(), "s3://bucket/data/".to_string());
-        args.insert("copy".to_string(), "invalid".to_string());
-
-        let result = { let sig = func.signature(); bundlebase_common::connector::validate_connector_args(&args, &sig) };
-        assert!(result.is_err());
-        assert!(result
-            .err()
-            .expect("expected error")
-            .to_string()
-            .contains("'copy' argument must be 'true' or 'false'"));
     }
 
     #[test]

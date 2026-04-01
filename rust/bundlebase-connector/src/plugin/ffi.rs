@@ -9,7 +9,7 @@
 //!   registered by the Python bindings at init time (PyO3 + `FromPyArrow`).
 
 use bundlebase_common::connector::{
-    ArgSpec, DataFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
+    SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::system_config::is_external_code_allowed;
@@ -269,11 +269,11 @@ impl FfiConnector {
     }
 }
 
-/// Build a JSON string of args for the C ABI, excluding `call` and `copy`.
+/// Build a JSON string of args for the C ABI, excluding `call`.
 fn filtered_args_json(args: &HashMap<String, String>) -> Result<String, BundlebaseError> {
     let filtered: HashMap<&str, &str> = args
         .iter()
-        .filter(|(k, _)| k.as_str() != "call" && k.as_str() != "copy")
+        .filter(|(k, _)| k.as_str() != "call")
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
     serde_json::to_string(&filtered)
@@ -343,7 +343,7 @@ fn parse_discover_json(json: &str) -> Result<Vec<DiscoveredLocation>, Bundlebase
             .get("must_copy")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        let format = DataFormat::from_extension(
+        let format = SourceFormat::from_extension(
             loc.get("format")
                 .and_then(|v| v.as_str())
                 .unwrap_or("parquet"),
@@ -372,7 +372,7 @@ fn build_discover_args_json(
 ) -> Result<String, BundlebaseError> {
     let filtered: HashMap<&str, &str> = args
         .iter()
-        .filter(|(k, _)| k.as_str() != "call" && k.as_str() != "copy")
+        .filter(|(k, _)| k.as_str() != "call")
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
     let mut value = serde_json::to_value(&filtered)
@@ -388,14 +388,7 @@ impl Connector for FfiConnector {
     fn signature(&self) -> ConnectorSignature {
         ConnectorSignature {
             name: "ffi".to_string(),
-            arg_specs: vec![
-                ArgSpec {
-                    name: "copy",
-                    description: "Whether to copy data into the bundle (default: true)",
-                    required: false,
-                    default: Some("true"),
-                },
-            ],
+            arg_specs: vec![],
             // call is injected by source definition resolution; user kwargs pass through
             accepts_extra_args: true,
         }
@@ -570,9 +563,7 @@ mod tests {
         let sig = func.signature();
         assert_eq!(sig.name, "ffi");
         // call is no longer in arg_specs — it's injected by source definition resolution
-        assert_eq!(sig.arg_specs.len(), 1);
-        assert_eq!(sig.arg_specs[0].name, "copy");
-        assert!(!sig.arg_specs[0].required);
+        assert_eq!(sig.arg_specs.len(), 0);
         assert!(sig.accepts_extra_args);
     }
 
@@ -586,11 +577,11 @@ mod tests {
         assert_eq!(locations.len(), 2);
         assert_eq!(locations[0].location, "file1.parquet");
         assert!(locations[0].must_copy);
-        assert_eq!(locations[0].format, DataFormat::Parquet);
+        assert_eq!(locations[0].format, SourceFormat::Parquet);
         assert_eq!(locations[0].version, "v1");
         assert_eq!(locations[1].location, "file2.csv");
         assert!(!locations[1].must_copy);
-        assert_eq!(locations[1].format, DataFormat::Csv);
+        assert_eq!(locations[1].format, SourceFormat::Csv);
         assert_eq!(locations[1].version, "");
     }
 
@@ -598,14 +589,12 @@ mod tests {
     fn test_filtered_args_json() {
         let mut args = HashMap::new();
         args.insert("call".to_string(), "ffi:test.so".to_string());
-        args.insert("copy".to_string(), "true".to_string());
         args.insert("custom".to_string(), "value".to_string());
 
         let json = filtered_args_json(&args).expect("should serialize");
         let parsed: serde_json::Value =
             serde_json::from_str(&json).expect("should parse JSON");
         assert!(parsed.get("call").is_none());
-        assert!(parsed.get("copy").is_none());
         assert_eq!(parsed.get("custom").and_then(|v| v.as_str()), Some("value"));
     }
 
@@ -614,7 +603,7 @@ mod tests {
         let loc = DiscoveredLocation {
             location: "test.parquet".to_string(),
             must_copy: true,
-            format: DataFormat::Parquet,
+            format: SourceFormat::Parquet,
             version: "v1".to_string(),
         };
         let json = location_json(&loc).expect("should serialize");
@@ -650,7 +639,7 @@ mod tests {
         let location = DiscoveredLocation {
             location: "test.parquet".to_string(),
             must_copy: true,
-            format: DataFormat::Parquet,
+            format: SourceFormat::Parquet,
             version: "v1".to_string(),
         };
 
@@ -668,7 +657,7 @@ mod tests {
         let location = DiscoveredLocation {
             location: "test.parquet".to_string(),
             must_copy: true,
-            format: DataFormat::Parquet,
+            format: SourceFormat::Parquet,
             version: "v1".to_string(),
         };
 
