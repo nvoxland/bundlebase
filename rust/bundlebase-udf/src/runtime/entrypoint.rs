@@ -141,6 +141,22 @@ pub trait UdfEntrypoint: Send + Sync + std::fmt::Debug {
         });
         let write_result = data_dir.write_stream(Box::pin(stream), ext).await?;
 
+        // Preserve execute permissions for binary files (connectors, scripts)
+        let url = write_result.file.url();
+        if url.scheme() == "file" {
+            if let Ok(path) = url.to_file_path() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(metadata) = std::fs::metadata(&path) {
+                        let mut perms = metadata.permissions();
+                        perms.set_mode(perms.mode() | 0o111); // add execute
+                        let _ = std::fs::set_permissions(&path, perms);
+                    }
+                }
+            }
+        }
+
         let hash = &write_result.hash;
         let bundle_path = format!("{}/{}.{}", &hash[..2], &hash[2..16], ext);
 

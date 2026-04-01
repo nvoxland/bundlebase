@@ -28,11 +28,11 @@ pub fn render_chart(chart: &ChartBlock, data: &BoundedQueryResult) -> Result<Str
     // Wrap in figure with optional title
     let mut output = String::new();
     if chart.title.is_some() {
-        output.push_str("#figure(\n");
+        output.push_str("#figure([\n");
     }
     output.push_str(&markup);
     if let Some(title) = &chart.title {
-        output.push_str(&format!(",\ncaption: [{}]\n)\n", escape_typst(title)));
+        output.push_str(&format!("],\ncaption: [{}]\n)\n", escape_typst(title)));
     }
     output.push('\n');
 

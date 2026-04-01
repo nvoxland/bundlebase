@@ -16,9 +16,9 @@ pub fn render_table(table: &TableBlock, data: &BoundedQueryResult) -> Result<Str
 
     let mut lines = Vec::new();
 
-    // Wrap in figure if there's a title
+    // Wrap in figure if there's a title — use content block to avoid # nesting
     if table.title.is_some() {
-        lines.push("#figure(".to_string());
+        lines.push("#figure([".to_string());
     }
 
     // Table opening with column count
@@ -78,9 +78,9 @@ pub fn render_table(table: &TableBlock, data: &BoundedQueryResult) -> Result<Str
 
     lines.push(")".to_string());
 
-    // Close figure with caption
+    // Close figure with caption — content block ] closes before caption
     if let Some(title) = &table.title {
-        lines.push(format!(", caption: [{}])", escape_typst(title)));
+        lines.push(format!("], caption: [{}])", escape_typst(title)));
     }
 
     lines.push(String::new());
