@@ -196,6 +196,96 @@ jobs:
           name: wheels-windows-${{ matrix.python-version }}
           path: dist/*.whl
 
+  build-cli-linux:
+    name: Build CLI binary (Linux x86_64)
+    runs-on: ubuntu-latest
+    needs: validate-version
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Build CLI
+        run: cargo build --release -p bundlebase-cli
+
+      - name: Package binary
+        run: |
+          cd target/release
+          tar czf bundlebase-linux-x86_64.tar.gz bundlebase
+          ls -lh bundlebase-linux-x86_64.tar.gz
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-linux-x86_64
+          path: target/release/bundlebase-linux-x86_64.tar.gz
+
+  build-cli-macos:
+    name: Build CLI binary (macOS arm64)
+    runs-on: macos-latest
+    needs: validate-version
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Build CLI
+        run: cargo build --release -p bundlebase-cli
+
+      - name: Package binary
+        run: |
+          cd target/release
+          tar czf bundlebase-macos-arm64.tar.gz bundlebase
+          ls -lh bundlebase-macos-arm64.tar.gz
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-macos-arm64
+          path: target/release/bundlebase-macos-arm64.tar.gz
+
+  build-cli-windows:
+    name: Build CLI binary (Windows x86_64)
+    runs-on: windows-latest
+    needs: validate-version
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Build CLI
+        run: cargo build --release -p bundlebase-cli
+
+      - name: Package binary
+        run: |
+          cd target/release
+          Compress-Archive -Path bundlebase.exe -DestinationPath bundlebase-windows-x86_64.zip
+          Get-ChildItem bundlebase-windows-x86_64.zip
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-windows-x86_64
+          path: target/release/bundlebase-windows-x86_64.zip
+
   build-sdist:
     name: Build source distribution
     runs-on: ubuntu-latest
@@ -220,7 +310,7 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: [build-linux, build-macos, build-windows, build-sdist]
+    needs: [build-linux, build-macos, build-windows, build-sdist, build-cli-linux, build-cli-macos, build-cli-windows]
     environment:
       name: pypi
       url: https://pypi.org/p/bundlebase
@@ -263,6 +353,7 @@ jobs:
           mkdir -p dist
           find artifacts -name '*.whl' -exec cp {} dist/ \;
           find artifacts -name '*.tar.gz' -exec cp {} dist/ \;
+          find artifacts -name '*.zip' -exec cp {} dist/ \;
           ls -lh dist/
 
       - name: Extract version from tag
@@ -278,9 +369,16 @@ jobs:
           body: |
             ## Installation
 
+            **Python package:**
             ```bash
             pip install bundlebase==${{ steps.version.outputs.VERSION }}
             ```
+
+            **CLI binary (standalone, no Python required):**
+            Download the appropriate binary below and add to your PATH:
+            - `bundlebase-macos-arm64.tar.gz` — macOS Apple Silicon
+            - `bundlebase-linux-x86_64.tar.gz` — Linux x86_64
+            - `bundlebase-windows-x86_64.zip` — Windows x86_64
 
             ## What's Changed
 
