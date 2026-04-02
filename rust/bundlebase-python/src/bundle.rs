@@ -470,6 +470,96 @@ impl PyBundle {
         })
     }
 
+    /// Test an already-imported connector by name.
+    ///
+    /// Calls discover() then data() and returns a record batch stream with
+    /// columns: section, key, value.
+    #[pyo3(signature = (name, **kwargs))]
+    fn test_connector<'py>(
+        &self,
+        name: &str,
+        kwargs: Option<&pyo3::types::PyDict>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let name = name.to_string();
+        let mut args = std::collections::HashMap::new();
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                args.insert(k.extract::<String>()?, v.extract::<String>()?);
+            }
+        }
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let stream = inner
+                .test_connector(&name, args)
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to test connector: {}",
+                        e
+                    ))
+                })?;
+            let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    super::record_batch_stream::PyRecordBatchStream::new(stream, schema),
+                )
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Failed to create stream: {}",
+                        e
+                    ))
+                })
+            })
+        })
+    }
+
+    /// Test a connector inline without importing it first.
+    ///
+    /// Calls discover() then data() and returns a record batch stream with
+    /// columns: section, key, value.
+    #[pyo3(signature = (from_, **kwargs))]
+    fn test_temp_connector<'py>(
+        &self,
+        from_: &str,
+        kwargs: Option<&pyo3::types::PyDict>,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let from_ = from_.to_string();
+        let mut args = std::collections::HashMap::new();
+        if let Some(kwargs) = kwargs {
+            for (k, v) in kwargs.iter() {
+                args.insert(k.extract::<String>()?, v.extract::<String>()?);
+            }
+        }
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let stream = inner
+                .test_temp_connector(&from_, args)
+                .await
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to test temp connector: {}",
+                        e
+                    ))
+                })?;
+            let schema = std::sync::Arc::new(stream.schema().as_ref().clone());
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    super::record_batch_stream::PyRecordBatchStream::new(stream, schema),
+                )
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Failed to create stream: {}",
+                        e
+                    ))
+                })
+            })
+        })
+    }
+
     /// Describe a registered function's metadata.
     ///
     /// Returns a record batch stream with columns: name, kind, input_types,
