@@ -19,8 +19,10 @@ mod show;
 mod show_count;
 pub mod describe_data;
 mod syntax;
+mod test_connector;
 
 pub use describe_data::DescribeDataCommand;
+pub use test_connector::TestConnectorCommand;
 pub use describe_connector::DescribeConnectorCommand;
 pub use describe_function::DescribeFunctionCommand;
 pub use export::ExportCommand;

@@ -132,6 +132,20 @@ metadata_stmt = {
     | set_description_stmt
     | set_config_stmt
     | save_config_stmt
+    | test_connector_stmt
+}
+
+// ============================================================================
+// TEST CONNECTOR Statement
+// ============================================================================
+// Test a connector without creating a source.
+// TEST CONNECTOR <name> tests an already-imported connector.
+// TEST TEMP CONNECTOR '...' tests inline without importing.
+test_connector_stmt = {
+    ^"test" ~ (
+        (^"temp" ~ ^"connector" ~ quoted_string ~ (^"with" ~ source_args)?)
+        | (^"connector" ~ (dotted_identifier | identifier) ~ (^"with" ~ source_args)?)
+    )
 }
 
 // ============================================================================

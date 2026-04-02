@@ -352,6 +352,17 @@ See [Views](../guide/views.md) for details.
 
 Commands for managing data sources.
 
+### TEST CONNECTOR
+
+Tests a connector without creating a source. Calls discover() and data() to validate the integration, showing discovered locations, schema, and sample data.
+
+```sql
+TEST CONNECTOR <name> [WITH (<key> = '<value>', ...)]
+TEST TEMP CONNECTOR '<runtime>::<entrypoint>' [WITH (<key> = '<value>', ...)]
+```
+
+See [Custom Connectors](../guide/custom-connectors/index.md) for details.
+
 ### CREATE SOURCE
 
 Defines a source for automatic file discovery.

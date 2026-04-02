@@ -389,6 +389,40 @@ class SyncBundle:
         async_result = _loop_manager.run_sync(coro)
         return SyncQueryResult(async_result)
 
+    def test_connector(self, name: str, **kwargs) -> "SyncQueryResult":
+        """Test an already-imported connector by name.
+
+        Calls discover() then data() to validate the integration without
+        modifying the bundle.
+
+        Args:
+            name: Connector name (e.g., "http", "acme.weather")
+            **kwargs: Connector arguments (e.g., url="https://example.com/data.csv")
+
+        Returns:
+            SyncQueryResult with sections: discover, schema, sample, result
+        """
+        coro = _call_original_method(self._async, "test_connector", name, **kwargs)
+        async_result = _loop_manager.run_sync(coro)
+        return SyncQueryResult(async_result)
+
+    def test_temp_connector(self, from_: str, **kwargs) -> "SyncQueryResult":
+        """Test a connector inline without importing it first.
+
+        Calls discover() then data() to validate the integration without
+        modifying the bundle.
+
+        Args:
+            from_: Runtime and entrypoint string (e.g., "python::my_module:MyConnector")
+            **kwargs: Connector arguments
+
+        Returns:
+            SyncQueryResult with sections: discover, schema, sample, result
+        """
+        coro = _call_original_method(self._async, "test_temp_connector", from_, **kwargs)
+        async_result = _loop_manager.run_sync(coro)
+        return SyncQueryResult(async_result)
+
     def import_temp_connector(
         self, name: str, from_: str,
         platform: str = "*/*"
@@ -795,6 +829,40 @@ class SyncBundleBuilder(SyncBundle):
             SyncQueryResult with column statistics
         """
         coro = _call_original_method(self._async, "describe_data", columns)
+        async_result = _loop_manager.run_sync(coro)
+        return SyncQueryResult(async_result)
+
+    def test_connector(self, name: str, **kwargs) -> "SyncQueryResult":
+        """Test an already-imported connector by name.
+
+        Calls discover() then data() to validate the integration without
+        modifying the bundle.
+
+        Args:
+            name: Connector name (e.g., "http", "acme.weather")
+            **kwargs: Connector arguments (e.g., url="https://example.com/data.csv")
+
+        Returns:
+            SyncQueryResult with sections: discover, schema, sample, result
+        """
+        coro = _call_original_method(self._async, "test_connector", name, **kwargs)
+        async_result = _loop_manager.run_sync(coro)
+        return SyncQueryResult(async_result)
+
+    def test_temp_connector(self, from_: str, **kwargs) -> "SyncQueryResult":
+        """Test a connector inline without importing it first.
+
+        Calls discover() then data() to validate the integration without
+        modifying the bundle.
+
+        Args:
+            from_: Runtime and entrypoint string (e.g., "python::my_module:MyConnector")
+            **kwargs: Connector arguments
+
+        Returns:
+            SyncQueryResult with sections: discover, schema, sample, result
+        """
+        coro = _call_original_method(self._async, "test_temp_connector", from_, **kwargs)
         async_result = _loop_manager.run_sync(coro)
         return SyncQueryResult(async_result)
 

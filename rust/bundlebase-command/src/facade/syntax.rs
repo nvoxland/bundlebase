@@ -169,6 +169,7 @@ fn usage_for_command(command_name: &str) -> Option<&'static str> {
         "DROP ALWAYS DELETE" => Some(include_str!("../syntax/always_delete.md")),
         "UPDATE" => Some(include_str!("../syntax/update.md")),
         "DESCRIBE CONNECTOR" => Some(include_str!("../syntax/describe_connector.md")),
+        "TEST CONNECTOR" => Some(include_str!("../syntax/test_connector.md")),
         "DESCRIBE DATA" => Some(include_str!("../syntax/describe_data.md")),
         "DESCRIBE FUNCTION" => Some(include_str!("../syntax/describe_function.md")),
         "SHOW" => Some(include_str!("../syntax/show.md")),

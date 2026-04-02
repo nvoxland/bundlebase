@@ -113,6 +113,8 @@ CREATE VIEW <name> AS <sql>
 DROP VIEW <name>
 
 -- Sources
+TEST CONNECTOR <name> [WITH (key = 'val', ...)]
+TEST TEMP CONNECTOR '<runtime>::<entrypoint>' [WITH (key = 'val', ...)]
 CREATE SOURCE [FOR <pack>] USING <connector> [WITH (key = 'val', ...)] [SAVE AS <AUTO|COPY|PARQUET|REF>]
 FETCH <pack> <ADD|UPDATE|SYNC> [DRY RUN]
 FETCH ALL <ADD|UPDATE|SYNC> [DRY RUN]

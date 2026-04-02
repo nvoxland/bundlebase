@@ -973,7 +973,9 @@ bundlebase extend --bundle ./lakes "IMPORT JOIN stations"
 
 ## Building a Custom Connector
 
-When data lives behind a custom API or needs custom fetch logic, write a Python connector:
+When data lives behind a custom API or needs custom fetch logic, write a connector and follow this workflow:
+
+**Step 1: Write the connector**
 
 ```python
 # my_connector.py
@@ -981,11 +983,9 @@ from bundlebase_sdk import Connector, Location, serve
 
 class MyApiConnector(Connector):
     def discover(self, attached_locations, **kwargs):
-        # Return available data locations (e.g., from an API listing endpoint)
         return [Location("users.parquet", format="parquet", version="v1")]
 
     def data(self, location, **kwargs):
-        # Fetch and return data for a specific location
         import pyarrow as pa
         # ... call your API here ...
         return pa.table({"id": [1, 2], "name": ["Alice", "Bob"]})
@@ -994,17 +994,39 @@ if __name__ == "__main__":
     serve(MyApiConnector())
 ```
 
-Register and use it:
+**Step 2: Test the connector with `TEST CONNECTOR`**
 
-```bash
-# Install the SDK: pip install bundlebase-sdk
-# Register the connector (temp = session-only, supports Python runtime)
-bundlebase extend --bundle ./data "IMPORT TEMP CONNECTOR my.api FROM 'python::my_connector.py:MyApiConnector'"
-bundlebase extend --bundle ./data "CREATE SOURCE USING my.api"
-bundlebase extend --bundle ./data "FETCH base ADD"
+Validate that bundlebase can communicate with it before creating a source. `TEST CONNECTOR` calls discover() and data() and shows the schema and sample data without modifying the bundle.
+
+```
+# Test inline without importing (quick validation during development)
+mcp__bundlebase__query(bundle="data", sql="TEST TEMP CONNECTOR 'python::my_connector.py:MyApiConnector'")
+
+# Or test an already-imported connector
+mcp__bundlebase__query(bundle="data", sql="IMPORT TEMP CONNECTOR my.api FROM 'python::my_connector.py:MyApiConnector'")
+mcp__bundlebase__query(bundle="data", sql="TEST CONNECTOR my.api")
 ```
 
-For persistent connectors (survive across sessions), use `ipc` or `ffi` runtimes instead of `python`. See the [Custom Connectors guide](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/index.md) and [Python SDK](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/python.md).
+If the test fails, fix the connector and test again. Do not proceed to creating a source until the test passes.
+
+**Step 3: Create a source — data is fetched automatically**
+
+Once the test passes, create the source. `CREATE SOURCE` automatically discovers and fetches the data — there is no separate FETCH step needed.
+
+```
+mcp__bundlebase__query(bundle="data", sql="IMPORT TEMP CONNECTOR my.api FROM 'python::my_connector.py:MyApiConnector'")
+mcp__bundlebase__query(bundle="data", sql="CREATE SOURCE USING my.api")
+mcp__bundlebase__query(bundle="data", sql="COMMIT 'Loaded API data'")
+```
+
+**To refresh data later**, use `FETCH base ADD` (for new files) or `FETCH base SYNC` (add new + remove deleted):
+
+```
+mcp__bundlebase__query(bundle="data", sql="FETCH base SYNC")
+mcp__bundlebase__query(bundle="data", sql="COMMIT 'Refreshed data'")
+```
+
+For persistent connectors (survive across sessions), use `IMPORT CONNECTOR` instead of `IMPORT TEMP CONNECTOR`. See the [Custom Connectors guide](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/index.md) and [Python SDK](https://raw.githubusercontent.com/nvoxland/bundlebase/main/docs/guide/custom-connectors/python.md).
 
 ## Transforming Data with Functions and Computed Columns
 

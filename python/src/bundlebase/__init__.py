@@ -302,6 +302,40 @@ async def _wrapped_builder_describe_data(self, columns) -> QueryResult:
 PyBundle.describe_data = _wrapped_bundle_describe_data
 PyBundleBuilder.describe_data = _wrapped_builder_describe_data
 
+# Wrap test_connector() and test_temp_connector() to return QueryResult
+_original_bundle_test_connector = PyBundle.test_connector
+_original_builder_test_connector = PyBundleBuilder.test_connector
+register_original_method("test_connector", _original_builder_test_connector)
+
+_original_bundle_test_temp_connector = PyBundle.test_temp_connector
+_original_builder_test_temp_connector = PyBundleBuilder.test_temp_connector
+register_original_method("test_temp_connector", _original_builder_test_temp_connector)
+
+async def _wrapped_bundle_test_connector(self, name, **kwargs) -> QueryResult:
+    """Test an already-imported connector by name."""
+    stream = await _original_bundle_test_connector(self, name, **kwargs)
+    return QueryResult(stream)
+
+async def _wrapped_builder_test_connector(self, name, **kwargs) -> QueryResult:
+    """Test an already-imported connector by name."""
+    stream = await _original_builder_test_connector(self, name, **kwargs)
+    return QueryResult(stream)
+
+async def _wrapped_bundle_test_temp_connector(self, from_, **kwargs) -> QueryResult:
+    """Test a connector inline without importing it first."""
+    stream = await _original_bundle_test_temp_connector(self, from_, **kwargs)
+    return QueryResult(stream)
+
+async def _wrapped_builder_test_temp_connector(self, from_, **kwargs) -> QueryResult:
+    """Test a connector inline without importing it first."""
+    stream = await _original_builder_test_temp_connector(self, from_, **kwargs)
+    return QueryResult(stream)
+
+PyBundle.test_connector = _wrapped_bundle_test_connector
+PyBundleBuilder.test_connector = _wrapped_builder_test_connector
+PyBundle.test_temp_connector = _wrapped_bundle_test_temp_connector
+PyBundleBuilder.test_temp_connector = _wrapped_builder_test_temp_connector
+
 # Wrap extend() on PyBundle to return an ExtendChain
 _original_extend = PyBundle.extend
 register_original_method("extend", _original_extend)

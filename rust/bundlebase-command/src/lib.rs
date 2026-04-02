@@ -80,6 +80,7 @@ pub use builder::{FileVerificationResult, VerificationResults};
 // Re-export facade command structs
 pub use facade::DescribeDataCommand;
 pub use facade::ExportCommand;
+pub use facade::TestConnectorCommand;
 pub use facade::DescribeConnectorCommand;
 pub use facade::DescribeFunctionCommand;
 pub use facade::ImportTempConnectorCommand;
@@ -148,6 +149,8 @@ pub enum FacadeCommand {
     Syntax(SyntaxCommand),
     /// Describe data quality and statistics for specified columns
     DescribeData(DescribeDataCommand),
+    /// Test a connector without creating a source
+    TestConnector(TestConnectorCommand),
 }
 
 impl FacadeCommand {
@@ -265,6 +268,10 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::TestConnector(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
         }
     }
 
@@ -298,6 +305,7 @@ impl FacadeCommand {
             FacadeCommand::ShowCount(_) => ShowCountCommand::output_schema(),
             FacadeCommand::Syntax(_) => SyntaxCommand::output_schema(),
             FacadeCommand::DescribeData(_) => DescribeDataCommand::output_schema(),
+            FacadeCommand::TestConnector(_) => TestConnectorCommand::output_schema(),
         }
     }
 
@@ -331,6 +339,7 @@ impl FacadeCommand {
             FacadeCommand::ShowCount(_) => ShowCountCommand::output_shape(),
             FacadeCommand::Syntax(_) => SyntaxCommand::output_shape(),
             FacadeCommand::DescribeData(_) => DescribeDataCommand::output_shape(),
+            FacadeCommand::TestConnector(_) => TestConnectorCommand::output_shape(),
         }
     }
 }
@@ -369,6 +378,7 @@ impl BundleCommand {
             BundleCommand::ShowCount(cmd) => Ok(FacadeCommand::ShowCount(cmd)),
             BundleCommand::Syntax(cmd) => Ok(FacadeCommand::Syntax(cmd)),
             BundleCommand::DescribeData(cmd) => Ok(FacadeCommand::DescribeData(cmd)),
+            BundleCommand::TestConnector(cmd) => Ok(FacadeCommand::TestConnector(cmd)),
             _ => {
                 // Get the command name for the error message
                 let cmd_name = match &self {
@@ -414,7 +424,7 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) => {
+                    BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -428,7 +438,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_))
+        matches!(self, BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_))
     }
 }
 
@@ -835,6 +845,8 @@ register_commands! {
             "SYNTAX" => "SYNTAX [<command>]",
         DescribeData(DescribeDataCommand) => Rule::describe_data_stmt,
             "DESCRIBE DATA" => "DESCRIBE DATA IN <col1> [AS <type>], <col2> [AS <type>], ...",
+        TestConnector(TestConnectorCommand) => Rule::test_connector_stmt,
+            "TEST CONNECTOR" => "TEST CONNECTOR <name> [WITH (<args>)] or TEST TEMP CONNECTOR '<runtime>::<entrypoint>' [WITH (<args>)]",
     }
 }
 
