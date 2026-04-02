@@ -51,7 +51,7 @@ SHOW ALWAYS DELETES
 
 A lot of small things in this release were aimed at making Bundlebase easier for an agent to explore and use without hand-holding.
 
-The [MCP server](../../guide/cli-mcp.md) now supports multiple bundles in a single session, so an agent can work across datasets without restarting. `list-bundles` lets it discover what's available. [`SYNTAX <command>`](../../sql-reference/index.md#syntax) gives inline help on any command, and [`bundle_info.commands`](../../sql-reference/index.md#show-commands) lists every supported SQL command — so an agent can figure out what's possible without needing external docs.
+The [MCP server](../../guide/cli-mcp.md) now supports multiple bundles in a single session, so an agent can work across datasets without restarting. `list-bundles` lets it discover what's available. [`SYNTAX <command>`](../../sql-reference/index.md#syntax) gives inline help on any command, and [`bundle_info.commands`](../../sql-reference/index.md#show) lists every supported SQL command — so an agent can figure out what's possible without needing external docs.
 
 The [HTTP connector](../../guide/sources.md#http) means an agent can pull in data from a URL directly, with format auto-detected from content type. Combined with [`TEST CONNECTOR`](../../sql-reference/index.md#test-connector), it can validate a data source before committing anything.
 
@@ -67,7 +67,7 @@ Whether you are driving bundlebase with an agent or own your own, I added new fe
 
 - [`DESCRIBE DATA IN`](../../sql-reference/index.md#describe-data) statement provides column profiling: min, max, null count, distinct count
 - [PDF reports](../../guide/reports.md) — embed live charts and tables in a markdown file, generate a PDF
-- [`SHOW COMMANDS`](../../sql-reference/index.md#show-commands) — lists all supported SQL commands with `bundle_info.commands`
+- [`SHOW COMMANDS`](../../sql-reference/index.md#show) — lists all supported SQL commands with `bundle_info.commands`
 - [`SYNTAX <command>`](../../sql-reference/index.md#syntax) — inline help for any command
 - `list-bundles` command
 

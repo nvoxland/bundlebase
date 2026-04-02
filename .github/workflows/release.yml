@@ -121,6 +121,23 @@ jobs:
           name: wheels-linux-${{ matrix.python-version }}
           path: dist/*.whl
 
+      - name: Build CLI binary
+        if: matrix.python-version == '3.13'
+        run: cargo build --release -p bundlebase-cli
+
+      - name: Package CLI binary
+        if: matrix.python-version == '3.13'
+        run: |
+          cd target/release
+          tar czf bundlebase-linux-x86_64.tar.gz bundlebase
+
+      - name: Upload CLI binary
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-linux-x86_64
+          path: target/release/bundlebase-linux-x86_64.tar.gz
+
   build-macos:
     name: Build macOS wheels
     runs-on: ${{ matrix.os }}
@@ -159,6 +176,23 @@ jobs:
           name: wheels-${{ matrix.os }}-${{ matrix.python-version }}
           path: dist/*.whl
 
+      - name: Build CLI binary
+        if: matrix.python-version == '3.13'
+        run: cargo build --release -p bundlebase-cli
+
+      - name: Package CLI binary
+        if: matrix.python-version == '3.13'
+        run: |
+          cd target/release
+          tar czf bundlebase-macos-arm64.tar.gz bundlebase
+
+      - name: Upload CLI binary
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-macos-arm64
+          path: target/release/bundlebase-macos-arm64.tar.gz
+
   build-windows:
     name: Build Windows wheels
     runs-on: windows-latest
@@ -196,91 +230,16 @@ jobs:
           name: wheels-windows-${{ matrix.python-version }}
           path: dist/*.whl
 
-  build-cli-linux:
-    name: Build CLI binary (Linux x86_64)
-    runs-on: ubuntu-latest
-    needs: validate-version
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: . -> target
-
-      - name: Build CLI
+      - name: Build CLI binary
+        if: matrix.python-version == '3.13'
         run: cargo build --release -p bundlebase-cli
 
-      - name: Package binary
-        run: |
-          cd target/release
-          tar czf bundlebase-linux-x86_64.tar.gz bundlebase
-          ls -lh bundlebase-linux-x86_64.tar.gz
+      - name: Package CLI binary
+        if: matrix.python-version == '3.13'
+        run: Compress-Archive -Path target/release/bundlebase.exe -DestinationPath target/release/bundlebase-windows-x86_64.zip
 
-      - name: Upload binary
-        uses: actions/upload-artifact@v6
-        with:
-          name: cli-linux-x86_64
-          path: target/release/bundlebase-linux-x86_64.tar.gz
-
-  build-cli-macos:
-    name: Build CLI binary (macOS arm64)
-    runs-on: macos-latest
-    needs: validate-version
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: . -> target
-
-      - name: Build CLI
-        run: cargo build --release -p bundlebase-cli
-
-      - name: Package binary
-        run: |
-          cd target/release
-          tar czf bundlebase-macos-arm64.tar.gz bundlebase
-          ls -lh bundlebase-macos-arm64.tar.gz
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v6
-        with:
-          name: cli-macos-arm64
-          path: target/release/bundlebase-macos-arm64.tar.gz
-
-  build-cli-windows:
-    name: Build CLI binary (Windows x86_64)
-    runs-on: windows-latest
-    needs: validate-version
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: . -> target
-
-      - name: Build CLI
-        run: cargo build --release -p bundlebase-cli
-
-      - name: Package binary
-        run: |
-          cd target/release
-          Compress-Archive -Path bundlebase.exe -DestinationPath bundlebase-windows-x86_64.zip
-          Get-ChildItem bundlebase-windows-x86_64.zip
-
-      - name: Upload binary
+      - name: Upload CLI binary
+        if: matrix.python-version == '3.13'
         uses: actions/upload-artifact@v6
         with:
           name: cli-windows-x86_64
@@ -310,7 +269,7 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: [build-linux, build-macos, build-windows, build-sdist, build-cli-linux, build-cli-macos, build-cli-windows]
+    needs: [build-linux, build-macos, build-windows, build-sdist]
     environment:
       name: pypi
       url: https://pypi.org/p/bundlebase
