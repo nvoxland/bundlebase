@@ -1339,7 +1339,7 @@ impl PyBundleBuilder {
     fn test_connector<'py>(
         &self,
         name: &str,
-        kwargs: Option<&pyo3::types::PyDict>,
+        kwargs: Option<Bound<'_, pyo3::types::PyDict>>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
@@ -1374,7 +1374,7 @@ impl PyBundleBuilder {
     fn test_temp_connector<'py>(
         &self,
         from_: &str,
-        kwargs: Option<&pyo3::types::PyDict>,
+        kwargs: Option<Bound<'_, pyo3::types::PyDict>>,
         py: Python<'py>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = self.inner.clone();
