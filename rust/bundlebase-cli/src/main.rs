@@ -12,6 +12,7 @@ use tracing_log::LogTracer;
 #[derive(Parser, Debug)]
 #[command(name = "bundlebase")]
 #[command(about = "Bundlebase", long_about = None)]
+#[command(version)]
 struct Cli {
     /// Logging level (ui, trace, debug, info, warn, error)
     /// ui: Minimal format (message only), INFO level - good for interactive use
