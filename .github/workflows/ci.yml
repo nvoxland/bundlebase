@@ -27,12 +27,17 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install lld
+        run: sudo apt-get install -y lld
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
 
       - name: Run Rust tests
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
         run: cargo test --verbose --package bundlebase
 
   python:
@@ -50,6 +55,9 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install lld
+        run: sudo apt-get install -y lld
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -80,6 +88,8 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Build Rust extension (development)
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
         run: |
           poetry run maturin build --out dist
           poetry run pip install --force-reinstall --no-deps dist/*.whl
@@ -88,6 +98,8 @@ jobs:
         run: poetry run pytest -v --timeout=300
 
       - name: Build Python wheel (release)
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
         run: poetry run maturin build --release --out dist-release
 
       - name: Upload Python wheel artifacts
@@ -118,12 +130,17 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install lld
+        run: sudo apt-get install -y lld
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
 
       - name: Run Rust SDK tests
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
         run: cargo test --verbose --package bundlebase-sdk
 
   go-sdk:
@@ -212,12 +229,17 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install lld
+        run: sudo apt-get install -y lld
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
 
       - name: Build bundlebase-cli (release)
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
         run: cargo build --release --package bundlebase-cli
 
       - name: Upload bundlebase-cli binary
