@@ -327,7 +327,7 @@ jobs:
         run: |
           mkdir -p dist
           find artifacts -name '*.whl' -exec cp {} dist/ \;
-          find artifacts -name '*.tar.gz' -exec cp {} dist/ \;
+          find artifacts/sdist -name '*.tar.gz' -exec cp {} dist/ \;
           ls -lh dist/
 
       - name: Publish to PyPI
