@@ -70,7 +70,7 @@ See the [SQL Reference](../sql-reference/index.md) for the full command syntax.
 
 ### Claude Code
 
-Run `bundlebase setup-agent` to automatically install the MCP server config. Or add manually to `.claude/settings.json`:
+Run `bundlebase setup-agent` to automatically install the MCP server config. Or add manually to `.mcp.json` in your project root:
 
 ```json
 {

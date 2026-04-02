@@ -16,7 +16,7 @@ use the bundlebase MCP server — it keeps bundles open across calls. For one-of
 use `bundlebase query` CLI. **Do NOT mix MCP and CLI on the same bundle simultaneously** — \
 close the MCP bundle first if you need to switch to CLI.\n";
 
-/// MCP server config for Claude Code settings.json
+/// MCP server config for Claude Code .mcp.json
 const CLAUDE_CODE_MCP_CONFIG: &str = r#"{
   "bundlebase": {
     "command": "bundlebase",
@@ -94,14 +94,13 @@ pub fn install(global: bool) -> Result<(), BundlebaseError> {
     Ok(())
 }
 
-/// Install MCP server config for Claude Code.
+/// Install MCP server config for Claude Code (.mcp.json in project root).
 fn install_claude_code_mcp(base_dir: &Path) -> Result<(), BundlebaseError> {
-    let settings_dir = base_dir.join(".claude");
-    let settings_path = settings_dir.join("settings.json");
+    let mcp_path = base_dir.join(".mcp.json");
 
-    if settings_path.exists() {
-        let contents = fs::read_to_string(&settings_path).map_err(|e| {
-            BundlebaseError::from(format!("Failed to read {}: {}", settings_path.display(), e))
+    if mcp_path.exists() {
+        let contents = fs::read_to_string(&mcp_path).map_err(|e| {
+            BundlebaseError::from(format!("Failed to read {}: {}", mcp_path.display(), e))
         })?;
 
         if contents.contains("\"bundlebase\"") {
@@ -111,13 +110,13 @@ fn install_claude_code_mcp(base_dir: &Path) -> Result<(), BundlebaseError> {
 
         // Parse, add mcpServers entry, write back
         match serde_json::from_str::<serde_json::Value>(&contents) {
-            Ok(mut settings) => {
+            Ok(mut config) => {
                 let mcp_config: serde_json::Value =
                     serde_json::from_str(CLAUDE_CODE_MCP_CONFIG).expect("valid JSON");
 
-                let mcp_servers = settings
+                let mcp_servers = config
                     .as_object_mut()
-                    .expect("settings is object")
+                    .expect("config is object")
                     .entry("mcpServers")
                     .or_insert_with(|| serde_json::json!({}));
 
@@ -129,30 +128,25 @@ fn install_claude_code_mcp(base_dir: &Path) -> Result<(), BundlebaseError> {
                     }
                 }
 
-                let updated = serde_json::to_string_pretty(&settings).map_err(|e| {
-                    BundlebaseError::from(format!("Failed to serialize settings: {}", e))
+                let updated = serde_json::to_string_pretty(&config).map_err(|e| {
+                    BundlebaseError::from(format!("Failed to serialize config: {}", e))
                 })?;
-                fs::write(&settings_path, updated).map_err(|e| {
-                    BundlebaseError::from(format!("Failed to write {}: {}", settings_path.display(), e))
+                fs::write(&mcp_path, updated).map_err(|e| {
+                    BundlebaseError::from(format!("Failed to write {}: {}", mcp_path.display(), e))
                 })?;
-                println!("Added bundlebase MCP server to {}", settings_path.display());
+                println!("Added bundlebase MCP server to {}", mcp_path.display());
             }
             Err(_) => {
-                // Can't parse existing settings — don't corrupt it
+                // Can't parse existing config — don't corrupt it
                 println!(
                     "Could not parse {}. Add bundlebase MCP server manually:\n{}",
-                    settings_path.display(),
+                    mcp_path.display(),
                     CLAUDE_CODE_MCP_CONFIG
                 );
             }
         }
     } else {
-        // Create new settings file with MCP config
-        fs::create_dir_all(&settings_dir).map_err(|e| {
-            BundlebaseError::from(format!("Failed to create {}: {}", settings_dir.display(), e))
-        })?;
-
-        let settings = serde_json::json!({
+        let config = serde_json::json!({
             "mcpServers": {
                 "bundlebase": {
                     "command": "bundlebase",
@@ -161,11 +155,11 @@ fn install_claude_code_mcp(base_dir: &Path) -> Result<(), BundlebaseError> {
             }
         });
 
-        let json = serde_json::to_string_pretty(&settings).expect("valid JSON");
-        fs::write(&settings_path, json).map_err(|e| {
-            BundlebaseError::from(format!("Failed to write {}: {}", settings_path.display(), e))
+        let json = serde_json::to_string_pretty(&config).expect("valid JSON");
+        fs::write(&mcp_path, json).map_err(|e| {
+            BundlebaseError::from(format!("Failed to write {}: {}", mcp_path.display(), e))
         })?;
-        println!("Created {} with bundlebase MCP server", settings_path.display());
+        println!("Created {} with bundlebase MCP server", mcp_path.display());
     }
 
     Ok(())
