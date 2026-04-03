@@ -186,6 +186,8 @@ impl CommandResponse for Vec<crate::connector::FetchResults> {
             Field::new("added_count", DataType::UInt64, false),
             Field::new("replaced_count", DataType::UInt64, false),
             Field::new("removed_count", DataType::UInt64, false),
+            Field::new("rows_before", DataType::UInt64, false),
+            Field::new("rows_after", DataType::UInt64, false),
         ]))
     }
 
@@ -216,6 +218,12 @@ impl CommandResponse for Vec<crate::connector::FetchResults> {
         let removed_count: ArrayRef = Arc::new(UInt64Array::from(
             self.iter().map(|r| r.removed.len() as u64).collect::<Vec<_>>(),
         ));
+        let rows_before: ArrayRef = Arc::new(UInt64Array::from(
+            self.iter().map(|r| r.rows_before).collect::<Vec<_>>(),
+        ));
+        let rows_after: ArrayRef = Arc::new(UInt64Array::from(
+            self.iter().map(|r| r.rows_after).collect::<Vec<_>>(),
+        ));
 
         let batch = RecordBatch::try_new(
             Self::schema(),
@@ -226,6 +234,8 @@ impl CommandResponse for Vec<crate::connector::FetchResults> {
                 added_count,
                 replaced_count,
                 removed_count,
+                rows_before,
+                rows_after,
             ],
         )
         .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;

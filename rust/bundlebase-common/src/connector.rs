@@ -207,12 +207,16 @@ pub struct FetchResults {
     pub replaced: Vec<FetchedBlock>,
     /// Source locations of blocks that were removed
     pub removed: Vec<String>,
+    /// Total rows in the pack before fetching
+    pub rows_before: u64,
+    /// Total rows in the pack after fetching
+    pub rows_after: u64,
 }
 
 impl FetchResults {
     /// Create empty results.
     pub fn empty(connector: String, source_url: String, pack: String) -> Self {
-        Self { connector, source_url, pack, added: Vec::new(), replaced: Vec::new(), removed: Vec::new() }
+        Self { connector, source_url, pack, added: Vec::new(), replaced: Vec::new(), removed: Vec::new(), rows_before: 0, rows_after: 0 }
     }
 
     /// Create FetchResults from a list of FetchActions.
@@ -235,7 +239,7 @@ impl FetchResults {
             }
         }
 
-        Self { connector, source_url, pack, added, replaced, removed }
+        Self { connector, source_url, pack, added, replaced, removed, rows_before: 0, rows_after: 0 }
     }
 
     /// Total number of actions.

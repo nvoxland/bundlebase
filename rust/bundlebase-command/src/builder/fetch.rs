@@ -209,6 +209,8 @@ async fn fetch_from_source(
     let connector = source.connector().to_string();
     let source_url = source.args().get("url").cloned().unwrap_or_default();
 
+    let rows_before = builder.num_rows().await? as u64;
+
     let actions = source.fetch(builder, mode).await?;
 
     // Process actions and collect them for the result
@@ -290,12 +292,17 @@ async fn fetch_from_source(
         progress.update((idx + 1) as u64, None);
     }
 
-    Ok(FetchResults::from_actions(
+    let rows_after = builder.num_rows().await? as u64;
+
+    let mut results = FetchResults::from_actions(
         connector,
         source_url,
         pack_name.to_string(),
         processed_actions,
-    ))
+    );
+    results.rows_before = rows_before;
+    results.rows_after = rows_after;
+    Ok(results)
 }
 
 /// Find the current location of a block that was attached from a source.

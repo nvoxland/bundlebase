@@ -884,7 +884,7 @@ Valid formats: `csv`, `json`, `jsonl`, `parquet`, `tsv`. If omitted, format is a
 CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv', head_supported = 'false')
 ```
 
-**`SAVE AS` clause (all sources):** Controls how fetched data is stored. Add after the `WITH` block:
+**`SAVE AS` clause (all sources):** Controls how fetched data is stored. **Omit it in most cases** — the default (`AUTO`) works correctly for all common formats. Only add `SAVE AS` when you have a specific reason.
 
 | Value | Behavior |
 |-------|----------|
@@ -894,16 +894,17 @@ CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv',
 | `REF` | Reference the remote URL directly — no download. Only valid for attachable formats and connectors that support it |
 
 ```sql
--- Default: auto (references CSV by URL, converts Excel to Parquet)
+-- Recommended: omit SAVE AS — AUTO default handles CSV, JSON, Parquet, Excel correctly
 CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv')
 
+-- Only add SAVE AS if you need a specific behavior:
 -- Force download into the bundle (self-contained, works offline)
 CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') SAVE AS COPY
 
 -- Force Parquet conversion for all data
 CREATE SOURCE USING http WITH (url = 'https://example.com/data.csv') SAVE AS PARQUET
 
--- Excel files are automatically converted to Parquet
+-- Excel files are automatically converted to Parquet even without SAVE AS
 CREATE SOURCE USING http WITH (url = 'https://example.com/data.xlsx')
 ```
 
