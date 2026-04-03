@@ -654,7 +654,14 @@ identifier = @{
 }
 
 quoted_string = @{
-    single_quoted | double_quoted
+    dollar_quoted | single_quoted | double_quoted
+}
+
+// PostgreSQL-style dollar-quoting: $$content$$
+// Content is taken as-is with no escape processing — no need to escape quotes or backslashes.
+// Ideal for multi-line strings, JSON bodies, and any content containing single quotes.
+dollar_quoted = @{
+    "$$" ~ (!"$$" ~ ANY)* ~ "$$"
 }
 
 single_quoted = @{

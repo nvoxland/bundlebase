@@ -63,33 +63,159 @@ Bundlebase ships with several common connectors, but custom connectors can also 
 
 ### http
 
-Downloads data from a single HTTP(S) URL. Use this for any direct link to a CSV, TSV, JSON, or Parquet file — including REST API endpoints that return data.
+Downloads data from a single HTTP(S) URL. Supports GET, POST, and PUT methods, custom request headers, and any URL that returns a data file (CSV, TSV, JSON, Parquet, Excel, etc.).
 
 **Arguments:**
 
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `url` | Yes | The HTTP(S) URL to download |
-| `format` | No | File format: `csv`, `json`, `parquet`, `tsv`, or `auto`. Default: `auto` |
+| Argument | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `url` | Yes | — | The HTTP(S) URL to download |
+| `method` | No | `GET` | HTTP method: `GET`, `POST`, or `PUT` |
+| `body` | No | — | Request body string, for POST/PUT |
+| `headers` | No | — | Additional request headers, one `Name: Value` per line |
+| `format` | No | `auto` | File format: `csv`, `json`, `jsonl`, `parquet`, `tsv`, or `auto` |
+| `head_supported` | No | `true` | Set to `false` if the server rejects HEAD requests |
 
 **Format auto-detection:** When `format` is `auto` (the default), the connector detects the data format using this priority:
 
 1. **Content-Type header** — from the HTTP response (e.g., `text/csv`, `application/json`)
-2. **URL file extension** — recognized extensions: `.csv`, `.json`, `.jsonl`, `.parquet`, `.tsv`, `.xml`
-3. **Content inspection** — examines the downloaded bytes (Parquet magic bytes, JSON structure, or CSV as default)
+2. **URL file extension** — recognized extensions: `.csv`, `.json`, `.jsonl`, `.parquet`, `.tsv`, `.xlsx`
+3. **Content inspection** — examines the downloaded bytes
+
+**GET requests (default):**
 
 === "SQL"
 
     ```sql
-    -- Download a CSV from a URL
+    -- Download a CSV directly
     CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv')
 
-    -- API URLs work without specifying format (auto-detected from response)
+    -- API endpoint — format auto-detected from Content-Type header
     CREATE SOURCE USING http WITH (url = 'https://api.example.com/data?query=results')
 
     -- Force format when auto-detection doesn't match
-    CREATE SOURCE USING http WITH (url = 'https://api.example.com/data?format=csv', format = 'csv')
+    CREATE SOURCE USING http WITH (url = 'https://api.example.com/data', format = 'csv')
+
+    -- Server doesn't support HEAD requests
+    CREATE SOURCE USING http WITH (url = 'https://data.example.gov/export.csv', head_supported = 'false')
     ```
+
+=== "Async API"
+
+    ```python
+    # Simple GET
+    bundle = await bundle.create_source("http", {"url": "https://data.mn.gov/api/lake_quality.csv"})
+
+    # Server doesn't support HEAD requests
+    bundle = await bundle.create_source("http", {
+        "url": "https://data.example.gov/export.csv",
+        "head_supported": "false"
+    })
+    ```
+
+=== "Sync API"
+
+    ```python
+    # Simple GET
+    bundle = bundle.create_source("http", {"url": "https://data.mn.gov/api/lake_quality.csv"})
+    ```
+
+**POST and PUT requests:**
+
+Some APIs require POST or PUT to retrieve data — for example, query APIs that accept filter parameters as a JSON body. Use the `method` and `body` arguments.
+
+For multi-line JSON bodies, use [dollar-quoting](../sql-reference/index.md#string-literals) (`$$...$$`) — no escaping needed:
+
+=== "SQL"
+
+    ```sql
+    -- POST with a JSON body (dollar-quoting avoids escaping issues)
+    CREATE SOURCE USING http WITH (
+        url = 'https://api.example.com/data/query',
+        method = 'POST',
+        body = $${
+            "filters": {"state": "MN", "type": "Lake"},
+            "format": "csv"
+        }$$,
+        headers = 'Content-Type: application/json
+Accept: text/csv'
+    )
+
+    -- POST with a form-encoded body
+    CREATE SOURCE USING http WITH (
+        url = 'https://api.example.com/export',
+        method = 'POST',
+        body = 'statecode=US%3A27&mimeType=csv',
+        headers = 'Content-Type: application/x-www-form-urlencoded'
+    )
+    ```
+
+=== "Async API"
+
+    ```python
+    import json
+
+    bundle = await bundle.create_source("http", {
+        "url": "https://api.example.com/data/query",
+        "method": "POST",
+        "body": json.dumps({
+            "filters": {"state": "MN", "type": "Lake"},
+            "format": "csv"
+        }),
+        "headers": "Content-Type: application/json\nAccept: text/csv"
+    })
+    ```
+
+=== "Sync API"
+
+    ```python
+    import json
+
+    bundle = bundle.create_source("http", {
+        "url": "https://api.example.com/data/query",
+        "method": "POST",
+        "body": json.dumps({
+            "filters": {"state": "MN", "type": "Lake"},
+            "format": "csv"
+        }),
+        "headers": "Content-Type: application/json\nAccept: text/csv"
+    })
+    ```
+
+**Custom headers (GET with authentication):**
+
+Use `headers` to add authorization tokens or request specific response formats from GET endpoints:
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE USING http WITH (
+        url = 'https://api.example.com/export',
+        headers = 'Authorization: Bearer my-api-token
+Accept: text/csv'
+    )
+    ```
+
+=== "Async API"
+
+    ```python
+    bundle = await bundle.create_source("http", {
+        "url": "https://api.example.com/export",
+        "headers": "Authorization: Bearer my-api-token\nAccept: text/csv"
+    })
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle = bundle.create_source("http", {
+        "url": "https://api.example.com/export",
+        "headers": "Authorization: Bearer my-api-token\nAccept: text/csv"
+    })
+    ```
+
+!!! note
+    POST and PUT requests skip the HEAD probe entirely — `head_supported` has no effect for non-GET methods.
 
 ### remote_dir
 

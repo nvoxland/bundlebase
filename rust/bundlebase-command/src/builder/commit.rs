@@ -96,4 +96,44 @@ mod parsing_tests {
             _ => panic!("Expected Commit variant"),
         }
     }
+
+    #[test]
+    fn test_parse_dollar_quoted_commit() {
+        let input = "COMMIT $$it's done$$";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::Commit(c) => {
+                assert_eq!(c.message, "it's done");
+            }
+            _ => panic!("Expected Commit variant"),
+        }
+    }
+
+    #[test]
+    fn test_dollar_quoted_round_trip_with_single_quotes() {
+        // Message contains a single quote — to_statement() should use $$...$$
+        let cmd = CommitCommand::new("it's a fix");
+        let statement = cmd.to_statement();
+        assert_eq!(statement, "COMMIT $$it's a fix$$");
+
+        let parsed = parse_command(&statement).unwrap();
+        match parsed {
+            BundleCommand::Commit(c) => {
+                assert_eq!(c.message, "it's a fix");
+            }
+            _ => panic!("Expected Commit variant"),
+        }
+    }
+
+    #[test]
+    fn test_dollar_quoted_multiline() {
+        let input = "COMMIT $$line1\nline2$$";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::Commit(c) => {
+                assert_eq!(c.message, "line1\nline2");
+            }
+            _ => panic!("Expected Commit variant"),
+        }
+    }
 }

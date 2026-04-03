@@ -110,6 +110,31 @@ bundlebase query --bundle ./data --format json "SHOW COLUMNS"
 
 SQL uses single quotes for strings. In shell, wrap the whole SQL in double quotes: `bundlebase extend --bundle ./data "COMMIT 'my message'"`. To escape a single quote in SQL, double it: `"SELECT * FROM bundle WHERE name = 'O''Brien'"`.
 
+**Dollar-quoting (`$$...$$`):** For strings that contain single quotes, newlines, or JSON, use PostgreSQL-style dollar-quoting — no escaping needed. The content between `$$` delimiters is taken exactly as written:
+
+```bash
+# Single quote in a commit message — no escaping needed
+bundlebase extend --bundle ./data "COMMIT \$\$fixed the connector's bug\$\$"
+```
+
+In MCP SQL (no shell escaping needed):
+```sql
+-- Commit message with a single quote
+COMMIT $$fixed the connector's bug$$
+
+-- Multi-line JSON body for a POST request
+CREATE SOURCE USING http WITH (
+    url = 'https://api.example.com/query',
+    method = 'POST',
+    body = $${
+        "filters": {"state": "MN", "type": "Lake"},
+        "format": "csv"
+    }$$,
+    headers = 'Content-Type: application/json
+Accept: text/csv'
+)
+```
+
 ### `bundlebase create` — Create a new bundle
 
 Creates a new bundle at the specified path. Optionally executes initial commands (like ATTACH) and auto-commits.
@@ -883,6 +908,42 @@ Valid formats: `csv`, `json`, `jsonl`, `parquet`, `tsv`. If omitted, format is a
 ```sql
 CREATE SOURCE USING http WITH (url = 'https://data.mn.gov/api/lake_quality.csv', head_supported = 'false')
 ```
+
+**http connector POST/PUT and custom headers:** For APIs that require POST or PUT, use the `method` arg. Combine with `body` for a request body and `headers` for custom request headers (one `Name: Value` per line).
+
+For JSON bodies, use dollar-quoting (`$$...$$`) so you don't need to escape double quotes:
+
+```sql
+-- POST with a JSON body (dollar-quoting avoids escaping issues)
+CREATE SOURCE USING http WITH (
+    url = 'https://api.example.com/data/query',
+    method = 'POST',
+    body = $${
+        "filters": {"state": "MN", "type": "Lake"},
+        "format": "csv"
+    }$$,
+    headers = 'Content-Type: application/json
+Accept: text/csv'
+)
+
+-- POST with form-encoded body
+CREATE SOURCE USING http WITH (
+    url = 'https://api.example.com/data/query',
+    method = 'POST',
+    body = 'statecode=US%3A27&mimeType=csv',
+    headers = 'Content-Type: application/x-www-form-urlencoded
+Accept: text/csv'
+)
+
+-- GET with custom headers (auth token, requested format)
+CREATE SOURCE USING http WITH (
+    url = 'https://api.example.com/export',
+    headers = 'Accept: text/csv
+Authorization: Bearer my-api-token'
+)
+```
+
+POST/PUT requests skip the HEAD probe entirely. `SAVE AS` defaults to AUTO as usual.
 
 **`SAVE AS` clause (all sources):** Controls how fetched data is stored. **Omit it in most cases** — the default (`AUTO`) works correctly for all common formats. Only add `SAVE AS` when you have a specific reason.
 

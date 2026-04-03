@@ -453,4 +453,29 @@ mod parsing_tests {
             _ => panic!("Expected CreateSource variant"),
         }
     }
+
+    #[test]
+    fn test_parse_dollar_quoted_arg_value() {
+        // Dollar-quoted body arg containing JSON with double quotes and single quotes
+        let input = r#"CREATE SOURCE USING http WITH (url = 'https://api.example.com/query', method = 'POST', body = $${"key": "it's a value"}$$)"#;
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.args.get("body").map(|s| s.as_str()), Some(r#"{"key": "it's a value"}"#));
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dollar_quoted_multiline_body() {
+        let input = "CREATE SOURCE USING http WITH (url = 'https://api.example.com/query', method = 'POST', body = $${\n  \"key\": \"value\"\n}$$)";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.args.get("body").map(|s| s.as_str()), Some("{\n  \"key\": \"value\"\n}"));
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
 }

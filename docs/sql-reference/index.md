@@ -4,6 +4,33 @@ Bundlebase extends standard SQL with custom commands for managing bundles. This 
 
 For standard SQL queries (`SELECT`, `INSERT`, etc.), see [Querying](../guide/querying.md).
 
+## String Literals
+
+Bundlebase supports three string literal forms:
+
+| Form | Example | Notes |
+|------|---------|-------|
+| Single-quoted | `'hello world'` | Standard SQL. Use `''` to escape a single quote inside: `'it''s fine'`. Supports `\n`, `\r`, `\t` escape sequences. |
+| Double-quoted | `"hello world"` | Same escape rules as single-quoted. Typically used for identifiers in standard SQL, but accepted as a string value here too. |
+| Dollar-quoted | `$$hello world$$` | PostgreSQL-style. Content is **raw** — no escaping needed. Ideal for multi-line strings, JSON, and any text containing single quotes. |
+
+Dollar-quoted strings are particularly useful when the value contains quotes or spans multiple lines:
+
+```sql
+-- Single quotes inside need no escaping
+COMMIT $$fixed the 'broken' connector$$
+
+-- Multi-line JSON body for an HTTP POST source
+CREATE SOURCE USING http WITH (
+    url = 'https://api.example.com/query',
+    method = 'POST',
+    body = $${
+        "filter": {"state": "MN", "type": "Lake"},
+        "format": "csv"
+    }$$
+)
+```
+
 ## Data Modification
 
 Commands that change bundle data content.

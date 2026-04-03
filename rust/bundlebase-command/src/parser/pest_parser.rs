@@ -65,9 +65,15 @@ pub fn quote_identifier(name: &str) -> String {
 
 /// Extract string content from a quoted string, handling escape sequences.
 ///
-/// Supports both single-quoted ('...') and double-quoted ("...") strings.
+/// Supports single-quoted ('...'), double-quoted ("..."), and dollar-quoted ($$...$$) strings.
+/// Dollar-quoted strings are returned as-is with no escape processing.
 pub fn extract_string_content(quoted: &str) -> Result<String, BundlebaseError> {
     let trimmed = quoted.trim();
+
+    if trimmed.starts_with("$$") && trimmed.ends_with("$$") && trimmed.len() >= 4 {
+        // Dollar-quoted: raw content, no escape processing
+        return Ok(trimmed[2..trimmed.len() - 2].to_string());
+    }
 
     // Remove surrounding quotes
     let content = if trimmed.starts_with('\'') && trimmed.ends_with('\'') {
@@ -107,8 +113,15 @@ pub fn parse_join_type(s: &str) -> Result<JoinTypeOption, BundlebaseError> {
 
 /// Escape a string value for use in a SQL statement.
 ///
-/// Returns a single-quoted string with special characters escaped.
+/// Uses dollar-quoting ($$...$$) when the string contains single quotes or literal newlines,
+/// since dollar-quoted strings need no escaping and preserve content exactly.
+/// Falls back to single-quoted with SQL escaping otherwise, or when the string contains `$$`.
 pub fn escape_string(s: &str) -> String {
+    // Use dollar-quoting when it's beneficial and safe (content doesn't contain $$)
+    if !s.contains("$$") && (s.contains('\'') || s.contains('\n') || s.contains('\r')) {
+        return format!("$${}$$", s);
+    }
+
     let escaped = s
         .replace('\'', "''")   // SQL-style: ' → ''
         .replace('\n', "\\n")
@@ -258,5 +271,78 @@ mod tests {
     fn test_split_multiple_statements() {
         let stmts = split_statements("ATTACH 'a.csv'; FILTER WHERE x > 1; COMMIT 'done'").unwrap();
         assert_eq!(stmts, vec!["ATTACH 'a.csv'", "FILTER WHERE x > 1", "COMMIT 'done'"]);
+    }
+
+    // --- Dollar-quoting tests ---
+
+    #[test]
+    fn test_extract_dollar_quoted_simple() {
+        assert_eq!(extract_string_content("$$hello$$").unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_extract_dollar_quoted_with_single_quotes() {
+        assert_eq!(extract_string_content("$$it's a test$$").unwrap(), "it's a test");
+    }
+
+    #[test]
+    fn test_extract_dollar_quoted_with_newlines() {
+        assert_eq!(extract_string_content("$$line1\nline2$$").unwrap(), "line1\nline2");
+    }
+
+    #[test]
+    fn test_extract_dollar_quoted_json() {
+        let json = r#"{"key": "value", "nested": {"a": 1}}"#;
+        let input = format!("$${}$$", json);
+        assert_eq!(extract_string_content(&input).unwrap(), json);
+    }
+
+    #[test]
+    fn test_extract_dollar_quoted_empty() {
+        assert_eq!(extract_string_content("$$$$").unwrap(), "");
+    }
+
+    #[test]
+    fn test_extract_dollar_quoted_no_escape_processing() {
+        // Dollar-quoted strings are raw — backslash sequences are NOT processed
+        assert_eq!(extract_string_content(r"$$hello\nworld$$").unwrap(), r"hello\nworld");
+    }
+
+    #[test]
+    fn test_escape_string_uses_dollar_quoting_for_single_quotes() {
+        let result = escape_string("it's here");
+        assert_eq!(result, "$$it's here$$");
+    }
+
+    #[test]
+    fn test_escape_string_uses_dollar_quoting_for_newlines() {
+        let result = escape_string("line1\nline2");
+        assert_eq!(result, "$$line1\nline2$$");
+    }
+
+    #[test]
+    fn test_escape_string_plain_uses_single_quotes() {
+        let result = escape_string("simple");
+        assert_eq!(result, "'simple'");
+    }
+
+    #[test]
+    fn test_escape_string_with_dollar_dollar_falls_back_to_single_quotes() {
+        // String contains $$ so we can't dollar-quote it
+        let result = escape_string("contains $$dollar$$ and 'quotes'");
+        assert_eq!(result, "'contains $$dollar$$ and ''quotes'''");
+    }
+
+    #[test]
+    fn test_split_semicolon_in_dollar_quoted() {
+        let stmts = split_statements("COMMIT $$msg; with semicolon$$; SHOW STATUS").unwrap();
+        assert_eq!(stmts, vec!["COMMIT $$msg; with semicolon$$", "SHOW STATUS"]);
+    }
+
+    #[test]
+    fn test_split_newline_in_dollar_quoted() {
+        let input = "COMMIT $$line1\nline2$$; SHOW STATUS";
+        let stmts = split_statements(input).unwrap();
+        assert_eq!(stmts, vec!["COMMIT $$line1\nline2$$", "SHOW STATUS"]);
     }
 }
