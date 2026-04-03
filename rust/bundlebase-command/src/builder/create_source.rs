@@ -224,7 +224,8 @@ impl BundleBuilderCommand for CreateSourceCommand {
         let actions = source.fetch(builder, SyncMode::Add).await?;
 
         // Process fetch actions
-        let mut added = 0usize;
+        let mut files_added = 0usize;
+        let mut rows_added: Option<usize> = Some(0); // None = at least one file had unknown row count
         for action in actions {
             match action {
                 FetchAction::Add(data) => {
@@ -246,8 +247,12 @@ impl BundleBuilderCommand for CreateSourceCommand {
                         builder,
                     )
                     .await?;
+                    files_added += 1;
+                    rows_added = match (rows_added, op.num_rows) {
+                        (Some(acc), Some(n)) => Some(acc + n),
+                        _ => None,
+                    };
                     builder.apply_operation(op.into()).await?;
-                    added += op.num_rows.unwrap_or(0);
                 }
                 FetchAction::Replace { .. } | FetchAction::Remove { .. } => {
                     // These shouldn't happen on initial source creation
@@ -255,13 +260,16 @@ impl BundleBuilderCommand for CreateSourceCommand {
             }
         }
 
-        if added == 0 {
+        if files_added == 0 {
             Ok(format!(
                 "Created source: {}. No data fetched — check that the URL is accessible and the connector args are correct.",
                 connector_name
             ))
         } else {
-            Ok(format!("Created source: {}. Fetched {} rows(s).", connector_name, added))
+            match rows_added {
+                Some(rows) => Ok(format!("Created source: {}. Fetched {} row(s).", connector_name, rows)),
+                None => Ok(format!("Created source: {}. Fetched {} file(s).", connector_name, files_added)),
+            }
         }
     }
 }
