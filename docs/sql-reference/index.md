@@ -1059,12 +1059,12 @@ See [Metadata](../guide/metadata.md) and [Configuration](../guide/configuration.
 
 ## Export
 
-### EXPORT
+### EXPORT DATA
 
 Exports query results to a file. The output format is determined by the file extension.
 
 ```sql
-EXPORT TO '<path>' <sql>
+EXPORT DATA TO '<path>' <sql>
 ```
 
 **Supported formats:**
@@ -1078,14 +1078,46 @@ EXPORT TO '<path>' <sql>
 
 ```sql
 -- Export all data to CSV
-EXPORT TO 'output.csv' SELECT * FROM bundle
+EXPORT DATA TO 'output.csv' SELECT * FROM bundle
 
 -- Export filtered results to JSON Lines
-EXPORT TO '/tmp/active_users.jsonl' SELECT * FROM bundle WHERE active = true
+EXPORT DATA TO '/tmp/active_users.jsonl' SELECT * FROM bundle WHERE active = true
 
 -- Export aggregated results
-EXPORT TO 'summary.csv' SELECT department, COUNT(*) as cnt, AVG(salary) as avg_sal FROM bundle GROUP BY department
+EXPORT DATA TO 'summary.csv' SELECT department, COUNT(*) as cnt, AVG(salary) as avg_sal FROM bundle GROUP BY department
 ```
+
+### EXPORT HOLLOW
+
+Creates a "hollow" bundle at the target path — containing source definitions,
+always-update/always-delete rules, column operations, and structure, but no
+attached data. Recipients can open the hollow bundle and run `FETCH` to pull
+the raw data themselves.
+
+```sql
+EXPORT HOLLOW TO '<path>'
+```
+
+The target path supports `.tar` files for a portable single-file bundle.
+
+**Examples:**
+
+```sql
+-- Export to a directory
+EXPORT HOLLOW TO 'path/to/hollow'
+
+-- Export to a tar file
+EXPORT HOLLOW TO 'path/to/hollow.tar'
+```
+
+**Behavior:**
+
+- Strips all data operations: `ATTACH`, `DETACH`, `REPLACE`, `DELETE`, `UPDATE`, `INDEX`
+- Preserves: `CREATE SOURCE`, `ALWAYS DELETE`, `ALWAYS UPDATE`, `RENAME COLUMN`,
+  `CAST COLUMN`, `ADD COLUMN`, `DROP COLUMN`, `FILTER`, `JOIN`, views
+- Fills the `EXPECTED SCHEMA` on each `CREATE SOURCE` from the last-seen fetched schema
+- The hollow bundle has no rows and no schema until `FETCH` is run
+- History is reset to a single "Hollow export" commit
 
 ## Help & Introspection
 

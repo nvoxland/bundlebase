@@ -1,10 +1,30 @@
 use crate::bundle::operation::Operation;
 use crate::data::ObjectId;
+use crate::object_id::ColumnId;
 use crate::source::validate_connector_args;
 use crate::{Bundle, BundlebaseError};
+use arrow::datatypes::DataType;
 use datafusion::error::DataFusionError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// A column declared in the expected schema for a source.
+///
+/// `ExpectedColumn` entries are stored on `CreateSourceOp.expected_schema` and serve two purposes:
+/// 1. Pre-reserve stable `ColumnId` values so that column operations (RENAME, CAST, etc.) can
+///    reference columns by ID before any data is fetched into the bundle.
+/// 2. Validate fetched data at `FETCH` time — warnings are emitted for missing, new, or
+///    type-changed columns.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpectedColumn {
+    /// Pre-reserved stable ID for this column. Used to match fetched columns by name.
+    pub id: ColumnId,
+    /// Column name (case-sensitive, must match fetched schema exactly).
+    pub name: String,
+    /// Expected Arrow data type.
+    pub data_type: DataType,
+}
 
 /// Operation that creates a data source for a pack.
 ///
@@ -15,7 +35,7 @@ use std::collections::HashMap;
 /// different arguments. For example, "remote_dir" requires:
 /// - "url": Directory URL to list (e.g., "s3://bucket/data/")
 /// - "patterns": Comma-separated glob patterns (e.g., "**/*.parquet,**/*.csv")
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSourceOp {
     /// Unique identifier for this source
@@ -37,6 +57,15 @@ pub struct CreateSourceOp {
     /// How to save fetched data (auto, copy, parquet, ref). None = auto.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub save_as: Option<String>,
+
+    /// Optional expected schema for this source.
+    ///
+    /// When present, column IDs are pre-registered in BundleSchema on `apply()` so that
+    /// column operations can reference them before any data is fetched. At fetch time,
+    /// the fetched schema is compared against this expected schema and warnings are emitted
+    /// for missing, new, or type-changed columns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_schema: Option<Vec<ExpectedColumn>>,
 }
 
 impl CreateSourceOp {
@@ -53,6 +82,7 @@ impl CreateSourceOp {
             connector,
             args,
             save_as,
+            expected_schema: None,
         }
     }
 }
@@ -61,6 +91,19 @@ impl Operation for CreateSourceOp {
     fn describe(&self) -> String {
         let url = self.args.get("url").map(|s| s.as_str()).unwrap_or("<no url>");
         format!("CREATE SOURCE {} at {} for pack {}", self.id, url, self.pack)
+    }
+
+    fn to_hollow(&self, context: &super::HollowContext) -> Option<super::AnyOperation> {
+        let expected = context.source_schemas.get(&self.id).cloned();
+        let filled = CreateSourceOp {
+            expected_schema: expected.map(|cols| {
+                cols.into_iter()
+                    .map(|(name, id, data_type)| ExpectedColumn { id, name, data_type })
+                    .collect()
+            }),
+            ..self.clone()
+        };
+        Some(super::AnyOperation::CreateSource(filled))
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -124,6 +167,7 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
             save_as: None,
+            expected_schema: None,
         };
 
         assert_eq!(
@@ -142,6 +186,7 @@ mod tests {
             connector: "custom_function".to_string(),
             args: HashMap::new(),
             save_as: None,
+            expected_schema: None,
         };
 
         assert_eq!(
@@ -208,6 +253,7 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
             save_as: None,
+            expected_schema: None,
         };
 
         let yaml = serde_yaml_ng::to_string(&op).unwrap();

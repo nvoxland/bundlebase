@@ -65,6 +65,18 @@ impl BundleSchema {
 
         for op in operations {
             match op {
+                AnyOperation::CreateSource(src) => {
+                    // Pre-register column IDs from expected_schema so column ops
+                    // (RENAME, CAST, etc.) can reference them before any data is fetched.
+                    if let Some(ref expected) = src.expected_schema {
+                        for col in expected {
+                            if !name_to_id.contains_key(&col.name) {
+                                name_to_id.insert(col.name.clone(), col.id);
+                                id_to_name.insert(col.id, col.name.clone());
+                            }
+                        }
+                    }
+                }
                 AnyOperation::AttachBlock(attach) => {
                     let block_entry = (attach.id, attach.version.clone());
                     all_blocks.push(block_entry.clone());
@@ -125,6 +137,17 @@ impl BundleSchema {
 
         for op in operations {
             match op {
+                AnyOperation::CreateSource(src) => {
+                    // Pre-register column IDs from expected_schema.
+                    if let Some(ref expected) = src.expected_schema {
+                        for col in expected {
+                            if !name_to_id.contains_key(&col.name) {
+                                name_to_id.insert(col.name.clone(), col.id);
+                                id_to_name.insert(col.id, col.name.clone());
+                            }
+                        }
+                    }
+                }
                 AnyOperation::AttachBlock(attach) => {
                     let block_entry = (attach.id, attach.version.clone());
                     all_blocks.push(block_entry.clone());

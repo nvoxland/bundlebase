@@ -59,6 +59,10 @@ impl DetachBlockOp {
 }
 
 impl Operation for DetachBlockOp {
+    fn to_hollow(&self, _context: &super::HollowContext) -> Option<super::AnyOperation> {
+        None
+    }
+
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Check that the block exists in some pack
         if !self.find_block_in_packs(bundle) {

@@ -37,7 +37,7 @@ pub use pack::JoinTypeOption;
 pub use facade::BundleFacade;
 pub use indexed_blocks::IndexedBlocks;
 pub use init::{InitCommit, INIT_FILENAME};
-pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation};
+pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation, HollowContext, ExpectedColumn};
 pub use source::Source;
 pub use crate::arrow_types::parse_arrow_type_name;
 pub use connector_entry::ConnectorEntry;

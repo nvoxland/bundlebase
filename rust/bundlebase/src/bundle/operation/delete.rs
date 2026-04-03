@@ -44,6 +44,10 @@ impl Operation for DeleteOp {
         format!("DELETE: {}", self.tombstone)
     }
 
+    fn to_hollow(&self, _context: &super::HollowContext) -> Option<super::AnyOperation> {
+        None
+    }
+
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Verify bundle has data to delete from
         let packs = bundle.packs();

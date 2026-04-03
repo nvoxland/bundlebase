@@ -128,6 +128,10 @@ impl ReplaceBlockOp {
 }
 
 impl Operation for ReplaceBlockOp {
+    fn to_hollow(&self, _context: &super::HollowContext) -> Option<super::AnyOperation> {
+        None
+    }
+
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Check that the block exists in some pack
         if self.find_block_in_packs(bundle).is_none() {

@@ -531,6 +531,7 @@ mod tests {
             connector: "http".to_string(),
             args: HashMap::new(),
             save_as: None,
+            expected_schema: None,
         });
 
         let remapped = remap_operation(&op, &pack_remap, &HashMap::new()).unwrap();

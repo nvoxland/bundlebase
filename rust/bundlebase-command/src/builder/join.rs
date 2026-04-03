@@ -144,7 +144,7 @@ impl BundleBuilderCommand for JoinCommand {
                 .detect(loc, &bundlebase_data::BlockId::generate(), builder)
                 .await?;
             let format = temp_reader.format();
-            let op = AttachBlockOp::setup(&join_pack_id, loc, format, None, None, builder).await?;
+            let op = AttachBlockOp::setup(&join_pack_id, loc, format, None, None, None, builder).await?;
             builder.apply_operation(op.into()).await?;
         }
 

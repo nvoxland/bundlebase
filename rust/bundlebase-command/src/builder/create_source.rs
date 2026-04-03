@@ -5,8 +5,11 @@ use crate::{CommandParsing, Rule};
 use crate::parser::extract_string_content;
 use bundlebase::bundle::operation::{AttachBlockOp, CreateSourceOp, SourceInfo};
 use bundlebase::source::{FetchAction, SyncMode};
+use bundlebase::{ExpectedColumn};
 use bundlebase_data::ObjectId;
 use bundlebase_common::BundlebaseError;
+use bundlebase_common::arrow_types::parse_arrow_type_name;
+use bundlebase_common::ColumnId;
 use std::collections::HashMap;
 use crate::BundleBuilderCommand;
 use bundlebase::BundleBuilder;
@@ -22,6 +25,8 @@ pub struct CreateSourceCommand {
     pub pack: Option<String>,
     /// How to save fetched data (auto, copy, parquet, ref). None = auto.
     pub save_as: Option<String>,
+    /// Optional expected schema: list of (column_name, type_name) pairs.
+    pub expected_schema: Option<Vec<(String, String)>>,
 }
 
 impl CreateSourceCommand {
@@ -36,6 +41,7 @@ impl CreateSourceCommand {
             args,
             pack,
             save_as: None,
+            expected_schema: None,
         }
     }
 }
@@ -51,6 +57,7 @@ impl CommandParsing for CreateSourceCommand {
         let mut has_dotted = false;
         let mut dotted_name = None;
         let mut save_as = None;
+        let mut expected_schema: Option<Vec<(String, String)>> = None;
 
         for inner_pair in pair.into_inner() {
             match inner_pair.as_rule() {
@@ -86,6 +93,18 @@ impl CommandParsing for CreateSourceCommand {
                 Rule::save_as_value => {
                     save_as = Some(inner_pair.as_str().to_lowercase());
                 }
+                Rule::expected_schema_clause => {
+                    let mut cols = Vec::new();
+                    for col_pair in inner_pair.into_inner() {
+                        if col_pair.as_rule() == Rule::expected_schema_column {
+                            let mut parts = col_pair.into_inner();
+                            if let (Some(name_part), Some(type_part)) = (parts.next(), parts.next()) {
+                                cols.push((extract_identifier(&name_part), type_part.as_str().to_string()));
+                            }
+                        }
+                    }
+                    expected_schema = Some(cols);
+                }
                 _ => {}
             }
         }
@@ -120,6 +139,7 @@ impl CommandParsing for CreateSourceCommand {
 
         let mut cmd = CreateSourceCommand::new(connector, args, pack);
         cmd.save_as = save_as;
+        cmd.expected_schema = expected_schema;
         Ok(cmd)
     }
 
@@ -136,8 +156,20 @@ impl CommandParsing for CreateSourceCommand {
             None => String::new(),
         };
 
+        let schema_part = match &self.expected_schema {
+            Some(cols) if !cols.is_empty() => {
+                let cols_str = cols
+                    .iter()
+                    .map(|(name, type_name)| format!("{} {}", quote_identifier(name), type_name.to_uppercase()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(" EXPECTED SCHEMA ({})", cols_str)
+            }
+            _ => String::new(),
+        };
+
         if self.args.is_empty() {
-            return format!("CREATE SOURCE{} USING {}{}", pack_part, self.connector, save_as_part);
+            return format!("CREATE SOURCE{} USING {}{}{}", pack_part, self.connector, save_as_part, schema_part);
         }
 
         let mut args_str: Vec<String> = self
@@ -148,8 +180,8 @@ impl CommandParsing for CreateSourceCommand {
         args_str.sort();
         let args_joined = args_str.join(", ");
         format!(
-            "CREATE SOURCE{} USING {} WITH ({}){}",
-            pack_part, self.connector, args_joined, save_as_part
+            "CREATE SOURCE{} USING {} WITH ({}){}{}",
+            pack_part, self.connector, args_joined, save_as_part, schema_part
         )
     }
 }
@@ -161,7 +193,25 @@ impl BundleBuilderCommand for CreateSourceCommand {
         let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
         let source_id = ObjectId::generate();
         let connector_name = self.connector.clone();
-        let op = CreateSourceOp::setup(source_id, pack_id, self.connector.clone(), self.args.clone(), self.save_as.clone());
+
+        // Convert expected_schema from (name, type_name) pairs to ExpectedColumn list
+        let expected_schema = self.expected_schema.as_ref()
+            .map(|cols| {
+                cols.iter()
+                    .map(|(name, type_name)| {
+                        parse_arrow_type_name(type_name)
+                            .map(|data_type| ExpectedColumn {
+                                id: ColumnId::generate(),
+                                name: name.clone(),
+                                data_type,
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
+
+        let mut op = CreateSourceOp::setup(source_id, pack_id, self.connector.clone(), self.args.clone(), self.save_as.clone());
+        op.expected_schema = expected_schema;
 
         builder.apply_operation(op.into()).await?;
 
@@ -174,6 +224,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
         let actions = source.fetch(builder, SyncMode::Add).await?;
 
         // Process fetch actions
+        let mut added = 0usize;
         for action in actions {
             match action {
                 FetchAction::Add(data) => {
@@ -191,10 +242,12 @@ impl BundleBuilderCommand for CreateSourceCommand {
                             location: data.source_location,
                             version: data.version,
                         }),
+                        None,
                         builder,
                     )
                     .await?;
                     builder.apply_operation(op.into()).await?;
+                    added += op.num_rows.unwrap_or(0);
                 }
                 FetchAction::Replace { .. } | FetchAction::Remove { .. } => {
                     // These shouldn't happen on initial source creation
@@ -202,7 +255,14 @@ impl BundleBuilderCommand for CreateSourceCommand {
             }
         }
 
-        Ok(format!("Created source: {}", connector_name))
+        if added == 0 {
+            Ok(format!(
+                "Created source: {}. No data fetched — check that the URL is accessible and the connector args are correct.",
+                connector_name
+            ))
+        } else {
+            Ok(format!("Created source: {}. Fetched {} rows(s).", connector_name, added))
+        }
     }
 }
 

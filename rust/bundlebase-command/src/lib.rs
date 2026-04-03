@@ -71,7 +71,7 @@ pub use builder::{
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
     RenameFunctionCommand, RenameJoinCommand, RenameViewCommand,
     ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand,
-    NormalizeColumnNamesCommand, UndoCommand, VerifyDataCommand,
+    NormalizeColumnNamesCommand, UndoCommand, VerifyDataCommand, ExportHollowCommand,
 };
 
 // Re-export verification result types
@@ -79,7 +79,7 @@ pub use builder::{FileVerificationResult, VerificationResults};
 
 // Re-export facade command structs
 pub use facade::DescribeDataCommand;
-pub use facade::ExportCommand;
+pub use facade::ExportDataCommand;
 pub use facade::TestConnectorCommand;
 pub use facade::DescribeConnectorCommand;
 pub use facade::DescribeFunctionCommand;
@@ -110,7 +110,7 @@ pub use builder_ext::BundleBuilderExt;
 #[derive(Debug, Clone)]
 pub enum FacadeCommand {
     /// Export query results to a file
-    Export(ExportCommand),
+    ExportData(ExportDataCommand),
     /// Describe a registered connector's metadata
     DescribeConnector(DescribeConnectorCommand),
     /// Describe a registered function's metadata
@@ -160,7 +160,7 @@ impl FacadeCommand {
         facade: &dyn BundleFacade,
     ) -> Result<Box<dyn CommandResponse>, BundlebaseError> {
         match self {
-            FacadeCommand::Export(cmd) => {
+            FacadeCommand::ExportData(cmd) => {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
@@ -278,7 +278,7 @@ impl FacadeCommand {
     /// Returns the Arrow schema for this command's output.
     pub fn output_schema(&self) -> SchemaRef {
         match self {
-            FacadeCommand::Export(_) => ExportCommand::output_schema(),
+            FacadeCommand::ExportData(_) => ExportDataCommand::output_schema(),
             FacadeCommand::DescribeConnector(_) => DescribeConnectorCommand::output_schema(),
             FacadeCommand::DescribeFunction(_) => DescribeFunctionCommand::output_schema(),
             FacadeCommand::ImportTempConnector(_) => ImportTempConnectorCommand::output_schema(),
@@ -312,7 +312,7 @@ impl FacadeCommand {
     /// Returns the expected output shape for display formatting.
     pub fn output_shape(&self) -> OutputShape {
         match self {
-            FacadeCommand::Export(_) => ExportCommand::output_shape(),
+            FacadeCommand::ExportData(_) => ExportDataCommand::output_shape(),
             FacadeCommand::DescribeConnector(_) => DescribeConnectorCommand::output_shape(),
             FacadeCommand::DescribeFunction(_) => DescribeFunctionCommand::output_shape(),
             FacadeCommand::ImportTempConnector(_) => ImportTempConnectorCommand::output_shape(),
@@ -351,7 +351,7 @@ impl BundleCommand {
     /// Returns `Err` with a descriptive error message if this is a mutating command.
     pub fn into_facade_command(self) -> Result<FacadeCommand, BundlebaseError> {
         match self {
-            BundleCommand::Export(cmd) => Ok(FacadeCommand::Export(cmd)),
+            BundleCommand::ExportData(cmd) => Ok(FacadeCommand::ExportData(cmd)),
             BundleCommand::DescribeConnector(cmd) => Ok(FacadeCommand::DescribeConnector(cmd)),
             BundleCommand::DescribeFunction(cmd) => Ok(FacadeCommand::DescribeFunction(cmd)),
             BundleCommand::ImportTempConnector(cmd) => Ok(FacadeCommand::ImportTempConnector(cmd)),
@@ -424,7 +424,8 @@ impl BundleCommand {
                     BundleCommand::FetchAll(_) => "FETCH ALL",
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
-                    BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_) => {
+                    BundleCommand::ExportHollow(_) => "EXPORT HOLLOW",
+                    BundleCommand::ExportData(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -438,7 +439,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::Export(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_))
+        matches!(self, BundleCommand::ExportData(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_))
     }
 }
 
@@ -776,6 +777,10 @@ register_commands! {
             "UNDO" => "UNDO",
         Commit(CommitCommand) => Rule::commit_stmt,
             "COMMIT" => "COMMIT '<message>'",
+
+        // Export commands
+        ExportHollow(ExportHollowCommand) => Rule::export_hollow_stmt,
+            "EXPORT HOLLOW" => "EXPORT HOLLOW TO '<path>'",
     }
     fetch_special {
         // These commands share Rule::fetch_stmt - handled in parser.rs
@@ -789,8 +794,8 @@ register_commands! {
             "VERIFY DATA" => "VERIFY DATA [UPDATE]",
     }
     facade {
-        Export(ExportCommand) => Rule::export_stmt,
-            "EXPORT" => "EXPORT TO '<path>' <sql>",
+        ExportData(ExportDataCommand) => Rule::export_data_stmt,
+            "EXPORT DATA" => "EXPORT DATA TO '<path>' <sql>",
         DescribeConnector(DescribeConnectorCommand) => Rule::describe_connector_stmt,
             "DESCRIBE CONNECTOR" => "DESCRIBE CONNECTOR <name>",
         DescribeFunction(DescribeFunctionCommand) => Rule::describe_function_stmt,

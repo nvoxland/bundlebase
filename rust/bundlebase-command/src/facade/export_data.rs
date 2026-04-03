@@ -1,6 +1,6 @@
-//! Export command implementation.
+//! Export Data command implementation.
 //!
-//! ExportCommand is a facade command that executes a SQL query and writes
+//! ExportDataCommand is a facade command that executes a SQL query and writes
 //! the results to a file in the format determined by the file extension.
 
 use crate::parser::extract_string_content;
@@ -19,12 +19,12 @@ use std::sync::Arc;
 /// - `.csv` - Comma-separated values
 /// - `.jsonl` - JSON Lines (one JSON object per line)
 #[derive(Debug, Clone)]
-pub struct ExportCommand {
+pub struct ExportDataCommand {
     pub path: String,
     pub sql: String,
 }
 
-impl ExportCommand {
+impl ExportDataCommand {
     pub fn output_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![Field::new(
             "message",
@@ -38,9 +38,9 @@ impl ExportCommand {
     }
 }
 
-impl CommandParsing for ExportCommand {
+impl CommandParsing for ExportDataCommand {
     fn rule() -> Rule {
-        Rule::export_stmt
+        Rule::export_data_stmt
     }
 
     fn from_statement(pair: pest::iterators::Pair<Rule>) -> Result<Self, BundlebaseError> {
@@ -52,25 +52,25 @@ impl CommandParsing for ExportCommand {
                 Rule::quoted_string => {
                     path = Some(extract_string_content(inner.as_str())?);
                 }
-                Rule::export_sql => {
+                Rule::export_data_sql => {
                     sql = Some(inner.as_str().trim().to_string());
                 }
                 _ => {}
             }
         }
 
-        let path = path.ok_or_else(|| BundlebaseError::from("EXPORT TO: missing file path"))?;
-        let sql = sql.ok_or_else(|| BundlebaseError::from("EXPORT TO: missing SQL query"))?;
+        let path = path.ok_or_else(|| BundlebaseError::from("EXPORT DATA TO: missing file path"))?;
+        let sql = sql.ok_or_else(|| BundlebaseError::from("EXPORT DATA TO: missing SQL query"))?;
 
-        Ok(ExportCommand { path, sql })
+        Ok(ExportDataCommand { path, sql })
     }
 
     fn to_statement(&self) -> String {
-        format!("EXPORT TO '{}' {}", self.path, self.sql)
+        format!("EXPORT DATA TO '{}' {}", self.path, self.sql)
     }
 }
 
-impl BundleFacadeCommand for ExportCommand {
+impl BundleFacadeCommand for ExportDataCommand {
     type Output = String;
 
     async fn execute(
@@ -105,76 +105,76 @@ mod parsing_tests {
     use crate::BundleCommand;
 
     #[test]
-    fn test_parse_export_basic() {
-        let cmd = parse_command("EXPORT TO 'output.csv' SELECT * FROM bundle")
-            .expect("Failed to parse EXPORT");
+    fn test_parse_export_data_basic() {
+        let cmd = parse_command("EXPORT DATA TO 'output.csv' SELECT * FROM bundle")
+            .expect("Failed to parse EXPORT DATA");
         match cmd {
-            BundleCommand::Export(ref c) => {
+            BundleCommand::ExportData(ref c) => {
                 assert_eq!(c.path, "output.csv");
                 assert_eq!(c.sql, "SELECT * FROM bundle");
             }
-            _ => panic!("Expected Export variant, got {:?}", cmd),
+            _ => panic!("Expected ExportData variant, got {:?}", cmd),
         }
     }
 
     #[test]
-    fn test_parse_export_with_where() {
+    fn test_parse_export_data_with_where() {
         let cmd = parse_command(
-            "EXPORT TO '/tmp/results.json' SELECT name, count FROM bundle WHERE active = true",
+            "EXPORT DATA TO '/tmp/results.json' SELECT name, count FROM bundle WHERE active = true",
         )
-        .expect("Failed to parse EXPORT");
+        .expect("Failed to parse EXPORT DATA");
         match cmd {
-            BundleCommand::Export(ref c) => {
+            BundleCommand::ExportData(ref c) => {
                 assert_eq!(c.path, "/tmp/results.json");
                 assert_eq!(
                     c.sql,
                     "SELECT name, count FROM bundle WHERE active = true"
                 );
             }
-            _ => panic!("Expected Export variant"),
+            _ => panic!("Expected ExportData variant"),
         }
     }
 
     #[test]
-    fn test_parse_export_case_insensitive() {
-        let cmd = parse_command("export to 'data.table' select * from bundle")
-            .expect("Failed to parse case-insensitive EXPORT");
+    fn test_parse_export_data_case_insensitive() {
+        let cmd = parse_command("export data to 'data.table' select * from bundle")
+            .expect("Failed to parse case-insensitive EXPORT DATA");
         match cmd {
-            BundleCommand::Export(ref c) => {
+            BundleCommand::ExportData(ref c) => {
                 assert_eq!(c.path, "data.table");
             }
-            _ => panic!("Expected Export variant"),
+            _ => panic!("Expected ExportData variant"),
         }
     }
 
     #[test]
-    fn test_parse_export_double_quoted_path() {
-        let cmd = parse_command("EXPORT TO \"output.csv\" SELECT * FROM bundle")
-            .expect("Failed to parse EXPORT with double quotes");
+    fn test_parse_export_data_double_quoted_path() {
+        let cmd = parse_command("EXPORT DATA TO \"output.csv\" SELECT * FROM bundle")
+            .expect("Failed to parse EXPORT DATA with double quotes");
         match cmd {
-            BundleCommand::Export(ref c) => {
+            BundleCommand::ExportData(ref c) => {
                 assert_eq!(c.path, "output.csv");
             }
-            _ => panic!("Expected Export variant"),
+            _ => panic!("Expected ExportData variant"),
         }
     }
 
     #[test]
     fn test_round_trip() {
-        let cmd = ExportCommand {
+        let cmd = ExportDataCommand {
             path: "output.csv".to_string(),
             sql: "SELECT * FROM bundle".to_string(),
         };
         let statement = cmd.to_statement();
-        assert_eq!(statement, "EXPORT TO 'output.csv' SELECT * FROM bundle");
+        assert_eq!(statement, "EXPORT DATA TO 'output.csv' SELECT * FROM bundle");
 
         let parsed = parse_command(&statement).expect("Failed to re-parse");
         match parsed {
-            BundleCommand::Export(ref c) => {
+            BundleCommand::ExportData(ref c) => {
                 assert_eq!(c.path, "output.csv");
                 assert_eq!(c.sql, "SELECT * FROM bundle");
             }
-            _ => panic!("Expected Export variant"),
+            _ => panic!("Expected ExportData variant"),
         }
     }
 }

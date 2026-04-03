@@ -231,6 +231,7 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
             save_as: None,
+            expected_schema: None,
         };
 
         let source = Source::from_op(&op, &registry).unwrap();
@@ -253,6 +254,7 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: args.clone(),
             save_as: None,
+            expected_schema: None,
         };
 
         // from_op succeeds, validation happens in check()
@@ -272,6 +274,7 @@ mod tests {
             connector: "unknown_function".to_string(),
             args: HashMap::new(),
             save_as: None,
+            expected_schema: None,
         };
 
         let result = Source::from_op(&op, &registry);

@@ -941,6 +941,10 @@ impl Operation for IndexBlocksOp {
         "INDEX BLOCKS".to_string()
     }
 
+    fn to_hollow(&self, _context: &super::HollowContext) -> Option<super::AnyOperation> {
+        None
+    }
+
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         // Verify all referenced blocks still exist in the bundle
         // This is a lightweight validation that doesn't require schema analysis

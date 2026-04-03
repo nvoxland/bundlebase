@@ -87,7 +87,7 @@ SYNTAX IMPORT FUNCTION  -- detailed syntax for IMPORT FUNCTION
 **Indexes**: CREATE INDEX, DROP INDEX, REBUILD INDEX, REINDEX
 **Version Control**: COMMIT, RESET, UNDO, VERIFY DATA, EXPLAIN
 **Metadata**: SET NAME, SET DESCRIPTION, SET CONFIG, SAVE CONFIG
-**Export**: EXPORT TO '<path>' <sql> (formats: .csv, .jsonl)
+**Export**: EXPORT DATA TO '<path>' <sql> (formats: .csv, .jsonl) | EXPORT HOLLOW TO '<path>' (structure only, no data)
 **Introspection**: SHOW (DETAILS, HISTORY, STATUS, VIEWS, INDEXES, PACKS, BLOCKS, CONFIG, CONNECTORS, FUNCTIONS), SYNTAX
 
 **Bundle references**: ATTACH and JOIN accept `bundle://` URLs to reference another bundle's query output:

@@ -70,6 +70,7 @@ impl AttachBlockOp {
     /// * `location` - Where data is stored (URL or path)
     /// * `hash` - Pre-computed SHA256 hash, or `None` to compute it from the file
     /// * `source_info` - Source tracking metadata, or `None` for directly-attached files
+    /// * `expected_schema` - Optional expected columns for pre-reserved ID reuse (from CreateSourceOp)
     /// * `builder` - Bundle builder
     pub async fn setup(
         pack: &ObjectId,
@@ -77,6 +78,7 @@ impl AttachBlockOp {
         format: AttachFormat,
         hash: Option<&str>,
         source_info: Option<SourceInfo>,
+        expected_schema: Option<&[crate::bundle::operation::create_source::ExpectedColumn]>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
         let progress = ProgressScope::new(
@@ -133,18 +135,33 @@ impl AttachBlockOp {
         };
 
         // Reuse existing ColumnIds for columns whose names match existing columns.
-        // This ensures the same logical column shares a ColumnId across blocks.
+        // Priority: pre-reserved IDs from expected_schema (by exact case-sensitive name),
+        // then existing IDs from the bundle schema, then generate new ones.
         let existing_ops = builder.operations();
         let resolved = bundle_schema::BundleSchema::resolved(&existing_ops);
-        let name_to_id: HashMap<String, ColumnId> = resolved
+        let name_to_existing_id: HashMap<String, ColumnId> = resolved
             .columns().iter()
             .map(|(id, name)| (name.clone(), *id))
             .collect();
 
+        // Build a lookup from expected_schema (case-sensitive name → pre-reserved ColumnId)
+        let name_to_expected_id: HashMap<&str, ColumnId> = expected_schema
+            .map(|cols| cols.iter().map(|c| (c.name.as_str(), c.id)).collect())
+            .unwrap_or_default();
+
         let column_ids = schema.as_ref()
             .map(|s| {
                 s.fields().iter().map(|f| {
-                    name_to_id.get(f.name()).copied().unwrap_or_else(ColumnId::generate)
+                    // Prefer pre-reserved ID from expected_schema (exact case-sensitive match)
+                    if let Some(&id) = name_to_expected_id.get(f.name().as_str()) {
+                        return id;
+                    }
+                    // Fall back to existing ID from bundle schema
+                    if let Some(&id) = name_to_existing_id.get(f.name()) {
+                        return id;
+                    }
+                    // Generate a new ID
+                    ColumnId::generate()
                 }).collect()
             })
             .unwrap_or_default();
@@ -190,6 +207,10 @@ impl AttachBlockOp {
 impl Operation for AttachBlockOp {
     fn describe(&self) -> String {
         format!("ATTACH: {}", self.location)
+    }
+
+    fn to_hollow(&self, _context: &super::HollowContext) -> Option<super::AnyOperation> {
+        None
     }
 
     async fn check(&self, _bundle: &Bundle) -> Result<(), BundlebaseError> {
@@ -293,7 +314,7 @@ mod tests {
         let datafile = test_datafile("userdata.parquet");
         let bundle = empty_bundle().await;
         let op =
-            AttachBlockOp::setup(&ObjectId::generate(), datafile, AttachFormat::Parquet, None, None, bundle.as_ref()).await?;
+            AttachBlockOp::setup(&ObjectId::generate(), datafile, AttachFormat::Parquet, None, None, None, bundle.as_ref()).await?;
         let block_id = String::from(op.id);
         let pack = String::from(op.pack);
         let version = ObjectStoreFile::from_url(

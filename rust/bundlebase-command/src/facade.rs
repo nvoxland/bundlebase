@@ -6,7 +6,7 @@
 // Facade command implementations
 mod describe_connector;
 mod describe_function;
-mod export;
+mod export_data;
 mod import_temp_connector;
 mod import_temp_function;
 mod explain;
@@ -25,7 +25,7 @@ pub use describe_data::DescribeDataCommand;
 pub use test_connector::TestConnectorCommand;
 pub use describe_connector::DescribeConnectorCommand;
 pub use describe_function::DescribeFunctionCommand;
-pub use export::ExportCommand;
+pub use export_data::ExportDataCommand;
 pub use import_temp_connector::ImportTempConnectorCommand;
 pub use import_temp_function::ImportTempFunctionCommand;
 pub use drop_temp_connector::DropTempConnectorCommand;

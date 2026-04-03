@@ -44,6 +44,7 @@ mod set_name;
 mod undo;
 mod update;
 mod verify_data;
+mod export_hollow;
 
 pub use add_column::AddColumnCommand;
 pub use always_delete::AlwaysDeleteCommand;
@@ -86,3 +87,4 @@ pub use set_name::SetNameCommand;
 pub use undo::UndoCommand;
 pub use update::{UpdateCommand, SetAssignment};
 pub use verify_data::{FileVerificationResult, VerificationResults, VerifyDataCommand};
+pub use export_hollow::ExportHollowCommand;

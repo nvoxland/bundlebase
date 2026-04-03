@@ -2,15 +2,17 @@
 
 use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::operation::{AttachBlockOp, DetachBlockOp, SourceInfo};
+use bundlebase::bundle::operation::{AnyOperation, AttachBlockOp, DetachBlockOp, SourceInfo};
+use bundlebase::ExpectedColumn;
 use bundlebase_data::ObjectId;
 use bundlebase_common::progress::ProgressScope;
 use bundlebase::source::{FetchAction, FetchResults, SyncMode};
 use bundlebase_common::BundlebaseError;
-use log::info;
+use log::{info, warn};
 use std::sync::Arc;
 use crate::BundleBuilderCommand;
 use bundlebase::{Bundle, BundleBuilder};
+use bundlebase::bundle::BundleFacade;
 
 /// Command to fetch from sources for a specific pack.
 #[derive(Debug, Clone)]
@@ -194,6 +196,16 @@ async fn fetch_from_source(
     mode: SyncMode,
 ) -> Result<FetchResults, BundlebaseError> {
     let source_id = *source.id();
+
+    // Look up expected_schema for this source from the CreateSourceOp in operations.
+    let ops = builder.operations();
+    let expected_schema: Option<Vec<ExpectedColumn>> = ops.iter()
+        .find_map(|op| match op {
+            AnyOperation::CreateSource(src) if src.id == source_id => {
+                src.expected_schema.clone()
+            }
+            _ => None,
+        });
     let connector = source.connector().to_string();
     let source_url = source.args().get("url").cloned().unwrap_or_default();
 
@@ -223,9 +235,11 @@ async fn fetch_from_source(
                         location: data.source_location.clone(),
                         version: data.version.clone(),
                     }),
+                    expected_schema.as_deref(),
                     builder,
                 )
                 .await?;
+                validate_schema_against_expected(&op, expected_schema.as_deref(), &data.attach_location);
                 builder.apply_operation(op.into()).await?;
                 info!("Fetched {} to {}", data.attach_location, pack_name);
             }
@@ -255,9 +269,11 @@ async fn fetch_from_source(
                         location: data.source_location.clone(),
                         version: data.version.clone(),
                     }),
+                    expected_schema.as_deref(),
                     builder,
                 )
                 .await?;
+                validate_schema_against_expected(&op, expected_schema.as_deref(), &data.attach_location);
                 builder.apply_operation(op.into()).await?;
                 info!("Replaced {} in {}", data.attach_location, pack_name);
             }
@@ -322,6 +338,62 @@ fn find_block_location_by_source(
             )
             .into()
         })
+}
+
+/// Validate a fetched block's schema against the source's expected schema.
+///
+/// Emits warnings for missing/type-changed columns, and info for new columns.
+/// Non-blocking — fetch proceeds regardless.
+fn validate_schema_against_expected(
+    op: &AttachBlockOp,
+    expected_schema: Option<&[ExpectedColumn]>,
+    location: &str,
+) {
+    let expected = match expected_schema {
+        Some(e) if !e.is_empty() => e,
+        _ => return,
+    };
+    let fetched_schema = match &op.schema {
+        Some(s) => s,
+        None => return,
+    };
+
+    // Build map of fetched column name → data type
+    let fetched: std::collections::HashMap<&str, &arrow::datatypes::DataType> = fetched_schema
+        .fields()
+        .iter()
+        .map(|f| (f.name().as_str(), f.data_type()))
+        .collect();
+
+    for col in expected {
+        match fetched.get(col.name.as_str()) {
+            None => {
+                warn!(
+                    "Expected column '{}' ({:?}) not found in fetched data at '{}'",
+                    col.name, col.data_type, location
+                );
+            }
+            Some(&fetched_type) if fetched_type != &col.data_type => {
+                warn!(
+                    "Column '{}' type changed from {:?} to {:?} in fetched data at '{}'",
+                    col.name, col.data_type, fetched_type, location
+                );
+            }
+            _ => {}
+        }
+    }
+
+    // New columns (in fetched but not in expected)
+    let expected_names: std::collections::HashSet<&str> =
+        expected.iter().map(|c| c.name.as_str()).collect();
+    for field in fetched_schema.fields() {
+        if !expected_names.contains(field.name().as_str()) {
+            info!(
+                "New column '{}' ({:?}) found in fetched data at '{}'",
+                field.name(), field.data_type(), location
+            );
+        }
+    }
 }
 
 #[cfg(test)]

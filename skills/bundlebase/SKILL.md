@@ -455,14 +455,15 @@ This is not an issue in MCP mode — another reason to prefer MCP for complex qu
 
 ## Common Mistakes to Avoid
 
-| Don't do this | Why | Do this instead |
-|---------------|-----|-----------------|
-| `curl`/`wget` to download data | No versioning, caching, or error handling | `CREATE SOURCE USING http WITH (url = '...')` |
-| `pip install pandas` to read CSV | Extra dependency; no history tracking | `bundlebase query` for exploration |
-| Materialize huge datasets in memory | Crashes on large data | Use `to_pandas()` / `to_polars()` which stream internally |
-| Skip commits during exploration | Lost history, can't undo mistakes | Commit at every meaningful step |
-| Create a bundle without SET NAME / SET DESCRIPTION | Bundles are hard to identify later | Always set both when creating a bundle |
-| Download data then ATTACH separately | Two steps when one will do | `CREATE SOURCE USING http; FETCH base ADD` in one call |
+| Don't do this                                      | Why                                                                                                                             | Do this instead                                           |
+|----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------|
+| `curl`/`wget` to download data                     | No versioning, caching, or error handling                                                                                       | `CREATE SOURCE USING http WITH (url = '...')`             |
+| `pip install pandas` to read CSV                   | Extra dependency; no history tracking                                                                                           | `bundlebase query` for exploration                        |
+| Materialize huge datasets in memory                | Crashes on large data                                                                                                           | Use `to_pandas()` / `to_polars()` which stream internally |
+| Skip commits during exploration                    | Lost history, can't undo mistakes                                                                                               | Commit at every meaningful step                           |
+| Create a bundle without SET NAME / SET DESCRIPTION | Bundles are hard to identify later                                                                                              | Always set both when creating a bundle                    |
+| Run FETCH after CREATE SOURCE for initial load     | CREATE SOURCE auto-fetches on creation — no separate FETCH needed for the first load                                            | Use FETCH later only to pick up new/changed data          |
+| Download data then ATTACH separately               | Directly downloading loses the history of where the data came from. Only use ATTACH for data that already existed on the system | `CREATE SOURCE USING http WITH (url = ...)                |
 
 ## Bundle References (`bundle://`)
 
@@ -852,7 +853,7 @@ bundlebase generate-report --input report.md --output report.pdf --bundle sales=
 
 ## Fetching External Data with Connectors
 
-Bundlebase has built-in connectors for common data sources. The pattern is: CREATE SOURCE → FETCH → query/transform.
+Bundlebase has built-in connectors for common data sources. The pattern is: CREATE SOURCE (auto-fetches on creation) → query/transform. You only FETCH again later to pick up new data.
 
 **Do NOT use curl, wget, or requests to download data files.** Use bundlebase connectors instead — they handle downloading, format detection, versioning, and caching automatically.
 
@@ -1083,22 +1084,36 @@ For async contexts (e.g., web servers), use `import bundlebase` with `await`. Se
 
 ## Exporting Data
 
-Use `EXPORT TO` to save query results directly to a file. This is more efficient than piping query output through stdout, especially for large result sets — use it instead of `SELECT` when you need the data in a file.
+Use `EXPORT DATA TO` to save query results directly to a file. This is more efficient than piping query output through stdout, especially for large result sets — use it instead of `SELECT` when you need the data in a file.
 
 ```bash
 # Export to CSV
-bundlebase query --bundle ./analysis "EXPORT TO 'output.csv' SELECT * FROM bundle"
+bundlebase query --bundle ./analysis "EXPORT DATA TO 'output.csv' SELECT * FROM bundle"
 
 # Export filtered results to JSON Lines
-bundlebase query --bundle ./analysis "EXPORT TO 'active_users.jsonl' SELECT * FROM bundle WHERE active = true"
+bundlebase query --bundle ./analysis "EXPORT DATA TO 'active_users.jsonl' SELECT * FROM bundle WHERE active = true"
 
 # Export aggregated results
-bundlebase query --bundle ./analysis "EXPORT TO 'summary.csv' SELECT department, COUNT(*) as cnt, AVG(salary) as avg_sal FROM bundle GROUP BY department"
+bundlebase query --bundle ./analysis "EXPORT DATA TO 'summary.csv' SELECT department, COUNT(*) as cnt, AVG(salary) as avg_sal FROM bundle GROUP BY department"
 ```
 
 **Supported formats:** `.csv`, `.jsonl` (JSON Lines — one JSON object per line)
 
-**Tip:** For data exploration where you need to see results, use `SELECT` with `--format json`. For saving data to a file for further processing, prefer `EXPORT TO` — it streams directly to the file without row limits.
+**Tip:** For data exploration where you need to see results, use `SELECT` with `--format json`. For saving data to a file for further processing, prefer `EXPORT DATA TO` — it streams directly to the file without row limits.
+
+## Exporting Hollow Bundles
+
+Use `EXPORT HOLLOW TO` to share a bundle's structure without its data. Recipients can open the hollow bundle and run `FETCH` to pull the raw data themselves.
+
+```bash
+# Export hollow bundle (no data, just sources and transformations)
+bundlebase build --bundle ./analysis "EXPORT HOLLOW TO './shared/hollow'"
+
+# Export as a portable tar file
+bundlebase build --bundle ./analysis "EXPORT HOLLOW TO './shared/hollow.tar'"
+```
+
+A hollow bundle contains sources, always-update/always-delete rules, column renames/casts, joins, and views — but no attached data files. The `EXPECTED SCHEMA` is preserved so column operations resolve correctly before any data is fetched.
 
 ### Sharing Bundles
 

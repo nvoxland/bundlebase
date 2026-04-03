@@ -70,13 +70,29 @@ pub use crate::bundle::operation::set_description::SetDescriptionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
 pub use crate::bundle::operation::update_version::UpdateVersionOp;
 use crate::bundle::bundle_schema::BundleSchema;
+use crate::data::ObjectId;
 use crate::{versioning, Bundle, BundlebaseError};
 use datafusion::error::DataFusionError;
 use datafusion::prelude::{DataFrame, SessionContext};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use uuid::Uuid;
+use arrow::datatypes::DataType;
+use crate::object_id::ColumnId;
+
+pub use crate::bundle::operation::create_source::ExpectedColumn;
+
+/// Context for hollow export — maps source ObjectId → columns seen in fetched data.
+///
+/// Built by walking all `AttachBlock` operations in history, then passed into
+/// `to_hollow()` on each operation so each op can decide what to do.
+pub struct HollowContext {
+    /// Maps source ObjectId → Vec<(column_name, ColumnId, DataType)>
+    /// Built from AttachBlock history. Most recent schema seen per source wins.
+    pub source_schemas: HashMap<ObjectId, Vec<(String, ColumnId, DataType)>>,
+}
 
 /// A logical change a user made. It contains one or more operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,7 +120,7 @@ impl Display for BundleChange {
 }
 
 /// Trait for all operations
-pub trait Operation: Send + Sync + Clone + Serialize + Debug {
+pub trait Operation: Send + Sync + Clone + Serialize + Debug + Into<AnyOperation> {
     /// Get a human-readable description of this operation
     fn describe(&self) -> String;
 
@@ -140,6 +156,14 @@ pub trait Operation: Send + Sync + Clone + Serialize + Debug {
     /// Override to return false for operations that should not be allowed on views.
     fn allowed_on_view(&self) -> bool {
         true
+    }
+
+    /// Returns the hollow version of this operation, or None if it should be excluded.
+    ///
+    /// Used by `EXPORT HOLLOW TO` to strip data-containing operations while preserving structure.
+    /// Default: include as-is. Override to return `None` (exclude) or a modified copy.
+    fn to_hollow(&self, _context: &HollowContext) -> Option<AnyOperation> {
+        Some(self.clone().into())
     }
 }
 
@@ -204,6 +228,12 @@ macro_rules! define_any_operation {
                     $( AnyOperation::$variant(op) => op.allowed_on_view(), )*
                 }
             }
+
+            fn to_hollow(&self, context: &HollowContext) -> Option<AnyOperation> {
+                match self {
+                    $( AnyOperation::$variant(op) => op.to_hollow(context), )*
+                }
+            }
         }
 
         // Generate From impls for each operation type
@@ -255,6 +285,7 @@ define_any_operation! {
     SetName(SetNameOp),
     UpdateVersion(UpdateVersionOp),
 }
+
 
 impl Display for AnyOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

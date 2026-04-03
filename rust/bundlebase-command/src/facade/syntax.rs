@@ -170,6 +170,8 @@ fn usage_for_command(command_name: &str) -> Option<&'static str> {
         "UPDATE" => Some(include_str!("../syntax/update.md")),
         "DESCRIBE CONNECTOR" => Some(include_str!("../syntax/describe_connector.md")),
         "TEST CONNECTOR" => Some(include_str!("../syntax/test_connector.md")),
+        "EXPORT DATA" => Some(include_str!("../syntax/export_data.md")),
+        "EXPORT HOLLOW" => Some(include_str!("../syntax/export_hollow.md")),
         "DESCRIBE DATA" => Some(include_str!("../syntax/describe_data.md")),
         "DESCRIBE FUNCTION" => Some(include_str!("../syntax/describe_function.md")),
         "SHOW" => Some(include_str!("../syntax/show.md")),

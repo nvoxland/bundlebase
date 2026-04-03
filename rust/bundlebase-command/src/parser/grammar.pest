@@ -108,7 +108,8 @@ transaction_stmt = {
 
 // Metadata statements - operations for bundle metadata
 metadata_stmt = {
-    export_stmt
+    export_data_stmt
+    | export_hollow_stmt
     | show_details_stmt
     | show_history_stmt
     | show_status_stmt
@@ -166,20 +167,32 @@ syntax_query = @{
 }
 
 // ============================================================================
-// EXPORT Statement
+// EXPORT DATA Statement
 // ============================================================================
-// Syntax: EXPORT TO '<path>' <sql>
+// Syntax: EXPORT DATA TO '<path>' <sql>
 // Examples:
-//   EXPORT TO 'output.csv' SELECT * FROM bundle
-//   EXPORT TO '/tmp/results.json' SELECT name, count FROM bundle WHERE active = true
-//   EXPORT TO 'data.table' SELECT * FROM bundle LIMIT 100
+//   EXPORT DATA TO 'output.csv' SELECT * FROM bundle
+//   EXPORT DATA TO '/tmp/results.json' SELECT name, count FROM bundle WHERE active = true
+//   EXPORT DATA TO 'data.table' SELECT * FROM bundle LIMIT 100
 
-export_stmt = {
-    ^"export" ~ ^"to" ~ quoted_string ~ export_sql
+export_data_stmt = {
+    ^"export" ~ ^"data" ~ ^"to" ~ quoted_string ~ export_data_sql
 }
 
-export_sql = @{
+export_data_sql = @{
     (!EOI ~ ANY)+
+}
+
+// ============================================================================
+// EXPORT HOLLOW Statement
+// ============================================================================
+// Syntax: EXPORT HOLLOW TO '<path>'
+// Examples:
+//   EXPORT HOLLOW TO 'path/hollow'
+//   EXPORT HOLLOW TO 'path/hollow.tar'
+
+export_hollow_stmt = {
+    ^"export" ~ ^"hollow" ~ ^"to" ~ quoted_string
 }
 
 // ============================================================================
@@ -531,7 +544,7 @@ rename_temp_function_stmt = {
 //   CREATE SOURCE USING acme.weather
 
 create_source_stmt = {
-    ^"create" ~ ^"source" ~ (^"for" ~ identifier)? ~ ^"using" ~ (dotted_identifier | identifier) ~ (^"with" ~ source_args)? ~ (^"save" ~ ^"as" ~ save_as_value)?
+    ^"create" ~ ^"source" ~ (^"for" ~ identifier)? ~ ^"using" ~ (dotted_identifier | identifier) ~ (^"with" ~ source_args)? ~ (^"save" ~ ^"as" ~ save_as_value)? ~ expected_schema_clause?
 }
 
 save_as_value = @{ ^"auto" | ^"copy" | ^"parquet" | ^"ref" }
@@ -542,6 +555,14 @@ source_args = {
 
 source_arg_pair = {
     identifier ~ "=" ~ quoted_string
+}
+
+expected_schema_clause = {
+    ^"expected" ~ ^"schema" ~ "(" ~ expected_schema_column ~ ("," ~ expected_schema_column)* ~ ")"
+}
+
+expected_schema_column = {
+    identifier ~ identifier
 }
 
 // ============================================================================
@@ -879,7 +900,7 @@ explain_sql = @{
 // Example: DESCRIBE CONNECTOR acme.weather
 
 describe_connector_stmt = {
-    ^"describe" ~ ^"connector" ~ dotted_identifier
+    ^"describe" ~ ^"connector" ~ (dotted_identifier | identifier)
 }
 
 // ============================================================================

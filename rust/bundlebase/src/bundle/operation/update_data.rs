@@ -43,6 +43,10 @@ impl Operation for UpdateDataOp {
         format!("UPDATE DATA: {}", self.overlay)
     }
 
+    fn to_hollow(&self, _context: &super::HollowContext) -> Option<super::AnyOperation> {
+        None
+    }
+
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
         let packs = bundle.packs();
         let has_data = packs
