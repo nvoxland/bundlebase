@@ -1,6 +1,6 @@
 Create a data source for automatic file discovery. Sources define where to find data files using a connector and its arguments. Use FOR to target a specific join pack (defaults to base).
 
-The optional `SAVE AS` clause controls how fetched data is stored: `AUTO` (default) references attachable formats by URL when possible, copies when required, converts others to Parquet; `COPY` downloads into the bundle; `PARQUET` converts to Parquet; `REF` references the URL directly.
+The optional `SAVE AS` clause controls how fetched data is stored: `AUTO` (default) always converts to Parquet and stores in the bundle; `COPY` downloads into the bundle; `PARQUET` converts to Parquet; `REF` references the URL directly.
 
 ### Syntax
 

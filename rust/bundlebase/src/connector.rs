@@ -443,17 +443,9 @@ mod tests {
     }
 
     #[test]
-    fn test_save_as_resolve_auto_attachable_must_copy_copies() {
-        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Csv, true).expect("ok"), ResolvedSaveAs::Copy);
-    }
-
-    #[test]
-    fn test_save_as_resolve_auto_attachable_no_must_copy_refs() {
-        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Csv, false).expect("ok"), ResolvedSaveAs::Ref);
-    }
-
-    #[test]
-    fn test_save_as_resolve_auto_non_attachable_converts() {
+    fn test_save_as_resolve_auto_always_parquet() {
+        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Csv, true).expect("ok"), ResolvedSaveAs::Parquet);
+        assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Csv, false).expect("ok"), ResolvedSaveAs::Parquet);
         assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Xlsx, false).expect("ok"), ResolvedSaveAs::Parquet);
         assert_eq!(SaveAs::Auto.resolve(&SourceFormat::Ods, true).expect("ok"), ResolvedSaveAs::Parquet);
     }

@@ -18,10 +18,7 @@ pub enum SaveAs {
     /// Reference the remote URL directly — no download. Only valid for attachable
     /// formats and connectors that don't require copying (must_copy=false).
     Ref,
-    /// Resolve automatically based on format and must_copy:
-    /// - Attachable format + must_copy=false → Ref
-    /// - Attachable format + must_copy=true → Copy
-    /// - Non-attachable format → Parquet
+    /// Always convert to Parquet and store in the bundle.
     Auto,
 }
 
@@ -77,16 +74,7 @@ impl SaveAs {
                 }
                 Ok(ResolvedSaveAs::Ref)
             }
-            SaveAs::Auto => {
-                let is_attachable = matches!(format, SourceFormat::Csv | SourceFormat::Tsv | SourceFormat::JsonL | SourceFormat::Parquet);
-                if !is_attachable {
-                    Ok(ResolvedSaveAs::Parquet)
-                } else if must_copy {
-                    Ok(ResolvedSaveAs::Copy)
-                } else {
-                    Ok(ResolvedSaveAs::Ref)
-                }
-            }
+            SaveAs::Auto => Ok(ResolvedSaveAs::Parquet),
         }
     }
 }
