@@ -6,6 +6,7 @@ use crate::parser::extract_string_content;
 use bundlebase::bundle::operation::{AttachBlockOp, CreateSourceOp, SourceInfo};
 use bundlebase::source::{FetchAction, SyncMode};
 use bundlebase::{ExpectedColumn};
+use bundlebase_data::attach_format::AttachFormat;
 use bundlebase_data::ObjectId;
 use bundlebase_common::BundlebaseError;
 use bundlebase_common::arrow_types::parse_arrow_type_name;
@@ -223,21 +224,31 @@ impl BundleBuilderCommand for CreateSourceCommand {
 
         let actions = source.fetch(builder, SyncMode::Add).await?;
 
+        // Extract json_* args as reader-level read options (connector validation already skips them).
+        let json_read_options = super::extract_json_opts(&self.args);
+
         // Process fetch actions
         let mut files_added = 0usize;
         let mut rows_added: Option<usize> = Some(0); // None = at least one file had unknown row count
         for action in actions {
             match action {
                 FetchAction::Add(data) => {
-                    let temp_reader = builder.bundle().reader_factory
-                        .detect(&data.attach_location, &bundlebase_data::BlockId::generate(), builder)
-                        .await?;
-                    let format = temp_reader.format();
+                    let (final_location, format, hash) = if let Some(ref opts) = json_read_options {
+                        let (parquet_location, parquet_hash) = builder
+                            .convert_json_attachment_to_parquet(&data.attach_location, opts)
+                            .await?;
+                        (parquet_location, AttachFormat::Parquet, Some(parquet_hash))
+                    } else {
+                        let temp_reader = builder.bundle().reader_factory
+                            .detect(&data.attach_location, &bundlebase_data::BlockId::generate(), builder)
+                            .await?;
+                        (data.attach_location.clone(), temp_reader.format(), data.hash.clone())
+                    };
                     let op = AttachBlockOp::setup(
                         &pack_id,
-                        &data.attach_location,
+                        &final_location,
                         format,
-                        data.hash.as_deref(),
+                        hash.as_deref(),
                         Some(SourceInfo {
                             id: source_id,
                             location: data.source_location,

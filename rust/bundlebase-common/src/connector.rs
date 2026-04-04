@@ -348,10 +348,11 @@ pub fn validate_connector_args(
 
     // Check for unknown arguments (skip if the source accepts extra args).
     // Keys prefixed with "_" are reserved system keys and always allowed.
+    // Keys prefixed with "json_" are reader-level options handled by the data pipeline, not connectors.
     if !sig.accepts_extra_args {
         let valid_names: HashSet<&str> = specs.iter().map(|s| s.name).collect();
         for key in args.keys() {
-            if !key.starts_with('_') && !valid_names.contains(key.as_str()) {
+            if !key.starts_with('_') && !key.starts_with("json_") && !valid_names.contains(key.as_str()) {
                 let valid_args = format_arg_list(specs);
                 return Err(format!(
                     "Function '{}' does not accept argument '{}'. Valid arguments: {}",

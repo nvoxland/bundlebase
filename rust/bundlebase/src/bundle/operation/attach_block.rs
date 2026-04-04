@@ -67,7 +67,7 @@ impl AttachBlockOp {
     ///
     /// # Arguments
     /// * `pack` - Pack to attach the block to
-    /// * `location` - Where data is stored (URL or path)
+    /// * `location` - Where data is stored (URL or path); must be an attachable format (CSV, TSV, JSONL, Parquet)
     /// * `hash` - Pre-computed SHA256 hash, or `None` to compute it from the file
     /// * `source_info` - Source tracking metadata, or `None` for directly-attached files
     /// * `expected_schema` - Optional expected columns for pre-reserved ID reuse (from CreateSourceOp)
@@ -126,12 +126,9 @@ impl AttachBlockOp {
         progress.update(4, Some("Reading schema"));
         let schema = adapter.read_schema().await?;
 
-        // Capture any format-specific options detected during schema inference
-        let detected_options = adapter.read_options();
-        let read_options = if detected_options.is_empty() {
-            None
-        } else {
-            Some(detected_options)
+        let read_options = {
+            let opts = adapter.read_options();
+            if opts.is_empty() { None } else { Some(opts) }
         };
 
         // Reuse existing ColumnIds for columns whose names match existing columns.

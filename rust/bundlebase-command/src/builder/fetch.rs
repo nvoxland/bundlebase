@@ -4,11 +4,14 @@ use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
 use bundlebase::bundle::operation::{AnyOperation, AttachBlockOp, DetachBlockOp, SourceInfo};
 use bundlebase::ExpectedColumn;
+use bundlebase_data::attach_format::AttachFormat;
 use bundlebase_data::ObjectId;
+use bundlebase_data::BlockId;
 use bundlebase_common::progress::ProgressScope;
 use bundlebase::source::{FetchAction, FetchResults, SyncMode};
 use bundlebase_common::BundlebaseError;
 use log::{info, warn};
+use std::collections::HashMap;
 use std::sync::Arc;
 use crate::BundleBuilderCommand;
 use bundlebase::{Bundle, BundleBuilder};
@@ -197,15 +200,16 @@ async fn fetch_from_source(
 ) -> Result<FetchResults, BundlebaseError> {
     let source_id = *source.id();
 
-    // Look up expected_schema for this source from the CreateSourceOp in operations.
+    // Look up expected_schema and json_* read options from the CreateSourceOp in operations.
     let ops = builder.operations();
-    let expected_schema: Option<Vec<ExpectedColumn>> = ops.iter()
+    let (expected_schema, json_read_options) = ops.iter()
         .find_map(|op| match op {
             AnyOperation::CreateSource(src) if src.id == source_id => {
-                src.expected_schema.clone()
+                Some((src.expected_schema.clone(), super::extract_json_opts(&src.args)))
             }
             _ => None,
-        });
+        })
+        .unwrap_or((None, None));
     let connector = source.connector().to_string();
     let source_url = source.args().get("url").cloned().unwrap_or_default();
 
@@ -223,15 +227,14 @@ async fn fetch_from_source(
     for (idx, action) in actions.into_iter().enumerate() {
         match &action {
             FetchAction::Add(data) => {
-                let temp_reader = builder.bundle().reader_factory
-                    .detect(&data.attach_location, &bundlebase_data::BlockId::generate(), builder)
-                    .await?;
-                let format = temp_reader.format();
+                let (final_location, format, hash) = resolve_attach_location(
+                    builder, &data.attach_location, data.hash.clone(), json_read_options.as_ref(),
+                ).await?;
                 let op = AttachBlockOp::setup(
                     pack_id,
-                    &data.attach_location,
+                    &final_location,
                     format,
-                    data.hash.as_deref(),
+                    hash.as_deref(),
                     Some(SourceInfo {
                         id: source_id,
                         location: data.source_location.clone(),
@@ -256,16 +259,14 @@ async fn fetch_from_source(
                 let detach_op = DetachBlockOp::setup(&old_location, builder).await?;
                 builder.apply_operation(detach_op.into()).await?;
 
-                // Attach the new block
-                let temp_reader = builder.bundle().reader_factory
-                    .detect(&data.attach_location, &bundlebase_data::BlockId::generate(), builder)
-                    .await?;
-                let format = temp_reader.format();
+                let (final_location, format, hash) = resolve_attach_location(
+                    builder, &data.attach_location, data.hash.clone(), json_read_options.as_ref(),
+                ).await?;
                 let op = AttachBlockOp::setup(
                     pack_id,
-                    &data.attach_location,
+                    &final_location,
                     format,
-                    data.hash.as_deref(),
+                    hash.as_deref(),
                     Some(SourceInfo {
                         id: source_id,
                         location: data.source_location.clone(),
@@ -303,6 +304,32 @@ async fn fetch_from_source(
     results.rows_before = rows_before;
     results.rows_after = rows_after;
     Ok(results)
+}
+
+/// Resolve the final attach location and format for a fetched file.
+///
+/// If `json_opts` is present, converts the JSON file to Parquet in the data dir and
+/// returns the Parquet path. Otherwise detects the format from the file directly.
+/// Returns `(location, format, hash)`.
+async fn resolve_attach_location(
+    builder: &BundleBuilder,
+    location: &str,
+    original_hash: Option<String>,
+    json_opts: Option<&HashMap<String, String>>,
+) -> Result<(String, AttachFormat, Option<String>), BundlebaseError> {
+    if let Some(opts) = json_opts {
+        let (parquet_location, parquet_hash) = builder
+            .convert_json_attachment_to_parquet(location, opts)
+            .await?;
+        Ok((parquet_location, AttachFormat::Parquet, Some(parquet_hash)))
+    } else {
+        let temp_reader = builder
+            .bundle()
+            .reader_factory
+            .detect(location, &BlockId::generate(), builder)
+            .await?;
+        Ok((location.to_string(), temp_reader.format(), original_hash))
+    }
 }
 
 /// Find the current location of a block that was attached from a source.

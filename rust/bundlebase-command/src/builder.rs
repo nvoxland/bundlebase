@@ -88,3 +88,18 @@ pub use undo::UndoCommand;
 pub use update::{UpdateCommand, SetAssignment};
 pub use verify_data::{FileVerificationResult, VerificationResults, VerifyDataCommand};
 pub use export_hollow::ExportHollowCommand;
+
+/// Extract `json_*`-prefixed entries from a connector args map as reader-level options.
+///
+/// Returns `None` when no `json_*` keys are present so callers can treat the
+/// absence of JSON options as the common case without an allocation.
+pub(crate) fn extract_json_opts(
+    args: &std::collections::HashMap<String, String>,
+) -> Option<std::collections::HashMap<String, String>> {
+    let opts: std::collections::HashMap<_, _> = args
+        .iter()
+        .filter(|(k, _)| k.starts_with("json_"))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    if opts.is_empty() { None } else { Some(opts) }
+}

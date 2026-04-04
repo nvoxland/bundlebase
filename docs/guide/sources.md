@@ -217,6 +217,76 @@ Accept: text/csv'
 !!! note
     POST and PUT requests skip the HEAD probe entirely — `head_supported` has no effect for non-GET methods.
 
+## JSON Options
+
+When a connector fetches a JSON file, you can control how records are extracted and nested fields are flattened. The connector transforms the JSON and copies the result into the bundle as Parquet. These options work with any connector (`http`, `remote_dir`, `ftp_directory`, etc.).
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `json_record_path` | _(required to activate)_ | Dot-notation path to the array of records (e.g., `"data"`, `"results.items"`). Empty string (`""`) means the top-level value is a bare JSON array. |
+| `json_sep` | `_` | Separator used when flattening nested field names. With the default, `user.name` becomes the column `user_name`. |
+| `json_meta` | _(none)_ | Comma-separated dot-notation paths to fields in the outer object to include as extra columns on every row (e.g., `"total,page"`). |
+
+**Common pattern — API with response wrapper:**
+
+Most REST APIs return a wrapper like `{"total": 847, "data": [{...}, ...]}` rather than a bare array. Use `json_record_path` to reach the array and `json_meta` to capture outer fields:
+
+=== "SQL"
+
+    ```sql
+    -- API returns: {"total": 847, "data": [{"id": 1, "user": {"name": "Alice"}}, ...]}
+    CREATE SOURCE USING http WITH (
+        url = 'https://api.example.com/users',
+        json_record_path = 'data',
+        json_meta = 'total'
+    )
+    -- Result columns: id, user_name, total
+    ```
+
+=== "Async API"
+
+    ```python
+    bundle = await bundle.create_source("http", {
+        "url": "https://api.example.com/users",
+        "json_record_path": "data",
+        "json_meta": "total"
+    })
+    ```
+
+=== "Sync API"
+
+    ```python
+    bundle = bundle.create_source("http", {
+        "url": "https://api.example.com/users",
+        "json_record_path": "data",
+        "json_meta": "total"
+    })
+    ```
+
+**Deeply nested path:**
+
+=== "SQL"
+
+    ```sql
+    -- Response: {"response": {"results": {"items": [{...}]}}}
+    CREATE SOURCE USING http WITH (
+        url = 'https://api.example.com/search',
+        json_record_path = 'response.results.items'
+    )
+    ```
+
+**Directory of JSON files with consistent structure:**
+
+=== "SQL"
+
+    ```sql
+    CREATE SOURCE USING remote_dir WITH (
+        url = 's3://my-bucket/api-exports/',
+        patterns = '**/*.json',
+        json_record_path = 'data'
+    )
+    ```
+
 ### remote_dir
 
 Lists files from a local or cloud directory. Supports any URL scheme supported by the IO registry (S3, GCS, Azure, file://, etc.).

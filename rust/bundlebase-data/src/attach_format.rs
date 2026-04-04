@@ -27,6 +27,7 @@ impl AttachFormat {
     }
 
     /// Convert from a SourceFormat, returning None for non-attachable formats.
+    /// JSON arrays are converted to Parquet upstream and never stored as blocks.
     pub fn from_source_format(format: &SourceFormat) -> Option<Self> {
         match format {
             SourceFormat::Csv => Some(AttachFormat::Csv),

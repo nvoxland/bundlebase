@@ -113,6 +113,9 @@ You can attach the query output of another committed bundle using a `bundle://` 
 - JSON Lines (`.json`, `.jsonl`)
 - Parquet (`.parquet`)
 
+!!! note
+    Only JSON Lines format (one JSON object per line) can be directly attached. For arbitrary JSON files — including API responses with wrapper objects, nested structures, or JSON arrays — use a connector (`CREATE SOURCE USING http`, `remote_dir`, etc.) with `json_record_path`. The connector transforms and copies the data into the bundle as Parquet. See [Sources: JSON Options](sources.md#json-options).
+
 ## Column Types
 
 **CSV and TSV files** are imported with all columns as text (`Utf8`). Because these are text-based formats, type inference from sampled rows is unreliable — a column that looks numeric in the first 100 rows might contain non-numeric values later. By defaulting to text, bundlebase avoids silent data corruption.

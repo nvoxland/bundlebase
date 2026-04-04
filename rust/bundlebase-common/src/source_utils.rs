@@ -295,6 +295,152 @@ pub async fn record_batch_stream_to_parquet(
     Ok(Bytes::from(buffer))
 }
 
+/// Convert JSON data to Parquet bytes using normalization options.
+///
+/// Handles wrapper objects (`json_record_path`), nested struct flattening (`json_sep`),
+/// and broadcasting outer fields to every row (`json_meta`). Uses Arrow's type inference
+/// so columns retain native types (Int64, Float64, Utf8, etc.).
+///
+/// # Arguments
+/// * `data` - Raw JSON bytes
+/// * `record_path` - Dot-notation path to the array of records (e.g. `"data"`, `"results.items"`).
+///   Empty string means the root value is itself an array.
+/// * `sep` - Separator for flattening nested field names (`"_"` → `user_name` from `user.name`)
+/// * `meta_paths` - Outer-object field paths to broadcast as extra columns on every row
+pub fn json_to_parquet_with_options(
+    data: &[u8],
+    record_path: &str,
+    sep: &str,
+    meta_paths: &[&str],
+) -> Result<Bytes, BundlebaseError> {
+    use std::io::Cursor;
+    use std::sync::Arc;
+
+    let root: serde_json::Value = serde_json::from_slice(data)
+        .map_err(|e| BundlebaseError::from(format!("Invalid JSON: {}", e)))?;
+
+    // Extract meta values from the outer object before navigating into record_path
+    let meta_values: Vec<(String, serde_json::Value)> = meta_paths
+        .iter()
+        .filter_map(|path| {
+            json_navigate_path(&root, path).map(|v| {
+                let col_name = path.split('.').last().unwrap_or(path).to_string();
+                (col_name, v.clone())
+            })
+        })
+        .collect();
+
+    // Navigate to record_path
+    let array = json_navigate_path(&root, record_path).ok_or_else(|| {
+        BundlebaseError::from(format!("Path '{}' not found in JSON document", record_path))
+    })?;
+
+    let records = array.as_array().ok_or_else(|| {
+        let kind = match array {
+            serde_json::Value::Object(_) => "object",
+            serde_json::Value::Null => "null",
+            serde_json::Value::Bool(_) => "boolean",
+            serde_json::Value::Number(_) => "number",
+            serde_json::Value::String(_) => "string",
+            serde_json::Value::Array(_) => "array",
+        };
+        BundlebaseError::from(format!(
+            "Expected JSON array at path '{}', got: {}",
+            record_path, kind
+        ))
+    })?;
+
+    if records.is_empty() {
+        return Err("JSON array is empty".into());
+    }
+
+    // Flatten each record and inject meta values, then serialize to JSONL for Arrow inference
+    let mut jsonl = Vec::new();
+    for record in records {
+        let mut flat = serde_json::Map::new();
+        json_flatten_value(record, "", sep, &mut flat);
+        for (col_name, meta_value) in &meta_values {
+            flat.insert(col_name.clone(), meta_value.clone());
+        }
+        serde_json::to_writer(&mut jsonl, &flat)
+            .map_err(|e| BundlebaseError::from(format!("JSON serialization error: {}", e)))?;
+        jsonl.push(b'\n');
+    }
+
+    // Infer Arrow schema from the JSONL
+    let (inferred, _) = arrow::json::reader::infer_json_schema(&mut Cursor::new(&jsonl), None)
+        .map_err(|e| BundlebaseError::from(format!("Schema inference failed: {}", e)))?;
+    let schema = Arc::new(inferred);
+
+    // Build RecordBatches
+    let batches: Vec<arrow::record_batch::RecordBatch> =
+        arrow::json::ReaderBuilder::new(schema.clone())
+            .build(Cursor::new(&jsonl))
+            .map_err(|e| BundlebaseError::from(format!("JSON reader error: {}", e)))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| BundlebaseError::from(format!("JSON read error: {}", e)))?;
+
+    // Write to Parquet
+    let mut buffer = Vec::new();
+    {
+        let props = parquet::file::properties::WriterProperties::builder()
+            .set_compression(parquet::basic::Compression::ZSTD(
+                parquet::basic::ZstdLevel::try_new(3)
+                    .unwrap_or(parquet::basic::ZstdLevel::default()),
+            ))
+            .set_max_row_group_size(128 * 1024)
+            .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
+            .build();
+        let mut writer =
+            parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
+                .map_err(|e| BundlebaseError::from(format!("Failed to create Parquet writer: {}", e)))?;
+        for batch in &batches {
+            writer
+                .write(batch)
+                .map_err(|e| BundlebaseError::from(format!("Failed to write batch: {}", e)))?;
+        }
+        writer
+            .close()
+            .map_err(|e| BundlebaseError::from(format!("Failed to close Parquet writer: {}", e)))?;
+    }
+
+    Ok(Bytes::from(buffer))
+}
+
+/// Navigate a dot-notation path within a JSON value. An empty path returns the value itself.
+fn json_navigate_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    if path.is_empty() {
+        return Some(value);
+    }
+    path.split('.').try_fold(value, |current, key| current.get(key))
+}
+
+/// Recursively flatten a JSON value into a flat map using the given separator.
+///
+/// Nested objects become `parent<sep>child` keys. Non-object values are stored as-is.
+fn json_flatten_value(
+    value: &serde_json::Value,
+    prefix: &str,
+    sep: &str,
+    out: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let new_key = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{}{}{}", prefix, sep, k)
+                };
+                json_flatten_value(v, &new_key, sep, out);
+            }
+        }
+        other => {
+            out.insert(prefix.to_string(), other.clone());
+        }
+    }
+}
+
 /// Convert raw bytes in a known format to Parquet bytes.
 ///
 /// This is the pluggable extension point for format conversion. To add support
@@ -523,6 +669,91 @@ mod tests {
     #[test]
     fn test_detect_format_whitespace_only() {
         assert_eq!(detect_format_from_bytes(b"   \n\t  "), None);
+    }
+
+    // --- json_to_parquet_with_options tests ---
+
+    const WRAPPED_JSON: &[u8] = br#"{"total": 4, "items": [{"id": 1, "name": "Gilbert", "info": {"score": 24}}, {"id": 2, "name": "Alexa", "info": {"score": 29}}, {"id": 3, "name": "May", "info": {"score": 14}}, {"id": 4, "name": "Deloise", "info": {"score": 19}}]}"#;
+    const FLAT_JSON: &[u8] = br#"[{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]"#;
+
+    fn read_parquet_batches(bytes: &bytes::Bytes) -> Vec<arrow::record_batch::RecordBatch> {
+        parquet::arrow::arrow_reader::ParquetRecordBatchReader::try_new(
+            bytes.clone(), 1024,
+        )
+        .expect("valid parquet")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("read batches")
+    }
+
+    #[test]
+    fn test_json_to_parquet_wrapped_array_schema() {
+        let result = json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &[]).expect("conversion");
+        let batches = read_parquet_batches(&result);
+        assert!(!batches.is_empty());
+        let schema = batches[0].schema();
+        let col_names: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        assert!(col_names.contains(&"id"), "expected 'id', got: {:?}", col_names);
+        assert!(col_names.contains(&"name"), "expected 'name', got: {:?}", col_names);
+        assert!(col_names.contains(&"info_score"), "expected 'info_score', got: {:?}", col_names);
+        assert!(!col_names.contains(&"info"), "should not have un-flattened 'info'");
+    }
+
+    #[test]
+    fn test_json_to_parquet_wrapped_array_row_count() {
+        let result = json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &[]).expect("conversion");
+        let batches = read_parquet_batches(&result);
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(4, total_rows);
+    }
+
+    #[test]
+    fn test_json_to_parquet_with_meta() {
+        let result = json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &["total"]).expect("conversion");
+        let batches = read_parquet_batches(&result);
+        let schema = batches[0].schema();
+        let col_names: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        assert!(col_names.contains(&"total"), "expected 'total' meta column, got: {:?}", col_names);
+    }
+
+    #[test]
+    fn test_json_to_parquet_flat_top_level_array() {
+        // Empty record_path means root is the array
+        let result = json_to_parquet_with_options(FLAT_JSON, "", "_", &[]).expect("conversion");
+        let batches = read_parquet_batches(&result);
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(2, total_rows);
+        let schema = batches[0].schema();
+        let col_names: Vec<_> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        assert!(col_names.contains(&"id"));
+        assert!(col_names.contains(&"name"));
+    }
+
+    #[test]
+    fn test_json_to_parquet_data_values() {
+        let result = json_to_parquet_with_options(WRAPPED_JSON, "items", "_", &[]).expect("conversion");
+        let batches = read_parquet_batches(&result);
+        let batch = &batches[0];
+        let schema = batch.schema();
+        let name_idx = schema.index_of("name").expect("name column");
+        let name_col = batch.column(name_idx);
+        let names: Vec<_> = (0..4)
+            .map(|i| name_col.as_any().downcast_ref::<arrow::array::StringArray>().expect("StringArray").value(i))
+            .collect();
+        assert_eq!(vec!["Gilbert", "Alexa", "May", "Deloise"], names);
+    }
+
+    #[test]
+    fn test_json_to_parquet_missing_path_error() {
+        let err = json_to_parquet_with_options(WRAPPED_JSON, "nonexistent", "_", &[]);
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("nonexistent"));
+    }
+
+    #[test]
+    fn test_json_to_parquet_non_array_path_error() {
+        // "total" is a number, not an array
+        let err = json_to_parquet_with_options(WRAPPED_JSON, "total", "_", &[]);
+        assert!(err.is_err());
     }
 
 }

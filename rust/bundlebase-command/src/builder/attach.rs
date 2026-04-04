@@ -51,9 +51,6 @@ impl CommandParsing for AttachCommand {
                         pack = Some(extract_identifier(&inner_pair));
                     }
                 }
-                Rule::with_options => {
-                    // WITH options - not used yet
-                }
                 _ => {}
             }
         }
@@ -98,7 +95,6 @@ impl BundleBuilderCommand for AttachCommand {
         let pack_id = builder.resolve_pack_id(self.pack.as_deref())?;
         let pack_name = self.pack.as_deref().unwrap_or("base");
 
-        // Detect format by probing the file — validates extension and content
         let temp_reader = builder.bundle().reader_factory
             .detect(&self.path, &bundlebase_data::BlockId::generate(), builder)
             .await?;

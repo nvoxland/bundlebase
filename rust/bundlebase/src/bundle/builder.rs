@@ -364,6 +364,40 @@ impl BundleBuilder {
         self.status.read().clone()
     }
 
+    /// Convert a JSON file to Parquet using normalization options, storing the result in the data dir.
+    ///
+    /// Used by fetch and create_source when `json_record_path` is present in connector args.
+    /// Returns the relative path of the new Parquet file and its SHA256 hash.
+    pub async fn convert_json_attachment_to_parquet(
+        &self,
+        location: &str,
+        json_opts: &HashMap<String, String>,
+    ) -> Result<(String, String), BundlebaseError> {
+        use crate::source::fetch::download_to_data_dir;
+        use bundlebase_common::source_utils::json_to_parquet_with_options;
+
+        let file = crate::io::readable_file_from_path(location, self.data_dir(), self.config()).await?;
+        let json_bytes = file
+            .read_bytes()
+            .await?
+            .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", location)))?;
+
+        let record_path = json_opts.get("json_record_path").map(|s| s.as_str()).unwrap_or("");
+        let sep = json_opts.get("json_sep").map(|s| s.as_str()).unwrap_or("_");
+        let meta_paths: Vec<&str> = json_opts
+            .get("json_meta")
+            .map(|s| s.split(',').filter(|p| !p.is_empty()).map(|p| p.trim()).collect())
+            .unwrap_or_default();
+
+        let parquet_bytes = json_to_parquet_with_options(&json_bytes, record_path, sep, &meta_paths)?;
+
+        let data_dir = self.data_dir();
+        let write_result = download_to_data_dir(parquet_bytes, "data.parquet", data_dir.as_ref()).await?;
+        let relative_path = data_dir.relative_path(write_result.file.as_ref())?;
+
+        Ok((relative_path, write_result.hash))
+    }
+
     /// Commits all operations in the bundle to persistent storage.
     ///
     /// # Arguments

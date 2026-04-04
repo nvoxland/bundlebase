@@ -183,60 +183,113 @@ def test_feature_streaming():
     result = c.to_pandas()  # Should use constant memory
 ```
 
-## Example: Adding JSON Adapter
+## Example: Adding a Reader Plugin
 
-Here's a reference implementation following this template:
+Here's a reference implementation using the existing JSON array reader as a model. This is the pattern for adding a new file format or a new way of reading an existing format via reader-level options.
+
+### Architecture: Reader Plugins
+
+New formats live in `rust/bundlebase-data/src/plugin/` as `ReaderPlugin` implementations. Plugins are registered in `DataReaderFactory` and activated by checking file extension and/or `read_options`.
+
+**Key pattern — `read_options` for format configuration:**
+
+Reader-level options (like `json_record_path`, `json_sep`, `json_meta`) are passed through any connector without connector-specific code changes. Connectors only need to allow them through `validate_connector_args` (prefix with `json_` or `_`). The `ReaderPlugin::reader()` method receives them as `read_options: Option<&HashMap<String, String>>`.
 
 ### 1. Planning
-- Feature: Support JSON files as data source
-- Architecture: Extends adapter system (Bundle trait implementation)
-- Dependencies: May need `serde_json` crate
-- Python API: `c.attach("data.json")`
+- Feature: New file format or variant reader
+- Architecture: Implement `ReaderPlugin` trait in `bundlebase-data`
+- Dependencies: Add to `bundlebase-data/Cargo.toml` (not `bundlebase`)
+- Activation: Decide whether the plugin activates by extension, by `read_options` key, or both
 
-### 2. Rust Implementation
+### 2. Create the Plugin
+
 ```rust
-// src/io/adapters/json.rs
-use datafusion::prelude::*;
-use crate::error::Result;
+// rust/bundlebase-data/src/plugin/my_format_reader.rs
+use crate::plugin::ReaderPlugin;
+use crate::{DataReader, DataContext};
+use bundlebase_common::object_id::BlockId;
+use bundlebase_common::BundlebaseError;
+use arrow_schema::SchemaRef;
+use async_trait::async_trait;
+use std::collections::HashMap;
+use std::sync::Arc;
 
-pub struct JsonAdapter {
-    path: String,
-}
+pub const MY_OPTION: &str = "my_option";  // read_options key (use prefix like "my_format_")
 
-impl JsonAdapter {
-    pub fn new(path: impl Into<String>) -> Self {
-        Self { path: path.into() }
-    }
+#[derive(Default)]
+pub struct MyFormatPlugin;
 
-    pub async fn to_dataframe(&self, ctx: &SessionContext) -> Result<DataFrame> {
-        // Use DataFusion's JSON reader (automatically streaming)
-        let df = ctx.read_json(&self.path, Default::default())
-            .await
-            .map_err(|e| format!("Failed to read JSON {}: {}", self.path, e))?;
-        Ok(df)
+#[async_trait]
+impl ReaderPlugin for MyFormatPlugin {
+    async fn reader(
+        &self,
+        source: &str,
+        block_id: &BlockId,
+        bundle: &dyn DataContext,
+        schema: Option<SchemaRef>,
+        layout: Option<String>,
+        expected_version: Option<String>,
+        read_options: Option<&HashMap<String, String>>,
+    ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
+        // Check if this plugin applies
+        let Some(opts) = read_options else { return Ok(None) };
+        let Some(my_opt) = opts.get(MY_OPTION) else { return Ok(None) };
+        // ... return Some(reader) or None
+        Ok(None)
     }
 }
 ```
 
-### 3. Python Binding
-```python
-# python/bundlebase/src/container.py
-def attach(self, path: str) -> "Container":
-    """Attach a data file (Parquet, JSON, CSV, etc.)."""
-    if path.endswith(".json"):
-        self._inner.attach_json(path)
-    # ... existing logic
-    return self
+### 3. Register the Plugin
+
+```rust
+// rust/bundlebase-data/src/plugin.rs
+pub mod my_format_reader;
+pub use my_format_reader::MyFormatPlugin;
+
+// rust/bundlebase-data/src/reader_factory.rs
+plugins: vec![
+    Arc::new(MyFormatPlugin::default()),  // ← add before existing plugins
+    Arc::new(CsvPlugin::default()),
+    // ...
+],
 ```
 
-### 4. Testing
-```python
-# python/tests/test_json_adapter.py
-def test_json_adapter():
-    c = bundlebase.create()
-    c.attach("test_data.json")
-    df = c.to_pandas()
-    assert len(df) > 0
+### 4. Allow Options Through Connectors
+
+If using a new `prefix_` option key, update `validate_connector_args` in `bundlebase-common/src/connector.rs`:
+
+```rust
+if !key.starts_with('_') && !key.starts_with("json_") && !key.starts_with("my_format_") && !valid_names.contains(key.as_str()) {
+```
+
+### 5. Testing
+
+```rust
+// In my_format_reader.rs
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn test_no_option_returns_none() { ... }
+
+    #[tokio::test]
+    async fn test_reads_data_correctly() { ... }
+
+    #[tokio::test]
+    async fn test_read_options_round_trip() {
+        // Verify read_options() returns the keys used, so they persist in AttachBlockOp
+    }
+}
+```
+
+### 6. Usage (no Python binding changes needed)
+
+Reader options flow through any connector automatically. The connector fetches the file and the reader plugin transforms it, copying the result into the bundle as Parquet. Direct `ATTACH` is for pass-through formats only (CSV, TSV, JSONL, Parquet).
+
+```sql
+-- Reader options work with any connector
+CREATE SOURCE USING http WITH (url = '...', my_format_option = 'value')
+CREATE SOURCE USING remote_dir WITH (url = '...', my_format_option = 'value')
 ```
 
 ## Success Criteria
