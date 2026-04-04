@@ -666,11 +666,17 @@ impl BundleBuilder {
         // Note: reload_from preserves the original ctx and its schema providers
         // which already have the correct facade set
         let new_bundle: Bundle = if empty {
-            // empty() returns Arc<Bundle>, clone inner Bundle for reload_from
+            // No commits yet: restore the post-create state.
+            // Bundle::empty() generates a fresh UUID and no packs, so we must:
+            //   1. Preserve the original bundle ID (never committed, but consistent within session)
+            //   2. Restore the BASE_PACK that BundleBuilder::create() always sets up
+            let original_id = self.bundle.id();
             let arc = Bundle::empty(Some(passed_config)).await?;
             let bundle = (*arc).clone();
             bundle.refresh_data_dir().await?;
             *bundle.data_dir.write() = writable_dir_from_url(&Url::parse(&url)?, bundle.config()).await?;
+            *bundle.id.write() = original_id;
+            bundle.add_pack(ObjectId::BASE_PACK, Arc::new(Pack::new_base()));
             bundle
         } else {
             // Preserve explicit_config when reopening

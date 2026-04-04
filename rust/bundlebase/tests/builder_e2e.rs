@@ -330,3 +330,64 @@ async fn test_commit_succeeds_without_temp_function_in_filter() {
     let result = builder.commit("should succeed").await;
     assert!(result.is_ok(), "Commit should succeed: {:?}", result.err());
 }
+
+// --- RESET tests ---
+
+#[tokio::test]
+async fn test_reset_before_first_commit_leaves_bundle_usable() {
+    // Bug: RESET on a never-committed bundle dropped the BASE_PACK from the
+    // in-memory state, causing subsequent ATTACH operations to fail.
+    init();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().to_str().unwrap();
+
+    let bundle = BundleBuilder::create(path, None).await.unwrap();
+
+    // Attach then reset (no commit yet)
+    bundle.attach(test_datafile("userdata.parquet"), None).await.unwrap();
+    bundle.reset().await.unwrap();
+
+    // Should be able to attach again after reset
+    bundle.attach(test_datafile("userdata.parquet"), None).await
+        .expect("ATTACH after RESET (before first commit) should succeed");
+
+    // Should be able to commit
+    bundle.commit("initial").await
+        .expect("COMMIT after RESET (before first commit) should succeed");
+
+    // Reopen and verify the data survived
+    let reopened = bundlebase::bundle::Bundle::open(path, None).await.unwrap();
+    assert_eq!(1000, reopened.num_rows().await.unwrap());
+}
+
+#[tokio::test]
+async fn test_reset_after_commit_preserves_init_file_and_data() {
+    // RESET after a commit should reload from the committed state without
+    // touching the INIT file or any committed manifest files.
+    init();
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().to_str().unwrap();
+
+    let bundle = BundleBuilder::create(path, None).await.unwrap();
+    bundle.attach(test_datafile("userdata.parquet"), None).await.unwrap();
+    bundle.commit("initial").await.unwrap();
+
+    // Add more (uncommitted) data then reset
+    bundle.attach(test_datafile("userdata.parquet"), None).await.unwrap();
+    bundle.reset().await.unwrap();
+
+    // Should be back to the committed state (1000 rows, not 2000)
+    assert_eq!(1000, bundle.num_rows().await.unwrap(),
+        "After RESET, row count should match last commit");
+
+    // The INIT file must still be on disk (META_DIR = "_bundlebase")
+    let meta_path = std::path::Path::new(path)
+        .join("_bundlebase")
+        .join("00000000000000000.yaml");
+    assert!(meta_path.exists(), "INIT file must still exist after RESET");
+
+    // Bundle must still be reopenable
+    let reopened = bundlebase::bundle::Bundle::open(path, None).await
+        .expect("Bundle must be reopenable after RESET");
+    assert_eq!(1000, reopened.num_rows().await.unwrap());
+}
