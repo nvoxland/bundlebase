@@ -8,6 +8,7 @@ on:
       - 'mkdocs.yml'
       - 'scripts/build_docs.sh'
       - '.github/workflows/docs.yml'
+  workflow_dispatch:
 
 jobs:
   build:
