@@ -303,15 +303,24 @@ async fn save_from_url(
             })
         }
         ResolvedSaveAs::Parquet => {
-            // Download raw bytes, convert to Parquet, then write
-            let response = reqwest::get(url.as_str())
-                .await
-                .map_err(|e| BundlebaseError::from(format!("Failed to download '{}': {}", url, e)))?;
-            if !response.status().is_success() {
-                return Err(http_status_error(url, response.status(), None).into());
-            }
-            let raw_bytes = response.bytes().await
-                .map_err(|e| BundlebaseError::from(format!("Failed to read '{}': {}", url, e)))?;
+            // Download raw bytes, convert to Parquet, then write.
+            // Use reqwest only for HTTP(S); for all other schemes (memory://, s3://, file://, etc.)
+            // use ObjectStoreFile so the same object-store backends work here as elsewhere.
+            let raw_bytes = if url.scheme() == "http" || url.scheme() == "https" {
+                let response = reqwest::get(url.as_str())
+                    .await
+                    .map_err(|e| BundlebaseError::from(format!("Failed to download '{}': {}", url, e)))?;
+                if !response.status().is_success() {
+                    return Err(http_status_error(url, response.status(), None).into());
+                }
+                response.bytes().await
+                    .map_err(|e| BundlebaseError::from(format!("Failed to read '{}': {}", url, e)))?
+            } else {
+                let file = ObjectStoreFile::from_url(url, config.clone())?;
+                file.read_bytes().await?.ok_or_else(|| {
+                    BundlebaseError::from(format!("File not found: {}", url))
+                })?
+            };
             let parquet_bytes = convert_to_parquet(&raw_bytes, format)?;
             let result = download_to_data_dir(parquet_bytes, "data.parquet", data_dir).await?;
             Ok(make_fetched_data(data_dir, &result, url.as_str()))

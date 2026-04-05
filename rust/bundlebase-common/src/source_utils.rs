@@ -448,6 +448,10 @@ fn json_flatten_value(
 pub fn convert_to_parquet(data: &[u8], format: &crate::connector::SourceFormat) -> Result<Bytes, BundlebaseError> {
     use crate::connector::SourceFormat;
     match format {
+        SourceFormat::Parquet => Ok(Bytes::copy_from_slice(data)),
+        SourceFormat::Csv => csv_to_parquet(data, b','),
+        SourceFormat::Tsv => csv_to_parquet(data, b'\t'),
+        SourceFormat::JsonL => jsonl_to_parquet(data),
         SourceFormat::Json => json_array_to_parquet(data),
         SourceFormat::Xlsx | SourceFormat::Xls | SourceFormat::Ods => crate::excel::excel_to_parquet(data, None),
         other => Err(format!(
@@ -557,6 +561,125 @@ fn json_array_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
         writer.write(&batch)?;
         writer.close()?;
     }
+
+    Ok(Bytes::from(buffer))
+}
+
+/// Convert CSV/TSV bytes to Parquet bytes.
+///
+/// Reads column names from the header row; all values stored as text (no type inference).
+fn csv_to_parquet(data: &[u8], delimiter: u8) -> Result<Bytes, BundlebaseError> {
+    use arrow::csv::reader::Format;
+    use arrow::csv::ReaderBuilder;
+    use std::io::Cursor;
+
+    // Infer schema with 0 data rows — only reads the header, no type guessing.
+    let fmt = Format::default().with_header(true).with_delimiter(delimiter);
+    let (header_schema, _) = fmt
+        .infer_schema(Cursor::new(data), Some(0))
+        .map_err(|e| BundlebaseError::from(format!("CSV header read failed: {}", e)))?;
+    let col_names: Vec<String> = header_schema.fields().iter().map(|f| f.name().clone()).collect();
+
+    // Read rows as raw strings using the all-text schema.
+    let schema = all_utf8_schema(&col_names);
+    let mut reader = ReaderBuilder::new(schema.clone())
+        .with_delimiter(delimiter)
+        .with_header(true)
+        .build(Cursor::new(data))
+        .map_err(|e| BundlebaseError::from(format!("CSV read failed: {}", e)))?;
+
+    let batches: Vec<_> = reader
+        .collect::<Result<_, _>>()
+        .map_err(|e| BundlebaseError::from(format!("CSV read error: {}", e)))?;
+
+    record_batches_to_parquet(batches, schema)
+}
+
+/// Convert JSONL (newline-delimited JSON) bytes to Parquet bytes.
+///
+/// Column names are taken from the first object's keys; all values stored as text.
+fn jsonl_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
+    let mut col_names: Option<Vec<String>> = None;
+    let mut rows: Vec<Vec<String>> = Vec::new();
+
+    for line in data.split(|&b| b == b'\n') {
+        if line.iter().all(|&b| matches!(b, b' ' | b'\t' | b'\r')) {
+            continue;
+        }
+        let obj: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(line)
+            .map_err(|e| BundlebaseError::from(format!("JSONL parse error: {}", e)))?;
+        if col_names.is_none() {
+            col_names = Some(obj.keys().cloned().collect());
+        }
+        let names = col_names.as_ref().unwrap();
+        rows.push(
+            names.iter()
+                .map(|k| obj.get(k).map(json_value_to_string).unwrap_or_default())
+                .collect(),
+        );
+    }
+
+    text_rows_to_parquet(&col_names.unwrap_or_default(), rows)
+}
+
+/// Convert column names and string rows to Parquet bytes.
+///
+/// Used by JSONL and any other text-based format that has already resolved
+/// column names and stringified values.
+fn text_rows_to_parquet(col_names: &[String], rows: Vec<Vec<String>>) -> Result<Bytes, BundlebaseError> {
+    use arrow::array::StringBuilder;
+    use arrow::record_batch::RecordBatch;
+
+    let schema = all_utf8_schema(col_names);
+    let mut builders: Vec<StringBuilder> = (0..col_names.len()).map(|_| StringBuilder::new()).collect();
+
+    for row in &rows {
+        for (i, builder) in builders.iter_mut().enumerate() {
+            builder.append_value(row.get(i).map(String::as_str).unwrap_or(""));
+        }
+    }
+
+    let columns: Vec<Arc<dyn arrow::array::Array>> =
+        builders.iter_mut().map(|b| Arc::new(b.finish()) as _).collect();
+
+    let batch = RecordBatch::try_new(schema.clone(), columns)
+        .map_err(|e| BundlebaseError::from(format!("RecordBatch build failed: {}", e)))?;
+
+    record_batches_to_parquet(vec![batch], schema)
+}
+
+/// Build an all-Utf8 Arrow schema from a list of column names.
+fn all_utf8_schema(col_names: &[String]) -> Arc<arrow::datatypes::Schema> {
+    use arrow::datatypes::{DataType, Field, Schema};
+    Arc::new(Schema::new(
+        col_names.iter().map(|n| Field::new(n, DataType::Utf8, true)).collect::<Vec<_>>(),
+    ))
+}
+
+/// Write a list of RecordBatches to Parquet bytes.
+fn record_batches_to_parquet(
+    batches: Vec<arrow::record_batch::RecordBatch>,
+    schema: Arc<arrow::datatypes::Schema>,
+) -> Result<Bytes, BundlebaseError> {
+    use parquet::basic::Compression;
+    use parquet::file::properties::WriterProperties;
+
+    let mut buffer = Vec::new();
+    let props = WriterProperties::builder()
+        .set_compression(Compression::SNAPPY)
+        .build();
+    let mut writer =
+        parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
+            .map_err(|e| BundlebaseError::from(format!("Parquet writer init failed: {}", e)))?;
+
+    for batch in batches {
+        writer
+            .write(&batch)
+            .map_err(|e| BundlebaseError::from(format!("Parquet write error: {}", e)))?;
+    }
+    writer
+        .close()
+        .map_err(|e| BundlebaseError::from(format!("Parquet writer close failed: {}", e)))?;
 
     Ok(Bytes::from(buffer))
 }
