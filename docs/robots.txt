@@ -1,0 +1,20 @@
+User-agent: *
+Allow: /
+
+# LLM crawlers explicitly welcome
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://nvoxland.github.io/bundlebase/sitemap.xml

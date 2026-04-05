@@ -1,5 +1,7 @@
 site_name: Bundlebase
 dev_addr: '0.0.0.0:8000'
+hooks:
+  - docs/hooks.py
 site_description: Python data packaging — version, share, and query datasets without database infrastructure. Attach CSV, Parquet, JSON from S3, HTTP, or local files. Export to pandas, polars, or SQL.
 site_author: Nathan Voxland
 site_url: https://nvoxland.github.io/bundlebase/

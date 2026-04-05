@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  <link rel="alternate" type="text/plain" title="LLM-optimized docs" href="{{ config.site_url }}llms.txt">
+{% endblock %}
