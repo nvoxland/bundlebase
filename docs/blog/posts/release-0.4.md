@@ -11,15 +11,15 @@ Those SQL-like command strings can be passed to a new `bundle.execute()` method 
 
 I've also cleaned up the REPL to accept any of those SQL-like commands, and distinguished REPL-specific commands with a `/` like `/exit` and `status`.
 
-Finally, there is also a new Arrow Flight server you can start with the CLI instead of REPL mode which lets you run both queries and other commands from your favorite database client.
+Finally, there is also a new SQL server you can start with the CLI instead of REPL mode which lets you run both queries and other commands from your favorite database client.
 
 <!-- more -->
 
 ## New Features
 
-### Arrow Flight server
+### SQL server
 
-You can now serve a bundle over the network using Arrow Flight SQL. Any Flight SQL client can connect and run queries.
+You can now serve a bundle over the network using SQL. Any SQL client can connect and run queries.
 
 ```bash
 bundlebase-cli --bundle /data/my_bundle --mode flight --port 50051

@@ -1,0 +1,249 @@
+/* ── Hide GitHub stars/forks in header ──────────────── */
+.md-source__facts { display: none; }
+
+/* ── Brand color: cyan-400 ──────────────────────────── */
+:root,
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #22d3ee;
+  --md-primary-fg-color--light: #67e8f9;
+  --md-primary-fg-color--dark:  #0891b2;
+  --md-accent-fg-color:         #22d3ee;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color:        #0891b2;
+  --md-primary-fg-color--light: #22d3ee;
+  --md-primary-fg-color--dark:  #0e7490;
+  --md-accent-fg-color:         #0891b2;
+}
+
+/* ── Header + tabs: consistent color across both schemes */
+.md-header,
+.md-tabs {
+  background-color: #0891b2;
+}
+
+.md-header__button.md-logo {
+  display: none;
+}
+
+/* ── Hero ───────────────────────────────────────────── */
+.bb-hero {
+  background: #0d1117;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  padding: 5rem 1.5rem 4.5rem;
+}
+
+.bb-hero__inner {
+  max-width: 72rem;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4rem;
+  align-items: center;
+}
+
+/* ── Hero background logo ───────────────────────────── */
+.bb-hero__left {
+  position: relative;
+  overflow: hidden;
+}
+
+.bb-hero__bg-logo {
+  position: absolute;
+  width: 320px;
+  height: 320px;
+  top: -40px;
+  right: -60px;
+  opacity: 0.07;
+  color: #22d3ee;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* keep text above the background logo */
+.bb-hero__brand,
+.bb-hero__title,
+.bb-hero__sub,
+.bb-hero__cta {
+  position: relative;
+  z-index: 1;
+}
+
+.bb-hero__title {
+  font-size: 3rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #f1f5f9;
+  margin: 0 0 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+/* ── Hero brand mark (below tagline) ────────────────── */
+.bb-hero__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.5rem;
+}
+
+.bb-hero__logo {
+  width: 28px;
+  height: 28px;
+  color: #22d3ee;
+  flex-shrink: 0;
+}
+
+.bb-hero__brand-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #22d3ee;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bb-hero__sub {
+  font-size: 1.05rem;
+  line-height: 1.7;
+  color: #94a3b8;
+  margin: 0 0 2rem;
+}
+
+/* ── CTA buttons ────────────────────────────────────── */
+.bb-hero__cta {
+  display: flex;
+  gap: 0.875rem;
+  flex-wrap: wrap;
+}
+
+.bb-btn {
+  display: inline-block;
+  padding: 0.625rem 1.4rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none !important;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.bb-btn--primary {
+  background: #22d3ee;
+  color: #0d1117 !important;
+  border: 1.5px solid transparent;
+}
+
+.bb-btn--primary:hover {
+  background: #67e8f9;
+}
+
+.bb-btn--outline {
+  background: transparent;
+  color: #94a3b8 !important;
+  border: 1.5px solid rgba(255,255,255,0.18);
+}
+
+.bb-btn--outline:hover {
+  border-color: #22d3ee;
+  color: #22d3ee !important;
+}
+
+/* ── Code window ────────────────────────────────────── */
+.bb-hero__code {
+  background: #161b22;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.bb-hero__code-header {
+  background: #21262d;
+  padding: 0.65rem 1rem;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Code window tabs ───────────────────────────────── */
+.bb-code-tabs {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+
+.bb-code-tab {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px;
+  color: rgba(255,255,255,0.4);
+  cursor: pointer;
+  font-family: var(--md-code-font-family);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.6rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.bb-code-tab:hover {
+  color: rgba(255,255,255,0.7);
+  border-color: rgba(255,255,255,0.25);
+}
+
+.bb-code-tab--active {
+  border-color: #22d3ee;
+  color: #22d3ee;
+}
+
+.bb-code-panel--hidden {
+  display: none;
+}
+
+.bb-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.13);
+  display: inline-block;
+}
+
+.bb-hero__code-label {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.25);
+  font-family: var(--md-code-font-family);
+  letter-spacing: 0.04em;
+}
+
+.bb-hero__code pre {
+  margin: 0;
+  padding: 1.25rem 1.5rem;
+  font-size: 0.8rem;
+  line-height: 1.75;
+  background: transparent !important;
+  overflow-x: auto;
+}
+
+.bb-hero__code code {
+  background: none !important;
+  color: #cdd9e5;
+  font-size: inherit;
+  padding: 0;
+}
+
+/* Syntax colors in hero snippet */
+.bb-kw   { color: #c792ea; }   /* keywords  */
+.bb-fn   { color: #22d3ee; }   /* methods   */
+.bb-str  { color: #c3e88d; }   /* strings   */
+.bb-comment { color: #4d5f70; }/* comments  */
+
+/* ── Responsive ─────────────────────────────────────── */
+@media (max-width: 900px) {
+  .bb-hero__inner {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+  }
+
+  .bb-hero__title {
+    font-size: 2.25rem;
+  }
+}

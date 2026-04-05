@@ -278,5 +278,5 @@ df = c.to_pandas()  # No await needed
 ## See Also
 
 - **[Async API](async-api.md)** - Main API documentation
-- **[Quick Start](../../getting-started/quick-start.md#method-chaining)** - Chaining examples
+- **[Quick Start](../../getting-started/python/quick-start.md#method-chaining)** - Chaining examples
 - **[Basic Concepts](../../getting-started/basic-concepts.md)** - Architecture overview

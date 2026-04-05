@@ -1,6 +1,6 @@
-# Flight SQL Server
+# SQL Server
 
-The Bundlebase CLI can run as an [Arrow Flight SQL](https://arrow.apache.org/docs/format/FlightSql.html) server, providing remote access to bundles over the network. Any JDBC-compatible client (such as DBeaver) or ADBC client can connect and run queries.
+The Bundlebase CLI can run as an [SQL](https://arrow.apache.org/docs/format/FlightSql.html) server, providing remote access to bundles over the network. Any JDBC-compatible client (such as DBeaver) or ADBC client can connect and run queries.
 
 ## Starting the Server
 
@@ -57,7 +57,7 @@ Each authenticated client gets its own session:
 
 ## Supported Operations
 
-The Flight SQL server supports the full set of Bundlebase SQL commands:
+The SQL server supports the full set of Bundlebase SQL commands:
 
 - **Queries**: `SELECT`, `EXPLAIN`
 - **Data modification**: `ATTACH`, `DETACH`, `REPLACE`, `FILTER`
@@ -74,7 +74,7 @@ See the [SQL Reference](../sql-reference/index.md) for the full command syntax.
 
 ## Connecting from DBeaver
 
-[DBeaver](https://dbeaver.io/) can connect via the Arrow Flight SQL JDBC driver.
+[DBeaver](https://dbeaver.io/) can connect via the SQL JDBC driver.
 
 ### Setup
 
@@ -106,7 +106,7 @@ COMMIT 'Added new data via DBeaver'
 
 ## Connecting from TypeScript
 
-Use the [Apache Arrow Flight SQL client](https://www.npmjs.com/package/apache-arrow) to connect from TypeScript/Node.js via gRPC.
+Use the [Apache SQL client](https://www.npmjs.com/package/apache-arrow) to connect from TypeScript/Node.js via gRPC.
 
 ### Install
 

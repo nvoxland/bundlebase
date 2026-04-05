@@ -1,5 +1,6 @@
 site_name: Bundlebase
-site_description: Docker but for data
+dev_addr: '0.0.0.0:8000'
+site_description: Python data packaging — version, share, and query datasets without database infrastructure. Attach CSV, Parquet, JSON from S3, HTTP, or local files. Export to pandas, polars, or SQL.
 site_author: Nathan Voxland
 site_url: https://nvoxland.github.io/bundlebase/
 repo_name: nvoxland/bundlebase
@@ -8,27 +9,29 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  custom_dir: docs/overrides
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
   palette:
-    # Light mode
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: indigo
-      accent: blue
+    # Dark mode (default)
+    - scheme: slate
+      primary: custom
+      accent: cyan
       toggle:
         icon: material/brightness-7
-        name: Switch to dark mode
-    # Dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: indigo
-      accent: blue
+        name: Switch to light mode
+    # Light mode
+    - scheme: default
+      primary: custom
+      accent: cyan
       toggle:
         icon: material/brightness-4
-        name: Switch to light mode
+        name: Switch to dark mode
   features:
     - navigation.instant      # Fast page loading
     - navigation.tracking     # URL updates with scroll
     - navigation.tabs         # Top-level tabs
+    - navigation.tabs.sticky  # Keep tabs visible while scrolling
     - navigation.sections     # Collapsible sections
     - navigation.expand       # Expand all sections by default
     - navigation.top          # Back to top button
@@ -107,6 +110,7 @@ markdown_extensions:
   - pymdownx.tilde
 
 extra:
+  generator: false
   analytics:
     provider: google
     property: G-2P5BTJ2GNN
@@ -115,5 +119,10 @@ extra:
       link: https://github.com/nvoxland/bundlebase
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/bundlebase/
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/bundlebase
+
+extra_css:
+  - stylesheets/extra.css
 
 copyright: Copyright &copy; 2026 Nathan Voxland

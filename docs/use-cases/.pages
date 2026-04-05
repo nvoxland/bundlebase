@@ -1,0 +1,8 @@
+nav:
+  - Overview: index.md
+  - Data Scientist: data-scientist.md
+  - LLM Agent Developer: llm-agent.md
+  - Backend Developer: backend-developer.md
+  - Data Engineer: data-engineer.md
+  - ETL / Periodic Collection: etl-developer.md
+  - Analyst: analyst.md

@@ -1,155 +1,249 @@
+---
+title: Basic Concepts — Bundlebase
+description: "Core Bundlebase concepts: what a bundle is, read-only vs mutable, lazy evaluation, supported data formats, and the Git-like commit and versioning system."
+---
+
 # Basic Concepts
 
-Understanding these core concepts will help you get the most out of Bundlebase.
+## What is a bundle?
 
-## What is a Bundle?
+A bundle is:
 
-A **bundle** is like a container for your data. Think of it as:
+- Data from one or more sources (CSV, Parquet, JSON, HTTP APIs, cloud storage, SFTP)
+- The transformations applied to it — filters, column drops, renames, joins — recorded as operations
+- A versioned snapshot committed to a path that anyone can open
 
-- A collection of data from one or more sources
-- A series of transformations to apply to that data
-- A snapshot that can be versioned and saved
+The key property is that **the data carries its own context**. A bundle knows its name, schema, transformation history, and where the data came from. A plain CSV or Parquet file knows none of that. You don't need a README alongside it, a schema document, or the person who made it — opening the bundle gives you everything.
 
-```python
-import bundlebase as bb
+=== "Python"
 
-# Create a new bundle
-c = await bb.create("my/path")
+    ```python
+    import bundlebase.sync as bb
 
-# Add data to it
-c = await c.attach("data.parquet")
+    # Define what the data is and how it's shaped
+    bundle = (bb.create("s3://my-bucket/my-bundle")
+        .attach("data.parquet")
+        .filter("age >= 18")
+        .drop_column("ssn")
+        .commit("Adults only, PII removed"))
 
-# Transform it
-c = await c.filter("age >= 18")
+    # Anyone opens it the same way
+    bundle = bb.open("s3://my-bucket/my-bundle")
+    df = bundle.to_pandas()
+    ```
 
-# Export it
-df = await c.to_pandas()
-```
+=== "SQL"
 
-## Read-Only vs Mutable Bundles
+    ```sql
+    CREATE 's3://my-bucket/my-bundle';
+    ATTACH 'data.parquet';
+    FILTER WITH SELECT * FROM bundle WHERE age >= 18;
+    DROP COLUMN ssn;
+    COMMIT 'Adults only, PII removed';
 
-Bundlebase has two types of bundles:
+    -- Anyone opens it the same way
+    OPEN 's3://my-bucket/my-bundle';
+    SELECT * FROM bundle;
+    ```
 
-### PyBundle (Read-Only)
+!!! tip "If you know Docker"
+    The mental model is similar: create, attach, filter, commit is the recipe — `commit` is the push, `open` is the pull. The artifact carries its own context so consumers don't need to know how it was built.
 
-When you open an existing bundle, you get a **read-only** bundle:
+## Read-only vs mutable
 
-```python
-# Opening returns PyBundle (read-only)
-c = await bb.open("/path/to/bundle")
+**Opening** an existing bundle gives you a **read-only** view. You can query and inspect the data, but not change it.
 
-# You can read data
-df = await c.to_pandas()
-schema = c.schema
-rows = c.num_rows
+**Creating** a new bundle or **extending** an existing one gives you a **mutable** bundle you can attach data to, transform, and commit.
 
-# But you can extend it to create a mutable copy
-c = await c.extend()  # Now it's mutable
-await c.filter("active = true")
-```
+=== "Python"
 
-### PyBundleBuilder (Mutable)
+    ```python
+    import bundlebase.sync as bb
 
-When you create a new bundle or extend an existing one, you get a **mutable** bundle that you can transform:
+    # open() → read-only
+    bundle = bb.open("s3://my-bucket/my-bundle")
+    df = bundle.to_pandas()       # query: yes
+    schema = bundle.schema        # inspect: yes
 
-```python
-# Creating returns PyBundleBuilder (mutable)
-c = await bb.create("my/bundle")
+    # extend() → mutable copy, ready to modify
+    bundle = bundle.extend()
+    bundle.filter("active = true")
+    bundle.commit("Active users only")
 
-# You can transform it
-await c.attach("data.parquet")
-await c.filter("age >= 18")
-await c.drop_column("ssn")
-```
+    # create() → new mutable bundle
+    bundle = bb.create("s3://my-bucket/new-bundle")
+    bundle.attach("data.parquet")
+    bundle.commit("Initial load")
+    ```
 
-!!! tip "All Mutations Are In-Place"
-    Bundlebase mutates in place - methods like `filter()` and `attach()` modify the bundle and return `self` for chaining. This is different from pandas where operations return new copies.
+=== "SQL"
 
-## Operation Pipeline
+    ```sql
+    -- OPEN → read-only
+    OPEN 's3://my-bucket/my-bundle';
+    SELECT * FROM bundle;    -- query: yes
+    SHOW STATUS;             -- inspect: yes
 
-Bundlebase uses **lazy evaluation** - operations are recorded but not executed immediately:
+    -- EXTEND → mutable, ready to modify
+    EXTEND;
+    FILTER WITH SELECT * FROM bundle WHERE active = true;
+    COMMIT 'Active users only';
 
-```python
-# These operations are just recorded, not executed yet
-c = await bb.create("my/path")
-c = await c.attach("data.parquet")
-c = await c.filter("age >= 18")
-c = await c.drop_column("ssn")
+    -- CREATE → new mutable bundle
+    CREATE 's3://my-bucket/new-bundle';
+    ATTACH 'data.parquet';
+    COMMIT 'Initial load';
+    ```
 
-# Execution happens here when you export
-df = await c.to_pandas()  # Now the pipeline executes
-```
+## Lazy evaluation
 
-This allows Bundlebase to:
+Operations are **recorded** when you write them, but not **executed** until you actually need the data. The full pipeline runs at once when you query or export.
 
-- Optimize the entire pipeline before execution
-- Push filters down to the data source
-- Avoid loading unnecessary columns
-- Stream data instead of loading everything into memory
+=== "Python"
 
-## Data Sources and Formats
+    ```python
+    import bundlebase.sync as bb
 
-Bundlebase supports multiple data formats:
+    bundle = bb.create("s3://my-bucket/my-bundle")
+    bundle.attach("data.parquet")   # recorded
+    bundle.filter("age >= 18")      # recorded
+    bundle.drop_column("ssn")       # recorded
 
-```python
-# Parquet files (fast, columnar)
-c = await c.attach("data.parquet")
+    df = bundle.to_pandas()         # pipeline executes here
+    ```
 
-# CSV files
-c = await c.attach("data.csv")
+=== "SQL"
 
-# JSON files
-c = await c.attach("data.json")
+    ```sql
+    CREATE 's3://my-bucket/my-bundle';
+    ATTACH 'data.parquet';                             -- recorded
+    FILTER WITH SELECT * FROM bundle WHERE age >= 18;  -- recorded
+    DROP COLUMN ssn;                                   -- recorded
 
-# Multiple sources (will be unioned)
-c = await c.attach("january.parquet")
-c = await c.attach("february.parquet")
-c = await c.attach("march.parquet")
-```
+    SELECT * FROM bundle;                              -- pipeline executes here
+    ```
 
-## Versioning and Commits
+This lets Bundlebase optimize the entire pipeline before touching any data — pushing filters down to the source, skipping columns that aren't needed, and streaming results rather than loading everything into memory at once.
 
-Bundlebase includes built-in version control similar to Git:
+## Data sources and formats
 
-```python
-# Create a bundle at a specific path
-c = await bb.create("/path/to/bundle")
+There are two ways to bring data into a bundle: **attach** and **source**.
 
-# Make changes
-c = await c.attach("data.parquet")
-c = await c.filter("year >= 2020")
+### Attach — specific files
 
-# Commit your changes
-await c.commit("Initial data load with 2020+ filter")
+`attach` pulls in a specific file or URL right now. Multiple attaches union together automatically, even across formats:
 
-# Later, open the saved bundle
-c = await bb.open("/path/to/bundle")
+=== "Python"
 
-# View commit history
-history = c.history()
-for commit in history:
-    print(f"{commit.version}: {commit.message}")
-```
+    ```python
+    bundle.attach("local.parquet")
+    bundle.attach("s3://bucket/data.csv")
+    bundle.attach("https://example.com/feed.json")
+    bundle.attach("january.parquet")
+    bundle.attach("february.parquet")   # unioned with january
+    ```
 
-## Indexing
+=== "SQL"
 
-Indexes enable fast lookups on specific columns:
+    ```sql
+    ATTACH 'local.parquet';
+    ATTACH 's3://bucket/data.csv';
+    ATTACH 'https://example.com/feed.json';
+    ATTACH 'january.parquet';
+    ATTACH 'february.parquet';   -- unioned with january
+    ```
 
-```python
-# Define an index on a column
-c = await c.create_index("email")
+### Source — automatic discovery
 
-# Now queries on email will be faster
-c = await c.filter("email = 'user@example.com'")
+`create_source` defines a persistent watched location (an S3 prefix, a directory, a connector endpoint). Once defined, `fetch` discovers and attaches whatever files are new — no need to track which files you've already seen.
 
-# Rebuild an index if data changes
-c = await c.rebuild_index("email")
-```
+=== "Python"
 
-Bundlebase uses a sophisticated indexing system that:
+    ```python
+    # Define once — watch this S3 prefix for Parquet files
+    bundle.create_source("monthly_reports", {"url": "s3://exports/reports/", "patterns": "**/*.parquet"})
 
-- Builds indexes lazily (only when needed)
-- Uses cost-based optimization to decide when to use indexes
-- Supports multiple index types for different data types
+    # Each month: fetch picks up only the new files
+    bundle.fetch("monthly_reports")
+    bundle.commit("Added new monthly reports")
+    ```
 
-Learn more in the [Indexing Guide](../guide/indexing.md).
+=== "SQL"
+
+    ```sql
+    -- Define once
+    CREATE SOURCE FOR monthly_reports USING s3_connector WITH (url = 's3://exports/reports/', patterns = '**/*.parquet');
+
+    -- Each month: fetch picks up only the new files
+    FETCH monthly_reports ADD;
+    COMMIT 'Added new monthly reports';
+    ```
+
+Use `attach` when you know exactly what file you want. Use `source` when you want a bundle to stay in sync with a location over time — vendor drops, recurring exports, live data directories.
+
+Supported built-in sources: local files, S3, GCS, Azure Blob, HTTP/HTTPS, SFTP. Custom connectors can extend this to any source — see [Extending Bundlebase](why-bundlebase.md#extending-bundlebase).
+
+## Versioning and commits
+
+Every `commit` saves a named snapshot. The full history is stored in the bundle — no external tracking needed.
+
+=== "Python"
+
+    ```python
+    import bundlebase.sync as bb
+
+    bundle = bb.create("s3://my-bucket/sales")
+    bundle.attach("jan.csv")
+    bundle.commit("January data")
+
+    bundle = bundle.extend()
+    bundle.attach("feb.csv")
+    bundle.commit("Added February")
+
+    # View the history
+    bundle = bb.open("s3://my-bucket/sales")
+    for entry in bundle.history():
+        print(entry)
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE 's3://my-bucket/sales';
+    ATTACH 'jan.csv';
+    COMMIT 'January data';
+
+    EXTEND;
+    ATTACH 'feb.csv';
+    COMMIT 'Added February';
+
+    -- View the history
+    OPEN 's3://my-bucket/sales';
+    SHOW HISTORY;
+    ```
+
+## Indexes
+
+Indexes enable fast lookups on specific columns without scanning the full dataset:
+
+=== "Python"
+
+    ```python
+    bundle.create_index("email")
+
+    # Queries on email now use the index
+    result = bundle.query("SELECT * FROM bundle WHERE email = 'user@example.com'")
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE INDEX email;
+
+    -- Queries on email now use the index
+    SELECT * FROM bundle WHERE email = 'user@example.com';
+    ```
+
+Indexes work regardless of the underlying storage format — including CSV. CSV columns are stored as text, but you can index them directly and equality, range, and `IN` lookups will use the index without any casting. For line-oriented formats like CSV and JSON, Bundlebase uses byte-offset reads to fetch only the matching rows rather than scanning the file.
+
+Indexes are built lazily and Bundlebase uses cost-based optimization to decide when to use them. Learn more in the [Indexing Guide](../guide/indexing.md).

@@ -254,5 +254,5 @@ import bundlebase.sync as dc  # Not bundlebase!
 ## See Also
 
 - **[Async API](async-api.md)** - Async/await interface
-- **[Quick Start Guide](../../getting-started/quick-start.md)** - Side-by-side examples
+- **[Quick Start Guide](../../getting-started/python/quick-start.md)** - Side-by-side examples
 - **[Examples](../../examples/basic-operations.md)** - Practical code examples

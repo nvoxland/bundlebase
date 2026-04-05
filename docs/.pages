@@ -1,6 +1,7 @@
 nav:
   - Home: index.md
   - Getting Started: getting-started
+  - Use Cases: use-cases
   - User Guide: guide
   - Examples: examples
   - API Reference: api

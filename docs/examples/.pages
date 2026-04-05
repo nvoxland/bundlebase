@@ -1,2 +1,6 @@
 nav:
-  - ...
+- index.md
+- Basic Operations: basic-operations.md
+- Data Ingestion: data-ingestion.md
+- Persistent Rules: persistent-rules.md
+- Real-World Scenarios: real-world.md

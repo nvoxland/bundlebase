@@ -80,7 +80,7 @@ Excel and standard JSON files can be returned by connectors, and bundlebase auto
 
 ## Standalone CLI Binaries
 
-Each release now ships [binaries](../../getting-started/cli-install.md) for macOS (arm64), Linux (x86_64), and Windows (x86_64) — no Python required. Download from the [releases page](https://github.com/nvoxland/bundlebase/releases) and put on your PATH.
+Each release now ships [binaries](../../getting-started/cli/install.md) for macOS (arm64), Linux (x86_64), and Windows (x86_64) — no Python required. Download from the [releases page](https://github.com/nvoxland/bundlebase/releases) and put on your PATH.
 
 ## Performance
 

@@ -1,268 +1,310 @@
+---
+title: Basic Operations — Bundlebase Examples
+description: "Core Bundlebase operations: creating bundles, attaching data, filtering, column transforms, SQL queries, exporting, and versioning."
+---
+
 # Basic Operations
 
-This guide demonstrates common Bundlebase operations with practical examples.
+## Creating a bundle
 
-## Creating Bundles
+=== "Python"
 
-### In-Memory Bundle
+    ```python
+    import bundlebase.sync as bb
 
-```python
-import bundlebase as bb
+    # Local path
+    bundle = bb.create("/path/to/my-bundle")
 
-# Create a temporary in-memory bundle
-c = await bb.create("memory:///")
-```
+    # Cloud storage
+    bundle = bb.create("s3://my-bucket/my-bundle")
 
-### Persistent Bundle
+    # In-memory (no persistence, useful for testing)
+    bundle = bb.create("memory:///")
+    ```
 
-```python
-import bundlebase as bb
+=== "SQL"
 
-# Create a bundle at a specific path
-c = await bb.create("/path/to/bundle")
+    ```sql
+    CREATE '/path/to/my-bundle';
+    CREATE 's3://my-bucket/my-bundle';
+    ```
 
-# Later, open the saved bundle
-c = await bb.open("/path/to/bundle")
-```
+## Opening an existing bundle
 
-## Loading Data
+=== "Python"
 
-### Single File
+    ```python
+    import bundlebase.sync as bb
 
-```python
-import bundlebase as bb
+    bundle = bb.open("s3://my-bucket/my-bundle")
 
-c = await bb.create("memory:///")
-c = await c.attach("file:///path/data.parquet")
-```
+    # Inspect before doing anything
+    print(bundle.name)
+    print(f"{bundle.num_rows:,} rows")
+    print(bundle.version)
+    ```
 
-### Multiple Files
+=== "SQL"
 
-```python
-import bundlebase as bb
+    ```sql
+    OPEN 's3://my-bucket/my-bundle';
+    SHOW STATUS;
+    ```
 
-# Files are automatically unioned
-c = await bb.create("memory:///")
-c = await c.attach("file:///path/january.parquet")
-c = await c.attach("file:///path/february.parquet")
-c = await c.attach("file:///path/march.parquet")
-```
+## Attaching data
 
-## Filtering Data
+Multiple files union together automatically, even across formats:
 
-### Simple Filters
+=== "Python"
 
-```python
-import bundlebase as bb
+    ```python
+    bundle.attach("data.parquet")
+    bundle.attach("s3://bucket/more-data.csv")
+    bundle.attach("https://example.com/feed.json")
 
-c = await (bb.create("memory:///")
-    .attach("file:///path/data.parquet")
-    .filter("age >= 18"))
+    # Multiple files union together
+    bundle.attach("jan.parquet")
+    bundle.attach("feb.parquet")
+    bundle.attach("mar.parquet")
+    ```
 
-df = await c.to_pandas()
-```
+=== "SQL"
 
-### Complex Filters
+    ```sql
+    ATTACH 'data.parquet';
+    ATTACH 's3://bucket/more-data.csv';
+    ATTACH 'https://example.com/feed.json';
 
-```python
-import bundlebase as bb
+    ATTACH 'jan.parquet';
+    ATTACH 'feb.parquet';
+    ATTACH 'mar.parquet';
+    ```
 
-c = await (bb.create("memory:///")
-    .attach("file:///path/data.parquet")
-    .filter("age >= 18 AND status = 'active' AND balance > 1000"))
+!!! note
+    CSV columns import as text. Use `cast_column()` to convert types after attaching.
 
-df = await c.to_pandas()
-```
+## Filtering rows
 
-### Parameterized Filters
+=== "Python"
 
-```python
-import bundlebase as bb
+    ```python
+    # Simple filter
+    bundle.filter("status = 'active'")
 
-min_age = 18
-status = "active"
+    # Compound filter
+    bundle.filter("age >= 18 AND status = 'active' AND balance > 1000")
 
-c = await (bb.create("memory:///")
-    .attach("file:///path/data.parquet")
-    .filter("age >= $1 AND status = $2", [min_age, status]))
+    # Parameterized (prevents injection, handles type coercion)
+    bundle.filter("age >= $1 AND status = $2", [18, "active"])
+    ```
 
-df = await c.to_pandas()
-```
+=== "SQL"
 
-## Column Operations
+    ```sql
+    FILTER WITH SELECT * FROM bundle WHERE status = 'active';
 
-### Removing Columns
+    FILTER WITH SELECT * FROM bundle WHERE age >= 18 AND status = 'active' AND balance > 1000;
+    ```
 
-```python
-import bundlebase as bb
+## Column operations
 
-# Remove sensitive columns
-c = await (bb.create("memory:///")
-    .attach("file:///path/data.parquet")
-    .drop_column("ssn")
-    .drop_column("credit_card")
-    .drop_column("password"))
+=== "Python"
 
-df = await c.to_pandas()
-```
+    ```python
+    # Remove columns
+    bundle.drop_column("ssn")
+    bundle.drop_column("credit_card")
 
-### Renaming Columns
+    # Rename
+    bundle.rename_column("fname", "first_name")
+    bundle.rename_column("lname", "last_name")
 
-```python
-import bundlebase as bb
+    # Normalize messy names: "Customer Id" → "customer_id", "Phone 1" → "phone_1"
+    bundle.normalize_column_names()
 
-# Rename columns for clarity
-c = await (bb.create("memory:///")
-    .attach("file:///path/data.parquet")
-    .rename_column("fname", "first_name")
-    .rename_column("lname", "last_name")
-    .rename_column("addr", "address"))
+    # Cast CSV text to typed columns
+    bundle.cast_column("amount", "float64")
+    bundle.cast_column("created_at", "timestamp")
+    ```
 
-df = await c.to_pandas()
-```
+=== "SQL"
 
-### Normalizing Column Names
+    ```sql
+    DROP COLUMN ssn;
+    DROP COLUMN credit_card;
 
-```python
-import bundlebase as bb
+    RENAME COLUMN fname TO first_name;
+    RENAME COLUMN lname TO last_name;
 
-# Convert messy column names to clean identifiers
-# e.g. "Customer Id" -> "customer_id", "Phone 1" -> "phone_1"
-c = await (bb.create("memory:///")
-    .attach("file:///path/customers.csv")
-    .normalize_column_names())
+    NORMALIZE COLUMN NAMES;
 
-df = await c.to_pandas()
-```
+    CAST COLUMN amount AS FLOAT64;
+    CAST COLUMN created_at AS TIMESTAMP;
+    ```
 
-## Data Export
+## Querying with SQL
 
-### Pandas DataFrame
+=== "Python"
 
-```python
-import bundlebase as bb
+    ```python
+    # Filter and reshape with SQL
+    result = bundle.query("""
+        SELECT region, COUNT(*) as deals, SUM(amount) as total
+        FROM bundle
+        WHERE status = 'closed_won'
+        GROUP BY region
+        ORDER BY total DESC
+    """)
 
-c = await (bb.create("memory:///")
-    .attach("file:///path/data.parquet")
-    .filter("active = true"))
+    df = result.to_pandas()
+    ```
 
-# Convert to pandas
-df = await c.to_pandas()
+=== "SQL"
 
-# Continue with pandas operations
-df = df.sort_values("date")
-df.to_csv("output.csv")
-```
+    ```sql
+    SELECT region, COUNT(*) as deals, SUM(amount) as total
+    FROM bundle
+    WHERE status = 'closed_won'
+    GROUP BY region
+    ORDER BY total DESC;
+    ```
 
-### Polars DataFrame
+## Exporting
 
-```python
-import bundlebase as bb
+=== "Python"
 
-c = await (bb.create("memory:///")
-    .attach("file:///path/data.parquet"))
+    ```python
+    # pandas
+    df = bundle.to_pandas()
 
-# Convert to Polars
-df = await c.to_polars()
+    # polars
+    df = bundle.to_polars()
 
-# Continue with Polars operations
-result = df.group_by("category").agg(pl.col("value").sum())
-```
+    # numpy (returns dict of arrays keyed by column name)
+    arrays = bundle.to_numpy()
+    x = arrays["revenue"]
 
-### NumPy Arrays
+    # Streaming batches — constant memory regardless of dataset size
+    for batch in bundle.stream_batches():
+        process(batch)   # each batch is a PyArrow RecordBatch
+    ```
 
-```python
-import bundlebase as bb
+=== "SQL"
 
-c = await (bb.create("memory:///")
-    .attach("file:///path/data.parquet")
-    .query("SELECT x, y, z FROM bundle"))
+    ```sql
+    -- In the REPL, results stream to the terminal
+    SELECT * FROM bundle;
 
-# Convert to NumPy arrays
-arrays = await c.to_numpy()
+    -- Or connect a BI tool via the SQL server
+    -- bundlebase serve --bundle s3://... --port 32010
+    ```
 
-# Access arrays by column name
-x = arrays["x"]
-y = arrays["y"]
-z = arrays["z"]
+## Versioning
 
-# Perform NumPy operations
-mean_x = x.mean()
-```
+=== "Python"
 
-### Python Dictionary
+    ```python
+    import bundlebase.sync as bb
 
-```python
-import bundlebase as bb
+    # Create and commit
+    bundle = bb.create("s3://my-bucket/sales")
+    bundle.attach("jan.csv")
+    bundle.commit("January data")
 
-c = await (bb.create("memory:///")
-    .attach("file:///path/data.parquet"))
+    # Extend (mutable copy of an existing bundle)
+    bundle = bb.open("s3://my-bucket/sales").extend()
+    bundle.attach("feb.csv")
+    bundle.commit("Added February")
 
-# Convert to dictionary
-data = await c.to_dict()
+    # View history
+    bundle = bb.open("s3://my-bucket/sales")
+    for entry in bundle.history():
+        print(entry)
 
-# Access data by column name
-ids = data["id"]
-names = data["name"]
-ages = data["age"]
-```
+    # Roll back uncommitted changes
+    bundle = bb.open("s3://my-bucket/sales").extend()
+    bundle.attach("bad-data.csv")
+    bundle.reset()   # back to last committed state
+    ```
 
-## Indexing
+=== "SQL"
 
-### Creating Indexes
+    ```sql
+    CREATE 's3://my-bucket/sales';
+    ATTACH 'jan.csv';
+    COMMIT 'January data';
 
-```python
-import bundlebase as bb
+    OPEN 's3://my-bucket/sales';
+    EXTEND;
+    ATTACH 'feb.csv';
+    COMMIT 'Added February';
 
-c = await (bb.create("memory:///")
-    .attach("file:///path/data.parquet")
-    .create_index("email")  # Create index on email column
-    .create_index("user_id"))  # Create index on user_id column
+    OPEN 's3://my-bucket/sales';
+    SHOW HISTORY;
 
-# Queries on indexed columns will be faster
-c = await c.filter("email = 'user@example.com'")
-```
+    EXTEND;
+    ATTACH 'bad-data.csv';
+    RESET;
+    ```
 
-## Complete Example: Data Cleaning Pipeline
+## Indexes
 
-```python
-import bundlebase as bb
+=== "Python"
 
-# Create a comprehensive data cleaning pipeline
-c = await (bundlebase.create("/path/to/cleaned_data")
-    # Load data
-    .attach("raw_customers.csv")
-    .attach("raw_orders.csv")
+    ```python
+    bundle.create_index("email")
+    bundle.create_index("user_id")
 
-    # Remove PII
-    .drop_column("ssn")
-    .drop_column("email")
-    .drop_column("phone")
-    .drop_column("credit_card")
+    # Queries on these columns now use the index automatically
+    result = bundle.query("SELECT * FROM bundle WHERE email = 'user@example.com'")
 
-    # Filter to active records
-    .filter("status = 'active'")
-    .filter("year >= 2020")
+    # Drop an index
+    bundle.drop_index("email")
+    ```
 
-    # Rename columns for clarity
-    .rename_column("fname", "first_name")
-    .rename_column("lname", "last_name")
-    .rename_column("addr", "address")
-    .rename_column("zip", "postal_code")
+=== "SQL"
 
-    # Select final columns
-    .query("SELECT id, first_name, last_name, address, postal_code, country, order_total FROM bundle"))
+    ```sql
+    CREATE INDEX email;
+    CREATE INDEX user_id;
 
-# Export cleaned data
-df = await c.to_pandas()
-print(f"Cleaned {len(df)} records")
+    SELECT * FROM bundle WHERE email = 'user@example.com';
 
-# Commit for versioning
-await c.commit("Data cleaning pipeline v1.0")
-```
+    DROP INDEX email;
+    ```
 
-## See Also
+## Method chaining
 
-- [Getting Started](../getting-started/quick-start.md)
-- [User Guide](../guide/attaching.md) 
-- [API Reference](../api/python/index.md)
+All mutation methods return `self`, so operations can be chained:
+
+=== "Python"
+
+    ```python
+    import bundlebase.sync as bb
+
+    bundle = (bb.create("s3://my-bucket/sales-q1")
+        .attach("jan.csv")
+        .attach("feb.csv")
+        .attach("mar.csv")
+        .normalize_column_names()
+        .cast_column("amount", "float64")
+        .drop_column("internal_id")
+        .filter("status = 'closed_won'")
+        .set_name("Q1 Sales — Closed Won")
+        .commit("Initial Q1 export"))
+    ```
+
+=== "SQL"
+
+    ```sql
+    CREATE 's3://my-bucket/sales-q1';
+    ATTACH 'jan.csv';
+    ATTACH 'feb.csv';
+    ATTACH 'mar.csv';
+    NORMALIZE COLUMN NAMES;
+    CAST COLUMN amount AS FLOAT64;
+    DROP COLUMN internal_id;
+    FILTER WITH SELECT * FROM bundle WHERE status = 'closed_won';
+    SET NAME 'Q1 Sales — Closed Won';
+    COMMIT 'Initial Q1 export';
+    ```

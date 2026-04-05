@@ -55,6 +55,7 @@ enum Subcommand {
     GenerateReport(cmd::report_cmd::ReportArgs),
 
     /// Start Arrow Flight SQL server
+    #[command(name = "serve")]
     Server(cmd::server_cmd::ServerArgs),
 
     /// Install agent skills for coding agents
