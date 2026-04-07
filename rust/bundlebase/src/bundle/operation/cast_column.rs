@@ -63,14 +63,28 @@ impl Operation for CastColumnOp {
             }
         }
 
+        let display_name = bundle_schema.column_name(&self.id).unwrap_or_else(|| self.id.to_string());
+        let new_type_str = format!("{}", self.new_type);
+
         df.select(select_exprs)
-            .map_err(|e| Box::new(e) as BundlebaseError)
+            .map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("Cast error") || msg.contains("Cannot cast") || msg.contains("invalid digit") {
+                    format!(
+                        "{}. Run 'PROFILE COLUMN \"{}\" FOR CAST TO {}' to see non-castable values.",
+                        msg, display_name, new_type_str
+                    ).into()
+                } else {
+                    Box::new(e) as BundlebaseError
+                }
+            })
     }
 
     fn describe(&self) -> String {
         format!(
             "CAST COLUMN: {} to {}",
-            self.id, self.new_type
+            self.id,
+            self.new_type,
         )
     }
 }

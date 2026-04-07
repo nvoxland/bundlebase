@@ -65,7 +65,7 @@ pub use parser::Rule;
 // Re-export builder command structs
 pub use builder::{
     AddColumnCommand, AlwaysDeleteCommand, AlwaysUpdateCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, UpdateCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
+    DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DropCastColumnCommand, UpdateCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
     DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
     DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
@@ -98,6 +98,7 @@ pub use facade::{
     ShowCountCommand,
 };
 pub use facade::SyntaxCommand;
+pub use facade::ProfileColumnCommand;
 
 // Re-export extension traits
 pub use facade_ext::BundleFacadeCommandExt;
@@ -151,6 +152,8 @@ pub enum FacadeCommand {
     DescribeData(DescribeDataCommand),
     /// Test a connector without creating a source
     TestConnector(TestConnectorCommand),
+    /// Profile a column's values (with optional cast-compatibility check)
+    ProfileColumn(ProfileColumnCommand),
 }
 
 impl FacadeCommand {
@@ -272,6 +275,10 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::ProfileColumn(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
         }
     }
 
@@ -306,6 +313,7 @@ impl FacadeCommand {
             FacadeCommand::Syntax(_) => SyntaxCommand::output_schema(),
             FacadeCommand::DescribeData(_) => DescribeDataCommand::output_schema(),
             FacadeCommand::TestConnector(_) => TestConnectorCommand::output_schema(),
+            FacadeCommand::ProfileColumn(_) => ProfileColumnCommand::output_schema(),
         }
     }
 
@@ -340,6 +348,7 @@ impl FacadeCommand {
             FacadeCommand::Syntax(_) => SyntaxCommand::output_shape(),
             FacadeCommand::DescribeData(_) => DescribeDataCommand::output_shape(),
             FacadeCommand::TestConnector(_) => TestConnectorCommand::output_shape(),
+            FacadeCommand::ProfileColumn(_) => ProfileColumnCommand::output_shape(),
         }
     }
 }
@@ -379,6 +388,7 @@ impl BundleCommand {
             BundleCommand::Syntax(cmd) => Ok(FacadeCommand::Syntax(cmd)),
             BundleCommand::DescribeData(cmd) => Ok(FacadeCommand::DescribeData(cmd)),
             BundleCommand::TestConnector(cmd) => Ok(FacadeCommand::TestConnector(cmd)),
+            BundleCommand::ProfileColumn(cmd) => Ok(FacadeCommand::ProfileColumn(cmd)),
             _ => {
                 // Get the command name for the error message
                 let cmd_name = match &self {
@@ -396,6 +406,7 @@ impl BundleCommand {
                     BundleCommand::ReplaceBlock(_) => "REPLACE",
                     BundleCommand::AddColumn(_) => "ADD COLUMN",
                     BundleCommand::CastColumn(_) => "CAST COLUMN",
+                    BundleCommand::DropCastColumn(_) => "DROP CAST COLUMN",
                     BundleCommand::DropColumn(_) => "ALTER TABLE DROP COLUMN",
                     BundleCommand::RenameColumn(_) => "ALTER TABLE RENAME COLUMN",
                     BundleCommand::NormalizeColumnNames(_) => "NORMALIZE COLUMN NAMES",
@@ -425,7 +436,7 @@ impl BundleCommand {
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
                     BundleCommand::ExportHollow(_) => "EXPORT HOLLOW",
-                    BundleCommand::ExportData(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_) => {
+                    BundleCommand::ExportData(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_) | BundleCommand::ProfileColumn(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -439,7 +450,7 @@ impl BundleCommand {
 
     /// Returns true if this command can be executed on a read-only bundle.
     pub fn is_facade_command(&self) -> bool {
-        matches!(self, BundleCommand::ExportData(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_))
+        matches!(self, BundleCommand::ExportData(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_) | BundleCommand::ProfileColumn(_))
     }
 }
 
@@ -716,7 +727,9 @@ register_commands! {
         AddColumn(AddColumnCommand) => Rule::add_column_stmt,
             "ADD COLUMN" => "ADD COLUMN <name> AS <expression>",
         CastColumn(CastColumnCommand) => Rule::cast_column_stmt,
-            "CAST COLUMN" => "CAST COLUMN <name> TO <type>",
+            "CAST COLUMN" => "CAST COLUMN <name> TO <type> [VERIFY EXISTING | NO VERIFY EXISTING]",
+        DropCastColumn(DropCastColumnCommand) => Rule::drop_cast_column_stmt,
+            "DROP CAST COLUMN" => "DROP CAST COLUMN <name>",
         DropColumn(DropColumnCommand) => Rule::drop_column_stmt,
             "DROP COLUMN" => "DROP COLUMN <name>",
         RenameColumn(RenameColumnCommand) => Rule::rename_column_stmt,
@@ -852,6 +865,8 @@ register_commands! {
             "DESCRIBE DATA" => "DESCRIBE DATA IN <col1> [AS <type>], <col2> [AS <type>], ...",
         TestConnector(TestConnectorCommand) => Rule::test_connector_stmt,
             "TEST CONNECTOR" => "TEST CONNECTOR <name> [WITH (<args>)] or TEST TEMP CONNECTOR '<runtime>::<entrypoint>' [WITH (<args>)]",
+        ProfileColumn(ProfileColumnCommand) => Rule::profile_column_stmt,
+            "PROFILE COLUMN" => "PROFILE COLUMN <name> [FOR CAST TO <type>]",
     }
 }
 

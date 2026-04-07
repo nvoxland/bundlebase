@@ -20,8 +20,10 @@ mod show_count;
 pub mod describe_data;
 mod syntax;
 mod test_connector;
+mod profile_column;
 
 pub use describe_data::DescribeDataCommand;
+pub use profile_column::ProfileColumnCommand;
 pub use test_connector::TestConnectorCommand;
 pub use describe_connector::DescribeConnectorCommand;
 pub use describe_function::DescribeFunctionCommand;

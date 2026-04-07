@@ -37,7 +37,7 @@ pub use pack::JoinTypeOption;
 pub use facade::BundleFacade;
 pub use indexed_blocks::IndexedBlocks;
 pub use init::{InitCommit, INIT_FILENAME};
-pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation, HollowContext, ExpectedColumn};
+pub use operation::{AnyOperation, BundleChange, CreateSourceOp, Operation, HollowContext, ExpectedColumn, resolve_cast_ops};
 pub use source::Source;
 pub use crate::arrow_types::parse_arrow_type_name;
 pub use connector_entry::ConnectorEntry;
@@ -1214,7 +1214,11 @@ impl BundleFacade for Bundle {
                 );
 
             let mut bundle_schema = BundleSchema::initial(&ops);
-            for op in ops.iter() {
+            let cast_active = resolve_cast_ops(&ops);
+            for (op, active) in ops.iter().zip(cast_active.iter()) {
+                if !active {
+                    continue;
+                }
                 debug!("Applying to dataframe: {}", &op.describe());
                 if let AnyOperation::CreateJoin(create_join) = op {
                     if let Some(pack) = packs_snapshot.get(&create_join.id) {

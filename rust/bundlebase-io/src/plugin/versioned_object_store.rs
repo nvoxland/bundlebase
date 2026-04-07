@@ -104,16 +104,11 @@ impl IOReadFile for VersionedObjectStoreFile {
         self.inner.exists().await
     }
 
-    async fn read_bytes(&self) -> Result<Option<Bytes>, BundlebaseError> {
-        self.validate_if_needed().await?;
-        self.inner.read_bytes().await
-    }
-
-    async fn read_stream(
+    async fn open_stream(
         &self,
     ) -> Result<Option<BoxStream<'static, Result<Bytes, BundlebaseError>>>, BundlebaseError> {
         self.validate_if_needed().await?;
-        self.inner.read_stream().await
+        self.inner.open_stream().await
     }
 
     async fn metadata(&self) -> Result<Option<FileInfo>, BundlebaseError> {

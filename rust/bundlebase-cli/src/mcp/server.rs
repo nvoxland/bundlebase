@@ -4,6 +4,7 @@
 //! Can start with or without a bundle — use `open_bundle` or `create_bundle` to load one.
 
 use bundlebase::{Bundle, BundleBuilder, BundleFacade};
+use bundlebase_common::progress::run_with_tracker;
 use bundlebase_common::BundlebaseError;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -11,12 +12,14 @@ use rmcp::model::{
     CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo,
 };
 use rmcp::schemars;
-use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler, ServiceExt};
+use rmcp::service::RequestContext;
+use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use super::progress::create_mcp_tracker;
 use super::tools;
 
 /// Parameter struct for the `query` tool.
@@ -247,12 +250,23 @@ impl BundlebaseMcpServer {
     async fn query(
         &self,
         Parameters(params): Parameters<QueryParams>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let bundle = match self.get_bundle(&params.bundle).await {
             Ok(b) => b,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
-        match tools::execute_query(&bundle, &params.sql).await {
+
+        // If the client provided a progressToken, install an MCP progress tracker
+        // so long-running operations (FETCH, ATTACH, index builds) emit notifications.
+        let result = if let Some(token) = context.meta.get_progress_token() {
+            let tracker = create_mcp_tracker(context.peer.clone(), token);
+            run_with_tracker(tracker, tools::execute_query(&bundle, &params.sql)).await
+        } else {
+            tools::execute_query(&bundle, &params.sql).await
+        };
+
+        match result {
             Ok(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
             Err(e) => Ok(CallToolResult::error(vec![Content::text(e)])),
         }

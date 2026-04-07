@@ -5,6 +5,7 @@
 
 use bundlebase_command::OutputShape;
 use bundlebase::BundleFacade;
+use bundlebase_common::progress::ProgressScope;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -18,6 +19,12 @@ pub async fn execute_query(
     sql: &str,
 ) -> Result<String, String> {
     use crate::repl::commands;
+
+    // Top-level progress scope: emits start/finish for every command, even those
+    // that have no internal progress instrumentation (e.g. CREATE SOURCE, long SELECTs).
+    // Truncate at 80 chars so long queries don't produce unwieldy notification messages.
+    let label = sql.get(..80).unwrap_or(sql);
+    let _progress = ProgressScope::new(label, None);
 
     let mut cmds = commands::parse(sql).map_err(|e| e.to_string())?;
 
@@ -120,6 +127,8 @@ pub async fn get_history(bundle: &Arc<dyn BundleFacade>) -> Result<String, Strin
 mod tests {
     use super::*;
     use bundlebase::BundleBuilder;
+    use bundlebase_common::progress::run_with_tracker;
+    use std::sync::Arc;
 
     fn init() {
         static INIT: std::sync::Once = std::sync::Once::new();
@@ -135,6 +144,78 @@ mod tests {
         BundleBuilder::create(&format!("memory:///mcp_tools_test_{}", ts), None)
             .await
             .expect("Failed to create test bundle")
+    }
+
+    /// A simple tracker that counts start/finish calls and captures the first operation name.
+    #[derive(Clone)]
+    struct CountingTracker {
+        starts: Arc<std::sync::atomic::AtomicU32>,
+        finishes: Arc<std::sync::atomic::AtomicU32>,
+        first_op: Arc<parking_lot::Mutex<Option<String>>>,
+    }
+
+    impl CountingTracker {
+        fn new() -> Self {
+            Self {
+                starts: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                finishes: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+                first_op: Arc::new(parking_lot::Mutex::new(None)),
+            }
+        }
+        fn start_count(&self) -> u32 { self.starts.load(std::sync::atomic::Ordering::SeqCst) }
+        fn finish_count(&self) -> u32 { self.finishes.load(std::sync::atomic::Ordering::SeqCst) }
+        fn first_operation(&self) -> Option<String> { self.first_op.lock().clone() }
+    }
+
+    impl bundlebase_common::progress::ProgressTracker for CountingTracker {
+        fn start(&self, operation: &str, _total: Option<u64>) -> bundlebase_common::progress::ProgressId {
+            self.starts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut lock = self.first_op.lock();
+            if lock.is_none() {
+                *lock = Some(operation.to_string());
+            }
+            bundlebase_common::progress::ProgressId::new()
+        }
+        fn update(&self, _id: bundlebase_common::progress::ProgressId, _current: u64, _message: Option<&str>) {}
+        fn finish(&self, _id: bundlebase_common::progress::ProgressId) {
+            self.finishes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    /// Verify that execute_query emits a Start and Finish progress event for every command,
+    /// even commands (like CREATE SOURCE) that have no internal progress instrumentation.
+    #[tokio::test]
+    async fn test_execute_query_emits_progress_events() {
+        let bundle = create_test_bundle().await;
+        let tracker = CountingTracker::new();
+
+        let result = run_with_tracker(
+            Arc::new(tracker.clone()),
+            execute_query(&bundle, "SELECT 1 AS value"),
+        ).await;
+
+        assert!(result.is_ok(), "Query failed: {:?}", result);
+        assert!(tracker.start_count() >= 1, "Expected at least one Start event");
+        assert!(tracker.finish_count() >= 1, "Expected at least one Finish event");
+
+        let op = tracker.first_operation().expect("No operation name recorded");
+        assert!(op.contains("SELECT 1"), "Operation should contain SQL, got: {}", op);
+    }
+
+    /// Verify progress events fire for a bundlebase command (SHOW STATUS), not just SELECT.
+    #[tokio::test]
+    async fn test_command_emits_progress_events() {
+        let bundle = create_test_bundle().await;
+        let tracker = CountingTracker::new();
+
+        let result = run_with_tracker(
+            Arc::new(tracker.clone()),
+            execute_query(&bundle, "SHOW STATUS"),
+        ).await;
+
+        assert!(result.is_ok(), "SHOW STATUS failed: {:?}", result);
+        assert!(tracker.start_count() >= 1, "No Start event for SHOW STATUS");
+        assert!(tracker.finish_count() >= 1, "No Finish event for SHOW STATUS");
     }
 
     #[tokio::test]

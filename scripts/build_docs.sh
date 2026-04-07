@@ -10,8 +10,9 @@ echo "Installing documentation dependencies..."
 poetry install --with docs
 
 # Build Rust Python extension (needed for mkdocstrings to introspect Python API)
+# Use a separate target dir to avoid cache collisions with plain cargo builds.
 echo "Building Rust Python extension..."
-poetry run maturin develop
+CARGO_TARGET_DIR=target/maturin poetry run maturin develop
 
 # Build Rust documentation
 echo "Generating Rust API documentation..."

@@ -216,46 +216,7 @@ impl IOReadFile for FtpFile {
         Ok(result.is_ok())
     }
 
-    async fn read_bytes(&self) -> Result<Option<Bytes>, BundlebaseError> {
-        let mut stream = self.connect().await?;
-
-        let mut buffer = Vec::new();
-        let result = stream.retr_as_stream(&self.path).await;
-
-        match result {
-            Ok(mut data_stream) => {
-                data_stream.read_to_end(&mut buffer).await.map_err(|e| {
-                    BundlebaseError::from(format!("Failed to read FTP file '{}': {}", self.path, e))
-                })?;
-                stream.finalize_retr_stream(data_stream).await.map_err(|e| {
-                    BundlebaseError::from(format!(
-                        "Failed to finalize FTP download for '{}': {}",
-                        self.path, e
-                    ))
-                })?;
-                if let Err(e) = stream.quit().await {
-                    debug!("Error closing FTP connection: {}", e);
-                }
-                Ok(Some(Bytes::from(buffer)))
-            }
-            Err(e) => {
-                if let Err(e) = stream.quit().await {
-                    debug!("Error closing FTP connection: {}", e);
-                }
-                // Check if it's a file not found error
-                // FTP error 550 = "Requested action not taken. File unavailable"
-                // This is the standard FTP response for file not found
-                let err_str = e.to_string().to_lowercase();
-                if err_str.contains("550") || err_str.contains("not found") || err_str.contains("no such file") {
-                    Ok(None)
-                } else {
-                    Err(format!("Failed to download FTP file '{}': {}", self.path, e).into())
-                }
-            }
-        }
-    }
-
-    async fn read_stream(
+    async fn open_stream(
         &self,
     ) -> Result<Option<BoxStream<'static, Result<Bytes, BundlebaseError>>>, BundlebaseError> {
         match self.download_to_temp_file().await? {

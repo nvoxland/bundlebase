@@ -5,6 +5,7 @@
 //! with or without a bundle — use the `open_bundle` or `create_bundle` tools
 //! to load one during the session.
 
+mod progress;
 mod server;
 mod tools;
 

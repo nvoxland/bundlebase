@@ -223,6 +223,58 @@ Multiple bundles can be open simultaneously, each identified by a unique `bundle
 
 The `query` tool handles everything: SELECT queries, ATTACH, DETACH, FILTER, RENAME, COMMIT, and all other bundlebase SQL commands.
 
+### Progress Tracking
+
+The `mcp__bundlebase__query` tool supports the MCP `progressToken` protocol — when you pass a `_meta.progressToken`, the server emits `notifications/progress` updates during execution so the user can see what's happening in real time.
+
+**Always pass a progress token for every query.** Any operation could be slow depending on data size — `FETCH`, `ATTACH`, `CREATE INDEX`, `CAST COLUMN`, and others can all take seconds to minutes. Passing a token that goes unused has no cost; missing one on a slow operation leaves the user with no feedback.
+
+```
+# Claude Code / MCP framework handles the token transparently when you call:
+mcp__bundlebase__query(bundle="data", sql="FETCH base SYNC")
+```
+
+The progress notifications include:
+- Operation name (e.g., "Processing 42 discovered files")
+- Current count and total (e.g., `progress: 12, total: 42`)
+- File or item currently being processed
+
+**If no progress notifications arrive within ~10 seconds of starting a slow operation:**
+1. The operation may still be running (some sources are slow to start)
+2. The client may not support `progressToken` — the operation still completes, you just won't see live updates
+3. If the tool call itself hangs (no response after several minutes), see the recovery section below
+
+### Recovering from Stalled Operations
+
+If a `mcp__bundlebase__query` call appears stuck (tool call never returns, or returns after an unreasonably long time with no result):
+
+**Step 1 — Check if the operation actually completed:**
+```
+mcp__bundlebase__status(bundle="data")
+```
+If status shows the expected changes (e.g., an ATTACH or FETCH), the operation completed — the result just wasn't returned. Commit normally.
+
+**Step 2 — If status shows nothing pending, check history:**
+```
+mcp__bundlebase__query(bundle="data", sql="SHOW HISTORY")
+```
+If the operation was committed before the hang (e.g., an auto-commit source creation), it's done.
+
+**Step 3 — If the bundle is in an unknown state, use a dry run to assess:**
+```
+mcp__bundlebase__query(bundle="data", sql="FETCH base ADD DRY RUN")
+```
+Dry run shows what *would* be fetched without making changes. If it shows 0 new files, the data was already fetched.
+
+**Step 4 — If the MCP server itself is unresponsive**, close and reopen the bundle:
+```
+mcp__bundlebase__close_bundle(bundle="data")
+mcp__bundlebase__open_bundle(bundle="data", path="./data")
+mcp__bundlebase__status(bundle="data")
+```
+Opening an existing bundle restores committed state. Any uncommitted changes from before the hang are gone — use `SHOW HISTORY` to see the last committed version.
+
+
 ### MCP Workflow Example
 
 ```
@@ -388,23 +440,21 @@ Do NOT drop columns just because they aren't used in the current analysis. Bundl
 
 ## Operation Ordering
 
-When cleaning data, always FILTER out bad rows BEFORE adding computed columns that depend on those values. Otherwise CAST or arithmetic may fail on dirty data. Use `TRY_CAST` instead of `CAST` for defensive type conversion.
+When cleaning data, always fix bad values or filter out bad rows BEFORE adding computed columns or casting. Otherwise CAST or arithmetic may fail on dirty data. Use `TRY_CAST` instead of `CAST` for defensive type conversion in ADD COLUMN expressions.
 
 ```
 # BAD: computed column fails because some rows have non-numeric values
 mcp__bundlebase__query(bundle="data", sql="ADD COLUMN price_cents AS CAST(price AS DOUBLE) * 100")
 
-# GOOD: check for dirty data first
-mcp__bundlebase__query(bundle="data", sql="SELECT price, COUNT(*) as cnt FROM bundle WHERE TRY_CAST(price AS DOUBLE) IS NULL GROUP BY price")
-
-# Then filter out bad rows, then compute
-mcp__bundlebase__query(bundle="data", sql="FILTER WITH SELECT * FROM bundle WHERE TRY_CAST(price AS DOUBLE) IS NOT NULL")
-mcp__bundlebase__query(bundle="data", sql="ADD COLUMN price_cents AS CAST(price AS DOUBLE) * 100")
+# GOOD: profile the data first, then fix bad values, then compute
+mcp__bundlebase__query(bundle="data", sql="PROFILE COLUMN price FOR CAST TO Float64")
+mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = NULL WHERE TRY_CAST(price AS Float64) IS NULL")
+mcp__bundlebase__query(bundle="data", sql="ADD COLUMN price_cents AS CAST(price AS Float64) * 100")
 ```
 
 ## Data Quality Checks
 
-**Always run `DESCRIBE DATA` before casting or computing on a column.** It profiles columns and reveals dirty data, sentinel values, NULLs, and type mismatches that would cause CAST failures.
+**Always profile columns before casting them.** This reveals dirty data, sentinel values, NULLs, and type mismatches that would cause CAST failures.
 
 ```
 # Profile columns to see min/max/avg/nulls/top values — do this FIRST
@@ -414,15 +464,63 @@ mcp__bundlebase__query(bundle="data", sql="DESCRIBE DATA IN price, quantity")
 # to find values that won't convert (e.g., "N/A", ">2", "10,5")
 mcp__bundlebase__query(bundle="data", sql="DESCRIBE DATA IN price AS DOUBLE")
 
+# Use PROFILE COLUMN for a focused view of a single column's values and frequencies
+mcp__bundlebase__query(bundle="data", sql="PROFILE COLUMN price")
+
+# Use PROFILE COLUMN ... FOR CAST TO to see exactly which values can't be cast
+mcp__bundlebase__query(bundle="data", sql="PROFILE COLUMN price FOR CAST TO Float64")
+# Returns a table of (value, count) for all non-castable values
+
 # Then fix or remove the bad values before casting (see "Cleaning Data" below)
-mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = NULL WHERE TRY_CAST(price AS DOUBLE) IS NULL")
-mcp__bundlebase__query(bundle="data", sql="CAST COLUMN price TO DOUBLE")
+mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = NULL WHERE price IN ('N/A', '-', '')")
+mcp__bundlebase__query(bundle="data", sql="CAST COLUMN price TO Float64")
 ```
 
 **The pattern for type conversion:**
-1. `DESCRIBE DATA IN col AS TARGET_TYPE` — find values that won't cast
-2. `UPDATE` to fix or NULL out bad values, or `DELETE` to remove bad rows
-3. `CAST COLUMN col TO TARGET_TYPE` — now safe to cast
+1. `PROFILE COLUMN col FOR CAST TO TARGET_TYPE` — find values that won't cast (with counts)
+2. `UPDATE` to fix bad values, or `DELETE` to remove bad rows
+3. `CAST COLUMN col TO TARGET_TYPE` — now safe to cast (pre-flight check runs automatically)
+
+## Understanding CAST COLUMN — Runtime Behavior
+
+**Critical:** `CAST COLUMN` is a lazy operation. It does not transform data in-place — it adds a cast expression applied at query time. This means:
+
+- **Verification happens at cast time:** By default, `CAST COLUMN` runs a pre-flight scan of existing data to detect non-castable values before recording the operation. If any are found, it aborts with an error listing examples and a `PROFILE COLUMN` suggestion.
+- **Future blocks are not pre-verified:** When you later attach new blocks of data, those new rows are NOT pre-checked. If new data contains non-castable values, any SELECT query on that column will fail at runtime.
+- **Error recovery:** If a cast fails at runtime (e.g., on newly attached data), the error message will suggest running `PROFILE COLUMN` to find the bad values. Use `UPDATE`/`DELETE` to fix them, then retry.
+
+```
+# Default: verifies existing data before recording the cast
+mcp__bundlebase__query(bundle="data", sql="CAST COLUMN value TO Float64")
+# → Aborts if any existing values can't be cast, with a PROFILE COLUMN suggestion
+
+# Skip pre-flight check (faster, but you accept the risk of runtime cast errors):
+mcp__bundlebase__query(bundle="data", sql="CAST COLUMN value TO Float64 NO VERIFY EXISTING")
+
+# Revert a cast if you made a mistake:
+mcp__bundlebase__query(bundle="data", sql="DROP CAST COLUMN value")
+```
+
+**Handling future data that may not always be castable:**
+
+If new blocks of data will be attached in the future and you can't guarantee they'll be castable, use one of these approaches:
+
+1. **ALWAYS UPDATE / ALWAYS DELETE** — persistent rules applied to every new block:
+   ```
+   # Null out non-castable values in every future block
+   mcp__bundlebase__query(bundle="data", sql="ALWAYS UPDATE bundle SET value = NULL WHERE TRY_CAST(value AS Float64) IS NULL AND value IS NOT NULL")
+   
+   # Or delete rows with bad values from every future block
+   mcp__bundlebase__query(bundle="data", sql="ALWAYS DELETE FROM bundle WHERE TRY_CAST(value AS Float64) IS NULL AND value IS NOT NULL")
+   ```
+
+2. **ADD COLUMN with TRY_CAST instead of CAST COLUMN** — keeps the original and adds a derived column. NULL values show you which originals failed to cast:
+   ```
+   # This is the safest approach when data quality is uncertain
+   mcp__bundlebase__query(bundle="data", sql="ADD COLUMN value_float AS TRY_CAST(value AS Float64)")
+   # Now you can see value_float (NULL where cast failed) alongside the original value
+   # Find which values are failing: SELECT value, COUNT(*) FROM bundle WHERE value_float IS NULL GROUP BY value
+   ```
 
 ## Cleaning Data with UPDATE and DELETE
 
@@ -544,15 +642,17 @@ mcp__bundlebase__query(bundle="data", sql="COMMIT 'Normalized column names'")
 mcp__bundlebase__query(bundle="data", sql="DESCRIBE DATA IN price, status, email")
 
 # Step 2: Check columns before casting — find values that won't convert
-mcp__bundlebase__query(bundle="data", sql="DESCRIBE DATA IN price AS DOUBLE")
+mcp__bundlebase__query(bundle="data", sql="PROFILE COLUMN price FOR CAST TO Float64")
+# Returns table of (value, count) for all non-castable values
 
 # Step 3: Fix bad values with UPDATE
 mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = NULL WHERE price IN ('N/A', '-', '')")
 mcp__bundlebase__query(bundle="data", sql="UPDATE bundle SET price = REPLACE(price, ',', '.') WHERE price LIKE '%,%'")
 mcp__bundlebase__query(bundle="data", sql="COMMIT 'Fixed price column values'")
 
-# Step 4: Now safe to cast
-mcp__bundlebase__query(bundle="data", sql="CAST COLUMN price TO DOUBLE")
+# Step 4: Cast (pre-flight check verifies existing data automatically)
+mcp__bundlebase__query(bundle="data", sql="CAST COLUMN price TO Float64")
+# If you made a mistake: DROP CAST COLUMN price
 
 # Step 5: Delete bad rows
 mcp__bundlebase__query(bundle="data", sql="DELETE FROM bundle WHERE email IS NULL AND name IS NULL")

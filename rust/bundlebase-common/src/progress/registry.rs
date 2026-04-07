@@ -1,6 +1,8 @@
 //! Global progress tracker registry.
 //!
 //! Provides thread-safe storage and access to the active progress tracker.
+//! Task-local trackers take precedence over the global one, allowing per-call
+//! progress tracking (e.g. in MCP tool handlers) without global contention.
 
 use super::{LoggingTracker, ProgressTracker};
 use lazy_static::lazy_static;
@@ -16,24 +18,45 @@ lazy_static! {
         RwLock::new(Arc::new(LoggingTracker::new()));
 }
 
+tokio::task_local! {
+    /// Per-task progress tracker. When set, overrides the global tracker for
+    /// the duration of the task. Use `run_with_tracker` to install one.
+    static TASK_TRACKER: Arc<dyn ProgressTracker + Send + Sync>;
+}
+
 /// Get a clone of the current progress tracker.
 ///
-/// Returns an Arc to the tracker, which is cheap to clone and can be held
-/// across async boundaries.
+/// Returns the task-local tracker if one is installed via `run_with_tracker`,
+/// otherwise returns the global tracker.
 ///
 /// # Returns
 ///
-/// Arc to the currently registered tracker (default: NoOpTracker)
+/// Arc to the currently registered tracker (default: LoggingTracker)
+pub fn get_tracker() -> Arc<dyn ProgressTracker + Send + Sync> {
+    TASK_TRACKER
+        .try_with(|t| t.clone())
+        .unwrap_or_else(|_| PROGRESS_TRACKER.read().clone())
+}
+
+/// Run a future with a task-local progress tracker.
+///
+/// The tracker is active only for the duration of `f` and only within the
+/// current tokio task. Concurrent tool calls each get their own tracker
+/// without interfering with each other.
 ///
 /// # Example
 ///
 /// ```rust,ignore
-/// let tracker = get_tracker();
-/// let id = tracker.start("My operation", Some(100));
-/// tracker.finish(id);
+/// run_with_tracker(Arc::new(MyTracker), async {
+///     let _scope = ProgressScope::new("Operation", Some(100));
+///     do_work().await;
+/// }).await;
 /// ```
-pub fn get_tracker() -> Arc<dyn ProgressTracker + Send + Sync> {
-    PROGRESS_TRACKER.read().clone()
+pub async fn run_with_tracker<F>(tracker: Arc<dyn ProgressTracker + Send + Sync>, f: F) -> F::Output
+where
+    F: std::future::Future,
+{
+    TASK_TRACKER.scope(tracker, f).await
 }
 
 /// Replace the global progress tracker.

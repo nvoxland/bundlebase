@@ -1,5 +1,5 @@
 use crate::bundle::bundle_schema;
-use crate::bundle::operation::{AnyOperation, Operation};
+use crate::bundle::operation::{AnyOperation, Operation, resolve_cast_ops};
 use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
 use crate::index::{
@@ -621,8 +621,11 @@ impl IndexBlocksOp {
             .map_err(|e| BundlebaseError::from(format!("Failed to get table: {}", e)))?;
 
         let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
-        for op in operations.iter() {
-            df = op.apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema).await?;
+        let cast_active = resolve_cast_ops(&operations);
+        for (op, active) in operations.iter().zip(cast_active.iter()) {
+            if *active {
+                df = op.apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema).await?;
+            }
         }
 
         // .collect() is acceptable here: operates on a single block's batch, not the full dataset
@@ -843,8 +846,11 @@ impl IndexBlocksOp {
                 })?;
 
                 let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
-                for op in operations.iter() {
-                    df = op.apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema).await?;
+                let cast_active = resolve_cast_ops(&operations);
+                for (op, active) in operations.iter().zip(cast_active.iter()) {
+                    if *active {
+                        df = op.apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema).await?;
+                    }
                 }
 
                 let col_refs: Vec<&str> = text_columns.iter().map(|s| s.as_str()).collect();

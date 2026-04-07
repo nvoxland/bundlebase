@@ -330,20 +330,7 @@ impl IOReadFile for ObjectStoreFile {
         }
     }
 
-    async fn read_bytes(&self) -> Result<Option<Bytes>, BundlebaseError> {
-        match self.store.get(&self.path).await {
-            Ok(r) => Ok(Some(r.bytes().await?)),
-            Err(e) => {
-                if matches!(e, object_store::Error::NotFound { .. }) {
-                    Ok(None)
-                } else {
-                    Err(Box::new(e))
-                }
-            }
-        }
-    }
-
-    async fn read_stream(
+    async fn open_stream(
         &self,
     ) -> Result<Option<BoxStream<'static, Result<Bytes, BundlebaseError>>>, BundlebaseError> {
         match self.store.get(&self.path).await {

@@ -25,8 +25,8 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            rust/bundlebase -> target
+          workspaces: . -> target
+          cache-directories: target/maturin
 
       - name: Set up Python
         uses: actions/setup-python@v5

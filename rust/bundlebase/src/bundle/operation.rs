@@ -3,6 +3,7 @@ mod always_delete;
 mod always_update;
 mod attach_block;
 mod cast_column;
+mod drop_cast_column;
 mod create_view;
 mod delete;
 mod drop_always_delete;
@@ -40,6 +41,7 @@ pub use crate::bundle::operation::always_delete::AlwaysDeleteOp;
 pub use crate::bundle::operation::always_update::AlwaysUpdateOp;
 pub use crate::bundle::operation::attach_block::{AttachBlockOp, SourceInfo};
 pub use crate::bundle::operation::cast_column::CastColumnOp;
+pub use crate::bundle::operation::drop_cast_column::DropCastColumnOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
 pub use crate::bundle::operation::import_function::ImportFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
@@ -255,6 +257,7 @@ define_any_operation! {
     AlwaysUpdate(AlwaysUpdateOp),
     AttachBlock(AttachBlockOp),
     CastColumn(CastColumnOp),
+    DropCastColumn(DropCastColumnOp),
     ImportFunction(ImportFunctionOp),
     CreateIndex(CreateIndexOp),
     CreateJoin(CreateJoinOp),
@@ -291,4 +294,37 @@ impl Display for AnyOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.describe())
     }
+}
+
+/// Compute which operations in `ops` are active (should be applied to the DataFrame).
+///
+/// `DropCastColumn` cancels the most recent `CastColumn` for the same column —
+/// both the cast and the drop are marked inactive so neither appears in the pipeline.
+/// This is called before every `apply_dataframe` loop to handle cast reverts
+/// correctly regardless of operation ordering.
+///
+/// Returns a `Vec<bool>` parallel to `ops`: `true` = apply, `false` = skip.
+pub fn resolve_cast_ops(ops: &[AnyOperation]) -> Vec<bool> {
+    let mut active = vec![true; ops.len()];
+    // Stack of op indices per column: pushed on CastColumn, popped (and cancelled) on DropCastColumn.
+    let mut cast_stacks: HashMap<ColumnId, Vec<usize>> = HashMap::new();
+
+    for (i, op) in ops.iter().enumerate() {
+        match op {
+            AnyOperation::CastColumn(c) => {
+                cast_stacks.entry(c.id).or_default().push(i);
+            }
+            AnyOperation::DropCastColumn(d) => {
+                if let Some(stack) = cast_stacks.get_mut(&d.id) {
+                    if let Some(cancelled) = stack.pop() {
+                        active[cancelled] = false;
+                    }
+                }
+                active[i] = false; // the drop itself is never applied directly
+            }
+            _ => {}
+        }
+    }
+
+    active
 }

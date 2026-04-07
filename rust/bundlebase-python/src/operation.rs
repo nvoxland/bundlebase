@@ -16,6 +16,7 @@ impl PyOperation {
             AnyOperation::AddColumn(_) => "addColumn".to_string(),
             AnyOperation::AttachBlock(_) => "attachBlock".to_string(),
             AnyOperation::CastColumn(_) => "castColumn".to_string(),
+            AnyOperation::DropCastColumn(_) => "dropCastColumn".to_string(),
             AnyOperation::CreateView(_) => "CreateView".to_string(),
             AnyOperation::DropColumn(_) => "dropColumn".to_string(),
             AnyOperation::RenameColumn(_) => "renameColumn".to_string(),

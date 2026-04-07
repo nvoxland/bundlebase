@@ -8,7 +8,7 @@
 //! via the `headers` argument (one `Name: Value` pair per line).
 
 use bundlebase_common::connector::{ArgSpec, Connector, ConnectorSignature, SourceFormat, DiscoveredLocation, SourceData};
-use bundlebase_common::source_utils::{self as shared_utils, http_status_error};
+use bundlebase_common::source_utils::{self as shared_utils, http_status_error, stream_response};
 use bundlebase_common::{ConfigProvider, BundlebaseError};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -94,8 +94,7 @@ async fn perform_request(url: &Url, args: &HashMap<String, String>) -> Result<By
         return Err(http_status_error(url, status, body_text.as_deref()).into());
     }
 
-    response.bytes().await
-        .map_err(|e| BundlebaseError::from(format!("Failed to read response from '{}': {}", url, e)))
+    stream_response(&format!("Downloading {}", url), response).await
 }
 
 /// Map a Content-Type header value to a data format string.

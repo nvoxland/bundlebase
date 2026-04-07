@@ -93,15 +93,11 @@ pub async fn download_http_to_data_dir(
         }
     }
 
-    // Log content length if available
-    if let Some(len) = response.content_length() {
-        info!("Downloading {} ({:.1} MB)", url, len as f64 / 1_048_576.0);
-    }
-
-    let data = response
-        .bytes()
-        .await
-        .map_err(|e| BundlebaseError::from(format!("Failed to read '{}': {}", url, e)))?;
+    // Stream the response body with progress reporting.
+    let data = bundlebase_common::source_utils::stream_response(
+        &format!("Downloading {}", url),
+        response,
+    ).await?;
 
     info!("Downloaded {} ({:.1} MB)", url, data.len() as f64 / 1_048_576.0);
 
@@ -313,8 +309,10 @@ async fn save_from_url(
                 if !response.status().is_success() {
                     return Err(http_status_error(url, response.status(), None).into());
                 }
-                response.bytes().await
-                    .map_err(|e| BundlebaseError::from(format!("Failed to read '{}': {}", url, e)))?
+                bundlebase_common::source_utils::stream_response(
+                    &format!("Downloading {}", url),
+                    response,
+                ).await?
             } else {
                 let file = ObjectStoreFile::from_url(url, config.clone())?;
                 file.read_bytes().await?.ok_or_else(|| {

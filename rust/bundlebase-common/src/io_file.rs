@@ -1,6 +1,7 @@
 //! File IO traits for reading and writing files.
 
 use crate::BundlebaseError;
+use crate::progress::ProgressScope;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
@@ -21,19 +22,52 @@ pub trait IOReadFile: Send + Sync + Debug {
     /// Check if a file exists at this location.
     async fn exists(&self) -> Result<bool, BundlebaseError>;
 
-    /// Read file contents as bytes (for small files).
+    /// Open file contents as a raw byte stream (for large files).
     /// Returns `None` if the file doesn't exist.
-    async fn read_bytes(&self) -> Result<Option<Bytes>, BundlebaseError>;
-
-    /// Read file contents as a stream (for large files).
-    /// Returns `None` if the file doesn't exist.
-    async fn read_stream(
+    /// Implementors provide the raw stream; callers should prefer `read_stream` for progress tracking.
+    async fn open_stream(
         &self,
     ) -> Result<Option<BoxStream<'static, Result<Bytes, BundlebaseError>>>, BundlebaseError>;
 
     /// Get file metadata.
     /// Returns `None` if the file doesn't exist.
     async fn metadata(&self) -> Result<Option<FileInfo>, BundlebaseError>;
+
+    /// Read file contents as a stream, reporting progress via the active `ProgressTracker`.
+    ///
+    /// Wraps `open_stream()` with a progress scope so byte throughput is visible during
+    /// S3, GCS, SFTP, FTP reads. Callers receive the same chunk-by-chunk stream but each
+    /// chunk increments the registered tracker.
+    async fn read_stream(
+        &self,
+    ) -> Result<Option<BoxStream<'static, Result<Bytes, BundlebaseError>>>, BundlebaseError> {
+        let Some(raw) = self.open_stream().await? else {
+            return Ok(None);
+        };
+        let progress = ProgressScope::new(&format!("Reading {}", self.url()), None);
+        let tracked = raw.map(move |chunk_result| {
+            if let Ok(ref chunk) = chunk_result {
+                progress.increment(chunk.len() as u64, None);
+            }
+            chunk_result
+        });
+        Ok(Some(Box::pin(tracked)))
+    }
+
+    /// Read file contents as bytes.
+    /// Returns `None` if the file doesn't exist.
+    /// Progress is reported via the active `ProgressTracker` as chunks stream in.
+    async fn read_bytes(&self) -> Result<Option<Bytes>, BundlebaseError> {
+        let Some(mut stream) = self.read_stream().await? else {
+            return Ok(None);
+        };
+        let mut buffer = Vec::new();
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            buffer.extend_from_slice(&chunk);
+        }
+        Ok(Some(Bytes::from(buffer)))
+    }
 
     /// Read file contents as a UTF-8 string.
     /// Returns `None` if the file doesn't exist.
@@ -56,7 +90,7 @@ pub trait IOReadFile: Send + Sync + Debug {
     async fn compute_hash(&self) -> Result<String, BundlebaseError> {
         let mut hasher = Sha256::new();
 
-        if let Some(mut stream) = self.read_stream().await? {
+        if let Some(mut stream) = self.open_stream().await? {
             while let Some(chunk_result) = stream.next().await {
                 let chunk = chunk_result?;
                 hasher.update(&chunk);

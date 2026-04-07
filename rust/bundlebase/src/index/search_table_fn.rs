@@ -16,7 +16,7 @@
 //! ```
 
 use crate::bundle::bundle_schema;
-use crate::bundle::{AnyOperation, BundleFacade, Operation, Pack};
+use crate::bundle::{AnyOperation, BundleFacade, Operation, Pack, resolve_cast_ops};
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId};
 use crate::index::TextIndex;
 use crate::index::IndexDefinition;
@@ -226,11 +226,14 @@ impl SearchResultTableProvider {
             let mut df = ctx.table("bundle").await?;
 
             let mut bundle_schema = bundle_schema::BundleSchema::initial(&self.operations);
-            for op in self.operations.iter() {
-                df = op
-                    .apply_dataframe(df, ctx.clone().into(), &mut bundle_schema)
-                    .await
-                    .map_err(|e| DataFusionError::External(e))?;
+            let cast_active = resolve_cast_ops(&self.operations);
+            for (op, active) in self.operations.iter().zip(cast_active.iter()) {
+                if *active {
+                    df = op
+                        .apply_dataframe(df, ctx.clone().into(), &mut bundle_schema)
+                        .await
+                        .map_err(|e| DataFusionError::External(e))?;
+                }
             }
 
             // Final rename: internal names → user-visible names
@@ -509,6 +512,7 @@ impl DataSource for SearchDataSource {
                 op,
                 AnyOperation::AddColumn(_)
                     | AnyOperation::CastColumn(_)
+                    | AnyOperation::DropCastColumn(_)
                     | AnyOperation::Filter(_)
             )
         });
@@ -627,13 +631,16 @@ impl DataSource for SearchDataSource {
 
                 // Apply each operation to transform the data
                 let mut bundle_schema = bundle_schema::BundleSchema::initial(&operations);
-                for op in operations.iter() {
-                    df = op
-                        .apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema)
-                        .await
-                        .map_err(|e: crate::BundlebaseError| {
-                            DataFusionError::External(e)
-                        })?;
+                let cast_active = resolve_cast_ops(&operations);
+                for (op, active) in operations.iter().zip(cast_active.iter()) {
+                    if *active {
+                        df = op
+                            .apply_dataframe(df, op_ctx.clone().into(), &mut bundle_schema)
+                            .await
+                            .map_err(|e: crate::BundlebaseError| {
+                                DataFusionError::External(e)
+                            })?;
+                    }
                 }
 
                 // Final rename: internal names → user-visible names

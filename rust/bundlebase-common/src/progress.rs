@@ -72,9 +72,10 @@ mod registry;
 mod mock;
 
 pub use logging::LoggingTracker;
-pub use registry::{get_tracker, set_tracker, with_tracker};
+pub use registry::{get_tracker, run_with_tracker, set_tracker, with_tracker};
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Unique identifier for a progress operation.
 ///
@@ -178,6 +179,13 @@ pub trait ProgressTracker: Send + Sync {
 pub struct ProgressScope {
     id: ProgressId,
     current: AtomicU64,
+    /// Tracker captured at construction time.
+    ///
+    /// Capturing once avoids a redundant `get_tracker()` call (and Arc clone)
+    /// on every `update()`/`increment()`. Also ensures `finish()` always goes
+    /// to the same tracker that received `start()`, even if the scope is moved
+    /// across an await point that exits a `run_with_tracker` boundary.
+    tracker: Arc<dyn ProgressTracker + Send + Sync>,
 }
 
 impl ProgressScope {
@@ -197,6 +205,7 @@ impl ProgressScope {
         Self {
             id,
             current: AtomicU64::new(0),
+            tracker,
         }
     }
 
@@ -208,8 +217,7 @@ impl ProgressScope {
     /// * `message` - Optional status message
     pub fn update(&self, current: u64, message: Option<&str>) {
         self.current.store(current, Ordering::Relaxed);
-        let tracker = get_tracker();
-        tracker.update(self.id, current, message);
+        self.tracker.update(self.id, current, message);
     }
 
     /// Increment progress by a delta.
@@ -222,8 +230,7 @@ impl ProgressScope {
     /// * `message` - Optional status message
     pub fn increment(&self, delta: u64, message: Option<&str>) {
         let new_current = self.current.fetch_add(delta, Ordering::Relaxed) + delta;
-        let tracker = get_tracker();
-        tracker.update(self.id, new_current, message);
+        self.tracker.update(self.id, new_current, message);
     }
 
     /// Get the progress ID for this scope.
@@ -234,8 +241,7 @@ impl ProgressScope {
 
 impl Drop for ProgressScope {
     fn drop(&mut self) {
-        let tracker = get_tracker();
-        tracker.finish(self.id);
+        self.tracker.finish(self.id);
     }
 }
 

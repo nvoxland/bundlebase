@@ -62,6 +62,7 @@ schema_stmt = {
     | rename_join_stmt
     | drop_column_stmt
     | rename_column_stmt
+    | drop_cast_column_stmt
     | cast_column_stmt
     | add_column_stmt
     | normalize_column_names_stmt
@@ -126,6 +127,7 @@ metadata_stmt = {
     | show_always_deletes_stmt
     | show_always_updates_stmt
     | syntax_stmt
+    | profile_column_stmt
     | describe_data_stmt
     | describe_connector_stmt
     | describe_function_stmt
@@ -844,6 +846,34 @@ rename_column_stmt = {
 
 cast_column_stmt = {
     ^"cast" ~ ^"column" ~ identifier ~ ^"to" ~ identifier
+    ~ (^"no" ~ ^"verify" ~ ^"existing" | ^"verify" ~ ^"existing")?
+}
+
+// ============================================================================
+// DROP CAST COLUMN Statement
+// ============================================================================
+// Syntax: DROP CAST COLUMN <name>
+// Reverts the most recent cast on a column back to its pre-cast type.
+// Example:
+//   DROP CAST COLUMN value
+
+drop_cast_column_stmt = {
+    ^"drop" ~ ^"cast" ~ ^"column" ~ identifier
+}
+
+// ============================================================================
+// PROFILE COLUMN Statement
+// ============================================================================
+// Syntax: PROFILE COLUMN <name> [FOR CAST TO <type>]
+// Without FOR CAST TO: shows top values and null counts for the column.
+// With FOR CAST TO: shows non-castable values and their counts.
+// Examples:
+//   PROFILE COLUMN value
+//   PROFILE COLUMN value FOR CAST TO Float64
+
+profile_column_stmt = {
+    ^"profile" ~ ^"column" ~ identifier
+    ~ (^"for" ~ ^"cast" ~ ^"to" ~ identifier)?
 }
 
 // ============================================================================

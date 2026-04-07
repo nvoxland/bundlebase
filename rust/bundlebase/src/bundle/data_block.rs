@@ -10,7 +10,9 @@ use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{BlockId, IOReadFile, IOReadWriteDir};
 use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
 use crate::object_id::ColumnId;
+use crate::progress::ProgressScope;
 use crate::BundleConfig;
+use futures::StreamExt;
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::catalog::memory::DataSourceExec;
@@ -277,6 +279,26 @@ impl DataBlock {
         self.reader.clone()
     }
 
+    /// Collect a RecordBatch stream into a Vec, reporting progress per batch.
+    ///
+    /// Opens a `ProgressScope` named after the reader URL so that slow remote reads
+    /// (S3, GCS, SFTP, etc.) are visible during SELECT queries, not just during FETCH.
+    async fn collect(
+        reader_url: &url::Url,
+        mut stream: datafusion::execution::SendableRecordBatchStream,
+    ) -> datafusion::common::Result<Vec<arrow::record_batch::RecordBatch>> {
+        let progress = ProgressScope::new(&format!("Reading {}", reader_url), None);
+        let mut batches = Vec::new();
+        let mut rows_read: u64 = 0;
+        while let Some(result) = stream.next().await {
+            let batch = result?;
+            rows_read += batch.num_rows() as u64;
+            progress.update(rows_read, Some("rows"));
+            batches.push(batch);
+        }
+        Ok(batches)
+    }
+
     /// Evaluate all indexable filters and select the most selective index
     /// Returns None if no suitable index is found or all have selectivity above threshold
     async fn select_best_index<'a>(
@@ -518,8 +540,7 @@ impl TableProvider for DataBlock {
                             .with_runtime(Arc::clone(state.runtime_env())),
                     );
                     let stream = base_source.open(0, task_ctx)?;
-                    let batches: Vec<arrow::record_batch::RecordBatch> =
-                        datafusion::physical_plan::common::collect(stream).await?;
+                    let batches = Self::collect(self.reader.url(), stream).await?;
                     let batches = Self::rename_batches_with_internal_names(batches, &self.column_ids);
                     let batch_schema = batches.first()
                         .map(|b| b.schema())
@@ -545,8 +566,7 @@ impl TableProvider for DataBlock {
                         .with_runtime(Arc::clone(state.runtime_env())),
                 );
                 let stream = base_source.open(0, task_ctx)?;
-                let batches: Vec<arrow::record_batch::RecordBatch> =
-                    datafusion::physical_plan::common::collect(stream).await?;
+                let batches = Self::collect(self.reader.url(), stream).await?;
                 let batches = Self::rename_batches_with_internal_names(batches, &self.column_ids);
                 let batch_schema = batches.first()
                     .map(|b| b.schema())

@@ -181,6 +181,54 @@ pub async fn read_http_head_info(url: &Url) -> Result<HttpHeadInfo, BundlebaseEr
     })
 }
 
+/// Stream an already-open `reqwest::Response` body into `Bytes`, reporting progress.
+///
+/// Opens a `ProgressScope` using `label` and `Content-Length` as the total (if known),
+/// then streams response chunks and increments the scope for each one.
+///
+/// Use this when you already have a response object (e.g. after checking status/Content-Type).
+/// Use [`download_url`] when you just have a URL.
+pub async fn stream_response(
+    label: &str,
+    response: reqwest::Response,
+) -> Result<Bytes, BundlebaseError> {
+    use crate::progress::ProgressScope;
+
+    let total = response.content_length();
+    let progress = ProgressScope::new(label, total);
+    let mut stream = response.bytes_stream();
+    let mut buffer = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk
+            .map_err(|e| BundlebaseError::from(format!("Failed to read response: {}", e)))?;
+        buffer.extend_from_slice(&chunk);
+        progress.increment(chunk.len() as u64, None);
+    }
+    Ok(Bytes::from(buffer))
+}
+
+/// Download an HTTP(S) URL, reporting byte-level progress via the active `ProgressTracker`.
+///
+/// This is the canonical way to do a plain HTTP GET download in bundlebase. It:
+/// - Opens a `ProgressScope` with the URL as the operation name and `Content-Length` as the total
+/// - Streams response chunks, incrementing the scope for each chunk
+/// - Validates the HTTP status code
+///
+/// Use this for simple GET downloads. For requests that need custom headers, method, or
+/// content-type checking, make the request yourself and pass the response to
+/// [`stream_response`].
+pub async fn download_url(url: &Url) -> Result<Bytes, BundlebaseError> {
+    let response = reqwest::get(url.as_str())
+        .await
+        .map_err(|e| BundlebaseError::from(format!("Failed to download '{}': {}", url, e)))?;
+
+    if !response.status().is_success() {
+        return Err(http_status_error(url, response.status(), None).into());
+    }
+
+    stream_response(&format!("Downloading {}", url), response).await
+}
+
 /// Detect data format by inspecting the first bytes of content.
 ///
 /// Returns `"parquet"`, `"json"`, `"jsonl"`, or `"csv"`. Returns `None` for empty content.

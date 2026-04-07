@@ -325,29 +325,7 @@ impl IOReadFile for SftpFile {
         Ok(result.is_ok())
     }
 
-    async fn read_bytes(&self) -> Result<Option<Bytes>, BundlebaseError> {
-        let client = self.connect().await?;
-        match client.read_file(&self.path).await {
-            Ok(data) => {
-                client.close().await?;
-                Ok(Some(data))
-            }
-            Err(e) => {
-                client.close().await?;
-                // Check if it's a file not found error
-                // SFTP uses SSH_FX_NO_SUCH_FILE (code 2) for missing files
-                // We check common error message patterns as a fallback
-                let err_str = e.to_string().to_lowercase();
-                if err_str.contains("no such file") || err_str.contains("not found") || err_str.contains("error code: 2") {
-                    Ok(None)
-                } else {
-                    Err(e)
-                }
-            }
-        }
-    }
-
-    async fn read_stream(
+    async fn open_stream(
         &self,
     ) -> Result<Option<BoxStream<'static, Result<Bytes, BundlebaseError>>>, BundlebaseError> {
         let client = self.connect().await?;

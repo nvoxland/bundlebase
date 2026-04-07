@@ -63,6 +63,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
+          cache-directories: target/maturin
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -90,6 +91,7 @@ jobs:
       - name: Build Rust extension (development)
         env:
           RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+          CARGO_TARGET_DIR: target/maturin
         run: |
           poetry run maturin build --out dist
           poetry run pip install --force-reinstall --no-deps dist/*.whl
@@ -100,6 +102,7 @@ jobs:
       - name: Build Python wheel (release)
         env:
           RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+          CARGO_TARGET_DIR: target/maturin
         run: poetry run maturin build --release --out dist-release
 
       - name: Upload Python wheel artifacts

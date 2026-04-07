@@ -6,6 +6,7 @@
 use bundlebase_common::connector::{
     ArgSpec, SourceFormat, DiscoveredLocation, SourceData, Connector, ConnectorSignature,
 };
+use bundlebase_common::progress::ProgressScope;
 use bundlebase_common::source_utils as shared_utils;
 use bundlebase_common::{config_keys, config_scopes, ConfigKey, ConfigScope};
 use bundlebase_common::{ConfigProvider, BundlebaseError, Scope};
@@ -442,6 +443,10 @@ impl KaggleConnector {
                 ))
             })?;
             let mut file = tokio::fs::File::from_std(std_file);
+            let progress = ProgressScope::new(
+                &format!("Downloading {}", source_location),
+                response.content_length(),
+            );
             let mut stream = response.bytes_stream();
             while let Some(chunk) = stream.next().await {
                 let chunk = chunk.map_err(|e| {
@@ -450,6 +455,7 @@ impl KaggleConnector {
                         source_location, e
                     ))
                 })?;
+                progress.increment(chunk.len() as u64, None);
                 file.write_all(&chunk).await.map_err(|e| {
                     BundlebaseError::from(format!(
                         "Failed to write temp file for Kaggle download '{}': {}",
