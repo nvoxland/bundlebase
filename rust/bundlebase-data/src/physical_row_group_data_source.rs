@@ -27,8 +27,14 @@ pub enum LineOrientedFormat {
     JsonLines,
 }
 
-/// Custom DataSource that reads only specified rows from line-oriented files
-/// by their byte offsets. Used for index-based query optimization to avoid full table scans.
+/// Custom DataSource that reads only specified rows or page ranges from line-oriented files.
+///
+/// Two modes:
+/// - **Row-offset mode** (for index-based reads): reads individual rows by byte offset with 4KB
+///   read-ahead, coalescing nearby offsets into single range requests.
+/// - **Page-range mode** (for page-filtered reads): reads contiguous byte ranges (one or more
+///   coalesced pages) and parses all lines within each range.
+///
 /// Supports both CSV and JSON Lines formats.
 pub struct PhysicalRowGroupDataSource {
     /// The source file
@@ -37,9 +43,13 @@ pub struct PhysicalRowGroupDataSource {
     schema: SchemaRef,
     /// Schema after projection is applied (computed at construction time)
     projected_schema: SchemaRef,
-    /// Byte offsets of rows to read (sorted for sequential reading)
+    /// Row-offset mode: byte positions of individual rows to read (sorted for sequential reading).
+    /// Empty when in page-range mode.
     byte_offsets: Vec<u64>,
-    /// Number of rows (for statistics)
+    /// Page-range mode: coalesced byte ranges `(inclusive_start, exclusive_end)` to read in full.
+    /// Empty when in row-offset mode.
+    page_ranges: Vec<(u64, u64)>,
+    /// Number of rows/ranges (for statistics)
     num_rows: usize,
     /// Optional column projection (indices of columns to read)
     projection: Option<Vec<usize>>,
@@ -78,6 +88,44 @@ impl PhysicalRowGroupDataSource {
             schema,
             projected_schema,
             byte_offsets: sorted_offsets,
+            page_ranges: Vec::new(),
+            num_rows,
+            projection,
+            object_store,
+            format,
+        }
+    }
+
+    /// Create a PhysicalRowGroupDataSource from coalesced page byte ranges.
+    ///
+    /// Each range `(start, end)` is a contiguous byte span in the file. All lines within each
+    /// range are parsed and returned. Adjacent or nearby pages should be merged by the caller
+    /// before calling this constructor (see [`coalesce_page_ranges`]).
+    ///
+    /// # Arguments
+    /// * `file` - The source file
+    /// * `schema` - Schema of the data
+    /// * `page_ranges` - Byte ranges `(inclusive_start, exclusive_end)` to read
+    /// * `projection` - Optional column projection
+    /// * `format` - File format (CSV or JSON Lines)
+    pub fn from_page_ranges(
+        file: &ObjectStoreFile,
+        schema: SchemaRef,
+        page_ranges: Vec<(u64, u64)>,
+        projection: Option<Vec<usize>>,
+        format: LineOrientedFormat,
+    ) -> Self {
+        let num_rows = page_ranges.len(); // approximate; actual row count unknown until read
+        let object_store = file.store();
+        let projected_schema =
+            project_schema(&schema, projection.as_ref()).expect("Failed to project schema");
+
+        Self {
+            file: file.clone(),
+            schema,
+            projected_schema,
+            byte_offsets: Vec::new(),
+            page_ranges,
             num_rows,
             projection,
             object_store,
@@ -187,41 +235,64 @@ impl DataSource for PhysicalRowGroupDataSource {
         _partition: usize,
         _context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
-        // Read rows by their byte offsets (works for CSV and JSON Lines)
         let schema = self.schema.clone();
-
-        // Use pre-computed projected schema
-        // This was computed in the constructor using project_schema()
         let output_schema = self.projected_schema.clone();
-
-        log::debug!(
-            "PhysicalRowGroupDataSource output schema has {} columns: {:?}",
-            output_schema.fields().len(),
-            output_schema
-                .fields()
-                .iter()
-                .take(5)
-                .map(|f| format!("{}:{}", f.name(), f.data_type()))
-                .collect::<Vec<_>>()
-        );
-
-        let byte_offsets = self.byte_offsets.clone();
         let object_store = self.object_store.clone();
         let file_path = self.file.store_path().clone();
         let projection = self.projection.clone();
         let format = self.format;
 
-        // Batch byte offsets for efficient fetching
+        if !self.page_ranges.is_empty() {
+            // Page-range mode: read full page byte ranges, parse all lines in each range.
+            // Used for page-filtered reads (avoids reading entire file when only some pages match).
+            let page_ranges = self.page_ranges.clone();
+            log::debug!(
+                "PhysicalRowGroupDataSource: page-range mode, {} ranges",
+                page_ranges.len()
+            );
+
+            let stream = stream::iter(page_ranges).then(move |(range_start, range_end)| {
+                let object_store = object_store.clone();
+                let file_path = file_path.clone();
+                let schema = schema.clone();
+                let projection = projection.clone();
+
+                async move {
+                    // Fetch the full page range in one ObjectStore call
+                    let range = GetRange::Bounded(range_start..range_end);
+                    let options = GetOptions { range: Some(range), ..Default::default() };
+
+                    let bytes = match object_store.get_opts(&file_path, options).await {
+                        Ok(r) => r.bytes().await.map_err(|e| DataFusionError::External(Box::new(e)))?,
+                        Err(e) => return Err(DataFusionError::External(Box::new(e))),
+                    };
+
+                    if bytes.is_empty() {
+                        return Ok(RecordBatch::new_empty(
+                            project_schema(&schema, projection.as_ref())
+                                ?,
+                        ));
+                    }
+
+                    // Parse all lines in the range; format dictates whether to add a header.
+                    parse_bytes_to_batch(&bytes, &schema, &projection, format)
+                }
+            });
+
+            return Ok(Box::pin(RecordBatchStreamAdapter::new(output_schema, stream)));
+        }
+
+        // Row-offset mode: read individual rows by byte offset with 4KB read-ahead.
+        // Used for index-based query optimization.
+        let byte_offsets = self.byte_offsets.clone();
         let batches = Self::batch_offsets(&byte_offsets);
 
         log::debug!(
-            "Batched {} byte offsets into {} fetch operations for streaming",
+            "PhysicalRowGroupDataSource: row-offset mode, {} offsets → {} batches",
             byte_offsets.len(),
             batches.len()
         );
 
-        // Create async stream that yields one RecordBatch per fetch batch
-        // This provides better memory usage than accumulating all data
         let stream = stream::iter(batches).then(move |(batch_start, batch_end, batch_offsets)| {
             let object_store = object_store.clone();
             let file_path = file_path.clone();
@@ -229,135 +300,74 @@ impl DataSource for PhysicalRowGroupDataSource {
             let projection = projection.clone();
 
             async move {
-                // Fetch the entire batch range in one ObjectStore call
                 let range = GetRange::Bounded(batch_start..batch_end);
-                let options = GetOptions {
-                    range: Some(range),
-                    ..Default::default()
-                };
+                let options = GetOptions { range: Some(range), ..Default::default() };
 
                 let bytes = match object_store.get_opts(&file_path, options).await {
-                    Ok(get_result) => get_result
-                        .bytes()
-                        .await
-                        .map_err(|e| DataFusionError::External(Box::new(e)))?,
+                    Ok(r) => r.bytes().await.map_err(|e| DataFusionError::External(Box::new(e)))?,
                     Err(e) => return Err(DataFusionError::External(Box::new(e))),
                 };
 
-                // Extract lines from this batch
                 let lines = Self::extract_lines(&bytes, batch_start, &batch_offsets);
 
-                // Build RecordBatch from lines based on format
                 if lines.is_empty() {
-                    // Return empty batch with correct schema (projected if projection exists)
-                    let empty_schema = if let Some(proj) = &projection {
-                        Arc::new(
-                            schema
-                                .project(proj)
-                                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
-                        )
-                    } else {
-                        schema.clone()
-                    };
-                    return Ok(RecordBatch::new_empty(empty_schema));
+                    return Ok(RecordBatch::new_empty(
+                        project_schema(&schema, projection.as_ref())
+                            ?,
+                    ));
                 }
 
                 let batch = match format {
                     LineOrientedFormat::Csv => {
-                        // Estimate capacity: header + newlines + all lines
                         let lines_len: usize = lines.iter().map(|l| l.len() + 1).sum();
                         let header_len: usize = schema.fields().iter().map(|f| f.name().len() + 1).sum();
                         let mut csv_data = String::with_capacity(header_len + lines_len);
-
-                        // Build header inline without intermediate Vec allocation
                         let mut first = true;
                         for field in schema.fields() {
-                            if !first {
-                                csv_data.push(',');
-                            }
+                            if !first { csv_data.push(','); }
                             csv_data.push_str(field.name());
                             first = false;
                         }
                         csv_data.push('\n');
-
-                        for line in lines {
-                            csv_data.push_str(&line);
-                            csv_data.push('\n');
-                        }
-
-                        // Parse CSV data into RecordBatch
+                        for line in lines { csv_data.push_str(&line); csv_data.push('\n'); }
                         let cursor = Cursor::new(csv_data.as_bytes());
                         let mut reader = CsvReaderBuilder::new(schema.clone())
-                            .with_header(true)
-                            .build(cursor)
-                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
-
-                        reader
-                            .next()
-                            .ok_or_else(|| {
-                                DataFusionError::Internal("No batch produced".to_string())
-                            })?
-                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?
+                            .with_header(true).build(cursor)
+                            ?;
+                        reader.next()
+                            .ok_or_else(|| DataFusionError::Internal("No batch produced".to_string()))?
+                            ?
                     }
                     LineOrientedFormat::JsonLines => {
-                        // Pre-allocate capacity for all lines plus newlines
                         let total_len: usize = lines.iter().map(|l| l.len() + 1).sum();
                         let mut json_data = String::with_capacity(total_len);
-
-                        for line in lines {
-                            json_data.push_str(&line);
-                            json_data.push('\n');
-                        }
-
-                        // Parse JSON Lines data into RecordBatch
+                        for line in lines { json_data.push_str(&line); json_data.push('\n'); }
                         let cursor = Cursor::new(json_data.as_bytes());
                         let mut reader = JsonReaderBuilder::new(schema.clone())
                             .build(cursor)
-                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
-
-                        reader
-                            .next()
-                            .ok_or_else(|| {
-                                DataFusionError::Internal("No batch produced".to_string())
-                            })?
-                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?
+                            ?;
+                        reader.next()
+                            .ok_or_else(|| DataFusionError::Internal("No batch produced".to_string()))?
+                            ?
                     }
                 };
 
-                // Apply projection if specified
-                let final_batch = if let Some(proj) = &projection {
-                    log::debug!(
-                        "Applying projection {:?} to batch with {} columns",
-                        proj,
-                        batch.num_columns()
-                    );
+                // Apply projection
+                if let Some(proj) = &projection {
                     let projected_columns: Vec<_> =
                         proj.iter().map(|&i| batch.column(i).clone()).collect();
                     let projected_schema = Arc::new(
-                        schema
-                            .project(proj)
-                            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?,
+                        schema.project(proj)?,
                     );
-                    let result = RecordBatch::try_new(projected_schema, projected_columns)
-                        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
-                    log::debug!(
-                        "Created projected batch with {} columns",
-                        result.num_columns()
-                    );
-                    result
+                    RecordBatch::try_new(projected_schema, projected_columns)
+                        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))
                 } else {
-                    batch
-                };
-
-                Ok(final_batch)
+                    Ok(batch)
+                }
             }
         });
 
-        // Use output_schema which matches the actual schema of batches produced by the stream
-        Ok(Box::pin(RecordBatchStreamAdapter::new(
-            output_schema,
-            stream,
-        )))
+        Ok(Box::pin(RecordBatchStreamAdapter::new(output_schema, stream)))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -403,6 +413,136 @@ impl DataSource for PhysicalRowGroupDataSource {
     ) -> datafusion::common::Result<Option<Arc<dyn DataSource>>> {
         // TODO: Implement projection pushdown
         Ok(None)
+    }
+}
+
+/// Merge adjacent or nearby page byte ranges into single reads.
+///
+/// Pages whose gap is smaller than `gap_threshold` bytes are combined into one range,
+/// trading a small amount of extra I/O for fewer round-trips (important for cloud stores).
+///
+/// # Arguments
+/// * `pages` - All page groups in the layout (positional)
+/// * `included` - Indices of pages to include (must be sorted ascending)
+/// * `file_size` - Total file size (used to compute the last page's end offset)
+/// * `gap_threshold` - Maximum gap in bytes before splitting into a new range (default: 256KB)
+pub fn coalesce_page_ranges(
+    pages: &[crate::physical_row_group_layout::PageGroup],
+    included: &[usize],
+    file_size: u64,
+    gap_threshold: u64,
+) -> Vec<(u64, u64)> {
+    if included.is_empty() {
+        return Vec::new();
+    }
+
+    let page_end = |i: usize| -> u64 {
+        pages.get(i + 1).map(|p| p.physical_start).unwrap_or(file_size)
+    };
+
+    let mut ranges = Vec::new();
+    let mut range_start = pages[included[0]].physical_start;
+    let mut range_end = page_end(included[0]);
+
+    for &i in &included[1..] {
+        let next_start = pages[i].physical_start;
+        let next_end = page_end(i);
+        if next_start <= range_end + gap_threshold {
+            // Merge: extend the current range to cover the gap and the next page
+            range_end = next_end;
+        } else {
+            ranges.push((range_start, range_end));
+            range_start = next_start;
+            range_end = next_end;
+        }
+    }
+    ranges.push((range_start, range_end));
+    ranges
+}
+
+/// Parse raw line-oriented bytes into a RecordBatch.
+///
+/// For CSV: all lines are data rows (no header); the schema is used directly.
+/// For JSONL: each non-empty line is a JSON object.
+/// Applies column projection if provided.
+fn parse_bytes_to_batch(
+    bytes: &bytes::Bytes,
+    schema: &SchemaRef,
+    projection: &Option<Vec<usize>>,
+    format: LineOrientedFormat,
+) -> datafusion::common::Result<RecordBatch> {
+    let cursor = Cursor::new(bytes.as_ref());
+    let batch = match format {
+        LineOrientedFormat::Csv => {
+            // CSV page bytes contain data rows only (no header — pages are split after the header).
+            // Build a synthetic header and parse.
+            let header: String = {
+                let mut h = String::new();
+                let mut first = true;
+                for field in schema.fields() {
+                    if !first { h.push(','); }
+                    h.push_str(field.name());
+                    first = false;
+                }
+                h.push('\n');
+                h
+            };
+            let mut csv_data = header;
+            csv_data.push_str(&String::from_utf8_lossy(bytes.as_ref()));
+            let cursor = Cursor::new(csv_data.as_bytes());
+            let mut reader = CsvReaderBuilder::new(schema.clone())
+                .with_header(true)
+                .build(cursor)
+                ?;
+            // Collect all batches from this page range
+            let mut batches = Vec::new();
+            for result in reader {
+                let b = result?;
+                if b.num_rows() > 0 {
+                    batches.push(b);
+                }
+            }
+            if batches.is_empty() {
+                return Ok(RecordBatch::new_empty(
+                    project_schema(schema, projection.as_ref())
+                        ?,
+                ));
+            }
+            arrow::compute::concat_batches(&schema, &batches)
+                ?
+        }
+        LineOrientedFormat::JsonLines => {
+            let mut reader = JsonReaderBuilder::new(schema.clone())
+                .build(cursor)
+                ?;
+            let mut batches = Vec::new();
+            for result in &mut reader {
+                let b = result?;
+                if b.num_rows() > 0 {
+                    batches.push(b);
+                }
+            }
+            if batches.is_empty() {
+                return Ok(RecordBatch::new_empty(
+                    project_schema(schema, projection.as_ref())
+                        ?,
+                ));
+            }
+            arrow::compute::concat_batches(&schema, &batches)
+                ?
+        }
+    };
+
+    // Apply projection
+    if let Some(proj) = projection {
+        let projected_columns: Vec<_> = proj.iter().map(|&i| batch.column(i).clone()).collect();
+        let projected_schema = Arc::new(
+            schema.project(proj)?,
+        );
+        RecordBatch::try_new(projected_schema, projected_columns)
+            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))
+    } else {
+        Ok(batch)
     }
 }
 

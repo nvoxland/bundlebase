@@ -53,6 +53,7 @@ pub mod facade;
 pub mod response;
 pub mod facade_ext;
 pub mod builder_ext;
+pub mod sql_utils;
 
 // Re-export response types
 pub use response::OutputShape;

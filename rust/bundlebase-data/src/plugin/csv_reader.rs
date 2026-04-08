@@ -364,71 +364,319 @@ impl DataReader for CsvReader {
     }
 
     async fn read_statistics(&self) -> Result<Option<Statistics>, BundlebaseError> {
-        let (num_rows, file_bytes) = self.compute_statistics().await?;
+        use object_store::GetOptions;
 
-        // Create statistics with actual row count and byte size
+        let object_store = self.inner.object_store();
+        let path = object_store::path::Path::parse(self.inner.url().path())?;
+
+        // Stream the file counting newlines — O(1) memory, no buffering.
+        let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
+        let mut stream = get_result.into_stream();
+
+        let mut row_count: usize = 0;
+        let mut file_size: usize = 0;
+        let mut last_byte: u8 = b'\n';
+        let mut header_seen = false;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
+            for &b in chunk.iter() {
+                if b == b'\n' {
+                    if header_seen {
+                        row_count += 1;
+                    } else {
+                        header_seen = true;
+                    }
+                }
+            }
+            file_size += chunk.len();
+            if !chunk.is_empty() {
+                last_byte = chunk[chunk.len() - 1];
+            }
+        }
+
+        // Account for final line without trailing newline
+        if file_size > 0 && last_byte != b'\n' && header_seen {
+            row_count += 1;
+        }
+
         let stats = Statistics {
-            num_rows: Precision::Exact(num_rows),
-            total_byte_size: Precision::Exact(file_bytes),
+            num_rows: Precision::Exact(row_count),
+            total_byte_size: Precision::Exact(file_size),
             ..Default::default()
         };
 
         Ok(Some(stats))
     }
 
+    async fn column_stats(&self) -> Result<Vec<crate::physical_row_group_layout::ColumnStats>, BundlebaseError> {
+        let layout_file = match &self.layout {
+            Some(f) => f,
+            None => return Ok(vec![]),
+        };
+        let layout = crate::physical_row_group_layout::PhysicalRowGroupLayout::load(layout_file).await?;
+        Ok(layout.column_stats)
+    }
+
     async fn build_layout(
         &self,
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
-        let result = PhysicalRowGroupLayout::build_and_write(
-            self.inner.file().as_object_store_file(),
-            data_dir,
-            true, // skip CSV header
-        )
-        .await?;
+        use crate::physical_row_group_layout::DEFAULT_PAGE_SIZE;
+        use futures::stream;
 
-        Ok(result)
+        let object_store = self.inner.object_store();
+        let path = object_store::path::Path::parse(self.inner.url().path())?;
+        let delimiter = self.inner.config().delimiter;
+
+        // Read file bytes once — used for both page layout and column stats.
+        let get_result = object_store.get_opts(&path, object_store::GetOptions::default()).await?;
+        let mut file_stream = get_result.into_stream();
+        let mut buffer = Vec::new();
+        while let Some(chunk) = file_stream.next().await {
+            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
+            buffer.extend_from_slice(&chunk);
+        }
+
+        // Build page layout first (no stats yet) to get page boundaries.
+        let initial_layout = match PhysicalRowGroupLayout::build(&buffer, true, DEFAULT_PAGE_SIZE, vec![]) {
+            None => return Ok(None),
+            Some(l) => l,
+        };
+        let page_row_starts: Vec<u32> = initial_layout.pages.iter().map(|p| p.row_begin).collect();
+
+        // Compute column stats with page-level tracking.
+        let column_stats = self.compute_column_stats_sync(&buffer, &page_row_starts, delimiter)?;
+
+        // Assemble final layout with stats and write.
+        let layout = PhysicalRowGroupLayout { column_stats, ..initial_layout };
+        let index_bytes = layout.serialize()?;
+        let data_stream = Box::pin(stream::once(async move { Ok::<_, std::io::Error>(index_bytes) }));
+        let result = data_dir.write_stream(data_stream, "prg.layout").await?;
+        Ok(Some(result.file))
+    }
+
+    async fn data_source_filtered_pages(
+        &self,
+        projection: Option<&Vec<usize>>,
+        filters: &[datafusion::logical_expr::Expr],
+        _limit: Option<usize>,
+    ) -> Result<Option<Arc<dyn datafusion::datasource::source::DataSource>>, BundlebaseError> {
+        use bundlebase_io::IOReadFile;
+        use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
+        use crate::page_filter::{extract_lower_bound, extract_upper_bound, is_value_above_bound, is_value_below_bound, prune_exact_with_bloom, prune_prefix, prune_range};
+        use crate::physical_row_group_layout::PhysicalRowGroupLayout;
+        use bundlebase_index::{FilterAnalyzer, IndexPredicate};
+
+        let layout_file = match &self.layout {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+
+        // Load layout from cache (page stats live in layout.column_stats[col].page_stats)
+        let layout_url = layout_file.url().clone();
+        let layout = if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&layout_url) {
+            cached
+        } else {
+            let loaded = PhysicalRowGroupLayout::load(layout_file).await?;
+            let arc = Arc::new(loaded);
+            GLOBAL_LAYOUT_CACHE.insert(layout_url, arc.clone());
+            arc
+        };
+
+        if layout.pages.len() <= 1 {
+            // Single page — no pruning possible.
+            return Ok(None);
+        }
+
+        let schema = match self.inner.read_schema().await? {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        let indexable = FilterAnalyzer::extract_indexable(filters);
+        if indexable.is_empty() {
+            return Ok(None);
+        }
+
+        // Determine which pages to include. Start with all included.
+        let num_pages = layout.pages.len();
+        let mut include = vec![true; num_pages];
+
+        for filter in &indexable {
+            // Find column index in schema by name
+            let col_idx = match schema.fields().iter().position(|f| f.name() == &filter.column) {
+                Some(i) => i,
+                None => continue,
+            };
+
+            let col_stats = match layout.column_stats.get(col_idx) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            if col_stats.page_stats.is_empty() {
+                continue; // No per-page stats for this column
+            }
+
+            let is_increasing = col_stats.is_strictly_increasing;
+            let is_decreasing = col_stats.is_strictly_decreasing;
+
+            for (page_idx, page_stat) in col_stats.page_stats.iter().enumerate() {
+                if !include[page_idx] {
+                    continue; // Already excluded
+                }
+
+                let bloom = page_stat.bloom_filter.as_deref();
+                let can_prune = match &filter.predicate {
+                    IndexPredicate::Exact(val) => {
+                        prune_exact_with_bloom(val, page_stat.min.as_ref(), page_stat.max.as_ref(), bloom)
+                    }
+                    IndexPredicate::Range { min: fmin, max: fmax } => {
+                        prune_range(fmin, fmax, page_stat.min.as_ref(), page_stat.max.as_ref())
+                    }
+                    IndexPredicate::In(vals) => {
+                        vals.iter().all(|v| prune_exact_with_bloom(v, page_stat.min.as_ref(), page_stat.max.as_ref(), bloom))
+                    }
+                    // Per-page null counts are not tracked; null pruning only works at block level
+                    IndexPredicate::IsNull | IndexPredicate::IsNotNull => false,
+                    IndexPredicate::Prefix(prefix) => {
+                        prune_prefix(prefix, page_stat.min.as_ref(), page_stat.max.as_ref())
+                    }
+                };
+
+                if can_prune {
+                    include[page_idx] = false;
+                }
+            }
+
+            // Monotonic early-stop: for strictly increasing columns with an upper bound,
+            // once page_min >= upper_bound all subsequent pages are also out of range.
+            if is_increasing {
+                if let Some(upper) = extract_upper_bound(&filter.predicate) {
+                    let mut past_range = false;
+                    for (page_idx, page_stat) in col_stats.page_stats.iter().enumerate() {
+                        if past_range {
+                            include[page_idx] = false;
+                        } else if let Some(ref pmin) = page_stat.min {
+                            if is_value_above_bound(&upper, pmin) {
+                                include[page_idx] = false;
+                                past_range = true;
+                            }
+                        }
+                    }
+                }
+            }
+            // For strictly decreasing columns with a lower bound, once page_max <= lower_bound
+            // all subsequent pages are also out of range.
+            if is_decreasing {
+                if let Some(lower) = extract_lower_bound(&filter.predicate) {
+                    let mut past_range = false;
+                    for (page_idx, page_stat) in col_stats.page_stats.iter().enumerate() {
+                        if past_range {
+                            include[page_idx] = false;
+                        } else if let Some(ref pmax) = page_stat.max {
+                            if is_value_below_bound(&lower, pmax) {
+                                include[page_idx] = false;
+                                past_range = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If all pages are included, no pruning happened — fall through to normal path.
+        if include.iter().all(|&b| b) {
+            return Ok(None);
+        }
+        // If no pages are included, this is covered by block-level pruning (should be rare).
+        // Return an empty page set — the caller handles the empty DataSource.
+
+        // Collect included page indices.
+        let included: Vec<usize> = include.iter().enumerate()
+            .filter(|(_, &inc)| inc)
+            .map(|(i, _)| i)
+            .collect();
+
+        if included.is_empty() {
+            return Ok(None); // Block pruning should have caught this
+        }
+
+        // Coalesce adjacent / nearby pages into single range reads (256KB gap threshold).
+        const GAP_THRESHOLD: u64 = 256 * 1024;
+        let page_ranges = crate::physical_row_group_data_source::coalesce_page_ranges(
+            &layout.pages,
+            &included,
+            layout.file_size,
+            GAP_THRESHOLD,
+        );
+
+        log::debug!(
+            "CSV page-filter: {} included pages → {} coalesced ranges",
+            included.len(),
+            page_ranges.len()
+        );
+
+        let full_schema = schema;
+        Ok(Some(Arc::new(PhysicalRowGroupDataSource::from_page_ranges(
+            self.inner.file().as_object_store_file(),
+            full_schema,
+            page_ranges,
+            projection.cloned(),
+            LineOrientedFormat::Csv,
+        ))))
     }
 }
 
 impl CsvReader {
-    /// Count the number of CSV rows and get file size by reading the file
-    /// Assumes standard CSV format with header row
-    /// Returns (row_count, file_size_in_bytes)
-    async fn compute_statistics(&self) -> Result<(usize, usize), BundlebaseError> {
-        use object_store::GetOptions;
+    /// Compute per-column statistics (synchronously) from in-memory CSV bytes.
+    ///
+    /// `page_row_starts` — `layout.pages[i].row_begin` for each page, used to populate
+    /// per-page min/max in the builder.
+    fn compute_column_stats_sync(
+        &self,
+        bytes: &[u8],
+        page_row_starts: &[u32],
+        delimiter: u8,
+    ) -> Result<Vec<crate::physical_row_group_layout::ColumnStats>, BundlebaseError> {
+        use crate::column_stats_builder::ColumnStatsBuilder;
+        use arrow::datatypes::{DataType, Field, Schema};
 
-        // Get the object store and path
-        let store = self.inner.url();
-        let object_store = self.inner.object_store();
-        let path = object_store::path::Path::parse(store.path())?;
+        // Parse just the header to get column names for the all-Utf8 schema.
+        let format = arrow::csv::reader::Format::default()
+            .with_header(true)
+            .with_delimiter(delimiter);
+        let (raw_schema, _) = format.infer_schema(std::io::Cursor::new(bytes), Some(0))
+            .map_err(|e| BundlebaseError::from(format!("CSV header parse error: {}", e)))?;
+        let col_count = raw_schema.fields().len();
+        if col_count == 0 {
+            return Ok(Vec::new());
+        }
+        let schema = Arc::new(Schema::new(
+            raw_schema.fields().iter()
+                .map(|f| Arc::new(Field::new(f.name(), DataType::Utf8, true)))
+                .collect::<Vec<_>>(),
+        ));
 
-        // Read the file
-        let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
+        let mut builder = ColumnStatsBuilder::new(col_count, page_row_starts);
 
-        let mut reader = get_result.into_stream();
+        let format = arrow::csv::reader::Format::default()
+            .with_header(true)
+            .with_delimiter(delimiter);
+        let reader = arrow::csv::ReaderBuilder::new(schema)
+            .with_format(format)
+            .with_batch_size(8192)
+            .build(std::io::Cursor::new(bytes))
+            .map_err(|e| BundlebaseError::from(format!("CSV stats read error: {}", e)))?;
 
-        let mut content = Vec::new();
-        while let Some(chunk) = reader.next().await {
-            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
-            content.extend_from_slice(&chunk);
+        for batch_result in reader {
+            let batch = batch_result
+                .map_err(|e| BundlebaseError::from(format!("CSV stats batch error: {}", e)))?;
+            builder.process_batch(&batch);
         }
 
-        // Get file size
-        let file_size = content.len();
-
-        // Count newlines to determine number of rows (including header)
-        let mut row_count = content.iter().filter(|&&b| b == b'\n').count();
-
-        // If the last line doesn't end with newline, add 1 for the last row
-        if !content.is_empty() && content[content.len() - 1] != b'\n' {
-            row_count += 1;
-        }
-
-        // Subtract 1 for the header row to get data rows
-        let data_row_count = if row_count > 0 { row_count - 1 } else { 0 };
-
-        Ok((data_row_count, file_size))
+        Ok(builder.finish())
     }
 }
 

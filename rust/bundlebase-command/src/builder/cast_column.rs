@@ -92,11 +92,12 @@ impl BundleBuilderCommand for CastColumnCommand {
         // Pre-flight check: scan existing data for non-castable values.
         if self.verify_existing {
             let col_sql = format!("\"{}\"", self.name);
+            let try_cast_sql = crate::sql_utils::build_try_cast_sql(&col_sql, &data_type)?;
             let check_sql = format!(
                 "SELECT CAST({} AS VARCHAR) AS value, COUNT(*) AS cnt \
-                 FROM bundle WHERE TRY_CAST({} AS {}) IS NULL AND {} IS NOT NULL \
+                 FROM bundle WHERE {} IS NULL AND {} IS NOT NULL \
                  GROUP BY CAST({} AS VARCHAR) ORDER BY cnt DESC LIMIT 10",
-                col_sql, col_sql, self.new_type, col_sql, col_sql
+                col_sql, try_cast_sql, col_sql, col_sql
             );
             let mut stream = builder.query(&check_sql, vec![], Some(10)).await?;
             let mut found_rows = false;

@@ -8,7 +8,7 @@ use crate::response::{single_batch_stream, OutputShape};
 use crate::{BundleFacadeCommand, CommandParsing, Rule};
 use bundlebase::BundleFacade;
 use bundlebase_common::BundlebaseError;
-use arrow::array::{Array, ArrayRef, Int64Array, RecordBatch, StringArray};
+use arrow::array::{Array, ArrayRef, BooleanArray, Int64Array, RecordBatch, StringArray};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::execution::SendableRecordBatchStream;
 use futures::StreamExt;
@@ -41,6 +41,10 @@ impl DescribeDataCommand {
             Field::new("num_not_nulls", DataType::Int64, false),
             Field::new("top_10_values", DataType::Utf8, true),
             Field::new("top_10_invalid", DataType::Utf8, true),
+            Field::new("distinct_count", DataType::Int64, true),
+            Field::new("bloom_filter_present", DataType::Boolean, true),
+            Field::new("string_profile", DataType::Utf8, true),
+            Field::new("histogram", DataType::Utf8, true),
         ]))
     }
 
@@ -213,6 +217,66 @@ async fn extract_value_counts(
     }
 }
 
+/// Load pre-computed column stats from all blocks in the bundle, aggregated by column name.
+///
+/// For each requested column, finds its ColumnId, then gathers stats from all blocks.
+/// Aggregates: max distinct_count, first non-None string_profile, first non-empty histogram.
+async fn load_column_stats(
+    facade: &dyn BundleFacade,
+    column_names: &[&str],
+) -> std::collections::HashMap<String, bundlebase_data::ColumnStats> {
+    let mut result = std::collections::HashMap::new();
+
+    // Resolve column names to IDs once before iterating blocks.
+    let col_id_pairs: Vec<(&str, _)> = column_names.iter()
+        .filter_map(|&n| facade.column_id(n).map(|id| (n, id)))
+        .collect();
+
+    if col_id_pairs.is_empty() {
+        return result;
+    }
+
+    let packs = facade.packs();
+    for (_, pack) in &packs {
+        for block in pack.blocks() {
+            let all_stats = match block.reader().column_stats().await {
+                Ok(s) if !s.is_empty() => s,
+                _ => continue,
+            };
+            let col_ids = block.column_ids();
+
+            for &(col_name, col_id) in &col_id_pairs {
+                let block_col_idx = match col_ids.iter().position(|id| *id == col_id) {
+                    Some(i) => i,
+                    None => continue,
+                };
+                let stat = match all_stats.get(block_col_idx) {
+                    Some(s) => s.clone(),
+                    None => continue,
+                };
+
+                let entry = result.entry(col_name.to_string()).or_insert_with(|| stat.clone());
+                // Aggregate: prefer higher distinct_count, first non-None profiles
+                if stat.distinct_count > entry.distinct_count {
+                    entry.distinct_count = stat.distinct_count;
+                }
+                if entry.string_profile.is_none() {
+                    entry.string_profile = stat.string_profile;
+                }
+                if entry.histogram.is_empty() {
+                    entry.histogram = stat.histogram;
+                }
+                // Merge page_stats for bloom filter presence check
+                if entry.page_stats.is_empty() {
+                    entry.page_stats = stat.page_stats;
+                }
+            }
+        }
+    }
+
+    result
+}
+
 impl BundleFacadeCommand for DescribeDataCommand {
     type Output = SendableRecordBatchStream;
 
@@ -271,6 +335,11 @@ impl BundleFacadeCommand for DescribeDataCommand {
             .map_err(|e| BundlebaseError::from(e.to_string()))?;
 
         // Extract results from the single stats batch
+        // Load pre-computed column stats (available for CSV/JSONL blocks with layout files).
+        // For each requested column, aggregate across all blocks: max distinct count,
+        // first non-None string_profile, first non-empty histogram, bloom present in any page.
+        let col_stats_map = load_column_stats(facade, &col_infos.iter().map(|c| c.name.as_str()).collect::<Vec<_>>()).await;
+
         let mut real_names: Vec<String> = Vec::new();
         let mut col_data_types: Vec<String> = Vec::new();
         let mut mins: Vec<Option<String>> = Vec::new();
@@ -280,6 +349,10 @@ impl BundleFacadeCommand for DescribeDataCommand {
         let mut not_null_counts: Vec<i64> = Vec::new();
         let mut top_10_values_list: Vec<Option<String>> = Vec::new();
         let mut top_10_invalid_list: Vec<Option<String>> = Vec::new();
+        let mut distinct_counts: Vec<Option<i64>> = Vec::new();
+        let mut bloom_filter_presents: Vec<Option<bool>> = Vec::new();
+        let mut string_profiles: Vec<Option<String>> = Vec::new();
+        let mut histograms: Vec<Option<String>> = Vec::new();
 
         for (i, info) in col_infos.iter().enumerate() {
             let base_idx = i * 5; // 5 columns per analyzed column (min, max, avg, nulls, not_nulls)
@@ -316,6 +389,38 @@ impl BundleFacadeCommand for DescribeDataCommand {
             } else {
                 top_10_invalid_list.push(None);
             }
+
+            // Pre-computed stats from layout files (CSV/JSONL) or Parquet attach-time layout.
+            if let Some(col_stat) = col_stats_map.get(info.name.as_str()) {
+                distinct_counts.push(if col_stat.distinct_count > 0 {
+                    Some(col_stat.distinct_count as i64)
+                } else {
+                    None
+                });
+                let has_bloom = col_stat.page_stats.iter().any(|p| p.bloom_filter.is_some());
+                bloom_filter_presents.push(Some(has_bloom));
+                string_profiles.push(col_stat.string_profile.as_ref().and_then(|sp| {
+                    serde_json::to_string(&serde_json::json!({
+                        "min_len": sp.min_len,
+                        "max_len": sp.max_len,
+                        "avg_len": sp.avg_len,
+                        "pct_ascii": sp.pct_ascii,
+                    })).ok()
+                }));
+                histograms.push(if col_stat.histogram.is_empty() {
+                    None
+                } else {
+                    serde_json::to_string(&col_stat.histogram.iter().map(|b| serde_json::json!({
+                        "lower_bound": b.lower_bound.display(),
+                        "count": b.count,
+                    })).collect::<Vec<_>>()).ok()
+                });
+            } else {
+                distinct_counts.push(None);
+                bloom_filter_presents.push(None);
+                string_profiles.push(None);
+                histograms.push(None);
+            }
         }
 
         let output_schema = Self::output_schema();
@@ -332,6 +437,10 @@ impl BundleFacadeCommand for DescribeDataCommand {
                 Arc::new(Int64Array::from(not_null_counts)) as ArrayRef,
                 Arc::new(StringArray::from(top_10_values_list)) as ArrayRef,
                 Arc::new(StringArray::from(top_10_invalid_list)) as ArrayRef,
+                Arc::new(Int64Array::from(distinct_counts)) as ArrayRef,
+                Arc::new(BooleanArray::from(bloom_filter_presents)) as ArrayRef,
+                Arc::new(StringArray::from(string_profiles)) as ArrayRef,
+                Arc::new(StringArray::from(histograms)) as ArrayRef,
             ],
         )
         .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;

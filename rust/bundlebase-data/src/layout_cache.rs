@@ -6,10 +6,20 @@
 use crate::physical_row_group_layout::PhysicalRowGroupLayout;
 use lazy_static::lazy_static;
 use lru::LruCache;
+use opentelemetry::metrics::Counter;
+use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use url::Url;
+
+lazy_static! {
+    static ref LAYOUT_CACHE_OPS: Counter<u64> = opentelemetry::global::meter("bundlebase")
+        .u64_counter("bundlebase.cache.operations")
+        .with_description("Cache hits and misses")
+        .with_unit("operations")
+        .build();
+}
 
 /// Global LRU cache for loaded page-group layouts.
 ///
@@ -35,7 +45,12 @@ impl LayoutCache {
     }
 
     pub fn get(&self, url: &Url) -> Option<Arc<PhysicalRowGroupLayout>> {
-        self.cache.lock().get(url).cloned()
+        let result = self.cache.lock().get(url).cloned();
+        LAYOUT_CACHE_OPS.add(1, &[
+            KeyValue::new("cache_name", "layout_cache"),
+            KeyValue::new("result", if result.is_some() { "hit" } else { "miss" }),
+        ]);
+        result
     }
 
     pub fn insert(&self, url: Url, layout: Arc<PhysicalRowGroupLayout>) {
@@ -117,6 +132,7 @@ mod tests {
                 PageGroup { physical_start: 0, row_begin: 0 },
                 PageGroup { physical_start: 25000, row_begin: total_rows as u32 / 2 },
             ],
+            column_stats: vec![],
         })
     }
 

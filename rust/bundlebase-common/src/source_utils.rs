@@ -319,6 +319,7 @@ pub async fn record_batch_stream_to_parquet(
             ))
             .set_max_row_group_size(128 * 1024) // 128K rows per row group
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
+            .set_bloom_filter_enabled(true)
             .build();
         let mut writer =
             parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
@@ -438,6 +439,7 @@ pub fn json_to_parquet_with_options(
             ))
             .set_max_row_group_size(128 * 1024)
             .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
+            .set_bloom_filter_enabled(true)
             .build();
         let mut writer =
             parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))
@@ -604,6 +606,8 @@ fn json_array_to_parquet(data: &[u8]) -> Result<Bytes, BundlebaseError> {
                 parquet::basic::ZstdLevel::try_new(3)
                     .unwrap_or(parquet::basic::ZstdLevel::default()),
             ))
+            .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
+            .set_bloom_filter_enabled(true)
             .build();
         let mut writer = parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))?;
         writer.write(&batch)?;
@@ -714,7 +718,12 @@ fn record_batches_to_parquet(
 
     let mut buffer = Vec::new();
     let props = WriterProperties::builder()
-        .set_compression(Compression::SNAPPY)
+        .set_compression(Compression::ZSTD(
+            parquet::basic::ZstdLevel::try_new(3)
+                .unwrap_or(parquet::basic::ZstdLevel::default()),
+        ))
+        .set_statistics_enabled(parquet::file::properties::EnabledStatistics::Chunk)
+        .set_bloom_filter_enabled(true)
         .build();
     let mut writer =
         parquet::arrow::ArrowWriter::try_new(&mut buffer, schema, Some(props))

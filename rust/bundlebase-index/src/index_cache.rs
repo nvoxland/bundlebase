@@ -1,10 +1,19 @@
 use crate::column_index::ColumnIndex;
-// metrics module not available in index crate
 use lazy_static::lazy_static;
 use lru::LruCache;
+use opentelemetry::metrics::Counter;
+use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+
+lazy_static! {
+    static ref INDEX_CACHE_OPS: Counter<u64> = opentelemetry::global::meter("bundlebase")
+        .u64_counter("bundlebase.cache.operations")
+        .with_description("Cache hits and misses")
+        .with_unit("operations")
+        .build();
+}
 
 /// Global LRU cache for deserialized `ColumnIndex` objects.
 ///
@@ -35,9 +44,10 @@ impl IndexCache {
     /// Gets a cached `ColumnIndex` if it exists, promoting it to most-recently-used.
     pub fn get(&self, index_path: &str) -> Option<Arc<ColumnIndex>> {
         let result = self.cache.lock().get(index_path).cloned();
-
-        // TODO: re-add metrics when extracted
-
+        INDEX_CACHE_OPS.add(1, &[
+            KeyValue::new("cache_name", "index_cache"),
+            KeyValue::new("result", if result.is_some() { "hit" } else { "miss" }),
+        ]);
         result
     }
 

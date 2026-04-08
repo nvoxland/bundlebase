@@ -80,22 +80,42 @@ impl BundleFacadeCommand for ProfileColumnCommand {
         self: Box<Self>,
         facade: &dyn BundleFacade,
     ) -> Result<SendableRecordBatchStream, BundlebaseError> {
-        let col_sql = format!("\"{}\"", self.name);
         let output_schema = Self::output_schema();
 
+        // Fast path: use pre-computed layout stats when available (CSV/JSONL blocks only,
+        // and only for the basic profile — FOR CAST TO always needs a full scan).
+        if self.for_cast_to.is_none() {
+            if let Some(result) = try_profile_from_stats(facade, &self.name).await? {
+                let (values, counts) = result;
+                let batch = RecordBatch::try_new(
+                    Arc::clone(&output_schema),
+                    vec![
+                        Arc::new(StringArray::from(values)) as ArrayRef,
+                        Arc::new(Int64Array::from(counts)) as ArrayRef,
+                    ],
+                )
+                .map_err(|e| BundlebaseError::from(format!("Failed to create record batch: {}", e)))?;
+                return single_batch_stream(output_schema, batch);
+            }
+        }
+
+        // Slow path: full SQL scan.
+        let col_sql = format!("\"{}\"", self.name);
         let sql = if let Some(ref cast_type) = self.for_cast_to {
-            // Show values that cannot be cast to the requested type
+            let try_cast_sql = bundlebase_common::arrow_types::parse_arrow_type_name(cast_type)
+                .ok()
+                .and_then(|dt| crate::sql_utils::build_try_cast_sql(&col_sql, &dt).ok())
+                .unwrap_or_else(|| format!("TRY_CAST({} AS {})", col_sql, cast_type));
             format!(
                 "SELECT CAST({} AS VARCHAR) AS value, COUNT(*) AS count \
                  FROM bundle \
-                 WHERE TRY_CAST({} AS {}) IS NULL AND {} IS NOT NULL \
+                 WHERE {} IS NULL AND {} IS NOT NULL \
                  GROUP BY CAST({} AS VARCHAR) \
                  ORDER BY count DESC \
                  LIMIT 100",
-                col_sql, col_sql, cast_type, col_sql, col_sql
+                col_sql, try_cast_sql, col_sql, col_sql
             )
         } else {
-            // Show top values by frequency
             format!(
                 "SELECT CAST({} AS VARCHAR) AS value, COUNT(*) AS count \
                  FROM bundle \
@@ -138,7 +158,6 @@ impl BundleFacadeCommand for ProfileColumnCommand {
         }
 
         if values.is_empty() {
-            // Return a single informational row when no results
             let msg = if self.for_cast_to.is_some() {
                 "No non-castable values found"
             } else {
@@ -159,6 +178,70 @@ impl BundleFacadeCommand for ProfileColumnCommand {
 
         single_batch_stream(output_schema, batch)
     }
+}
+
+/// Attempt to build a profile from pre-computed layout statistics.
+///
+/// Returns `Some((values, counts))` if all blocks containing this column have pre-computed
+/// stats (currently CSV/JSONL only). Returns `None` if any block lacks stats, signalling
+/// the caller to fall back to a full SQL scan.
+///
+/// Top values are merged across blocks by summing counts for the same value, then the
+/// global top 10 are returned. This is a good approximation for the common case where
+/// frequency distributions are similar across blocks.
+async fn try_profile_from_stats(
+    facade: &dyn BundleFacade,
+    column_name: &str,
+) -> Result<Option<(Vec<Option<String>>, Vec<i64>)>, BundlebaseError> {
+    let column_id = match facade.column_id(column_name) {
+        Some(id) => id,
+        None => return Ok(None),
+    };
+
+    // Collect stats from every block that contains this column.
+    let mut merged: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut total_null_count: u64 = 0;
+    let mut found_any_block = false;
+
+    for pack in facade.packs().values() {
+        for block in pack.blocks() {
+            // Only process blocks that contain this column
+            if !block.column_ids().contains(&column_id) {
+                continue;
+            }
+            found_any_block = true;
+
+            let stats = match block.column_stats_for(column_id).await? {
+                Some(s) => s,
+                // This block has no pre-computed stats — fall back to SQL
+                None => return Ok(None),
+            };
+
+            total_null_count += stats.null_count;
+            for (value, count) in stats.top_values {
+                *merged.entry(value).or_insert(0) += count;
+            }
+        }
+    }
+
+    if !found_any_block {
+        return Ok(None);
+    }
+
+    // Sort by count descending, take top 10
+    let mut entries: Vec<(String, u64)> = merged.into_iter().collect();
+    entries.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    entries.truncate(10);
+
+    let mut values: Vec<Option<String>> = entries.iter().map(|(v, _)| Some(v.clone())).collect();
+    let mut counts: Vec<i64> = entries.iter().map(|(_, c)| *c as i64).collect();
+
+    if values.is_empty() && total_null_count == 0 {
+        values.push(Some("No non-null values found".to_string()));
+        counts.push(0);
+    }
+
+    Ok(Some((values, counts)))
 }
 
 #[cfg(test)]

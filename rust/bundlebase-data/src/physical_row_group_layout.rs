@@ -5,18 +5,20 @@
 //! binary search finds the containing page, then newline scanning
 //! within the page locates the exact row.
 //!
-//! Files smaller than the page size don't need a layout file — the
-//! entire file is one implicit page.
+//! The layout file also stores per-column statistics captured at attach
+//! time, avoiding re-scans for profiling and enabling query optimizations.
 //!
 //! # File Format (`prg.layout`)
 //!
 //! ```text
-//! Magic:      "BBROWG01" (8 bytes)
-//! Version:    u8 (1 byte)
-//! Row count:  u64 little-endian (8 bytes)
-//! File size:  u64 little-endian (8 bytes)
-//! Page count: u32 little-endian (4 bytes)
-//! Pages:      [(physical_start: u64, row_begin: u32); page_count]  — 12 bytes each
+//! Magic:        "BBROWG01" (8 bytes)
+//! Version:      u8 (1 byte)
+//! Row count:    u64 little-endian (8 bytes)
+//! File size:    u64 little-endian (8 bytes)
+//! Page count:   u32 little-endian (4 bytes)
+//! Stats offset: u64 little-endian (8 bytes)  — byte offset of stats blob
+//! Pages:        [(physical_start: u64, row_begin: u32); page_count]  — 12 bytes each
+//! Stats blob:   JSON-encoded Vec<ColumnStats> (positional: index = column order in file)
 //! ```
 
 use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
@@ -27,12 +29,258 @@ use bytes::Bytes;
 use futures::stream;
 use futures::StreamExt;
 use object_store::{GetOptions, GetRange, ObjectStore};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 const MAGIC_BYTES: &[u8; 8] = b"BBROWG01";
 const VERSION: u8 = 1;
-const HEADER_SIZE: usize = 8 + 1 + 8 + 8 + 4; // magic + version + row_count + file_size + page_count
+const HEADER_SIZE: usize = 8 + 1 + 8 + 8 + 4 + 8; // magic + version + row_count + file_size + page_count + stats_offset
+
+/// Typed min/max/histogram-bound value stored in layout files.
+///
+/// Covers all orderable Arrow scalar types. Non-orderable types (List, Struct, Map)
+/// are excluded — no statistics system computes min/max for them.
+///
+/// Serialized as a discriminated union: `{"t":"Int64","v":42}` so the type is preserved
+/// across round-trips without implicit string parsing.
+///
+/// For CSV/JSONL columns: `Float64` when `is_all_numeric`, `Utf8` otherwise.
+/// For Parquet columns: the native Arrow type from the schema.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "t", content = "v")]
+pub enum StatValue {
+    Int8(i8),
+    Int16(i16),
+    Int32(i32),
+    Int64(i64),
+    UInt8(u8),
+    UInt16(u16),
+    UInt32(u32),
+    UInt64(u64),
+    Float32(f32),
+    Float64(f64),
+    Utf8(String),
+    Boolean(bool),
+    /// Days since Unix epoch (Arrow Date32)
+    Date32(i32),
+    /// Milliseconds since Unix epoch (Arrow Date64)
+    Date64(i64),
+    TimestampSecond(i64),
+    TimestampMillisecond(i64),
+    TimestampMicrosecond(i64),
+    TimestampNanosecond(i64),
+    Time32Second(i32),
+    Time32Millisecond(i32),
+    Time64Microsecond(i64),
+    Time64Nanosecond(i64),
+}
+
+impl StatValue {
+    /// Compare this value against a query predicate `IndexedValue`.
+    /// Returns `None` when the types are not in the same orderable family.
+    ///
+    /// Numeric types (Int* / UInt* / Float*) all compare via f64 — acceptable for
+    /// pruning since false negatives only add scanned pages, never wrong results.
+    /// Timestamp variants all compare via their raw i64 tick count.
+    pub fn compare_to_indexed(
+        &self,
+        other: &bundlebase_index::IndexedValue,
+    ) -> Option<std::cmp::Ordering> {
+        use bundlebase_index::IndexedValue;
+        match other {
+            IndexedValue::Int64(q) => self.as_f64().and_then(|s| s.partial_cmp(&(*q as f64))),
+            IndexedValue::Float64(q) => self.as_f64().and_then(|s| s.partial_cmp(&q.0)),
+            IndexedValue::Utf8(q) => {
+                if let StatValue::Utf8(sv) = self {
+                    Some(sv.as_str().cmp(q.as_str()))
+                } else {
+                    None
+                }
+            }
+            IndexedValue::Boolean(q) => {
+                if let StatValue::Boolean(sv) = self {
+                    Some(sv.cmp(q))
+                } else {
+                    None
+                }
+            }
+            IndexedValue::Timestamp(q) => self.as_timestamp_i64().map(|s| s.cmp(q)),
+            IndexedValue::Null => None,
+        }
+    }
+
+    /// Convert numeric variants to f64 for cross-type comparison.
+    fn as_f64(&self) -> Option<f64> {
+        match self {
+            StatValue::Int8(n) => Some(*n as f64),
+            StatValue::Int16(n) => Some(*n as f64),
+            StatValue::Int32(n) => Some(*n as f64),
+            StatValue::Int64(n) => Some(*n as f64),
+            StatValue::UInt8(n) => Some(*n as f64),
+            StatValue::UInt16(n) => Some(*n as f64),
+            StatValue::UInt32(n) => Some(*n as f64),
+            StatValue::UInt64(n) => Some(*n as f64),
+            StatValue::Float32(f) => Some(*f as f64),
+            StatValue::Float64(f) => Some(*f),
+            _ => None,
+        }
+    }
+
+    /// Convert temporal variants to their raw i64 tick count for comparison
+    /// against `IndexedValue::Timestamp` (nanoseconds since epoch).
+    fn as_timestamp_i64(&self) -> Option<i64> {
+        match self {
+            StatValue::TimestampSecond(n)
+            | StatValue::TimestampMillisecond(n)
+            | StatValue::TimestampMicrosecond(n)
+            | StatValue::TimestampNanosecond(n)
+            | StatValue::Date64(n)
+            | StatValue::Time64Microsecond(n)
+            | StatValue::Time64Nanosecond(n)
+            | StatValue::Int64(n) => Some(*n),
+            StatValue::Date32(n) | StatValue::Time32Second(n) | StatValue::Time32Millisecond(n) => {
+                Some(*n as i64)
+            }
+            _ => None,
+        }
+    }
+
+    /// Compare this value to another `StatValue` of the same type.
+    /// Returns `None` if types differ or the comparison is not defined (e.g., NaN).
+    pub fn cmp_to_stat(&self, other: &StatValue) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (StatValue::Int8(a), StatValue::Int8(b)) => Some(a.cmp(b)),
+            (StatValue::Int16(a), StatValue::Int16(b)) => Some(a.cmp(b)),
+            (StatValue::Int32(a), StatValue::Int32(b)) => Some(a.cmp(b)),
+            (StatValue::Int64(a), StatValue::Int64(b)) => Some(a.cmp(b)),
+            (StatValue::UInt8(a), StatValue::UInt8(b)) => Some(a.cmp(b)),
+            (StatValue::UInt16(a), StatValue::UInt16(b)) => Some(a.cmp(b)),
+            (StatValue::UInt32(a), StatValue::UInt32(b)) => Some(a.cmp(b)),
+            (StatValue::UInt64(a), StatValue::UInt64(b)) => Some(a.cmp(b)),
+            (StatValue::Float32(a), StatValue::Float32(b)) => a.partial_cmp(b),
+            (StatValue::Float64(a), StatValue::Float64(b)) => a.partial_cmp(b),
+            (StatValue::Utf8(a), StatValue::Utf8(b)) => Some(a.cmp(b)),
+            (StatValue::Boolean(a), StatValue::Boolean(b)) => Some(a.cmp(b)),
+            (StatValue::Date32(a), StatValue::Date32(b)) => Some(a.cmp(b)),
+            (StatValue::Date64(a), StatValue::Date64(b)) => Some(a.cmp(b)),
+            (StatValue::TimestampSecond(a), StatValue::TimestampSecond(b)) => Some(a.cmp(b)),
+            (StatValue::TimestampMillisecond(a), StatValue::TimestampMillisecond(b)) => Some(a.cmp(b)),
+            (StatValue::TimestampMicrosecond(a), StatValue::TimestampMicrosecond(b)) => Some(a.cmp(b)),
+            (StatValue::TimestampNanosecond(a), StatValue::TimestampNanosecond(b)) => Some(a.cmp(b)),
+            (StatValue::Time32Second(a), StatValue::Time32Second(b)) => Some(a.cmp(b)),
+            (StatValue::Time32Millisecond(a), StatValue::Time32Millisecond(b)) => Some(a.cmp(b)),
+            (StatValue::Time64Microsecond(a), StatValue::Time64Microsecond(b)) => Some(a.cmp(b)),
+            (StatValue::Time64Nanosecond(a), StatValue::Time64Nanosecond(b)) => Some(a.cmp(b)),
+            _ => None,
+        }
+    }
+
+    /// Human-readable string representation for display (e.g., DESCRIBE histogram output).
+    pub fn display(&self) -> String {
+        match self {
+            StatValue::Int8(n) => n.to_string(),
+            StatValue::Int16(n) => n.to_string(),
+            StatValue::Int32(n) => n.to_string(),
+            StatValue::Int64(n) => n.to_string(),
+            StatValue::UInt8(n) => n.to_string(),
+            StatValue::UInt16(n) => n.to_string(),
+            StatValue::UInt32(n) => n.to_string(),
+            StatValue::UInt64(n) => n.to_string(),
+            StatValue::Float32(f) => f.to_string(),
+            StatValue::Float64(f) => f.to_string(),
+            StatValue::Utf8(s) => s.clone(),
+            StatValue::Boolean(b) => b.to_string(),
+            StatValue::Date32(n) => n.to_string(),
+            StatValue::Date64(n) => n.to_string(),
+            StatValue::TimestampSecond(n) => n.to_string(),
+            StatValue::TimestampMillisecond(n) => n.to_string(),
+            StatValue::TimestampMicrosecond(n) => n.to_string(),
+            StatValue::TimestampNanosecond(n) => n.to_string(),
+            StatValue::Time32Second(n) => n.to_string(),
+            StatValue::Time32Millisecond(n) => n.to_string(),
+            StatValue::Time64Microsecond(n) => n.to_string(),
+            StatValue::Time64Nanosecond(n) => n.to_string(),
+        }
+    }
+}
+
+/// String distribution profile for a column (only present when the column is not all-numeric).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StringProfile {
+    /// Minimum non-null value length in bytes.
+    pub min_len: u32,
+    /// Maximum non-null value length in bytes.
+    pub max_len: u32,
+    /// Average non-null value length in bytes.
+    pub avg_len: f32,
+    /// Fraction of non-null values that are pure ASCII (0.0–1.0).
+    pub pct_ascii: f32,
+}
+
+/// One bucket in a value-distribution histogram.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistogramBucket {
+    /// Inclusive lower bound of the bucket (typed value).
+    /// For numeric columns the bucket represents an equal-width interval.
+    /// For string columns it represents an equal-height (decile) interval.
+    pub lower_bound: StatValue,
+    /// Number of sampled values that fall in this bucket.
+    pub count: u64,
+}
+
+/// Per-column statistics captured at attach time for CSV/JSONL blocks.
+///
+/// Statistics are indexed positionally — index N corresponds to column N in the file schema.
+/// Stored in the layout file to avoid re-scanning the data for profiling or optimization.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnStats {
+    /// Number of null (empty) values in the column.
+    pub null_count: u64,
+    /// Minimum value seen (typed), or None if all values were null.
+    pub min: Option<StatValue>,
+    /// Maximum value seen (typed), or None if all values were null.
+    pub max: Option<StatValue>,
+    /// Top 10 most frequent non-null values with their counts.
+    pub top_values: Vec<(String, u64)>,
+    /// True if every non-null value in the column can be parsed as f64.
+    pub is_all_numeric: bool,
+    /// True if values are strictly increasing (numeric order if is_all_numeric, else lexicographic).
+    pub is_strictly_increasing: bool,
+    /// True if values are strictly decreasing (numeric order if is_all_numeric, else lexicographic).
+    pub is_strictly_decreasing: bool,
+    /// Approximate count of distinct non-null values. Up to 2000 tracked exactly; higher
+    /// cardinality columns report the last known count before pruning.
+    pub distinct_count: u64,
+    /// Per-page statistics, positional: index i corresponds to layout.pages[i].
+    pub page_stats: Vec<PageStats>,
+    /// String distribution profile. None when is_all_numeric (string lengths of numbers
+    /// are not meaningful) or when the column has no non-null values.
+    pub string_profile: Option<StringProfile>,
+    /// 10-bucket histogram of value distribution.
+    /// Equal-width over [min, max] for numeric columns; equal-height (decile) for string columns.
+    /// Built from a reservoir sample of up to 1000 values.
+    pub histogram: Vec<HistogramBucket>,
+}
+
+/// Statistics for a single page of a column.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PageStats {
+    /// Minimum non-null value seen in this page (typed), or None.
+    pub min: Option<StatValue>,
+    /// Maximum non-null value seen in this page (typed), or None.
+    pub max: Option<StatValue>,
+    /// Approximate distinct count for this page. Exact up to 500; capped at 500 for
+    /// high-cardinality pages (true distinct count is ≥ 500 when this value is 500).
+    pub distinct_count: u64,
+    /// Serialized 8KB (65536-bit, 3-hash FNV-1a) bloom filter for per-page equality pruning.
+    /// None when this page has ≥ 500 distinct values (FP rate rises above ~0.01% at that point).
+    pub bloom_filter: Option<Vec<u8>>,
+}
 
 /// Default page size: 5MB
 pub const DEFAULT_PAGE_SIZE: usize = 5 * 1024 * 1024;
@@ -51,6 +299,7 @@ pub struct PageGroup {
 ///
 /// Maps logical row numbers to physical byte ranges by dividing the file
 /// into pages of approximately `DEFAULT_PAGE_SIZE` bytes.
+/// Also carries per-column statistics captured at attach time.
 #[derive(Debug, Clone)]
 pub struct PhysicalRowGroupLayout {
     /// Total number of data rows in the file
@@ -59,30 +308,35 @@ pub struct PhysicalRowGroupLayout {
     pub file_size: u64,
     /// Page group entries, sorted by row_begin
     pub pages: Vec<PageGroup>,
+    /// Per-column statistics, positional (index = column order in file schema).
+    /// Empty when no stats were computed (e.g., layout loaded from storage with old format).
+    pub column_stats: Vec<ColumnStats>,
 }
 
 impl PhysicalRowGroupLayout {
     /// Build a layout by scanning file bytes for newlines.
     ///
-    /// If the file is smaller than `page_size`, returns None — no layout needed.
+    /// Always returns `Some` — even small files get a layout so column stats are always stored.
+    /// For files smaller than `page_size`, a single implicit page covers the whole file.
     ///
     /// # Arguments
     /// * `bytes` - The full file content
     /// * `skip_first_line` - Whether to skip the first line (e.g., CSV header)
     /// * `page_size` - Target page size in bytes (use `DEFAULT_PAGE_SIZE`)
+    /// * `column_stats` - Pre-computed per-column statistics to embed in the layout
     pub fn build(
         bytes: &[u8],
         skip_first_line: bool,
         page_size: usize,
+        column_stats: Vec<ColumnStats>,
     ) -> Option<PhysicalRowGroupLayout> {
         if bytes.is_empty() {
             return None;
         }
 
-        // If file is smaller than page size, no layout needed
-        if bytes.len() <= page_size {
-            return None;
-        }
+        // For small files, emit one page covering the whole file (pages are not needed
+        // for row lookup but we still write the layout for column stats).
+        let use_pages = bytes.len() > page_size;
 
         let mut pages = Vec::new();
         let mut row_count: u32 = 0;
@@ -106,17 +360,19 @@ impl PhysicalRowGroupLayout {
                     row_count += 1;
                 }
 
-                let page_bytes = (i as u64 + 1 - page_start) as usize;
+                if use_pages {
+                    let page_bytes = (i as u64 + 1 - page_start) as usize;
 
-                // Start new page if current page exceeds target size
-                if page_bytes >= page_size && !skip_first {
-                    let new_page_start = (i + 1) as u64;
-                    page_start = new_page_start;
+                    // Start new page if current page exceeds target size
+                    if page_bytes >= page_size && !skip_first {
+                        let new_page_start = (i + 1) as u64;
+                        page_start = new_page_start;
 
-                    pages.push(PageGroup {
-                        physical_start: new_page_start,
-                        row_begin: row_count,
-                    });
+                        pages.push(PageGroup {
+                            physical_start: new_page_start,
+                            row_begin: row_count,
+                        });
+                    }
                 }
             }
         }
@@ -134,16 +390,25 @@ impl PhysicalRowGroupLayout {
             total_rows: row_count as u64,
             file_size: bytes.len() as u64,
             pages,
+            column_stats,
         })
     }
 
     /// Build a layout from a file and write it to content-addressed storage.
     ///
-    /// Returns None if the file is smaller than `DEFAULT_PAGE_SIZE`.
+    /// Always writes a layout file (even for small files) so column stats are always stored.
+    /// Returns None only if the file is empty or has no data rows.
+    ///
+    /// # Arguments
+    /// * `datafile` - The data file to build a layout for
+    /// * `data_dir` - Directory to write the layout file into
+    /// * `skip_first_line` - Whether to skip the first line (e.g., CSV header)
+    /// * `column_stats` - Pre-computed per-column statistics to embed
     pub async fn build_and_write(
         datafile: &ObjectStoreFile,
         data_dir: &dyn IOReadWriteDir,
         skip_first_line: bool,
+        column_stats: Vec<ColumnStats>,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
         // Read the full file
         let mut file_stream = datafile.read_existing().await?;
@@ -153,11 +418,10 @@ impl PhysicalRowGroupLayout {
             buffer.extend_from_slice(&chunk);
         }
 
-        let layout = Self::build(&buffer, skip_first_line, DEFAULT_PAGE_SIZE);
-        match layout {
+        match Self::build(&buffer, skip_first_line, DEFAULT_PAGE_SIZE, column_stats) {
             None => Ok(None),
             Some(layout) => {
-                let index_bytes = layout.serialize();
+                let index_bytes = layout.serialize()?;
                 let data_stream =
                     Box::pin(stream::once(async { Ok::<_, std::io::Error>(index_bytes) }));
                 let result = data_dir.write_stream(data_stream, "prg.layout").await?;
@@ -167,22 +431,31 @@ impl PhysicalRowGroupLayout {
     }
 
     /// Serialize to binary format.
-    pub fn serialize(&self) -> Bytes {
+    pub fn serialize(&self) -> Result<Bytes, BundlebaseError> {
         let page_count = self.pages.len();
-        let mut buffer = Vec::with_capacity(HEADER_SIZE + page_count * 12);
+        let pages_size = page_count * 12;
+        // stats_offset points to the byte immediately after the page entries
+        let stats_offset = (HEADER_SIZE + pages_size) as u64;
+        let stats_json = serde_json::to_vec(&self.column_stats)
+            .map_err(|e| BundlebaseError::from(format!("Failed to serialize column stats: {}", e)))?;
+
+        let mut buffer = Vec::with_capacity(HEADER_SIZE + pages_size + stats_json.len());
 
         buffer.extend_from_slice(MAGIC_BYTES);
         buffer.push(VERSION);
         buffer.extend_from_slice(&self.total_rows.to_le_bytes());
         buffer.extend_from_slice(&self.file_size.to_le_bytes());
         buffer.extend_from_slice(&(page_count as u32).to_le_bytes());
+        buffer.extend_from_slice(&stats_offset.to_le_bytes());
 
         for page in &self.pages {
             buffer.extend_from_slice(&page.physical_start.to_le_bytes());
             buffer.extend_from_slice(&page.row_begin.to_le_bytes());
         }
 
-        Bytes::from(buffer)
+        buffer.extend_from_slice(&stats_json);
+
+        Ok(Bytes::from(buffer))
     }
 
     /// Deserialize from binary format.
@@ -212,11 +485,15 @@ impl PhysicalRowGroupLayout {
             BundlebaseError::from("Invalid layout file: bad page_count")
         })?) as usize;
 
-        let expected_size = HEADER_SIZE + page_count * 12;
-        if bytes.len() < expected_size {
+        let stats_offset = u64::from_le_bytes(bytes[29..37].try_into().map_err(|_| {
+            BundlebaseError::from("Invalid layout file: bad stats_offset")
+        })?) as usize;
+
+        let pages_end = HEADER_SIZE + page_count * 12;
+        if bytes.len() < pages_end {
             return Err(format!(
                 "Invalid layout file: expected {} bytes, got {}",
-                expected_size,
+                pages_end,
                 bytes.len()
             )
             .into());
@@ -241,10 +518,18 @@ impl PhysicalRowGroupLayout {
             });
         }
 
+        // Parse column stats from the JSON blob if present
+        let column_stats = if stats_offset < bytes.len() {
+            serde_json::from_slice(&bytes[stats_offset..]).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
         Ok(PhysicalRowGroupLayout {
             total_rows,
             file_size,
             pages,
+            column_stats,
         })
     }
 
@@ -473,23 +758,24 @@ mod tests {
 
     #[test]
     fn test_build_empty_file() {
-        let result = PhysicalRowGroupLayout::build(b"", false, DEFAULT_PAGE_SIZE);
+        let result = PhysicalRowGroupLayout::build(b"", false, DEFAULT_PAGE_SIZE, vec![]);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_build_file_smaller_than_page_size() {
-        // 10 bytes is way under 5MB
+        // Small files still get a layout (for column stats), just with one page.
         let data = b"row1\nrow2\n";
-        let result = PhysicalRowGroupLayout::build(data, false, DEFAULT_PAGE_SIZE);
-        assert!(result.is_none(), "No layout needed for small files");
+        let result = PhysicalRowGroupLayout::build(data, false, DEFAULT_PAGE_SIZE, vec![]).unwrap();
+        assert_eq!(result.total_rows, 2);
+        assert_eq!(result.pages.len(), 1, "Single page for small files");
     }
 
     #[test]
     fn test_build_with_small_page_size() {
         // Use a tiny page size to test page splitting
         let data = b"row1\nrow2\nrow3\nrow4\nrow5\nrow6\n";
-        let result = PhysicalRowGroupLayout::build(data, false, 10).unwrap();
+        let result = PhysicalRowGroupLayout::build(data, false, 10, vec![]).unwrap();
 
         assert_eq!(result.total_rows, 6);
         assert_eq!(result.file_size, data.len() as u64);
@@ -503,7 +789,7 @@ mod tests {
     #[test]
     fn test_build_with_header_skip() {
         let data = b"header\nrow1\nrow2\nrow3\n";
-        let result = PhysicalRowGroupLayout::build(data, true, 10).unwrap();
+        let result = PhysicalRowGroupLayout::build(data, true, 10, vec![]).unwrap();
 
         // Should have 3 data rows (header skipped)
         assert_eq!(result.total_rows, 3);
@@ -514,7 +800,7 @@ mod tests {
     #[test]
     fn test_build_header_only() {
         let data = b"header\n";
-        let result = PhysicalRowGroupLayout::build(data, true, DEFAULT_PAGE_SIZE);
+        let result = PhysicalRowGroupLayout::build(data, true, DEFAULT_PAGE_SIZE, vec![]);
         assert!(result.is_none(), "No rows after skipping header");
     }
 
@@ -522,7 +808,7 @@ mod tests {
     fn test_build_no_trailing_newline() {
         let data = b"row1\nrow2\nrow3";
         // Use small page to force layout creation
-        let result = PhysicalRowGroupLayout::build(data, false, 5).unwrap();
+        let result = PhysicalRowGroupLayout::build(data, false, 5, vec![]).unwrap();
         assert_eq!(result.total_rows, 3); // row3 counted even without \n
     }
 
@@ -536,7 +822,7 @@ mod tests {
         data_with_newline.extend_from_slice(&vec![b'y'; 20]);
         data_with_newline.push(b'\n');
 
-        let result = PhysicalRowGroupLayout::build(&data_with_newline, false, 10).unwrap();
+        let result = PhysicalRowGroupLayout::build(&data_with_newline, false, 10, vec![]).unwrap();
         assert_eq!(result.total_rows, 2);
         // Large row gets its own page
         assert!(result.pages.len() >= 1);
@@ -544,6 +830,21 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize_roundtrip() {
+        let stats = ColumnStats {
+            null_count: 5,
+            min: Some(StatValue::Float64(1.0)),
+            max: Some(StatValue::Float64(99.0)),
+            top_values: vec![("foo".to_string(), 10), ("bar".to_string(), 7)],
+            is_all_numeric: true,
+            is_strictly_increasing: false,
+            is_strictly_decreasing: false,
+            distinct_count: 42,
+            page_stats: vec![
+                PageStats { min: Some(StatValue::Float64(1.0)), max: Some(StatValue::Float64(50.0)), distinct_count: 20, bloom_filter: None },
+                PageStats { min: Some(StatValue::Float64(51.0)), max: Some(StatValue::Float64(99.0)), distinct_count: 22, bloom_filter: None },
+            ],
+            ..Default::default()
+        };
         let layout = PhysicalRowGroupLayout {
             total_rows: 100,
             file_size: 50000,
@@ -551,9 +852,10 @@ mod tests {
                 PageGroup { physical_start: 0, row_begin: 0 },
                 PageGroup { physical_start: 25000, row_begin: 50 },
             ],
+            column_stats: vec![stats],
         };
 
-        let bytes = layout.serialize();
+        let bytes = layout.serialize().expect("serialize should succeed");
         let loaded = PhysicalRowGroupLayout::deserialize(&bytes).unwrap();
 
         assert_eq!(loaded.total_rows, 100);
@@ -561,11 +863,23 @@ mod tests {
         assert_eq!(loaded.pages.len(), 2);
         assert_eq!(loaded.pages[0], layout.pages[0]);
         assert_eq!(loaded.pages[1], layout.pages[1]);
+        assert_eq!(loaded.column_stats.len(), 1);
+        assert_eq!(loaded.column_stats[0].null_count, 5);
+        assert_eq!(loaded.column_stats[0].min, Some(StatValue::Float64(1.0)));
+        assert_eq!(loaded.column_stats[0].top_values.len(), 2);
+        assert!(loaded.column_stats[0].is_all_numeric);
+        assert_eq!(loaded.column_stats[0].distinct_count, 42);
+        assert_eq!(loaded.column_stats[0].page_stats.len(), 2);
+        assert_eq!(loaded.column_stats[0].page_stats[0].min, Some(StatValue::Float64(1.0)));
+        assert_eq!(loaded.column_stats[0].page_stats[0].max, Some(StatValue::Float64(50.0)));
+        assert_eq!(loaded.column_stats[0].page_stats[1].min, Some(StatValue::Float64(51.0)));
+        assert_eq!(loaded.column_stats[0].page_stats[1].max, Some(StatValue::Float64(99.0)));
     }
 
     #[test]
     fn test_deserialize_bad_magic() {
-        let bytes = b"WRONGMAG\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        // 37 bytes minimum for new header (old was 29, new adds 8 for stats_offset)
+        let bytes = b"WRONGMAG\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
         let result = PhysicalRowGroupLayout::deserialize(bytes);
         assert!(result.is_err());
     }
@@ -586,6 +900,7 @@ mod tests {
                 PageGroup { physical_start: 50000, row_begin: 100 },
                 PageGroup { physical_start: 100000, row_begin: 200 },
             ],
+            column_stats: vec![],
         };
 
         assert_eq!(layout.find_page(0), Some(0));
@@ -608,6 +923,7 @@ mod tests {
                 PageGroup { physical_start: 50000, row_begin: 100 },
                 PageGroup { physical_start: 100000, row_begin: 200 },
             ],
+            column_stats: vec![],
         };
 
         assert_eq!(layout.page_byte_range(0), (0, 50000));
@@ -625,6 +941,7 @@ mod tests {
                 PageGroup { physical_start: 50000, row_begin: 100 },
                 PageGroup { physical_start: 100000, row_begin: 200 },
             ],
+            column_stats: vec![],
         };
 
         assert_eq!(layout.page_row_range(0), (0, 100));
@@ -641,7 +958,7 @@ mod tests {
         }
 
         // Use 50-byte page size to get multiple pages
-        let layout = PhysicalRowGroupLayout::build(&data, false, 50).unwrap();
+        let layout = PhysicalRowGroupLayout::build(&data, false, 50, vec![]).unwrap();
         assert_eq!(layout.total_rows, 100);
 
         // Every row should map to a valid page

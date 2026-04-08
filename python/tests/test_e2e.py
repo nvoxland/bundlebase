@@ -1909,11 +1909,11 @@ async def test_cast_column_type():
     # Standardize first so column names are predictable
     c2 = await c2.normalize_column_names()
 
-    # customer_id is a string like "1", "2", etc. - cast to integer
-    c2 = await c2.cast_column("customer_id", "Int64")
+    # index is a string like "1", "2", etc. - cast to integer
+    c2 = await c2.cast_column("index", "Int64")
 
     schema = await c2.schema()
-    col = next(f for f in schema if f.name == "customer_id")
+    col = next(f for f in schema if f.name == "index")
     assert "int" in col.data_type.lower()
 
     # Verify data is still accessible

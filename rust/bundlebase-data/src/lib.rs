@@ -1,6 +1,8 @@
 #![deny(clippy::unwrap_used)]
 
 pub mod attach_format;
+pub mod column_stats_builder;
+pub mod page_filter;
 pub mod plugin;
 pub mod reader_factory;
 mod layout_cache;
@@ -22,8 +24,8 @@ pub use bundlebase_common::object_id::{BlockId, ObjectId, ObjectIdAlias};
 pub use reader_factory::DataReaderFactory;
 pub use bundlebase_common::row_id::{RowId, RowIdBatch, SendableRowIdBatchStream};
 pub use layout_cache::GLOBAL_LAYOUT_CACHE;
-pub use physical_row_group_layout::PhysicalRowGroupLayout;
-pub use physical_row_group_data_source::{LineOrientedFormat, PhysicalRowGroupDataSource};
+pub use physical_row_group_layout::{ColumnStats, HistogramBucket, PageStats, PhysicalRowGroupLayout, StatValue, StringProfile};
+pub use physical_row_group_data_source::{coalesce_page_ranges, LineOrientedFormat, PhysicalRowGroupDataSource};
 pub use rowid_stream::RowIdStreamAdapter;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -52,6 +54,30 @@ pub trait DataReader: Sync + Send + Debug {
     async fn read_statistics(&self) -> Result<Option<Statistics>, BundlebaseError>;
 
     async fn read_version(&self) -> Result<String, BundlebaseError>;
+
+    /// Return pre-computed per-column statistics captured at attach time, if available.
+    ///
+    /// The returned `Vec` is positional: index N corresponds to column N in the reader's schema.
+    /// The default implementation returns an empty Vec (no pre-computed stats).
+    /// CSV and JSONL readers override this to load stats from the layout file.
+    async fn column_stats(&self) -> Result<Vec<crate::physical_row_group_layout::ColumnStats>, BundlebaseError> {
+        Ok(vec![])
+    }
+
+    /// Return a filtered data source that reads only pages whose per-page min/max stats
+    /// overlap with the given filter predicates.
+    ///
+    /// Returns `Ok(None)` when page-level filtering is not supported or no pruning is possible.
+    /// When `Some` is returned, the data source is partial and must NOT be placed in the block
+    /// cache (which stores complete blocks only).
+    async fn data_source_filtered_pages(
+        &self,
+        _projection: Option<&Vec<usize>>,
+        _filters: &[datafusion::logical_expr::Expr],
+        _limit: Option<usize>,
+    ) -> Result<Option<Arc<dyn DataSource>>, BundlebaseError> {
+        Ok(None)
+    }
 
     async fn data_source(
         &self,

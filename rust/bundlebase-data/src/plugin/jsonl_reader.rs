@@ -184,70 +184,254 @@ impl DataReader for JsonlReader {
     }
 
     async fn read_statistics(&self) -> Result<Option<Statistics>, BundlebaseError> {
-        let (num_rows, file_bytes) = self.compute_statistics().await?;
+        use object_store::GetOptions;
 
-        // Create statistics with actual row count and byte size
+        let object_store = self.inner.object_store();
+        let path = object_store::path::Path::parse(self.inner.url().path())?;
+
+        // Stream the file counting newlines — O(1) memory, no buffering.
+        let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
+        let mut stream = get_result.into_stream();
+
+        let mut row_count: usize = 0;
+        let mut file_size: usize = 0;
+        let mut last_byte: u8 = b'\n';
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
+            for &b in chunk.iter() {
+                if b == b'\n' {
+                    row_count += 1;
+                }
+            }
+            file_size += chunk.len();
+            if !chunk.is_empty() {
+                last_byte = chunk[chunk.len() - 1];
+            }
+        }
+
+        // Account for final line without trailing newline
+        if file_size > 0 && last_byte != b'\n' {
+            row_count += 1;
+        }
+
         let stats = Statistics {
-            num_rows: Precision::Exact(num_rows),
-            total_byte_size: Precision::Exact(file_bytes),
+            num_rows: Precision::Exact(row_count),
+            total_byte_size: Precision::Exact(file_size),
             ..Default::default()
         };
 
         Ok(Some(stats))
     }
 
+    async fn column_stats(&self) -> Result<Vec<crate::physical_row_group_layout::ColumnStats>, BundlebaseError> {
+        let layout_file = match &self.layout {
+            Some(f) => f,
+            None => return Ok(vec![]),
+        };
+        let layout = crate::physical_row_group_layout::PhysicalRowGroupLayout::load(layout_file).await?;
+        Ok(layout.column_stats)
+    }
+
     async fn build_layout(
         &self,
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
-        let result = PhysicalRowGroupLayout::build_and_write(
-            self.inner.file().as_object_store_file(),
-            data_dir,
-            false, // no header to skip in JSON Lines
-        )
-        .await?;
-
-        Ok(result)
-    }
-}
-
-impl JsonlReader {
-    /// Count the number of JSON rows and get file size by reading the file
-    /// Assumes line-delimited JSON format (JSONL)
-    /// Returns (row_count, file_size_in_bytes)
-    async fn compute_statistics(&self) -> Result<(usize, usize), BundlebaseError> {
+        use crate::column_stats_builder::ColumnStatsBuilder;
+        use crate::physical_row_group_layout::DEFAULT_PAGE_SIZE;
+        use futures::stream;
         use object_store::GetOptions;
+        use std::collections::HashMap;
 
-        // Get the object store and path
-        let store = self.inner.url();
         let object_store = self.inner.object_store();
-        let path = object_store::path::Path::parse(store.path())?;
+        let path = object_store::path::Path::parse(self.inner.url().path())?;
 
-        // Read the file
+        // Get column names from the schema for name→idx mapping
+        let schema = match self.inner.read_schema().await? {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+        let col_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        let col_count = col_names.len();
+        let name_to_idx: HashMap<&str, usize> = col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+        // Read file bytes once — used for both page layout and column stats.
         let get_result = object_store.get_opts(&path, GetOptions::default()).await?;
-
-        let mut reader = get_result.into_stream();
-
-        let mut content = Vec::new();
-        while let Some(chunk) = reader.next().await {
+        let mut file_stream = get_result.into_stream();
+        let mut buffer = Vec::new();
+        while let Some(chunk) = file_stream.next().await {
             let chunk = chunk.map_err(|e| Box::new(e) as BundlebaseError)?;
-            content.extend_from_slice(&chunk);
+            buffer.extend_from_slice(&chunk);
         }
 
-        // Get file size
-        let file_size = content.len();
+        // Build page layout first (no stats yet) to get page boundaries.
+        let initial_layout = match PhysicalRowGroupLayout::build(&buffer, false, DEFAULT_PAGE_SIZE, vec![]) {
+            None => return Ok(None),
+            Some(l) => l,
+        };
+        let page_row_starts: Vec<u32> = initial_layout.pages.iter().map(|p| p.row_begin).collect();
 
-        // Count newlines (each line is a JSON object in JSONL format)
-        let row_count = content.iter().filter(|&&b| b == b'\n').count();
+        // Compute column stats with page-level tracking.
+        let mut builder = if col_count > 0 { ColumnStatsBuilder::new(col_count, &page_row_starts) } else { ColumnStatsBuilder::new(0, &[]) };
 
-        // If the last line doesn't end with newline, add 1 for the last object
-        let row_count = if !content.is_empty() && content[content.len() - 1] != b'\n' {
-            row_count + 1
-        } else {
-            row_count
+        for line in buffer.split(|&b| b == b'\n') {
+            let line = if line.last() == Some(&b'\r') { &line[..line.len() - 1] } else { line };
+            if line.is_empty() { continue; }
+            let obj: serde_json::Map<String, serde_json::Value> =
+                match serde_json::from_slice(line) {
+                    Ok(serde_json::Value::Object(m)) => m,
+                    _ => continue,
+                };
+            builder.process_jsonl_row(&obj, &name_to_idx, col_count);
+        }
+
+        let column_stats = builder.finish();
+
+        // Assemble final layout with stats and write.
+        let layout = PhysicalRowGroupLayout { column_stats, ..initial_layout };
+        let index_bytes = layout.serialize()?;
+        let data_stream = Box::pin(stream::once(async move { Ok::<_, std::io::Error>(index_bytes) }));
+        let result = data_dir.write_stream(data_stream, "prg.layout").await?;
+        Ok(Some(result.file))
+    }
+
+    async fn data_source_filtered_pages(
+        &self,
+        projection: Option<&Vec<usize>>,
+        filters: &[datafusion::logical_expr::Expr],
+        _limit: Option<usize>,
+    ) -> Result<Option<Arc<dyn datafusion::datasource::source::DataSource>>, BundlebaseError> {
+        use bundlebase_io::IOReadFile;
+        use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
+        use crate::page_filter::{extract_lower_bound, extract_upper_bound, is_value_above_bound, is_value_below_bound, prune_exact_with_bloom, prune_prefix, prune_range};
+        use crate::physical_row_group_layout::PhysicalRowGroupLayout;
+        use bundlebase_index::{FilterAnalyzer, IndexPredicate};
+
+        let layout_file = match &self.layout {
+            Some(f) => f,
+            None => return Ok(None),
         };
 
-        Ok((row_count, file_size))
+        let layout_url = layout_file.url().clone();
+        let layout = if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&layout_url) {
+            cached
+        } else {
+            let loaded = PhysicalRowGroupLayout::load(layout_file).await?;
+            let arc = Arc::new(loaded);
+            GLOBAL_LAYOUT_CACHE.insert(layout_url, arc.clone());
+            arc
+        };
+
+        if layout.pages.len() <= 1 {
+            return Ok(None);
+        }
+
+        let schema = match self.inner.read_schema().await? {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        let indexable = FilterAnalyzer::extract_indexable(filters);
+        if indexable.is_empty() {
+            return Ok(None);
+        }
+
+        let num_pages = layout.pages.len();
+        let mut include = vec![true; num_pages];
+
+        for filter in &indexable {
+            let col_idx = match schema.fields().iter().position(|f| f.name() == &filter.column) {
+                Some(i) => i,
+                None => continue,
+            };
+            let col_stats = match layout.column_stats.get(col_idx) {
+                Some(s) => s,
+                None => continue,
+            };
+            if col_stats.page_stats.is_empty() { continue; }
+
+            let is_increasing = col_stats.is_strictly_increasing;
+            let is_decreasing = col_stats.is_strictly_decreasing;
+
+            for (page_idx, page_stat) in col_stats.page_stats.iter().enumerate() {
+                if !include[page_idx] { continue; }
+                let bloom = page_stat.bloom_filter.as_deref();
+                let can_prune = match &filter.predicate {
+                    IndexPredicate::Exact(val) => prune_exact_with_bloom(val, page_stat.min.as_ref(), page_stat.max.as_ref(), bloom),
+                    IndexPredicate::Range { min: fmin, max: fmax } => prune_range(fmin, fmax, page_stat.min.as_ref(), page_stat.max.as_ref()),
+                    IndexPredicate::In(vals) => vals.iter().all(|v| prune_exact_with_bloom(v, page_stat.min.as_ref(), page_stat.max.as_ref(), bloom)),
+                    // Per-page null counts not tracked; null pruning only works at block level
+                    IndexPredicate::IsNull | IndexPredicate::IsNotNull => false,
+                    IndexPredicate::Prefix(prefix) => prune_prefix(prefix, page_stat.min.as_ref(), page_stat.max.as_ref()),
+                };
+                if can_prune { include[page_idx] = false; }
+            }
+
+            if is_increasing {
+                if let Some(upper) = extract_upper_bound(&filter.predicate) {
+                    let mut past_range = false;
+                    for (page_idx, page_stat) in col_stats.page_stats.iter().enumerate() {
+                        if past_range { include[page_idx] = false; }
+                        else if let Some(ref pmin) = page_stat.min {
+                            if is_value_above_bound(&upper, pmin) {
+                                include[page_idx] = false;
+                                past_range = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if is_decreasing {
+                if let Some(lower) = extract_lower_bound(&filter.predicate) {
+                    let mut past_range = false;
+                    for (page_idx, page_stat) in col_stats.page_stats.iter().enumerate() {
+                        if past_range { include[page_idx] = false; }
+                        else if let Some(ref pmax) = page_stat.max {
+                            if is_value_below_bound(&lower, pmax) {
+                                include[page_idx] = false;
+                                past_range = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if include.iter().all(|&b| b) {
+            return Ok(None);
+        }
+
+        let included: Vec<usize> = include.iter().enumerate()
+            .filter(|(_, &inc)| inc)
+            .map(|(i, _)| i)
+            .collect();
+
+        if included.is_empty() {
+            return Ok(None);
+        }
+
+        // Coalesce adjacent / nearby pages into single range reads (256KB gap threshold).
+        const GAP_THRESHOLD: u64 = 256 * 1024;
+        let page_ranges = crate::physical_row_group_data_source::coalesce_page_ranges(
+            &layout.pages,
+            &included,
+            layout.file_size,
+            GAP_THRESHOLD,
+        );
+
+        log::debug!(
+            "JSONL page-filter: {} included pages → {} coalesced ranges",
+            included.len(),
+            page_ranges.len()
+        );
+
+        Ok(Some(Arc::new(PhysicalRowGroupDataSource::from_page_ranges(
+            self.inner.file().as_object_store_file(),
+            schema,
+            page_ranges,
+            projection.cloned(),
+            LineOrientedFormat::JsonLines,
+        ))))
     }
 }
 

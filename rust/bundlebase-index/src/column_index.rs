@@ -850,6 +850,8 @@ impl ColumnIndex {
             IndexPredicate::Exact(value) => self.estimate_exact_selectivity(value),
             IndexPredicate::In(values) => self.estimate_in_selectivity(values),
             IndexPredicate::Range { min, max } => self.estimate_range_selectivity(min, max),
+            // IsNull, IsNotNull, and Prefix are handled by block/page pruning, not the column index
+            IndexPredicate::IsNull | IndexPredicate::IsNotNull | IndexPredicate::Prefix(_) => 1.0,
         }
     }
 

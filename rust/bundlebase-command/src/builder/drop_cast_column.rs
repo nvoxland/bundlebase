@@ -68,7 +68,7 @@ impl BundleBuilderCommand for DropCastColumnCommand {
 }
 
 /// Count the number of active (un-dropped) casts for a column by replaying the cast stack.
-fn active_cast_depth(ops: &[AnyOperation], id: bundlebase::object_id::ColumnId) -> usize {
+fn active_cast_depth(ops: &[AnyOperation], id: bundlebase_common::object_id::ColumnId) -> usize {
     let mut depth: usize = 0;
     for op in ops {
         match op {
@@ -87,7 +87,7 @@ mod tests {
     use crate::BundleCommand;
     use arrow_schema::DataType;
     use bundlebase::bundle::operation::{CastColumnOp, resolve_cast_ops};
-    use bundlebase::object_id::ColumnId;
+    use bundlebase_common::object_id::ColumnId;
 
     #[test]
     fn test_parse_drop_cast_column() {

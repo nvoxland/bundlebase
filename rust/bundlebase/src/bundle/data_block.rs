@@ -8,7 +8,10 @@ use crate::index::{
 };
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{BlockId, IOReadFile, IOReadWriteDir};
-use crate::metrics::{start_span, OperationCategory, OperationOutcome, OperationTimer};
+use crate::metrics::{
+    record_cache_operation, record_operation, start_span, KeyValue, OperationCategory,
+    OperationOutcome, OperationTimer,
+};
 use crate::object_id::ColumnId;
 use crate::progress::ProgressScope;
 use crate::BundleConfig;
@@ -23,7 +26,6 @@ use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::ExecutionPlan;
 use parking_lot::RwLock;
 use std::any::Any;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Candidate index for a query with its estimated selectivity
@@ -56,6 +58,9 @@ pub struct DataBlock {
     update_overlays: Arc<RwLock<Vec<crate::bundle::update_overlay::UpdateOverlay>>>,
     /// Whether this block's version has been validated (first scan reads through reader).
     version_validated: Arc<std::sync::atomic::AtomicBool>,
+    /// DataFusion statistics cached after the first column-stats load. Starts as None;
+    /// populated during can_prune_block() so the optimizer gets stats on subsequent queries.
+    cached_df_statistics: Arc<RwLock<Option<datafusion::common::Statistics>>>,
 }
 
 impl DataBlock {
@@ -101,6 +106,7 @@ impl DataBlock {
             deleted_rows: Arc::new(RwLock::new(Vec::new())),
             update_overlays: Arc::new(RwLock::new(Vec::new())),
             version_validated: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            cached_df_statistics: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -147,6 +153,90 @@ impl DataBlock {
     /// Returns the column IDs for this block's schema fields
     pub fn column_ids(&self) -> &[ColumnId] {
         &self.column_ids
+    }
+
+    /// Return pre-computed statistics for a specific column, if available.
+    ///
+    /// Loads stats from the reader's layout file (CSV/JSONL only). Returns `None`
+    /// if the column is not in this block, or if this format has no pre-computed stats.
+    pub async fn column_stats_for(
+        &self,
+        column_id: ColumnId,
+    ) -> Result<Option<bundlebase_data::physical_row_group_layout::ColumnStats>, crate::BundlebaseError> {
+        let idx = match self.column_ids.iter().position(|id| *id == column_id) {
+            Some(i) => i,
+            None => return Ok(None),
+        };
+        let all_stats = self.reader.column_stats().await?;
+        Ok(all_stats.into_iter().nth(idx))
+    }
+
+    /// Returns true if the given filters provably exclude this entire block, based on
+    /// pre-computed column statistics. Conservative: returns false when uncertain.
+    ///
+    /// Also populates `cached_df_statistics` as a side effect so DataFusion's optimizer
+    /// has accurate cardinality estimates for join planning on subsequent queries.
+    async fn can_prune_block(
+        &self,
+        filters: &[IndexableFilter],
+    ) -> datafusion::common::Result<bool> {
+        use bundlebase_data::page_filter::{prune_block_exact, prune_block_range, prune_prefix};
+        use crate::index::IndexPredicate;
+
+        // Load all column stats once; we'll use them for both pruning and caching DF stats.
+        let all_stats = self.reader.column_stats().await
+            .map_err(|e| datafusion::common::DataFusionError::External(e))?;
+
+        // Cache DataFusion statistics (column cardinality / min / max) for the optimizer.
+        // Hold the write lock for the entire check-and-set to avoid redundant concurrent builds.
+        if !all_stats.is_empty() {
+            let mut cache = self.cached_df_statistics.write();
+            if cache.is_none() {
+                *cache = Some(build_df_statistics(&all_stats, &self.schema.read()));
+            }
+        }
+
+        for filter in filters {
+            // Look up column ID by name
+            let col_pos = match self.schema.read().fields().iter().position(|f| f.name() == &filter.column) {
+                Some(p) => p,
+                None => continue,
+            };
+            let stats = match all_stats.get(col_pos) {
+                Some(s) => s.clone(),
+                None => continue, // No stats for this column — can't prune
+            };
+
+            let can_prune = match &filter.predicate {
+                IndexPredicate::Exact(val) => {
+                    prune_block_exact(val, stats.min.as_ref(), stats.max.as_ref())
+                }
+                IndexPredicate::Range { min: fmin, max: fmax } => {
+                    prune_block_range(fmin, fmax, stats.min.as_ref(), stats.max.as_ref())
+                }
+                IndexPredicate::In(vals) => {
+                    // Prune only if every value in the IN list is outside the block range.
+                    stats.min.is_some() && stats.max.is_some() &&
+                        vals.iter().all(|v| prune_block_exact(v, stats.min.as_ref(), stats.max.as_ref()))
+                }
+                IndexPredicate::IsNull => {
+                    // No nulls in this block — IS NULL can't match
+                    stats.null_count == 0
+                }
+                IndexPredicate::IsNotNull => {
+                    // Block has values (min/max present) — can't prune
+                    false
+                }
+                IndexPredicate::Prefix(prefix) => {
+                    prune_prefix(prefix, stats.min.as_ref(), stats.max.as_ref())
+                }
+            };
+
+            if can_prune {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Cache key for this block.
@@ -263,6 +353,8 @@ impl DataBlock {
                 row_ids
             }
             IndexPredicate::Range { min, max } => index.lookup_range(min, max),
+            // IsNull, IsNotNull, and Prefix are not handled by the column index
+            IndexPredicate::IsNull | IndexPredicate::IsNotNull | IndexPredicate::Prefix(_) => vec![],
         }
     }
 
@@ -401,6 +493,10 @@ impl TableProvider for DataBlock {
             .collect())
     }
 
+    fn statistics(&self) -> Option<datafusion::common::Statistics> {
+        self.cached_df_statistics.read().clone()
+    }
+
     async fn scan(
         &self,
         state: &dyn Session,
@@ -505,8 +601,67 @@ impl TableProvider for DataBlock {
             }
         }
 
-        // Phase 2: Full scan with block cache
+        // Phase 2: Stats-based optimizations (block pruning + page filtering).
+        // Skipped when update overlays are present — updates can introduce values
+        // outside the original stats range, so pruning could return incorrect results.
         let overlays = self.update_overlays.read().clone();
+        if overlays.is_empty() && !indexable_filters.is_empty() {
+            let current_schema = self.schema.read().clone();
+            let projected_schema = match projection {
+                Some(proj) => {
+                    let fields: Vec<_> = proj.iter()
+                        .filter_map(|&i| current_schema.fields().get(i).cloned())
+                        .collect();
+                    Arc::new(arrow_schema::Schema::new(fields))
+                }
+                None => current_schema,
+            };
+
+            // Block-level pruning: if any filter provably excludes this entire block, return empty.
+            if self.can_prune_block(&indexable_filters).await? {
+                log::debug!("Block {} pruned by column stats (filter can't match)", self.id);
+                record_operation(
+                    OperationCategory::Select,
+                    OperationOutcome::Skipped,
+                    "block_prune",
+                    &[KeyValue::new("block_id", self.id.to_string())],
+                );
+                let exec = datafusion::physical_plan::empty::EmptyExec::new(projected_schema);
+                return Ok(Arc::new(exec));
+            }
+
+            // Page-level filtering: read only pages whose per-page stats overlap the filters.
+            // Only attempted on cache misses — a cached block is already memory-local and
+            // scanning it is fast enough that the overhead of page filtering isn't worthwhile.
+            let cache_key = self.cache_key();
+            let cached = GLOBAL_BLOCK_CACHE.get(&cache_key);
+            if cached.is_none() {
+                if let Some(page_source) = self.reader
+                    .data_source_filtered_pages(projection, filters, limit)
+                    .await
+                    .map_err(|e| datafusion::common::DataFusionError::External(e))?
+                {
+                    log::debug!("Block {} using page-filtered read (bypassing block cache)", self.id);
+                    record_operation(
+                        OperationCategory::Select,
+                        OperationOutcome::Success,
+                        "page_filter",
+                        &[KeyValue::new("block_id", self.id.to_string())],
+                    );
+                    let deleted = self.deleted_rows.read().clone();
+                    let mut source = page_source;
+                    if !deleted.is_empty() {
+                        source = Arc::new(crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
+                            source,
+                            Arc::new(deleted),
+                        ));
+                    }
+                    return Ok(Arc::new(datafusion::catalog::memory::DataSourceExec::new(source)));
+                }
+            }
+        }
+
+        // Phase 3: Full scan with block cache
         let cache_key = self.cache_key();
         let validated = self.version_validated.load(std::sync::atomic::Ordering::Relaxed);
 
@@ -516,6 +671,7 @@ impl TableProvider for DataBlock {
             if validated {
                 if let Some(cached) = GLOBAL_BLOCK_CACHE.get(&cache_key) {
                     log::debug!("Block cache hit for {}", cache_key);
+                    record_cache_operation("block_cache", true);
                     // Use the cached batch's own schema (derived from the reader's actual types)
                     let batch_schema = cached.batches.first()
                         .map(|b| b.schema())
@@ -526,6 +682,8 @@ impl TableProvider for DataBlock {
                         projection.cloned(),
                     )?)
                 } else {
+                    log::debug!("Block cache miss for {}", cache_key);
+                    record_cache_operation("block_cache", false);
                     // Validated but not cached (evicted or first scan after validation).
                     // Read through reader, rename to internal names, cache result.
                     // NOTE: collect() is intentional here — we materialize the block to populate
@@ -558,6 +716,7 @@ impl TableProvider for DataBlock {
             } else {
                 // First scan: read through reader (validates version), rename, then cache.
                 // NOTE: collect() is intentional — see comment above for rationale.
+                record_cache_operation("block_cache", false);
                 let base_source = self.reader
                     .data_source(None, &[], None, None)
                     .await?;
@@ -627,6 +786,78 @@ impl TableProvider for DataBlock {
 
         let exec = DataSourceExec::new(source.clone());
         Ok(Arc::new(exec))
+    }
+}
+
+
+/// Build a DataFusion `Statistics` object from our per-column stats, for the query optimizer.
+/// Uses the internal-name schema (col_<id>) to populate column statistics positionally.
+fn build_df_statistics(
+    col_stats: &[bundlebase_data::ColumnStats],
+    schema: &arrow_schema::SchemaRef,
+) -> datafusion::common::Statistics {
+    use datafusion::common::stats::Precision;
+    use datafusion::common::{ColumnStatistics, Statistics};
+    let column_statistics = schema.fields().iter().enumerate().map(|(i, _field)| {
+        let cs = match col_stats.get(i) {
+            Some(s) => s,
+            None => return ColumnStatistics::new_unknown(),
+        };
+        let min_val = cs.min.as_ref()
+            .and_then(stat_value_to_scalar)
+            .map(Precision::Exact)
+            .unwrap_or(Precision::Absent);
+        let max_val = cs.max.as_ref()
+            .and_then(stat_value_to_scalar)
+            .map(Precision::Exact)
+            .unwrap_or(Precision::Absent);
+        ColumnStatistics {
+            null_count: Precision::Exact(cs.null_count as usize),
+            max_value: max_val,
+            min_value: min_val,
+            distinct_count: if cs.distinct_count > 0 {
+                Precision::Inexact(cs.distinct_count as usize)
+            } else {
+                Precision::Absent
+            },
+            ..Default::default()
+        }
+    }).collect();
+
+    Statistics {
+        num_rows: Precision::Absent,
+        total_byte_size: Precision::Absent,
+        column_statistics,
+    }
+}
+
+/// Convert a typed `StatValue` to a DataFusion `ScalarValue` for the query optimizer.
+fn stat_value_to_scalar(sv: &bundlebase_data::StatValue) -> Option<datafusion::scalar::ScalarValue> {
+    use bundlebase_data::StatValue;
+    use datafusion::scalar::ScalarValue;
+    match sv {
+        StatValue::Int8(n) => Some(ScalarValue::Int8(Some(*n))),
+        StatValue::Int16(n) => Some(ScalarValue::Int16(Some(*n))),
+        StatValue::Int32(n) => Some(ScalarValue::Int32(Some(*n))),
+        StatValue::Int64(n) => Some(ScalarValue::Int64(Some(*n))),
+        StatValue::UInt8(n) => Some(ScalarValue::UInt8(Some(*n))),
+        StatValue::UInt16(n) => Some(ScalarValue::UInt16(Some(*n))),
+        StatValue::UInt32(n) => Some(ScalarValue::UInt32(Some(*n))),
+        StatValue::UInt64(n) => Some(ScalarValue::UInt64(Some(*n))),
+        StatValue::Float32(f) => Some(ScalarValue::Float32(Some(*f))),
+        StatValue::Float64(f) => Some(ScalarValue::Float64(Some(*f))),
+        StatValue::Utf8(s) => Some(ScalarValue::Utf8(Some(s.clone()))),
+        StatValue::Boolean(b) => Some(ScalarValue::Boolean(Some(*b))),
+        StatValue::Date32(n) => Some(ScalarValue::Date32(Some(*n))),
+        StatValue::Date64(n) => Some(ScalarValue::Date64(Some(*n))),
+        StatValue::TimestampSecond(n) => Some(ScalarValue::TimestampSecond(Some(*n), None)),
+        StatValue::TimestampMillisecond(n) => Some(ScalarValue::TimestampMillisecond(Some(*n), None)),
+        StatValue::TimestampMicrosecond(n) => Some(ScalarValue::TimestampMicrosecond(Some(*n), None)),
+        StatValue::TimestampNanosecond(n) => Some(ScalarValue::TimestampNanosecond(Some(*n), None)),
+        StatValue::Time32Second(n) => Some(ScalarValue::Time32Second(Some(*n))),
+        StatValue::Time32Millisecond(n) => Some(ScalarValue::Time32Millisecond(Some(*n))),
+        StatValue::Time64Microsecond(n) => Some(ScalarValue::Time64Microsecond(Some(*n))),
+        StatValue::Time64Nanosecond(n) => Some(ScalarValue::Time64Nanosecond(Some(*n))),
     }
 }
 

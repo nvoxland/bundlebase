@@ -1,6 +1,6 @@
 use crate::column_index::IndexedValue;
 use bundlebase_common::BundlebaseError;
-use datafusion::logical_expr::{expr, BinaryExpr, Expr, Operator};
+use datafusion::logical_expr::{expr, BinaryExpr, Expr, Like, Operator};
 
 /// Represents the type of index predicate extracted from a filter expression
 #[derive(Debug, Clone, PartialEq)]
@@ -16,6 +16,15 @@ pub enum IndexPredicate {
         min: IndexedValue,
         max: IndexedValue,
     },
+
+    /// IS NULL predicate: column IS NULL
+    IsNull,
+
+    /// IS NOT NULL predicate: column IS NOT NULL
+    IsNotNull,
+
+    /// LIKE prefix predicate: column LIKE 'prefix%'
+    Prefix(String),
 }
 
 /// Represents a filter expression that can be optimized with an index
@@ -78,6 +87,45 @@ impl FilterAnalyzer {
                 op: Operator::And,
                 right,
             }) => Self::extract_range_and(left, right),
+
+            // Handle IS NULL: column IS NULL
+            Expr::IsNull(inner) => {
+                if let Expr::Column(col) = inner.as_ref() {
+                    Ok(IndexableFilter {
+                        column: col.name.clone(),
+                        predicate: IndexPredicate::IsNull,
+                    })
+                } else {
+                    Err("IsNull on non-column expression".into())
+                }
+            }
+
+            // Handle IS NOT NULL: column IS NOT NULL
+            Expr::IsNotNull(inner) => {
+                if let Expr::Column(col) = inner.as_ref() {
+                    Ok(IndexableFilter {
+                        column: col.name.clone(),
+                        predicate: IndexPredicate::IsNotNull,
+                    })
+                } else {
+                    Err("IsNotNull on non-column expression".into())
+                }
+            }
+
+            // Handle LIKE prefix: column LIKE 'prefix%' (case-sensitive, non-negated)
+            Expr::Like(Like { negated: false, expr, pattern, case_insensitive: false, .. }) => {
+                if let (Expr::Column(col), Expr::Literal(datafusion::common::ScalarValue::Utf8(Some(pat)), _)) =
+                    (expr.as_ref(), pattern.as_ref())
+                {
+                    if let Some(prefix) = extract_like_prefix(pat) {
+                        return Ok(IndexableFilter {
+                            column: col.name.clone(),
+                            predicate: IndexPredicate::Prefix(prefix),
+                        });
+                    }
+                }
+                Err("LIKE pattern is not a simple prefix (prefix%)".into())
+            }
 
             _ => Err("Expression is not indexable".into()),
         }
@@ -264,6 +312,18 @@ impl FilterAnalyzer {
             (Err(_), Err(_)) => Err("AND expression has no indexable predicates".into()),
         }
     }
+}
+
+/// Extract a plain prefix from a LIKE pattern of the form `prefix%`.
+///
+/// Returns `None` if the pattern contains other wildcards (`%` or `_`) before
+/// the trailing `%`, if it doesn't end with `%`, or if the prefix is empty.
+fn extract_like_prefix(pattern: &str) -> Option<String> {
+    let prefix = pattern.strip_suffix('%')?;
+    if prefix.is_empty() || prefix.contains(['%', '_']) {
+        return None;
+    }
+    Some(prefix.to_string())
 }
 
 #[cfg(test)]
