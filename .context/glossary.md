@@ -323,6 +323,25 @@ container/
 
 **See Also**: [views.md](views.md)
 
+## Stored Reports
+
+### Report / Stored Report
+
+**Definition**: A markdown template with embedded `bundlebase` fenced code blocks, stored inside a bundle and identified by a unique id.
+
+**Characteristics**:
+- Id: alphanumeric, underscores, hyphens (e.g., `monthly-sales`)
+- Contains markdown with `bundlebase` fenced blocks for charts/tables
+- Content-addressed via SHA-256 hash
+- Stored as operations (CreateReportOp/DropReportOp) in the commit chain
+- Queryable via `bundle_info.reports` table
+
+**SQL**: `CREATE REPORT`, `DROP REPORT`, `SHOW REPORTS`, `GENERATE REPORT`
+
+**Python**: `create_report()`, `drop_report()`, `generate_report()`
+
+**See Also**: [reports guide](../docs/guide/reports.md)
+
 ## Python Bindings
 
 ### PyBundle / PyBundleBuilder

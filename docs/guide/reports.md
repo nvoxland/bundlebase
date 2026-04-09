@@ -4,13 +4,23 @@ Bundlebase can generate PDF reports from a markdown template. You write a normal
 
 ## Generating a Report
 
+Generate a PDF from a markdown file:
+
 ```bash
-bundlebase generate-report --input report.md --output report.pdf
+bundlebase generate-report --bundle ./my-bundle --input report.md --output report.pdf
+```
+
+Or from a stored report (see [Stored Reports](#stored-reports) below):
+
+```bash
+bundlebase generate-report --bundle ./my-bundle --id monthly-sales --output report.pdf
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--input` / `-i` | Path to the markdown report file |
+| `--bundle` | Path to the bundle (required) |
+| `--input` | Path to the markdown report file (use this or `--id`) |
+| `--id` | ID of a stored report in the bundle (use this or `--input`) |
 | `--output` / `-o` | Output PDF path (must end in `.pdf`) |
 | `--no-branding` | Omit the "Created by Bundlebase" footer |
 
@@ -221,3 +231,79 @@ type: table
 title: Top 20 Products
 ```
 ````
+
+## Stored Reports
+
+You can save report templates inside a bundle so they travel with the data. Stored reports are identified by an **id** (alphanumeric characters, underscores, and hyphens).
+
+### Creating a Report
+
+````sql
+CREATE REPORT monthly-sales
+  NAME 'Monthly Sales Report'
+  DESCRIPTION 'Regional revenue breakdown'
+  CONTENT $$
+# Monthly Sales
+
+```bundlebase
+bundle: .
+query: SELECT region, SUM(revenue) as total FROM bundle GROUP BY region
+type: bar
+title: Revenue by Region
+```
+$$
+````
+
+The `CONTENT` field uses `$$` dollar-quoting so the markdown can contain single quotes, newlines, and any other characters without escaping.
+
+If a report with the same id already exists, `CREATE REPORT` replaces it.
+
+### Listing Reports
+
+```sql
+SHOW REPORTS
+```
+
+Returns `id`, `name`, and `description` for each stored report (excludes the markdown content).
+
+To see full report data including content, query the info schema table directly:
+
+```sql
+SELECT * FROM bundle_info.reports
+```
+
+### Generating a Stored Report
+
+From SQL (returns the PDF as a binary column):
+
+```sql
+GENERATE REPORT monthly-sales
+```
+
+From the CLI:
+
+```bash
+bundlebase generate-report --bundle ./my-bundle --id monthly-sales --output report.pdf
+```
+
+From Python:
+
+```python
+c = await bundlebase.create("/path/to/bundle")
+await c.create_report(
+    "monthly-sales",
+    "Monthly Sales Report",
+    "Regional revenue breakdown",
+    markdown_content,
+)
+await c.commit("Add monthly sales report")
+
+# Generate PDF
+msg = await c.generate_report("monthly-sales", "report.pdf")
+```
+
+### Removing a Report
+
+```sql
+DROP REPORT monthly-sales
+```

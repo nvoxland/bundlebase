@@ -20,6 +20,7 @@ bundlebase-udf = { workspace = true }
 bundlebase-data = { workspace = true }
 bundlebase-index = { workspace = true }
 bundlebase-connector = { workspace = true }
+bundlebase-report = { path = "../bundlebase-report" }
 
 # Arrow & DataFusion
 arrow = { workspace = true }

@@ -74,6 +74,16 @@ use url::Url;
 use uuid::Uuid;
 pub static META_DIR: &str = "_bundlebase";
 
+/// A stored report template with markdown content.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportEntry {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub content: String,
+}
+
 /// A persistent always-update rule: SET assignments + WHERE clause.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,6 +132,7 @@ pub struct Bundle {
     sources: Arc<RwLock<HashMap<ObjectId, Arc<Source>>>>,
     indexes: Arc<RwLock<Vec<Arc<IndexDefinition>>>>,
     views: Arc<RwLock<HashMap<String, ObjectId>>>,
+    reports: Arc<RwLock<HashMap<String, ReportEntry>>>,
     dataframe: DataFrameHolder,
     bundle_schema: Arc<RwLock<BundleSchema>>,
 
@@ -192,6 +203,7 @@ impl Clone for Bundle {
             sources: Arc::clone(&self.sources),
             indexes: Arc::clone(&self.indexes),
             views: Arc::clone(&self.views),
+            reports: Arc::clone(&self.reports),
             dataframe: DataFrameHolder {
                 dataframe: Arc::new(RwLock::new(self.dataframe.dataframe.read().clone())),
             },
@@ -232,6 +244,7 @@ impl Bundle {
         let commits = Arc::new(RwLock::new(vec![]));
         let indexes = Arc::new(RwLock::new(Vec::new()));
         let views = Arc::new(RwLock::new(HashMap::new()));
+        let reports = Arc::new(RwLock::new(HashMap::new()));
         let sources = Arc::new(RwLock::new(HashMap::new()));
         let operations = Arc::new(RwLock::new(Vec::new()));
 
@@ -268,6 +281,7 @@ impl Bundle {
             sources,
             indexes,
             views,
+            reports,
             storage: Arc::clone(&storage),
             reader_factory: DataReaderFactory::new_with_plugins(
                 Arc::clone(&storage),
@@ -585,6 +599,16 @@ impl Bundle {
 
     pub fn config(&self) -> Arc<BundleConfig> {
         Arc::clone(&self.config)
+    }
+
+    /// Returns all stored reports (id -> entry).
+    pub fn reports(&self) -> HashMap<String, ReportEntry> {
+        self.reports.read().clone()
+    }
+
+    /// Look up a stored report by id.
+    pub fn report_by_id(&self, id: &str) -> Option<ReportEntry> {
+        self.reports.read().get(id).cloned()
     }
 
     /// Returns the current always-delete rules (WHERE clauses).
@@ -1438,6 +1462,10 @@ impl BundleFacade for Bundle {
 
     fn views_by_name(&self) -> HashMap<String, ObjectId> {
         self.views.read().clone()
+    }
+
+    fn reports(&self) -> HashMap<String, ReportEntry> {
+        Bundle::reports(self)
     }
 
     fn always_delete_rules(&self) -> Vec<String> {

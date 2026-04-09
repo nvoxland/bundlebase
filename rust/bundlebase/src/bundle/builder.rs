@@ -6,7 +6,7 @@ use crate::bundle::operation::AnyOperation;
 use crate::bundle::operation::{BundleChange, IndexBlocksOp, Operation};
 use crate::bundle::{commit, Pack, INIT_FILENAME, META_DIR};
 use crate::bundle::function_entry::FunctionRegistry;
-use crate::bundle::{bundle_schema, sql, AlwaysUpdateRule, Bundle};
+use crate::bundle::{bundle_schema, sql, AlwaysUpdateRule, Bundle, ReportEntry};
 use crate::source::ConnectorRegistry;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, VersionedBlockId};
 use crate::index::{IndexDefinition};
@@ -1346,6 +1346,10 @@ impl BundleFacade for BundleBuilder {
 
     fn views_by_name(&self) -> HashMap<String, ObjectId> {
         self.bundle.views.read().clone()
+    }
+
+    fn reports(&self) -> HashMap<String, ReportEntry> {
+        self.bundle.reports()
     }
 
     fn always_delete_rules(&self) -> Vec<String> {

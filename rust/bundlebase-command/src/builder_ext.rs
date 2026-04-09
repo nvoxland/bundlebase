@@ -19,8 +19,8 @@ use async_trait::async_trait;
 
 use crate::builder::{
     AddColumnCommand, AlwaysDeleteCommand, AttachCommand, CastColumnCommand, CreateIndexCommand, CreateSourceCommand,
-    DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
-    DropIndexCommand, DropJoinCommand, DropViewCommand, FetchAllCommand, FetchCommand,
+    CreateReportCommand, DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DetachBlockCommand, DropColumnCommand, DropConnectorCommand, DropFunctionCommand,
+    DropIndexCommand, DropJoinCommand, DropReportCommand, DropViewCommand, FetchAllCommand, FetchCommand,
     FilterCommand, ImportConnectorCommand, ImportFunctionCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
     RenameFunctionCommand, RenameJoinCommand, RenameViewCommand, ReplaceBlockCommand,
@@ -127,6 +127,18 @@ pub trait BundleBuilderExt {
 
     /// Drop an existing view.
     async fn drop_view(&self, view_name: &str) -> Result<&Self, BundlebaseError>;
+
+    /// Create or replace a stored report.
+    async fn create_report(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+        content: &str,
+    ) -> Result<&Self, BundlebaseError>;
+
+    /// Drop a stored report.
+    async fn drop_report(&self, id: &str) -> Result<&Self, BundlebaseError>;
 
     /// Drop an existing join.
     async fn drop_join(&self, join_name: &str) -> Result<&Self, BundlebaseError>;
@@ -403,6 +415,24 @@ impl BundleBuilderExt for BundleBuilder {
         Ok(self)
     }
 
+    async fn create_report(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+        content: &str,
+    ) -> Result<&Self, BundlebaseError> {
+        exec_cmd(self, CreateReportCommand::new(id, name, description, content))
+            .await?;
+        Ok(self)
+    }
+
+    async fn drop_report(&self, id: &str) -> Result<&Self, BundlebaseError> {
+        exec_cmd(self, DropReportCommand::new(id))
+            .await?;
+        Ok(self)
+    }
+
     async fn drop_join(&self, join_name: &str) -> Result<&Self, BundlebaseError> {
         exec_cmd(self,DropJoinCommand::new(join_name))
             .await?;
@@ -672,6 +702,12 @@ impl BundleBuilderExt for Arc<BundleBuilder> {
     }
     async fn drop_view(&self, view_name: &str) -> Result<&Self, BundlebaseError> {
         (**self).drop_view(view_name).await?; Ok(self)
+    }
+    async fn create_report(&self, id: &str, name: &str, description: &str, content: &str) -> Result<&Self, BundlebaseError> {
+        (**self).create_report(id, name, description, content).await?; Ok(self)
+    }
+    async fn drop_report(&self, id: &str) -> Result<&Self, BundlebaseError> {
+        (**self).drop_report(id).await?; Ok(self)
     }
     async fn drop_join(&self, join_name: &str) -> Result<&Self, BundlebaseError> {
         (**self).drop_join(join_name).await?; Ok(self)

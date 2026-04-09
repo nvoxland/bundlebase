@@ -66,9 +66,9 @@ pub use parser::Rule;
 // Re-export builder command structs
 pub use builder::{
     AddColumnCommand, AlwaysDeleteCommand, AlwaysUpdateCommand, AttachCommand, CastColumnCommand, CommitCommand, CreateIndexCommand, CreateSourceCommand,
-    DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DropCastColumnCommand, UpdateCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
+    CreateReportCommand, DeleteCommand, DropAlwaysDeleteCommand, DropAlwaysUpdateCommand, DropCastColumnCommand, UpdateCommand, ImportJoinCommand, ImportConnectorCommand, ImportFunctionCommand, CreateViewCommand, DetachBlockCommand,
     DropColumnCommand, DropConnectorCommand, DropFunctionCommand, DropIndexCommand, DropJoinCommand,
-    DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
+    DropReportCommand, DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
     RenameFunctionCommand, RenameJoinCommand, RenameViewCommand,
     ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand,
@@ -96,10 +96,11 @@ pub use facade::{
     ShowAlwaysDeletesCommand, ShowAlwaysUpdatesCommand, ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
     ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
     ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
-    ShowCountCommand,
+    ShowCountCommand, ShowReportsCommand,
 };
 pub use facade::SyntaxCommand;
 pub use facade::ProfileColumnCommand;
+pub use facade::GenerateReportCommand;
 
 // Re-export extension traits
 pub use facade_ext::BundleFacadeCommandExt;
@@ -155,6 +156,10 @@ pub enum FacadeCommand {
     TestConnector(TestConnectorCommand),
     /// Profile a column's values (with optional cast-compatibility check)
     ProfileColumn(ProfileColumnCommand),
+    /// Show stored reports (id, name, description)
+    ShowReports(ShowReportsCommand),
+    /// Generate PDF from a stored report
+    GenerateReport(GenerateReportCommand),
 }
 
 impl FacadeCommand {
@@ -280,6 +285,14 @@ impl FacadeCommand {
                 let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
                 Ok(Box::new(result))
             }
+            FacadeCommand::ShowReports(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
+            FacadeCommand::GenerateReport(cmd) => {
+                let result = BundleFacadeCommand::execute(Box::new(cmd), facade).await?;
+                Ok(Box::new(result))
+            }
         }
     }
 
@@ -315,6 +328,8 @@ impl FacadeCommand {
             FacadeCommand::DescribeData(_) => DescribeDataCommand::output_schema(),
             FacadeCommand::TestConnector(_) => TestConnectorCommand::output_schema(),
             FacadeCommand::ProfileColumn(_) => ProfileColumnCommand::output_schema(),
+            FacadeCommand::ShowReports(_) => ShowReportsCommand::output_schema(),
+            FacadeCommand::GenerateReport(_) => GenerateReportCommand::output_schema(),
         }
     }
 
@@ -350,6 +365,8 @@ impl FacadeCommand {
             FacadeCommand::DescribeData(_) => DescribeDataCommand::output_shape(),
             FacadeCommand::TestConnector(_) => TestConnectorCommand::output_shape(),
             FacadeCommand::ProfileColumn(_) => ProfileColumnCommand::output_shape(),
+            FacadeCommand::ShowReports(_) => ShowReportsCommand::output_shape(),
+            FacadeCommand::GenerateReport(_) => GenerateReportCommand::output_shape(),
         }
     }
 }
@@ -390,6 +407,8 @@ impl BundleCommand {
             BundleCommand::DescribeData(cmd) => Ok(FacadeCommand::DescribeData(cmd)),
             BundleCommand::TestConnector(cmd) => Ok(FacadeCommand::TestConnector(cmd)),
             BundleCommand::ProfileColumn(cmd) => Ok(FacadeCommand::ProfileColumn(cmd)),
+            BundleCommand::ShowReports(cmd) => Ok(FacadeCommand::ShowReports(cmd)),
+            BundleCommand::GenerateReport(cmd) => Ok(FacadeCommand::GenerateReport(cmd)),
             _ => {
                 // Get the command name for the error message
                 let cmd_name = match &self {
@@ -415,7 +434,9 @@ impl BundleCommand {
                     BundleCommand::DropIndex(_) => "DROP INDEX",
                     BundleCommand::RebuildIndex(_) => "REBUILD INDEX",
                     BundleCommand::Reindex(_) => "REINDEX",
+                    BundleCommand::CreateReport(_) => "CREATE REPORT",
                     BundleCommand::CreateView(_) => "CREATE VIEW",
+                    BundleCommand::DropReport(_) => "DROP REPORT",
                     BundleCommand::RenameView(_) => "RENAME VIEW",
                     BundleCommand::DropView(_) => "DROP VIEW",
                     BundleCommand::DropJoin(_) => "DROP JOIN",
@@ -437,7 +458,7 @@ impl BundleCommand {
                     BundleCommand::VerifyData(_) => "VERIFY DATA",
                     BundleCommand::Commit(_) => "COMMIT",
                     BundleCommand::ExportHollow(_) => "EXPORT HOLLOW",
-                    BundleCommand::ExportData(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_) | BundleCommand::ProfileColumn(_) => {
+                    BundleCommand::ExportData(_) | BundleCommand::DescribeConnector(_) | BundleCommand::DescribeFunction(_) | BundleCommand::ImportTempConnector(_) | BundleCommand::ImportTempFunction(_) | BundleCommand::DropTempConnector(_) | BundleCommand::DropTempFunction(_) | BundleCommand::RenameTempConnector(_) | BundleCommand::RenameTempFunction(_) | BundleCommand::ExplainPlan(_) | BundleCommand::SetConfig(_) | BundleCommand::ShowAlwaysDeletes(_) | BundleCommand::ShowAlwaysUpdates(_) | BundleCommand::ShowDetails(_) | BundleCommand::ShowHistory(_) | BundleCommand::ShowStatus(_) | BundleCommand::ShowViews(_) | BundleCommand::ShowIndexes(_) | BundleCommand::ShowPacks(_) | BundleCommand::ShowBlocks(_) | BundleCommand::ShowConfig(_) | BundleCommand::ShowCommands(_) | BundleCommand::ShowConnectors(_) | BundleCommand::ShowFunctions(_) | BundleCommand::ShowColumns(_) | BundleCommand::ShowCount(_) | BundleCommand::ShowReports(_) | BundleCommand::GenerateReport(_) | BundleCommand::Syntax(_) | BundleCommand::DescribeData(_) | BundleCommand::TestConnector(_) | BundleCommand::ProfileColumn(_) => {
                         unreachable!("Already handled above")
                     }
                 };
@@ -746,6 +767,12 @@ register_commands! {
         Reindex(ReindexCommand) => Rule::reindex_stmt,
             "REINDEX" => "REINDEX [ON data(<column>)]",
 
+        // Report commands
+        CreateReport(CreateReportCommand) => Rule::create_report_stmt,
+            "CREATE REPORT" => "CREATE REPORT <id> NAME '<name>' DESCRIPTION '<description>' CONTENT $$<markdown>$$",
+        DropReport(DropReportCommand) => Rule::drop_report_stmt,
+            "DROP REPORT" => "DROP REPORT <id>",
+
         // View commands
         CreateView(CreateViewCommand) => Rule::create_view_stmt,
             "CREATE VIEW" => "CREATE VIEW <name> AS <sql>",
@@ -860,6 +887,10 @@ register_commands! {
             "SHOW ALWAYS DELETES" => "SHOW ALWAYS DELETES",
         ShowAlwaysUpdates(ShowAlwaysUpdatesCommand) => Rule::show_always_updates_stmt,
             "SHOW ALWAYS UPDATES" => "SHOW ALWAYS UPDATES",
+        ShowReports(ShowReportsCommand) => Rule::show_reports_stmt,
+            "SHOW REPORTS" => "SHOW REPORTS",
+        GenerateReport(GenerateReportCommand) => Rule::generate_report_stmt,
+            "GENERATE REPORT" => "GENERATE REPORT <id>",
         Syntax(SyntaxCommand) => Rule::syntax_stmt,
             "SYNTAX" => "SYNTAX [<command>]",
         DescribeData(DescribeDataCommand) => Rule::describe_data_stmt,

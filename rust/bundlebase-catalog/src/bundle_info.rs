@@ -10,6 +10,7 @@ mod history_table;
 mod indexes_table;
 mod packs_table;
 mod columns_table;
+mod reports_table;
 mod status_table;
 mod views_table;
 
@@ -33,6 +34,7 @@ use columns_table::BundleColumnsTable;
 use status_table::BundleStatusTable;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
+use reports_table::BundleReportsTable;
 use views_table::BundleViewsTable;
 
 /// SchemaProvider that exposes bundle metadata tables in the "bundle_info" schema.
@@ -68,7 +70,8 @@ impl BundleInfoSchemaProvider {
         tables.insert(tables::FUNCTIONS, Arc::new(BundleFunctionsTable::new(bundle.clone())));
         tables.insert(tables::COLUMNS, Arc::new(BundleColumnsTable::new(bundle.clone())));
         tables.insert(tables::ALWAYS_DELETES, Arc::new(BundleAlwaysDeletesTable::new(bundle.clone())));
-        tables.insert(tables::ALWAYS_UPDATES, Arc::new(BundleAlwaysUpdatesTable::new(bundle)));
+        tables.insert(tables::ALWAYS_UPDATES, Arc::new(BundleAlwaysUpdatesTable::new(bundle.clone())));
+        tables.insert(tables::REPORTS, Arc::new(BundleReportsTable::new(bundle)));
         tables.insert(tables::COMMANDS, Arc::new(CommandsTable::new()));
         Self { tables }
     }

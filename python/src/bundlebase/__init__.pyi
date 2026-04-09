@@ -277,6 +277,20 @@ class PyBundle:
         """
         ...
 
+    async def generate_report(self, id: str, output: str, no_branding: bool = False) -> str:
+        """
+        Generate a PDF from a stored report template.
+
+        Args:
+            id: Report identifier
+            output: Output PDF path (must end in .pdf)
+            no_branding: Disable 'Created by Bundlebase' footer
+
+        Returns:
+            Success message
+        """
+        ...
+
 
 class PyChange:
     """Information about a logical, user-level change."""
@@ -936,6 +950,36 @@ class PyBundleBuilder:
         """
         ...
 
+    def create_report(self, id: str, name: str, description: str, content: str) -> "OperationChain":
+        """
+        Create or replace a stored report template.
+
+        Args:
+            id: Unique identifier (alphanumeric, _, -)
+            name: Human-readable name
+            description: Description of the report
+            content: Markdown content with bundlebase fenced blocks
+        """
+        ...
+
+    def drop_report(self, id: str) -> "OperationChain":
+        """Drop a stored report by id."""
+        ...
+
+    async def generate_report(self, id: str, output: str, no_branding: bool = False) -> str:
+        """
+        Generate a PDF from a stored report template.
+
+        Args:
+            id: Report identifier
+            output: Output PDF path (must end in .pdf)
+            no_branding: Disable 'Created by Bundlebase' footer
+
+        Returns:
+            Success message
+        """
+        ...
+
     def drop_index(self, column: str) -> "OperationChain":
         """
         Drop an index from a column.
@@ -1407,6 +1451,14 @@ class OperationChain:
         """Queue a drop_view operation."""
         ...
 
+    def create_report(self, id: str, name: str, description: str, content: str) -> "OperationChain":
+        """Queue a create_report operation."""
+        ...
+
+    def drop_report(self, id: str) -> "OperationChain":
+        """Queue a drop_report operation."""
+        ...
+
     def drop_index(self, column: str) -> "OperationChain":
         """Queue a drop_index operation."""
         ...
@@ -1566,6 +1618,14 @@ class CreateChain:
         """Queue a drop_view operation."""
         ...
 
+    def create_report(self, id: str, name: str, description: str, content: str) -> "CreateChain":
+        """Queue a create_report operation."""
+        ...
+
+    def drop_report(self, id: str) -> "CreateChain":
+        """Queue a drop_report operation."""
+        ...
+
     def drop_index(self, column: str) -> "CreateChain":
         """Queue a drop_index operation."""
         ...
@@ -1723,6 +1783,14 @@ class ExtendChain:
 
     def drop_view(self, view_name: str) -> "ExtendChain":
         """Queue a drop_view operation."""
+        ...
+
+    def create_report(self, id: str, name: str, description: str, content: str) -> "ExtendChain":
+        """Queue a create_report operation."""
+        ...
+
+    def drop_report(self, id: str) -> "ExtendChain":
+        """Queue a drop_report operation."""
         ...
 
     def drop_index(self, column: str) -> "ExtendChain":

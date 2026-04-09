@@ -69,6 +69,8 @@ schema_stmt = {
     | create_view_stmt
     | drop_view_stmt
     | rename_view_stmt
+    | create_report_stmt
+    | drop_report_stmt
 }
 
 // Source management statements - operations for data sources and functions
@@ -136,6 +138,8 @@ metadata_stmt = {
     | set_config_stmt
     | save_config_stmt
     | test_connector_stmt
+    | show_reports_stmt
+    | generate_report_stmt
 }
 
 // ============================================================================
@@ -965,4 +969,54 @@ describe_data_stmt = {
 
 describe_data_column_spec = {
     identifier ~ (^"as" ~ identifier)?
+}
+
+// ============================================================================
+// Report ID
+// ============================================================================
+// Like identifier but also allows hyphens (for report ids like "monthly-sales").
+// Can be double-quoted to allow any characters.
+
+report_id = @{
+    "\"" ~ (!"\"" ~ ANY)+ ~ "\""
+    | (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_" | "-")*
+}
+
+// ============================================================================
+// CREATE REPORT Statement
+// ============================================================================
+// Syntax: CREATE REPORT <id> NAME '<name>' DESCRIPTION '<description>' CONTENT $$<markdown>$$
+// Examples:
+//   CREATE REPORT monthly-sales NAME 'Monthly Sales' DESCRIPTION 'Sales summary' CONTENT $$# Report$$
+
+create_report_stmt = {
+    ^"create" ~ ^"report" ~ report_id
+    ~ ^"name" ~ quoted_string
+    ~ ^"description" ~ quoted_string
+    ~ ^"content" ~ quoted_string
+}
+
+// ============================================================================
+// DROP REPORT Statement
+// ============================================================================
+// Syntax: DROP REPORT <id>
+
+drop_report_stmt = {
+    ^"drop" ~ ^"report" ~ report_id
+}
+
+// ============================================================================
+// SHOW REPORTS Statement
+// ============================================================================
+// Syntax: SHOW REPORTS
+
+show_reports_stmt = { ^"show" ~ ^"reports" }
+
+// ============================================================================
+// GENERATE REPORT Statement
+// ============================================================================
+// Syntax: GENERATE REPORT <id>
+
+generate_report_stmt = {
+    ^"generate" ~ ^"report" ~ report_id
 }

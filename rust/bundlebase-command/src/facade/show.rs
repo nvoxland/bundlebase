@@ -75,6 +75,51 @@ show_table_command!(ShowColumnsCommand, show_columns_stmt, "columns", "COLUMNS")
 show_table_command!(ShowAlwaysDeletesCommand, show_always_deletes_stmt, "always_deletes", "ALWAYS DELETES");
 show_table_command!(ShowAlwaysUpdatesCommand, show_always_updates_stmt, "always_updates", "ALWAYS UPDATES");
 
+/// SHOW REPORTS — custom command that excludes the content column.
+#[derive(Debug, Clone)]
+pub struct ShowReportsCommand;
+
+impl ShowReportsCommand {
+    pub fn output_schema() -> SchemaRef {
+        Arc::new(Schema::empty())
+    }
+
+    pub fn output_shape() -> OutputShape {
+        OutputShape::Table
+    }
+}
+
+impl CommandParsing for ShowReportsCommand {
+    fn rule() -> Rule {
+        Rule::show_reports_stmt
+    }
+
+    fn from_statement(
+        _pair: pest::iterators::Pair<Rule>,
+    ) -> Result<Self, BundlebaseError> {
+        Ok(ShowReportsCommand)
+    }
+
+    fn to_statement(&self) -> String {
+        "SHOW REPORTS".to_string()
+    }
+}
+
+impl BundleFacadeCommand for ShowReportsCommand {
+    type Output = SendableRecordBatchStream;
+
+    async fn execute(
+        self: Box<Self>,
+        facade: &dyn BundleFacade,
+    ) -> Result<SendableRecordBatchStream, BundlebaseError> {
+        let sql = format!(
+            "SELECT id, name, description FROM {}.reports",
+            BUNDLE_INFO_SCHEMA
+        );
+        facade.query(&sql, vec![], None).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::parser::parse_command;
@@ -137,6 +182,7 @@ mod tests {
             ("SHOW CONNECTORS", "ShowConnectors"),
             ("SHOW FUNCTIONS", "ShowFunctions"),
             ("SHOW COLUMNS", "ShowColumns"),
+            ("SHOW REPORTS", "ShowReports"),
         ];
         for (sql, expected_name) in cases {
             let cmd = parse_command(sql).unwrap_or_else(|e| panic!("Failed to parse {}: {}", sql, e));

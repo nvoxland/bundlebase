@@ -159,6 +159,9 @@ All operations work synchronously without `await`:
 - **`create_index(column: str)`** - Create index
 - **`drop_index(column: str)`** - Drop index
 - **`rebuild_index(column: str)`** - Rebuild index
+- **`create_report(id, name, description, content)`** - Create or replace a stored report template
+- **`drop_report(id)`** - Drop a stored report
+- **`generate_report(id, output, no_branding=False) -> str`** - Generate PDF from stored report
 
 #### Read Operations (no chaining)
 

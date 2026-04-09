@@ -30,33 +30,20 @@ pub trait BundleResolver: Send + Sync {
     async fn resolve(&self, bundle_ref: &str) -> Result<Arc<dyn BundleFacade>, BundlebaseError>;
 }
 
-/// Generate a PDF report from markdown with embedded query/chart placeholders.
+/// Generate PDF bytes from markdown with embedded query/chart placeholders.
 ///
 /// Parses the markdown, executes queries against resolved bundles,
-/// renders charts and tables via Typst, and writes the PDF to `output_path`.
-///
-/// Returns a success message describing what was generated.
-pub async fn generate_report(
+/// renders charts and tables via Typst, and returns the raw PDF bytes.
+pub async fn generate_report_bytes(
     input: &str,
     resolver: &dyn BundleResolver,
-    output: &str,
     show_branding: bool,
-) -> Result<String, BundlebaseError> {
-    // Validate output path
-    if !output.ends_with(".pdf") {
-        return Err(BundlebaseError::from(format!(
-            "Output path must end with .pdf, got: {}",
-            output
-        )));
-    }
-
+) -> Result<Vec<u8>, BundlebaseError> {
     // Phase 1: Parse markdown
     let elements = parse::parse_report(input)?;
 
     // Phase 2: Resolve elements — execute queries and generate Typst markup
     let mut resolved = Vec::new();
-    let mut chart_count = 0usize;
-    let mut table_count = 0usize;
 
     for (idx, element) in elements.iter().enumerate() {
         match element {
@@ -85,7 +72,6 @@ pub async fn generate_report(
                     })?;
                 let markup = typst_chart::render_chart(chart, &data)?;
                 resolved.push(ResolvedElement::Chart(markup));
-                chart_count += 1;
             }
             ReportElement::Table(table) => {
                 let bundle = resolver.resolve(&table.bundle).await.map_err(|e| {
@@ -108,26 +94,41 @@ pub async fn generate_report(
                     })?;
                 let markup = typst_table::render_table(table, &data)?;
                 resolved.push(ResolvedElement::Table(markup));
-                table_count += 1;
             }
         }
     }
 
     // Phase 3: Assemble Typst document and compile to PDF
     let typst_source = typst_render::assemble_document(&resolved, show_branding);
-    let pdf_bytes = typst_render::compile_to_pdf(&typst_source)?;
+    typst_render::compile_to_pdf(&typst_source)
+}
 
-    // Phase 4: Write PDF to disk
+/// Generate a PDF report from markdown with embedded query/chart placeholders.
+///
+/// Parses the markdown, executes queries against resolved bundles,
+/// renders charts and tables via Typst, and writes the PDF to `output_path`.
+///
+/// Returns a success message describing what was generated.
+pub async fn generate_report(
+    input: &str,
+    resolver: &dyn BundleResolver,
+    output: &str,
+    show_branding: bool,
+) -> Result<String, BundlebaseError> {
+    // Validate output path
+    if !output.ends_with(".pdf") {
+        return Err(BundlebaseError::from(format!(
+            "Output path must end with .pdf, got: {}",
+            output
+        )));
+    }
+
+    let pdf_bytes = generate_report_bytes(input, resolver, show_branding).await?;
+
+    // Write PDF to disk
     tokio::fs::write(output, &pdf_bytes).await.map_err(|e| {
         BundlebaseError::from(format!("Failed to write PDF to '{}': {}", output, e))
     })?;
 
-    Ok(format!(
-        "Report generated: {} ({} chart{}, {} table{})",
-        output,
-        chart_count,
-        if chart_count == 1 { "" } else { "s" },
-        table_count,
-        if table_count == 1 { "" } else { "s" },
-    ))
+    Ok(format!("Report generated: {}", output))
 }

@@ -372,6 +372,20 @@ class SyncBundle:
         async_result = _loop_manager.run_sync(coro)
         return SyncQueryResult(async_result)
 
+    def generate_report(self, id: str, output: str, no_branding: bool = False) -> str:
+        """Generate a PDF from a stored report template.
+
+        Args:
+            id: Report identifier
+            output: Output PDF path
+            no_branding: Disable 'Created by Bundlebase' footer
+
+        Returns:
+            Success message
+        """
+        coro = _call_original_method(self._async, "generate_report", id, output, no_branding)
+        return _loop_manager.run_sync(coro)
+
     def describe_data(self, columns) -> "SyncQueryResult":
         """Describe data quality and statistics for specified columns.
 
@@ -596,6 +610,39 @@ class SyncBundleBuilder(SyncBundle):
         coro = _call_original_method(self._async, "drop_column", name)
         self._async = _loop_manager.run_sync(coro)
         return self
+
+    def create_report(self, id: str, name: str, description: str, content: str) -> "SyncBundleBuilder":
+        """Create or replace a stored report template.
+
+        Args:
+            id: Unique identifier for the report (alphanumeric, _, -)
+            name: Human-readable name
+            description: Description of the report
+            content: Markdown content with bundlebase fenced blocks
+        """
+        coro = _call_original_method(self._async, "create_report", id, name, description, content)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def drop_report(self, id: str) -> "SyncBundleBuilder":
+        """Remove a stored report by id."""
+        coro = _call_original_method(self._async, "drop_report", id)
+        self._async = _loop_manager.run_sync(coro)
+        return self
+
+    def generate_report(self, id: str, output: str, no_branding: bool = False) -> str:
+        """Generate a PDF from a stored report template.
+
+        Args:
+            id: Report identifier
+            output: Output PDF path
+            no_branding: Disable 'Created by Bundlebase' footer
+
+        Returns:
+            Success message
+        """
+        coro = _call_original_method(self._async, "generate_report", id, output, no_branding)
+        return _loop_manager.run_sync(coro)
 
     def cast_column(self, name: str, new_type: str) -> "SyncBundleBuilder":
         """Cast a column to a different data type.

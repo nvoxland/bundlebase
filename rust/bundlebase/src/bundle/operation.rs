@@ -4,8 +4,10 @@ mod always_update;
 mod attach_block;
 mod cast_column;
 mod drop_cast_column;
+mod create_report;
 mod create_view;
 mod delete;
+mod drop_report;
 mod drop_always_delete;
 mod drop_always_update;
 mod update_data;
@@ -42,7 +44,9 @@ pub use crate::bundle::operation::always_update::AlwaysUpdateOp;
 pub use crate::bundle::operation::attach_block::{AttachBlockOp, SourceInfo};
 pub use crate::bundle::operation::cast_column::CastColumnOp;
 pub use crate::bundle::operation::drop_cast_column::DropCastColumnOp;
+pub use crate::bundle::operation::create_report::CreateReportOp;
 pub use crate::bundle::operation::create_view::CreateViewOp;
+pub use crate::bundle::operation::drop_report::DropReportOp;
 pub use crate::bundle::operation::import_function::ImportFunctionOp;
 pub use crate::bundle::operation::create_index::CreateIndexOp;
 pub use crate::bundle::operation::drop_function::DropFunctionOp;
@@ -261,6 +265,7 @@ define_any_operation! {
     ImportFunction(ImportFunctionOp),
     CreateIndex(CreateIndexOp),
     CreateJoin(CreateJoinOp),
+    CreateReport(CreateReportOp),
     CreateSource(CreateSourceOp),
     CreateView(CreateViewOp),
     Delete(DeleteOp),
@@ -274,6 +279,7 @@ define_any_operation! {
     DropConnector(DropConnectorOp),
     DropFunction(DropFunctionOp),
     DropJoin(DropJoinOp),
+    DropReport(DropReportOp),
     DropView(DropViewOp),
     Filter(FilterOp),
     IndexBlocks(IndexBlocksOp),

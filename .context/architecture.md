@@ -53,6 +53,8 @@ Operations are recorded and applied in sequence when querying:
 - **SetDescription**: Set container description
 - **IndexData**: Track row indexing metadata
 - **DescribeConnector**: Returns metadata table (name, runtime, entrypoint, platform, temporary) for a registered connector
+- **CreateReport**: Store a markdown report template in the bundle (auto-replaces if id exists)
+- **DropReport**: Remove a stored report template
 
 ## Adapter System
 

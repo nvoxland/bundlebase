@@ -7,7 +7,7 @@ use crate::index::IndexDefinition;
 use crate::io::{IOReadWriteDir, ObjectId};
 use crate::object_id::ColumnId;
 use crate::bundle_config::Scope;
-use crate::bundle::AlwaysUpdateRule;
+use crate::bundle::{AlwaysUpdateRule, ReportEntry};
 use crate::{AnyOperation, Bundle, BundleBuilder, BundleConfig, BundlebaseError};
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
@@ -128,6 +128,9 @@ pub trait BundleFacade: Send + Sync {
 
     /// Returns views by name (name -> id mapping)
     fn views_by_name(&self) -> HashMap<String, ObjectId>;
+
+    /// Returns all stored reports (id -> entry)
+    fn reports(&self) -> HashMap<String, ReportEntry>;
 
     /// Returns the current always-delete rules (WHERE clauses)
     fn always_delete_rules(&self) -> Vec<String>;

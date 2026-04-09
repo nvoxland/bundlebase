@@ -1,5 +1,6 @@
 use super::commit::PyCommit;
 use bundlebase_command::BundleFacadeCommandExt;
+use bundlebase_common::BundlebaseError;
 use arrow::pyarrow::ToPyArrow;
 use ::bundlebase::bundle::BundleFacade;
 use ::bundlebase::{Bundle, FileVerificationResult, VerificationResults};
@@ -748,10 +749,102 @@ impl PyBundle {
             })
         })
     }
+
+    #[pyo3(signature = (id, output, no_branding=false))]
+    fn generate_report<'py>(
+        &self,
+        id: &str,
+        output: &str,
+        no_branding: bool,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        let id = id.to_string();
+        let output = output.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let report = inner.report_by_id(&id).ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Report '{}' not found",
+                    id
+                ))
+            })?;
+
+            let resolver = PyBundleResolver::new(inner.clone() as Arc<dyn BundleFacade>);
+            let msg = bundlebase_report::generate_report(
+                &report.content,
+                &resolver,
+                &output,
+                !no_branding,
+            )
+            .await
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Failed to generate report: {}",
+                    e
+                ))
+            })?;
+
+            Ok(msg)
+        })
+    }
 }
 
 impl PyBundle {
     pub fn new(inner: Arc<Bundle>) -> Self {
         PyBundle { inner }
+    }
+}
+
+/// Bundle resolver for Python context — uses the provided bundle facade for "." and "bundle".
+pub(crate) struct PyBundleResolver {
+    facade: Arc<dyn BundleFacade>,
+    cache: tokio::sync::Mutex<std::collections::HashMap<String, Arc<dyn BundleFacade>>>,
+}
+
+impl PyBundleResolver {
+    pub fn new(facade: Arc<dyn BundleFacade>) -> Self {
+        Self {
+            facade,
+            cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl bundlebase_report::BundleResolver for PyBundleResolver {
+    async fn resolve(
+        &self,
+        bundle_ref: &str,
+    ) -> Result<Arc<dyn BundleFacade>, BundlebaseError> {
+        if bundle_ref == "." || bundle_ref == "bundle" {
+            return Ok(self.facade.clone());
+        }
+
+        let primary_url = self.facade.url().to_string();
+        if bundle_ref == primary_url {
+            return Ok(self.facade.clone());
+        }
+
+        {
+            let cache = self.cache.lock().await;
+            if let Some(bundle) = cache.get(bundle_ref) {
+                return Ok(bundle.clone());
+            }
+        }
+
+        let bundle = Bundle::open(bundle_ref, None).await.map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to open bundle '{}': {}",
+                bundle_ref, e
+            ))
+        })?;
+
+        let arc_bundle: Arc<dyn BundleFacade> = bundle;
+        self.cache
+            .lock()
+            .await
+            .insert(bundle_ref.to_string(), arc_bundle.clone());
+
+        Ok(arc_bundle)
     }
 }

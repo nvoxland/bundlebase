@@ -23,6 +23,8 @@ bundlebase-catalog = { workspace = true }
 bundlebase-command = { workspace = true }
 bundlebase-common = { path = "../bundlebase-common" }
 bundlebase-index = { path = "../bundlebase-index" }
+bundlebase-report = { path = "../bundlebase-report" }
+async-trait = { workspace = true }
 
 # PyO3 dependencies for Python bindings
 pyo3 = { version = "0.28", features = ["experimental-async"] }

@@ -973,8 +973,40 @@ Geographic region definitions and population data.
 **CLI equivalent:**
 
 ```bash
-bundlebase generate-report --input report.md --output report.pdf --bundle sales=./sales-data
+bundlebase generate-report --input report.md --output report.pdf --bundle ./sales-data
 ```
+
+**Storing reports for re-use:** Reports that a user would want to re-run over time as data changes can be stored in the bundle with `CREATE REPORT`. This keeps the report template alongside the data so anyone who opens the bundle can generate an up-to-date PDF at any time.
+
+```
+# Store the report in the bundle
+mcp__bundlebase__query(
+  bundle="sales",
+  sql="""CREATE REPORT quarterly-sales
+    NAME 'Quarterly Sales Report'
+    DESCRIPTION 'Revenue breakdown by region and product'
+    CONTENT $$
+# Q4 Sales Report
+
+## Revenue by Region
+
+```bundlebase
+bundle: sales
+query: SELECT region, SUM(revenue) as total FROM bundle GROUP BY region ORDER BY total DESC
+type: bar
+title: Revenue by Region
+```
+$$"""
+)
+
+# Later, generate the PDF with current data
+mcp__bundlebase__query(bundle="sales", sql="GENERATE REPORT quarterly-sales")
+```
+
+Other stored report commands:
+- `SHOW REPORTS` — list all stored reports (id, name, description)
+- `DROP REPORT <id>` — remove a stored report
+- `SELECT * FROM bundle_info.reports` — query full report data including content
 
 ## Fetching External Data with Connectors
 

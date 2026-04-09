@@ -101,6 +101,9 @@ c = await Bundlebase.open("/my/container/dir")
 - `import_temp_function(name, from_, platform)` - Define a session-only SQL function (types auto-detected from manifest)
 - `drop_function(name, platform)` - Drop a function definition (drops **all overloads** for that name)
 - `create_view(name, sql)` - Create a named view from a SQL query
+- `create_report(id, name, description, content)` - Create or replace a stored report template
+- `drop_report(id)` - Drop a stored report
+- `generate_report(id, output, no_branding=False)` - Generate a PDF from a stored report
 - `query(sql, params)` - Execute a SQL query and return streaming results
 
 ## Schema Introspection

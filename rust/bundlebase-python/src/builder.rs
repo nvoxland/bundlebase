@@ -540,6 +540,85 @@ impl PyBundleBuilder {
         })
     }
 
+    #[pyo3(signature = (id, name, description, content))]
+    fn create_report<'py>(
+        slf: PyRef<'_, Self>,
+        id: &str,
+        name: &str,
+        description: &str,
+        content: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let id = id.to_string();
+        let name = name.to_string();
+        let description = description.to_string();
+        let content = content.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .create_report(&id, &name, &description, &content)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to create report", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    fn drop_report<'py>(
+        slf: PyRef<'_, Self>,
+        id: &str,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let id = id.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .drop_report(&id)
+                .await
+                .map_err(|e| to_py_error_ctx("Failed to drop report", e))?;
+            Python::attach(|py| {
+                Py::new(py, PyBundleBuilder { inner })
+                    .map_err(|e| to_py_error(e))
+            })
+        })
+    }
+
+    #[pyo3(signature = (id, output, no_branding=false))]
+    fn generate_report<'py>(
+        slf: PyRef<'_, Self>,
+        id: &str,
+        output: &str,
+        no_branding: bool,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = slf.inner.clone();
+        let id = id.to_string();
+        let output = output.to_string();
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let reports = inner.reports();
+            let report = reports.get(&id).ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Report '{}' not found",
+                    id
+                ))
+            })?;
+
+            let resolver = super::bundle::PyBundleResolver::new(inner.clone());
+            let msg = bundlebase_report::generate_report(
+                &report.content,
+                &resolver,
+                &output,
+                !no_branding,
+            )
+            .await
+            .map_err(|e| to_py_error_ctx("Failed to generate report", e))?;
+
+            Ok(msg)
+        })
+    }
+
     #[pyo3(signature = (name, expression))]
     fn add_column<'py>(
         slf: PyRef<'_, Self>,

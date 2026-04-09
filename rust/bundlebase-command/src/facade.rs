@@ -21,6 +21,7 @@ pub mod describe_data;
 mod syntax;
 mod test_connector;
 mod profile_column;
+mod generate_report;
 
 pub use describe_data::DescribeDataCommand;
 pub use profile_column::ProfileColumnCommand;
@@ -40,6 +41,8 @@ pub use show::{
     ShowAlwaysDeletesCommand, ShowAlwaysUpdatesCommand, ShowDetailsCommand, ShowHistoryCommand, ShowStatusCommand, ShowViewsCommand,
     ShowIndexesCommand, ShowPacksCommand, ShowBlocksCommand, ShowConfigCommand,
     ShowCommandsCommand, ShowConnectorsCommand, ShowFunctionsCommand, ShowColumnsCommand,
+    ShowReportsCommand,
 };
 pub use show_count::ShowCountCommand;
+pub use generate_report::GenerateReportCommand;
 pub use syntax::SyntaxCommand;

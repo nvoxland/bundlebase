@@ -48,6 +48,8 @@ impl PyOperation {
             AnyOperation::DropAlwaysUpdate(_) => "dropAlwaysUpdate".to_string(),
             AnyOperation::UpdateData(_) => "updateData".to_string(),
             AnyOperation::RenameFunction(_) => "renameFunction".to_string(),
+            AnyOperation::CreateReport(_) => "createReport".to_string(),
+            AnyOperation::DropReport(_) => "dropReport".to_string(),
         }
     }
 
