@@ -1269,7 +1269,6 @@ mod tests {
     /// which should be caught by our retry logic.
     /// This test is ignored by default since it requires a specific data file.
     #[tokio::test]
-    #[ignore]
     async fn test_jeopardy_csv_from_disk() -> Result<(), BundlebaseError> {
         let csv_path = concat!(
             env!("CARGO_MANIFEST_DIR"),

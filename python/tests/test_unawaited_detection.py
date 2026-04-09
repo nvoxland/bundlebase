@@ -130,29 +130,6 @@ class TestUnawaitedCreateChain:
             assert len(w) == 0
 
 
-class TestUnawaitedExtendChain:
-    """Test unawaited ExtendChain detection.
-
-    Note: ExtendChain is used for chaining operations after extend(),
-    but extend() is used in the synchronous API tests, not the async API.
-    """
-
-    @pytest.mark.skip(reason="extend() is for synchronous API, not async")
-    async def test_unawaited_extend_chain(self):
-        """Test that unawaited ExtendChain with operations triggers warning."""
-        pass
-
-    @pytest.mark.skip(reason="extend() is for synchronous API, not async")
-    async def test_unawaited_extend_no_operations_no_warning(self):
-        """Test that extend() without operations doesn't warn."""
-        pass
-
-    @pytest.mark.skip(reason="extend() is for synchronous API, not async")
-    async def test_awaited_extend_chain_no_warning(self):
-        """Test that properly awaited extend chains don't trigger warnings."""
-        pass
-
-
 class TestWarningContent:
     """Test the content and clarity of warning messages."""
 
@@ -204,12 +181,6 @@ class TestWarningContent:
             msg = str(w[0].message)
             assert "create() was never awaited" in msg
             assert "Did you forget to add 'await' before create()" in msg
-
-    @pytest.mark.skip(reason="extend() is for synchronous API, not async")
-    async def test_extend_chain_warning_format(self):
-        """Test ExtendChain warning message format."""
-        pass
-
 
 class TestWarningControl:
     """Test that warnings can be controlled via the warnings module."""

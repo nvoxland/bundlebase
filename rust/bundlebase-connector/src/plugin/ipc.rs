@@ -647,8 +647,14 @@ mod tests {
 
     fn mock_script_path() -> PathBuf {
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.push("tests/fixtures/custom_source_mock.py");
-        path
+        path.push("../bundlebase/tests/fixtures/custom_source_mock.py");
+        path.canonicalize().unwrap_or_else(|e| {
+            panic!(
+                "Mock script not found at {}: {}. This fixture must exist for IPC tests.",
+                path.display(),
+                e
+            )
+        })
     }
 
     fn poetry_python() -> Option<String> {
@@ -664,16 +670,16 @@ mod tests {
 
     fn make_ipc_args() -> Option<HashMap<String, String>> {
         let python = poetry_python()?;
+        let script = mock_script_path();
         let mut args = HashMap::new();
         args.insert(
             "call".to_string(),
-            format!("{} {}", python, mock_script_path().display()),
+            format!("{} {}", python, script.display()),
         );
         Some(args)
     }
 
     #[tokio::test]
-    #[ignore] // Requires subprocess infrastructure
     async fn test_discover_via_subprocess() {
         let args = match make_ipc_args() {
             Some(a) => a,
@@ -696,7 +702,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires subprocess infrastructure
     async fn test_data_returns_arrow_batches() {
         let args = match make_ipc_args() {
             Some(a) => a,
@@ -731,7 +736,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires subprocess infrastructure
     async fn test_data_multi_batch_streaming() {
         use futures::StreamExt;
 
@@ -771,7 +775,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires subprocess infrastructure
     async fn test_stable_url_none() {
         let args = match make_ipc_args() {
             Some(a) => a,
@@ -795,7 +798,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires subprocess infrastructure
     async fn test_subprocess_error_handling() {
         let args = match make_ipc_args() {
             Some(a) => a,
