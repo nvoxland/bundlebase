@@ -2,8 +2,8 @@ use crate::DataContext;
 use crate::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::plugin::ReaderPlugin;
 use crate::attach_format::AttachFormat;
-use crate::{BlockId, DataReader, LineOrientedFormat, PhysicalRowGroupDataSource, RowId};
-use crate::physical_row_group_layout::{PhysicalRowGroupLayout, resolve_row_numbers_to_byte_offsets};
+use crate::{BlockId, DataReader, LineOrientedFormat, PageMapDataSource, RowId};
+use crate::page_map::{PageMap, resolve_row_numbers_to_byte_offsets};
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadWriteDir;
 use bundlebase_common::BundlebaseError;
@@ -346,7 +346,7 @@ impl DataReader for CsvReader {
                 .map_err(|e| DataFusionError::External(e))?
                 .ok_or_else(|| DataFusionError::Internal("No schema available".to_string()))?;
 
-            return Ok(Arc::new(PhysicalRowGroupDataSource::new(
+            return Ok(Arc::new(PageMapDataSource::new(
                 self.inner.file().as_object_store_file(),
                 schema,
                 byte_offsets,
@@ -409,12 +409,12 @@ impl DataReader for CsvReader {
         Ok(Some(stats))
     }
 
-    async fn column_stats(&self) -> Result<Vec<crate::physical_row_group_layout::ColumnStats>, BundlebaseError> {
+    async fn column_stats(&self) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
         let layout_file = match &self.layout {
             Some(f) => f,
             None => return Ok(vec![]),
         };
-        let layout = crate::physical_row_group_layout::PhysicalRowGroupLayout::load(layout_file).await?;
+        let layout = crate::page_map::PageMap::load(layout_file).await?;
         Ok(layout.column_stats)
     }
 
@@ -422,7 +422,7 @@ impl DataReader for CsvReader {
         &self,
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
-        use crate::physical_row_group_layout::DEFAULT_PAGE_SIZE;
+        use crate::page_map::DEFAULT_PAGE_SIZE;
         use futures::stream;
 
         let object_store = self.inner.object_store();
@@ -439,7 +439,7 @@ impl DataReader for CsvReader {
         }
 
         // Build page layout first (no stats yet) to get page boundaries.
-        let initial_layout = match PhysicalRowGroupLayout::build(&buffer, true, DEFAULT_PAGE_SIZE, vec![]) {
+        let initial_layout = match PageMap::build(&buffer, true, DEFAULT_PAGE_SIZE, vec![]) {
             None => return Ok(None),
             Some(l) => l,
         };
@@ -449,7 +449,7 @@ impl DataReader for CsvReader {
         let column_stats = self.compute_column_stats_sync(&buffer, &page_row_starts, delimiter)?;
 
         // Assemble final layout with stats and write.
-        let layout = PhysicalRowGroupLayout { column_stats, ..initial_layout };
+        let layout = PageMap { column_stats, ..initial_layout };
         let index_bytes = layout.serialize()?;
         let data_stream = Box::pin(stream::once(async move { Ok::<_, std::io::Error>(index_bytes) }));
         let address = bundlebase_common::ContentAddress::with_sub_type(
@@ -470,7 +470,7 @@ impl DataReader for CsvReader {
         use bundlebase_io::IOReadFile;
         use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
         use crate::page_filter::{extract_lower_bound, extract_upper_bound, is_value_above_bound, is_value_below_bound, prune_exact_with_bloom, prune_prefix, prune_range};
-        use crate::physical_row_group_layout::PhysicalRowGroupLayout;
+        use crate::page_map::PageMap;
         use bundlebase_index::{FilterAnalyzer, IndexPredicate};
 
         let layout_file = match &self.layout {
@@ -483,7 +483,7 @@ impl DataReader for CsvReader {
         let layout = if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&layout_url) {
             cached
         } else {
-            let loaded = PhysicalRowGroupLayout::load(layout_file).await?;
+            let loaded = PageMap::load(layout_file).await?;
             let arc = Arc::new(loaded);
             GLOBAL_LAYOUT_CACHE.insert(layout_url, arc.clone());
             arc
@@ -610,7 +610,7 @@ impl DataReader for CsvReader {
 
         // Coalesce adjacent / nearby pages into single range reads (256KB gap threshold).
         const GAP_THRESHOLD: u64 = 256 * 1024;
-        let page_ranges = crate::physical_row_group_data_source::coalesce_page_ranges(
+        let page_ranges = crate::page_map_data_source::coalesce_page_ranges(
             &layout.pages,
             &included,
             layout.file_size,
@@ -624,7 +624,7 @@ impl DataReader for CsvReader {
         );
 
         let full_schema = schema;
-        Ok(Some(Arc::new(PhysicalRowGroupDataSource::from_page_ranges(
+        Ok(Some(Arc::new(PageMapDataSource::from_page_ranges(
             self.inner.file().as_object_store_file(),
             full_schema,
             page_ranges,
@@ -644,7 +644,7 @@ impl CsvReader {
         bytes: &[u8],
         page_row_starts: &[u32],
         delimiter: u8,
-    ) -> Result<Vec<crate::physical_row_group_layout::ColumnStats>, BundlebaseError> {
+    ) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
         use crate::column_stats_builder::ColumnStatsBuilder;
         use arrow::datatypes::{DataType, Field, Schema};
 

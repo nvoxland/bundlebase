@@ -12,7 +12,7 @@
 //! - 10-bucket equal-height (quantile) histogram for both numeric and string columns
 //! - per-page bloom filter (8KB, 3-hash FNV1a; abandoned when page has ≥500 distinct values)
 
-use crate::physical_row_group_layout::{ColumnStats, HistogramBucket, PageStats, StatValue, StringProfile};
+use crate::page_map::{ColumnStats, HistogramBucket, PageStats, StatValue, StringProfile};
 use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use std::collections::{HashMap, HashSet};

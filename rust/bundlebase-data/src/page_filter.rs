@@ -4,7 +4,7 @@
 //! whether a page (or block) can be skipped entirely.
 
 use bundlebase_index::{IndexedValue, IndexPredicate};
-use crate::physical_row_group_layout::StatValue;
+use crate::page_map::StatValue;
 
 /// Returns true if the given exact value is provably outside [page_min, page_max],
 /// meaning the page can be skipped.

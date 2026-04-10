@@ -1,4 +1,4 @@
-//! Physical row group layout for line-oriented formats (CSV, JSON Lines).
+//! Page map for line-oriented formats (CSV, JSON Lines).
 //!
 //! Breaks a file into page groups of ~5MB each. Each page records its
 //! byte offset and starting row number. Given a logical row number,
@@ -8,10 +8,10 @@
 //! The layout file also stores per-column statistics captured at attach
 //! time, avoiding re-scans for profiling and enabling query optimizations.
 //!
-//! # File Format (`prg.layout`)
+//! # File Format (`block.layout.pagemap`)
 //!
 //! ```text
-//! Magic:        "BBROWG01" (8 bytes)
+//! Magic:        "BBPMAP01" (8 bytes)
 //! Version:      u8 (1 byte)
 //! Row count:    u64 little-endian (8 bytes)
 //! File size:    u64 little-endian (8 bytes)
@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-const MAGIC_BYTES: &[u8; 8] = b"BBROWG01";
+const MAGIC_BYTES: &[u8; 8] = b"BBPMAP01";
 const VERSION: u8 = 1;
 const HEADER_SIZE: usize = 8 + 1 + 8 + 8 + 4 + 8; // magic + version + row_count + file_size + page_count + stats_offset
 
@@ -295,13 +295,13 @@ pub struct PageGroup {
     pub row_begin: u32,
 }
 
-/// Physical row group layout for a line-oriented file.
+/// Page map for a line-oriented file.
 ///
 /// Maps logical row numbers to physical byte ranges by dividing the file
 /// into pages of approximately `DEFAULT_PAGE_SIZE` bytes.
 /// Also carries per-column statistics captured at attach time.
 #[derive(Debug, Clone)]
-pub struct PhysicalRowGroupLayout {
+pub struct PageMap {
     /// Total number of data rows in the file
     pub total_rows: u64,
     /// Total file size in bytes
@@ -313,7 +313,7 @@ pub struct PhysicalRowGroupLayout {
     pub column_stats: Vec<ColumnStats>,
 }
 
-impl PhysicalRowGroupLayout {
+impl PageMap {
     /// Build a layout by scanning file bytes for newlines.
     ///
     /// Always returns `Some` — even small files get a layout so column stats are always stored.
@@ -329,7 +329,7 @@ impl PhysicalRowGroupLayout {
         skip_first_line: bool,
         page_size: usize,
         column_stats: Vec<ColumnStats>,
-    ) -> Option<PhysicalRowGroupLayout> {
+    ) -> Option<PageMap> {
         if bytes.is_empty() {
             return None;
         }
@@ -386,7 +386,7 @@ impl PhysicalRowGroupLayout {
             return None;
         }
 
-        Some(PhysicalRowGroupLayout {
+        Some(PageMap {
             total_rows: row_count as u64,
             file_size: bytes.len() as u64,
             pages,
@@ -464,7 +464,7 @@ impl PhysicalRowGroupLayout {
     }
 
     /// Deserialize from binary format.
-    pub fn deserialize(bytes: &[u8]) -> Result<PhysicalRowGroupLayout, BundlebaseError> {
+    pub fn deserialize(bytes: &[u8]) -> Result<PageMap, BundlebaseError> {
         if bytes.len() < HEADER_SIZE {
             return Err("Invalid layout file: too short".into());
         }
@@ -530,7 +530,7 @@ impl PhysicalRowGroupLayout {
             Vec::new()
         };
 
-        Ok(PhysicalRowGroupLayout {
+        Ok(PageMap {
             total_rows,
             file_size,
             pages,
@@ -539,7 +539,7 @@ impl PhysicalRowGroupLayout {
     }
 
     /// Load a layout from a file.
-    pub async fn load(file: &ObjectStoreFile) -> Result<PhysicalRowGroupLayout, BundlebaseError> {
+    pub async fn load(file: &ObjectStoreFile) -> Result<PageMap, BundlebaseError> {
         let mut stream = file.read_existing().await?;
         let mut buffer = Vec::new();
         while let Some(chunk_result) = stream.next().await {
@@ -621,7 +621,7 @@ pub async fn resolve_row_numbers_to_byte_offsets(
                 Some(cached)
             } else {
                 log::debug!("Layout cache miss for {}, loading from disk", url);
-                let loaded = PhysicalRowGroupLayout::load(lf).await?;
+                let loaded = PageMap::load(lf).await?;
                 let arc = Arc::new(loaded);
                 GLOBAL_LAYOUT_CACHE.insert(url, arc.clone());
                 Some(arc)
@@ -640,7 +640,7 @@ pub async fn resolve_row_numbers_to_byte_offsets(
 async fn resolve_with_layout(
     store: &Arc<dyn ObjectStore>,
     path: &object_store::path::Path,
-    layout: &PhysicalRowGroupLayout,
+    layout: &PageMap,
     row_numbers: &[u32],
 ) -> Result<Vec<u64>, BundlebaseError> {
     // Group row numbers by page
@@ -763,7 +763,7 @@ mod tests {
 
     #[test]
     fn test_build_empty_file() {
-        let result = PhysicalRowGroupLayout::build(b"", false, DEFAULT_PAGE_SIZE, vec![]);
+        let result = PageMap::build(b"", false, DEFAULT_PAGE_SIZE, vec![]);
         assert!(result.is_none());
     }
 
@@ -771,7 +771,7 @@ mod tests {
     fn test_build_file_smaller_than_page_size() {
         // Small files still get a layout (for column stats), just with one page.
         let data = b"row1\nrow2\n";
-        let result = PhysicalRowGroupLayout::build(data, false, DEFAULT_PAGE_SIZE, vec![]).unwrap();
+        let result = PageMap::build(data, false, DEFAULT_PAGE_SIZE, vec![]).unwrap();
         assert_eq!(result.total_rows, 2);
         assert_eq!(result.pages.len(), 1, "Single page for small files");
     }
@@ -780,7 +780,7 @@ mod tests {
     fn test_build_with_small_page_size() {
         // Use a tiny page size to test page splitting
         let data = b"row1\nrow2\nrow3\nrow4\nrow5\nrow6\n";
-        let result = PhysicalRowGroupLayout::build(data, false, 10, vec![]).unwrap();
+        let result = PageMap::build(data, false, 10, vec![]).unwrap();
 
         assert_eq!(result.total_rows, 6);
         assert_eq!(result.file_size, data.len() as u64);
@@ -794,7 +794,7 @@ mod tests {
     #[test]
     fn test_build_with_header_skip() {
         let data = b"header\nrow1\nrow2\nrow3\n";
-        let result = PhysicalRowGroupLayout::build(data, true, 10, vec![]).unwrap();
+        let result = PageMap::build(data, true, 10, vec![]).unwrap();
 
         // Should have 3 data rows (header skipped)
         assert_eq!(result.total_rows, 3);
@@ -805,7 +805,7 @@ mod tests {
     #[test]
     fn test_build_header_only() {
         let data = b"header\n";
-        let result = PhysicalRowGroupLayout::build(data, true, DEFAULT_PAGE_SIZE, vec![]);
+        let result = PageMap::build(data, true, DEFAULT_PAGE_SIZE, vec![]);
         assert!(result.is_none(), "No rows after skipping header");
     }
 
@@ -813,7 +813,7 @@ mod tests {
     fn test_build_no_trailing_newline() {
         let data = b"row1\nrow2\nrow3";
         // Use small page to force layout creation
-        let result = PhysicalRowGroupLayout::build(data, false, 5, vec![]).unwrap();
+        let result = PageMap::build(data, false, 5, vec![]).unwrap();
         assert_eq!(result.total_rows, 3); // row3 counted even without \n
     }
 
@@ -827,7 +827,7 @@ mod tests {
         data_with_newline.extend_from_slice(&vec![b'y'; 20]);
         data_with_newline.push(b'\n');
 
-        let result = PhysicalRowGroupLayout::build(&data_with_newline, false, 10, vec![]).unwrap();
+        let result = PageMap::build(&data_with_newline, false, 10, vec![]).unwrap();
         assert_eq!(result.total_rows, 2);
         // Large row gets its own page
         assert!(result.pages.len() >= 1);
@@ -850,7 +850,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let layout = PhysicalRowGroupLayout {
+        let layout = PageMap {
             total_rows: 100,
             file_size: 50000,
             pages: vec![
@@ -861,7 +861,7 @@ mod tests {
         };
 
         let bytes = layout.serialize().expect("serialize should succeed");
-        let loaded = PhysicalRowGroupLayout::deserialize(&bytes).unwrap();
+        let loaded = PageMap::deserialize(&bytes).unwrap();
 
         assert_eq!(loaded.total_rows, 100);
         assert_eq!(loaded.file_size, 50000);
@@ -885,19 +885,19 @@ mod tests {
     fn test_deserialize_bad_magic() {
         // 37 bytes minimum for new header (old was 29, new adds 8 for stats_offset)
         let bytes = b"WRONGMAG\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-        let result = PhysicalRowGroupLayout::deserialize(bytes);
+        let result = PageMap::deserialize(bytes);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_deserialize_too_short() {
-        let result = PhysicalRowGroupLayout::deserialize(&[0u8; 10]);
+        let result = PageMap::deserialize(&[0u8; 10]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_find_page() {
-        let layout = PhysicalRowGroupLayout {
+        let layout = PageMap {
             total_rows: 300,
             file_size: 150000,
             pages: vec![
@@ -920,7 +920,7 @@ mod tests {
 
     #[test]
     fn test_page_byte_range() {
-        let layout = PhysicalRowGroupLayout {
+        let layout = PageMap {
             total_rows: 300,
             file_size: 150000,
             pages: vec![
@@ -938,7 +938,7 @@ mod tests {
 
     #[test]
     fn test_page_row_range() {
-        let layout = PhysicalRowGroupLayout {
+        let layout = PageMap {
             total_rows: 300,
             file_size: 150000,
             pages: vec![
@@ -963,7 +963,7 @@ mod tests {
         }
 
         // Use 50-byte page size to get multiple pages
-        let layout = PhysicalRowGroupLayout::build(&data, false, 50, vec![]).unwrap();
+        let layout = PageMap::build(&data, false, 50, vec![]).unwrap();
         assert_eq!(layout.total_rows, 100);
 
         // Every row should map to a valid page

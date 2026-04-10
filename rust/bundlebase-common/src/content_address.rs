@@ -44,7 +44,7 @@ pub enum ContentFormat {
     Md,
     Bin,
     Dat,
-    /// Physical row group page map format
+    /// Page map format
     Pagemap,
     /// Sorted value→RowId mapping format
     Rowmap,

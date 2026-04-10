@@ -36,7 +36,7 @@ pub enum LineOrientedFormat {
 ///   coalesced pages) and parses all lines within each range.
 ///
 /// Supports both CSV and JSON Lines formats.
-pub struct PhysicalRowGroupDataSource {
+pub struct PageMapDataSource {
     /// The source file
     file: ObjectStoreFile,
     /// Schema of the data (original full schema)
@@ -59,8 +59,8 @@ pub struct PhysicalRowGroupDataSource {
     format: LineOrientedFormat,
 }
 
-impl PhysicalRowGroupDataSource {
-    /// Create a PhysicalRowGroupDataSource from byte offsets.
+impl PageMapDataSource {
+    /// Create a PageMapDataSource from byte offsets.
     ///
     /// # Arguments
     /// * `file` - The source file
@@ -96,7 +96,7 @@ impl PhysicalRowGroupDataSource {
         }
     }
 
-    /// Create a PhysicalRowGroupDataSource from coalesced page byte ranges.
+    /// Create a PageMapDataSource from coalesced page byte ranges.
     ///
     /// Each range `(start, end)` is a contiguous byte span in the file. All lines within each
     /// range are parsed and returned. Adjacent or nearby pages should be merged by the caller
@@ -205,9 +205,9 @@ impl PhysicalRowGroupDataSource {
     }
 }
 
-impl Debug for PhysicalRowGroupDataSource {
+impl Debug for PageMapDataSource {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PhysicalRowGroupDataSource")
+        f.debug_struct("PageMapDataSource")
             .field("file", &self.file)
             .field("schema", &self.schema)
             .field("num_offsets", &self.byte_offsets.len())
@@ -217,11 +217,11 @@ impl Debug for PhysicalRowGroupDataSource {
     }
 }
 
-impl Display for PhysicalRowGroupDataSource {
+impl Display for PageMapDataSource {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "PhysicalRowGroupDataSource[file={}, rows={}, format={:?}]",
+            "PageMapDataSource[file={}, rows={}, format={:?}]",
             self.file.url(),
             self.num_rows,
             self.format
@@ -229,7 +229,7 @@ impl Display for PhysicalRowGroupDataSource {
     }
 }
 
-impl DataSource for PhysicalRowGroupDataSource {
+impl DataSource for PageMapDataSource {
     fn open(
         &self,
         _partition: usize,
@@ -247,7 +247,7 @@ impl DataSource for PhysicalRowGroupDataSource {
             // Used for page-filtered reads (avoids reading entire file when only some pages match).
             let page_ranges = self.page_ranges.clone();
             log::debug!(
-                "PhysicalRowGroupDataSource: page-range mode, {} ranges",
+                "PageMapDataSource: page-range mode, {} ranges",
                 page_ranges.len()
             );
 
@@ -288,7 +288,7 @@ impl DataSource for PhysicalRowGroupDataSource {
         let batches = Self::batch_offsets(&byte_offsets);
 
         log::debug!(
-            "PhysicalRowGroupDataSource: row-offset mode, {} offsets → {} batches",
+            "PageMapDataSource: row-offset mode, {} offsets → {} batches",
             byte_offsets.len(),
             batches.len()
         );
@@ -427,7 +427,7 @@ impl DataSource for PhysicalRowGroupDataSource {
 /// * `file_size` - Total file size (used to compute the last page's end offset)
 /// * `gap_threshold` - Maximum gap in bytes before splitting into a new range (default: 256KB)
 pub fn coalesce_page_ranges(
-    pages: &[crate::physical_row_group_layout::PageGroup],
+    pages: &[crate::page_map::PageGroup],
     included: &[usize],
     file_size: u64,
     gap_threshold: u64,
@@ -563,7 +563,7 @@ mod tests {
         )
         .expect("valid file");
         let schema = Arc::new(arrow::datatypes::Schema::empty());
-        let source = PhysicalRowGroupDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv);
+        let source = PageMapDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv);
 
         // Verify byte offsets are sorted
         assert_eq!(source.byte_offsets[0], 100);
@@ -581,7 +581,7 @@ mod tests {
         )
         .expect("valid file");
         let schema = Arc::new(arrow::datatypes::Schema::empty());
-        let source = PhysicalRowGroupDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv);
+        let source = PageMapDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv);
 
         let stats = source.partition_statistics(None).expect("stats");
         assert_eq!(stats.num_rows.get_value(), Some(&2));
@@ -592,7 +592,7 @@ mod tests {
         // Byte offsets that are close together should be batched (within 4KB read-ahead)
         let offsets = vec![1000u64, 2000, 3000];
 
-        let batches = PhysicalRowGroupDataSource::batch_offsets(&offsets);
+        let batches = PageMapDataSource::batch_offsets(&offsets);
 
         // All three should be in one batch since they're within overlapping 4KB ranges
         assert_eq!(1, batches.len());
@@ -607,7 +607,7 @@ mod tests {
         // Byte offsets that are far apart should be in separate batches
         let offsets = vec![1000u64, 50000, 100000];
 
-        let batches = PhysicalRowGroupDataSource::batch_offsets(&offsets);
+        let batches = PageMapDataSource::batch_offsets(&offsets);
 
         // Should be in separate batches since they're beyond 4KB read-ahead of each other
         assert_eq!(3, batches.len());
@@ -621,7 +621,7 @@ mod tests {
         // Mix of close and far byte offsets
         let offsets = vec![1000u64, 2000, 50000, 51000, 100000];
 
-        let batches = PhysicalRowGroupDataSource::batch_offsets(&offsets);
+        let batches = PageMapDataSource::batch_offsets(&offsets);
 
         // Should be in 3 batches
         assert_eq!(3, batches.len());
@@ -636,7 +636,7 @@ mod tests {
         let csv_data = "value1,value2,value3\nvalue4,value5,value6\nvalue7,value8,value9\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = PhysicalRowGroupDataSource::extract_lines(bytes, 0, &[0, 21]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 21]);
 
         assert_eq!(2, lines.len());
         assert_eq!("value1,value2,value3", lines[0]);
@@ -648,7 +648,7 @@ mod tests {
         let csv_data = "single,line,data\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = PhysicalRowGroupDataSource::extract_lines(bytes, 0, &[0]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0]);
 
         assert_eq!(1, lines.len());
         assert_eq!("single,line,data", lines[0]);
@@ -663,7 +663,7 @@ mod tests {
 "#;
         let bytes = json_data.as_bytes();
 
-        let lines = PhysicalRowGroupDataSource::extract_lines(bytes, 0, &[0, 24]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 24]);
 
         assert_eq!(2, lines.len());
         assert_eq!(r#"{"id":1,"name":"Alice"}"#, lines[0]);
@@ -676,7 +676,7 @@ mod tests {
         let csv_data = "line1\nline2\npartial";
         let bytes = csv_data.as_bytes();
 
-        let lines = PhysicalRowGroupDataSource::extract_lines(bytes, 0, &[0, 6, 12]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 12]);
 
         // Should only get 2 complete lines, not the partial one (no trailing newline)
         assert_eq!(2, lines.len());
@@ -690,7 +690,7 @@ mod tests {
         let csv_data = "line1\nline2\nline3\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = PhysicalRowGroupDataSource::extract_lines(bytes, 0, &[0, 6, 12]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 12]);
 
         // Should get all 3 complete lines
         assert_eq!(3, lines.len());
@@ -705,7 +705,7 @@ mod tests {
         let csv_data = "line1\n\nline3\n";
         let bytes = csv_data.as_bytes();
 
-        let lines = PhysicalRowGroupDataSource::extract_lines(bytes, 0, &[0, 6, 7]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6, 7]);
 
         // Empty line at offset 6 is trimmed and not included
         assert_eq!(2, lines.len());
@@ -721,7 +721,7 @@ mod tests {
         let bytes = data.as_bytes();
         // "row1,data1\n" = 11 bytes, "row2,data2\n" = 11 bytes, "row3,data3\n" starts at 22
 
-        let lines = PhysicalRowGroupDataSource::extract_lines(bytes, 0, &[0, 22]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 22]);
 
         assert_eq!(2, lines.len());
         assert_eq!("row1,data1", lines[0]);
@@ -736,7 +736,7 @@ mod tests {
         let bytes = data.as_bytes();
 
         // Row offsets are absolute file positions
-        let lines = PhysicalRowGroupDataSource::extract_lines(bytes, 100, &[100, 117]);
+        let lines = PageMapDataSource::extract_lines(bytes, 100, &[100, 117]);
 
         assert_eq!(2, lines.len());
         assert_eq!("middle_row,value", lines[0]);
@@ -750,7 +750,7 @@ mod tests {
         let data = "short\nthis_is_a_very";  // second line has no \n
         let bytes = data.as_bytes();
 
-        let lines = PhysicalRowGroupDataSource::extract_lines(bytes, 0, &[0, 6]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 6]);
 
         // First line is complete, second line is truncated (no \n) so it's skipped
         assert_eq!(1, lines.len());
@@ -763,7 +763,7 @@ mod tests {
         let data = "only_line\n";
         let bytes = data.as_bytes();
 
-        let lines = PhysicalRowGroupDataSource::extract_lines(bytes, 0, &[0, 500]);
+        let lines = PageMapDataSource::extract_lines(bytes, 0, &[0, 500]);
 
         // First line extracted, second offset is beyond buffer and skipped
         assert_eq!(1, lines.len());
@@ -775,7 +775,7 @@ mod tests {
         // Verify that closely-spaced byte offsets batch together with 4KB read-ahead
         let offsets = vec![100u64, 200, 4000]; // 4000 still within 4KB of first (100+4096=4196)
 
-        let batches = PhysicalRowGroupDataSource::batch_offsets(&offsets);
+        let batches = PageMapDataSource::batch_offsets(&offsets);
 
         // All three should batch together since they're within 4KB range
         assert_eq!(1, batches.len());
@@ -787,7 +787,7 @@ mod tests {
         // Verify that byte offsets just beyond 4KB read-ahead create separate batches
         let offsets = vec![100u64, 5000]; // 5000 beyond 100+4096=4196 → new batch
 
-        let batches = PhysicalRowGroupDataSource::batch_offsets(&offsets);
+        let batches = PageMapDataSource::batch_offsets(&offsets);
 
         assert_eq!(2, batches.len());
         assert_eq!(1, batches[0].2.len());

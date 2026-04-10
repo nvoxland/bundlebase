@@ -127,8 +127,8 @@ impl ParquetDataReader {
 impl ParquetDataReader {
     /// Extract basic min/max/null_count/distinct_count from the Parquet footer.
     /// Does not scan row data — only reads the file footer.
-    async fn column_stats_from_footer(&self) -> Result<Vec<crate::physical_row_group_layout::ColumnStats>, BundlebaseError> {
-        use crate::physical_row_group_layout::ColumnStats;
+    async fn column_stats_from_footer(&self) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
+        use crate::page_map::ColumnStats;
 
         // Read Parquet metadata (only fetches footer, no row data)
         let store = self.inner.file().store();
@@ -145,7 +145,7 @@ impl ParquetDataReader {
         };
         let num_cols = schema.fields().len();
 
-        use crate::physical_row_group_layout::StatValue;
+        use crate::page_map::StatValue;
         use std::cmp::Ordering;
 
         let mut null_counts = vec![0u64; num_cols];
@@ -262,10 +262,10 @@ impl DataReader for ParquetDataReader {
         Ok(Arc::new(builder.build()))
     }
 
-    async fn column_stats(&self) -> Result<Vec<crate::physical_row_group_layout::ColumnStats>, BundlebaseError> {
-        use crate::physical_row_group_layout::PhysicalRowGroupLayout;
+    async fn column_stats(&self) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
+        use crate::page_map::PageMap;
         if let Some(ref layout_file) = self.layout {
-            let layout = PhysicalRowGroupLayout::load(layout_file).await?;
+            let layout = PageMap::load(layout_file).await?;
             if !layout.column_stats.is_empty() {
                 return Ok(layout.column_stats);
             }
@@ -278,7 +278,7 @@ impl DataReader for ParquetDataReader {
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
         use crate::column_stats_builder::ColumnStatsBuilder;
-        use crate::physical_row_group_layout::PhysicalRowGroupLayout;
+        use crate::page_map::PageMap;
         use arrow::compute::cast;
         use arrow::record_batch::RecordBatch;
         use futures::stream;
@@ -335,7 +335,7 @@ impl DataReader for ParquetDataReader {
         }
 
         let column_stats = stats_builder.finish();
-        let layout = PhysicalRowGroupLayout {
+        let layout = PageMap {
             total_rows: row_count,
             file_size: 0,
             pages: vec![],
@@ -473,8 +473,8 @@ impl futures::stream::Stream for RowIdStreamWrapper {
 fn parquet_stats_to_stat_values(
     stats: &datafusion::parquet::file::statistics::Statistics,
     field: &arrow::datatypes::Field,
-) -> (Option<crate::physical_row_group_layout::StatValue>, Option<crate::physical_row_group_layout::StatValue>) {
-    use crate::physical_row_group_layout::StatValue;
+) -> (Option<crate::page_map::StatValue>, Option<crate::page_map::StatValue>) {
+    use crate::page_map::StatValue;
     use arrow::datatypes::{DataType, TimeUnit};
     use datafusion::parquet::file::statistics::Statistics as S;
 

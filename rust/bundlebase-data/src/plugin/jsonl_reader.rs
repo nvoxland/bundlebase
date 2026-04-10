@@ -1,8 +1,8 @@
 use crate::DataContext;
 use crate::plugin::file_reader::{FileFormatConfig, FilePlugin, FileReader};
 use crate::plugin::ReaderPlugin;
-use crate::{BlockId, DataReader, LineOrientedFormat, PhysicalRowGroupDataSource, RowId};
-use crate::physical_row_group_layout::{PhysicalRowGroupLayout, resolve_row_numbers_to_byte_offsets};
+use crate::{BlockId, DataReader, LineOrientedFormat, PageMapDataSource, RowId};
+use crate::page_map::{PageMap, resolve_row_numbers_to_byte_offsets};
 use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadWriteDir;
 use bundlebase_common::BundlebaseError;
@@ -166,7 +166,7 @@ impl DataReader for JsonlReader {
                 .map_err(|e| DataFusionError::External(e))?
                 .ok_or_else(|| DataFusionError::Internal("No schema available".to_string()))?;
 
-            return Ok(Arc::new(PhysicalRowGroupDataSource::new(
+            return Ok(Arc::new(PageMapDataSource::new(
                 self.inner.file().as_object_store_file(),
                 schema,
                 byte_offsets,
@@ -224,12 +224,12 @@ impl DataReader for JsonlReader {
         Ok(Some(stats))
     }
 
-    async fn column_stats(&self) -> Result<Vec<crate::physical_row_group_layout::ColumnStats>, BundlebaseError> {
+    async fn column_stats(&self) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
         let layout_file = match &self.layout {
             Some(f) => f,
             None => return Ok(vec![]),
         };
-        let layout = crate::physical_row_group_layout::PhysicalRowGroupLayout::load(layout_file).await?;
+        let layout = crate::page_map::PageMap::load(layout_file).await?;
         Ok(layout.column_stats)
     }
 
@@ -238,7 +238,7 @@ impl DataReader for JsonlReader {
         data_dir: &dyn IOReadWriteDir,
     ) -> Result<Option<Box<dyn bundlebase_io::IOReadFile>>, BundlebaseError> {
         use crate::column_stats_builder::ColumnStatsBuilder;
-        use crate::physical_row_group_layout::DEFAULT_PAGE_SIZE;
+        use crate::page_map::DEFAULT_PAGE_SIZE;
         use futures::stream;
         use object_store::GetOptions;
         use std::collections::HashMap;
@@ -265,7 +265,7 @@ impl DataReader for JsonlReader {
         }
 
         // Build page layout first (no stats yet) to get page boundaries.
-        let initial_layout = match PhysicalRowGroupLayout::build(&buffer, false, DEFAULT_PAGE_SIZE, vec![]) {
+        let initial_layout = match PageMap::build(&buffer, false, DEFAULT_PAGE_SIZE, vec![]) {
             None => return Ok(None),
             Some(l) => l,
         };
@@ -288,7 +288,7 @@ impl DataReader for JsonlReader {
         let column_stats = builder.finish();
 
         // Assemble final layout with stats and write.
-        let layout = PhysicalRowGroupLayout { column_stats, ..initial_layout };
+        let layout = PageMap { column_stats, ..initial_layout };
         let index_bytes = layout.serialize()?;
         let data_stream = Box::pin(stream::once(async move { Ok::<_, std::io::Error>(index_bytes) }));
         let address = bundlebase_common::ContentAddress::with_sub_type(
@@ -309,7 +309,7 @@ impl DataReader for JsonlReader {
         use bundlebase_io::IOReadFile;
         use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
         use crate::page_filter::{extract_lower_bound, extract_upper_bound, is_value_above_bound, is_value_below_bound, prune_exact_with_bloom, prune_prefix, prune_range};
-        use crate::physical_row_group_layout::PhysicalRowGroupLayout;
+        use crate::page_map::PageMap;
         use bundlebase_index::{FilterAnalyzer, IndexPredicate};
 
         let layout_file = match &self.layout {
@@ -321,7 +321,7 @@ impl DataReader for JsonlReader {
         let layout = if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&layout_url) {
             cached
         } else {
-            let loaded = PhysicalRowGroupLayout::load(layout_file).await?;
+            let loaded = PageMap::load(layout_file).await?;
             let arc = Arc::new(loaded);
             GLOBAL_LAYOUT_CACHE.insert(layout_url, arc.clone());
             arc
@@ -417,7 +417,7 @@ impl DataReader for JsonlReader {
 
         // Coalesce adjacent / nearby pages into single range reads (256KB gap threshold).
         const GAP_THRESHOLD: u64 = 256 * 1024;
-        let page_ranges = crate::physical_row_group_data_source::coalesce_page_ranges(
+        let page_ranges = crate::page_map_data_source::coalesce_page_ranges(
             &layout.pages,
             &included,
             layout.file_size,
@@ -430,7 +430,7 @@ impl DataReader for JsonlReader {
             page_ranges.len()
         );
 
-        Ok(Some(Arc::new(PhysicalRowGroupDataSource::from_page_ranges(
+        Ok(Some(Arc::new(PageMapDataSource::from_page_ranges(
             self.inner.file().as_object_store_file(),
             schema,
             page_ranges,

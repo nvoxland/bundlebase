@@ -236,7 +236,7 @@ impl<C: FileFormatConfig> FileReader<C> {
     ///
     /// This handles the full-scan path. For index-based selective reads,
     /// format-specific readers (CsvReader, JsonReader) should resolve
-    /// logical row numbers to byte offsets and create PhysicalRowGroupDataSource
+    /// logical row numbers to byte offsets and create PageMapDataSource
     /// directly, bypassing this method.
     pub async fn data_source(
         &self,

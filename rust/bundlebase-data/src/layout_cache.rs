@@ -1,9 +1,9 @@
-//! LRU cache for loaded PhysicalRowGroupLayouts.
+//! LRU cache for loaded PageMaps.
 //!
 //! Prevents unbounded memory growth when accessing many files by caching
 //! loaded layout data with automatic LRU eviction.
 
-use crate::physical_row_group_layout::PhysicalRowGroupLayout;
+use crate::page_map::PageMap;
 use lazy_static::lazy_static;
 use lru::LruCache;
 use opentelemetry::metrics::Counter;
@@ -29,7 +29,7 @@ lazy_static! {
 /// # Default Capacity
 /// - 100 files (configurable via environment variable BUNDLEBASE_LAYOUT_CACHE_SIZE)
 pub struct LayoutCache {
-    cache: Mutex<LruCache<Url, Arc<PhysicalRowGroupLayout>>>,
+    cache: Mutex<LruCache<Url, Arc<PageMap>>>,
 }
 
 impl LayoutCache {
@@ -44,7 +44,7 @@ impl LayoutCache {
         }
     }
 
-    pub fn get(&self, url: &Url) -> Option<Arc<PhysicalRowGroupLayout>> {
+    pub fn get(&self, url: &Url) -> Option<Arc<PageMap>> {
         let result = self.cache.lock().get(url).cloned();
         LAYOUT_CACHE_OPS.add(1, &[
             KeyValue::new("cache_name", "layout_cache"),
@@ -53,7 +53,7 @@ impl LayoutCache {
         result
     }
 
-    pub fn insert(&self, url: Url, layout: Arc<PhysicalRowGroupLayout>) {
+    pub fn insert(&self, url: Url, layout: Arc<PageMap>) {
         let mut cache = self.cache.lock();
         if cache.len() == cache.cap().get() && !cache.contains(&url) {
             log::debug!(
@@ -122,10 +122,10 @@ lazy_static! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::physical_row_group_layout::PageGroup;
+    use crate::page_map::PageGroup;
 
-    fn test_layout(total_rows: u64) -> Arc<PhysicalRowGroupLayout> {
-        Arc::new(PhysicalRowGroupLayout {
+    fn test_layout(total_rows: u64) -> Arc<PageMap> {
+        Arc::new(PageMap {
             total_rows,
             file_size: 50000,
             pages: vec![

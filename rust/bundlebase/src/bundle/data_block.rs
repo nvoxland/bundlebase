@@ -162,7 +162,7 @@ impl DataBlock {
     pub async fn column_stats_for(
         &self,
         column_id: ColumnId,
-    ) -> Result<Option<bundlebase_data::physical_row_group_layout::ColumnStats>, crate::BundlebaseError> {
+    ) -> Result<Option<bundlebase_data::page_map::ColumnStats>, crate::BundlebaseError> {
         let idx = match self.column_ids.iter().position(|id| *id == column_id) {
             Some(i) => i,
             None => return Ok(None),

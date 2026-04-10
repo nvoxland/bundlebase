@@ -6,8 +6,8 @@ pub mod page_filter;
 pub mod plugin;
 pub mod reader_factory;
 mod layout_cache;
-pub mod physical_row_group_layout;
-mod physical_row_group_data_source;
+pub mod page_map;
+mod page_map_data_source;
 mod rowid_stream;
 
 use bundlebase_common::config::ConfigProvider;
@@ -24,8 +24,8 @@ pub use bundlebase_common::object_id::{BlockId, ObjectId, ObjectIdAlias};
 pub use reader_factory::DataReaderFactory;
 pub use bundlebase_common::row_id::{RowId, RowIdBatch, SendableRowIdBatchStream};
 pub use layout_cache::GLOBAL_LAYOUT_CACHE;
-pub use physical_row_group_layout::{ColumnStats, HistogramBucket, PageStats, PhysicalRowGroupLayout, StatValue, StringProfile};
-pub use physical_row_group_data_source::{coalesce_page_ranges, LineOrientedFormat, PhysicalRowGroupDataSource};
+pub use page_map::{ColumnStats, HistogramBucket, PageStats, PageMap, StatValue, StringProfile};
+pub use page_map_data_source::{coalesce_page_ranges, LineOrientedFormat, PageMapDataSource};
 pub use rowid_stream::RowIdStreamAdapter;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -60,7 +60,7 @@ pub trait DataReader: Sync + Send + Debug {
     /// The returned `Vec` is positional: index N corresponds to column N in the reader's schema.
     /// The default implementation returns an empty Vec (no pre-computed stats).
     /// CSV and JSONL readers override this to load stats from the layout file.
-    async fn column_stats(&self) -> Result<Vec<crate::physical_row_group_layout::ColumnStats>, BundlebaseError> {
+    async fn column_stats(&self) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
         Ok(vec![])
     }
 

@@ -152,7 +152,7 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
 // \*\*\* physical_plan \*\*\*
 // FilterExec: Email@2 = elizabethbarr@ewing.com, projection=\[Index@0, City@1\]
 //   CooperativeExec
-//     DataSourceExec: PhysicalRowGroupDataSource\[file=memory:///test_data/customers-0-100.csv, rows=1, format=Csv\]
+//     DataSourceExec: PageMapDataSource\[file=memory:///test_data/customers-0-100.csv, rows=1, format=Csv\]
 // "#,
 
     Ok(())
@@ -335,12 +335,12 @@ async fn test_index_selectivity() -> Result<(), BundlebaseError> {
 // Index usage verification tests
 //
 // These tests use EXPLAIN to inspect the physical plan and verify that
-// index-based query acceleration (PhysicalRowGroupDataSource) is used when an
+// index-based query acceleration (PageMapDataSource) is used when an
 // index exists, and that a regular scan is used when it doesn't.
 // ==========================================================================
 
 /// Verify that the query path (bundle.query via DefaultSchemaProvider) uses the
-/// index when one exists. The physical plan should contain PhysicalRowGroupDataSource.
+/// index when one exists. The physical plan should contain PageMapDataSource.
 #[tokio::test]
 async fn test_query_path_uses_index() -> Result<(), BundlebaseError> {
     init();
@@ -365,8 +365,8 @@ async fn test_query_path_uses_index() -> Result<(), BundlebaseError> {
     .await?;
 
     assert!(
-        plan.contains("PhysicalRowGroupDataSource") || plan.contains("SchemaRenameDataSource"),
-        "Expected physical plan to use PhysicalRowGroupDataSource (index lookup) but got:\n{}",
+        plan.contains("PageMapDataSource") || plan.contains("SchemaRenameDataSource"),
+        "Expected physical plan to use PageMapDataSource (index lookup) but got:\n{}",
         plan
     );
 
@@ -374,7 +374,7 @@ async fn test_query_path_uses_index() -> Result<(), BundlebaseError> {
 }
 
 /// Verify that without an index, the physical plan does NOT contain
-/// PhysicalRowGroupDataSource (uses a full scan instead).
+/// PageMapDataSource (uses a full scan instead).
 #[tokio::test]
 async fn test_query_path_without_index_uses_full_scan() -> Result<(), BundlebaseError> {
     init();
@@ -394,8 +394,8 @@ async fn test_query_path_without_index_uses_full_scan() -> Result<(), Bundlebase
     .await?;
 
     assert!(
-        !plan.contains("PhysicalRowGroupDataSource") || plan.contains("SchemaRenameDataSource"),
-        "Expected full scan (no PhysicalRowGroupDataSource) but got:\n{}",
+        !plan.contains("PageMapDataSource") || plan.contains("SchemaRenameDataSource"),
+        "Expected full scan (no PageMapDataSource) but got:\n{}",
         plan
     );
 
@@ -431,8 +431,8 @@ async fn test_filter_path_uses_index() -> Result<(), BundlebaseError> {
     let plan = get_physical_plan(&bundle, None).await?;
 
     assert!(
-        plan.contains("PhysicalRowGroupDataSource") || plan.contains("SchemaRenameDataSource"),
-        "Expected physical plan to use PhysicalRowGroupDataSource after filter but got:\n{}",
+        plan.contains("PageMapDataSource") || plan.contains("SchemaRenameDataSource"),
+        "Expected physical plan to use PageMapDataSource after filter but got:\n{}",
         plan
     );
 
@@ -456,7 +456,7 @@ async fn test_query_on_non_indexed_column_uses_full_scan() -> Result<(), Bundleb
         .await?;
     bundle.commit("Index on Email only").await?;
 
-    // Query on City (not indexed) — should NOT use PhysicalRowGroupDataSource
+    // Query on City (not indexed) — should NOT use PageMapDataSource
     let plan = get_physical_plan(
         bundle.as_ref(),
         Some("SELECT * FROM bundle WHERE City = 'East Leonard'"),
@@ -464,7 +464,7 @@ async fn test_query_on_non_indexed_column_uses_full_scan() -> Result<(), Bundleb
     .await?;
 
     assert!(
-        !plan.contains("PhysicalRowGroupDataSource") || plan.contains("SchemaRenameDataSource"),
+        !plan.contains("PageMapDataSource") || plan.contains("SchemaRenameDataSource"),
         "Expected full scan for non-indexed column but got:\n{}",
         plan
     );
@@ -587,7 +587,7 @@ async fn test_index_survives_reopen() -> Result<(), BundlebaseError> {
     .await?;
 
     assert!(
-        plan.contains("PhysicalRowGroupDataSource") || plan.contains("SchemaRenameDataSource"),
+        plan.contains("PageMapDataSource") || plan.contains("SchemaRenameDataSource"),
         "Expected index to survive reopen but physical plan was:\n{}",
         plan
     );
@@ -1403,7 +1403,7 @@ async fn test_create_index_then_cast_column_different_column() -> Result<(), Bun
     .await?;
 
     assert!(
-        plan.contains("PhysicalRowGroupDataSource") || plan.contains("SchemaRenameDataSource"),
+        plan.contains("PageMapDataSource") || plan.contains("SchemaRenameDataSource"),
         "Expected City index to still work after casting a different column, plan:\n{}",
         plan
     );
@@ -1610,7 +1610,7 @@ async fn test_cast_column_then_create_index_on_different_column() -> Result<(), 
     .await?;
 
     assert!(
-        plan.contains("PhysicalRowGroupDataSource") || plan.contains("SchemaRenameDataSource"),
+        plan.contains("PageMapDataSource") || plan.contains("SchemaRenameDataSource"),
         "Expected City index to work after casting a different column, plan:\n{}",
         plan
     );
