@@ -3,7 +3,7 @@ use crate::bundle::bundle_schema;
 use crate::bundle::operation::SourceInfo;
 use crate::data::{DataReader, VersionedBlockId};
 use crate::index::{
-    ColumnIndex, FilterAnalyzer, IndexDefinition, IndexPredicate, IndexSelector, IndexableFilter,
+    BTreeIndex, FilterAnalyzer, IndexDefinition, IndexPredicate, IndexSelector, IndexableFilter,
     GLOBAL_INDEX_CACHE,
 };
 use crate::io::plugin::object_store::ObjectStoreFile;
@@ -33,7 +33,7 @@ struct IndexCandidate<'a> {
     filter: &'a IndexableFilter,
     selectivity: f64,
     /// The deserialized index, retained from selectivity estimation to avoid double disk reads
-    index: Arc<ColumnIndex>,
+    index: Arc<BTreeIndex>,
 }
 
 /// A DataBlock is a logical, tablular view of data contained within a single source, regardless of the underlying storage format.
@@ -278,7 +278,7 @@ impl DataBlock {
         index_path: &str,
         column: &str,
         predicate: &IndexPredicate,
-    ) -> Result<Option<(f64, Arc<ColumnIndex>)>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Option<(f64, Arc<BTreeIndex>)>, Box<dyn std::error::Error + Send + Sync>> {
         // Check the global cache first
         let index = if let Some(cached) = GLOBAL_INDEX_CACHE.get(index_path) {
             cached
@@ -293,7 +293,7 @@ impl DataBlock {
                 .ok_or_else(|| format!("Index file not found: {}", index_path))?;
 
             // Deserialize and cache the index
-            let index = Arc::new(ColumnIndex::deserialize(index_bytes, column.to_string())?);
+            let index = Arc::new(BTreeIndex::deserialize(index_bytes, column.to_string())?);
             GLOBAL_INDEX_CACHE.insert(index_path.to_string(), index.clone());
             index
         };
@@ -323,9 +323,9 @@ impl DataBlock {
         Ok(Some((selectivity, index)))
     }
 
-    /// Perform index lookup using a pre-loaded `ColumnIndex`.
+    /// Perform index lookup using a pre-loaded `BTreeIndex`.
     fn lookup_index(
-        index: &ColumnIndex,
+        index: &BTreeIndex,
         predicate: &IndexPredicate,
     ) -> Vec<crate::data::RowId> {
         match predicate {
@@ -413,7 +413,7 @@ impl DataBlock {
                 IndexSelector::select_index_from_ref(&column_id, versioned_block, &self.indexes)
             {
                 // Skip text indexes — they can't serve column predicates
-                if index_def.is_text() {
+                if index_def.is_inverted() {
                     continue;
                 }
                 // Get the index file path

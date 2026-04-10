@@ -88,7 +88,7 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
 //         explain
 //     );
 
-    bundle.create_index(&["Email"], IndexType::Column, None).await?;
+    bundle.create_index(&["Email"], IndexType::BTree, None).await?;
 
     let status = bundle.status();
     assert_eq!(1, status.changes().len());
@@ -169,7 +169,7 @@ async fn test_select_with_indexed_column_exact_match() -> Result<(), BundlebaseE
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email column
-    bundle.create_index(&["Email"], IndexType::Column, None).await?;
+    bundle.create_index(&["Email"], IndexType::BTree, None).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query with exact match on indexed column
@@ -207,7 +207,7 @@ async fn test_select_with_indexed_column_in_list() -> Result<(), BundlebaseError
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email column
-    bundle.create_index(&["Email"], IndexType::Column, None).await?;
+    bundle.create_index(&["Email"], IndexType::BTree, None).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query with IN list on indexed column
@@ -274,7 +274,7 @@ async fn test_select_on_non_indexed_column() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Email but query on City (not indexed)
-    bundle.create_index(&["Email"], IndexType::Column, None).await?;
+    bundle.create_index(&["Email"], IndexType::BTree, None).await?;
     bundle.commit("Created index on Email").await?;
 
     // Query on non-indexed column should fall back to full scan
@@ -306,7 +306,7 @@ async fn test_index_selectivity() -> Result<(), BundlebaseError> {
     bundle.attach(test_datafile("customers-0-100.csv"), None).await?;
 
     // Create index on Customer Id (should be unique)
-    bundle.create_index(&["Customer Id"], IndexType::Column, None).await?;
+    bundle.create_index(&["Customer Id"], IndexType::BTree, None).await?;
     bundle.commit("Created index on Customer Id").await?;
 
     // Query for specific customer
@@ -352,7 +352,7 @@ async fn test_query_path_uses_index() -> Result<(), BundlebaseError> {
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
     bundle
-        .create_index(&["Email"], IndexType::Column, None)
+        .create_index(&["Email"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index on Email").await?;
 
@@ -415,7 +415,7 @@ async fn test_filter_path_uses_index() -> Result<(), BundlebaseError> {
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
     bundle
-        .create_index(&["Email"], IndexType::Column, None)
+        .create_index(&["Email"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index on Email").await?;
 
@@ -452,7 +452,7 @@ async fn test_query_on_non_indexed_column_uses_full_scan() -> Result<(), Bundleb
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
     bundle
-        .create_index(&["Email"], IndexType::Column, None)
+        .create_index(&["Email"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index on Email only").await?;
 
@@ -540,7 +540,7 @@ async fn test_query_path_index_with_parameterized_filter() -> Result<(), Bundleb
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
     bundle
-        .create_index(&["Email"], IndexType::Column, None)
+        .create_index(&["Email"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index on Email").await?;
 
@@ -573,7 +573,7 @@ async fn test_index_survives_reopen() -> Result<(), BundlebaseError> {
         .attach(test_datafile("customers-0-100.csv"), None)
         .await?;
     bundle
-        .create_index(&["Email"], IndexType::Column, None)
+        .create_index(&["Email"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index on Email").await?;
 
@@ -1022,7 +1022,7 @@ async fn test_create_index_after_rename_column() -> Result<(), BundlebaseError> 
     // Rename a column, then create an index on the new name
     bundle.rename_column("City", "city").await?;
     bundle
-        .create_index(&["city"], IndexType::Column, None)
+        .create_index(&["city"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index on renamed column").await?;
 
@@ -1058,7 +1058,7 @@ async fn test_create_index_after_normalize_column_names() -> Result<(), Bundleba
     // normalize_column_names lowercases and replaces spaces/special chars
     bundle.normalize_column_names().await?;
     bundle
-        .create_index(&["city"], IndexType::Column, None)
+        .create_index(&["city"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index after standardize").await?;
 
@@ -1351,7 +1351,7 @@ async fn test_cast_column_then_create_index() -> Result<(), BundlebaseError> {
 
     // Create column index on the cast column
     bundle
-        .create_index(&["Index"], IndexType::Column, None)
+        .create_index(&["Index"], IndexType::BTree, None)
         .await?;
     bundle.commit("Cast + index").await?;
 
@@ -1387,7 +1387,7 @@ async fn test_create_index_then_cast_column_different_column() -> Result<(), Bun
 
     // Create index on City first
     bundle
-        .create_index(&["City"], IndexType::Column, None)
+        .create_index(&["City"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index on City").await?;
 
@@ -1425,7 +1425,7 @@ async fn test_create_index_then_cast_same_column() -> Result<(), BundlebaseError
 
     // Create column index on Index (as string)
     bundle
-        .create_index(&["Index"], IndexType::Column, None)
+        .create_index(&["Index"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index on string Index").await?;
 
@@ -1598,7 +1598,7 @@ async fn test_cast_column_then_create_index_on_different_column() -> Result<(), 
 
     // Create index on City (not the cast column)
     bundle
-        .create_index(&["City"], IndexType::Column, None)
+        .create_index(&["City"], IndexType::BTree, None)
         .await?;
     bundle.commit("Cast Index, index City").await?;
 
@@ -1624,7 +1624,7 @@ async fn test_cast_column_then_create_index_on_different_column() -> Result<(), 
 
 /// Verify that creating a column index on an add_column computed column works.
 #[tokio::test]
-async fn test_create_column_index_on_added_column() -> Result<(), BundlebaseError> {
+async fn test_create_btree_index_on_added_column() -> Result<(), BundlebaseError> {
     init();
     common::enable_logging();
     let data_dir = random_memory_dir();
@@ -1641,7 +1641,7 @@ async fn test_create_column_index_on_added_column() -> Result<(), BundlebaseErro
 
     // Create column index on the computed column
     bundle
-        .create_index(&["company_upper"], IndexType::Column, None)
+        .create_index(&["company_upper"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index on computed column").await?;
 
@@ -1752,7 +1752,7 @@ async fn test_create_text_index_on_added_column() -> Result<(), BundlebaseError>
 
 /// Verify that indexing a computed column works after renaming a source column.
 #[tokio::test]
-async fn test_create_column_index_on_added_column_after_rename() -> Result<(), BundlebaseError> {
+async fn test_create_btree_index_on_added_column_after_rename() -> Result<(), BundlebaseError> {
     init();
     common::enable_logging();
     let data_dir = random_memory_dir();
@@ -1770,7 +1770,7 @@ async fn test_create_column_index_on_added_column_after_rename() -> Result<(), B
 
     // Create column index on the computed column
     bundle
-        .create_index(&["company_upper"], IndexType::Column, None)
+        .create_index(&["company_upper"], IndexType::BTree, None)
         .await?;
     bundle.commit("Index on computed column after rename").await?;
 
@@ -1818,7 +1818,7 @@ async fn test_search_with_index_on_added_column() -> Result<(), BundlebaseError>
         .add_column("company_upper", "upper(\"Company\")")
         .await?;
     bundle
-        .create_index(&["company_upper"], IndexType::Column, None)
+        .create_index(&["company_upper"], IndexType::BTree, None)
         .await?;
     bundle.commit("Text index + computed column index").await?;
 
@@ -1868,7 +1868,7 @@ async fn test_search_with_index_on_added_column() -> Result<(), BundlebaseError>
 
 #[tokio::test]
 #[ignore = "Column index across multiple blocks hits range error — known issue to fix"]
-async fn test_column_index_across_multiple_blocks() -> Result<(), BundlebaseError> {
+async fn test_btree_index_across_multiple_blocks() -> Result<(), BundlebaseError> {
     init();
     common::enable_logging();
     let data_dir = random_memory_dir();
@@ -1882,7 +1882,7 @@ async fn test_column_index_across_multiple_blocks() -> Result<(), BundlebaseErro
         .await?;
 
     bundle
-        .create_index(&["Email"], IndexType::Column, None)
+        .create_index(&["Email"], IndexType::BTree, None)
         .await?;
     bundle.commit("Attach + index").await?;
 

@@ -1,4 +1,4 @@
-use crate::column_index::IndexedValue;
+use crate::btree_index::IndexedValue;
 use bundlebase_common::BundlebaseError;
 use datafusion::logical_expr::{expr, BinaryExpr, Expr, Like, Operator};
 
@@ -329,7 +329,7 @@ fn extract_like_prefix(pattern: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::column_index::OrderedFloat;
+    use crate::btree_index::OrderedFloat;
     use datafusion::common::Column;
     use datafusion::common::ScalarValue;
     use datafusion::logical_expr::col;

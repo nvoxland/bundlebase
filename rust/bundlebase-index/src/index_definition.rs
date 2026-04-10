@@ -11,10 +11,10 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum IndexType {
-    /// B-tree style column index for equality/range queries
-    Column,
-    /// BM25 full-text search index spanning one or more columns
-    Text {
+    /// B-tree style index for equality/range queries
+    BTree,
+    /// BM25 inverted full-text search index spanning one or more columns
+    Inverted {
         tokenizer: TokenizerConfig,
     },
 }
@@ -22,26 +22,26 @@ pub enum IndexType {
 impl IndexType {
     /// Create a new Text index type with the specified tokenizer.
     pub fn text(tokenizer: TokenizerConfig) -> Self {
-        IndexType::Text {
+        IndexType::Inverted {
             tokenizer,
         }
     }
 
-    /// Check if this is a text/full-text index
-    pub fn is_text(&self) -> bool {
-        matches!(self, IndexType::Text { .. })
+    /// Check if this is an inverted/full-text index
+    pub fn is_inverted(&self) -> bool {
+        matches!(self, IndexType::Inverted { .. })
     }
 
-    /// Check if this is a column/btree index
-    pub fn is_column(&self) -> bool {
-        matches!(self, IndexType::Column)
+    /// Check if this is a btree index
+    pub fn is_btree(&self) -> bool {
+        matches!(self, IndexType::BTree)
     }
 
-    /// Get the tokenizer config if this is a text index
+    /// Get the tokenizer config if this is an inverted index
     pub fn tokenizer(&self) -> Option<&TokenizerConfig> {
         match self {
-            IndexType::Text { tokenizer, .. } => Some(tokenizer),
-            IndexType::Column => None,
+            IndexType::Inverted { tokenizer, .. } => Some(tokenizer),
+            IndexType::BTree => None,
         }
     }
 
@@ -50,10 +50,10 @@ impl IndexType {
     /// For text indexes, a tokenizer can be specified separately via `with_tokenizer()`.
     pub fn with_tokenizer(self, tokenizer: Option<TokenizerConfig>) -> Self {
         match self {
-            IndexType::Text { .. } => IndexType::Text {
+            IndexType::Inverted { .. } => IndexType::Inverted {
                 tokenizer: tokenizer.unwrap_or_default(),
             },
-            IndexType::Column => self,
+            IndexType::BTree => self,
         }
     }
 
@@ -66,21 +66,21 @@ impl IndexType {
     /// * `args` - HashMap of argument name to value
     ///
     /// # Supported Arguments
-    /// - **Column index**: No arguments accepted
-    /// - **Text index**: `tokenizer` (optional) - tokenizer name (e.g., "simple", "en_stem")
+    /// - **BTree index**: No arguments accepted
+    /// - **Inverted index**: `tokenizer` (optional) - tokenizer name (e.g., "simple", "en_stem")
     pub fn with_args(self, args: &HashMap<String, String>) -> Result<Self, IndexTypeConfigError> {
         match self {
-            IndexType::Column => {
+            IndexType::BTree => {
                 // Column index accepts no args
                 if let Some(unknown) = args.keys().next() {
                     return Err(IndexTypeConfigError(format!(
-                        "Unknown argument '{}' for column index",
+                        "Unknown argument '{}' for btree index",
                         unknown
                     )));
                 }
                 Ok(self)
             }
-            IndexType::Text { .. } => {
+            IndexType::Inverted { .. } => {
                 let mut tokenizer = TokenizerConfig::default();
                 for (key, value) in args {
                     match key.as_str() {
@@ -91,13 +91,13 @@ impl IndexType {
                         }
                         unknown => {
                             return Err(IndexTypeConfigError(format!(
-                                "Unknown argument '{}' for text index. Valid arguments: tokenizer",
+                                "Unknown argument '{}' for inverted index. Valid arguments: tokenizer",
                                 unknown
                             )));
                         }
                     }
                 }
-                Ok(IndexType::Text { tokenizer })
+                Ok(IndexType::Inverted { tokenizer })
             }
         }
     }
@@ -132,21 +132,21 @@ impl FromStr for IndexType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "column" | "btree" | "b-tree" => Ok(IndexType::Column),
-            "text" | "fulltext" | "fts" | "full-text" => {
-                Ok(IndexType::Text {
+            "column" | "btree" | "b-tree" => Ok(IndexType::BTree),
+            "inverted" | "text" | "fulltext" | "fts" | "full-text" => {
+                Ok(IndexType::Inverted {
                     tokenizer: TokenizerConfig::default(),
                 })
             }
             other => Err(ParseIndexTypeError(format!(
-                "Unknown index type '{}'. Valid options: column, btree, text, fulltext, fts",
+                "Unknown index type '{}'. Valid options: btree, column, inverted, text, fulltext, fts",
                 other
             ))),
         }
     }
 }
 
-/// Tokenizer configuration for text indexes
+/// Tokenizer configuration for inverted indexes
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum TokenizerConfig {
@@ -293,14 +293,14 @@ impl IndexDefinition {
         &self.index_type
     }
 
-    /// Check if this is a text/full-text index
-    pub fn is_text(&self) -> bool {
-        self.index_type.is_text()
+    /// Check if this is an inverted/full-text index
+    pub fn is_inverted(&self) -> bool {
+        self.index_type.is_inverted()
     }
 
-    /// Check if this is a column/btree index
-    pub fn is_column(&self) -> bool {
-        self.index_type.is_column()
+    /// Check if this is a btree index
+    pub fn is_btree(&self) -> bool {
+        self.index_type.is_btree()
     }
 
     /// Get the IndexedBlocks containing the specified versioned block.

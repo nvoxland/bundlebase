@@ -20,9 +20,9 @@ pub struct CreateIndexOp {
 
 impl CreateIndexOp {
     pub async fn setup(column_ids: Vec<ColumnId>, index_type: IndexType, name: String) -> Result<Self, BundlebaseError> {
-        // For column indexes, validate exactly one column
-        if index_type.is_column() && column_ids.len() != 1 {
-            return Err("Column indexes must have exactly one column".into());
+        // For btree indexes, validate exactly one column
+        if index_type.is_btree() && column_ids.len() != 1 {
+            return Err("BTree indexes must have exactly one column".into());
         }
 
         Ok(Self {
@@ -37,8 +37,8 @@ impl CreateIndexOp {
 impl Operation for CreateIndexOp {
     fn describe(&self) -> String {
         match &self.index_type {
-            IndexType::Column => format!("CREATE INDEX on column IDs: {:?}", self.column_ids),
-            IndexType::Text { tokenizer } => {
+            IndexType::BTree => format!("CREATE INDEX on column IDs: {:?}", self.column_ids),
+            IndexType::Inverted { tokenizer } => {
                 format!("CREATE TEXT INDEX '{}' on column IDs: {:?} (tokenizer: {:?})", self.name, self.column_ids, tokenizer)
             }
         }
@@ -53,7 +53,7 @@ impl Operation for CreateIndexOp {
                 .ok_or_else(|| BundlebaseError::from(format!("Column with ID '{}' not found", id))))
             .collect::<Result<Vec<_>, _>>()?;
 
-        if self.index_type.is_text() {
+        if self.index_type.is_inverted() {
             // Validate all columns exist and are string types
             for col in &columns {
                 let field = schema.column_with_name(col).map(|(_, f)| f);
@@ -122,10 +122,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_column_index_rejects_multiple_columns() {
+    async fn test_btree_index_rejects_multiple_columns() {
         let result = CreateIndexOp::setup(
             vec![ColumnId::generate(), ColumnId::generate()],
-            IndexType::Column,
+            IndexType::BTree,
             "test_idx".to_string(),
         )
         .await;

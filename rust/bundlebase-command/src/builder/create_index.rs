@@ -72,11 +72,11 @@ impl CommandParsing for CreateIndexCommand {
     // the parser grammar to support the full text index syntax.
     fn to_statement(&self) -> String {
         match &self.index_type {
-            IndexType::Column => {
+            IndexType::BTree => {
                 let quoted_cols: Vec<String> = self.columns.iter().map(|c| quote_identifier(c)).collect();
                 format!("CREATE COLUMN INDEX ON {}", quoted_cols.join(", "))
             }
-            IndexType::Text { tokenizer } => {
+            IndexType::Inverted { tokenizer } => {
                 let cols = self.columns.join(", ");
                 if let Some(name) = self.name.as_deref() {
                     format!("CREATE TEXT INDEX '{}' ON [{}] (tokenizer: {:?})", name, cols, tokenizer)
@@ -129,13 +129,13 @@ mod parsing_tests {
     use crate::BundleCommand;
 
     #[test]
-    fn test_parse_create_column_index() {
+    fn test_parse_create_btree_index() {
         let input = "CREATE COLUMN INDEX ON user_id";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::CreateIndex(c) => {
                 assert_eq!(c.columns, vec!["user_id"]);
-                assert_eq!(c.index_type, IndexType::Column);
+                assert_eq!(c.index_type, IndexType::BTree);
             }
             _ => panic!("Expected CreateIndex variant"),
         }
@@ -148,7 +148,7 @@ mod parsing_tests {
         match cmd {
             BundleCommand::CreateIndex(c) => {
                 assert_eq!(c.columns, vec!["description"]);
-                assert!(c.index_type.is_text());
+                assert!(c.index_type.is_inverted());
             }
             _ => panic!("Expected CreateIndex variant"),
         }
@@ -156,7 +156,7 @@ mod parsing_tests {
 
     #[test]
     fn test_round_trip() {
-        let cmd = CreateIndexCommand::new(vec!["email".to_string()], IndexType::Column, None);
+        let cmd = CreateIndexCommand::new(vec!["email".to_string()], IndexType::BTree, None);
         let statement = cmd.to_statement();
         assert_eq!(statement, "CREATE COLUMN INDEX ON email");
 
@@ -164,7 +164,7 @@ mod parsing_tests {
         match parsed {
             BundleCommand::CreateIndex(c) => {
                 assert_eq!(c.columns, vec!["email"]);
-                assert_eq!(c.index_type, IndexType::Column);
+                assert_eq!(c.index_type, IndexType::BTree);
             }
             _ => panic!("Expected CreateIndex variant"),
         }

@@ -65,10 +65,10 @@ impl BundleIndexesTable {
         let types: Vec<&str> = indexes
             .iter()
             .map(|idx| {
-                if idx.is_text() {
-                    "text"
+                if idx.is_inverted() {
+                    "inverted"
                 } else {
-                    "column"
+                    "btree"
                 }
             })
             .collect();

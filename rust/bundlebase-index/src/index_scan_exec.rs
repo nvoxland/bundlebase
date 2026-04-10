@@ -1,7 +1,7 @@
 use bundlebase_common::data_reader::DataReader;
 use bundlebase_common::{RowId};
 use datafusion::physical_plan::SendableRecordBatchStream;
-use crate::column_index::{ColumnIndex, IndexedValue};
+use crate::btree_index::{BTreeIndex, IndexedValue};
 use bundlebase_common::BundlebaseError;
 use arrow::datatypes::SchemaRef;
 use std::fmt;
@@ -14,7 +14,7 @@ pub struct IndexScanExec {
     /// The schema of results
     schema: SchemaRef,
     /// The column index to query
-    index: Arc<ColumnIndex>,
+    index: Arc<BTreeIndex>,
     /// The data adapter to fetch rows from
     adapter: Arc<dyn DataReader>,
     /// The value to look up in the index
@@ -26,7 +26,7 @@ pub struct IndexScanExec {
 impl IndexScanExec {
     pub fn new(
         schema: SchemaRef,
-        index: Arc<ColumnIndex>,
+        index: Arc<BTreeIndex>,
         adapter: Arc<dyn DataReader>,
         lookup_value: IndexedValue,
         projection: Option<Vec<usize>>,
@@ -85,7 +85,7 @@ impl fmt::Debug for IndexScanExec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::column_index::IndexedValue;
+    use crate::btree_index::IndexedValue;
     use arrow::datatypes::DataType;
     use std::collections::HashMap;
 
@@ -98,7 +98,7 @@ mod tests {
         );
 
         let has_entries = !index_map.is_empty();
-        let index = Arc::new(ColumnIndex::build("value", &DataType::Utf8, index_map).unwrap());
+        let index = Arc::new(BTreeIndex::build("value", &DataType::Utf8, index_map).unwrap());
 
         // Verify the index was created successfully
         assert!(has_entries, "Index map should have entries");

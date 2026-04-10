@@ -91,7 +91,7 @@ impl TableFunctionImpl for SearchTableFunction {
                 })?;
 
                 let text_indexes: Vec<_> =
-                    indexes.iter().filter(|idx| idx.is_text()).collect();
+                    indexes.iter().filter(|idx| idx.is_inverted()).collect();
 
                 match text_indexes.len() {
                     0 => {
@@ -137,11 +137,11 @@ impl TableFunctionImpl for SearchTableFunction {
         // Look up the index definition by name only
         let index_def = indexes
             .iter()
-            .find(|idx| idx.is_text() && idx.name() == index_name)
+            .find(|idx| idx.is_inverted() && idx.name() == index_name)
             .ok_or_else(|| {
                 let available_text: Vec<String> = indexes
                     .iter()
-                    .filter(|idx| idx.is_text())
+                    .filter(|idx| idx.is_inverted())
                     .map(|idx| idx.name().to_string())
                     .collect();
 

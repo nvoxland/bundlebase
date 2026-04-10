@@ -179,7 +179,7 @@ async fn test_create_index_in_tar() {
         .await
         .unwrap();
     let builder = BundleBuilder::extend(opened.into(), None).await.unwrap();
-    builder.create_index(&["id"], IndexType::Column, None).await.unwrap();
+    builder.create_index(&["id"], IndexType::BTree, None).await.unwrap();
     builder.commit("v2 - added index").await.unwrap();
 
     // Reopen and verify index exists

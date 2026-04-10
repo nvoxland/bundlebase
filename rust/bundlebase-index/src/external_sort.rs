@@ -4,7 +4,7 @@
 //! by using temporary files for intermediate storage.
 
 use bundlebase_common::RowId;
-use crate::column_index::IndexedValue;
+use crate::btree_index::IndexedValue;
 use bundlebase_common::BundlebaseError;
 use bytes::{BufMut, BytesMut};
 use std::collections::BinaryHeap;

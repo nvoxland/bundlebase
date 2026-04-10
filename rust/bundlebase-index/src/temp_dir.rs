@@ -38,7 +38,7 @@ impl TempDirManager {
     ///
     /// # Arguments
     /// * `data_dir` - The data directory for the bundle
-    /// * `prefix` - Prefix for the temp directory name (e.g., "column_index")
+    /// * `prefix` - Prefix for the temp directory name (e.g., "btree_index")
     ///
     /// # Returns
     /// A `TempDirManager` that will clean up the directory on drop.

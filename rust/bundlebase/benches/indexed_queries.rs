@@ -20,7 +20,7 @@ use std::sync::Arc;
 use bundlebase_command::BundleBuilderExt;
 
 /// Create a committed bundle with a column index on the specified column.
-async fn create_bundle_with_column_index(
+async fn create_bundle_with_btree_index(
     rows: usize,
     format: &bench_data::Format,
     column: &str,
@@ -68,10 +68,10 @@ fn bench_order_by(c: &mut Criterion) {
 
             // Column index on id
             let indexed_bundle = rt
-                .block_on(create_bundle_with_column_index(rows, &format, "id"))
+                .block_on(create_bundle_with_btree_index(rows, &format, "id"))
                 .expect("indexed bundle creation");
             group.bench_with_input(
-                BenchmarkId::new(format!("column_index_{}", format.name()), rows),
+                BenchmarkId::new(format!("btree_index_{}", format.name()), rows),
                 &rows,
                 |b, _| {
                     b.to_async(&rt).iter(|| {
@@ -134,10 +134,10 @@ fn bench_limit_with_filter(c: &mut Criterion) {
 
             // Column index on filter_value
             let indexed_bundle = rt
-                .block_on(create_bundle_with_column_index(rows, &format, "filter_value"))
+                .block_on(create_bundle_with_btree_index(rows, &format, "filter_value"))
                 .expect("indexed bundle creation");
             group.bench_with_input(
-                BenchmarkId::new(format!("column_index_{}", format.name()), rows),
+                BenchmarkId::new(format!("btree_index_{}", format.name()), rows),
                 &rows,
                 |b, _| {
                     b.to_async(&rt).iter(|| {
@@ -200,10 +200,10 @@ fn bench_distinct(c: &mut Criterion) {
 
             // Column index on category
             let indexed_bundle = rt
-                .block_on(create_bundle_with_column_index(rows, &format, "category"))
+                .block_on(create_bundle_with_btree_index(rows, &format, "category"))
                 .expect("indexed bundle creation");
             group.bench_with_input(
-                BenchmarkId::new(format!("column_index_{}", format.name()), rows),
+                BenchmarkId::new(format!("btree_index_{}", format.name()), rows),
                 &rows,
                 |b, _| {
                     b.to_async(&rt).iter(|| {
@@ -266,10 +266,10 @@ fn bench_count_group_by(c: &mut Criterion) {
 
             // Column index on category
             let indexed_bundle = rt
-                .block_on(create_bundle_with_column_index(rows, &format, "category"))
+                .block_on(create_bundle_with_btree_index(rows, &format, "category"))
                 .expect("indexed bundle creation");
             group.bench_with_input(
-                BenchmarkId::new(format!("column_index_{}", format.name()), rows),
+                BenchmarkId::new(format!("btree_index_{}", format.name()), rows),
                 &rows,
                 |b, _| {
                     b.to_async(&rt).iter(|| {
@@ -412,10 +412,10 @@ fn bench_like(c: &mut Criterion) {
 
             // Column index on name
             let indexed_bundle = rt
-                .block_on(create_bundle_with_column_index(rows, &format, "name"))
+                .block_on(create_bundle_with_btree_index(rows, &format, "name"))
                 .expect("indexed bundle creation");
             group.bench_with_input(
-                BenchmarkId::new(format!("column_index_{}", format.name()), rows),
+                BenchmarkId::new(format!("btree_index_{}", format.name()), rows),
                 &rows,
                 |b, _| {
                     b.to_async(&rt).iter(|| {

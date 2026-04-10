@@ -3,7 +3,7 @@ use crate::bundle::operation::{AnyOperation, Operation, resolve_cast_ops};
 use crate::bundle::DataBlock;
 use crate::data::{BlockId, ObjectId, ObjectIdAlias, RowId, VersionedBlockId};
 use crate::index::{
-    ColumnIndex, ExternalSortConfig, ExternalSortWriter, IndexedValue, IndexType, TempDirManager,
+    BTreeIndex, ExternalSortConfig, ExternalSortWriter, IndexedValue, IndexType, TempDirManager,
     TextIndexBuilder, TokenizerConfig, DEFAULT_MEMORY_LIMIT_BYTES,
 };
 use crate::object_id::ColumnId;
@@ -214,17 +214,17 @@ impl IndexBlocksOp {
 
         // Dispatch to appropriate index building method
         match &index_type {
-            IndexType::Column => {
+            IndexType::BTree => {
                 let column = columns.first().ok_or_else(|| {
                     BundlebaseError::from("Column index requires at least one column")
                 })?;
                 if is_computed {
-                    Self::build_computed_column_index(index, column, blocks, bundle, operations).await
+                    Self::build_computed_btree_index(index, column, blocks, bundle, operations).await
                 } else {
-                    Self::build_column_index(index, column, blocks, bundle).await
+                    Self::build_btree_index(index, column, blocks, bundle).await
                 }
             }
-            IndexType::Text { tokenizer, .. } => {
+            IndexType::Inverted { tokenizer, .. } => {
                 if is_computed {
                     Self::build_computed_text_index(
                         index, &index_name, &columns, blocks, bundle, tokenizer, operations,
@@ -244,7 +244,7 @@ impl IndexBlocksOp {
     /// 2. External sorter flushes sorted runs to disk when memory limit exceeded
     /// 3. K-way merge produces sorted stream of entries
     /// 4. Build index incrementally from sorted stream
-    async fn build_column_index(
+    async fn build_btree_index(
         index: &ObjectId,
         column: &str,
         blocks: Vec<(BlockId, String)>,
@@ -284,7 +284,7 @@ impl IndexBlocksOp {
         );
 
         // Create temp directory for external sort
-        let temp_manager = TempDirManager::new(&bundle.data_dir(), "column_index")?;
+        let temp_manager = TempDirManager::new(&bundle.data_dir(), "btree_index")?;
 
         let sort_config = ExternalSortConfig::new(
             DEFAULT_MEMORY_LIMIT_BYTES,
@@ -307,7 +307,7 @@ impl IndexBlocksOp {
 
         // Build index from sorted stream
         let sorted_iter = sorter.finish()?;
-        let column_index = ColumnIndex::build_streaming(
+        let btree_index = BTreeIndex::build_streaming(
             column,
             &data_type,
             sorted_iter.map(|r| r.map(|e| (e.value, e.row_id))),
@@ -319,10 +319,10 @@ impl IndexBlocksOp {
             ))
         })?;
 
-        let total_cardinality = column_index.cardinality();
+        let total_cardinality = btree_index.cardinality();
 
         // Serialize and save the index
-        let serialized = column_index.serialize().map_err(|e| {
+        let serialized = btree_index.serialize().map_err(|e| {
             BundlebaseError::from(format!(
                 "Failed to serialize index for column '{}': {}",
                 column, e
@@ -653,7 +653,7 @@ impl IndexBlocksOp {
     }
 
     /// Build a column index on a computed column by applying operations to each batch.
-    async fn build_computed_column_index(
+    async fn build_computed_btree_index(
         index: &ObjectId,
         column: &str,
         blocks: Vec<(BlockId, String)>,
@@ -681,7 +681,7 @@ impl IndexBlocksOp {
             Some(blocks.len() as u64),
         );
 
-        let temp_manager = TempDirManager::new(&bundle.data_dir(), "column_index")?;
+        let temp_manager = TempDirManager::new(&bundle.data_dir(), "btree_index")?;
         let sort_config = ExternalSortConfig::new(
             DEFAULT_MEMORY_LIMIT_BYTES,
             temp_manager.path().clone(),
@@ -736,7 +736,7 @@ impl IndexBlocksOp {
 
         // Build index from sorted stream
         let sorted_iter = sorter.finish()?;
-        let column_index = ColumnIndex::build_streaming(
+        let btree_index = BTreeIndex::build_streaming(
             column,
             &data_type,
             sorted_iter.map(|r| r.map(|e| (e.value, e.row_id))),
@@ -748,9 +748,9 @@ impl IndexBlocksOp {
             ))
         })?;
 
-        let total_cardinality = column_index.cardinality();
+        let total_cardinality = btree_index.cardinality();
 
-        let serialized = column_index.serialize().map_err(|e| {
+        let serialized = btree_index.serialize().map_err(|e| {
             BundlebaseError::from(format!(
                 "Failed to serialize index for computed column '{}': {}",
                 column, e

@@ -2,13 +2,13 @@
 
 //! Indexing infrastructure for Bundlebase.
 //!
-//! Provides text search (via tantivy), column indexes, row ID caching,
+//! Provides text search (via tantivy), btree indexes, row ID caching,
 //! and index selection for query optimization.
 //!
 //! Note: `search_table_fn` (DataFusion table function integration) remains
 //! in the core crate since it depends on BundleFacade.
 
-pub mod column_index;
+pub mod btree_index;
 mod external_sort;
 mod filter_analyzer;
 mod index_definition;
@@ -22,7 +22,7 @@ pub mod text_column_index;
 #[cfg(test)]
 pub(crate) mod test_utils;
 
-pub use column_index::{ColumnIndex, IndexedValue};
+pub use btree_index::{BTreeIndex, IndexedValue};
 pub use external_sort::{ExternalSortConfig, ExternalSortWriter, DEFAULT_MEMORY_LIMIT_BYTES};
 pub use filter_analyzer::{FilterAnalyzer, IndexPredicate, IndexableFilter};
 pub use index_definition::{IndexDefinition, IndexType, IndexTypeConfigError, ParseIndexTypeError, TokenizerConfig};

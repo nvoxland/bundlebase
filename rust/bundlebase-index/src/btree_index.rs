@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::Cursor;
 
-const MAGIC: &[u8; 8] = b"COLIDX\0\0";
+const MAGIC: &[u8; 8] = b"BBBTRI01";
 const VERSION: u8 = 1;
 const TARGET_BLOCK_SIZE: usize = 64 * 1024; // 64KB blocks
 
@@ -376,9 +376,9 @@ impl BlockDirectory {
     }
 }
 
-/// Column index structure
+/// BTree index structure
 #[derive(Debug, Clone)]
-pub struct ColumnIndex {
+pub struct BTreeIndex {
     column_name: String,
     data_type: DataType,
     blocks: Vec<IndexBlock>,
@@ -387,7 +387,7 @@ pub struct ColumnIndex {
     total_rows: u64,    // Total number of rows indexed
 }
 
-impl ColumnIndex {
+impl BTreeIndex {
     /// Build index from value -> rowids mapping
     pub fn build(
         column_name: &str,
@@ -430,7 +430,7 @@ impl ColumnIndex {
             current_offset += block.serialize().len() as u64;
         }
 
-        Ok(ColumnIndex {
+        Ok(BTreeIndex {
             column_name: column_name.to_string(),
             data_type: data_type.clone(),
             blocks,
@@ -453,7 +453,7 @@ impl ColumnIndex {
     /// * `sorted_entries` - Iterator yielding (IndexedValue, RowId) pairs in sorted order
     ///
     /// # Returns
-    /// A new ColumnIndex built from the sorted entries.
+    /// A new BTreeIndex built from the sorted entries.
     pub fn build_streaming<I>(
         column_name: &str,
         data_type: &DataType,
@@ -571,7 +571,7 @@ impl ColumnIndex {
             current_offset += block.serialize().len() as u64;
         }
 
-        Ok(ColumnIndex {
+        Ok(BTreeIndex {
             column_name: column_name.to_string(),
             data_type: data_type.clone(),
             blocks,
@@ -707,7 +707,7 @@ impl ColumnIndex {
             blocks.push(block);
         }
 
-        Ok(ColumnIndex {
+        Ok(BTreeIndex {
             column_name,
             data_type,
             blocks,
@@ -850,7 +850,7 @@ impl ColumnIndex {
             IndexPredicate::Exact(value) => self.estimate_exact_selectivity(value),
             IndexPredicate::In(values) => self.estimate_in_selectivity(values),
             IndexPredicate::Range { min, max } => self.estimate_range_selectivity(min, max),
-            // IsNull, IsNotNull, and Prefix are handled by block/page pruning, not the column index
+            // IsNull, IsNotNull, and Prefix are handled by block/page pruning, not the btree index
             IndexPredicate::IsNull | IndexPredicate::IsNotNull | IndexPredicate::Prefix(_) => 1.0,
         }
     }
@@ -883,7 +883,7 @@ impl ColumnIndex {
     }
 }
 
-impl Index for ColumnIndex {
+impl Index for BTreeIndex {
     fn serialize(&self) -> Result<Bytes, BundlebaseError> {
         self.serialize()
     }
@@ -897,7 +897,7 @@ impl Index for ColumnIndex {
     }
 
     fn index_type(&self) -> IndexType {
-        IndexType::Column
+        IndexType::BTree
     }
 
     fn total_rows(&self) -> u64 {
@@ -936,13 +936,13 @@ mod tests {
     }
 
     #[test]
-    fn test_column_index_build_and_lookup() {
+    fn test_btree_index_build_and_lookup() {
         let mut value_map = HashMap::new();
         value_map.insert(IndexedValue::Int64(1), vec![RowId::from(100u64)]);
         value_map.insert(IndexedValue::Int64(2), vec![RowId::from(200u64)]);
         value_map.insert(IndexedValue::Int64(3), vec![RowId::from(300u64)]);
 
-        let index = ColumnIndex::build("test_col", &DataType::Int64, value_map).unwrap();
+        let index = BTreeIndex::build("test_col", &DataType::Int64, value_map).unwrap();
 
         // Point lookup
         let result = index.lookup_exact(&IndexedValue::Int64(2));
@@ -955,15 +955,15 @@ mod tests {
     }
 
     #[test]
-    fn test_column_index_serialize_deserialize() {
+    fn test_btree_index_serialize_deserialize() {
         let mut value_map = HashMap::new();
         value_map.insert(IndexedValue::Int64(1), vec![RowId::from(100u64)]);
         value_map.insert(IndexedValue::Int64(2), vec![RowId::from(200u64)]);
 
-        let index = ColumnIndex::build("test_col", &DataType::Int64, value_map).unwrap();
+        let index = BTreeIndex::build("test_col", &DataType::Int64, value_map).unwrap();
 
         let bytes = index.serialize().unwrap();
-        let deserialized = ColumnIndex::deserialize(bytes, "test_col".to_string()).unwrap();
+        let deserialized = BTreeIndex::deserialize(bytes, "test_col".to_string()).unwrap();
 
         assert_eq!(deserialized.column_name(), "test_col");
         assert_eq!(deserialized.cardinality(), 2);
@@ -984,7 +984,7 @@ mod tests {
             value_map.insert(IndexedValue::Int64(i as i64), row_ids);
         }
 
-        let index = ColumnIndex::build("test_col", &DataType::Int64, value_map).unwrap();
+        let index = BTreeIndex::build("test_col", &DataType::Int64, value_map).unwrap();
 
         // Verify stats
         assert_eq!(index.cardinality(), 10); // 10 distinct values
@@ -1021,7 +1021,7 @@ mod tests {
             value_map.insert(IndexedValue::Int64(i as i64), row_ids);
         }
 
-        let index = ColumnIndex::build("test_col", &DataType::Int64, value_map).unwrap();
+        let index = BTreeIndex::build("test_col", &DataType::Int64, value_map).unwrap();
 
         // Test with Exact predicate
         let exact_pred = IndexPredicate::Exact(IndexedValue::Int64(10));
@@ -1053,7 +1053,7 @@ mod tests {
         ];
 
         let index =
-            ColumnIndex::build_streaming("test_col", &DataType::Int64, entries.into_iter())
+            BTreeIndex::build_streaming("test_col", &DataType::Int64, entries.into_iter())
                 .unwrap();
 
         // Verify structure
@@ -1083,7 +1083,7 @@ mod tests {
         );
 
         let index_from_map =
-            ColumnIndex::build("test_col", &DataType::Int64, value_map).unwrap();
+            BTreeIndex::build("test_col", &DataType::Int64, value_map).unwrap();
 
         // Build same index using streaming method (entries must be sorted)
         let entries: Vec<Result<(IndexedValue, RowId), BundlebaseError>> = vec![
@@ -1094,7 +1094,7 @@ mod tests {
         ];
 
         let index_from_stream =
-            ColumnIndex::build_streaming("test_col", &DataType::Int64, entries.into_iter())
+            BTreeIndex::build_streaming("test_col", &DataType::Int64, entries.into_iter())
                 .unwrap();
 
         // Verify both produce same results
@@ -1119,7 +1119,7 @@ mod tests {
         let entries: Vec<Result<(IndexedValue, RowId), BundlebaseError>> = vec![];
 
         let index =
-            ColumnIndex::build_streaming("empty_col", &DataType::Int64, entries.into_iter())
+            BTreeIndex::build_streaming("empty_col", &DataType::Int64, entries.into_iter())
                 .unwrap();
 
         assert_eq!(index.cardinality(), 0);

@@ -1,4 +1,4 @@
-use crate::column_index::ColumnIndex;
+use crate::btree_index::BTreeIndex;
 use lazy_static::lazy_static;
 use lru::LruCache;
 use opentelemetry::metrics::Counter;
@@ -15,7 +15,7 @@ lazy_static! {
         .build();
 }
 
-/// Global LRU cache for deserialized `ColumnIndex` objects.
+/// Global LRU cache for deserialized `BTreeIndex` objects.
 ///
 /// Indexes are immutable once written (tied to block version), so no
 /// invalidation logic is needed — the file path uniquely identifies the
@@ -25,7 +25,7 @@ lazy_static! {
 /// # Default Capacity
 /// - 100 entries (configurable via `BUNDLEBASE_INDEX_CACHE_SIZE`)
 pub struct IndexCache {
-    cache: Mutex<LruCache<String, Arc<ColumnIndex>>>,
+    cache: Mutex<LruCache<String, Arc<BTreeIndex>>>,
 }
 
 impl IndexCache {
@@ -41,8 +41,8 @@ impl IndexCache {
         }
     }
 
-    /// Gets a cached `ColumnIndex` if it exists, promoting it to most-recently-used.
-    pub fn get(&self, index_path: &str) -> Option<Arc<ColumnIndex>> {
+    /// Gets a cached `BTreeIndex` if it exists, promoting it to most-recently-used.
+    pub fn get(&self, index_path: &str) -> Option<Arc<BTreeIndex>> {
         let result = self.cache.lock().get(index_path).cloned();
         INDEX_CACHE_OPS.add(1, &[
             KeyValue::new("cache_name", "index_cache"),
@@ -51,8 +51,8 @@ impl IndexCache {
         result
     }
 
-    /// Inserts a `ColumnIndex` into the cache, evicting LRU entry if at capacity.
-    pub fn insert(&self, index_path: String, index: Arc<ColumnIndex>) {
+    /// Inserts a `BTreeIndex` into the cache, evicting LRU entry if at capacity.
+    pub fn insert(&self, index_path: String, index: Arc<BTreeIndex>) {
         let mut cache = self.cache.lock();
 
         if cache.len() == cache.cap().get() && !cache.contains(&index_path) {
@@ -106,15 +106,15 @@ lazy_static! {
 mod tests {
     use super::*;
     use bundlebase_common::RowId;
-    use crate::column_index::IndexedValue;
+    use crate::btree_index::IndexedValue;
     use arrow::datatypes::DataType;
     use std::collections::HashMap;
 
-    fn build_test_index(name: &str) -> Arc<ColumnIndex> {
+    fn build_test_index(name: &str) -> Arc<BTreeIndex> {
         let mut value_map = HashMap::new();
         value_map.insert(IndexedValue::Int64(1), vec![RowId::from(100u64)]);
         value_map.insert(IndexedValue::Int64(2), vec![RowId::from(200u64)]);
-        Arc::new(ColumnIndex::build(name, &DataType::Int64, value_map).expect("build index"))
+        Arc::new(BTreeIndex::build(name, &DataType::Int64, value_map).expect("build index"))
     }
 
     #[test]

@@ -580,7 +580,7 @@ async fn test_bundle_indexes_table_with_index() {
         .attach(test_datafile("userdata.parquet"), None)
         .await
         .unwrap();
-    bundle.create_index(&["id"], IndexType::Column, None).await.unwrap();
+    bundle.create_index(&["id"], IndexType::BTree, None).await.unwrap();
     bundle.commit("Initial commit with index").await.unwrap();
 
     let bundle = Bundle::open(data_dir.url().as_str(), None).await.unwrap();
@@ -599,7 +599,7 @@ async fn test_bundle_indexes_table_with_index() {
     let column_col = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
     let type_col = batch.column(1).as_any().downcast_ref::<StringArray>().unwrap();
     assert_eq!(column_col.value(0), "id");
-    assert_eq!(type_col.value(0), "column");
+    assert_eq!(type_col.value(0), "btree");
 }
 
 // ==================== bundle_info.packs tests ====================

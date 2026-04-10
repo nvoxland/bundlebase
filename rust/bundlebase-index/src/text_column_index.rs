@@ -515,7 +515,7 @@ impl Index for TextIndex {
     }
 
     fn index_type(&self) -> IndexType {
-        IndexType::Text {
+        IndexType::Inverted {
             tokenizer: self.tokenizer_config.clone(),
         }
     }
