@@ -263,7 +263,7 @@ class TestSyncIndex:
         """Test creating an index synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.create_index("id", "column")
+        c.create_index("id", "btree")
 
         # Verify bundle still works
         assert c.num_rows() == 1000
@@ -272,7 +272,7 @@ class TestSyncIndex:
         """Test rebuilding an index synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.create_index("id", "column")
+        c.create_index("id", "btree")
         c.rebuild_index("id")
 
         assert c.num_rows() == 1000
@@ -281,7 +281,7 @@ class TestSyncIndex:
         """Test creating multiple indexes."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.create_index("id", "column").create_index("salary", "column")
+        c.create_index("id", "btree").create_index("salary", "btree")
 
         assert c.num_rows() == 1000
 
@@ -289,14 +289,14 @@ class TestSyncIndex:
         """Test dropping an index synchronously."""
         c = bb.create(random_bundle())
         c.attach(datafile("userdata.parquet"))
-        c.create_index("id", "column")
+        c.create_index("id", "btree")
         c.drop_index("id")
 
         # Verify bundle still works
         assert c.num_rows() == 1000
 
         # Should be able to recreate the index after dropping
-        c.create_index("id", "column")
+        c.create_index("id", "btree")
         assert c.num_rows() == 1000
 
 

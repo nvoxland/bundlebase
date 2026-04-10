@@ -588,7 +588,7 @@ Commands for managing search indexes.
 Creates an index on a column.
 
 ```sql
-CREATE <COLUMN|TEXT> INDEX ON <column>
+CREATE <BTREE|TEXT> INDEX ON <column>
 ```
 
 !!! note

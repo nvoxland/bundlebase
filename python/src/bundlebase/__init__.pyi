@@ -1093,7 +1093,7 @@ class PyBundleBuilder:
             OperationChain for fluent chaining
 
         Example:
-            c = await c.create_index("user_id", "column")
+            c = await c.create_index("user_id", "btree")
             c = await c.create_index("description", "text")
             c = await c.create_index(["title", "description"], "text")
             c = await c.create_index(["title", "description"], "text", name="product_search")

@@ -1046,7 +1046,7 @@ mod tests {
                 VersionedBlockId::new(block_id1, "v1".to_string()),
                 VersionedBlockId::new(block_id2, "v2".to_string()),
             ],
-            path: "ab/cdef0123456789.idx.column".to_string(),
+            path: "ab/cdef0123456789.index.btree.rowmap".to_string(),
             cardinality: 100,
             doc_count: None,
         };

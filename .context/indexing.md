@@ -1,8 +1,8 @@
-# Column Indexing System
+# Indexing System
 
 ## Overview
 
-Bundlebase provides a column indexing system for query optimization. Indexes accelerate queries with equality, IN, and range predicates by avoiding full table scans. The system includes intelligent cost-based optimization to automatically choose the best index and skip indexes when a full scan would be faster.
+Bundlebase provides an indexing system for query optimization. BTree indexes accelerate queries with equality, IN, and range predicates by avoiding full table scans. The system includes intelligent cost-based optimization to automatically choose the best index and skip indexes when a full scan would be faster.
 
 ## Key Concepts
 
@@ -51,12 +51,12 @@ pub struct IndexDefinition {
 }
 ```
 
-### 2. Column Index (`column_index.rs`)
+### 2. BTree Index (`btree_index.rs`)
 
 The physical index structure stored on disk:
 
 ```rust
-pub struct ColumnIndex {
+pub struct BTreeIndex {
     column_name: String,
     data_type: DataType,
     blocks: Vec<IndexBlock>,       // Value -> RowId mappings
@@ -146,7 +146,7 @@ await c.index_blocks()
 
 **Rust operations applied:**
 1. `CreateIndexOp` - Creates IndexDefinition, assigns unique ID
-2. `IndexBlocksOp` - Scans each block, builds ColumnIndex, saves to disk
+2. `IndexBlocksOp` - Scans each block, builds BTreeIndex, saves to disk
 
 ### Dropping an Index
 
@@ -179,7 +179,7 @@ The system intelligently decides when to use indexes:
 ### Selectivity Estimation
 
 ```rust
-impl ColumnIndex {
+impl BTreeIndex {
     pub fn estimate_selectivity(&self, predicate: &IndexPredicate) -> f64 {
         match predicate {
             IndexPredicate::Exact(_) => {
@@ -442,7 +442,7 @@ impl IndexBlocksOp {
             let df = bundle.data_table(block_id)?;
 
             // Build index for specified column
-            let index = ColumnIndex::build_from_dataframe(
+            let index = BTreeIndex::build_from_dataframe(
                 &df,
                 &self.column,
                 block_id,
@@ -464,7 +464,7 @@ impl IndexBlocksOp {
 ### Index Lookup
 
 ```rust
-impl ColumnIndex {
+impl BTreeIndex {
     pub fn lookup_exact(&self, value: &IndexedValue) -> Vec<RowId> {
         // Binary search in blocks
         match self.blocks.binary_search_by(|block| block.value.cmp(value)) {

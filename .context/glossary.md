@@ -219,19 +219,19 @@ extended = await base.extend("/extended/container")
 
 ## Indexing
 
-### Row Index / Column Index
+### BTree Index
 
 **Definition**: Data structure that accelerates queries with equality, IN, and range predicates.
 
-**Storage**: Binary files in `{data_dir}/_bundlebase/indexes/`
+**Storage**: Content-addressed binary files with `.index.btree.rowmap` extension.
 
 **Structure**:
 ```rust
-pub struct ColumnIndex {
+pub struct BTreeIndex {
     column_name: String,
     data_type: DataType,
     blocks: Vec<IndexBlock>,       // Value -> RowId mappings
-    directory: IndexDirectory,      // Block-level min/max
+    directory: BlockDirectory,     // Block-level min/max
     total_entries: u64,
     total_rows: u64,
 }

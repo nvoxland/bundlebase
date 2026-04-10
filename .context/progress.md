@@ -184,7 +184,7 @@ The following operations currently report progress:
 
 ### High Priority (Process entire datasets)
 
-1. **`rebuild_index(column)`** - Rebuilding column index
+1. **`rebuild_index(column)`** - Rebuilding btree index
    - **Type**: Determinate (if row count known)
    - **Unit**: Rows processed
    - **Example**: `Rebuilding index on 'salary' [=====>] 50000/100000 (50%)`

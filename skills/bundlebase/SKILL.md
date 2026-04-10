@@ -817,8 +817,8 @@ bundlebase query --bundle ./data "VERIFY DATA"
 ### 8. Indexes for Performance
 
 ```bash
-# Create a column index for faster filtering
-bundlebase extend --bundle ./data "CREATE COLUMN INDEX ON customer_id"
+# Create a btree index for faster filtering
+bundlebase extend --bundle ./data "CREATE BTREE INDEX ON customer_id"
 
 # Create a text index for full-text search
 bundlebase extend --bundle ./data "CREATE TEXT INDEX ON description"

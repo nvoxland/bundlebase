@@ -4,26 +4,26 @@ While Bundlebase can query any attached data, the base formats are not always th
 
 Creating indexes on columns you frequently filter on will allow for faster query execution.
 
-## Column Indexes
+## BTree Indexes
 
-Column indexes accelerate exact-match lookups and range queries. Use `create_index()` with `index_type="column"`.
+BTree indexes accelerate exact-match lookups and range queries. Use `create_index()` with `index_type="btree"`.
 
 === "Async API"
 
     ```python
-    await bundle.create_index("email", index_type="column")
+    await bundle.create_index("email", index_type="btree")
     ```
 
 === "Sync API"
 
     ```python
-    bundle.create_index("email", index_type="column")
+    bundle.create_index("email", index_type="btree")
     ```
 
 === "SQL"
 
     ```sql
-    CREATE COLUMN INDEX ON email
+    CREATE BTREE INDEX ON email
     ```
 
 !!! note

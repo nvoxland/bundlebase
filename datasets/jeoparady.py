@@ -16,9 +16,9 @@ bundle.normalize_column_names()
 
 bundle.cast_column("value", "integer")
 
-# bundle.create_index("round", "column")
-# bundle.create_index("category", "column")
-# bundle.create_index("value", "column")
+# bundle.create_index("round", "btree")
+# bundle.create_index("category", "btree")
+# bundle.create_index("value", "btree")
 bundle.create_index(["question", "answer"], "text")
 
 bundle.rename_column("question", "q")
