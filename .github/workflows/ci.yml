@@ -38,12 +38,23 @@ jobs:
       - name: Run Rust tests
         env:
           RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
-        run: cargo test --verbose --package bundlebase
+        run: cargo test --verbose --workspace
+
+      - name: Build bundlebase-cli
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+        run: cargo build --package bundlebase-cli
+
+      - name: Upload bundlebase-cli binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: bundlebase-cli-${{ runner.os }}
+          path: target/debug/bundlebase
+          retention-days: 30
 
   python:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
-    needs: rust
     strategy:
       fail-fast: false
       matrix:
@@ -99,17 +110,11 @@ jobs:
       - name: Run Python tests
         run: poetry run pytest -v --timeout=300
 
-      - name: Build Python wheel (release)
-        env:
-          RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
-          CARGO_TARGET_DIR: target/maturin
-        run: poetry run maturin build --release --out dist-release
-
       - name: Upload Python wheel artifacts
         uses: actions/upload-artifact@v6
         with:
           name: wheels-py${{ matrix.python-version }}-${{ runner.os }}
-          path: dist-release/*.whl
+          path: dist/*.whl
           retention-days: 30
 
       - name: Upload test results on failure
@@ -219,35 +224,3 @@ jobs:
       - name: Run Python SDK tests
         working-directory: sdk/python
         run: poetry run pytest -v tests/
-
-  build-cli:
-    name: Build bundlebase-cli
-    runs-on: ubuntu-latest
-    needs: rust
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install lld
-        run: sudo apt-get install -y lld
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: . -> target
-
-      - name: Build bundlebase-cli (release)
-        env:
-          RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
-        run: cargo build --release --package bundlebase-cli
-
-      - name: Upload bundlebase-cli binary
-        uses: actions/upload-artifact@v6
-        with:
-          name: bundlebase-cli-${{ runner.os }}
-          path: target/release/bundlebase
-          retention-days: 30
