@@ -392,7 +392,12 @@ impl BundleBuilder {
         let parquet_bytes = json_to_parquet_with_options(&json_bytes, record_path, sep, &meta_paths)?;
 
         let data_dir = self.data_dir();
-        let write_result = download_to_data_dir(parquet_bytes, "data.parquet", data_dir.as_ref()).await?;
+        let address = bundlebase_common::ContentAddress::with_sub_type(
+            bundlebase_common::ContentCategory::Block,
+            "data",
+            bundlebase_common::ContentFormat::Parquet,
+        )?;
+        let write_result = download_to_data_dir(parquet_bytes, &address, data_dir.as_ref()).await?;
         let relative_path = data_dir.relative_path(write_result.file.as_ref())?;
 
         Ok((relative_path, write_result.hash))
@@ -461,7 +466,12 @@ impl BundleBuilder {
             debug!("[DELETE] Writing tombstone file ({} bytes)", tomb_bytes.len());
             let data_dir = self.bundle.data_dir();
             let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(tomb_bytes)]);
-            let write_result = data_dir.write_stream(Box::pin(stream), "tomb").await?;
+            let address = bundlebase_common::ContentAddress::with_sub_type(
+                bundlebase_common::ContentCategory::Overlay,
+                "tomb",
+                bundlebase_common::ContentFormat::Rowids,
+            )?;
+            let write_result = data_dir.write_stream(Box::pin(stream), &address).await?;
             let tomb_filename = data_dir.relative_path(write_result.file.as_ref())?;
             debug!("[DELETE] Tombstone file written: {}", tomb_filename);
 
@@ -495,7 +505,12 @@ impl BundleBuilder {
             debug!("[UPDATE] Writing overlay file ({} bytes, {} rows)", overlay_bytes.len(), pending_upd.len());
             let data_dir = self.bundle.data_dir();
             let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(overlay_bytes)]);
-            let write_result = data_dir.write_stream(Box::pin(stream), "update").await?;
+            let address = bundlebase_common::ContentAddress::with_sub_type(
+                bundlebase_common::ContentCategory::Overlay,
+                "update",
+                bundlebase_common::ContentFormat::Parquet,
+            )?;
+            let write_result = data_dir.write_stream(Box::pin(stream), &address).await?;
             let overlay_filename = data_dir.relative_path(write_result.file.as_ref())?;
             debug!("[UPDATE] Overlay file written: {}", overlay_filename);
 

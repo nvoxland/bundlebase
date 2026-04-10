@@ -23,16 +23,11 @@ use url::Url;
 /// Returns a WriteResult containing the file reference and the computed SHA256 hash.
 pub async fn download_to_data_dir(
     data: Bytes,
-    filename: &str,
+    address: &bundlebase_common::ContentAddress,
     data_dir: &dyn IOReadWriteDir,
 ) -> Result<WriteResult, BundlebaseError> {
-    // Extract extension from filename (e.g., "file.parquet" -> "parquet")
-    let ext = filename.rsplit('.').next().unwrap_or("dat");
-
-    // Create a stream from the bytes
     let data_stream = Box::pin(stream::once(async { Ok::<_, std::io::Error>(data) }));
-
-    data_dir.write_stream(data_stream, ext).await
+    data_dir.write_stream(data_stream, address).await
 }
 
 /// Download a file from an IOFile to the data directory.
@@ -46,7 +41,15 @@ pub async fn download_io_file_to_data_dir(
         BundlebaseError::from(format!("File not found: {}", file.url()))
     })?;
     let filename = filename_from_url(file.url());
-    download_to_data_dir(data, &filename, data_dir).await
+    let ext_str = filename.rsplit('.').next().unwrap_or("dat");
+    let format = bundlebase_common::ContentFormat::from_extension(ext_str)
+        .unwrap_or(bundlebase_common::ContentFormat::Dat);
+    let address = bundlebase_common::ContentAddress::with_sub_type(
+        bundlebase_common::ContentCategory::Block,
+        "data",
+        format,
+    )?;
+    download_to_data_dir(data, &address, data_dir).await
 }
 
 /// Download a file from an HTTP(S) URL to the data directory.
@@ -117,22 +120,33 @@ pub async fn download_http_to_data_dir(
         other => other,
     };
 
-    let mut filename = filename_from_url(url);
+    let filename = filename_from_url(url);
 
-    // If the filename has no recognized data extension and we have a format hint, append it
-    if let Some(fmt) = resolved_hint {
+    // Determine format from filename extension or format hint
+    let ext_str = if let Some(fmt) = resolved_hint {
         let known_extensions = ["csv", "json", "jsonl", "parquet", "tsv", "xml", "xlsx", "xls", "ods"];
         let has_known_ext = filename
             .rsplit('.')
             .next()
             .map(|ext| known_extensions.contains(&ext.to_lowercase().as_str()))
             .unwrap_or(false);
-        if !has_known_ext {
-            filename = format!("{}.{}", filename, fmt);
+        if has_known_ext {
+            filename.rsplit('.').next().unwrap_or("dat").to_string()
+        } else {
+            fmt.to_string()
         }
-    }
+    } else {
+        filename.rsplit('.').next().unwrap_or("dat").to_string()
+    };
 
-    download_to_data_dir(data, &filename, data_dir).await
+    let format = bundlebase_common::ContentFormat::from_extension(&ext_str)
+        .unwrap_or(bundlebase_common::ContentFormat::Dat);
+    let address = bundlebase_common::ContentAddress::with_sub_type(
+        bundlebase_common::ContentCategory::Block,
+        "data",
+        format,
+    )?;
+    download_to_data_dir(data, &address, data_dir).await
 }
 
 /// Collect a byte stream into a single Bytes buffer.
@@ -256,17 +270,32 @@ async fn save_source_data(
         // Arrow batches can't be "copied" or "ref'd" as files.
         (SourceData::Arrow(batch_stream), _) => {
             let bytes = record_batch_stream_to_parquet(batch_stream).await?;
-            let result = download_to_data_dir(bytes, "data.parquet", data_dir).await?;
+            let address = bundlebase_common::ContentAddress::with_sub_type(
+                bundlebase_common::ContentCategory::Block,
+                "data",
+                bundlebase_common::ContentFormat::Parquet,
+            )?;
+            let result = download_to_data_dir(bytes, &address, data_dir).await?;
             Ok(make_fetched_data(data_dir, &result, source_url))
         }
         (SourceData::RawBytes(byte_stream), ResolvedSaveAs::Copy) => {
-            let result = data_dir.write_stream(byte_stream, format.extension()).await?;
+            let address = bundlebase_common::ContentAddress::with_sub_type(
+                bundlebase_common::ContentCategory::Block,
+                "data",
+                bundlebase_common::ContentFormat::from_source_format(format),
+            )?;
+            let result = data_dir.write_stream(byte_stream, &address).await?;
             Ok(make_fetched_data(data_dir, &result, source_url))
         }
         (SourceData::RawBytes(byte_stream), ResolvedSaveAs::Parquet) => {
             let bytes = collect_byte_stream(byte_stream).await?;
             let parquet_bytes = convert_to_parquet(&bytes, format)?;
-            let result = download_to_data_dir(parquet_bytes, "data.parquet", data_dir).await?;
+            let address = bundlebase_common::ContentAddress::with_sub_type(
+                bundlebase_common::ContentCategory::Block,
+                "data",
+                bundlebase_common::ContentFormat::Parquet,
+            )?;
+            let result = download_to_data_dir(parquet_bytes, &address, data_dir).await?;
             Ok(make_fetched_data(data_dir, &result, source_url))
         }
         (SourceData::RawBytes(_), ResolvedSaveAs::Ref) => {
@@ -320,7 +349,12 @@ async fn save_from_url(
                 })?
             };
             let parquet_bytes = convert_to_parquet(&raw_bytes, format)?;
-            let result = download_to_data_dir(parquet_bytes, "data.parquet", data_dir).await?;
+            let address = bundlebase_common::ContentAddress::with_sub_type(
+                bundlebase_common::ContentCategory::Block,
+                "data",
+                bundlebase_common::ContentFormat::Parquet,
+            )?;
+            let result = download_to_data_dir(parquet_bytes, &address, data_dir).await?;
             Ok(make_fetched_data(data_dir, &result, url.as_str()))
         }
         ResolvedSaveAs::Ref => {

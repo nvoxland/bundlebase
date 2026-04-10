@@ -31,8 +31,12 @@ impl CreateReportOp {
         let byte_stream = stream::once(async move {
             Ok::<Bytes, std::io::Error>(Bytes::from(content.into_bytes()))
         });
+        let address = bundlebase_common::ContentAddress::new(
+            bundlebase_common::ContentCategory::Report,
+            bundlebase_common::ContentFormat::Md,
+        );
         let result = data_dir
-            .write_stream(Box::pin(byte_stream), "report.md")
+            .write_stream(Box::pin(byte_stream), &address)
             .await?;
         let path = data_dir.relative_path(result.file.as_ref())?;
 

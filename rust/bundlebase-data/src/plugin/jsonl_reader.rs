@@ -291,7 +291,12 @@ impl DataReader for JsonlReader {
         let layout = PhysicalRowGroupLayout { column_stats, ..initial_layout };
         let index_bytes = layout.serialize()?;
         let data_stream = Box::pin(stream::once(async move { Ok::<_, std::io::Error>(index_bytes) }));
-        let result = data_dir.write_stream(data_stream, "prg.layout").await?;
+        let address = bundlebase_common::ContentAddress::with_sub_type(
+            bundlebase_common::ContentCategory::Block,
+            "layout",
+            bundlebase_common::ContentFormat::Pagemap,
+        )?;
+        let result = data_dir.write_stream(data_stream, &address).await?;
         Ok(Some(result.file))
     }
 

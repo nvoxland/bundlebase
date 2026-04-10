@@ -131,15 +131,21 @@ pub trait UdfEntrypoint: Send + Sync + std::fmt::Debug {
             ))
         })?;
 
-        let ext = abs_path
+        let ext_str = abs_path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("bin");
+        let format = bundlebase_common::ContentFormat::from_extension(ext_str)
+            .unwrap_or(bundlebase_common::ContentFormat::Bin);
+        let address = bundlebase_common::ContentAddress::new(
+            bundlebase_common::ContentCategory::Udf,
+            format,
+        );
 
         let stream = futures::stream::once(async move {
             Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::from(file_bytes))
         });
-        let write_result = data_dir.write_stream(Box::pin(stream), ext).await?;
+        let write_result = data_dir.write_stream(Box::pin(stream), &address).await?;
 
         // Preserve execute permissions for binary files (connectors, scripts)
         let url = write_result.file.url();
@@ -158,7 +164,7 @@ pub trait UdfEntrypoint: Send + Sync + std::fmt::Debug {
         }
 
         let hash = &write_result.hash;
-        let bundle_path = format!("{}/{}.{}", &hash[..2], &hash[2..16], ext);
+        let bundle_path = format!("{}/{}.{}", &hash[..2], &hash[2..16], address.extension());
 
         Ok(Some(bundle_path))
     }

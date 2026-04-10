@@ -2,6 +2,8 @@
 
 pub mod arrow_types;
 pub mod command_response;
+pub mod content_address;
+pub use content_address::{ContentAddress, ContentCategory, ContentFormat};
 pub mod excel;
 pub use command_response::{CommandResponse, OutputShape, single_batch_stream};
 pub mod config;

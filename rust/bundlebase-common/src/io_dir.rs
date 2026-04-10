@@ -1,5 +1,6 @@
 //! Directory IO traits for reading and writing directories.
 
+use crate::content_address::ContentAddress;
 use crate::BundlebaseError;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -131,7 +132,7 @@ pub trait IOReadWriteDir: IOReadDir {
     async fn write_stream(
         &self,
         mut source: BoxStream<'static, Result<Bytes, std::io::Error>>,
-        ext: &str,
+        address: &ContentAddress,
     ) -> Result<WriteResult, BundlebaseError> {
         use futures::StreamExt;
 
@@ -155,7 +156,7 @@ pub trait IOReadWriteDir: IOReadDir {
         // Compute hash - first 2 chars = subdir, remaining chars = filename
         let hash = format!("{:x}", hasher.finalize());
         let subdir_name = &hash[..2];
-        let file_name = format!("{}.{}", &hash[2..16], ext);
+        let file_name = format!("{}.{}", &hash[2..16], address.extension());
 
         // Get or create the hash-prefix subdirectory
         let final_dir = self.writable_subdir(subdir_name)?;

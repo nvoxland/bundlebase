@@ -329,7 +329,12 @@ impl IndexBlocksOp {
             ))
         })?;
 
-        let rel_path = Self::save_index_bytes(bundle, serialized, "idx.column", column).await?;
+        let address = bundlebase_common::ContentAddress::with_sub_type(
+            bundlebase_common::ContentCategory::Index,
+            "btree",
+            bundlebase_common::ContentFormat::Rowmap,
+        )?;
+        let rel_path = Self::save_index_bytes(bundle, serialized, &address, column).await?;
 
         log::debug!(
             "Successfully created column index for '{}' at {}",
@@ -353,7 +358,7 @@ impl IndexBlocksOp {
     async fn save_index_bytes(
         bundle: &Bundle,
         serialized: Bytes,
-        extension: &str,
+        address: &bundlebase_common::ContentAddress,
         column: &str,
     ) -> Result<String, BundlebaseError> {
         let stream = futures::stream::once(async move { Ok::<_, std::io::Error>(serialized) });
@@ -362,7 +367,7 @@ impl IndexBlocksOp {
 
         let data_dir = bundle.data_dir();
         let write_result = data_dir
-            .write_stream(boxed_stream, extension)
+            .write_stream(boxed_stream, address)
             .await
             .map_err(|e| {
                 BundlebaseError::from(format!(
@@ -508,7 +513,14 @@ impl IndexBlocksOp {
         })?;
 
         let rel_path =
-            Self::save_index_bytes(bundle, serialized, "idx.text.tar", index_name).await?;
+            {
+            let address = bundlebase_common::ContentAddress::with_sub_type(
+                bundlebase_common::ContentCategory::Index,
+                "inverted",
+                bundlebase_common::ContentFormat::Tar,
+            )?;
+            Self::save_index_bytes(bundle, serialized, &address, index_name).await?
+        };
 
         log::debug!(
             "Successfully created text index '{}' for columns [{}] at {} ({} documents)",
@@ -745,7 +757,12 @@ impl IndexBlocksOp {
             ))
         })?;
 
-        let rel_path = Self::save_index_bytes(bundle, serialized, "idx.column", column).await?;
+        let address = bundlebase_common::ContentAddress::with_sub_type(
+            bundlebase_common::ContentCategory::Index,
+            "btree",
+            bundlebase_common::ContentFormat::Rowmap,
+        )?;
+        let rel_path = Self::save_index_bytes(bundle, serialized, &address, column).await?;
 
         log::debug!(
             "Successfully created computed column index for '{}' at {}",
@@ -919,7 +936,14 @@ impl IndexBlocksOp {
         })?;
 
         let rel_path =
-            Self::save_index_bytes(bundle, serialized, "idx.text.tar", index_name).await?;
+            {
+            let address = bundlebase_common::ContentAddress::with_sub_type(
+                bundlebase_common::ContentCategory::Index,
+                "inverted",
+                bundlebase_common::ContentFormat::Tar,
+            )?;
+            Self::save_index_bytes(bundle, serialized, &address, index_name).await?
+        };
 
         log::debug!(
             "Successfully created computed text index '{}' for columns [{}] at {} ({} documents)",
