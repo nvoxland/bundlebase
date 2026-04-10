@@ -135,8 +135,6 @@ metadata_stmt = {
     | describe_function_stmt
     | set_name_stmt
     | set_description_stmt
-    | set_min_version_stmt
-    | set_max_version_stmt
     | set_config_stmt
     | save_config_stmt
     | test_connector_stmt
@@ -790,24 +788,6 @@ set_name_stmt = {
 
 set_description_stmt = {
     ^"set" ~ ^"description" ~ quoted_string
-}
-
-// ============================================================================
-// SET MIN VERSION Statement
-// ============================================================================
-// Syntax: SET MIN VERSION '<version>'
-
-set_min_version_stmt = {
-    ^"set" ~ ^"min" ~ ^"version" ~ quoted_string
-}
-
-// ============================================================================
-// SET MAX VERSION Statement
-// ============================================================================
-// Syntax: SET MAX VERSION '<version>'
-
-set_max_version_stmt = {
-    ^"set" ~ ^"max" ~ ^"version" ~ quoted_string
 }
 
 // ============================================================================
