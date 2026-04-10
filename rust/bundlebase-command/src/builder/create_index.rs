@@ -56,7 +56,7 @@ impl CommandParsing for CreateIndexCommand {
         })?;
 
         let index_type_str = index_type_str.ok_or_else(|| -> BundlebaseError {
-            "CREATE INDEX statement missing index type (COLUMN or TEXT)".into()
+            "CREATE INDEX statement missing index type (BTREE or TEXT)".into()
         })?;
 
         let index_type: IndexType = index_type_str.parse()
@@ -74,7 +74,7 @@ impl CommandParsing for CreateIndexCommand {
         match &self.index_type {
             IndexType::BTree => {
                 let quoted_cols: Vec<String> = self.columns.iter().map(|c| quote_identifier(c)).collect();
-                format!("CREATE COLUMN INDEX ON {}", quoted_cols.join(", "))
+                format!("CREATE BTREE INDEX ON {}", quoted_cols.join(", "))
             }
             IndexType::Inverted { tokenizer } => {
                 let cols = self.columns.join(", ");
@@ -130,7 +130,7 @@ mod parsing_tests {
 
     #[test]
     fn test_parse_create_btree_index() {
-        let input = "CREATE COLUMN INDEX ON user_id";
+        let input = "CREATE BTREE INDEX ON user_id";
         let cmd = parse_command(input).unwrap();
         match cmd {
             BundleCommand::CreateIndex(c) => {
@@ -158,7 +158,7 @@ mod parsing_tests {
     fn test_round_trip() {
         let cmd = CreateIndexCommand::new(vec!["email".to_string()], IndexType::BTree, None);
         let statement = cmd.to_statement();
-        assert_eq!(statement, "CREATE COLUMN INDEX ON email");
+        assert_eq!(statement, "CREATE BTREE INDEX ON email");
 
         let parsed = parse_command(&statement).unwrap();
         match parsed {

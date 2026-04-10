@@ -93,7 +93,7 @@ async fn test_basic_indexing() -> Result<(), BundlebaseError> {
     let status = bundle.status();
     assert_eq!(1, status.changes().len());
     assert_eq!(
-        "CREATE COLUMN INDEX ON Email",
+        "CREATE BTREE INDEX ON Email",
         status.changes()[0].description,
     );
 

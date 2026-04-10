@@ -23,7 +23,7 @@ pub fn command_metadata() -> Vec<(&'static str, &'static str, &'static str)> {
         ("CAST COLUMN", "CAST COLUMN <name> TO <type>", "read-write"),
         ("DROP COLUMN", "DROP COLUMN <name>", "read-write"),
         ("RENAME COLUMN", "RENAME COLUMN <old> TO <new>", "read-write"),
-        ("CREATE INDEX", "CREATE <COLUMN|TEXT> INDEX ON <column>", "read-write"),
+        ("CREATE INDEX", "CREATE <BTREE|TEXT> INDEX ON <column>", "read-write"),
         ("DROP INDEX", "DROP INDEX <column>", "read-write"),
         ("REBUILD INDEX", "REBUILD INDEX ON <column>", "read-write"),
         ("REINDEX", "REINDEX [ON data(<column>)]", "read-write"),

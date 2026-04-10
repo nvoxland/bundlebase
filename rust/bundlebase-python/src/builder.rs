@@ -1530,14 +1530,14 @@ impl PyBundleBuilder {
     ///
     /// # Arguments
     /// * `column` - Column name (str) or list of column names (list[str])
-    /// * `index_type` - Index type: "column" or "text"
+    /// * `index_type` - Index type: "btree" or "text"
     /// * `args` - Optional index-specific arguments (e.g., {"tokenizer": "en_stem"} for text indexes)
     /// * `name` - Optional index name (for text indexes). If not provided, auto-generated as idx_{columns}
     ///
     /// # Example
     /// ```python
-    /// # Column index
-    /// c = await c.create_index("id", "column")
+    /// # BTree index
+    /// c = await c.create_index("id", "btree")
     ///
     /// # Text index — single column, auto-named "idx_description"
     /// c = await c.create_index("description", "text")

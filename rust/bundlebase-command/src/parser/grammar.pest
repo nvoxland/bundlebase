@@ -821,7 +821,7 @@ create_index_stmt = {
     ^"create" ~ index_type ~ ^"index" ~ ^"on" ~ identifier
 }
 
-index_type = { ^"column" | ^"text" }
+index_type = { ^"btree" | ^"text" }
 
 // ============================================================================
 // DROP COLUMN Statement

@@ -759,7 +759,7 @@ register_commands! {
         NormalizeColumnNames(NormalizeColumnNamesCommand) => Rule::normalize_column_names_stmt,
             "NORMALIZE COLUMN NAMES" => "NORMALIZE COLUMN NAMES",
         CreateIndex(CreateIndexCommand) => Rule::create_index_stmt,
-            "CREATE INDEX" => "CREATE <COLUMN|TEXT> INDEX ON <column>",
+            "CREATE INDEX" => "CREATE <BTREE|TEXT> INDEX ON <column>",
         DropIndex(DropIndexCommand) => Rule::drop_index_stmt,
             "DROP INDEX" => "DROP INDEX <column>",
         RebuildIndex(RebuildIndexCommand) => Rule::rebuild_index_stmt,

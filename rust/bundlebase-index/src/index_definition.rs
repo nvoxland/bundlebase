@@ -132,14 +132,14 @@ impl FromStr for IndexType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "column" | "btree" | "b-tree" => Ok(IndexType::BTree),
-            "inverted" | "text" | "fulltext" | "fts" | "full-text" => {
+            "btree" => Ok(IndexType::BTree),
+            "text" => {
                 Ok(IndexType::Inverted {
                     tokenizer: TokenizerConfig::default(),
                 })
             }
             other => Err(ParseIndexTypeError(format!(
-                "Unknown index type '{}'. Valid options: btree, column, inverted, text, fulltext, fts",
+                "Unknown index type '{}'. Valid options: btree, text",
                 other
             ))),
         }
