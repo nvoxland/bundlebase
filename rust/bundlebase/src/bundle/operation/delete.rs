@@ -77,7 +77,7 @@ impl Operation for DeleteOp {
             }
         };
 
-        let row_ids = tombstone::deserialize_tombstone(&bytes)
+        let row_ids = tombstone::deserialize_rowids(&bytes)
             .map_err(|e| DataFusionError::External(e))?;
 
         // Group RowIds by block_ref -> row numbers

@@ -462,7 +462,7 @@ impl BundleBuilder {
             use crate::bundle::operation::DeleteOp;
 
             // Serialize and write tombstone file via content-addressed storage
-            let tomb_bytes = tombstone::serialize_tombstone(&deleted_ids);
+            let tomb_bytes = tombstone::serialize_rowids(&deleted_ids);
             debug!("[DELETE] Writing tombstone file ({} bytes)", tomb_bytes.len());
             let data_dir = self.bundle.data_dir();
             let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(tomb_bytes)]);

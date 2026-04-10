@@ -6,7 +6,7 @@
 //! # File Format
 //!
 //! ```text
-//! Magic:   b"BBTOMB01" (8 bytes)
+//! Magic:   b"BBRID001" (8 bytes)
 //! Count:   u64 little-endian (8 bytes)
 //! RowIds:  [u64 little-endian; count] (sorted)
 //! ```
@@ -15,14 +15,14 @@ use bundlebase_common::{BundlebaseError, RowId};
 use bytes::Bytes;
 use std::collections::HashSet;
 
-const MAGIC: &[u8; 8] = b"BBTOMB01";
+const MAGIC: &[u8; 8] = b"BBRID001";
 const HEADER_SIZE: usize = 8 + 8; // magic + count
 
 /// Serialize a set of RowIds into the tombstone binary format.
 ///
 /// Returns the serialized bytes. The caller is responsible for writing
 /// to content-addressed storage (e.g., via `write_stream()`).
-pub fn serialize_tombstone(row_ids: &HashSet<RowId>) -> Bytes {
+pub fn serialize_rowids(row_ids: &HashSet<RowId>) -> Bytes {
     let mut sorted: Vec<u64> = row_ids.iter().map(|id| id.as_u64()).collect();
     sorted.sort();
 
@@ -43,7 +43,7 @@ pub fn serialize_tombstone(row_ids: &HashSet<RowId>) -> Bytes {
 }
 
 /// Deserialize a tombstone file from bytes into a set of RowIds.
-pub fn deserialize_tombstone(bytes: &[u8]) -> Result<HashSet<RowId>, BundlebaseError> {
+pub fn deserialize_rowids(bytes: &[u8]) -> Result<HashSet<RowId>, BundlebaseError> {
     if bytes.len() < HEADER_SIZE {
         return Err("Invalid tombstone file: too short".into());
     }
@@ -95,9 +95,9 @@ mod tests {
     #[test]
     fn test_roundtrip_empty() {
         let row_ids = HashSet::new();
-        let bytes = serialize_tombstone(&row_ids);
+        let bytes = serialize_rowids(&row_ids);
 
-        let result = deserialize_tombstone(&bytes).expect("Failed to deserialize");
+        let result = deserialize_rowids(&bytes).expect("Failed to deserialize");
         assert!(result.is_empty());
     }
 
@@ -109,9 +109,9 @@ mod tests {
         row_ids.insert(RowId::new(block_ref, 1));
         row_ids.insert(RowId::new(block_ref, 2));
 
-        let bytes = serialize_tombstone(&row_ids);
+        let bytes = serialize_rowids(&row_ids);
 
-        let result = deserialize_tombstone(&bytes).expect("Failed to deserialize");
+        let result = deserialize_rowids(&bytes).expect("Failed to deserialize");
         assert_eq!(result.len(), 3);
         assert_eq!(result, row_ids);
     }
@@ -119,13 +119,13 @@ mod tests {
     #[test]
     fn test_invalid_magic() {
         let bytes = b"WRONGMAG\x00\x00\x00\x00\x00\x00\x00\x00";
-        let result = deserialize_tombstone(bytes);
+        let result = deserialize_rowids(bytes);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_too_short() {
-        let result = deserialize_tombstone(&[0u8; 5]);
+        let result = deserialize_rowids(&[0u8; 5]);
         assert!(result.is_err());
     }
 
@@ -137,7 +137,7 @@ mod tests {
         row_ids.insert(RowId::new(block_ref, 0));
         row_ids.insert(RowId::new(block_ref, 1));
 
-        let bytes = serialize_tombstone(&row_ids);
+        let bytes = serialize_rowids(&row_ids);
 
         // Read raw RowIds from the bytes to verify sorting
         let id1 = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
