@@ -705,7 +705,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_discover_500_returns_error_with_hint() {
+    async fn test_discover_500_returns_descriptive_error() {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("HEAD"))
             .respond_with(wiremock::ResponseTemplate::new(500))
@@ -720,7 +720,8 @@ mod tests {
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
-        assert!(err.contains("head_supported"), "Error should suggest head_supported=false: {}", err);
+        assert!(err.contains("500"), "Error should mention status code: {}", err);
+        assert!(!err.contains("head_supported"), "HTTP status errors should not suggest head_supported: {}", err);
     }
 
     #[tokio::test]
@@ -743,7 +744,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_discover_503_returns_error_with_hint() {
+    async fn test_discover_503_returns_descriptive_error() {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("HEAD"))
             .respond_with(wiremock::ResponseTemplate::new(503))
@@ -758,7 +759,8 @@ mod tests {
         let result = connector.discover(&args, &HashSet::new(), &config).await;
         assert!(result.is_err());
         let err = result.err().unwrap().to_string();
-        assert!(err.contains("head_supported"), "Error should suggest head_supported=false: {}", err);
+        assert!(err.contains("503"), "Error should mention status code: {}", err);
+        assert!(!err.contains("head_supported"), "HTTP status errors should not suggest head_supported: {}", err);
     }
 
     #[tokio::test]

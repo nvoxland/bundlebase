@@ -158,13 +158,7 @@ pub async fn read_http_head_info(url: &Url) -> Result<HttpHeadInfo, BundlebaseEr
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
         let base_err = http_status_error(url, status, warning.as_deref());
-        let head_hint = if status.is_server_error() {
-            " If this server doesn't support HEAD requests, retry with: \
-             head_supported = 'false'"
-        } else {
-            ""
-        };
-        return Err(format!("{}{}", base_err, head_hint).into());
+        return Err(base_err.into());
     }
 
     let version = if let Some(etag) = response.headers().get("etag") {
