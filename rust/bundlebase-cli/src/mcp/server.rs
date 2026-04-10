@@ -100,6 +100,14 @@ pub struct GenerateReportParams {
     pub branding: Option<bool>,
 }
 
+/// Parameter struct for `upgrade_bundle` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpgradeBundleParams {
+    /// Path or URL to the bundle to upgrade
+    #[schemars(description = "Path or URL to the bundle to upgrade (e.g., './my-bundle', 's3://bucket/bundle')")]
+    pub path: String,
+}
+
 /// MCP server for bundlebase bundles.
 ///
 /// Supports multiple bundles open simultaneously, each identified by a unique bundle name.
@@ -165,6 +173,29 @@ impl BundlebaseMcpServer {
             }
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
                 "Failed to create bundle: {}",
+                e
+            ))])),
+        }
+    }
+
+    #[tool(
+        name = "upgrade_bundle",
+        description = "Upgrade a bundle's format version to the current bundlebase version. Use this when opening a bundle fails due to a version mismatch."
+    )]
+    async fn upgrade_bundle(
+        &self,
+        Parameters(params): Parameters<UpgradeBundleParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match BundleBuilder::upgrade_bundle(&params.path, None).await {
+            Ok(()) => {
+                let version = bundlebase_common::format_version_string();
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Bundle at '{}' upgraded to version {}",
+                    params.path, version
+                ))]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
+                "Failed to upgrade bundle: {}",
                 e
             ))])),
         }

@@ -9,6 +9,7 @@ pub mod repl_cmd;
 pub mod report_cmd;
 pub mod server_cmd;
 pub mod setup_agent_cmd;
+pub mod upgrade_bundle_cmd;
 
 use bundlebase::{Bundle, BundleFacade, PassedBundleConfig};
 use bundlebase_common::BundlebaseError;

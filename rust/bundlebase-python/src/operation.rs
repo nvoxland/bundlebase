@@ -27,6 +27,8 @@ impl PyOperation {
             AnyOperation::SaveConfig(_) => "saveConfig".to_string(),
             AnyOperation::SetName(_) => "setName".to_string(),
             AnyOperation::SetDescription(_) => "setDescription".to_string(),
+            AnyOperation::SetMinVersion(_) => "setMinVersion".to_string(),
+            AnyOperation::SetMaxVersion(_) => "setMaxVersion".to_string(),
             AnyOperation::IndexBlocks(_) => "indexBlocks".to_string(),
             AnyOperation::CreateIndex(_) => "createIndex".to_string(),
             AnyOperation::CreateJoin(_) => "createJoin".to_string(),

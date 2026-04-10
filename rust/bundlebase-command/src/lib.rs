@@ -71,7 +71,8 @@ pub use builder::{
     DropReportCommand, DropViewCommand, FetchAllCommand, FetchCommand, FilterCommand, JoinCommand,
     RebuildIndexCommand, ReindexCommand, RenameColumnCommand, RenameConnectorCommand,
     RenameFunctionCommand, RenameJoinCommand, RenameViewCommand,
-    ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand, SetNameCommand,
+    ReplaceBlockCommand, ResetCommand, SaveConfigCommand, SetDescriptionCommand,
+    SetNameCommand,
     NormalizeColumnNamesCommand, UndoCommand, VerifyDataCommand, ExportHollowCommand,
 };
 

@@ -60,6 +60,9 @@ enum Subcommand {
 
     /// Install agent skills for coding agents
     SetupAgent(cmd::setup_agent_cmd::SetupAgentArgs),
+
+    /// Upgrade a bundle's format version to the current bundlebase version
+    UpgradeBundle(cmd::upgrade_bundle_cmd::UpgradeBundleArgs),
 }
 
 /// Configuration for logging
@@ -122,6 +125,7 @@ async fn main() -> Result<(), BundlebaseError> {
         Subcommand::Mcp(args) => cmd::mcp_cmd::run(args).await?,
         Subcommand::Server(args) => cmd::server_cmd::run(args).await?,
         Subcommand::SetupAgent(args) => cmd::setup_agent_cmd::run(args)?,
+        Subcommand::UpgradeBundle(args) => cmd::upgrade_bundle_cmd::run(args).await?,
     }
 
     Ok(())

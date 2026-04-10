@@ -364,6 +364,84 @@ impl BundleBuilder {
         self.status.read().clone()
     }
 
+    /// Upgrade a bundle's format version to the current bundlebase version.
+    ///
+    /// Writes a new commit directly to the manifest directory without opening
+    /// the bundle, since opening would fail if the version is out of range.
+    pub async fn upgrade_bundle(
+        path: &str,
+        config: Option<PassedBundleConfig>,
+    ) -> Result<(), BundlebaseError> {
+        use crate::bundle::commit::BundleCommit;
+        use crate::bundle::operation::{BundleChange, SetMinVersionOp, SetMaxVersionOp};
+
+        let bundle_config = Arc::new(BundleConfig::new(config.as_ref())?);
+        let config_provider: Arc<dyn crate::ConfigProvider> =
+            Arc::clone(&bundle_config) as Arc<dyn crate::ConfigProvider>;
+        let data_dir =
+            crate::io::writable_dir_from_str(path, config_provider.clone()).await?;
+        let manifest_dir = data_dir.writable_subdir(META_DIR)?;
+
+        // Verify this is a bundle (init file exists)
+        let init_file = manifest_dir.file(INIT_FILENAME)?;
+        if !init_file.exists().await? {
+            return Err(format!("No bundle found at '{}'", path).into());
+        }
+
+        // Find the latest manifest version
+        let manifest_files = manifest_dir.list_files().await?;
+        let last_version = manifest_files
+            .iter()
+            .filter(|f| f.filename() != Some(INIT_FILENAME))
+            .filter_map(|f| f.filename())
+            .filter(|name| !name.contains('/'))
+            .map(|name| commit::manifest_version(name))
+            .max()
+            .unwrap_or(0);
+
+        let next_version = last_version + 1;
+        let version = bundlebase_common::format_version_string();
+        let desc = format!("Upgrade bundle format to {}", version);
+
+        let timestamp = to_iso(std::time::SystemTime::now());
+        let author = std::env::var("BUNDLEBASE_AUTHOR")
+            .unwrap_or_else(|_| std::env::var("USER").unwrap_or_else(|_| "unknown".to_string()));
+
+        let mut change = BundleChange::new(&desc);
+        change
+            .operations
+            .push(SetMinVersionOp::setup(&version).into());
+        change
+            .operations
+            .push(SetMaxVersionOp::setup(&version).into());
+
+        let commit_struct = BundleCommit {
+            url: None,
+            data_dir: None,
+            message: desc,
+            author,
+            timestamp,
+            changes: vec![change],
+        };
+
+        let yaml = serde_yaml_ng::to_string(&commit_struct)?;
+
+        let mut hasher = Sha256::new();
+        hasher.update(yaml.as_bytes());
+        let hash_bytes = hasher.finalize();
+        let hash_hex = hex::encode(hash_bytes);
+        let hash_short = &hash_hex[..12];
+
+        let filename = format!("{:05}{}.yaml", next_version, hash_short);
+        let manifest_file = manifest_dir.writable_file(&filename)?;
+
+        let data = bytes::Bytes::from(yaml);
+        let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
+        manifest_file.write_stream(Box::pin(stream)).await?;
+
+        Ok(())
+    }
+
     /// Convert a JSON file to Parquet using normalization options, storing the result in the data dir.
     ///
     /// Used by fetch and create_source when `json_record_path` is present in connector args.
@@ -435,10 +513,13 @@ impl BundleBuilder {
         if last_manifest_version == 0 {
             let init_file = manifest_dir.writable_file(INIT_FILENAME)?;
             // Use the bundle's existing ID rather than generating a new one
+            let version_str = bundlebase_common::format_version_string();
             let init_commit = InitCommit {
                 id: if from.is_none() { Some(bundle_id) } else { None },
                 from: from.clone(),
                 view: None,
+                min_version: Some(version_str.clone()),
+                max_version: Some(version_str),
             };
             write_yaml(init_file.as_ref(), &init_commit).await?;
         };

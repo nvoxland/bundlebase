@@ -56,6 +56,22 @@ async def open(path: str, config: Optional[Dict[str, Any]] = None) -> PyBundle:
     """
     ...
 
+async def upgrade_bundle(path: str, config: Optional[Dict[str, Any]] = None) -> None:
+    """
+    Upgrade a bundle's format version to the current bundlebase version.
+
+    Use this when opening a bundle fails due to a version mismatch.
+    Writes a new commit directly without opening the bundle.
+
+    Args:
+        path: Path or URL to the bundle to upgrade
+        config: Optional configuration dict for cloud storage settings
+
+    Raises:
+        ValueError: If the bundle cannot be found or upgraded
+    """
+    ...
+
 class PyBundle:
     """
     Read-only Bundle class for data processing operations.

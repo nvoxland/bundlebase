@@ -59,6 +59,24 @@ pub fn open<'py>(
     })
 }
 
+/// Upgrade a bundle's format version to the current bundlebase version.
+#[pyfunction]
+#[pyo3(signature = (path, config=None))]
+pub fn upgrade_bundle<'py>(
+    path: String,
+    config: Option<&Bound<'py, PyAny>>,
+    py: Python<'py>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let config_inner = config.map(|c| config_from_python(c)).transpose()?;
+
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        BundleBuilder::upgrade_bundle(path.as_str(), config_inner)
+            .await
+            .map(|_| bundlebase_common::format_version_string())
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
+    })
+}
+
 #[pyfunction]
 fn log_metrics() {
     init_logging_metrics();
@@ -81,6 +99,7 @@ fn bundlebase(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(create, m)?)?;
     m.add_function(wrap_pyfunction!(log_metrics, m)?)?;
     m.add_function(wrap_pyfunction!(open, m)?)?;
+    m.add_function(wrap_pyfunction!(upgrade_bundle, m)?)?;
     m.add_function(wrap_pyfunction!(test_datafile, m)?)?;
     m.add_function(wrap_pyfunction!(random_memory_url, m)?)?;
     m.add_class::<PyBundle>()?;

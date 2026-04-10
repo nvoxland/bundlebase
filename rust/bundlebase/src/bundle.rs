@@ -160,6 +160,10 @@ pub struct Bundle {
     /// True if this bundle is a view (has a view field in init commit)
     is_view: Arc<RwLock<bool>>,
 
+    /// Minimum bundlebase version required to open this bundle (major, minor)
+    min_version: Arc<RwLock<Option<(u16, u16)>>>,
+    /// Maximum bundlebase version allowed to open this bundle (major, minor)
+    max_version: Arc<RwLock<Option<(u16, u16)>>>,
 }
 
 impl bundlebase_data::DataContext for Bundle {
@@ -219,6 +223,8 @@ impl Clone for Bundle {
             always_update_rules: Arc::clone(&self.always_update_rules),
             update_overlays: Arc::clone(&self.update_overlays),
             is_view: Arc::clone(&self.is_view),
+            min_version: Arc::clone(&self.min_version),
+            max_version: Arc::clone(&self.max_version),
         }
     }
 }
@@ -314,6 +320,8 @@ impl Bundle {
             always_update_rules: Arc::new(RwLock::new(Vec::new())),
             update_overlays: Arc::new(RwLock::new(Vec::new())),
             is_view: Arc::new(RwLock::new(false)),
+            min_version: Arc::new(RwLock::new(None)),
+            max_version: Arc::new(RwLock::new(None)),
         });
 
         // Register schema providers and the search() table function
@@ -430,6 +438,10 @@ impl Bundle {
         // Mark this bundle as a view if it has a view field in the init commit
         *bundle.is_view.write() = init_commit.view.is_some();
 
+        // Set initial version bounds from init commit
+        *bundle.min_version.write() = init_commit.min_version.as_deref().map(bundlebase_common::parse_format_version);
+        *bundle.max_version.write() = init_commit.max_version.as_deref().map(bundlebase_common::parse_format_version);
+
         // List files in the manifest directory
         let manifest_files = manifest_dir.list_files().await?;
 
@@ -463,6 +475,11 @@ impl Bundle {
         // ObjectStore.list() does not guarantee any particular ordering
         let mut manifest_files = manifest_files.into_iter().cloned().collect::<Vec<_>>();
         manifest_files.sort_by_key(|f| manifest_version(f.filename().unwrap_or("")));
+
+        // Check format version compatibility before deserializing operations.
+        // This uses raw YAML scanning so that unknown operation types from newer
+        // bundlebase versions don't cause deserialization errors.
+        Self::check_format_version(&init_commit, &manifest_files, bundle.config()).await?;
 
         // Load and apply each manifest in order
         for manifest_file_info in manifest_files {
@@ -506,6 +523,90 @@ impl Bundle {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Check bundle format version compatibility by scanning raw YAML before typed deserialization.
+    ///
+    /// Reads the init commit and all manifest files as raw YAML values, looking for
+    /// minVersion/maxVersion in the init commit and SetMinVersion/SetMaxVersion operations
+    /// in manifests. The most recent values win. Returns an error if the current bundlebase
+    /// version is outside the allowed range.
+    async fn check_format_version(
+        init_commit: &InitCommit,
+        manifest_files: &[crate::file_info::FileInfo],
+        config: Arc<BundleConfig>,
+    ) -> Result<(), BundlebaseError> {
+        let current = bundlebase_common::format_version();
+        let current_str = bundlebase_common::format_version_string();
+
+        // Start with values from init commit
+        let mut min_version = init_commit
+            .min_version
+            .as_deref()
+            .map(bundlebase_common::parse_format_version);
+        let mut max_version = init_commit
+            .max_version
+            .as_deref()
+            .map(bundlebase_common::parse_format_version);
+
+        // Scan manifests for SetMinVersion/SetMaxVersion operations (raw YAML)
+        for file_info in manifest_files {
+            let file = readable_file_from_url(&file_info.url, config.clone()).await?;
+            let bytes = match file.read_bytes().await? {
+                Some(b) => b,
+                None => continue,
+            };
+            let yaml_str = std::str::from_utf8(&bytes)
+                .map_err(|e| BundlebaseError::from(format!("Invalid UTF-8 in manifest: {}", e)))?;
+            let doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_str)
+                .map_err(|e| BundlebaseError::from(format!("Invalid YAML in manifest: {}", e)))?;
+
+            // Walk changes[].operations[] looking for version ops
+            if let Some(changes) = doc.get("changes").and_then(|c| c.as_sequence()) {
+                for change in changes {
+                    if let Some(ops) = change.get("operations").and_then(|o| o.as_sequence()) {
+                        for op in ops {
+                            if let Some(op_type) = op.get("type").and_then(|t| t.as_str()) {
+                                match op_type {
+                                    "setMinVersion" => {
+                                        if let Some(v) = op.get("version").and_then(|v| v.as_str()) {
+                                            min_version = Some(bundlebase_common::parse_format_version(v));
+                                        }
+                                    }
+                                    "setMaxVersion" => {
+                                        if let Some(v) = op.get("version").and_then(|v| v.as_str()) {
+                                            max_version = Some(bundlebase_common::parse_format_version(v));
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check compatibility
+        if let Some(min) = min_version {
+            if current < min {
+                return Err(format!(
+                    "This bundle requires bundlebase >= {}.{}, but current version is {}",
+                    min.0, min.1, current_str
+                ).into());
+            }
+        }
+        if let Some(max) = max_version {
+            if current > max {
+                return Err(format!(
+                    "This bundle requires bundlebase <= {}.{}, but current version is {}. \
+                     Run `bundlebase upgrade-bundle` to update.",
+                    max.0, max.1, current_str
+                ).into());
+            }
+        }
+
         Ok(())
     }
 

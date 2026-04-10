@@ -178,6 +178,49 @@ Verify the integrity of all files in the bundle by checking SHA256 hashes.
     VERIFY DATA UPDATE
     ```
 
+## Format Compatibility
+
+Every bundle records the minimum and maximum bundlebase version required to open it. These are set automatically when a bundle is created and track the major.minor version (e.g., `0.9`).
+
+When opening a bundle:
+
+- If the current bundlebase version is **below** the bundle's minimum version, an error is returned. This means the bundle uses features that this version of bundlebase doesn't support.
+- If the current bundlebase version is **above** the bundle's maximum version, an error is returned with a suggestion to upgrade.
+
+Old bundles created before version tracking was added will open without restriction.
+
+### Upgrading a Bundle
+
+When you update bundlebase to a newer version, existing bundles may need their version range updated.
+
+=== "Async API"
+
+    ```python
+    import bundlebase as bb
+
+    await bb.upgrade_bundle("/path/to/bundle")
+    ```
+
+=== "Sync API"
+
+    ```python
+    import bundlebase.sync as bb
+
+    bb.upgrade_bundle("/path/to/bundle")
+    ```
+
+=== "CLI"
+
+    ```bash
+    bundlebase upgrade-bundle --bundle /path/to/bundle
+    ```
+
+=== "MCP"
+
+    Use the `upgrade_bundle` tool with the bundle path.
+
+This updates the bundle's min and max version to match the current bundlebase version, committing the change. The upgrade writes directly to the bundle's manifest without opening it, so it works even when the version mismatch would prevent a normal open.
+
 ## Manifest System
 
 Bundlebase uses a versioned manifest system for tracking commits:

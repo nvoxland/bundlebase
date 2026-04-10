@@ -45,9 +45,10 @@ async fn test_basic_e2e() -> Result<(), BundlebaseError> {
         .read_str()
         .await?
         .expect("init commit doesn't exist");
+    let fmt_version = bundlebase_common::format_version_string();
     assert_eq!(
         init_content.trim(),
-        format!("id: {}", bundle.bundle().id()).trim()
+        format!("id: {}\nminVersion: '{}'\nmaxVersion: '{}'", bundle.bundle().id(), fmt_version, fmt_version).trim()
     );
 
     // Find and read the versioned manifest file
@@ -531,5 +532,127 @@ async fn test_attach_json() -> Result<(), BundlebaseError> {
     assert!(batches[0].schema().column_with_name("points").is_some());
     assert!(!batches[0].schema().column_with_name("score").is_some());
 
+    Ok(())
+}
+
+// ==================== Version compatibility tests ====================
+
+/// Helper to overwrite the init commit YAML with custom min/max versions.
+async fn set_init_versions(
+    data_dir: &dyn bundlebase_io::IOReadWriteDir,
+    min_version: Option<&str>,
+    max_version: Option<&str>,
+) {
+    let manifest_dir = data_dir.subdir(META_DIR).unwrap();
+    let init_file_read = manifest_dir.file(INIT_FILENAME).unwrap();
+    let yaml_str = init_file_read.read_str().await.unwrap().unwrap();
+    let mut doc: serde_yaml_ng::Value = serde_yaml_ng::from_str(&yaml_str).unwrap();
+
+    match min_version {
+        Some(v) => { doc["minVersion"] = serde_yaml_ng::Value::String(v.to_string()); }
+        None => { doc.as_mapping_mut().unwrap().remove("minVersion"); }
+    }
+    match max_version {
+        Some(v) => { doc["maxVersion"] = serde_yaml_ng::Value::String(v.to_string()); }
+        None => { doc.as_mapping_mut().unwrap().remove("maxVersion"); }
+    }
+
+    let new_yaml = serde_yaml_ng::to_string(&doc).unwrap();
+    let manifest_dir_rw = data_dir.writable_subdir(META_DIR).unwrap();
+    let init_file_write = manifest_dir_rw.writable_file(INIT_FILENAME).unwrap();
+    init_file_write.write(bytes::Bytes::from(new_yaml)).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_version_check_passes_for_current_version() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle.commit("Initial").await?;
+
+    // Should open fine — versions match current
+    let _loaded = Bundle::open(data_dir.url().as_str(), None).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_version_check_fails_when_min_version_too_high() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle.commit("Initial").await?;
+
+    // Set min version higher than current
+    set_init_versions(data_dir.as_ref(), Some("99.0"), Some("99.0")).await;
+
+    let err_msg = match Bundle::open(data_dir.url().as_str(), None).await {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("Expected version check to fail"),
+    };
+    assert!(err_msg.contains("requires bundlebase >= 99.0"), "Error: {}", err_msg);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_version_check_fails_when_max_version_too_low() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle.commit("Initial").await?;
+
+    // Set max version lower than current
+    set_init_versions(data_dir.as_ref(), Some("0.1"), Some("0.1")).await;
+
+    let err_msg = match Bundle::open(data_dir.url().as_str(), None).await {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("Expected version check to fail"),
+    };
+    assert!(err_msg.contains("requires bundlebase <= 0.1"), "Error: {}", err_msg);
+    assert!(err_msg.contains("upgrade-bundle"), "Error should mention upgrade-bundle: {}", err_msg);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_version_check_allows_old_bundles_without_versions() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle.commit("Initial").await?;
+
+    // Remove version fields to simulate pre-versioning bundle
+    set_init_versions(data_dir.as_ref(), None, None).await;
+
+    // Should still open
+    let _loaded = Bundle::open(data_dir.url().as_str(), None).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_upgrade_bundle_fixes_too_old_bundle() -> Result<(), BundlebaseError> {
+    init();
+    let data_dir = random_memory_dir();
+    let bundle = bundlebase::BundleBuilder::create(data_dir.url().as_str(), None).await?;
+    bundle.attach(test_datafile("userdata.parquet"), None).await?;
+    bundle.commit("Initial").await?;
+
+    // Set max version too low so open would fail
+    set_init_versions(data_dir.as_ref(), Some("0.1"), Some("0.1")).await;
+
+    // Verify it would fail to open
+    assert!(
+        matches!(Bundle::open(data_dir.url().as_str(), None).await, Err(_)),
+        "Expected version check to fail"
+    );
+
+    // Upgrade the bundle (bypasses version check)
+    bundlebase::BundleBuilder::upgrade_bundle(data_dir.url().as_str(), None).await?;
+
+    // Now it should open successfully
+    let loaded = Bundle::open(data_dir.url().as_str(), None).await?;
+    assert!(loaded.num_rows().await? > 0);
     Ok(())
 }

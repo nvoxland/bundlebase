@@ -1326,6 +1326,30 @@ def open(path: str, config: Optional[Any] = None) -> SyncBundle:
     return SyncBundle(async_bundle)
 
 
+def upgrade_bundle(path: str, config: Optional[Any] = None) -> None:
+    """Upgrade a bundle's format version to the current bundlebase version.
+
+    Use this when opening a bundle fails due to a version mismatch.
+
+    Args:
+        path: Path or URL to the bundle to upgrade
+        config: Optional configuration dict for cloud storage settings
+
+    Example:
+        >>> import bundlebase.sync as bb
+        >>> bb.upgrade_bundle("/path/to/bundle")
+
+    Raises:
+        ValueError: If bundle cannot be found or upgraded
+    """
+    from bundlebase import _bundlebase
+
+    async def _upgrade_async():
+        return await _bundlebase.upgrade_bundle(path, config)
+
+    _loop_manager.run_sync(_upgrade_async())
+
+
 def stream_batches(bundle: SyncBundle) -> Any:
     """Stream RecordBatches from a bundle synchronously.
 

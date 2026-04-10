@@ -35,6 +35,8 @@ mod rename_view;
 mod serde_util;
 mod save_config;
 mod set_description;
+mod set_max_version;
+mod set_min_version;
 mod set_name;
 mod update_version;
 
@@ -73,6 +75,8 @@ pub use crate::bundle::operation::rename_join::RenameJoinOp;
 pub use crate::bundle::operation::rename_view::RenameViewOp;
 pub use crate::bundle::operation::save_config::SaveConfigOp;
 pub use crate::bundle::operation::set_description::SetDescriptionOp;
+pub use crate::bundle::operation::set_max_version::SetMaxVersionOp;
+pub use crate::bundle::operation::set_min_version::SetMinVersionOp;
 pub use crate::bundle::operation::set_name::SetNameOp;
 pub use crate::bundle::operation::update_version::UpdateVersionOp;
 use crate::bundle::bundle_schema::BundleSchema;
@@ -291,6 +295,8 @@ define_any_operation! {
     ReplaceBlock(ReplaceBlockOp),
     SaveConfig(SaveConfigOp),
     SetDescription(SetDescriptionOp),
+    SetMaxVersion(SetMaxVersionOp),
+    SetMinVersion(SetMinVersionOp),
     SetName(SetNameOp),
     UpdateVersion(UpdateVersionOp),
 }

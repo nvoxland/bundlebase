@@ -12,10 +12,15 @@ pub struct InitCommit {
     pub from: Option<Url>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_version: Option<String>,
 }
 
 impl InitCommit {
     pub fn new(from: Option<&Url>) -> Self {
+        let version = bundlebase_common::format_version_string();
         Self {
             // Only set id when creating a new bundle (from is None)
             // When extending (from is Some), id should be None and inherited from parent
@@ -26,14 +31,19 @@ impl InitCommit {
             },
             from: from.cloned(),
             view: None,
+            min_version: Some(version.clone()),
+            max_version: Some(version),
         }
     }
 
     pub fn new_view(view_id: &str) -> Self {
+        let version = bundlebase_common::format_version_string();
         Self {
             id: None,
             from: None,
             view: Some(view_id.to_string()),
+            min_version: Some(version.clone()),
+            max_version: Some(version),
         }
     }
 }
