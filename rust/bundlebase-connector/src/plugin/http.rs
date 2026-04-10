@@ -779,6 +779,7 @@ mod tests {
         let err = result.err().unwrap().to_string();
         assert!(err.contains("404"), "Error should mention status code: {}", err);
         assert!(err.contains("not found"), "Error should mention not found: {}", err);
+        assert!(!err.contains("head_supported"), "4xx errors should not suggest head_supported: {}", err);
     }
 
     #[tokio::test]
@@ -799,6 +800,52 @@ mod tests {
         let err = result.err().unwrap().to_string();
         assert!(err.contains("401"), "Error should mention status code: {}", err);
         assert!(err.contains("authentication"), "Error should mention authentication: {}", err);
+        assert!(!err.contains("head_supported"), "4xx errors should not suggest head_supported: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_discover_400_returns_descriptive_error() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(wiremock::ResponseTemplate::new(400))
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/api/search?bad=param", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let result = connector.discover(&args, &HashSet::new(), &config).await;
+        assert!(result.is_err());
+        let err = result.err().unwrap().to_string();
+        assert!(err.contains("400"), "Error should mention status code: {}", err);
+        assert!(err.contains("rejected"), "Error should mention rejected: {}", err);
+        assert!(!err.contains("head_supported"), "400 errors should not suggest head_supported: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_discover_400_includes_warning_header() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("HEAD"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(400)
+                    .insert_header("warning", "299 WQP \"The value of organization=21MNPCA is not in the list of enumerated values.\""),
+            )
+            .mount(&server)
+            .await;
+
+        let connector = HttpConnector;
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), format!("{}/api/search?organization=21MNPCA", server.uri()));
+        let config = crate::test_utils::test_config();
+
+        let result = connector.discover(&args, &HashSet::new(), &config).await;
+        assert!(result.is_err());
+        let err = result.err().unwrap().to_string();
+        assert!(err.contains("400"), "Error should mention status code: {}", err);
+        assert!(err.contains("enumerated values"), "Error should include warning header content: {}", err);
+        assert!(!err.contains("head_supported"), "400 errors should not suggest head_supported: {}", err);
     }
 
     #[tokio::test]

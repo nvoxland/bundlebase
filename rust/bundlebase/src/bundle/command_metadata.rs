@@ -34,6 +34,8 @@ pub fn command_metadata() -> Vec<(&'static str, &'static str, &'static str)> {
         ("RENAME JOIN", "RENAME JOIN <old> TO <new>", "read-write"),
         ("SET NAME", "SET NAME '<name>'", "read-write"),
         ("SET DESCRIPTION", "SET DESCRIPTION '<description>'", "read-write"),
+        ("SET MIN VERSION", "SET MIN VERSION '<version>'", "read-write"),
+        ("SET MAX VERSION", "SET MAX VERSION '<version>'", "read-write"),
         ("SAVE CONFIG", "SAVE CONFIG <key> = '<value>' FOR '<scope>'", "read-write"),
         ("IMPORT CONNECTOR", "IMPORT CONNECTOR <name> FROM '<runtime::entrypoint>' [WITH (<args>)]", "read-write"),
         ("IMPORT FUNCTION", "IMPORT FUNCTION <name> FROM '<runtime::entrypoint>' [WITH (<args>)]", "read-write"),

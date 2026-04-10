@@ -102,13 +102,14 @@ pub struct HttpHeadInfo {
 /// Build a descriptive error message for an HTTP error status code.
 ///
 /// Includes the status code, reason phrase, an actionable hint, and optionally
-/// a truncated snippet of the server response body.
+/// a truncated snippet of the server response body or Warning header.
 pub fn http_status_error(
     url: &Url,
     status: reqwest::StatusCode,
-    body: Option<&str>,
+    detail: Option<&str>,
 ) -> String {
     let hint = match status.as_u16() {
+        400 => " The request was rejected by the server. Check URL parameters for invalid values.",
         401 => " The server requires authentication. Check if credentials are needed.",
         403 => " Access is forbidden. Check if the URL requires authorization or an API key.",
         404 => " The URL was not found. Verify the URL is correct and the resource exists.",
@@ -117,9 +118,9 @@ pub fn http_status_error(
         502 | 503 | 504 => " The service is temporarily unavailable. Try again later.",
         _ => " Verify the URL is correct and accessible.",
     };
-    let body_snippet = match body {
-        Some(b) if !b.trim().is_empty() => {
-            let truncated = if b.len() > 200 { &b[..200] } else { b };
+    let detail_snippet = match detail {
+        Some(d) if !d.trim().is_empty() => {
+            let truncated = if d.len() > 200 { &d[..200] } else { d };
             format!(" Server response: {}", truncated.trim())
         }
         _ => String::new(),
@@ -130,7 +131,7 @@ pub fn http_status_error(
         url,
         status.canonical_reason().unwrap_or("Unknown error"),
         hint,
-        body_snippet,
+        detail_snippet,
     )
 }
 
@@ -153,12 +154,17 @@ pub async fn read_http_head_info(url: &Url) -> Result<HttpHeadInfo, BundlebaseEr
 
     if !response.status().is_success() {
         let status = response.status();
-        let base_err = http_status_error(url, status, None);
-        return Err(format!(
-            "{}. If this server doesn't support HEAD requests, retry with: \
-             head_supported = 'false'",
-            base_err
-        ).into());
+        let warning = response.headers().get("warning")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let base_err = http_status_error(url, status, warning.as_deref());
+        let head_hint = if status.is_server_error() {
+            " If this server doesn't support HEAD requests, retry with: \
+             head_supported = 'false'"
+        } else {
+            ""
+        };
+        return Err(format!("{}{}", base_err, head_hint).into());
     }
 
     let version = if let Some(etag) = response.headers().get("etag") {
