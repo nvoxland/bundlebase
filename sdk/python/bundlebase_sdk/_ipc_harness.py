@@ -9,6 +9,7 @@ Usage:
 """
 
 import importlib.util
+from importlib.machinery import SourceFileLoader
 import sys
 
 from bundlebase_sdk.function import Function
@@ -17,7 +18,11 @@ from bundlebase_sdk.function_serve import serve_function
 
 def _load_module_from_file(file_path: str):
     """Load a Python module from a file path."""
-    spec = importlib.util.spec_from_file_location("_user_module", file_path)
+    spec = importlib.util.spec_from_file_location(
+        "_user_module",
+        file_path,
+        loader=SourceFileLoader("_user_module", file_path),
+    )
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load Python module from '{file_path}'")
     module = importlib.util.module_from_spec(spec)
