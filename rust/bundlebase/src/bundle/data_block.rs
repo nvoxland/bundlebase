@@ -155,6 +155,38 @@ impl DataBlock {
             .collect()
     }
 
+    /// Build a synthetic ExecutionPlan that returns `rows` empty rows (zero
+    /// columns). Used by the COUNT(*) fast path in `scan()` — DataFusion's
+    /// count aggregator only needs row counts when projection is empty, so
+    /// we can satisfy the query without touching the underlying file.
+    fn empty_projection_plan(
+        &self,
+        rows: usize,
+    ) -> datafusion::common::Result<datafusion::catalog::memory::DataSourceExec> {
+        use arrow::record_batch::{RecordBatch, RecordBatchOptions};
+        use arrow_schema::Schema;
+        use datafusion::catalog::memory::DataSourceExec;
+        use datafusion::datasource::memory::MemorySourceConfig;
+
+        let empty_schema = Arc::new(Schema::empty());
+        // Chunk the synthetic rows into reasonable batch sizes so downstream
+        // operators see normal-shaped batches rather than one giant batch.
+        const BATCH_ROWS: usize = 8192;
+        let mut batches: Vec<RecordBatch> = Vec::new();
+        let mut remaining = rows;
+        while remaining > 0 {
+            let take = remaining.min(BATCH_ROWS);
+            let opts = RecordBatchOptions::default().with_row_count(Some(take));
+            let batch = RecordBatch::try_new_with_options(empty_schema.clone(), vec![], &opts)
+                .map_err(|e| datafusion::common::DataFusionError::ArrowError(Box::new(e), None))?;
+            batches.push(batch);
+            remaining -= take;
+        }
+        let source: Arc<dyn datafusion::datasource::source::DataSource> =
+            Arc::new(MemorySourceConfig::try_new(&[batches], empty_schema, None)?);
+        Ok(DataSourceExec::new(source))
+    }
+
     /// Returns source information if this block was attached via a source fetch
     pub fn source_info(&self) -> Option<&SourceInfo> {
         self.source_info.as_ref()
@@ -535,6 +567,26 @@ impl TableProvider for DataBlock {
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         let versioned_block = VersionedBlockId::new(self.id, self.version.clone());
         let deleted = self.deleted_rows.read().clone();
+
+        // Phase 0: Empty-projection fast path (e.g. `SELECT COUNT(*)`).
+        // DataFusion asks for zero columns when it only needs row counts.
+        // If we know `num_rows` from attach metadata and there's nothing
+        // that could change the row count (no filters, no overlays, no
+        // deleted rows), return a synthetic plan with N empty rows so the
+        // count aggregator never touches the underlying file.
+        if let (Some(proj), Some(rows)) = (projection, self.num_rows) {
+            if proj.is_empty()
+                && filters.is_empty()
+                && deleted.is_empty()
+                && self.update_overlays.read().is_empty()
+            {
+                let effective_rows = match limit {
+                    Some(lim) => rows.min(lim),
+                    None => rows,
+                };
+                return Ok(Arc::new(self.empty_projection_plan(effective_rows)?));
+            }
+        }
 
         // Try column index optimization
         let indexable_filters = FilterAnalyzer::extract_indexable(filters);

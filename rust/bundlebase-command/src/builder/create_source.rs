@@ -272,7 +272,11 @@ impl BundleBuilderCommand for CreateSourceCommand {
         // Extract json_* args as reader-level read options (connector validation already skips them).
         let json_read_options = super::extract_json_opts(&self.args);
 
-        // Prepare all AttachBlockOps first, then batch them if batch_size is configured
+        // Prepare all AttachBlockOps first, then batch them if batch_size is configured.
+        // Share a single name→ColumnId map across all attaches in this batch so
+        // sibling blocks reuse the same IDs for the same logical columns rather
+        // than each generating fresh IDs.
+        let shared_column_ids = AttachBlockOp::shared_name_to_id_for(builder);
         let mut prepared_ops: Vec<(AttachBlockOp, String)> = Vec::new();
         for action in actions {
             match action {
@@ -288,7 +292,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
                             .await?;
                         (data.attach_location.clone(), temp_reader.format(), data.hash.clone())
                     };
-                    let op = AttachBlockOp::setup(
+                    let op = AttachBlockOp::setup_with_shared_ids(
                         &pack_id,
                         &final_location,
                         format,
@@ -301,6 +305,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
                         }),
                         None,
                         builder,
+                        Some(&shared_column_ids),
                     )
                     .await?;
                     let attach_location = op.location.clone();

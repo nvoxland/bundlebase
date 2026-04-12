@@ -74,6 +74,27 @@ pub struct AttachBlockOp {
 }
 
 impl AttachBlockOp {
+    /// Build the initial name → ColumnId map for the bundle's existing schema.
+    ///
+    /// Pass this into [`setup_with_shared_ids`] to share ID allocation across
+    /// a batch of parallel attaches. Without sharing, each parallel `setup`
+    /// call queries operations independently — and since none of the parallel
+    /// ops have been applied yet, every block re-generates fresh ColumnIds for
+    /// columns the OTHER parallel ops are also seeing, blowing up the merged
+    /// schema by orders of magnitude.
+    pub fn shared_name_to_id_for(
+        builder: &BundleBuilder,
+    ) -> std::sync::Arc<parking_lot::Mutex<HashMap<String, ColumnId>>> {
+        let existing_ops = builder.operations();
+        let resolved = bundle_schema::BundleSchema::resolved(&existing_ops);
+        let map: HashMap<String, ColumnId> = resolved
+            .columns()
+            .iter()
+            .map(|(id, name)| (name.clone(), *id))
+            .collect();
+        std::sync::Arc::new(parking_lot::Mutex::new(map))
+    }
+
     /// Setup an AttachBlockOp for a file.
     ///
     /// Reads schema, version, statistics, and layout from the file at `location`.
@@ -93,6 +114,31 @@ impl AttachBlockOp {
         source_info: Option<SourceInfo>,
         expected_schema: Option<&[crate::bundle::operation::create_source::ExpectedColumn]>,
         builder: &BundleBuilder,
+    ) -> Result<Self, BundlebaseError> {
+        Self::setup_with_shared_ids(
+            pack,
+            location,
+            format,
+            hash,
+            source_info,
+            expected_schema,
+            builder,
+            None,
+        )
+        .await
+    }
+
+    /// Setup variant that shares a name→ColumnId map across a batch of parallel
+    /// attaches. See [`shared_name_to_id_for`] for the rationale.
+    pub async fn setup_with_shared_ids(
+        pack: &ObjectId,
+        location: &str,
+        format: AttachFormat,
+        hash: Option<&str>,
+        source_info: Option<SourceInfo>,
+        expected_schema: Option<&[crate::bundle::operation::create_source::ExpectedColumn]>,
+        builder: &BundleBuilder,
+        shared_ids: Option<&std::sync::Arc<parking_lot::Mutex<HashMap<String, ColumnId>>>>,
     ) -> Result<Self, BundlebaseError> {
         let progress = ProgressScope::new(
             &format!("Attaching '{}'", location),
@@ -141,37 +187,33 @@ impl AttachBlockOp {
             if opts.is_empty() { None } else { Some(opts) }
         };
 
-        // Reuse existing ColumnIds for columns whose names match existing columns.
-        // Priority: pre-reserved IDs from expected_schema (by exact case-sensitive name),
-        // then existing IDs from the bundle schema, then generate new ones.
-        let existing_ops = builder.operations();
-        let resolved = bundle_schema::BundleSchema::resolved(&existing_ops);
-        let name_to_existing_id: HashMap<String, ColumnId> = resolved
-            .columns().iter()
-            .map(|(id, name)| (name.clone(), *id))
-            .collect();
-
         // Build a lookup from expected_schema (case-sensitive name → pre-reserved ColumnId)
         let name_to_expected_id: HashMap<&str, ColumnId> = expected_schema
             .map(|cols| cols.iter().map(|c| (c.name.as_str(), c.id)).collect())
             .unwrap_or_default();
 
-        let column_ids = schema.as_ref()
-            .map(|s| {
-                s.fields().iter().map(|f| {
-                    // Prefer pre-reserved ID from expected_schema (exact case-sensitive match)
-                    if let Some(&id) = name_to_expected_id.get(f.name().as_str()) {
-                        return id;
-                    }
-                    // Fall back to existing ID from bundle schema
-                    if let Some(&id) = name_to_existing_id.get(f.name()) {
-                        return id;
-                    }
-                    // Generate a new ID
-                    ColumnId::generate()
-                }).collect()
-            })
-            .unwrap_or_default();
+        // Reuse existing ColumnIds for columns whose names match existing columns.
+        // Priority: pre-reserved IDs from expected_schema, then existing IDs from
+        // the shared map (or freshly read from bundle ops if no shared map),
+        // then generate new ones — and insert any new IDs into the shared map
+        // so other parallel attaches in the same batch see the same assignment.
+        // Acquire (or build then acquire) the shared name→id map. Lock is
+        // held only across the per-field loop (microseconds).
+        let shared_arc = match shared_ids {
+            Some(arc) => arc.clone(),
+            None => Self::shared_name_to_id_for(builder),
+        };
+        let column_ids = schema.as_ref().map(|s| {
+            let mut map_guard = shared_arc.lock();
+            s.fields().iter().map(|f| {
+                if let Some(&id) = name_to_expected_id.get(f.name().as_str()) {
+                    return id;
+                }
+                *map_guard
+                    .entry(f.name().clone())
+                    .or_insert_with(ColumnId::generate)
+            }).collect()
+        }).unwrap_or_default();
 
         let mut op = AttachBlockOp {
             location: location.to_string(),

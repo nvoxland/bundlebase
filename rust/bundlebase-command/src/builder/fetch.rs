@@ -241,17 +241,24 @@ async fn fetch_from_source(
         Some(add_actions.len() as u64),
     );
 
+    // Share a single name→ColumnId map across all parallel attaches in this
+    // batch. Without this, every parallel setup() generates fresh ColumnIds
+    // for the same logical columns (because none of the sibling ops are
+    // applied yet), blowing up the merged schema by orders of magnitude.
+    let shared_column_ids = AttachBlockOp::shared_name_to_id_for(builder);
+
     let prepared_adds: Vec<Result<(AttachBlockOp, String), BundlebaseError>> =
         futures::stream::iter(add_actions.into_iter().enumerate())
             .map(|(idx, data)| {
                 let json_read_options = &json_read_options;
                 let expected_schema = &expected_schema;
                 let setup_progress = &setup_progress;
+                let shared_column_ids = shared_column_ids.clone();
                 async move {
                     let (final_location, format, hash) = resolve_attach_location(
                         builder, &data.attach_location, data.hash.clone(), json_read_options.as_ref(),
                     ).await?;
-                    let op = AttachBlockOp::setup(
+                    let op = AttachBlockOp::setup_with_shared_ids(
                         pack_id,
                         &final_location,
                         format,
@@ -264,6 +271,7 @@ async fn fetch_from_source(
                         }),
                         expected_schema.as_deref(),
                         builder,
+                        Some(&shared_column_ids),
                     ).await?;
                     validate_schema_against_expected(&op, expected_schema.as_deref(), &data.attach_location);
                     setup_progress.update((idx + 1) as u64, Some(&data.attach_location));
