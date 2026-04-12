@@ -742,7 +742,7 @@ fn record_batches_to_parquet(
 }
 
 /// Convert a JSON value to a string representation.
-fn json_value_to_string(value: &serde_json::Value) -> String {
+pub fn json_value_to_string(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::Null => String::new(),
         serde_json::Value::Bool(b) => b.to_string(),

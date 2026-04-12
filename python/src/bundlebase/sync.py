@@ -804,7 +804,9 @@ class SyncBundleBuilder(SyncBundle):
         return self
 
     def create_source(
-        self, connector: str, args: Dict[str, str], pack: str = "base"
+        self, connector: str, args: Dict[str, str], pack: str = "base",
+        save_as: str = None,
+        batch_bytes: str = None,
     ) -> "SyncBundleBuilder":
         """Create a data source for a pack.
 
@@ -814,11 +816,26 @@ class SyncBundleBuilder(SyncBundle):
             pack: Which pack to define the source for:
                 - "base" (default): The base pack
                 - A join name: A joined pack by its join name
+            save_as: How to store fetched data:
+                - None (default): Auto (converts to parquet)
+                - "copy": Keep original format as-is
+                - "parquet": Convert to parquet
+                - "ref": Reference remote URL without downloading
+            batch_bytes: Optional size threshold for batching small files together.
+                Can be a plain number (bytes) or a string with unit suffix:
+                "10MB", "500KB", "1GB", etc. When set, small files are merged
+                into larger blocks until the threshold is reached, reducing
+                per-file overhead.
 
         Returns:
             Self for fluent chaining
         """
-        coro = _call_original_method(self._async, "create_source", connector, args, pack)
+        merged_args = dict(args)
+        if save_as is not None:
+            merged_args["save_as"] = save_as
+        if batch_bytes is not None:
+            merged_args["batch_bytes"] = str(batch_bytes)
+        coro = _call_original_method(self._async, "create_source", connector, merged_args, pack)
         self._async = _loop_manager.run_sync(coro)
         return self
 

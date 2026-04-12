@@ -15,7 +15,7 @@ use bundlebase_io::io_registry;
 use bundlebase_common::{ConfigProvider, BundlebaseError};
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use url::Url;
@@ -83,36 +83,40 @@ impl Connector for RemoteDirConnector {
             .await?;
         let all_files = lister.list_files().await?;
 
-        let mut locations = Vec::new();
-        for file in all_files {
-            let relative_path = Self::relative_path(&base_url, &file.url);
-            // Check pattern match
-            if !patterns
-                .iter()
-                .any(|pattern| pattern.matches(&relative_path))
-            {
-                continue;
-            }
+        // Filter files by pattern first (cheap CPU work), then read versions concurrently
+        let matched_files: Vec<_> = all_files
+            .into_iter()
+            .filter_map(|file| {
+                let relative_path = Self::relative_path(&base_url, &file.url);
+                if patterns.iter().any(|pattern| pattern.matches(&relative_path)) {
+                    let format = SourceFormat::from_extension(
+                        relative_path.rsplit('.').next().unwrap_or("dat"),
+                    );
+                    Some((file, relative_path, format))
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-            // Get format from file extension
-            let format = SourceFormat::from_extension(
-                relative_path
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or("dat"),
-            );
-
-            // Read version from remote file
-            let version = Self::read_remote_version(&file.url, config).await
-                .unwrap_or_else(|_| "unknown".to_string());
-
-            locations.push(DiscoveredLocation {
-                location: relative_path,
-                must_copy,
-                format,
-                version,
-            });
-        }
+        // Read versions concurrently using buffer_unordered
+        let locations: Vec<DiscoveredLocation> = futures::stream::iter(matched_files)
+            .map(|(file, relative_path, format)| {
+                let config = Arc::clone(config);
+                async move {
+                    let version = Self::read_remote_version(&file.url, &config).await
+                        .unwrap_or_else(|_| "unknown".to_string());
+                    DiscoveredLocation {
+                        location: relative_path,
+                        must_copy,
+                        format,
+                        version,
+                    }
+                }
+            })
+            .buffer_unordered(50)
+            .collect()
+            .await;
 
         Ok(locations)
     }

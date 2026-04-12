@@ -58,6 +58,12 @@ pub struct CreateSourceOp {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub save_as: Option<String>,
 
+    /// Optional batch size threshold in bytes. When set, small files fetched from
+    /// this source are concatenated into batches until the total raw bytes exceeds
+    /// this threshold, reducing per-file overhead. None = no batching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_bytes: Option<usize>,
+
     /// Optional expected schema for this source.
     ///
     /// When present, column IDs are pre-registered in BundleSchema on `apply()` so that
@@ -82,6 +88,7 @@ impl CreateSourceOp {
             connector,
             args,
             save_as,
+            batch_bytes: None,
             expected_schema: None,
         }
     }
@@ -107,6 +114,22 @@ impl Operation for CreateSourceOp {
     }
 
     async fn check(&self, bundle: &Bundle) -> Result<(), BundlebaseError> {
+        // batch_bytes only applies when fetched data is converted to parquet.
+        // SAVE AS COPY keeps original bytes; SAVE AS REF doesn't store data at all.
+        if self.batch_bytes.is_some() {
+            if let Some(sa) = self.save_as.as_deref() {
+                let lowered = sa.to_lowercase();
+                if lowered == "copy" || lowered == "ref" {
+                    return Err(format!(
+                        "batch_bytes is not valid with save_as='{}'. \
+                         Batching only applies when data is converted to parquet \
+                         (save_as='auto' or save_as='parquet').",
+                        lowered
+                    ).into());
+                }
+            }
+        }
+
         // Verify pack exists
         if bundle.get_pack(&self.pack).is_none() {
             return Err(format!("Pack {} not found", self.pack).into());
@@ -167,6 +190,7 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
             save_as: None,
+            batch_bytes: None,
             expected_schema: None,
         };
 
@@ -186,6 +210,7 @@ mod tests {
             connector: "custom_function".to_string(),
             args: HashMap::new(),
             save_as: None,
+            batch_bytes: None,
             expected_schema: None,
         };
 
@@ -253,6 +278,7 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
             save_as: None,
+            batch_bytes: None,
             expected_schema: None,
         };
 
@@ -264,5 +290,73 @@ mod tests {
         assert!(yaml.contains("connector: remote_dir"));
         assert!(yaml.contains("url: s3://bucket/data/"));
         assert!(yaml.contains("patterns: '**/*.parquet'"));
+    }
+
+    #[tokio::test]
+    async fn test_check_rejects_batch_bytes_with_save_as_copy() {
+        let bundle = Bundle::empty(None).await.expect("empty bundle");
+        let op = CreateSourceOp {
+            id: ObjectId::generate(),
+            pack: ObjectId::BASE_PACK,
+            connector: "remote_dir".to_string(),
+            args: make_args("s3://bucket/data/", Some("**/*.jsonl")),
+            save_as: Some("copy".to_string()),
+            batch_bytes: Some(1024 * 1024),
+            expected_schema: None,
+        };
+        let err = op.check(&bundle).await.expect_err("should reject");
+        let msg = err.to_string();
+        assert!(msg.contains("batch_bytes"), "msg: {}", msg);
+        assert!(msg.contains("copy"), "msg: {}", msg);
+    }
+
+    #[tokio::test]
+    async fn test_check_rejects_batch_bytes_with_save_as_ref() {
+        let bundle = Bundle::empty(None).await.expect("empty bundle");
+        let op = CreateSourceOp {
+            id: ObjectId::generate(),
+            pack: ObjectId::BASE_PACK,
+            connector: "remote_dir".to_string(),
+            args: make_args("s3://bucket/data/", Some("**/*.jsonl")),
+            save_as: Some("ref".to_string()),
+            batch_bytes: Some(1024 * 1024),
+            expected_schema: None,
+        };
+        let err = op.check(&bundle).await.expect_err("should reject");
+        let msg = err.to_string();
+        assert!(msg.contains("batch_bytes"), "msg: {}", msg);
+        assert!(msg.contains("ref"), "msg: {}", msg);
+    }
+
+    #[tokio::test]
+    async fn test_check_allows_batch_bytes_with_save_as_parquet() {
+        let bundle = Bundle::empty(None).await.expect("empty bundle");
+        bundle.add_pack(ObjectId::BASE_PACK, std::sync::Arc::new(crate::bundle::pack::Pack::new_base()));
+        let op = CreateSourceOp {
+            id: ObjectId::generate(),
+            pack: ObjectId::BASE_PACK,
+            connector: "remote_dir".to_string(),
+            args: make_args("s3://bucket/data/", Some("**/*.jsonl")),
+            save_as: Some("parquet".to_string()),
+            batch_bytes: Some(1024 * 1024),
+            expected_schema: None,
+        };
+        op.check(&bundle).await.expect("should allow parquet + batch");
+    }
+
+    #[tokio::test]
+    async fn test_check_allows_batch_bytes_with_save_as_auto() {
+        let bundle = Bundle::empty(None).await.expect("empty bundle");
+        bundle.add_pack(ObjectId::BASE_PACK, std::sync::Arc::new(crate::bundle::pack::Pack::new_base()));
+        let op = CreateSourceOp {
+            id: ObjectId::generate(),
+            pack: ObjectId::BASE_PACK,
+            connector: "remote_dir".to_string(),
+            args: make_args("s3://bucket/data/", Some("**/*.jsonl")),
+            save_as: None,
+            batch_bytes: Some(1024 * 1024),
+            expected_schema: None,
+        };
+        op.check(&bundle).await.expect("should allow auto + batch");
     }
 }

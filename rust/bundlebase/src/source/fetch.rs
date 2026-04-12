@@ -5,6 +5,7 @@ use crate::connector::{
     ResolvedSaveAs, SourceData,
 };
 use bundlebase_common::source_utils::{convert_to_parquet, detect_format_from_bytes, filename_from_url, http_status_error, record_batch_stream_to_parquet};
+use arrow::record_batch::RecordBatch;
 use super::SyncMode;
 use crate::io::plugin::object_store::ObjectStoreFile;
 use crate::io::{IOReadFile, IOReadWriteDir, WriteResult};
@@ -410,53 +411,62 @@ pub async fn orchestrate_fetch(
         Some(discovered.len() as u64),
     );
 
-    let mut actions = Vec::new();
+    // Determine which locations need data fetching (cheap, sequential classification)
+    enum PendingKind {
+        Add,
+        Replace,
+    }
 
-    for (idx, location) in discovered.iter().enumerate() {
-        progress.update(idx as u64, Some(&location.location));
+    let mut pending: Vec<(PendingKind, DiscoveredLocation)> = Vec::new();
 
+    for location in discovered {
         if let Some(attached_info) = attached_files.get(&location.location) {
-            // Already attached — check for changes in Update/Sync mode
-            if mode == SyncMode::Update || mode == SyncMode::Sync {
-                if location.version != attached_info.version {
-                    debug!(
-                        "File {} changed: version {} -> {}",
-                        location.location, attached_info.version, location.version
-                    );
-                    let data = get_data_for_location(
-                        func,
-                        location,
-                        args,
-                        config,
-                        data_dir,
-                        &save_as,
-                    )
-                    .await?;
-                    actions.push(FetchAction::Replace {
-                        old_source_location: location.location.clone(),
-                        data: MaterializedData {
-                            attach_location: data.attach_location,
-                            source_location: location.location.clone(),
-                            source_url: data.source_url,
-                            hash: data.hash,
-                            version: location.version.clone(),
-                        },
-                    });
-                }
+            if (mode == SyncMode::Update || mode == SyncMode::Sync)
+                && location.version != attached_info.version
+            {
+                debug!(
+                    "File {} changed: version {} -> {}",
+                    location.location, attached_info.version, location.version
+                );
+                pending.push((PendingKind::Replace, location));
             }
-            // For Add mode, skip files that are already attached
         } else {
-            // New file — add it
-            let data =
-                get_data_for_location(func, location, args, config, data_dir, &save_as).await?;
-            actions.push(FetchAction::Add(MaterializedData {
-                attach_location: data.attach_location,
-                source_location: location.location.clone(),
-                source_url: data.source_url,
-                hash: data.hash,
-                version: location.version.clone(),
-            }));
+            pending.push((PendingKind::Add, location));
         }
+    }
+
+    progress.update(0, Some(&format!("Fetching {} files", pending.len())));
+
+    // Fetch data for all pending locations concurrently
+    let fetch_results: Vec<Result<FetchAction, BundlebaseError>> =
+        futures::stream::iter(pending)
+            .map(|(kind, location)| async move {
+                let data = get_data_for_location(
+                    func, &location, args, config, data_dir, &save_as,
+                ).await?;
+                let materialized = MaterializedData {
+                    attach_location: data.attach_location,
+                    source_location: location.location.clone(),
+                    source_url: data.source_url,
+                    hash: data.hash,
+                    version: location.version.clone(),
+                };
+                Ok(match kind {
+                    PendingKind::Add => FetchAction::Add(materialized),
+                    PendingKind::Replace => FetchAction::Replace {
+                        old_source_location: location.location.clone(),
+                        data: materialized,
+                    },
+                })
+            })
+            .buffer_unordered(100)
+            .collect()
+            .await;
+
+    // Collect results, propagating any errors
+    let mut actions = Vec::with_capacity(fetch_results.len());
+    for result in fetch_results {
+        actions.push(result?);
     }
 
     // For Sync mode: find removed files
@@ -472,4 +482,80 @@ pub async fn orchestrate_fetch(
     }
 
     Ok(actions)
+}
+
+/// Read a parquet file from the data directory and return its record batches.
+pub async fn read_parquet_batches(
+    location: &str,
+    data_dir: &dyn IOReadWriteDir,
+) -> Result<(arrow_schema::SchemaRef, Vec<RecordBatch>), BundlebaseError> {
+    let file = data_dir.file(location)
+        .map_err(|e| BundlebaseError::from(format!("Failed to open {}: {}", location, e)))?;
+    let bytes = file.read_bytes().await
+        .map_err(|e| BundlebaseError::from(format!("Failed to read {}: {}", location, e)))?
+        .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", location)))?;
+
+    let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+        Bytes::from(bytes),
+    )
+    .map_err(|e| BundlebaseError::from(format!("Failed to read parquet {}: {}", location, e)))?;
+
+    let schema = builder.schema().clone();
+    let reader = builder.build()
+    .map_err(|e| BundlebaseError::from(format!("Failed to build reader {}: {}", location, e)))?;
+    let mut batches = Vec::new();
+    for batch_result in reader {
+        let batch = batch_result
+            .map_err(|e| BundlebaseError::from(format!("Failed to read batch: {}", e)))?;
+        batches.push(batch);
+    }
+    Ok((schema, batches))
+}
+
+/// Concatenate multiple JSONL files into a single merged JSONL file.
+/// Returns the WriteResult with the content-addressed path and hash.
+pub async fn write_merged_jsonl(
+    locations: &[&str],
+    data_dir: &dyn IOReadWriteDir,
+) -> Result<WriteResult, BundlebaseError> {
+    // Read all files sequentially (data_dir is &dyn so can't be moved into futures).
+    // Note: parallelizing this would require an Arc<dyn IOReadWriteDir> parameter.
+    let mut merged = Vec::new();
+    for location in locations {
+        let file = data_dir.file(location)
+            .map_err(|e| BundlebaseError::from(format!("Failed to open {}: {}", location, e)))?;
+        let bytes = file.read_bytes().await
+            .map_err(|e| BundlebaseError::from(format!("Failed to read {}: {}", location, e)))?
+            .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", location)))?;
+        merged.extend_from_slice(&bytes);
+        if !merged.is_empty() && merged.last() != Some(&b'\n') {
+            merged.push(b'\n');
+        }
+    }
+
+    let address = bundlebase_common::ContentAddress::with_sub_type(
+        bundlebase_common::ContentCategory::Block,
+        "data",
+        bundlebase_common::ContentFormat::JsonL,
+    )?;
+    let data = Bytes::from(merged);
+    let data_stream = Box::pin(stream::once(async { Ok::<_, std::io::Error>(data) }));
+    data_dir.write_stream(data_stream, &address).await
+}
+
+/// Write merged record batches as a single parquet file to the data directory.
+/// Returns the relative path and hash of the written file.
+pub async fn write_merged_parquet(
+    batches: Vec<RecordBatch>,
+    data_dir: &dyn IOReadWriteDir,
+) -> Result<WriteResult, BundlebaseError> {
+    let batch_stream: futures::stream::BoxStream<'static, Result<RecordBatch, BundlebaseError>> =
+        Box::pin(futures::stream::iter(batches.into_iter().map(Ok)));
+    let merged_bytes = record_batch_stream_to_parquet(batch_stream).await?;
+    let address = bundlebase_common::ContentAddress::with_sub_type(
+        bundlebase_common::ContentCategory::Block,
+        "data",
+        bundlebase_common::ContentFormat::Parquet,
+    )?;
+    download_to_data_dir(merged_bytes, &address, data_dir).await
 }

@@ -61,6 +61,9 @@ pub struct DataBlock {
     /// DataFusion statistics cached after the first column-stats load. Starts as None;
     /// populated during can_prune_block() so the optimizer gets stats on subsequent queries.
     cached_df_statistics: Arc<RwLock<Option<datafusion::common::Statistics>>>,
+    /// Row count captured at attach time (from AttachBlockOp). Used to seed
+    /// statistics() so DataFusion's optimizer has cardinality without I/O.
+    num_rows: Option<usize>,
 }
 
 impl DataBlock {
@@ -78,6 +81,7 @@ impl DataBlock {
         config: Arc<BundleConfig>,
         source_info: Option<SourceInfo>,
         column_ids: Vec<ColumnId>,
+        num_rows: Option<usize>,
     ) -> Self {
         // Build ID-based schema: rename each field to `col_<column_id>`
         let id_fields: Vec<Arc<arrow_schema::Field>> = physical_schema
@@ -107,11 +111,17 @@ impl DataBlock {
             update_overlays: Arc::new(RwLock::new(Vec::new())),
             version_validated: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             cached_df_statistics: Arc::new(RwLock::new(None)),
+            num_rows,
         }
     }
 
     pub fn id(&self) -> &BlockId {
         &self.id
+    }
+
+    /// Row count captured at attach time, if known.
+    pub fn num_rows(&self) -> Option<usize> {
+        self.num_rows
     }
 
     /// Rename batches from physical column names to stable internal names.
@@ -192,7 +202,7 @@ impl DataBlock {
         if !all_stats.is_empty() {
             let mut cache = self.cached_df_statistics.write();
             if cache.is_none() {
-                *cache = Some(build_df_statistics(&all_stats, &self.schema.read()));
+                *cache = Some(build_df_statistics(&all_stats, &self.schema.read(), self.num_rows));
             }
         }
 
@@ -494,7 +504,26 @@ impl TableProvider for DataBlock {
     }
 
     fn statistics(&self) -> Option<datafusion::common::Statistics> {
-        self.cached_df_statistics.read().clone()
+        use datafusion::common::stats::Precision;
+        use datafusion::common::Statistics;
+
+        if let Some(cached) = self.cached_df_statistics.read().clone() {
+            return Some(cached);
+        }
+        // No column stats loaded yet, but we may still know the row count from
+        // the attach-time metadata. Return a minimal Statistics so the optimizer
+        // can plan COUNT(*) and similar without scanning data.
+        self.num_rows.map(|n| Statistics {
+            num_rows: Precision::Exact(n),
+            total_byte_size: Precision::Absent,
+            column_statistics: self
+                .schema
+                .read()
+                .fields()
+                .iter()
+                .map(|_| datafusion::common::ColumnStatistics::new_unknown())
+                .collect(),
+        })
     }
 
     async fn scan(
@@ -661,6 +690,49 @@ impl TableProvider for DataBlock {
             }
         }
 
+        // Phase 2.5: Limit fast path. When the caller asked for a small slice
+        // (e.g. SELECT * LIMIT 1000), bypass the block cache and push the
+        // limit through to the underlying reader. The cache-population path
+        // below collects the entire block before applying the limit, which
+        // turns a tiny preview into a full scan. Skipped when overlays exist
+        // (those can change row counts) or when index/page paths already
+        // returned above.
+        if let Some(lim) = limit {
+            if overlays.is_empty() {
+                let inner_source = self.reader
+                    .data_source(projection, &[], Some(lim), None)
+                    .await?;
+                let projected_col_ids: Vec<ColumnId> = match projection {
+                    Some(proj) => proj.iter().filter_map(|&i| self.column_ids.get(i).copied()).collect(),
+                    None => self.column_ids.clone(),
+                };
+                let current_schema = self.schema.read().clone();
+                let projected_schema = match projection {
+                    Some(proj) => {
+                        let fields: Vec<_> = proj.iter()
+                            .filter_map(|&i| current_schema.fields().get(i).cloned())
+                            .collect();
+                        Arc::new(arrow_schema::Schema::new(fields))
+                    }
+                    None => current_schema,
+                };
+                let mut source: Arc<dyn datafusion::datasource::source::DataSource> = Arc::new(
+                    crate::bundle::schema_rename_filter::SchemaRenameDataSource::new(
+                        inner_source,
+                        projected_schema,
+                        projected_col_ids,
+                    ),
+                );
+                if !deleted.is_empty() {
+                    source = Arc::new(crate::bundle::deleted_row_filter::DeletedRowFilterDataSource::new(
+                        source,
+                        Arc::new(deleted),
+                    ));
+                }
+                return Ok(Arc::new(DataSourceExec::new(source)));
+            }
+        }
+
         // Phase 3: Full scan with block cache
         let cache_key = self.cache_key();
         let validated = self.version_validated.load(std::sync::atomic::Ordering::Relaxed);
@@ -795,9 +867,11 @@ impl TableProvider for DataBlock {
 fn build_df_statistics(
     col_stats: &[bundlebase_data::ColumnStats],
     schema: &arrow_schema::SchemaRef,
+    num_rows: Option<usize>,
 ) -> datafusion::common::Statistics {
     use datafusion::common::stats::Precision;
     use datafusion::common::{ColumnStatistics, Statistics};
+
     let column_statistics = schema.fields().iter().enumerate().map(|(i, _field)| {
         let cs = match col_stats.get(i) {
             Some(s) => s,
@@ -825,7 +899,7 @@ fn build_df_statistics(
     }).collect();
 
     Statistics {
-        num_rows: Precision::Absent,
+        num_rows: num_rows.map(Precision::Exact).unwrap_or(Precision::Absent),
         total_byte_size: Precision::Absent,
         column_statistics,
     }

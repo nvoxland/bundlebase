@@ -26,6 +26,8 @@ pub struct CreateSourceCommand {
     pub pack: Option<String>,
     /// How to save fetched data (auto, copy, parquet, ref). None = auto.
     pub save_as: Option<String>,
+    /// Optional size threshold in bytes for batching small files. None = no batching.
+    pub batch_bytes: Option<usize>,
     /// Optional expected schema: list of (column_name, type_name) pairs.
     pub expected_schema: Option<Vec<(String, String)>>,
 }
@@ -34,17 +36,55 @@ impl CreateSourceCommand {
     /// Create a new CreateSourceCommand.
     pub fn new(
         connector: impl Into<String>,
-        args: HashMap<String, String>,
+        mut args: HashMap<String, String>,
         pack: Option<String>,
     ) -> Self {
+        // Extract save_as and batch_bytes from args (source-level options, not connector args).
+        let save_as = args.remove("save_as");
+        let batch_bytes = args
+            .remove("batch_bytes")
+            .and_then(|v| parse_size(&v))
+            .or_else(|| default_batch_bytes(save_as.as_deref()));
         Self {
             connector: connector.into(),
             args,
             pack,
-            save_as: None,
+            save_as,
+            batch_bytes,
             expected_schema: None,
         }
     }
+}
+
+/// Default batching threshold: 1GB. Many small files are a query-time
+/// performance trap (each block adds per-file scan overhead), so we batch
+/// by default whenever we're going to convert to parquet. SAVE AS COPY/REF
+/// keep the original files intact and cannot be batched.
+const DEFAULT_BATCH_BYTES: usize = 1024 * 1024 * 1024;
+
+fn default_batch_bytes(save_as: Option<&str>) -> Option<usize> {
+    match save_as.map(|s| s.to_lowercase()).as_deref() {
+        None | Some("auto") | Some("parquet") => Some(DEFAULT_BATCH_BYTES),
+        _ => None,
+    }
+}
+
+/// Parse a size string like "10MB", "500KB", "1GB", or a plain number (bytes).
+fn parse_size(s: &str) -> Option<usize> {
+    let s = s.trim();
+    let s_upper = s.to_uppercase();
+    let (num_str, multiplier) = if let Some(n) = s_upper.strip_suffix("GB") {
+        (n.trim(), 1_024 * 1_024 * 1_024)
+    } else if let Some(n) = s_upper.strip_suffix("MB") {
+        (n.trim(), 1_024 * 1_024)
+    } else if let Some(n) = s_upper.strip_suffix("KB") {
+        (n.trim(), 1_024)
+    } else if let Some(n) = s_upper.strip_suffix("B") {
+        (n.trim(), 1)
+    } else {
+        (s_upper.as_str(), 1)
+    };
+    num_str.trim().parse::<usize>().ok().map(|n| n * multiplier)
 }
 
 impl CommandParsing for CreateSourceCommand {
@@ -138,8 +178,12 @@ impl CommandParsing for CreateSourceCommand {
             return Err("CREATE SOURCE requires at least one argument in WITH clause".into());
         }
 
+        // Inject parser-extracted save_as into args so new() sees it when
+        // computing the batch_bytes default. new() will remove it again.
+        if let Some(ref s) = save_as {
+            args.insert("save_as".to_string(), s.clone());
+        }
         let mut cmd = CreateSourceCommand::new(connector, args, pack);
-        cmd.save_as = save_as;
         cmd.expected_schema = expected_schema;
         Ok(cmd)
     }
@@ -213,6 +257,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
 
         let mut op = CreateSourceOp::setup(source_id, pack_id, self.connector.clone(), self.args.clone(), self.save_as.clone());
         op.expected_schema = expected_schema;
+        op.batch_bytes = self.batch_bytes;
 
         builder.apply_operation(op.into()).await?;
 
@@ -227,9 +272,8 @@ impl BundleBuilderCommand for CreateSourceCommand {
         // Extract json_* args as reader-level read options (connector validation already skips them).
         let json_read_options = super::extract_json_opts(&self.args);
 
-        // Process fetch actions
-        let mut files_added = 0usize;
-        let mut rows_added: Option<usize> = Some(0); // None = at least one file had unknown row count
+        // Prepare all AttachBlockOps first, then batch them if batch_size is configured
+        let mut prepared_ops: Vec<(AttachBlockOp, String)> = Vec::new();
         for action in actions {
             match action {
                 FetchAction::Add(data) => {
@@ -253,22 +297,36 @@ impl BundleBuilderCommand for CreateSourceCommand {
                             id: source_id,
                             location: data.source_location,
                             version: data.version,
+                            batch_sources: None,
                         }),
                         None,
                         builder,
                     )
                     .await?;
-                    files_added += 1;
-                    rows_added = match (rows_added, op.num_rows) {
-                        (Some(acc), Some(n)) => Some(acc + n),
-                        _ => None,
-                    };
-                    builder.apply_operation(op.into()).await?;
+                    let attach_location = op.location.clone();
+                    prepared_ops.push((op, attach_location));
                 }
                 FetchAction::Replace { .. } | FetchAction::Remove { .. } => {
                     // These shouldn't happen on initial source creation
                 }
             }
+        }
+
+        let final_ops = if let Some(batch_bytes) = self.batch_bytes {
+            super::fetch::batch_small_ops_public(prepared_ops, batch_bytes, source_id, builder).await?
+        } else {
+            prepared_ops
+        };
+
+        let mut files_added = 0usize;
+        let mut rows_added: Option<usize> = Some(0);
+        for (op, _) in final_ops {
+            files_added += 1;
+            rows_added = match (rows_added, op.num_rows) {
+                (Some(acc), Some(n)) => Some(acc + n),
+                _ => None,
+            };
+            builder.apply_operation(op.into()).await?;
         }
 
         if files_added == 0 {
@@ -344,6 +402,75 @@ mod parsing_tests {
                 assert_eq!(c.connector, "acme.weather");
                 assert_eq!(c.args.get("region"), Some(&"us-east".to_string()));
                 assert_eq!(c.pack, Some("users".to_string()));
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_default_batch_bytes_when_save_as_unset() {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/".to_string());
+        let cmd = CreateSourceCommand::new("remote_dir", args, None);
+        assert_eq!(cmd.batch_bytes, Some(1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn test_default_batch_bytes_when_save_as_parquet() {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/".to_string());
+        args.insert("save_as".to_string(), "parquet".to_string());
+        let cmd = CreateSourceCommand::new("remote_dir", args, None);
+        assert_eq!(cmd.batch_bytes, Some(1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn test_no_default_batch_bytes_when_save_as_copy() {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/".to_string());
+        args.insert("save_as".to_string(), "copy".to_string());
+        let cmd = CreateSourceCommand::new("remote_dir", args, None);
+        assert_eq!(cmd.batch_bytes, None);
+    }
+
+    #[test]
+    fn test_no_default_batch_bytes_when_save_as_ref() {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/".to_string());
+        args.insert("save_as".to_string(), "ref".to_string());
+        let cmd = CreateSourceCommand::new("remote_dir", args, None);
+        assert_eq!(cmd.batch_bytes, None);
+    }
+
+    #[test]
+    fn test_user_batch_bytes_overrides_default() {
+        let mut args = HashMap::new();
+        args.insert("url".to_string(), "s3://bucket/".to_string());
+        args.insert("batch_bytes".to_string(), "100MB".to_string());
+        let cmd = CreateSourceCommand::new("remote_dir", args, None);
+        assert_eq!(cmd.batch_bytes, Some(100 * 1024 * 1024));
+    }
+
+    #[test]
+    fn test_default_applied_after_save_as_clause_in_parser() {
+        let input = "CREATE SOURCE USING remote_dir WITH (url = 's3://bucket/') SAVE AS COPY";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.save_as, Some("copy".to_string()));
+                assert_eq!(c.batch_bytes, None, "copy must not get default batching");
+            }
+            _ => panic!("Expected CreateSource variant"),
+        }
+    }
+
+    #[test]
+    fn test_default_applied_after_save_as_parquet_in_parser() {
+        let input = "CREATE SOURCE USING remote_dir WITH (url = 's3://bucket/') SAVE AS PARQUET";
+        let cmd = parse_command(input).unwrap();
+        match cmd {
+            BundleCommand::CreateSource(c) => {
+                assert_eq!(c.batch_bytes, Some(1024 * 1024 * 1024));
             }
             _ => panic!("Expected CreateSource variant"),
         }

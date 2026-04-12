@@ -47,6 +47,7 @@ bytes = { workspace = true }
 log = "0.4"
 tracing = { workspace = true }
 sha2 = { workspace = true }
+xxhash-rust = { workspace = true }
 hex = "0.4"
 parquet = { workspace = true }
 rand = { workspace = true }

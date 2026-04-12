@@ -164,6 +164,10 @@ pub struct Bundle {
     min_version: Arc<RwLock<Option<(u16, u16)>>>,
     /// Maximum bundlebase version allowed to open this bundle (major, minor)
     max_version: Arc<RwLock<Option<(u16, u16)>>>,
+
+    /// Running SHA-256 hasher for incremental version computation.
+    /// Feeds each operation's version hash as it's applied, avoiding O(n) re-iteration.
+    version_hasher: Arc<RwLock<Sha256>>,
 }
 
 impl bundlebase_data::DataContext for Bundle {
@@ -225,6 +229,7 @@ impl Clone for Bundle {
             is_view: Arc::clone(&self.is_view),
             min_version: Arc::clone(&self.min_version),
             max_version: Arc::clone(&self.max_version),
+            version_hasher: Arc::clone(&self.version_hasher),
         }
     }
 }
@@ -322,6 +327,7 @@ impl Bundle {
             is_view: Arc::new(RwLock::new(false)),
             min_version: Arc::new(RwLock::new(None)),
             max_version: Arc::new(RwLock::new(None)),
+            version_hasher: Arc::new(RwLock::new(Sha256::new())),
         });
 
         // Register schema providers and the search() table function
@@ -519,10 +525,14 @@ impl Bundle {
                         }
                     }
                     debug!("    Applying: {}", op.describe());
-                    bundle.apply_operation(op).await?;
+                    bundle.apply_operation_deferred(op).await?;
                 }
             }
         }
+
+        // Compute version once after all operations are applied (O(n) instead of O(n²))
+        bundle.recompute_version();
+
         Ok(())
     }
 
@@ -681,9 +691,8 @@ impl Bundle {
 
         debug!("Apply: {}", &description);
         op.apply(self).await?;
+        self.update_version_for_op(&op);
         self.operations.write().push(op);
-
-        self.compute_version();
         // clear cached values
         self.dataframe.clear();
         *self.bundle_schema.write() = BundleSchema::new();
@@ -691,6 +700,25 @@ impl Bundle {
 
         debug!("Applying operation to bundle: {}...DONE", &description);
 
+        Ok(())
+    }
+
+    /// Applies an operation without recomputing the version.
+    /// Used during bulk manifest loading where intermediate versions are never read.
+    /// Call `recompute_version()` once after all operations are applied.
+    async fn apply_operation_deferred(&self, op: AnyOperation) -> Result<(), BundlebaseError> {
+        let description = &op.describe();
+        debug!("Applying operation (deferred): {}...", &description);
+
+        op.check(self).await?;
+        op.apply(self).await?;
+        self.operations.write().push(op);
+
+        // Clear cached values so subsequent operations see fresh state
+        self.dataframe.clear();
+        *self.bundle_schema.write() = BundleSchema::new();
+
+        debug!("Applying operation (deferred): {}...DONE", &description);
         Ok(())
     }
 
@@ -792,6 +820,7 @@ impl Bundle {
         *self.always_delete_rules.write() = other.always_delete_rules.read().clone();
         *self.always_update_rules.write() = other.always_update_rules.read().clone();
         *self.update_overlays.write() = other.update_overlays.read().clone();
+        *self.version_hasher.write() = other.version_hasher.read().clone();
         self.dataframe.clear();
         *self.bundle_schema.write() = BundleSchema::new();
     }
@@ -906,17 +935,33 @@ impl Bundle {
         resolved
     }
 
-    fn compute_version(&self) {
+    /// Incrementally updates the version by feeding a single new operation into the
+    /// running hasher. O(1) per call instead of O(n).
+    fn update_version_for_op(&self, op: &AnyOperation) {
+        let mut hasher = self.version_hasher.write();
+        hasher.update(op.version().as_bytes());
+
+        // Finalize a clone to get the version string without consuming the running state
+        let new_version = hex::encode(hasher.clone().finalize())[0..12].to_string();
+        *self.version.write() = new_version.clone();
+
+        self.function_registry.read().refresh_version_udf(new_version);
+    }
+
+    /// Recomputes the version from scratch by iterating all operations.
+    /// Also resets the running hasher to match. Used during bulk loading
+    /// and for correctness verification in tests.
+    fn recompute_version(&self) {
         let mut hasher = Sha256::new();
 
         for op in self.operations.read().iter() {
             hasher.update(op.version().as_bytes());
         }
 
+        *self.version_hasher.write() = hasher.clone();
         let new_version = hex::encode(hasher.finalize())[0..12].to_string();
         *self.version.write() = new_version.clone();
 
-        // Re-register version() UDF with the updated version
         self.function_registry.read().refresh_version_udf(new_version);
     }
 

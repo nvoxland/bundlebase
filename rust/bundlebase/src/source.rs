@@ -57,3 +57,4 @@ pub use crate::connector::{
     ConnectorRegistry, ConnectorSignature,
 };
 pub use fetch::orchestrate_fetch;
+pub use fetch::{download_to_data_dir, read_parquet_batches, write_merged_jsonl, write_merged_parquet};

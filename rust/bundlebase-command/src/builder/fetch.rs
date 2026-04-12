@@ -2,7 +2,7 @@
 
 use crate::parser::{extract_identifier, quote_identifier};
 use crate::{CommandParsing, Rule};
-use bundlebase::bundle::operation::{AnyOperation, AttachBlockOp, DetachBlockOp, SourceInfo};
+use bundlebase::bundle::operation::{AnyOperation, AttachBlockOp, BatchedSource, DetachBlockOp, SourceInfo};
 use bundlebase::ExpectedColumn;
 use bundlebase_data::attach_format::AttachFormat;
 use bundlebase_data::ObjectId;
@@ -10,6 +10,7 @@ use bundlebase_data::BlockId;
 use bundlebase_common::progress::ProgressScope;
 use bundlebase::source::{FetchAction, FetchResults, SyncMode};
 use bundlebase_common::BundlebaseError;
+use futures::StreamExt;
 use log::{info, warn};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -213,46 +214,95 @@ async fn fetch_from_source(
     let connector = source.connector().to_string();
     let source_url = source.args().get("url").cloned().unwrap_or_default();
 
-    let rows_before = builder.num_rows().await? as u64;
+    // Skip rows_before: full scan is too expensive for large bundles
+    let rows_before: u64 = 0;
 
     let actions = source.fetch(builder, mode).await?;
 
-    // Process actions and collect them for the result
-    let progress = ProgressScope::new(
-        &format!("Applying {} fetch actions for '{}'", actions.len(), pack_name),
-        Some(actions.len() as u64),
-    );
-    let mut processed_actions = Vec::new();
+    // Separate Add actions (parallelizable setup) from Replace/Remove (sequential)
+    let mut add_actions = Vec::new();
+    let mut sequential_actions = Vec::new();
+    for action in actions.iter() {
+        match action {
+            FetchAction::Add(data) => add_actions.push(data.clone()),
+            _ => sequential_actions.push(action.clone()),
+        }
+    }
 
-    for (idx, action) in actions.into_iter().enumerate() {
-        match &action {
-            FetchAction::Add(data) => {
-                let (final_location, format, hash) = resolve_attach_location(
-                    builder, &data.attach_location, data.hash.clone(), json_read_options.as_ref(),
-                ).await?;
-                let op = AttachBlockOp::setup(
-                    pack_id,
-                    &final_location,
-                    format,
-                    hash.as_deref(),
-                    Some(SourceInfo {
-                        id: source_id,
-                        location: data.source_location.clone(),
-                        version: data.version.clone(),
-                    }),
-                    expected_schema.as_deref(),
-                    builder,
-                )
-                .await?;
-                validate_schema_against_expected(&op, expected_schema.as_deref(), &data.attach_location);
-                builder.apply_operation(op.into()).await?;
-                info!("Fetched {} to {}", data.attach_location, pack_name);
-            }
+    let total = actions.len();
+    let progress = ProgressScope::new(
+        &format!("Applying {} fetch actions for '{}'", total, pack_name),
+        Some(total as u64),
+    );
+
+    // Phase 1: Prepare Add operations concurrently (I/O-heavy setup: hash, schema, stats)
+    let setup_progress = ProgressScope::new(
+        &format!("Preparing {} new attachments", add_actions.len()),
+        Some(add_actions.len() as u64),
+    );
+
+    let prepared_adds: Vec<Result<(AttachBlockOp, String), BundlebaseError>> =
+        futures::stream::iter(add_actions.into_iter().enumerate())
+            .map(|(idx, data)| {
+                let json_read_options = &json_read_options;
+                let expected_schema = &expected_schema;
+                let setup_progress = &setup_progress;
+                async move {
+                    let (final_location, format, hash) = resolve_attach_location(
+                        builder, &data.attach_location, data.hash.clone(), json_read_options.as_ref(),
+                    ).await?;
+                    let op = AttachBlockOp::setup(
+                        pack_id,
+                        &final_location,
+                        format,
+                        hash.as_deref(),
+                        Some(SourceInfo {
+                            id: source_id,
+                            location: data.source_location.clone(),
+                            version: data.version.clone(),
+                            batch_sources: None,
+                        }),
+                        expected_schema.as_deref(),
+                        builder,
+                    ).await?;
+                    validate_schema_against_expected(&op, expected_schema.as_deref(), &data.attach_location);
+                    setup_progress.update((idx + 1) as u64, Some(&data.attach_location));
+                    Ok((op, data.attach_location.clone()))
+                }
+            })
+            .buffer_unordered(100)
+            .collect()
+            .await;
+
+    // Collect prepared ops, propagating errors
+    let mut prepared_ops: Vec<(AttachBlockOp, String)> = Vec::with_capacity(prepared_adds.len());
+    for result in prepared_adds {
+        prepared_ops.push(result?);
+    }
+
+    // Phase 2: Batch small files if batch_bytes is configured on the source.
+    let final_ops = if let Some(batch_bytes) = source.batch_bytes() {
+        batch_small_ops(prepared_ops, batch_bytes, source_id, builder).await?
+    } else {
+        prepared_ops
+    };
+
+    // Phase 3: Apply prepared Add operations sequentially (fast, no I/O)
+    let mut applied = 0;
+    for (op, attach_location) in final_ops {
+        builder.apply_operation(op.into()).await?;
+        applied += 1;
+        progress.update(applied as u64, None);
+        info!("Fetched {} to {}", attach_location, pack_name);
+    }
+
+    // Phase 4: Process Replace/Remove actions sequentially (depend on bundle state)
+    for action in &sequential_actions {
+        match action {
             FetchAction::Replace {
                 old_source_location,
                 data,
             } => {
-                // Clone bundle for find_block_location_by_source lookup
                 let bundle_snapshot = builder.bundle().clone();
                 let old_location =
                     find_block_location_by_source(&bundle_snapshot, &source_id, old_source_location)?;
@@ -271,6 +321,7 @@ async fn fetch_from_source(
                         id: source_id,
                         location: data.source_location.clone(),
                         version: data.version.clone(),
+                        batch_sources: None,
                     }),
                     expected_schema.as_deref(),
                     builder,
@@ -281,19 +332,22 @@ async fn fetch_from_source(
                 info!("Replaced {} in {}", data.attach_location, pack_name);
             }
             FetchAction::Remove { source_location } => {
-                // Clone bundle for find_block_location_by_source lookup
                 let bundle_snapshot = builder.bundle().clone();
                 let location = find_block_location_by_source(&bundle_snapshot, &source_id, source_location)?;
                 let detach_op = DetachBlockOp::setup(&location, builder).await?;
                 builder.apply_operation(detach_op.into()).await?;
                 info!("Removed {} from {}", location, pack_name);
             }
+            _ => {}
         }
-        processed_actions.push(action);
-        progress.update((idx + 1) as u64, None);
+        applied += 1;
+        progress.update(applied as u64, None);
     }
 
-    let rows_after = builder.num_rows().await? as u64;
+    let processed_actions = actions;
+
+    // Skip rows_after: full scan is too expensive for large bundles
+    let rows_after: u64 = 0;
 
     let mut results = FetchResults::from_actions(
         connector,
@@ -361,6 +415,12 @@ fn find_block_location_by_source(
                     if &info.id == source_id && info.location == source_location {
                         return Some(attach.location.clone());
                     }
+                    // Also check batched source locations
+                    if let Some(ref batch_sources) = info.batch_sources {
+                        if batch_sources.iter().any(|b| b.location == source_location) {
+                            return Some(attach.location.clone());
+                        }
+                    }
                 }
             }
             None
@@ -372,6 +432,230 @@ fn find_block_location_by_source(
             )
             .into()
         })
+}
+
+/// Public wrapper for `batch_small_ops` — used by create_source.rs.
+pub(crate) async fn batch_small_ops_public(
+    ops: Vec<(AttachBlockOp, String)>,
+    batch_bytes: usize,
+    source_id: ObjectId,
+    builder: &BundleBuilder,
+) -> Result<Vec<(AttachBlockOp, String)>, BundlebaseError> {
+    batch_small_ops(ops, batch_bytes, source_id, builder).await
+}
+
+/// Group ops into chunks where cumulative bytes reach `batch_bytes` threshold.
+/// Files larger than threshold become single-item chunks (passed through unchanged).
+fn group_by_size(ops: Vec<(AttachBlockOp, String)>, batch_bytes: usize) -> Vec<Vec<(AttachBlockOp, String)>> {
+    let mut chunks: Vec<Vec<(AttachBlockOp, String)>> = Vec::new();
+    let mut current: Vec<(AttachBlockOp, String)> = Vec::new();
+    let mut current_bytes: usize = 0;
+
+    for (op, loc) in ops {
+        let op_bytes = op.bytes.unwrap_or(0);
+        // If this file alone exceeds the threshold, emit it as its own chunk
+        if op_bytes >= batch_bytes {
+            if !current.is_empty() {
+                chunks.push(std::mem::take(&mut current));
+                current_bytes = 0;
+            }
+            chunks.push(vec![(op, loc)]);
+            continue;
+        }
+        // If adding this file would exceed the threshold and current is non-empty, flush first
+        if !current.is_empty() && current_bytes + op_bytes > batch_bytes {
+            chunks.push(std::mem::take(&mut current));
+            current_bytes = 0;
+        }
+        current.push((op, loc));
+        current_bytes += op_bytes;
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+/// Batch small files into larger combined blocks.
+///
+/// Groups prepared AttachBlockOps into chunks where the cumulative raw bytes
+/// reach `batch_bytes` threshold. Files larger than the threshold are passed
+/// through as single-file chunks. Only parquet files are batched — other formats
+/// (JSONL, CSV, etc.) are passed through unchanged.
+async fn batch_small_ops(
+    ops: Vec<(AttachBlockOp, String)>,
+    batch_bytes: usize,
+    _source_id: ObjectId,
+    builder: &BundleBuilder,
+) -> Result<Vec<(AttachBlockOp, String)>, BundlebaseError> {
+    use bundlebase::source::{read_parquet_batches, write_merged_parquet};
+
+    if batch_bytes == 0 || ops.len() <= 1 {
+        return Ok(ops);
+    }
+
+    // Only parquet files are batched. Other formats pass through unchanged.
+    let mut parquet_ops = Vec::new();
+    let mut other_ops = Vec::new();
+    for (op, loc) in ops {
+        match op.format {
+            AttachFormat::Parquet => parquet_ops.push((op, loc)),
+            _ => other_ops.push((op, loc)),
+        }
+    }
+
+    let total_batchable = parquet_ops.len();
+    let progress = ProgressScope::new(
+        &format!("Batching {} parquet files (threshold {} bytes)", total_batchable, batch_bytes),
+        Some(total_batchable as u64),
+    );
+
+    let mut result = other_ops;
+    let mut processed = 0usize;
+
+    // Batch parquet files by size
+    let parquet_chunks = group_by_size(parquet_ops, batch_bytes);
+    for (batch_idx, chunk) in parquet_chunks.into_iter().enumerate() {
+        if chunk.len() == 1 {
+            result.push(chunk.into_iter().next().unwrap());
+            processed += 1;
+            progress.update(processed as u64, None);
+            continue;
+        }
+
+        let data_dir = builder.bundle().data_dir();
+        let first_op = &chunk[0].0;
+        let batch_sources = build_batch_sources(&chunk);
+
+        // First pass: read all parquet files in parallel (I/O bound)
+        let data_dir_clone = builder.bundle().data_dir();
+        let locations: Vec<String> = chunk.iter().map(|(op, _)| op.location.clone()).collect();
+        let read_results: Vec<Result<(arrow_schema::SchemaRef, Vec<arrow::record_batch::RecordBatch>), BundlebaseError>> =
+            futures::stream::iter(locations.into_iter())
+                .map(|location| {
+                    let dir = data_dir_clone.clone();
+                    async move {
+                        read_parquet_batches(&location, dir.as_ref()).await
+                    }
+                })
+                .buffer_unordered(50)
+                .collect()
+                .await;
+
+        let mut per_file_batches: Vec<Vec<arrow::record_batch::RecordBatch>> = Vec::new();
+        let mut union_fields: Vec<arrow_schema::Field> = Vec::new();
+        let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut total_rows: usize = 0;
+        let mut total_bytes: usize = 0;
+
+        for (read_result, (op, _)) in read_results.into_iter().zip(chunk.iter()) {
+            let (schema, batches) = read_result?;
+            for field in schema.fields() {
+                if seen_names.insert(field.name().clone()) {
+                    union_fields.push(field.as_ref().clone());
+                }
+            }
+            for batch in &batches {
+                total_rows += batch.num_rows();
+            }
+            per_file_batches.push(batches);
+            total_bytes += op.bytes.unwrap_or(0);
+        }
+
+        let union_schema = Arc::new(arrow_schema::Schema::new(union_fields));
+
+        // Second pass: align each batch to the union schema, adding null columns for missing fields
+        let mut all_batches = Vec::new();
+        for batches in per_file_batches {
+            for batch in batches {
+                let aligned = align_batch_to_schema(&batch, &union_schema)?;
+                all_batches.push(aligned);
+            }
+        }
+
+        let schema = union_schema;
+        let write_result = write_merged_parquet(all_batches, data_dir.as_ref()).await?;
+        let merged_location = data_dir.relative_path(write_result.file.as_ref())?;
+        let merged_hash = write_result.hash;
+
+        let chunk_len = chunk.len();
+        let merged_op = build_merged_op(first_op, &merged_location, &merged_hash, AttachFormat::Parquet,
+            &batch_sources, Some(total_rows), Some(total_bytes), Some(schema));
+        result.push((merged_op, format!("parquet-batch-{} ({} files)", batch_idx, chunk_len)));
+        processed += chunk_len;
+        progress.update(processed as u64, None);
+        info!("Batched {} parquet files into {}", chunk_len, merged_location);
+    }
+
+    Ok(result)
+}
+
+/// Align a RecordBatch to a target schema by adding null columns for missing fields.
+fn align_batch_to_schema(
+    batch: &arrow::record_batch::RecordBatch,
+    target: &arrow_schema::SchemaRef,
+) -> Result<arrow::record_batch::RecordBatch, BundlebaseError> {
+    let batch_schema = batch.schema();
+    let num_rows = batch.num_rows();
+    let mut columns: Vec<Arc<dyn arrow::array::Array>> = Vec::with_capacity(target.fields().len());
+    for field in target.fields() {
+        if let Some((i, _)) = batch_schema.fields().iter().enumerate()
+            .find(|(_, f)| f.name() == field.name())
+        {
+            columns.push(batch.column(i).clone());
+        } else {
+            // Add null column matching target type
+            let null_array = arrow::array::new_null_array(field.data_type(), num_rows);
+            columns.push(null_array);
+        }
+    }
+    arrow::record_batch::RecordBatch::try_new(target.clone(), columns)
+        .map_err(|e| BundlebaseError::from(format!("Failed to align batch: {}", e)))
+}
+
+/// Build BatchedSource entries from a chunk of ops (skip first, it becomes primary).
+fn build_batch_sources(chunk: &[(AttachBlockOp, String)]) -> Vec<BatchedSource> {
+    chunk.iter().skip(1).filter_map(|(op, _)| {
+        op.source_info.as_ref().map(|si| BatchedSource {
+            location: si.location.clone(),
+            version: si.version.clone(),
+        })
+    }).collect()
+}
+
+/// Build a merged AttachBlockOp from a batch.
+fn build_merged_op(
+    first_op: &AttachBlockOp,
+    merged_location: &str,
+    merged_hash: &str,
+    format: AttachFormat,
+    batch_sources: &[BatchedSource],
+    num_rows: Option<usize>,
+    bytes: Option<usize>,
+    schema: Option<arrow_schema::SchemaRef>,
+) -> AttachBlockOp {
+    let merged_source_info = first_op.source_info.as_ref().map(|si| SourceInfo {
+        id: si.id,
+        location: si.location.clone(),
+        version: si.version.clone(),
+        batch_sources: if batch_sources.is_empty() { None } else { Some(batch_sources.to_vec()) },
+    });
+
+    AttachBlockOp {
+        id: BlockId::generate(),
+        pack: first_op.pack,
+        location: merged_location.to_string(),
+        format,
+        read_options: None,
+        version: merged_hash.to_string(),
+        hash: merged_hash.to_string(),
+        source_info: merged_source_info,
+        layout: None,
+        num_rows,
+        bytes,
+        schema,
+        column_ids: first_op.column_ids.clone(),
+    }
 }
 
 /// Validate a fetched block's schema against the source's expected schema.

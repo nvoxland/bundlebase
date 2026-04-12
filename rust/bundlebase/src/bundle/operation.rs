@@ -43,7 +43,7 @@ mod update_version;
 pub use crate::bundle::operation::add_column::AddColumnOp;
 pub use crate::bundle::operation::always_delete::AlwaysDeleteOp;
 pub use crate::bundle::operation::always_update::AlwaysUpdateOp;
-pub use crate::bundle::operation::attach_block::{AttachBlockOp, SourceInfo};
+pub use crate::bundle::operation::attach_block::{AttachBlockOp, BatchedSource, SourceInfo};
 pub use crate::bundle::operation::cast_column::CastColumnOp;
 pub use crate::bundle::operation::drop_cast_column::DropCastColumnOp;
 pub use crate::bundle::operation::create_report::CreateReportOp;

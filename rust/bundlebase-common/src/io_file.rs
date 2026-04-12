@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use sha2::{Digest, Sha256};
+use xxhash_rust::xxh3::Xxh3;
 use std::fmt::Debug;
 use url::Url;
 
@@ -82,13 +82,13 @@ pub trait IOReadFile: Send + Sync + Debug {
     /// This could be an ETag, last modified time hash, or version ID.
     async fn version(&self) -> Result<String, BundlebaseError>;
 
-    /// Compute the SHA256 hash of the file content by streaming.
+    /// Compute the xxHash (xxh3-128) of the file content by streaming.
     ///
     /// Reads the file in chunks and computes the hash incrementally,
     /// avoiding loading the entire file into memory.
-    /// Returns the full 64-character hex string.
+    /// Returns a 32-character hex string.
     async fn compute_hash(&self) -> Result<String, BundlebaseError> {
-        let mut hasher = Sha256::new();
+        let mut hasher = Xxh3::new();
 
         if let Some(mut stream) = self.open_stream().await? {
             while let Some(chunk_result) = stream.next().await {
@@ -102,7 +102,7 @@ pub trait IOReadFile: Send + Sync + Debug {
             )));
         }
 
-        Ok(format!("{:x}", hasher.finalize()))
+        Ok(format!("{:032x}", hasher.digest128()))
     }
 }
 

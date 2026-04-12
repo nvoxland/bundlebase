@@ -117,16 +117,18 @@ impl DataReader for JsonlReader {
     }
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
-        // Validate the file is JSONL (one object per line), not a JSON array.
+        // Read first 64KB — enough for JSON array check + first-line schema inference.
         let store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())?;
         let opts = object_store::GetOptions {
-            range: Some((0..64).into()),
+            range: Some((0..65536).into()),
             ..Default::default()
         };
         let result = store.get_opts(&path, opts).await?;
-        let head = result.bytes().await?;
-        let first_char = head.iter()
+        let bytes = result.bytes().await?;
+
+        // Validate the file is JSONL (one object per line), not a JSON array.
+        let first_char = bytes.iter()
             .find(|b| !b.is_ascii_whitespace())
             .copied();
         if first_char == Some(b'[') {
@@ -138,7 +140,23 @@ impl DataReader for JsonlReader {
             )));
         }
 
-        self.inner.read_schema().await
+        // Read field names from the first JSON line and treat all columns as Utf8,
+        // just like CSV. This avoids Arrow's sampling-based schema inference which
+        // fails on files with mixed types across records.
+        let first_line = bytes.iter()
+            .position(|&b| b == b'\n')
+            .map(|pos| &bytes[..pos])
+            .unwrap_or(&bytes[..]);
+        let parsed: serde_json::Value = serde_json::from_slice(first_line)
+            .map_err(|e| BundlebaseError::from(format!("Failed to parse first JSONL line from {}: {}", self.inner.url(), e)))?;
+        if let serde_json::Value::Object(map) = parsed {
+            let fields: Vec<arrow::datatypes::Field> = map.keys()
+                .map(|k| arrow::datatypes::Field::new(k, arrow::datatypes::DataType::Utf8, true))
+                .collect();
+            Ok(Some(Arc::new(arrow::datatypes::Schema::new(fields))))
+        } else {
+            Err(BundlebaseError::from(format!("First JSONL line is not a JSON object in {}", self.inner.url())))
+        }
     }
 
     async fn data_source(
@@ -160,7 +178,6 @@ impl DataReader for JsonlReader {
             .map_err(|e| DataFusionError::External(e))?;
 
             let schema = self
-                .inner
                 .read_schema()
                 .await
                 .map_err(|e| DataFusionError::External(e))?
@@ -174,9 +191,56 @@ impl DataReader for JsonlReader {
                 LineOrientedFormat::JsonLines,
             )));
         }
-        self.inner
-            .data_source(projection, filters, limit)
+        // Read JSONL with serde_json and stringify all values to produce all-Utf8
+        // Arrow columns. This avoids Arrow's strict JSON reader which rejects
+        // non-string values (booleans, numbers, objects) when schema says Utf8.
+        let schema = self
+            .read_schema()
             .await
+            .map_err(|e| DataFusionError::External(e))?
+            .ok_or_else(|| DataFusionError::Internal("No schema available".to_string()))?;
+
+        let store = self.inner.object_store();
+        let path = object_store::path::Path::parse(self.inner.url().path())
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let result = store.get_opts(&path, Default::default()).await
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let bytes = result.bytes().await
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        let col_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
+        let mut builders: Vec<arrow::array::StringBuilder> = (0..col_names.len())
+            .map(|_| arrow::array::StringBuilder::new())
+            .collect();
+
+        for line in bytes.split(|&b| b == b'\n') {
+            let line = if line.last() == Some(&b'\r') { &line[..line.len() - 1] } else { line };
+            if line.is_empty() { continue; }
+            let obj: serde_json::Map<String, serde_json::Value> = match serde_json::from_slice(line) {
+                Ok(serde_json::Value::Object(m)) => m,
+                _ => continue,
+            };
+            for (i, name) in col_names.iter().enumerate() {
+                let val = obj.get(name)
+                    .map(bundlebase_common::source_utils::json_value_to_string)
+                    .unwrap_or_default();
+                builders[i].append_value(&val);
+            }
+        }
+
+        let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
+            .into_iter()
+            .map(|mut b| Arc::new(b.finish()) as Arc<dyn arrow::array::Array>)
+            .collect();
+        let batch = arrow::record_batch::RecordBatch::try_new(schema.clone(), arrays)
+            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+
+        let proj = projection.cloned();
+        let partitions = vec![vec![batch]];
+        let source = Arc::new(
+            datafusion::datasource::memory::MemorySourceConfig::try_new(&partitions, schema, proj)?
+        );
+        Ok(source as Arc<dyn DataSource>)
     }
 
     async fn read_version(&self) -> Result<String, BundlebaseError> {
@@ -247,7 +311,8 @@ impl DataReader for JsonlReader {
         let path = object_store::path::Path::parse(self.inner.url().path())?;
 
         // Get column names from the schema for name→idx mapping
-        let schema = match self.inner.read_schema().await? {
+        // Use self.read_schema() (not self.inner) to get the fallback-aware schema
+        let schema = match self.read_schema().await? {
             Some(s) => s,
             None => return Ok(None),
         };
@@ -277,12 +342,12 @@ impl DataReader for JsonlReader {
         for line in buffer.split(|&b| b == b'\n') {
             let line = if line.last() == Some(&b'\r') { &line[..line.len() - 1] } else { line };
             if line.is_empty() { continue; }
-            let obj: serde_json::Map<String, serde_json::Value> =
-                match serde_json::from_slice(line) {
-                    Ok(serde_json::Value::Object(m)) => m,
-                    _ => continue,
-                };
-            builder.process_jsonl_row(&obj, &name_to_idx, col_count);
+            match serde_json::from_slice::<serde_json::Value>(line) {
+                Ok(serde_json::Value::Object(m)) => {
+                    builder.process_jsonl_row(&m, &name_to_idx, col_count);
+                }
+                _ => continue,
+            }
         }
 
         let column_stats = builder.finish();

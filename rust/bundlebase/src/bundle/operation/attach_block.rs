@@ -29,6 +29,19 @@ pub struct SourceInfo {
     pub location: String,
     /// The version of the source at fetch time (e.g., ETag, last-modified)
     pub version: String,
+    /// Additional source locations when this block was created by batching multiple small files.
+    /// Each entry is (location, version). The primary `location` and `version` fields hold the
+    /// first file's info for backwards compatibility.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_sources: Option<Vec<BatchedSource>>,
+}
+
+/// A single source file within a batched block.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchedSource {
+    pub location: String,
+    pub version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -41,7 +54,7 @@ pub struct AttachBlockOp {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub read_options: Option<HashMap<String, String>>,
     pub version: String,
-    /// SHA256 hash of the content (full 64-character hex string)
+    /// xxHash (xxh3-128) of the content (32-character hex string)
     pub hash: String,
     #[serde(rename = "source", skip_serializing_if = "Option::is_none")]
     pub source_info: Option<SourceInfo>,
@@ -101,10 +114,7 @@ impl AttachBlockOp {
                         .await?;
                     let version = adapter.read_version().await?;
 
-                    use sha2::{Digest, Sha256};
-                    let mut hasher = Sha256::new();
-                    hasher.update(version.as_bytes());
-                    hex::encode(hasher.finalize())
+                    format!("{:032x}", xxhash_rust::xxh3::xxh3_128(version.as_bytes()))
                 } else {
                     let file = readable_file_from_path(location, builder.data_dir(), builder.config()).await?;
                     file.compute_hash().await?
@@ -253,6 +263,7 @@ impl Operation for AttachBlockOp {
             bundle.config(),
             self.source_info.clone(),
             self.column_ids.clone(),
+            self.num_rows,
         ));
 
         let pack = bundle.get_pack(&self.pack).expect("Cannot find pack");
@@ -261,6 +272,7 @@ impl Operation for AttachBlockOp {
         // Add to source's attached_files tracking
         if let Some(ref source_info) = self.source_info {
             if let Some(source) = bundle.get_source(&source_info.id) {
+                // Register the primary source location
                 source.add_attached_file(
                     &source_info.location,
                     AttachedFileInfo {
@@ -269,6 +281,19 @@ impl Operation for AttachBlockOp {
                         bytes: self.bytes,
                     },
                 );
+                // Register all batched source locations (if this is a batched block)
+                if let Some(ref batch_sources) = source_info.batch_sources {
+                    for batched in batch_sources {
+                        source.add_attached_file(
+                            &batched.location,
+                            AttachedFileInfo {
+                                location: self.location.clone(),
+                                version: batched.version.clone(),
+                                bytes: self.bytes,
+                            },
+                        );
+                    }
+                }
             }
         }
 
@@ -330,7 +355,7 @@ pack: {}
 location: memory:///test_data/userdata.parquet
 format: parquet
 version: {}
-hash: 59d4fdcdd71e5b6ab79d0bc8fae8ee6f144d3639250facb4b519b36b92c8a5cc
+hash: 8c26edb7f30d7694a1431224f28e5932
 numRows: 1000
 bytes: 113629
 schema:

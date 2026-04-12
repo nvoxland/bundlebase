@@ -629,13 +629,29 @@ impl BundleBuilder {
         let stream = futures::stream::iter(vec![Ok::<_, std::io::Error>(data)]);
         manifest_file.write_stream(Box::pin(stream)).await?;
 
-        // Update base to reflect the committed version
-        // Preserve explicit_config from current bundle
-        let new_bundle = Bundle::open(&url, passed_config).await?;
+        // Update metadata to reflect the committed version.
+        // The bundle state (operations, version, schema) is already correct in memory —
+        // we just need to record the commit, advance the manifest version, and apply
+        // any commit-time operations (DeleteOp, UpdateDataOp) that were added to the
+        // manifest but not yet applied to the in-memory bundle.
+        *self.bundle.last_manifest_version.write() = next_version;
 
-        // Replace the bundle contents using reload_from to preserve Arc references
-        // open_to_bundle returns Arc<Bundle> so we dereference to get the Bundle
-        self.bundle.reload_from((*new_bundle).clone());
+        // Apply commit-time operations that were created during commit serialization
+        // (tombstone DeleteOps and overlay UpdateDataOps)
+        for change in &commit_struct.changes {
+            for op in &change.operations {
+                let is_commit_time_op = matches!(op, AnyOperation::Delete(_) | AnyOperation::UpdateData(_));
+                if is_commit_time_op {
+                    self.bundle.apply_operation(op.clone()).await?;
+                }
+            }
+        }
+
+        // Set data_dir on the commit to match what open_recursive would have set,
+        // so that from() derivation works correctly for extended bundles.
+        let mut commit_with_metadata = commit_struct;
+        commit_with_metadata.data_dir = Some(self.bundle.data_dir().url().clone());
+        self.bundle.commits.write().push(commit_with_metadata);
 
         // Clear status since the operations have been persisted
         self.status.write().clear();

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use rand::Rng;
-use sha2::{Digest, Sha256};
+use xxhash_rust::xxh3::Xxh3;
 use std::fmt::Debug;
 use url::Url;
 
@@ -19,7 +19,7 @@ use crate::io_file::{IOReadFile, IOReadWriteFile};
 pub struct WriteResult {
     /// Reference to the written file
     pub file: Box<dyn IOReadFile>,
-    /// SHA256 hash of the content (full 64-character hex string)
+    /// xxHash (xxh3-128) of the content (32-character hex string)
     pub hash: String,
 }
 
@@ -142,7 +142,7 @@ pub trait IOReadWriteDir: IOReadDir {
         let temp_file = temp_dir.writable_file(&temp_name)?;
 
         // Consume stream: compute hash while buffering
-        let mut hasher = Sha256::new();
+        let mut hasher = Xxh3::new();
         let mut buffer = Vec::new();
         while let Some(chunk_result) = source.next().await {
             let chunk = chunk_result.map_err(|e| BundlebaseError::from(e.to_string()))?;
@@ -154,7 +154,7 @@ pub trait IOReadWriteDir: IOReadDir {
         temp_file.write(Bytes::from(buffer)).await?;
 
         // Compute hash - first 2 chars = subdir, remaining chars = filename
-        let hash = format!("{:x}", hasher.finalize());
+        let hash = format!("{:032x}", hasher.digest128());
         let subdir_name = &hash[..2];
         let file_name = format!("{}.{}", &hash[2..16], address.extension());
 

@@ -531,6 +531,7 @@ mod tests {
             connector: "http".to_string(),
             args: HashMap::new(),
             save_as: None,
+            batch_bytes: None,
             expected_schema: None,
         });
 

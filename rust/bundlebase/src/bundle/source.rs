@@ -23,6 +23,8 @@ pub struct Source {
     args: HashMap<String, String>,
     /// How to save fetched data.
     save_as: SaveAs,
+    /// Optional size threshold in bytes for batching small files together.
+    batch_bytes: Option<usize>,
     /// Attached files from this source, keyed by source_location
     attached_files: RwLock<HashMap<String, AttachedFileInfo>>,
 }
@@ -35,12 +37,24 @@ impl Source {
         args: HashMap<String, String>,
         save_as: SaveAs,
     ) -> Self {
+        Self::new_with_options(id, pack, connector, args, save_as, None)
+    }
+
+    pub fn new_with_options(
+        id: ObjectId,
+        pack: ObjectId,
+        connector: String,
+        args: HashMap<String, String>,
+        save_as: SaveAs,
+        batch_bytes: Option<usize>,
+    ) -> Self {
         Self {
             id,
             pack,
             connector: RwLock::new(connector),
             args,
             save_as,
+            batch_bytes,
             attached_files: RwLock::new(HashMap::new()),
         }
     }
@@ -60,13 +74,18 @@ impl Source {
             .transpose()?
             .unwrap_or(SaveAs::Auto);
 
-        Ok(Self::new(
+        Ok(Self::new_with_options(
             op.id,
             op.pack,
             op.connector.clone(),
             op.args.clone(),
             save_as,
+            op.batch_bytes,
         ))
+    }
+
+    pub fn batch_bytes(&self) -> Option<usize> {
+        self.batch_bytes
     }
 
     pub fn id(&self) -> &ObjectId {
@@ -90,6 +109,10 @@ impl Source {
 
     pub fn args(&self) -> &HashMap<String, String> {
         &self.args
+    }
+
+    pub fn save_as(&self) -> &SaveAs {
+        &self.save_as
     }
 
     /// Fetch this source: find new data and materialize it.
@@ -231,6 +254,7 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: make_args("s3://bucket/data/", Some("**/*.parquet")),
             save_as: None,
+            batch_bytes: None,
             expected_schema: None,
         };
 
@@ -254,6 +278,7 @@ mod tests {
             connector: "remote_dir".to_string(),
             args: args.clone(),
             save_as: None,
+            batch_bytes: None,
             expected_schema: None,
         };
 
@@ -274,6 +299,7 @@ mod tests {
             connector: "unknown_function".to_string(),
             args: HashMap::new(),
             save_as: None,
+            batch_bytes: None,
             expected_schema: None,
         };
 

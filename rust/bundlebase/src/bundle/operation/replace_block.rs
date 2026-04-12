@@ -74,6 +74,7 @@ impl ReplaceBlockOp {
             id: info.id,
             location: info.location,
             version: new_version.clone(),
+            batch_sources: info.batch_sources,
         });
 
         Ok(Self {
@@ -176,6 +177,7 @@ impl Operation for ReplaceBlockOp {
             bundle.config(),
             self.source_info.clone(),
             old_block.column_ids().to_vec(),
+            None,
         ));
 
         // Replace the old block with the new one in the pack
@@ -284,6 +286,7 @@ mod tests {
                 id: source_id,
                 location: "original/path.csv".to_string(),
                 version: "etag:abc123".to_string(),
+                batch_sources: None,
             }),
         };
 

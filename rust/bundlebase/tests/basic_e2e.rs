@@ -68,7 +68,7 @@ changes:
     location: memory:///test_data/userdata.parquet
     format: parquet
     version: {}
-    hash: 59d4fdcdd71e5b6ab79d0bc8fae8ee6f144d3639250facb4b519b36b92c8a5cc
+    hash: 8c26edb7f30d7694a1431224f28e5932
     numRows: 1000
     bytes: 113629
     schema:
@@ -221,7 +221,7 @@ changes:
     location: memory:///test_data/userdata.parquet
     format: parquet
     version: {}
-    hash: 59d4fdcdd71e5b6ab79d0bc8fae8ee6f144d3639250facb4b519b36b92c8a5cc
+    hash: 8c26edb7f30d7694a1431224f28e5932
     numRows: 1000
     bytes: 113629
     schema:
@@ -392,7 +392,7 @@ changes:
     location: memory:///test_data/customers-0-100.csv
     format: csv
     version: {}
-    hash: f2147696392a019d768a11ff68bab8e8dec77b5af2c93e8e5d5e399bd7bba8b9{}
+    hash: {}{}
     numRows: 100
     bytes: 17160
     schema:
@@ -448,6 +448,7 @@ changes:
                 AnyOperation::AttachBlock,
                 version
             )),
+            op_field!(commit.operations()[0], AnyOperation::AttachBlock, hash),
             layout_line,
         )
         .trim(),
