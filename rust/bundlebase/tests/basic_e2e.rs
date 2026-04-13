@@ -71,50 +71,7 @@ changes:
     hash: 8c26edb7f30d7694a1431224f28e5932
     numRows: 1000
     bytes: 113629
-    schema:
-      fields:
-      - name: registration_dttm
-        data_type:
-          type: Timestamp
-          unit: Nanosecond
-          timezone: null
-        nullable: true
-      - name: id
-        data_type: Int32
-        nullable: true
-      - name: first_name
-        data_type: Utf8View
-        nullable: true
-      - name: last_name
-        data_type: Utf8View
-        nullable: true
-      - name: email
-        data_type: Utf8View
-        nullable: true
-      - name: gender
-        data_type: Utf8View
-        nullable: true
-      - name: ip_address
-        data_type: Utf8View
-        nullable: true
-      - name: cc
-        data_type: Utf8View
-        nullable: true
-      - name: country
-        data_type: Utf8View
-        nullable: true
-      - name: birthdate
-        data_type: Utf8View
-        nullable: true
-      - name: salary
-        data_type: Float64
-        nullable: true
-      - name: title
-        data_type: Utf8View
-        nullable: true
-      - name: comments
-        data_type: Utf8View
-        nullable: true
+    schemaPath: 3b/a5bd5f9d91f9d1.block.schema.yaml
 - id: {}
   description: DROP COLUMN title
   operations:
@@ -224,50 +181,7 @@ changes:
     hash: 8c26edb7f30d7694a1431224f28e5932
     numRows: 1000
     bytes: 113629
-    schema:
-      fields:
-      - name: registration_dttm
-        data_type:
-          type: Timestamp
-          unit: Nanosecond
-          timezone: null
-        nullable: true
-      - name: id
-        data_type: Int32
-        nullable: true
-      - name: first_name
-        data_type: Utf8View
-        nullable: true
-      - name: last_name
-        data_type: Utf8View
-        nullable: true
-      - name: email
-        data_type: Utf8View
-        nullable: true
-      - name: gender
-        data_type: Utf8View
-        nullable: true
-      - name: ip_address
-        data_type: Utf8View
-        nullable: true
-      - name: cc
-        data_type: Utf8View
-        nullable: true
-      - name: country
-        data_type: Utf8View
-        nullable: true
-      - name: birthdate
-        data_type: Utf8View
-        nullable: true
-      - name: salary
-        data_type: Float64
-        nullable: true
-      - name: title
-        data_type: Utf8View
-        nullable: true
-      - name: comments
-        data_type: Utf8View
-        nullable: true
+    schemaPath: 3b/a5bd5f9d91f9d1.block.schema.yaml
 - id: {}
   description: DROP COLUMN title
   operations:
@@ -395,44 +309,7 @@ changes:
     hash: {}{}
     numRows: 100
     bytes: 17160
-    schema:
-      fields:
-      - name: Index
-        data_type: Utf8
-        nullable: true
-      - name: Customer Id
-        data_type: Utf8
-        nullable: true
-      - name: First Name
-        data_type: Utf8
-        nullable: true
-      - name: Last Name
-        data_type: Utf8
-        nullable: true
-      - name: Company
-        data_type: Utf8
-        nullable: true
-      - name: City
-        data_type: Utf8
-        nullable: true
-      - name: Country
-        data_type: Utf8
-        nullable: true
-      - name: Phone 1
-        data_type: Utf8
-        nullable: true
-      - name: Phone 2
-        data_type: Utf8
-        nullable: true
-      - name: Email
-        data_type: Utf8
-        nullable: true
-      - name: Subscription Date
-        data_type: Utf8
-        nullable: true
-      - name: Website
-        data_type: Utf8
-        nullable: true",
+    schemaPath: 26/2b64b78fa6eff8.block.schema.yaml",
             commit.author,
             commit.timestamp,
             commit.changes[0].id,

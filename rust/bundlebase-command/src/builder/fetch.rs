@@ -241,11 +241,11 @@ async fn fetch_from_source(
         Some(add_actions.len() as u64),
     );
 
-    // Share a single name→ColumnId map across all parallel attaches in this
-    // batch. Without this, every parallel setup() generates fresh ColumnIds
-    // for the same logical columns (because none of the sibling ops are
-    // applied yet), blowing up the merged schema by orders of magnitude.
-    let shared_column_ids = AttachBlockOp::shared_name_to_id_for(builder);
+    // Share a single SharedAttachContext across all parallel attaches in
+    // this batch. Without this, every parallel setup() generates fresh
+    // ColumnIds for the same logical columns AND re-writes the same schema
+    // file once per attach, blowing up both the merged schema and disk I/O.
+    let shared_ctx = AttachBlockOp::shared_attach_context_for(builder);
 
     let prepared_adds: Vec<Result<(AttachBlockOp, String), BundlebaseError>> =
         futures::stream::iter(add_actions.into_iter().enumerate())
@@ -253,12 +253,12 @@ async fn fetch_from_source(
                 let json_read_options = &json_read_options;
                 let expected_schema = &expected_schema;
                 let setup_progress = &setup_progress;
-                let shared_column_ids = shared_column_ids.clone();
+                let shared_ctx = shared_ctx.clone();
                 async move {
                     let (final_location, format, hash) = resolve_attach_location(
                         builder, &data.attach_location, data.hash.clone(), json_read_options.as_ref(),
                     ).await?;
-                    let op = AttachBlockOp::setup_with_shared_ids(
+                    let op = AttachBlockOp::setup_with_shared_context(
                         pack_id,
                         &final_location,
                         format,
@@ -271,7 +271,7 @@ async fn fetch_from_source(
                         }),
                         expected_schema.as_deref(),
                         builder,
-                        Some(&shared_column_ids),
+                        Some(&shared_ctx),
                     ).await?;
                     validate_schema_against_expected(&op, expected_schema.as_deref(), &data.attach_location);
                     setup_progress.update((idx + 1) as u64, Some(&data.attach_location));
@@ -586,9 +586,20 @@ async fn batch_small_ops(
         let merged_location = data_dir.relative_path(write_result.file.as_ref())?;
         let merged_hash = write_result.hash;
 
+        // Persist the merged schema as a sidecar file using the same dedup
+        // mechanism as the per-block setup path.
+        let merged_shared_ctx =
+            bundlebase::bundle::operation::AttachBlockOp::shared_attach_context_for(builder);
+        let schema_path = bundlebase::bundle::operation::AttachBlockOp::write_schema_file(
+            &schema,
+            &merged_shared_ctx,
+            data_dir.as_ref(),
+        )
+        .await?;
+
         let chunk_len = chunk.len();
         let merged_op = build_merged_op(first_op, &merged_location, &merged_hash, AttachFormat::Parquet,
-            &batch_sources, Some(total_rows), Some(total_bytes), Some(schema));
+            &batch_sources, Some(total_rows), Some(total_bytes), schema, schema_path);
         result.push((merged_op, format!("parquet-batch-{} ({} files)", batch_idx, chunk_len)));
         processed += chunk_len;
         progress.update(processed as u64, None);
@@ -640,7 +651,8 @@ fn build_merged_op(
     batch_sources: &[BatchedSource],
     num_rows: Option<usize>,
     bytes: Option<usize>,
-    schema: Option<arrow_schema::SchemaRef>,
+    schema: arrow_schema::SchemaRef,
+    schema_path: String,
 ) -> AttachBlockOp {
     let merged_source_info = first_op.source_info.as_ref().map(|si| SourceInfo {
         id: si.id,
@@ -661,7 +673,8 @@ fn build_merged_op(
         layout: None,
         num_rows,
         bytes,
-        schema,
+        schema_path,
+        schema: Some(schema),
         column_ids: first_op.column_ids.clone(),
     }
 }

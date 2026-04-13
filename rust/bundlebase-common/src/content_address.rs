@@ -50,6 +50,8 @@ pub enum ContentFormat {
     Rowmap,
     /// Serialized RowId set format
     Rowids,
+    /// YAML
+    Yaml,
 }
 
 impl fmt::Display for ContentFormat {
@@ -70,6 +72,7 @@ impl fmt::Display for ContentFormat {
             ContentFormat::Pagemap => write!(f, "pagemap"),
             ContentFormat::Rowmap => write!(f, "rowmap"),
             ContentFormat::Rowids => write!(f, "rowids"),
+            ContentFormat::Yaml => write!(f, "yaml"),
         }
     }
 }
@@ -93,6 +96,7 @@ impl ContentFormat {
             "pagemap" => Ok(ContentFormat::Pagemap),
             "rowmap" => Ok(ContentFormat::Rowmap),
             "rowids" => Ok(ContentFormat::Rowids),
+            "yaml" => Ok(ContentFormat::Yaml),
             _ => Err(format!("Unknown content format: {}", ext).into()),
         }
     }
@@ -181,6 +185,14 @@ mod tests {
             ContentAddress::with_sub_type(ContentCategory::Block, "data", ContentFormat::Parquet)
                 .unwrap();
         assert_eq!(addr.extension(), "block.data.parquet");
+    }
+
+    #[test]
+    fn test_block_schema_yaml() {
+        let addr =
+            ContentAddress::with_sub_type(ContentCategory::Block, "schema", ContentFormat::Yaml)
+                .unwrap();
+        assert_eq!(addr.extension(), "block.schema.yaml");
     }
 
     #[test]

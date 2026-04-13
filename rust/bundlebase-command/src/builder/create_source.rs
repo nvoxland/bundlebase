@@ -273,10 +273,9 @@ impl BundleBuilderCommand for CreateSourceCommand {
         let json_read_options = super::extract_json_opts(&self.args);
 
         // Prepare all AttachBlockOps first, then batch them if batch_size is configured.
-        // Share a single name→ColumnId map across all attaches in this batch so
-        // sibling blocks reuse the same IDs for the same logical columns rather
-        // than each generating fresh IDs.
-        let shared_column_ids = AttachBlockOp::shared_name_to_id_for(builder);
+        // Share a single SharedAttachContext across all attaches in this batch so
+        // sibling blocks reuse the same column IDs and the same written schema files.
+        let shared_ctx = AttachBlockOp::shared_attach_context_for(builder);
         let mut prepared_ops: Vec<(AttachBlockOp, String)> = Vec::new();
         for action in actions {
             match action {
@@ -292,7 +291,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
                             .await?;
                         (data.attach_location.clone(), temp_reader.format(), data.hash.clone())
                     };
-                    let op = AttachBlockOp::setup_with_shared_ids(
+                    let op = AttachBlockOp::setup_with_shared_context(
                         &pack_id,
                         &final_location,
                         format,
@@ -305,7 +304,7 @@ impl BundleBuilderCommand for CreateSourceCommand {
                         }),
                         None,
                         builder,
-                        Some(&shared_column_ids),
+                        Some(&shared_ctx),
                     )
                     .await?;
                     let attach_location = op.location.clone();

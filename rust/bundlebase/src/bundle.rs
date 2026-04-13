@@ -498,6 +498,11 @@ impl Bundle {
             commit.url = Some(manifest_file_info.url.clone());
             commit.data_dir = Some(data_dir.url().clone());
 
+            // Resolve schema sidecar files in parallel and populate each
+            // AttachBlockOp's in-memory `schema` field. Done before the apply
+            // loop because op.apply() requires `self.schema` to be populated.
+            resolve_attach_schemas(&mut commit, data_dir.as_ref(), bundle.config()).await?;
+
             debug!(
                 "Loading commit from {}: {} changes",
                 manifest_file_info.filename().unwrap_or("<unknown>"),
@@ -535,6 +540,83 @@ impl Bundle {
 
         Ok(())
     }
+
+}
+
+/// Walk all `AttachBlock` ops in a freshly-deserialized commit, parallel-load
+/// the referenced `.block.schema.yaml` sidecar files, and populate each op's
+/// in-memory `schema` field. Required because `AttachBlockOp::apply()` reads
+/// `self.schema` and panics if it's None.
+async fn resolve_attach_schemas(
+    commit: &mut BundleCommit,
+    data_dir: &dyn IOReadWriteDir,
+    config: Arc<BundleConfig>,
+) -> Result<(), BundlebaseError> {
+    use crate::bundle::operation::AnyOperation;
+    use std::collections::{HashMap, HashSet};
+
+    let _ = config; // currently unused — kept in signature for symmetry with read_yaml callers.
+
+    // Collect unique schema paths used by attach ops in this commit.
+    let mut paths: HashSet<String> = HashSet::new();
+    for change in &commit.changes {
+        for op in &change.operations {
+            if let AnyOperation::AttachBlock(a) = op {
+                if a.schema.is_none() {
+                    paths.insert(a.schema_path.clone());
+                }
+            }
+        }
+    }
+
+    if paths.is_empty() {
+        return Ok(());
+    }
+
+    // Parallel-load each unique sidecar file. Use the data dir's own
+    // `file()` accessor (rather than constructing an ObjectStoreFile
+    // directly) so backends like the tar object store, which join paths
+    // through their own logic, work correctly.
+    let load_futures = paths.into_iter().map(|path| async move {
+        let file = data_dir.file(&path).map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to construct schema file ref '{}': {}",
+                path, e
+            ))
+        })?;
+        let value: Option<serde_yaml_ng::Value> = read_yaml(file.as_ref()).await
+            .map_err(|e| BundlebaseError::from(format!(
+                "Failed to read schema file '{}': {}", path, e
+            )))?;
+        let value = value.ok_or_else(|| BundlebaseError::from(format!(
+            "Schema sidecar file not found: '{}'", path
+        )))?;
+        let schema = crate::bundle::operation::serde_util::deserialize_schema_internal(&value)
+            .map_err(|e| BundlebaseError::from(format!(
+                "Failed to deserialize schema from '{}': {}", path, e
+            )))?;
+        Ok::<(String, std::sync::Arc<arrow_schema::Schema>), BundlebaseError>((path, schema))
+    });
+    let loaded: Vec<(String, std::sync::Arc<arrow_schema::Schema>)> =
+        futures::future::try_join_all(load_futures).await?;
+    let path_to_schema: HashMap<String, std::sync::Arc<arrow_schema::Schema>> =
+        loaded.into_iter().collect();
+
+    // Populate each attach op's in-memory schema field.
+    for change in &mut commit.changes {
+        for op in &mut change.operations {
+            if let AnyOperation::AttachBlock(a) = op {
+                if a.schema.is_none() {
+                    a.schema = path_to_schema.get(&a.schema_path).cloned();
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+impl Bundle {
 
     /// Check bundle format version compatibility by scanning raw YAML before typed deserialization.
     ///

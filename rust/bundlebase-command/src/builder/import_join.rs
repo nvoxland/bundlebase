@@ -484,6 +484,7 @@ mod tests {
             layout: None,
             num_rows: Some(100),
             bytes: None,
+            schema_path: "00/00000000000000.block.schema.yaml".to_string(),
             schema: None,
             column_ids: vec![],
         });

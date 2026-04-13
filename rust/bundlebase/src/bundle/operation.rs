@@ -32,7 +32,7 @@ mod rename_join;
 mod rename_connector;
 mod rename_function;
 mod rename_view;
-mod serde_util;
+pub(crate) mod serde_util;
 mod save_config;
 mod set_description;
 mod set_max_version;

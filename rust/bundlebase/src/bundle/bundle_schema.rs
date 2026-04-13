@@ -446,6 +446,7 @@ mod tests {
             layout: None,
             num_rows: None,
             bytes: None,
+            schema_path: "00/00000000000000.block.schema.yaml".to_string(),
             schema: Some(Arc::new(Schema::new(fields))),
             column_ids: ids.to_vec(),
         })
@@ -468,6 +469,7 @@ mod tests {
             layout: None,
             num_rows: None,
             bytes: None,
+            schema_path: "00/00000000000000.block.schema.yaml".to_string(),
             schema: Some(Arc::new(Schema::new(fields))),
             column_ids: ids.to_vec(),
         })

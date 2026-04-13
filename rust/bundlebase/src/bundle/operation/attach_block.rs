@@ -64,27 +64,44 @@ pub struct AttachBlockOp {
     pub num_rows: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bytes: Option<usize>,
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        serialize_with = "super::serde_util::serialize_schema_option",
-        deserialize_with = "super::serde_util::deserialize_schema_option"
-    )]
+    /// Relative path (within the bundle's data dir) to a content-addressed
+    /// `.block.schema.yaml` file holding this block's Arrow schema. Always
+    /// set after `setup_*` runs; populated on read by
+    /// `Bundle::open` → `resolve_attach_schemas`.
+    pub schema_path: String,
+    /// In-memory cache of the schema referenced by `schema_path`. Never
+    /// serialized — populated either at attach time (setup) or right after
+    /// the manifest is parsed during `Bundle::open`.
+    #[serde(skip)]
     pub schema: Option<SchemaRef>,
     pub column_ids: Vec<ColumnId>,
 }
 
+/// State shared across a batch of parallel `AttachBlockOp::setup_with_shared_context`
+/// calls so they can deduplicate column-id assignments and schema-file writes.
+///
+/// Without this batching, each parallel setup() call sees no sibling state
+/// (none of the in-flight ops are applied yet) and would (a) generate fresh
+/// ColumnIds for the same logical columns and (b) re-write the same schema
+/// file once per attach. Both result in massive duplication.
+#[derive(Debug, Default)]
+pub struct SharedAttachContext {
+    /// column name → ColumnId. Pre-populated from the bundle's existing
+    /// schema; mutated as new columns are seen.
+    pub name_to_id: parking_lot::Mutex<HashMap<String, ColumnId>>,
+    /// schema content hash → relative path of the written schema file.
+    /// First setup that sees a given schema writes the file; subsequent
+    /// setups in the same batch reuse the path.
+    pub schema_paths: parking_lot::Mutex<HashMap<u128, String>>,
+}
+
 impl AttachBlockOp {
-    /// Build the initial name → ColumnId map for the bundle's existing schema.
-    ///
-    /// Pass this into [`setup_with_shared_ids`] to share ID allocation across
-    /// a batch of parallel attaches. Without sharing, each parallel `setup`
-    /// call queries operations independently — and since none of the parallel
-    /// ops have been applied yet, every block re-generates fresh ColumnIds for
-    /// columns the OTHER parallel ops are also seeing, blowing up the merged
-    /// schema by orders of magnitude.
-    pub fn shared_name_to_id_for(
+    /// Build a [`SharedAttachContext`] seeded with the bundle's existing
+    /// column-name → ColumnId map. Pass into
+    /// [`setup_with_shared_context`] for a batch of parallel attaches.
+    pub fn shared_attach_context_for(
         builder: &BundleBuilder,
-    ) -> std::sync::Arc<parking_lot::Mutex<HashMap<String, ColumnId>>> {
+    ) -> std::sync::Arc<SharedAttachContext> {
         let existing_ops = builder.operations();
         let resolved = bundle_schema::BundleSchema::resolved(&existing_ops);
         let map: HashMap<String, ColumnId> = resolved
@@ -92,7 +109,10 @@ impl AttachBlockOp {
             .iter()
             .map(|(id, name)| (name.clone(), *id))
             .collect();
-        std::sync::Arc::new(parking_lot::Mutex::new(map))
+        std::sync::Arc::new(SharedAttachContext {
+            name_to_id: parking_lot::Mutex::new(map),
+            schema_paths: parking_lot::Mutex::new(HashMap::new()),
+        })
     }
 
     /// Setup an AttachBlockOp for a file.
@@ -115,7 +135,7 @@ impl AttachBlockOp {
         expected_schema: Option<&[crate::bundle::operation::create_source::ExpectedColumn]>,
         builder: &BundleBuilder,
     ) -> Result<Self, BundlebaseError> {
-        Self::setup_with_shared_ids(
+        Self::setup_with_shared_context(
             pack,
             location,
             format,
@@ -128,9 +148,10 @@ impl AttachBlockOp {
         .await
     }
 
-    /// Setup variant that shares a name→ColumnId map across a batch of parallel
-    /// attaches. See [`shared_name_to_id_for`] for the rationale.
-    pub async fn setup_with_shared_ids(
+    /// Setup variant that shares a [`SharedAttachContext`] across a batch of
+    /// parallel attaches so column-id allocation and schema-file writes are
+    /// deduplicated within the batch.
+    pub async fn setup_with_shared_context(
         pack: &ObjectId,
         location: &str,
         format: AttachFormat,
@@ -138,7 +159,7 @@ impl AttachBlockOp {
         source_info: Option<SourceInfo>,
         expected_schema: Option<&[crate::bundle::operation::create_source::ExpectedColumn]>,
         builder: &BundleBuilder,
-        shared_ids: Option<&std::sync::Arc<parking_lot::Mutex<HashMap<String, ColumnId>>>>,
+        shared: Option<&std::sync::Arc<SharedAttachContext>>,
     ) -> Result<Self, BundlebaseError> {
         let progress = ProgressScope::new(
             &format!("Attaching '{}'", location),
@@ -192,19 +213,15 @@ impl AttachBlockOp {
             .map(|cols| cols.iter().map(|c| (c.name.as_str(), c.id)).collect())
             .unwrap_or_default();
 
-        // Reuse existing ColumnIds for columns whose names match existing columns.
-        // Priority: pre-reserved IDs from expected_schema, then existing IDs from
-        // the shared map (or freshly read from bundle ops if no shared map),
-        // then generate new ones — and insert any new IDs into the shared map
-        // so other parallel attaches in the same batch see the same assignment.
-        // Acquire (or build then acquire) the shared name→id map. Lock is
-        // held only across the per-field loop (microseconds).
-        let shared_arc = match shared_ids {
+        // Acquire (or build then acquire) the shared attach context. Locks
+        // are held only across the per-field / per-schema critical sections
+        // (microseconds each).
+        let shared_arc = match shared {
             Some(arc) => arc.clone(),
-            None => Self::shared_name_to_id_for(builder),
+            None => Self::shared_attach_context_for(builder),
         };
         let column_ids = schema.as_ref().map(|s| {
-            let mut map_guard = shared_arc.lock();
+            let mut map_guard = shared_arc.name_to_id.lock();
             s.fields().iter().map(|f| {
                 if let Some(&id) = name_to_expected_id.get(f.name().as_str()) {
                     return id;
@@ -215,6 +232,20 @@ impl AttachBlockOp {
             }).collect()
         }).unwrap_or_default();
 
+        // Persist the schema as a content-addressed sidecar file under the
+        // bundle's data dir. Within a batch we dedupe via the shared cache;
+        // across batches the content-addressed path makes writes idempotent.
+        let data_dir = builder.bundle().data_dir();
+        let schema_path = match schema.as_ref() {
+            Some(s) => Self::write_schema_file(s, &shared_arc, data_dir.as_ref()).await?,
+            None => {
+                return Err(BundlebaseError::from(format!(
+                    "Cannot attach '{}': adapter returned no schema",
+                    location
+                )));
+            }
+        };
+
         let mut op = AttachBlockOp {
             location: location.to_string(),
             format,
@@ -222,6 +253,7 @@ impl AttachBlockOp {
             bytes: None,
             version,
             hash,
+            schema_path,
             schema,
             id: block_id,
             pack: *pack,
@@ -243,7 +275,6 @@ impl AttachBlockOp {
         }
 
         progress.update(6, Some("Building layout"));
-        let data_dir = builder.bundle().data_dir();
         op.layout = match adapter.build_layout(data_dir.as_ref()).await? {
             Some(file) => Some(data_dir.relative_path(file.as_ref())?),
             None => None,
@@ -251,11 +282,106 @@ impl AttachBlockOp {
 
         Ok(op)
     }
+
+    /// Serialize a schema to YAML and write it to the bundle's data dir as a
+    /// content-addressed sidecar file (`xx/yyyyyyyyyyyyyy.block.schema.yaml`).
+    /// Within a batch, dedupe via `shared.schema_paths` so identical schemas
+    /// only get written once. Returns the relative path to store on the op.
+    pub async fn write_schema_file(
+        schema: &SchemaRef,
+        shared: &std::sync::Arc<SharedAttachContext>,
+        data_dir: &dyn bundlebase_io::IOReadWriteDir,
+    ) -> Result<String, BundlebaseError> {
+        use bundlebase_common::{ContentAddress, ContentCategory, ContentFormat};
+        use futures::stream;
+
+        // Build the YAML body once, hash it for the in-batch dedup map.
+        let yaml_body = serde_yaml_ng::to_string(&SchemaWire::from_schema(schema))
+            .map_err(|e| BundlebaseError::from(format!("Failed to serialize schema: {}", e)))?;
+        let body_hash = xxhash_rust::xxh3::xxh3_128(yaml_body.as_bytes());
+
+        // Fast path: this exact schema has already been written by an earlier
+        // setup in the same batch.
+        if let Some(path) = shared.schema_paths.lock().get(&body_hash) {
+            return Ok(path.clone());
+        }
+
+        let bytes = bytes::Bytes::from(yaml_body.into_bytes());
+        let stream = Box::pin(stream::once(async move {
+            Ok::<_, std::io::Error>(bytes)
+        }));
+        let address = ContentAddress::with_sub_type(
+            ContentCategory::Block,
+            "schema",
+            ContentFormat::Yaml,
+        )?;
+        let result = data_dir.write_stream(stream, &address).await?;
+        let relative = data_dir.relative_path(result.file.as_ref())?;
+        shared.schema_paths.lock().insert(body_hash, relative.clone());
+        Ok(relative)
+    }
+}
+
+/// Wire form of an Arrow Schema for the standalone `.block.schema.yaml`
+/// sidecar file. Reuses the same YAML shape as the previous inline `schema:`
+/// field by delegating to `serde_util::serialize_schema_option` /
+/// `deserialize_schema_option`.
+#[derive(Debug)]
+struct SchemaWire<'a>(&'a SchemaRef);
+
+impl<'a> SchemaWire<'a> {
+    fn from_schema(s: &'a SchemaRef) -> Self {
+        Self(s)
+    }
+}
+
+impl<'a> serde::Serialize for SchemaWire<'a> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        super::serde_util::serialize_schema_option(&Some(self.0.clone()), serializer)
+    }
 }
 
 impl Operation for AttachBlockOp {
     fn describe(&self) -> String {
         format!("ATTACH: {}", self.location)
+    }
+
+    /// Fast version hash that avoids the generic `hash_config` (which JSON
+    /// round-trips and recursively re-serializes the entire op, including a
+    /// potentially huge schema). The data file's `version` is already a
+    /// content hash, so combining it with the few fields that change the
+    /// op's identity (location, pack, column_ids, source location) is
+    /// sufficient and ~1000× faster on bundles with thousands of attaches.
+    fn version(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"AttachBlockOp\0");
+        h.update(self.id.to_string().as_bytes());
+        h.update(b"\0");
+        h.update(self.pack.to_string().as_bytes());
+        h.update(b"\0");
+        h.update(self.location.as_bytes());
+        h.update(b"\0");
+        h.update(self.version.as_bytes());
+        h.update(b"\0");
+        h.update(self.hash.as_bytes());
+        h.update(b"\0");
+        for col_id in &self.column_ids {
+            h.update(col_id.to_string().as_bytes());
+            h.update(b",");
+        }
+        h.update(b"\0");
+        if let Some(ref src) = self.source_info {
+            h.update(src.id.to_string().as_bytes());
+            h.update(b"\0");
+            h.update(src.location.as_bytes());
+            h.update(b"\0");
+            h.update(src.version.as_bytes());
+        }
+        hex::encode(h.finalize())[0..12].to_string()
     }
 
     fn to_hollow(&self, _context: &super::HollowContext) -> Option<super::AnyOperation> {
@@ -363,6 +489,7 @@ mod tests {
             pack: ObjectId::generate(),
             num_rows: None,
             bytes: None,
+            schema_path: "00/00000000000000.block.schema.yaml".to_string(),
             schema: None,
             layout: None,
             source_info: None,
@@ -390,7 +517,8 @@ mod tests {
 
         let serialized = serde_yaml_ng::to_string(&op)?;
 
-        // Check the static portion (before columnIds which contains random values)
+        // Check the static portion. The schema field is no longer inlined —
+        // it's persisted as a sidecar file and the op carries `schemaPath:`.
         let expected_prefix = format!(
             r#"id: {}
 pack: {}
@@ -400,51 +528,7 @@ version: {}
 hash: 8c26edb7f30d7694a1431224f28e5932
 numRows: 1000
 bytes: 113629
-schema:
-  fields:
-  - name: registration_dttm
-    data_type:
-      type: Timestamp
-      unit: Nanosecond
-      timezone: null
-    nullable: true
-  - name: id
-    data_type: Int32
-    nullable: true
-  - name: first_name
-    data_type: Utf8View
-    nullable: true
-  - name: last_name
-    data_type: Utf8View
-    nullable: true
-  - name: email
-    data_type: Utf8View
-    nullable: true
-  - name: gender
-    data_type: Utf8View
-    nullable: true
-  - name: ip_address
-    data_type: Utf8View
-    nullable: true
-  - name: cc
-    data_type: Utf8View
-    nullable: true
-  - name: country
-    data_type: Utf8View
-    nullable: true
-  - name: birthdate
-    data_type: Utf8View
-    nullable: true
-  - name: salary
-    data_type: Float64
-    nullable: true
-  - name: title
-    data_type: Utf8View
-    nullable: true
-  - name: comments
-    data_type: Utf8View
-    nullable: true
-"#,
+schemaPath: "#,
             for_yaml(block_id),
             for_yaml(pack),
             for_yaml(version),
@@ -452,6 +536,20 @@ schema:
         assert!(
             serialized.starts_with(&expected_prefix),
             "Serialized output doesn't start with expected prefix.\nActual:\n{}",
+            serialized
+        );
+
+        // The serialized op should NOT contain an inline schema block now.
+        assert!(
+            !serialized.contains("\nschema:"),
+            "AttachBlockOp must not serialize inline schema:\n{}",
+            serialized
+        );
+
+        // schemaPath should reference the standard sharded sidecar layout
+        assert!(
+            serialized.contains(".block.schema.yaml"),
+            "Expected schemaPath ending in .block.schema.yaml:\n{}",
             serialized
         );
 
@@ -476,6 +574,7 @@ schema:
             pack: ObjectId::generate(),
             num_rows: None,
             bytes: None,
+            schema_path: "00/00000000000000.block.schema.yaml".to_string(),
             schema: None,
             layout: None,
             source_info: None,

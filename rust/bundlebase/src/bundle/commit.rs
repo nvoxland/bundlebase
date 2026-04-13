@@ -636,6 +636,7 @@ changes:
             layout: None,
             num_rows: Some(100),
             bytes: Some(1000),
+            schema_path: "ab/cd1234567890ab.block.schema.yaml".to_string(),
             schema: Some(schema),
             source_info: None,
             read_options: None,
@@ -701,11 +702,7 @@ changes:
     id: '000000000000002a'
     numRows: 100
     bytes: 1000
-    schema:
-      fields:
-      - name: id
-        data_type: Int32
-        nullable: true
+    schemaPath: ab/cd0000000000.block.schema.yaml
     columnIds:
     - '0000000000000001'
 "#;
@@ -742,20 +739,7 @@ changes:
     pack: '00000000000000dd'
     numRows: 1000
     bytes: 113629
-    schema:
-      fields:
-      - name: registration_dttm
-        data_type:
-          type: Timestamp
-          unit: Nanosecond
-          timezone: null
-        nullable: true
-      - name: id
-        data_type: Int32
-        nullable: true
-      - name: first_name
-        data_type: Utf8View
-        nullable: true
+    schemaPath: ab/cd0000000000.block.schema.yaml
     columnIds:
     - '0000000000000aa1'
     - '0000000000000aa2'
@@ -774,16 +758,15 @@ changes:
         assert_eq!(commit.message, "First commit");
         assert_eq!(commit.operations().len(), 3);
 
-        // Verify AttachBlock operation
+        // Verify AttachBlock operation. Schema is no longer inlined; only the
+        // sidecar reference is on the wire. The actual schema gets resolved
+        // by `Bundle::open` from the sidecar file.
         match &commit.operations()[0] {
             AnyOperation::AttachBlock(config) => {
                 assert_eq!(config.location, "memory:///test_data/userdata.parquet");
                 assert_eq!(config.version, "2");
-                assert!(config.schema.is_some());
-                let schema = config.schema.as_ref().unwrap();
-                assert_eq!(schema.fields().len(), 3);
-                // Verify first field has Timestamp data type
-                assert_eq!(schema.field(0).name(), "registration_dttm");
+                assert_eq!(config.schema_path, "ab/cd0000000000.block.schema.yaml");
+                assert!(config.schema.is_none(), "schema is loaded lazily by Bundle::open");
             }
             _ => panic!("Expected AttachBlock operation"),
         }
