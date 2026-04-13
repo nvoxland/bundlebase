@@ -586,10 +586,41 @@ async fn batch_small_ops(
         let merged_location = data_dir.relative_path(write_result.file.as_ref())?;
         let merged_hash = write_result.hash;
 
-        // Persist the merged schema and column-id list as sidecar files
-        // using the same dedup mechanism as the per-block setup path.
+        // Build a column_ids list that matches the *union* schema (one ID per
+        // field in the merged parquet). The per-chunk ops may have shorter
+        // column_ids lists (only their own schemas); we need to extend with
+        // fresh IDs for fields that only appear in later chunk members.
+        // Re-use the shared attach context so names seen across this and
+        // any other batches resolve to the same ColumnId.
         let merged_shared_ctx =
             bundlebase::bundle::operation::AttachBlockOp::shared_attach_context_for(builder);
+        let merged_column_ids: Vec<bundlebase_common::ColumnId> = {
+            // Seed the name→id map from the source ops in this chunk so
+            // fields they covered keep their original IDs.
+            {
+                let mut name_to_id = merged_shared_ctx.name_to_id.lock();
+                for (src_op, _) in chunk.iter() {
+                    if let Some(src_schema) = src_op.schema.as_ref() {
+                        for (field, id) in src_schema.fields().iter().zip(src_op.column_ids.iter()) {
+                            name_to_id.entry(field.name().clone()).or_insert(*id);
+                        }
+                    }
+                }
+            }
+            let mut name_to_id = merged_shared_ctx.name_to_id.lock();
+            schema
+                .fields()
+                .iter()
+                .map(|f| {
+                    *name_to_id
+                        .entry(f.name().clone())
+                        .or_insert_with(bundlebase_common::ColumnId::generate)
+                })
+                .collect()
+        };
+
+        // Persist the merged schema and (union-schema-sized) column-id list
+        // as sidecar files using the same dedup mechanism as per-block setup.
         let schema_path = bundlebase::bundle::operation::AttachBlockOp::write_schema_file(
             &schema,
             &merged_shared_ctx,
@@ -597,15 +628,18 @@ async fn batch_small_ops(
         )
         .await?;
         let column_ids_path = bundlebase::bundle::operation::AttachBlockOp::write_column_ids_file(
-            &first_op.column_ids,
+            &merged_column_ids,
             &merged_shared_ctx,
             data_dir.as_ref(),
         )
         .await?;
 
         let chunk_len = chunk.len();
-        let merged_op = build_merged_op(first_op, &merged_location, &merged_hash, AttachFormat::Parquet,
-            &batch_sources, Some(total_rows), Some(total_bytes), schema, schema_path, column_ids_path);
+        let merged_op = build_merged_op(
+            first_op, &merged_location, &merged_hash, AttachFormat::Parquet,
+            &batch_sources, Some(total_rows), Some(total_bytes), schema, schema_path,
+            column_ids_path, merged_column_ids,
+        );
         result.push((merged_op, format!("parquet-batch-{} ({} files)", batch_idx, chunk_len)));
         processed += chunk_len;
         progress.update(processed as u64, None);
@@ -649,6 +683,7 @@ fn build_batch_sources(chunk: &[(AttachBlockOp, String)]) -> Vec<BatchedSource> 
 }
 
 /// Build a merged AttachBlockOp from a batch.
+#[allow(clippy::too_many_arguments)]
 fn build_merged_op(
     first_op: &AttachBlockOp,
     merged_location: &str,
@@ -660,6 +695,7 @@ fn build_merged_op(
     schema: arrow_schema::SchemaRef,
     schema_path: String,
     column_ids_path: String,
+    column_ids: Vec<bundlebase_common::ColumnId>,
 ) -> AttachBlockOp {
     let merged_source_info = first_op.source_info.as_ref().map(|si| SourceInfo {
         id: si.id,
@@ -683,7 +719,7 @@ fn build_merged_op(
         schema_path,
         column_ids_path,
         schema: Some(schema),
-        column_ids: first_op.column_ids.clone(),
+        column_ids,
     }
 }
 
