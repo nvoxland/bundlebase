@@ -27,9 +27,10 @@ lazy_static! {
 /// of least-recently-used entries when the cache reaches capacity.
 ///
 /// # Default Capacity
-/// - 100 files (configurable via environment variable BUNDLEBASE_LAYOUT_CACHE_SIZE)
+/// - 10,000 files (configurable via environment variable BUNDLEBASE_LAYOUT_CACHE_SIZE)
 pub struct LayoutCache {
     cache: Mutex<LruCache<Url, Arc<PageMap>>>,
+    evictions: std::sync::atomic::AtomicUsize,
 }
 
 impl LayoutCache {
@@ -41,6 +42,7 @@ impl LayoutCache {
         };
         Self {
             cache: Mutex::new(LruCache::new(capacity)),
+            evictions: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -55,13 +57,29 @@ impl LayoutCache {
 
     pub fn insert(&self, url: Url, layout: Arc<PageMap>) {
         let mut cache = self.cache.lock();
-        if cache.len() == cache.cap().get() && !cache.contains(&url) {
-            log::debug!(
-                "Layout cache full ({} entries), evicting LRU entry",
-                cache.len()
-            );
+        let evicting = cache.len() == cache.cap().get() && !cache.contains(&url);
+        if evicting {
+            LAYOUT_CACHE_OPS.add(1, &[
+                KeyValue::new("cache_name", "layout_cache"),
+                KeyValue::new("result", "eviction"),
+            ]);
+            let total_evictions = self.evictions.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if total_evictions == 1 || total_evictions.is_power_of_two() {
+                log::warn!(
+                    "Layout cache thrashing: {} entries at capacity {}, {} total evictions so far. \
+                     Consider increasing BUNDLEBASE_LAYOUT_CACHE_SIZE (current default 10,000).",
+                    cache.len(),
+                    cache.cap().get(),
+                    total_evictions
+                );
+            }
         }
         cache.put(url, layout);
+    }
+
+    /// Returns the total number of evictions since startup.
+    pub fn evictions(&self) -> usize {
+        self.evictions.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn len(&self) -> usize {
@@ -85,6 +103,7 @@ impl LayoutCache {
         CacheStats {
             size: cache.len(),
             capacity: cache.cap().get(),
+            evictions: self.evictions.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 }
@@ -93,16 +112,18 @@ impl LayoutCache {
 pub struct CacheStats {
     pub size: usize,
     pub capacity: usize,
+    pub evictions: usize,
 }
 
 impl std::fmt::Display for CacheStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Layout cache: {}/{} entries ({:.1}% full)",
+            "Layout cache: {}/{} entries ({:.1}% full), {} evictions",
             self.size,
             self.capacity,
-            (self.size as f64 / self.capacity as f64) * 100.0
+            (self.size as f64 / self.capacity as f64) * 100.0,
+            self.evictions,
         )
     }
 }
@@ -112,7 +133,7 @@ lazy_static! {
         let capacity = std::env::var("BUNDLEBASE_LAYOUT_CACHE_SIZE")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(100);
+            .unwrap_or(10_000);
 
         log::debug!("Initializing global layout cache with capacity: {}", capacity);
         LayoutCache::new(capacity)
