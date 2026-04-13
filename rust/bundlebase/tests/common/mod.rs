@@ -65,8 +65,9 @@ pub async fn latest_commit(
 /// These contain random generated IDs that differ between test runs.
 ///
 /// Strips:
-/// - `columnIds:` lists (on AttachBlockOp)
+/// - `columnIds:` lists (on AttachBlockOp, legacy)
 /// - `columnId:` fields (legacy naming)
+/// - `columnIdsPath:` values (content-hash path that varies with random ColumnIds)
 /// - `id:` fields on column operations (RenameColumn, CastColumn, AddColumn, DropColumn)
 ///   but NOT on AttachBlock or change-level `id:` lines
 #[allow(dead_code)]
@@ -103,6 +104,12 @@ pub fn strip_column_ids(yaml: &str) -> String {
         }
         if trimmed.starts_with("columnIds:") {
             in_ids_list = true;
+            i += 1;
+            continue;
+        }
+        // columnIdsPath is a content-addressed path whose value depends on
+        // the randomly-generated ColumnIds, so it's not stable across runs.
+        if trimmed.starts_with("columnIdsPath:") {
             i += 1;
             continue;
         }

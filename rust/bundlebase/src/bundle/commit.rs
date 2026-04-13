@@ -637,6 +637,7 @@ changes:
             num_rows: Some(100),
             bytes: Some(1000),
             schema_path: "ab/cd1234567890ab.block.schema.yaml".to_string(),
+            column_ids_path: "ab/cd1234567890ab.block.columns.yaml".to_string(),
             schema: Some(schema),
             source_info: None,
             read_options: None,
@@ -703,8 +704,7 @@ changes:
     numRows: 100
     bytes: 1000
     schemaPath: ab/cd0000000000.block.schema.yaml
-    columnIds:
-    - '0000000000000001'
+    columnIdsPath: ab/cd0000000000.block.columns.yaml
 "#;
         let commit: BundleCommit = serde_yaml_ng::from_str(yaml).unwrap();
 
@@ -740,10 +740,7 @@ changes:
     numRows: 1000
     bytes: 113629
     schemaPath: ab/cd0000000000.block.schema.yaml
-    columnIds:
-    - '0000000000000aa1'
-    - '0000000000000aa2'
-    - '0000000000000aa3'
+    columnIdsPath: ab/cd0000000000.block.columns.yaml
   - type: dropColumn
     id: '0000000000000aa3'
     name: title

@@ -103,7 +103,7 @@ changes:
     assert_eq!(common::strip_column_ids(&contents), expected);
 
     // Verify column IDs are present in the actual serialized output
-    assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
+    assert!(contents.contains("columnIdsPath:"), "AttachBlock should have columnIdsPath");
     assert!(contents.contains("type: dropColumn\n    id:"), "DropColumn should have id");
     assert!(contents.contains("type: renameColumn\n    id:"), "RenameColumn should have id");
 
@@ -228,7 +228,7 @@ changes:
     assert_eq!(common::strip_column_ids(&contents).trim(), expected.trim());
 
     // Verify column IDs are present in the actual serialized output
-    assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
+    assert!(contents.contains("columnIdsPath:"), "AttachBlock should have columnIdsPath");
     assert!(contents.contains("type: dropColumn\n    id:"), "DropColumn should have id");
     assert!(contents.contains("type: renameColumn\n    id:"), "RenameColumn should have id");
 
@@ -333,7 +333,7 @@ changes:
     );
 
     // Verify column IDs are present in the actual serialized output
-    assert!(contents.contains("columnIds:"), "AttachBlock should have columnIds");
+    assert!(contents.contains("columnIdsPath:"), "AttachBlock should have columnIdsPath");
 
     // Open the saved bundle
     let loaded_bundle = Bundle::open(data_dir.url().as_str(), None).await?;

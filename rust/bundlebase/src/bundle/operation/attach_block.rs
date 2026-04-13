@@ -67,13 +67,20 @@ pub struct AttachBlockOp {
     /// Relative path (within the bundle's data dir) to a content-addressed
     /// `.block.schema.yaml` file holding this block's Arrow schema. Always
     /// set after `setup_*` runs; populated on read by
-    /// `Bundle::open` → `resolve_attach_schemas`.
+    /// `Bundle::open` → `resolve_attach_sidecars`.
     pub schema_path: String,
+    /// Relative path to a content-addressed `.block.columns.yaml` sidecar
+    /// file holding this block's `column_ids` list (parallel to `schema_path`).
+    /// Same dedup pattern: one file per unique column-id list hash.
+    pub column_ids_path: String,
     /// In-memory cache of the schema referenced by `schema_path`. Never
     /// serialized — populated either at attach time (setup) or right after
     /// the manifest is parsed during `Bundle::open`.
     #[serde(skip)]
     pub schema: Option<SchemaRef>,
+    /// In-memory cache of the column IDs referenced by `column_ids_path`.
+    /// Never serialized — populated at attach time or by `Bundle::open`.
+    #[serde(skip)]
     pub column_ids: Vec<ColumnId>,
 }
 
@@ -93,6 +100,10 @@ pub struct SharedAttachContext {
     /// First setup that sees a given schema writes the file; subsequent
     /// setups in the same batch reuse the path.
     pub schema_paths: parking_lot::Mutex<HashMap<u128, String>>,
+    /// column-id list content hash → relative path of the written
+    /// `.block.columns.yaml` sidecar file. Same dedup semantics as
+    /// `schema_paths`.
+    pub column_ids_paths: parking_lot::Mutex<HashMap<u128, String>>,
 }
 
 impl AttachBlockOp {
@@ -112,6 +123,7 @@ impl AttachBlockOp {
         std::sync::Arc::new(SharedAttachContext {
             name_to_id: parking_lot::Mutex::new(map),
             schema_paths: parking_lot::Mutex::new(HashMap::new()),
+            column_ids_paths: parking_lot::Mutex::new(HashMap::new()),
         })
     }
 
@@ -220,7 +232,7 @@ impl AttachBlockOp {
             Some(arc) => arc.clone(),
             None => Self::shared_attach_context_for(builder),
         };
-        let column_ids = schema.as_ref().map(|s| {
+        let column_ids: Vec<ColumnId> = schema.as_ref().map(|s| {
             let mut map_guard = shared_arc.name_to_id.lock();
             s.fields().iter().map(|f| {
                 if let Some(&id) = name_to_expected_id.get(f.name().as_str()) {
@@ -232,9 +244,10 @@ impl AttachBlockOp {
             }).collect()
         }).unwrap_or_default();
 
-        // Persist the schema as a content-addressed sidecar file under the
-        // bundle's data dir. Within a batch we dedupe via the shared cache;
-        // across batches the content-addressed path makes writes idempotent.
+        // Persist the schema and column-id list as content-addressed sidecar
+        // files under the bundle's data dir. Within a batch we dedupe via
+        // the shared cache; across batches the content-addressed path makes
+        // writes idempotent.
         let data_dir = builder.bundle().data_dir();
         let schema_path = match schema.as_ref() {
             Some(s) => Self::write_schema_file(s, &shared_arc, data_dir.as_ref()).await?,
@@ -245,6 +258,8 @@ impl AttachBlockOp {
                 )));
             }
         };
+        let column_ids_path =
+            Self::write_column_ids_file(&column_ids, &shared_arc, data_dir.as_ref()).await?;
 
         let mut op = AttachBlockOp {
             location: location.to_string(),
@@ -254,6 +269,7 @@ impl AttachBlockOp {
             version,
             hash,
             schema_path,
+            column_ids_path,
             schema,
             id: block_id,
             pack: *pack,
@@ -318,6 +334,42 @@ impl AttachBlockOp {
         let result = data_dir.write_stream(stream, &address).await?;
         let relative = data_dir.relative_path(result.file.as_ref())?;
         shared.schema_paths.lock().insert(body_hash, relative.clone());
+        Ok(relative)
+    }
+
+    /// Serialize a column-id list to YAML and write it to the data dir as a
+    /// content-addressed sidecar file (`xx/yyyyyyyyyyyyyy.block.columns.yaml`).
+    /// Dedup semantics mirror `write_schema_file`: identical lists share
+    /// the same file via `shared.column_ids_paths`.
+    pub async fn write_column_ids_file(
+        column_ids: &[ColumnId],
+        shared: &std::sync::Arc<SharedAttachContext>,
+        data_dir: &dyn bundlebase_io::IOReadWriteDir,
+    ) -> Result<String, BundlebaseError> {
+        use bundlebase_common::{ContentAddress, ContentCategory, ContentFormat};
+        use futures::stream;
+
+        let yaml_body = serde_yaml_ng::to_string(column_ids).map_err(|e| {
+            BundlebaseError::from(format!("Failed to serialize column_ids: {}", e))
+        })?;
+        let body_hash = xxhash_rust::xxh3::xxh3_128(yaml_body.as_bytes());
+
+        if let Some(path) = shared.column_ids_paths.lock().get(&body_hash) {
+            return Ok(path.clone());
+        }
+
+        let bytes = bytes::Bytes::from(yaml_body.into_bytes());
+        let stream = Box::pin(stream::once(async move {
+            Ok::<_, std::io::Error>(bytes)
+        }));
+        let address = ContentAddress::with_sub_type(
+            ContentCategory::Block,
+            "columns",
+            ContentFormat::Yaml,
+        )?;
+        let result = data_dir.write_stream(stream, &address).await?;
+        let relative = data_dir.relative_path(result.file.as_ref())?;
+        shared.column_ids_paths.lock().insert(body_hash, relative.clone());
         Ok(relative)
     }
 }
@@ -490,6 +542,7 @@ mod tests {
             num_rows: None,
             bytes: None,
             schema_path: "00/00000000000000.block.schema.yaml".to_string(),
+            column_ids_path: "00/00000000000000.block.columns.yaml".to_string(),
             schema: None,
             layout: None,
             source_info: None,
@@ -539,25 +592,30 @@ schemaPath: "#,
             serialized
         );
 
-        // The serialized op should NOT contain an inline schema block now.
+        // The serialized op should NOT contain an inline schema or columnIds
+        // block — both are persisted as sidecar files now.
         assert!(
             !serialized.contains("\nschema:"),
             "AttachBlockOp must not serialize inline schema:\n{}",
             serialized
         );
+        assert!(
+            !serialized.contains("\ncolumnIds:"),
+            "AttachBlockOp must not serialize inline columnIds:\n{}",
+            serialized
+        );
 
-        // schemaPath should reference the standard sharded sidecar layout
+        // schemaPath and columnIdsPath should reference the standard sharded sidecar layout
         assert!(
             serialized.contains(".block.schema.yaml"),
             "Expected schemaPath ending in .block.schema.yaml:\n{}",
             serialized
         );
-
-        // Verify columnIds section has 13 entries (one per schema field)
-        assert!(serialized.contains("columnIds:"));
-        let column_ids_section = serialized.split("columnIds:").nth(1).unwrap();
-        let column_id_count = column_ids_section.lines().filter(|l| l.trim().starts_with("- ")).count();
-        assert_eq!(column_id_count, 13, "Expected 13 column IDs for 13 schema fields");
+        assert!(
+            serialized.contains(".block.columns.yaml"),
+            "Expected columnIdsPath ending in .block.columns.yaml:\n{}",
+            serialized
+        );
         Ok(())
     }
 
@@ -575,6 +633,7 @@ schemaPath: "#,
             num_rows: None,
             bytes: None,
             schema_path: "00/00000000000000.block.schema.yaml".to_string(),
+            column_ids_path: "00/00000000000000.block.columns.yaml".to_string(),
             schema: None,
             layout: None,
             source_info: None,

@@ -501,7 +501,7 @@ impl Bundle {
             // Resolve schema sidecar files in parallel and populate each
             // AttachBlockOp's in-memory `schema` field. Done before the apply
             // loop because op.apply() requires `self.schema` to be populated.
-            resolve_attach_schemas(&mut commit, data_dir.as_ref(), bundle.config()).await?;
+            resolve_attach_sidecars(&mut commit, data_dir.as_ref(), bundle.config()).await?;
 
             debug!(
                 "Loading commit from {}: {} changes",
@@ -544,40 +544,46 @@ impl Bundle {
 }
 
 /// Walk all `AttachBlock` ops in a freshly-deserialized commit, parallel-load
-/// the referenced `.block.schema.yaml` sidecar files, and populate each op's
-/// in-memory `schema` field. Required because `AttachBlockOp::apply()` reads
-/// `self.schema` and panics if it's None.
-async fn resolve_attach_schemas(
+/// the referenced `.block.schema.yaml` and `.block.columns.yaml` sidecar
+/// files, and populate each op's in-memory `schema` and `column_ids` fields.
+/// Required because `AttachBlockOp::apply()` reads these and panics if
+/// they're empty/None.
+async fn resolve_attach_sidecars(
     commit: &mut BundleCommit,
     data_dir: &dyn IOReadWriteDir,
     config: Arc<BundleConfig>,
 ) -> Result<(), BundlebaseError> {
     use crate::bundle::operation::AnyOperation;
+    use bundlebase_common::ColumnId;
     use std::collections::{HashMap, HashSet};
 
     let _ = config; // currently unused — kept in signature for symmetry with read_yaml callers.
 
-    // Collect unique schema paths used by attach ops in this commit.
-    let mut paths: HashSet<String> = HashSet::new();
+    // Collect unique sidecar paths used by attach ops in this commit.
+    let mut schema_paths: HashSet<String> = HashSet::new();
+    let mut column_ids_paths: HashSet<String> = HashSet::new();
     for change in &commit.changes {
         for op in &change.operations {
             if let AnyOperation::AttachBlock(a) = op {
                 if a.schema.is_none() {
-                    paths.insert(a.schema_path.clone());
+                    schema_paths.insert(a.schema_path.clone());
+                }
+                if a.column_ids.is_empty() {
+                    column_ids_paths.insert(a.column_ids_path.clone());
                 }
             }
         }
     }
 
-    if paths.is_empty() {
+    if schema_paths.is_empty() && column_ids_paths.is_empty() {
         return Ok(());
     }
 
-    // Parallel-load each unique sidecar file. Use the data dir's own
+    // Parallel-load each unique schema sidecar file. Use the data dir's own
     // `file()` accessor (rather than constructing an ObjectStoreFile
     // directly) so backends like the tar object store, which join paths
     // through their own logic, work correctly.
-    let load_futures = paths.into_iter().map(|path| async move {
+    let schema_futures = schema_paths.into_iter().map(|path| async move {
         let file = data_dir.file(&path).map_err(|e| {
             BundlebaseError::from(format!(
                 "Failed to construct schema file ref '{}': {}",
@@ -597,17 +603,45 @@ async fn resolve_attach_schemas(
             )))?;
         Ok::<(String, std::sync::Arc<arrow_schema::Schema>), BundlebaseError>((path, schema))
     });
-    let loaded: Vec<(String, std::sync::Arc<arrow_schema::Schema>)> =
-        futures::future::try_join_all(load_futures).await?;
-    let path_to_schema: HashMap<String, std::sync::Arc<arrow_schema::Schema>> =
-        loaded.into_iter().collect();
 
-    // Populate each attach op's in-memory schema field.
+    // Parallel-load each unique column-id-list sidecar file.
+    let column_id_futures = column_ids_paths.into_iter().map(|path| async move {
+        let file = data_dir.file(&path).map_err(|e| {
+            BundlebaseError::from(format!(
+                "Failed to construct column-id file ref '{}': {}",
+                path, e
+            ))
+        })?;
+        let value: Option<Vec<ColumnId>> = read_yaml(file.as_ref()).await
+            .map_err(|e| BundlebaseError::from(format!(
+                "Failed to read column-id file '{}': {}", path, e
+            )))?;
+        let ids = value.ok_or_else(|| BundlebaseError::from(format!(
+            "Column-id sidecar file not found: '{}'", path
+        )))?;
+        Ok::<(String, Vec<ColumnId>), BundlebaseError>((path, ids))
+    });
+
+    let (schemas_loaded, columns_loaded) = futures::try_join!(
+        futures::future::try_join_all(schema_futures),
+        futures::future::try_join_all(column_id_futures),
+    )?;
+    let path_to_schema: HashMap<String, std::sync::Arc<arrow_schema::Schema>> =
+        schemas_loaded.into_iter().collect();
+    let path_to_column_ids: HashMap<String, Vec<ColumnId>> =
+        columns_loaded.into_iter().collect();
+
+    // Populate each attach op's in-memory schema + column_ids fields.
     for change in &mut commit.changes {
         for op in &mut change.operations {
             if let AnyOperation::AttachBlock(a) = op {
                 if a.schema.is_none() {
                     a.schema = path_to_schema.get(&a.schema_path).cloned();
+                }
+                if a.column_ids.is_empty() {
+                    if let Some(ids) = path_to_column_ids.get(&a.column_ids_path) {
+                        a.column_ids = ids.clone();
+                    }
                 }
             }
         }
