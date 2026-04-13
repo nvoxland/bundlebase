@@ -13,8 +13,8 @@ use parking_lot::Mutex;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-/// Default cache budget: 256 MB
-const DEFAULT_CACHE_BUDGET_BYTES: usize = 256 * 1024 * 1024;
+/// Default cache budget: 500 MB
+const DEFAULT_CACHE_BUDGET_BYTES: usize = 500 * 1024 * 1024;
 
 /// Maximum number of blocks to track in the LRU (entry count limit).
 const MAX_CACHE_ENTRIES: usize = 1024;
@@ -139,7 +139,7 @@ lazy_static! {
     /// Global singleton block cache instance.
     ///
     /// Budget can be configured via `BUNDLEBASE_BLOCK_CACHE_BYTES` environment variable.
-    /// Defaults to 256 MB if not set or invalid.
+    /// Defaults to 500 MB if not set or invalid.
     pub static ref GLOBAL_BLOCK_CACHE: BlockCache = {
         let budget = std::env::var("BUNDLEBASE_BLOCK_CACHE_BYTES")
             .ok()

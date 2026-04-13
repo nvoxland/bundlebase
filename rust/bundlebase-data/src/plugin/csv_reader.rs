@@ -410,12 +410,24 @@ impl DataReader for CsvReader {
     }
 
     async fn column_stats(&self) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
+        use crate::layout_cache::GLOBAL_LAYOUT_CACHE;
+        use crate::page_map::PageMap;
+        use bundlebase_io::IOReadFile;
+
         let layout_file = match &self.layout {
             Some(f) => f,
             None => return Ok(vec![]),
         };
-        let layout = crate::page_map::PageMap::load(layout_file).await?;
-        Ok(layout.column_stats)
+        let layout_url = layout_file.url().clone();
+        let layout = if let Some(cached) = GLOBAL_LAYOUT_CACHE.get(&layout_url) {
+            cached
+        } else {
+            let loaded = PageMap::load(layout_file).await?;
+            let arc = Arc::new(loaded);
+            GLOBAL_LAYOUT_CACHE.insert(layout_url, arc.clone());
+            arc
+        };
+        Ok(layout.column_stats.clone())
     }
 
     async fn build_layout(
