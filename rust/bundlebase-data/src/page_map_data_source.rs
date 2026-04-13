@@ -2,7 +2,6 @@ use bundlebase_io::plugin::object_store::ObjectStoreFile;
 use bundlebase_io::IOReadFile;
 use arrow::csv::ReaderBuilder as CsvReaderBuilder;
 use arrow::datatypes::SchemaRef;
-use arrow::json::ReaderBuilder as JsonReaderBuilder;
 use arrow::record_batch::RecordBatch;
 use datafusion::common::{project_schema, DataFusionError, Statistics};
 use datafusion::datasource::source::DataSource;
@@ -339,16 +338,42 @@ impl DataSource for PageMapDataSource {
                             ?
                     }
                     LineOrientedFormat::JsonLines => {
-                        let total_len: usize = lines.iter().map(|l| l.len() + 1).sum();
-                        let mut json_data = String::with_capacity(total_len);
-                        for line in lines { json_data.push_str(&line); json_data.push('\n'); }
-                        let cursor = Cursor::new(json_data.as_bytes());
-                        let mut reader = JsonReaderBuilder::new(schema.clone())
-                            .build(cursor)
-                            ?;
-                        reader.next()
-                            .ok_or_else(|| DataFusionError::Internal("No batch produced".to_string()))?
-                            ?
+                        // Same mixed-type handling as parse_bytes_to_batch:
+                        // stringify every JSON value (including nested
+                        // objects/arrays) instead of using Arrow's JSON
+                        // reader which refuses non-scalar values when the
+                        // schema declares Utf8.
+                        let col_names: Vec<String> = schema
+                            .fields()
+                            .iter()
+                            .map(|f| f.name().clone())
+                            .collect();
+                        let mut builders: Vec<arrow::array::StringBuilder> =
+                            (0..col_names.len())
+                                .map(|_| arrow::array::StringBuilder::new())
+                                .collect();
+                        for line in &lines {
+                            if line.is_empty() {
+                                continue;
+                            }
+                            let obj: serde_json::Map<String, serde_json::Value> =
+                                match serde_json::from_str(line) {
+                                    Ok(serde_json::Value::Object(m)) => m,
+                                    _ => continue,
+                                };
+                            for (i, name) in col_names.iter().enumerate() {
+                                let val = obj
+                                    .get(name)
+                                    .map(bundlebase_common::source_utils::json_value_to_string)
+                                    .unwrap_or_default();
+                                builders[i].append_value(&val);
+                            }
+                        }
+                        let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
+                            .into_iter()
+                            .map(|mut b| Arc::new(b.finish()) as Arc<dyn arrow::array::Array>)
+                            .collect();
+                        RecordBatch::try_new(schema.clone(), arrays)?
                     }
                 };
 
@@ -512,24 +537,49 @@ fn parse_bytes_to_batch(
                 ?
         }
         LineOrientedFormat::JsonLines => {
-            let mut reader = JsonReaderBuilder::new(schema.clone())
-                .build(cursor)
-                ?;
-            let mut batches = Vec::new();
-            for result in &mut reader {
-                let b = result?;
-                if b.num_rows() > 0 {
-                    batches.push(b);
+            // Match JsonlDataReader::data_source: parse each line with
+            // serde_json and stringify every value (including nested
+            // objects/arrays) via json_value_to_string. Arrow's own
+            // JsonReaderBuilder errors out when a field expected to be
+            // Utf8 arrives as a JSON object/array (common in Claude
+            // transcripts where e.g. `message` is sometimes a string,
+            // sometimes a structured `{type, text, ...}` object).
+            let _ = cursor;
+            let col_names: Vec<String> = schema
+                .fields()
+                .iter()
+                .map(|f| f.name().clone())
+                .collect();
+            let mut builders: Vec<arrow::array::StringBuilder> = (0..col_names.len())
+                .map(|_| arrow::array::StringBuilder::new())
+                .collect();
+            for line in bytes.split(|&b| b == b'\n') {
+                let line = if line.last() == Some(&b'\r') {
+                    &line[..line.len() - 1]
+                } else {
+                    line
+                };
+                if line.is_empty() {
+                    continue;
+                }
+                let obj: serde_json::Map<String, serde_json::Value> =
+                    match serde_json::from_slice(line) {
+                        Ok(serde_json::Value::Object(m)) => m,
+                        _ => continue,
+                    };
+                for (i, name) in col_names.iter().enumerate() {
+                    let val = obj
+                        .get(name)
+                        .map(bundlebase_common::source_utils::json_value_to_string)
+                        .unwrap_or_default();
+                    builders[i].append_value(&val);
                 }
             }
-            if batches.is_empty() {
-                return Ok(RecordBatch::new_empty(
-                    project_schema(schema, projection.as_ref())
-                        ?,
-                ));
-            }
-            arrow::compute::concat_batches(&schema, &batches)
-                ?
+            let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
+                .into_iter()
+                .map(|mut b| Arc::new(b.finish()) as Arc<dyn arrow::array::Array>)
+                .collect();
+            RecordBatch::try_new(schema.clone(), arrays)?
         }
     };
 

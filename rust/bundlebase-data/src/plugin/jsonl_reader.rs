@@ -396,7 +396,11 @@ impl DataReader for JsonlReader {
             return Ok(None);
         }
 
-        let schema = match self.inner.read_schema().await? {
+        // Use JsonlReader::read_schema (not FileReader::read_schema) so we
+        // go through the serde_json-based all-Utf8 fallback and avoid
+        // Arrow's JsonFormat::infer_schema, which errors on JSONL files
+        // whose columns change type between records.
+        let schema = match self.read_schema().await? {
             Some(s) => s,
             None => return Ok(None),
         };
