@@ -452,14 +452,27 @@ impl DataReader for CsvReader {
         }
 
         // Build page layout first (no stats yet) to get page boundaries.
+        // This is a SIMD newline scan (memchr) — fast enough that the double
+        // pass over `buffer` (here + Arrow CSV reader below) is dominated
+        // entirely by the Arrow CSV reader.
         let initial_layout = match PageMap::build(&buffer, true, DEFAULT_PAGE_SIZE, vec![]) {
             None => return Ok(None),
             Some(l) => l,
         };
         let page_row_starts: Vec<u32> = initial_layout.pages.iter().map(|p| p.row_begin).collect();
 
+        // Reuse the already-inferred schema instead of re-parsing the header
+        // from `buffer`. `read_schema` has a 64KB-range fetch + its own parse;
+        // doing the same work again here is the other half of the "double
+        // parse" inefficiency.
+        let schema = self
+            .inner
+            .read_schema()
+            .await?
+            .ok_or_else(|| BundlebaseError::from("CSV schema unavailable during build_layout"))?;
+
         // Compute column stats with page-level tracking.
-        let column_stats = self.compute_column_stats_sync(&buffer, &page_row_starts, delimiter)?;
+        let column_stats = self.compute_column_stats_sync(&buffer, &page_row_starts, delimiter, schema)?;
 
         // Assemble final layout with stats and write.
         let layout = PageMap { column_stats, ..initial_layout };
@@ -658,25 +671,14 @@ impl CsvReader {
         bytes: &[u8],
         page_row_starts: &[u32],
         delimiter: u8,
+        schema: SchemaRef,
     ) -> Result<Vec<crate::page_map::ColumnStats>, BundlebaseError> {
         use crate::column_stats_builder::ColumnStatsBuilder;
-        use arrow::datatypes::{DataType, Field, Schema};
 
-        // Parse just the header to get column names for the all-Utf8 schema.
-        let format = arrow::csv::reader::Format::default()
-            .with_header(true)
-            .with_delimiter(delimiter);
-        let (raw_schema, _) = format.infer_schema(std::io::Cursor::new(bytes), Some(0))
-            .map_err(|e| BundlebaseError::from(format!("CSV header parse error: {}", e)))?;
-        let col_count = raw_schema.fields().len();
+        let col_count = schema.fields().len();
         if col_count == 0 {
             return Ok(Vec::new());
         }
-        let schema = Arc::new(Schema::new(
-            raw_schema.fields().iter()
-                .map(|f| Arc::new(Field::new(f.name(), DataType::Utf8, true)))
-                .collect::<Vec<_>>(),
-        ));
 
         let mut builder = ColumnStatsBuilder::new(col_count, page_row_starts);
 
