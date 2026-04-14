@@ -222,6 +222,35 @@ impl DataBlock {
         Ok(())
     }
 
+    /// Check that the source file version still matches the version stored
+    /// on this block at attach time. Returns `Err(Version mismatch …)` if
+    /// the file has changed since the bundle was committed.
+    ///
+    /// Paths that actually open the data file trigger version validation
+    /// automatically via `VersionedObjectStoreFile`; this helper is for the
+    /// code paths that skip reading the data (COUNT(*) fast path, metadata-
+    /// only queries) where stale data would otherwise silently return the
+    /// old answer. Once validated, the `version_validated` flag short-
+    /// circuits subsequent calls so this is not on the hot path after the
+    /// first query.
+    pub async fn validate_version(&self) -> Result<(), crate::BundlebaseError> {
+        if self.version_validated.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(());
+        }
+        let current = self.reader.read_version().await?;
+        if current != self.version {
+            return Err(crate::BundlebaseError::from(format!(
+                "Version mismatch for '{}': expected '{}', found '{}'. \
+                 The source file has changed since the bundle was created.",
+                self.reader.url(),
+                self.version,
+                current
+            )));
+        }
+        self.version_validated.store(true, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
     /// Returns true if the given filters provably exclude this entire block, based on
     /// pre-computed column statistics. Conservative: returns false when uncertain.
     ///
@@ -583,12 +612,21 @@ impl TableProvider for DataBlock {
         // that could change the row count (no filters, no overlays, no
         // deleted rows), return a synthetic plan with N empty rows so the
         // count aggregator never touches the underlying file.
+        //
+        // Version validation still has to happen though — otherwise a
+        // modified source file can silently return the stale row count.
+        // `VersionedObjectStoreFile` only fires when the data file is
+        // actually read, and we're specifically skipping that. Call
+        // `validate_version` explicitly so a version mismatch surfaces as
+        // a query error instead of silently-succeeding stale data.
         if let (Some(proj), Some(rows)) = (projection, self.num_rows) {
             if proj.is_empty()
                 && filters.is_empty()
                 && deleted.is_empty()
                 && self.update_overlays.read().is_empty()
             {
+                self.validate_version().await
+                    .map_err(datafusion::common::DataFusionError::External)?;
                 let effective_rows = match limit {
                     Some(lim) => rows.min(lim),
                     None => rows,
