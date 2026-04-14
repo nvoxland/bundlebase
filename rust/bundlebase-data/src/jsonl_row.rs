@@ -100,14 +100,18 @@ where
     }
 }
 
-/// Append a JSON value (given as its raw JSON text) to a StringBuilder in
-/// the same canonical form as `bundlebase_common::source_utils::json_value_to_string`.
+/// Append a JSON value (given as its raw JSON text) to a StringBuilder.
 ///
 /// - `null` → empty string
 /// - `"..."` → unescaped string contents (zero-copy when no `\` present)
-/// - number / bool → raw text verbatim
-/// - object / array → re-minified via `serde_json::Value` so that keys are
-///   sorted and whitespace is removed, matching the legacy behavior.
+/// - number / bool / object / array → raw JSON text verbatim
+///
+/// **Behavioral note**: nested objects and arrays are stored as they appear
+/// in the source file, NOT canonicalized (key-sorted, whitespace-stripped).
+/// This differs from the older `json_value_to_string` path, which built a
+/// `serde_json::Value` tree and called `.to_string()` on it. Users who were
+/// filtering on stringified nested containers may see different values after
+/// this change — serialize on the Arrow side if you need a canonical form.
 fn append_raw_json_value(b: &mut StringBuilder, raw: &str) {
     let bytes = raw.as_bytes();
     match bytes.first() {
@@ -124,12 +128,6 @@ fn append_raw_json_value(b: &mut StringBuilder, raw: &str) {
             }
         }
         Some(b'n') if raw == "null" => b.append_value(""),
-        Some(b'{') | Some(b'[') => {
-            match serde_json::from_str::<serde_json::Value>(raw) {
-                Ok(v) => b.append_value(v.to_string()),
-                Err(_) => b.append_value(raw),
-            }
-        }
         _ => b.append_value(raw),
     }
 }
@@ -185,18 +183,19 @@ mod tests {
     }
 
     #[test]
-    fn nested_object_is_minified_and_key_sorted() {
+    fn nested_object_preserves_source_order_and_whitespace() {
         let row = br#"{"m":{"y": 2, "x": 1}}"#;
         let out = build(row, &["m"]);
-        // serde_json::Value uses BTreeMap, so keys come out sorted.
-        assert_eq!(out, vec![r#"{"x":1,"y":2}"#]);
+        // Containers are stored verbatim from the source bytes — no longer
+        // round-tripped through serde_json::Value for canonicalization.
+        assert_eq!(out, vec![r#"{"y": 2, "x": 1}"#]);
     }
 
     #[test]
-    fn nested_array_is_preserved() {
+    fn nested_array_is_preserved_verbatim() {
         let row = br#"{"a":[1, 2, 3]}"#;
         let out = build(row, &["a"]);
-        assert_eq!(out, vec!["[1,2,3]"]);
+        assert_eq!(out, vec!["[1, 2, 3]"]);
     }
 
     #[test]

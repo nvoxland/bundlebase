@@ -117,14 +117,22 @@ impl DataReader for JsonlReader {
     }
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
-        // Read first 64KB — enough for JSON array check + first-line schema inference.
+        // Query-time fast path: if a schema was persisted at attach time and
+        // handed to us via the inner FileReader, return it directly. Avoids
+        // re-fetching the file and re-parsing lines on every query.
+        if let Some(cached) = self.inner.schema() {
+            return Ok(Some(cached.clone()));
+        }
+
+        // Attach-time path: compute the union of top-level field names across
+        // every line in the file. Earlier this only looked at the first line,
+        // which meant any key that showed up later went through the expensive
+        // `serde_json::Deserializer::ignore_value` path at query time. Unioning
+        // across all lines is a one-time attach cost but means the query-time
+        // visitor almost never hits an unknown field.
         let store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())?;
-        let opts = object_store::GetOptions {
-            range: Some((0..65536).into()),
-            ..Default::default()
-        };
-        let result = store.get_opts(&path, opts).await?;
+        let result = store.get_opts(&path, object_store::GetOptions::default()).await?;
         let bytes = result.bytes().await?;
 
         // Validate the file is JSONL (one object per line), not a JSON array.
@@ -140,23 +148,49 @@ impl DataReader for JsonlReader {
             )));
         }
 
-        // Read field names from the first JSON line and treat all columns as Utf8,
-        // just like CSV. This avoids Arrow's sampling-based schema inference which
-        // fails on files with mixed types across records.
-        let first_line = bytes.iter()
-            .position(|&b| b == b'\n')
-            .map(|pos| &bytes[..pos])
-            .unwrap_or(&bytes[..]);
-        let parsed: serde_json::Value = serde_json::from_slice(first_line)
-            .map_err(|e| BundlebaseError::from(format!("Failed to parse first JSONL line from {}: {}", self.inner.url(), e)))?;
-        if let serde_json::Value::Object(map) = parsed {
-            let fields: Vec<arrow::datatypes::Field> = map.keys()
-                .map(|k| arrow::datatypes::Field::new(k, arrow::datatypes::DataType::Utf8, true))
-                .collect();
-            Ok(Some(Arc::new(arrow::datatypes::Schema::new(fields))))
-        } else {
-            Err(BundlebaseError::from(format!("First JSONL line is not a JSON object in {}", self.inner.url())))
+        // Walk every line, collecting field names in first-seen order across
+        // the whole file. Treat all columns as Utf8, just like CSV — avoids
+        // Arrow's sampling-based schema inference which fails on files with
+        // mixed types across records.
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut fields: Vec<arrow::datatypes::Field> = Vec::new();
+        let mut saw_any_object = false;
+
+        for line in bytes.split(|&b| b == b'\n') {
+            let line = if line.last() == Some(&b'\r') { &line[..line.len() - 1] } else { line };
+            if line.iter().all(|b| b.is_ascii_whitespace()) { continue; }
+            let parsed: serde_json::Value = match serde_json::from_slice(line) {
+                Ok(v) => v,
+                Err(e) => return Err(BundlebaseError::from(format!(
+                    "Failed to parse JSONL line from {}: {}",
+                    self.inner.url(), e
+                ))),
+            };
+            let map = match parsed {
+                serde_json::Value::Object(m) => m,
+                _ => return Err(BundlebaseError::from(format!(
+                    "JSONL line is not a JSON object in {}", self.inner.url()
+                ))),
+            };
+            saw_any_object = true;
+            for key in map.keys() {
+                if seen.insert(key.clone()) {
+                    fields.push(arrow::datatypes::Field::new(
+                        key,
+                        arrow::datatypes::DataType::Utf8,
+                        true,
+                    ));
+                }
+            }
         }
+
+        if !saw_any_object {
+            return Err(BundlebaseError::from(format!(
+                "No JSON objects found in {}", self.inner.url()
+            )));
+        }
+
+        Ok(Some(Arc::new(arrow::datatypes::Schema::new(fields))))
     }
 
     async fn data_source(
