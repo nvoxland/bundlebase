@@ -213,6 +213,15 @@ impl DataBlock {
         Ok(all_stats.into_iter().nth(idx))
     }
 
+    /// Touch the layout sidecar so that `GLOBAL_LAYOUT_CACHE` is populated for
+    /// this block. Called from `Bundle::open` at open time to pay the cold
+    /// read cost once, up front, instead of on the first filter query. The
+    /// returned value is discarded — we only care about the cache side effect.
+    pub async fn preload_layout(&self) -> Result<(), crate::BundlebaseError> {
+        let _ = self.reader.column_stats().await?;
+        Ok(())
+    }
+
     /// Returns true if the given filters provably exclude this entire block, based on
     /// pre-computed column statistics. Conservative: returns false when uncertain.
     ///

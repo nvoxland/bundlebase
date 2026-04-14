@@ -422,7 +422,7 @@ impl DataReader for JsonlReader {
             }
         }
 
-        let column_stats = builder.finish();
+        let column_stats = builder.finish(buffer.len() as u64);
 
         // Assemble final layout with stats and write.
         let layout = PageMap { column_stats, ..initial_layout };

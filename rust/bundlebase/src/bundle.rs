@@ -375,7 +375,57 @@ impl Bundle {
         )
         .await?;
 
+        // Warm the layout-sidecar cache in parallel so the first filter query
+        // doesn't pay a serial cold-read cost on all blocks. Uses join_all
+        // (not try_join_all) so a single corrupt or stale sidecar logs a
+        // warning instead of aborting the entire open.
+        Self::preload_layouts(&arc_bundle).await;
+
         Ok(arc_bundle)
+    }
+
+    /// Preload all block layout sidecars into `GLOBAL_LAYOUT_CACHE`.
+    ///
+    /// This moves the cold-load cost (fetch + decode of every .pagemap file)
+    /// from the first filter query's critical path into `Bundle::open` where
+    /// the latency is already expected and amortized. Per-block failures are
+    /// logged but do not abort the open — the lazy-load fallback at query
+    /// time will surface a clean error if anything is genuinely broken.
+    async fn preload_layouts(bundle: &Bundle) {
+        let blocks: Vec<Arc<DataBlock>> = {
+            let packs = bundle.packs.read();
+            packs
+                .values()
+                .flat_map(|p| p.blocks().into_iter())
+                .collect()
+        };
+
+        if blocks.is_empty() {
+            return;
+        }
+
+        let total = blocks.len();
+        let start = std::time::Instant::now();
+
+        let futures = blocks.into_iter().map(|block| async move {
+            let id = *block.id();
+            match block.preload_layout().await {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    log::warn!("Failed to preload layout for block {}: {}", id, e);
+                    Err(())
+                }
+            }
+        });
+        let results = futures::future::join_all(futures).await;
+        let ok = results.iter().filter(|r| r.is_ok()).count();
+
+        log::debug!(
+            "preloaded {}/{} layout sidecars in {:?}",
+            ok,
+            total,
+            start.elapsed()
+        );
     }
 
     /// Internal implementation of open() that tracks visited URLs to detect cycles

@@ -25,6 +25,7 @@ parquet = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
+postcard = { version = "1", features = ["use-std"] }
 
 # Async
 async-trait = { workspace = true }

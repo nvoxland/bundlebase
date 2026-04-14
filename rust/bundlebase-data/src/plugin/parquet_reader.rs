@@ -334,7 +334,12 @@ impl DataReader for ParquetDataReader {
             return Ok(None);
         }
 
-        let column_stats = stats_builder.finish();
+        // Parquet doesn't track raw file size here; pass 0 so the bloom
+        // budget relies on the `BLOOM_BUDGET_FLOOR_BYTES` floor (5 MB).
+        // Parquet has its own internal column stats at the row-group level,
+        // so the bundlebase layout sidecar is rarely the hot path for
+        // parquet queries anyway.
+        let column_stats = stats_builder.finish(0);
         let layout = PageMap {
             total_rows: row_count,
             file_size: 0,

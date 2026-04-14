@@ -697,7 +697,7 @@ impl CsvReader {
             builder.process_batch(&batch);
         }
 
-        Ok(builder.finish())
+        Ok(builder.finish(bytes.len() as u64))
     }
 }
 

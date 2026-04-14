@@ -42,13 +42,13 @@ const HEADER_SIZE: usize = 8 + 1 + 8 + 8 + 4 + 8; // magic + version + row_count
 /// Covers all orderable Arrow scalar types. Non-orderable types (List, Struct, Map)
 /// are excluded — no statistics system computes min/max for them.
 ///
-/// Serialized as a discriminated union: `{"t":"Int64","v":42}` so the type is preserved
-/// across round-trips without implicit string parsing.
+/// Serialized via postcard (the layout file's stats blob format). The
+/// default externally-tagged serde representation is used because postcard
+/// does not support `#[serde(tag = ..., content = ...)]` adjacent tagging.
 ///
 /// For CSV/JSONL columns: `Float64` when `is_all_numeric`, `Utf8` otherwise.
 /// For Parquet columns: the native Arrow type from the schema.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "t", content = "v")]
 pub enum StatValue {
     Int8(i8),
     Int16(i16),
@@ -442,10 +442,10 @@ impl PageMap {
         let pages_size = page_count * 12;
         // stats_offset points to the byte immediately after the page entries
         let stats_offset = (HEADER_SIZE + pages_size) as u64;
-        let stats_json = serde_json::to_vec(&self.column_stats)
+        let stats_blob = postcard::to_stdvec(&self.column_stats)
             .map_err(|e| BundlebaseError::from(format!("Failed to serialize column stats: {}", e)))?;
 
-        let mut buffer = Vec::with_capacity(HEADER_SIZE + pages_size + stats_json.len());
+        let mut buffer = Vec::with_capacity(HEADER_SIZE + pages_size + stats_blob.len());
 
         buffer.extend_from_slice(MAGIC_BYTES);
         buffer.push(VERSION);
@@ -459,7 +459,7 @@ impl PageMap {
             buffer.extend_from_slice(&page.row_begin.to_le_bytes());
         }
 
-        buffer.extend_from_slice(&stats_json);
+        buffer.extend_from_slice(&stats_blob);
 
         Ok(Bytes::from(buffer))
     }
@@ -524,9 +524,13 @@ impl PageMap {
             });
         }
 
-        // Parse column stats from the JSON blob if present
+        // Parse column stats from the postcard blob if present.
+        // Decode errors are propagated — a corrupt or legacy-format sidecar
+        // should surface as an explicit error, not silently-empty stats that
+        // disable filter pruning.
         let column_stats = if stats_offset < bytes.len() {
-            serde_json::from_slice(&bytes[stats_offset..]).unwrap_or_default()
+            postcard::from_bytes(&bytes[stats_offset..])
+                .map_err(|e| BundlebaseError::from(format!("Failed to decode column stats: {}", e)))?
         } else {
             Vec::new()
         };
