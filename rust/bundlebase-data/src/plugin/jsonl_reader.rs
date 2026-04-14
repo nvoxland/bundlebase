@@ -264,8 +264,19 @@ impl DataReader for JsonlReader {
         let bytes = result.bytes().await
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
-        let col_names: Vec<&str> =
-            schema.fields().iter().map(|f| f.name().as_str()).collect();
+        // Build builders only for the projected columns. Rows come in with a
+        // fixed set of top-level keys; the visitor's name→idx map only maps
+        // the ones we care about, so per-row cost is O(projected) rather than
+        // O(schema_fields). That makes wide schemas (schema-union over
+        // heterogeneous JSONL) as cheap as narrow ones for aggregation
+        // queries that only read 1-3 columns.
+        let projected_schema: SchemaRef = match projection {
+            Some(proj) => Arc::new(schema.project(proj)
+                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?),
+            None => schema.clone(),
+        };
+        let col_names: Vec<&str> = projected_schema
+            .fields().iter().map(|f| f.name().as_str()).collect();
         let name_to_idx: std::collections::HashMap<&str, usize> =
             col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
         let mut builders: Vec<arrow::array::StringBuilder> = (0..col_names.len())
@@ -283,13 +294,12 @@ impl DataReader for JsonlReader {
             .into_iter()
             .map(|mut b| Arc::new(b.finish()) as Arc<dyn arrow::array::Array>)
             .collect();
-        let batch = arrow::record_batch::RecordBatch::try_new(schema.clone(), arrays)
+        let batch = arrow::record_batch::RecordBatch::try_new(projected_schema.clone(), arrays)
             .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
 
-        let proj = projection.cloned();
         let partitions = vec![vec![batch]];
         let source = Arc::new(
-            datafusion::datasource::memory::MemorySourceConfig::try_new(&partitions, schema, proj)?
+            datafusion::datasource::memory::MemorySourceConfig::try_new(&partitions, projected_schema, None)?
         );
         Ok(source as Arc<dyn DataSource>)
     }

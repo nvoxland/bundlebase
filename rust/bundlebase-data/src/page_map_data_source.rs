@@ -326,6 +326,10 @@ impl DataSource for PageMapDataSource {
                     ));
                 }
 
+                let projected_schema: SchemaRef = match projection.as_ref() {
+                    Some(proj) => Arc::new(schema.project(proj)?),
+                    None => schema.clone(),
+                };
                 let batch = match format {
                     LineOrientedFormat::Csv => {
                         let lines_len: usize = lines.iter().map(|l| l.len() + 1).sum();
@@ -340,58 +344,27 @@ impl DataSource for PageMapDataSource {
                         csv_data.push('\n');
                         for line in lines { csv_data.push_str(&line); csv_data.push('\n'); }
                         let cursor = Cursor::new(csv_data.as_bytes());
-                        let mut reader = CsvReaderBuilder::new(schema.clone())
-                            .with_header(true).build(cursor)
-                            ?;
+                        let mut builder = CsvReaderBuilder::new(schema.clone()).with_header(true);
+                        if let Some(proj) = &projection {
+                            builder = builder.with_projection(proj.clone());
+                        }
+                        let mut reader = builder.build(cursor)?;
                         reader.next()
                             .ok_or_else(|| DataFusionError::Internal("No batch produced".to_string()))?
                             ?
                     }
                     LineOrientedFormat::JsonLines => {
-                        // Direct JSONL → StringBuilder extraction, no Value tree.
-                        // See crate::jsonl_row for rationale.
-                        let col_names: Vec<&str> = schema
-                            .fields()
-                            .iter()
-                            .map(|f| f.name().as_str())
-                            .collect();
-                        let name_to_idx: std::collections::HashMap<&str, usize> =
-                            col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
-                        let mut builders: Vec<arrow::array::StringBuilder> =
-                            (0..col_names.len())
-                                .map(|_| arrow::array::StringBuilder::new())
-                                .collect();
-                        for line in &lines {
-                            if line.is_empty() {
-                                continue;
-                            }
-                            crate::jsonl_row::append_jsonl_row_to_builders(
-                                line.as_bytes(),
-                                &name_to_idx,
-                                &mut builders,
-                                normalize_nested_json,
-                            );
-                        }
-                        let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
-                            .into_iter()
-                            .map(|mut b| Arc::new(b.finish()) as Arc<dyn arrow::array::Array>)
-                            .collect();
-                        RecordBatch::try_new(schema.clone(), arrays)?
+                        parse_jsonl_lines(
+                            lines.iter().map(|l| l.as_bytes()),
+                            &projected_schema,
+                            normalize_nested_json,
+                        )?
                     }
                 };
 
-                // Apply projection
-                if let Some(proj) = &projection {
-                    let projected_columns: Vec<_> =
-                        proj.iter().map(|&i| batch.column(i).clone()).collect();
-                    let projected_schema = Arc::new(
-                        schema.project(proj)?,
-                    );
-                    RecordBatch::try_new(projected_schema, projected_columns)
-                        .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))
-                } else {
-                    Ok(batch)
-                }
+                // Projection already applied to both JSONL and CSV branches.
+                let _ = projected_schema;
+                Ok(batch)
             }
         });
 
@@ -500,11 +473,15 @@ fn parse_bytes_to_batch(
     format: LineOrientedFormat,
     normalize_nested_json: bool,
 ) -> datafusion::common::Result<RecordBatch> {
-    let cursor = Cursor::new(bytes.as_ref());
-    let batch = match format {
+    let projected_schema: SchemaRef = match projection.as_ref() {
+        Some(proj) => Arc::new(schema.project(proj)?),
+        None => schema.clone(),
+    };
+    match format {
         LineOrientedFormat::Csv => {
             // CSV page bytes contain data rows only (no header — pages are split after the header).
-            // Build a synthetic header and parse.
+            // Build a synthetic header (for the *full* schema) and let the Arrow CSV
+            // reader project down to the columns we actually want via `with_projection`.
             let header: String = {
                 let mut h = String::new();
                 let mut first = true;
@@ -519,11 +496,11 @@ fn parse_bytes_to_batch(
             let mut csv_data = header;
             csv_data.push_str(&String::from_utf8_lossy(bytes.as_ref()));
             let cursor = Cursor::new(csv_data.as_bytes());
-            let mut reader = CsvReaderBuilder::new(schema.clone())
-                .with_header(true)
-                .build(cursor)
-                ?;
-            // Collect all batches from this page range
+            let mut builder = CsvReaderBuilder::new(schema.clone()).with_header(true);
+            if let Some(proj) = projection {
+                builder = builder.with_projection(proj.clone());
+            }
+            let reader = builder.build(cursor)?;
             let mut batches = Vec::new();
             for result in reader {
                 let b = result?;
@@ -532,66 +509,65 @@ fn parse_bytes_to_batch(
                 }
             }
             if batches.is_empty() {
-                return Ok(RecordBatch::new_empty(
-                    project_schema(schema, projection.as_ref())
-                        ?,
-                ));
+                return Ok(RecordBatch::new_empty(projected_schema));
             }
-            arrow::compute::concat_batches(&schema, &batches)
-                ?
+            arrow::compute::concat_batches(&projected_schema, &batches)
+                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))
         }
         LineOrientedFormat::JsonLines => {
             // Direct JSONL → StringBuilder extraction, no Value tree.
-            // Arrow's own JsonReaderBuilder errors out when a field expected
-            // to be Utf8 arrives as a JSON object/array (common in Claude
-            // transcripts where e.g. `message` is sometimes a string, sometimes
-            // a structured `{type, text, ...}` object). See crate::jsonl_row.
-            let _ = cursor;
-            let col_names: Vec<&str> = schema
-                .fields()
-                .iter()
-                .map(|f| f.name().as_str())
-                .collect();
-            let name_to_idx: std::collections::HashMap<&str, usize> =
-                col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
-            let mut builders: Vec<arrow::array::StringBuilder> = (0..col_names.len())
-                .map(|_| arrow::array::StringBuilder::new())
-                .collect();
-            for line in bytes.split(|&b| b == b'\n') {
-                let line = if line.last() == Some(&b'\r') {
-                    &line[..line.len() - 1]
-                } else {
-                    line
-                };
-                if line.is_empty() {
-                    continue;
-                }
-                crate::jsonl_row::append_jsonl_row_to_builders(
-                    line,
-                    &name_to_idx,
-                    &mut builders,
-                    normalize_nested_json,
-                );
-            }
-            let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
-                .into_iter()
-                .map(|mut b| Arc::new(b.finish()) as Arc<dyn arrow::array::Array>)
-                .collect();
-            RecordBatch::try_new(schema.clone(), arrays)?
+            // Build builders only for the projected columns so a wide schema
+            // doesn't cost per-row work for fields the query never reads.
+            let batch = parse_jsonl_lines(
+                bytes.split(|&b| b == b'\n'),
+                &projected_schema,
+                normalize_nested_json,
+            )?;
+            Ok(batch)
         }
-    };
-
-    // Apply projection
-    if let Some(proj) = projection {
-        let projected_columns: Vec<_> = proj.iter().map(|&i| batch.column(i).clone()).collect();
-        let projected_schema = Arc::new(
-            schema.project(proj)?,
-        );
-        RecordBatch::try_new(projected_schema, projected_columns)
-            .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))
-    } else {
-        Ok(batch)
     }
+}
+
+/// Build a RecordBatch over the projected schema by walking JSONL lines once.
+fn parse_jsonl_lines<'a, I>(
+    lines: I,
+    projected_schema: &SchemaRef,
+    normalize_nested_json: bool,
+) -> datafusion::common::Result<RecordBatch>
+where
+    I: IntoIterator<Item = &'a [u8]>,
+{
+    let col_names: Vec<&str> = projected_schema
+        .fields()
+        .iter()
+        .map(|f| f.name().as_str())
+        .collect();
+    let name_to_idx: std::collections::HashMap<&str, usize> =
+        col_names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+    let mut builders: Vec<arrow::array::StringBuilder> = (0..col_names.len())
+        .map(|_| arrow::array::StringBuilder::new())
+        .collect();
+    for line in lines {
+        let line = if line.last() == Some(&b'\r') {
+            &line[..line.len() - 1]
+        } else {
+            line
+        };
+        if line.is_empty() {
+            continue;
+        }
+        crate::jsonl_row::append_jsonl_row_to_builders(
+            line,
+            &name_to_idx,
+            &mut builders,
+            normalize_nested_json,
+        );
+    }
+    let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
+        .into_iter()
+        .map(|mut b| Arc::new(b.finish()) as Arc<dyn arrow::array::Array>)
+        .collect();
+    Ok(RecordBatch::try_new(projected_schema.clone(), arrays)?)
 }
 
 #[cfg(test)]
