@@ -1,3 +1,4 @@
+mod common;
 use arrow::array::{Array, StringArray};
 use bundlebase::bundle::BundleFacade;
 use bundlebase::test_utils::{random_memory_dir, test_datafile};
@@ -8,10 +9,7 @@ use futures::StreamExt;
 use futures::TryStreamExt;
 
 fn init() {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| {
-        bundlebase_catalog::init();
-    });
+    common::init_catalog();
 }
 
 #[tokio::test]

@@ -58,6 +58,10 @@ pub struct DataBlock {
     update_overlays: Arc<RwLock<Vec<crate::bundle::update_overlay::UpdateOverlay>>>,
     /// Whether this block's version has been validated (first scan reads through reader).
     version_validated: Arc<std::sync::atomic::AtomicBool>,
+    /// Count of narrow-projection bypasses served for this block. Used to
+    /// promote hot blocks into the full block cache after repeated narrow
+    /// queries — see Phase 2.6 in `scan()`.
+    narrow_bypass_count: Arc<std::sync::atomic::AtomicU32>,
     /// DataFusion statistics cached after the first column-stats load. Starts as None;
     /// populated during can_prune_block() so the optimizer gets stats on subsequent queries.
     cached_df_statistics: Arc<RwLock<Option<datafusion::common::Statistics>>>,
@@ -115,6 +119,7 @@ impl DataBlock {
             deleted_rows: Arc::new(RwLock::new(Vec::new())),
             update_overlays: Arc::new(RwLock::new(Vec::new())),
             version_validated: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            narrow_bypass_count: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             cached_df_statistics: Arc::new(RwLock::new(None)),
             num_rows,
         }
@@ -841,13 +846,28 @@ impl TableProvider for DataBlock {
         // CSV / JSONL row parser), and the warm wide-query case still hits
         // the cache because SELECT * takes the Phase 3 path below.
         //
+        // Hot-block promotion: only the FIRST narrow query on a block takes
+        // the bypass. A second narrow query on the same block means the
+        // block is hot — fall through to the Phase 3 path so the block
+        // gets cached and subsequent narrow queries hit the cache instead
+        // of re-reading from disk on every call.
+        //
         // Skipped when overlays exist (they can change per-column data) or
         // when the block is already cached (hit path below is fast enough).
         if let Some(proj) = projection {
             let current_schema = self.schema.read().clone();
             let narrow = proj.len() < current_schema.fields().len();
-            if narrow && overlays.is_empty() && GLOBAL_BLOCK_CACHE.get(&self.cache_key()).is_none()
+            let first_bypass = self
+                .narrow_bypass_count
+                .load(std::sync::atomic::Ordering::Relaxed)
+                == 0;
+            if narrow
+                && first_bypass
+                && overlays.is_empty()
+                && GLOBAL_BLOCK_CACHE.get(&self.cache_key()).is_none()
             {
+                self.narrow_bypass_count
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 log::debug!(
                     "Block {} using narrow-projection bypass ({} of {} columns)",
                     self.id,
@@ -860,6 +880,13 @@ impl TableProvider for DataBlock {
                     "narrow_projection_bypass",
                     &[KeyValue::new("block_id", self.id.to_string())],
                 );
+                // Validate source version before the bypass read: this path
+                // skips the block cache's first-scan version check, so an
+                // out-of-date source file would otherwise return stale data
+                // silently.
+                self.validate_version()
+                    .await
+                    .map_err(datafusion::common::DataFusionError::External)?;
                 let inner_source = self
                     .reader
                     .data_source(projection, &[], limit, None)

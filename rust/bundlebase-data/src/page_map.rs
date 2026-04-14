@@ -540,9 +540,9 @@ impl PageMap {
         }
 
         // Parse column stats from the postcard blob if present.
-        // Decode errors are propagated — a corrupt or legacy-format sidecar
-        // should surface as an explicit error, not silently-empty stats that
-        // disable filter pruning.
+        // Decode errors are propagated — a corrupt sidecar should surface as
+        // an explicit error, not silently-empty stats that disable filter
+        // pruning.
         let column_stats = if stats_offset < bytes.len() {
             postcard::from_bytes(&bytes[stats_offset..]).map_err(|e| {
                 BundlebaseError::from(format!("Failed to decode column stats: {}", e))

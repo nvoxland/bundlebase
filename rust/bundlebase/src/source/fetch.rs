@@ -47,8 +47,14 @@ pub async fn download_io_file_to_data_dir(
         .ok_or_else(|| BundlebaseError::from(format!("File not found: {}", file.url())))?;
     let filename = filename_from_url(file.url());
     let ext_str = filename.rsplit('.').next().unwrap_or("dat");
-    let format = bundlebase_common::ContentFormat::from_extension(ext_str)
-        .unwrap_or(bundlebase_common::ContentFormat::Dat);
+    let format = bundlebase_common::ContentFormat::from_extension(ext_str).unwrap_or_else(|_| {
+        debug!(
+            "Unknown extension '{}' on '{}', falling back to ContentFormat::Dat",
+            ext_str,
+            file.url()
+        );
+        bundlebase_common::ContentFormat::Dat
+    });
     let address = bundlebase_common::ContentAddress::with_sub_type(
         bundlebase_common::ContentCategory::Block,
         "data",
@@ -147,8 +153,13 @@ pub async fn download_http_to_data_dir(
         filename.rsplit('.').next().unwrap_or("dat").to_string()
     };
 
-    let format = bundlebase_common::ContentFormat::from_extension(&ext_str)
-        .unwrap_or(bundlebase_common::ContentFormat::Dat);
+    let format = bundlebase_common::ContentFormat::from_extension(&ext_str).unwrap_or_else(|_| {
+        debug!(
+            "Unknown extension '{}' for url '{}', falling back to ContentFormat::Dat",
+            ext_str, url
+        );
+        bundlebase_common::ContentFormat::Dat
+    });
     let address = bundlebase_common::ContentAddress::with_sub_type(
         bundlebase_common::ContentCategory::Block,
         "data",
@@ -544,8 +555,7 @@ pub async fn write_merged_jsonl(
     locations: &[&str],
     data_dir: &dyn IOReadWriteDir,
 ) -> Result<WriteResult, BundlebaseError> {
-    // Read all files sequentially (data_dir is &dyn so can't be moved into futures).
-    // Note: parallelizing this would require an Arc<dyn IOReadWriteDir> parameter.
+    // Sequential read: `data_dir` is `&dyn` and can't be moved into futures.
     let mut merged = Vec::new();
     for location in locations {
         let file = data_dir

@@ -7,27 +7,34 @@ use futures::TryStreamExt;
 mod common;
 
 fn init() {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| {
-        bundlebase_catalog::init();
-    });
+    common::init_catalog();
 }
 
 /// Helper: run a SQL query and collect all batches
 async fn query_collect(facade: &dyn BundleFacade, sql: &str) -> Vec<arrow::array::RecordBatch> {
-    let stream = facade.query(sql, vec![], None).await.unwrap();
-    stream.try_collect().await.unwrap()
+    let stream = facade
+        .query(sql, vec![], None)
+        .await
+        .unwrap_or_else(|e| panic!("query failed for `{}`: {}", sql, e));
+    stream
+        .try_collect()
+        .await
+        .unwrap_or_else(|e| panic!("batch collect failed for `{}`: {}", sql, e))
 }
 
 /// Helper: run a COUNT query and return the count
 async fn query_count(facade: &dyn BundleFacade, sql: &str) -> i64 {
     let batches = query_collect(facade, sql).await;
-    assert!(!batches.is_empty());
+    assert!(
+        !batches.is_empty(),
+        "query `{}` returned no batches",
+        sql
+    );
     let col = batches[0]
         .column(0)
         .as_any()
         .downcast_ref::<arrow::array::Int64Array>()
-        .expect("Expected Int64 count column");
+        .unwrap_or_else(|| panic!("query `{}`: expected Int64 count column", sql));
     col.value(0)
 }
 

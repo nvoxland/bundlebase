@@ -1,21 +1,41 @@
 # Testing Strategy
 
+## Where Tests Live
+
+**Most test coverage is in Rust.** Rust integration tests under
+`rust/bundlebase/tests/` are the primary place to add e2e tests for
+operations, query paths, sources, sidecars, version validation, views,
+joins, updates, and anything else that exercises the bundlebase core.
+
+Python tests are deliberately thin: they exist to verify the Python binding
+layer works end-to-end. They do NOT re-test underlying Rust business logic.
+If you find yourself wanting to add a Python test to check operation
+correctness, add a Rust test instead.
+
 ## Test Coverage Overview
 
 **Rust Lib Tests** (`src/`):
-- **Total tests**: ~150+ (all passing)
-- **Coverage**: Module unit tests, data storage tests, function registry tests, schema tracking, versioning, row indexing
+- Module unit tests, data storage tests, function registry tests, schema
+  tracking, versioning, row indexing.
 
-**Rust Integration Tests** (`tests/`):
-- **Test files**: `basic.rs`, `operations.rs`, `functions.rs`, `filters_selects.rs`, `joins.rs`, `queries.rs`, `schema.rs`, `extending.rs`
-- **Passing tests**: Cover all operations (attach, remove, rename, filter, select, join, commit/open, functions, metadata, row indexing)
-- **Test organization**: Split by feature area for focused testing
-- **Common utilities**: `tests/common/mod.rs` provides shared test helpers
+**Rust Integration Tests** (`rust/bundlebase/tests/`):
+- **Primary home for e2e coverage.** Split by feature area —
+  `basic_e2e`, `source_e2e`, `update_e2e`, `version_validation_e2e`,
+  `views_e2e`, `index_e2e`, `query_e2e`, `bundle_schema_e2e`, etc.
+- Cover all operations (attach, remove, rename, filter, select, join,
+  commit/open, functions, metadata, row indexing, sources, sidecars,
+  version checks, narrow-projection bypass, etc.).
+- Shared helpers live in `tests/common/mod.rs`; call `common::init_catalog()`
+  from each test's `fn init()` rather than duplicating the `Once` boilerplate.
 
 **Python E2E Tests** (`python/tests/test_e2e.py`):
-- **Coverage**: Binding verification, file formats (Parquet/CSV/JSON), conversions (pandas, polars, dict, numpy), custom functions, metadata, schema introspection, commit/open roundtrip
-- **Test strategy**: Python tests verify binding layer works; Rust tests verify operation logic
-- **Async testing**: All Python tests use pytest-asyncio for async/await support
+- **Scope**: High-level smoke checks that the Python binding exposes the
+  expected API — file formats (Parquet/CSV/JSON), conversions (pandas,
+  polars, dict, numpy), custom functions, metadata, schema introspection,
+  commit/open roundtrip.
+- **Not in scope**: operation semantics, query correctness, perf fast
+  paths, version validation. Those belong in Rust.
+- **Async testing**: Uses pytest-asyncio for async/await support.
 
 ## Test Execution
 
@@ -67,10 +87,10 @@ These serve as specification and regression tests for future features.
 ## Development Workflow
 
 **Testing best practices:**
-1. Always start with Rust code and ensure it's working and well tested
-2. THEN write Python code and tests
-3. Python tests should be E2E tests focusing on the Python binding
-4. Python tests should NOT test underlying Rust business logic (that's covered by Rust tests)
+1. Always start with Rust code and ensure it's working and well tested — most coverage lives in `rust/bundlebase/tests/`
+2. THEN, if you touched the Python binding surface, add a thin Python test for the binding itself
+3. Python tests are high-level E2E checks of the Python binding only
+4. Python tests MUST NOT re-test underlying Rust business logic — add a Rust test instead
 
 **Test data:**
 - All test data in `test_data/` directory at project root

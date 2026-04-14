@@ -75,7 +75,7 @@ The published end-user facing documentation is manged in the `docs` directory.
 - **Lazy evaluation** - queries execute on demand, not when operations are recorded
 - **Streaming execution** - use `execute_stream()`, never `collect()` for memory efficiency
 - **Three phases** - operations validate, reconfigure state, then apply to DataFrames
-- **E2E Python tests** - test the Python binding, not underlying Rust logic
+- **Tests live in Rust** - most test coverage (including e2e) belongs in `rust/bundlebase/tests/`. Python tests exist only to verify the Python binding itself and should stay thin and high-level — they do NOT re-test underlying Rust logic.
 
 See [.context/development.md](.context/development.md) for full development workflow.
 

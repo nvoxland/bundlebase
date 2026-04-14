@@ -1,3 +1,4 @@
+mod common;
 use bundlebase::bundle::{BundleBuilder, BundleFacade};
 use bundlebase::test_utils::{random_memory_url, test_datafile};
 use bundlebase::Bundle;
@@ -6,10 +7,7 @@ use bundlebase_index::IndexType;
 use tempfile::TempDir;
 
 fn init() {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| {
-        bundlebase_catalog::init();
-    });
+    common::init_catalog();
 }
 
 /// Tests exporting a bundle to tar and reopening it

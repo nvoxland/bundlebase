@@ -65,10 +65,9 @@ pub async fn latest_commit(
 /// These contain random generated IDs that differ between test runs.
 ///
 /// Strips:
-/// - `columnIds:` lists (on AttachBlockOp, legacy)
-/// - `columnId:` fields (legacy naming)
-/// - `columnIds:` values (content-hash path that varies with random ColumnIds)
-/// - `id:` fields on column operations (RenameColumn, CastColumn, AddColumn, DropColumn)
+/// - `columnId:` fields on single-column ops (Rename/Cast/Add/DropColumn)
+/// - `columnIds:` lists / content-addressed paths on AttachBlockOp
+/// - `id:` fields on column operations
 ///   but NOT on AttachBlock or change-level `id:` lines
 #[allow(dead_code)]
 pub fn strip_column_ids(yaml: &str) -> String {
@@ -97,19 +96,16 @@ pub fn strip_column_ids(yaml: &str) -> String {
             );
         }
 
-        // Skip columnId/columnIds lines (legacy naming, used by AttachBlock)
+        // Skip `columnId:` (singular) — appears on AddColumn etc.
         if trimmed.starts_with("columnId:") && !trimmed.starts_with("columnIds:") {
             i += 1;
             continue;
         }
+        // `columnIds:` on AttachBlock is a content-addressed sidecar path
+        // (or, in older serializations, an inline list) and varies with
+        // the randomly-generated ColumnIds.
         if trimmed.starts_with("columnIds:") {
             in_ids_list = true;
-            i += 1;
-            continue;
-        }
-        // columnIds is a content-addressed path whose value depends on
-        // the randomly-generated ColumnIds, so it's not stable across runs.
-        if trimmed.starts_with("columnIds:") {
             i += 1;
             continue;
         }

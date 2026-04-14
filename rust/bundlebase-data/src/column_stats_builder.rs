@@ -38,19 +38,27 @@ const PAGE_DISTINCT_CAP: usize = 500;
 /// Drop per-column blooms when `distinct_estimate / total_rows` exceeds this.
 /// Columns that are mostly unique (UUIDs, primary keys, timestamps) saturate
 /// any bloom filter — every bit gets set and pruning becomes useless.
+/// 0.5 was chosen empirically: it catches UUIDs / PKs without discarding
+/// blooms on moderately-selective enum columns (type/status/region) where
+/// ratios of 0.1–0.3 are typical and pruning is still effective. Tunable
+/// if future workloads call for it.
 const BLOOM_DROP_DISTINCT_RATIO: f64 = 0.5;
 /// Drop per-column blooms when the column has at most this many distinct
 /// values. At that point the `top_values` list (up to 10 entries, exact)
 /// plus min/max already give perfect membership pruning, and the bloom is
 /// pure overhead. This handles the common case of columns that are
 /// constant or near-constant within a file (e.g. `sessionId`, `version`,
-/// `cwd` in per-session claude transcripts).
+/// `cwd` in per-session claude transcripts). 10 matches the top_values
+/// cap so nothing slips through the cracks between the two paths.
 const BLOOM_DROP_LOW_DISTINCT_COUNT: u64 = 10;
 /// Drop per-column blooms when avg value length is at least this AND the
 /// column also has non-trivial cardinality (`> BLOOM_DROP_LONG_DISTINCT_RATIO`).
 /// Long distinct values are almost always free-text or IDs (URLs, session IDs,
 /// descriptions) where exact-match filters are rare and saturated blooms help
 /// no one.
+/// 10 bytes / 0.1 ratio are empirical defaults — short-enum columns (typically
+/// <= 8 bytes like "active"/"pending") still get blooms, and long-string
+/// columns only keep theirs if they're near-constant (below the 0.1 ratio).
 const BLOOM_DROP_LONG_AVG_LEN: f64 = 10.0;
 const BLOOM_DROP_LONG_DISTINCT_RATIO: f64 = 0.1;
 /// Per-layout-file bloom byte budget floor. The budget is

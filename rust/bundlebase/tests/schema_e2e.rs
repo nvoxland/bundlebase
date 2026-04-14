@@ -7,8 +7,7 @@ use bundlebase_command::BundleBuilderExt;
 mod common;
 
 fn init() {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| { bundlebase_catalog::init(); });
+    common::init_catalog();
 }
 
 

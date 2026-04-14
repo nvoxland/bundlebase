@@ -57,4 +57,8 @@ pub use crate::connector::{
     ConnectorRegistry, ConnectorSignature,
 };
 pub use fetch::orchestrate_fetch;
+// Internal helpers used by bundlebase-command's builder. Public so
+// cross-crate callers can reach them, but not part of the documented API —
+// do not depend on these from outside the workspace.
+#[doc(hidden)]
 pub use fetch::{download_to_data_dir, read_parquet_batches, write_merged_jsonl, write_merged_parquet};

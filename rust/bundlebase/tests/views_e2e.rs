@@ -1,3 +1,4 @@
+mod common;
 use bundlebase::test_utils::{
     assert_vec_regexp, describe_ops, field_names, random_memory_url, test_datafile,
 };
@@ -7,10 +8,7 @@ use bundlebase_common::BundlebaseError;
 use bundlebase_io::read_yaml;
 
 fn init() {
-    static INIT: std::sync::Once = std::sync::Once::new();
-    INIT.call_once(|| {
-        bundlebase_catalog::init();
-    });
+    common::init_catalog();
 }
 
 #[tokio::test]
