@@ -153,15 +153,15 @@ impl DataReader for JsonlReader {
             return Ok(Some(cached.clone()));
         }
 
-        // Attach-time path: read the first 64 KB, check it's not a JSON
-        // array, and infer field names from the first line.
+        // Attach-time path: read the full file and union top-level keys
+        // across every line. Heterogeneous JSONL datasets (e.g. claude
+        // transcripts where a `summary` record on line 1 has different keys
+        // than the `user`/`assistant` rows that follow) would otherwise
+        // silently drop the fields that aren't on line 1. Correctness wins
+        // over the per-row cost of a wider schema.
         let store = self.inner.object_store();
         let path = object_store::path::Path::parse(self.inner.url().path())?;
-        let opts = object_store::GetOptions {
-            range: Some((0..65536).into()),
-            ..Default::default()
-        };
-        let result = store.get_opts(&path, opts).await?;
+        let result = store.get_opts(&path, object_store::GetOptions::default()).await?;
         let bytes = result.bytes().await?;
 
         // Validate the file is JSONL (one object per line), not a JSON array.
@@ -177,26 +177,41 @@ impl DataReader for JsonlReader {
             )));
         }
 
-        // Read field names from the first JSON line and treat all columns as
-        // Utf8, just like CSV. Earlier we tried unioning field names across
-        // every line of the file so the query-time visitor could skip the
-        // `serde_json::Deserializer::ignore_value` path on unknown keys, but
-        // that doubled column counts on heterogeneous datasets and the extra
-        // per-row "fill missing with empty" work more than ate the savings.
-        let first_line = bytes.iter()
-            .position(|&b| b == b'\n')
-            .map(|pos| &bytes[..pos])
-            .unwrap_or(&bytes[..]);
-        let parsed: serde_json::Value = serde_json::from_slice(first_line)
-            .map_err(|e| BundlebaseError::from(format!("Failed to parse first JSONL line from {}: {}", self.inner.url(), e)))?;
-        if let serde_json::Value::Object(map) = parsed {
-            let fields: Vec<arrow::datatypes::Field> = map.keys()
-                .map(|k| arrow::datatypes::Field::new(k, arrow::datatypes::DataType::Utf8, true))
-                .collect();
-            Ok(Some(Arc::new(arrow::datatypes::Schema::new(fields))))
-        } else {
-            Err(BundlebaseError::from(format!("First JSONL line is not a JSON object in {}", self.inner.url())))
+        let mut keys: Vec<String> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut saw_object = false;
+        for line in bytes.split(|&b| b == b'\n') {
+            let line = if line.last() == Some(&b'\r') {
+                &line[..line.len() - 1]
+            } else {
+                line
+            };
+            if line.iter().all(|b| b.is_ascii_whitespace()) {
+                continue;
+            }
+            let parsed: serde_json::Value = match serde_json::from_slice(line) {
+                Ok(v) => v,
+                Err(_) => continue, // matches query-time tolerance for malformed rows
+            };
+            if let serde_json::Value::Object(map) = parsed {
+                saw_object = true;
+                for k in map.keys() {
+                    if seen.insert(k.clone()) {
+                        keys.push(k.clone());
+                    }
+                }
+            }
         }
+        if !saw_object {
+            return Err(BundlebaseError::from(format!(
+                "No JSON objects found in {}", self.inner.url()
+            )));
+        }
+        let fields: Vec<arrow::datatypes::Field> = keys
+            .into_iter()
+            .map(|k| arrow::datatypes::Field::new(k, arrow::datatypes::DataType::Utf8, true))
+            .collect();
+        Ok(Some(Arc::new(arrow::datatypes::Schema::new(fields))))
     }
 
     async fn data_source(
