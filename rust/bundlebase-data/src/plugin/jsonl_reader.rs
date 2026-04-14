@@ -21,7 +21,23 @@ use url::Url;
 
 /// Configuration for JSON format
 #[derive(Debug, Clone, Default)]
-pub struct JsonlFormatConfig;
+pub struct JsonlFormatConfig {
+    /// When true, nested objects and arrays stored in string columns are
+    /// re-serialized into canonical JSON (keys sorted, whitespace stripped)
+    /// instead of being kept verbatim. Source option: `normalize_nested_json`.
+    pub normalize_nested_json: bool,
+}
+
+impl JsonlFormatConfig {
+    pub fn from_read_options(opts: &std::collections::HashMap<String, String>) -> Self {
+        Self {
+            normalize_nested_json: opts
+                .get("normalize_nested_json")
+                .map(|v| v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
+        }
+    }
+}
 
 impl FileFormatConfig for JsonlFormatConfig {
     fn extensions(&self) -> &'static [&'static str] {
@@ -44,7 +60,7 @@ impl FileFormatConfig for JsonlFormatConfig {
 /// JSON plugin - uses generic FilePlugin and creates JsonlReader
 #[derive(Default)]
 pub struct JsonlPlugin {
-    inner: FilePlugin<JsonlFormatConfig>,
+    config: JsonlFormatConfig,
 }
 
 #[async_trait]
@@ -57,12 +73,18 @@ impl ReaderPlugin for JsonlPlugin {
         schema: Option<SchemaRef>,
         layout: Option<String>,
         expected_version: Option<String>,
-        _read_options: Option<&std::collections::HashMap<String, String>>,
+        read_options: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<Option<Arc<dyn DataReader>>, BundlebaseError> {
         let lower = source.to_lowercase();
         if !lower.ends_with(".json") && !lower.ends_with(".jsonl") {
             return Ok(None);
         }
+
+        let config = match read_options {
+            Some(opts) if !opts.is_empty() => JsonlFormatConfig::from_read_options(opts),
+            _ => self.config.clone(),
+        };
+        let plugin = FilePlugin::new(config);
 
         let layout = match layout {
             None => None,
@@ -73,8 +95,7 @@ impl ReaderPlugin for JsonlPlugin {
             )?),
         };
 
-        let reader = self
-            .inner
+        let reader = plugin
             .reader(source, bundle, schema, expected_version)
             .await?;
         Ok(Some(Arc::new(JsonlReader::new(reader, block_id, &layout))))
@@ -114,6 +135,14 @@ impl DataReader for JsonlReader {
 
     fn format(&self) -> crate::attach_format::AttachFormat {
         crate::attach_format::AttachFormat::JsonL
+    }
+
+    fn read_options(&self) -> std::collections::HashMap<String, String> {
+        let mut opts = std::collections::HashMap::new();
+        if self.inner.config().normalize_nested_json {
+            opts.insert("normalize_nested_json".to_string(), "true".to_string());
+        }
+        opts
     }
 
     async fn read_schema(&self) -> Result<Option<SchemaRef>, BundlebaseError> {
@@ -200,6 +229,7 @@ impl DataReader for JsonlReader {
                 byte_offsets,
                 projection.cloned(),
                 LineOrientedFormat::JsonLines,
+                self.inner.config().normalize_nested_json,
             )));
         }
         // Read JSONL with serde_json and stringify all values to produce all-Utf8
@@ -226,11 +256,12 @@ impl DataReader for JsonlReader {
         let mut builders: Vec<arrow::array::StringBuilder> = (0..col_names.len())
             .map(|_| arrow::array::StringBuilder::new())
             .collect();
+        let normalize = self.inner.config().normalize_nested_json;
 
         for line in bytes.split(|&b| b == b'\n') {
             let line = if line.last() == Some(&b'\r') { &line[..line.len() - 1] } else { line };
             if line.is_empty() { continue; }
-            crate::jsonl_row::append_jsonl_row_to_builders(line, &name_to_idx, &mut builders);
+            crate::jsonl_row::append_jsonl_row_to_builders(line, &name_to_idx, &mut builders, normalize);
         }
 
         let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
@@ -521,6 +552,7 @@ impl DataReader for JsonlReader {
             page_ranges,
             projection.cloned(),
             LineOrientedFormat::JsonLines,
+            self.inner.config().normalize_nested_json,
         ))))
     }
 }

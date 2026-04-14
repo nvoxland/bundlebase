@@ -352,6 +352,7 @@ impl DataReader for CsvReader {
                 byte_offsets,
                 projection.cloned(),
                 LineOrientedFormat::Csv,
+                false, // CSV has no nested containers; flag ignored
             )));
         }
         self.inner
@@ -642,6 +643,7 @@ impl DataReader for CsvReader {
             page_ranges,
             projection.cloned(),
             LineOrientedFormat::Csv,
+            false, // CSV has no nested containers; flag ignored
         ))))
     }
 }

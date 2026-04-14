@@ -56,6 +56,11 @@ pub struct PageMapDataSource {
     object_store: Arc<dyn ObjectStore>,
     /// File format (CSV or JSON Lines)
     format: LineOrientedFormat,
+    /// For JSONL only: when true, nested containers are canonicalized
+    /// (key-sorted, whitespace-stripped); when false, stored verbatim.
+    /// Ignored for CSV. Set from the JSONL reader's `normalize_nested_json`
+    /// source option.
+    normalize_nested_json: bool,
 }
 
 impl PageMapDataSource {
@@ -73,6 +78,7 @@ impl PageMapDataSource {
         byte_offsets: Vec<u64>,
         projection: Option<Vec<usize>>,
         format: LineOrientedFormat,
+        normalize_nested_json: bool,
     ) -> Self {
         let mut sorted_offsets = byte_offsets;
         sorted_offsets.sort();
@@ -92,6 +98,7 @@ impl PageMapDataSource {
             projection,
             object_store,
             format,
+            normalize_nested_json,
         }
     }
 
@@ -113,6 +120,7 @@ impl PageMapDataSource {
         page_ranges: Vec<(u64, u64)>,
         projection: Option<Vec<usize>>,
         format: LineOrientedFormat,
+        normalize_nested_json: bool,
     ) -> Self {
         let num_rows = page_ranges.len(); // approximate; actual row count unknown until read
         let object_store = file.store();
@@ -129,6 +137,7 @@ impl PageMapDataSource {
             projection,
             object_store,
             format,
+            normalize_nested_json,
         }
     }
 
@@ -240,6 +249,7 @@ impl DataSource for PageMapDataSource {
         let file_path = self.file.store_path().clone();
         let projection = self.projection.clone();
         let format = self.format;
+        let normalize_nested_json = self.normalize_nested_json;
 
         if !self.page_ranges.is_empty() {
             // Page-range mode: read full page byte ranges, parse all lines in each range.
@@ -274,7 +284,7 @@ impl DataSource for PageMapDataSource {
                     }
 
                     // Parse all lines in the range; format dictates whether to add a header.
-                    parse_bytes_to_batch(&bytes, &schema, &projection, format)
+                    parse_bytes_to_batch(&bytes, &schema, &projection, format, normalize_nested_json)
                 }
             });
 
@@ -359,6 +369,7 @@ impl DataSource for PageMapDataSource {
                                 line.as_bytes(),
                                 &name_to_idx,
                                 &mut builders,
+                                normalize_nested_json,
                             );
                         }
                         let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
@@ -487,6 +498,7 @@ fn parse_bytes_to_batch(
     schema: &SchemaRef,
     projection: &Option<Vec<usize>>,
     format: LineOrientedFormat,
+    normalize_nested_json: bool,
 ) -> datafusion::common::Result<RecordBatch> {
     let cursor = Cursor::new(bytes.as_ref());
     let batch = match format {
@@ -558,6 +570,7 @@ fn parse_bytes_to_batch(
                     line,
                     &name_to_idx,
                     &mut builders,
+                    normalize_nested_json,
                 );
             }
             let arrays: Vec<Arc<dyn arrow::array::Array>> = builders
@@ -598,7 +611,7 @@ mod tests {
         )
         .expect("valid file");
         let schema = Arc::new(arrow::datatypes::Schema::empty());
-        let source = PageMapDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv);
+        let source = PageMapDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv, false);
 
         // Verify byte offsets are sorted
         assert_eq!(source.byte_offsets[0], 100);
@@ -616,7 +629,7 @@ mod tests {
         )
         .expect("valid file");
         let schema = Arc::new(arrow::datatypes::Schema::empty());
-        let source = PageMapDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv);
+        let source = PageMapDataSource::new(&file, schema, byte_offsets, None, LineOrientedFormat::Csv, false);
 
         let stats = source.partition_statistics(None).expect("stats");
         assert_eq!(stats.num_rows.get_value(), Some(&2));

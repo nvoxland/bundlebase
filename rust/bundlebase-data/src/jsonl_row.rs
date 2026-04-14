@@ -32,6 +32,12 @@ use std::fmt;
 /// - Fields in the schema but missing from the row are appended as empty.
 /// - If the row is not a valid JSON object, no builder is modified and the
 ///   function returns `false`.
+/// - `normalize_nested_json` controls how nested objects/arrays are stored:
+///   `false` (default) preserves the source bytes verbatim; `true`
+///   round-trips through `serde_json::Value` so that object keys come out
+///   sorted and whitespace is stripped. The normalized form is useful for
+///   equality / grouping on stringified containers across heterogeneous
+///   writers, at the cost of ~40% scan throughput.
 ///
 /// On success all builders have exactly one new value appended. On failure
 /// none do — the partial writes are staged in a scratch buffer first and
@@ -40,6 +46,7 @@ pub fn append_jsonl_row_to_builders(
     line: &[u8],
     name_to_idx: &HashMap<&str, usize>,
     builders: &mut [StringBuilder],
+    normalize_nested_json: bool,
 ) -> bool {
     let mut pending: Vec<(usize, &str)> = Vec::with_capacity(name_to_idx.len());
 
@@ -55,7 +62,7 @@ pub fn append_jsonl_row_to_builders(
     let ncols = builders.len();
     let mut seen = vec![false; ncols];
     for (idx, raw_text) in &pending {
-        append_raw_json_value(&mut builders[*idx], raw_text);
+        append_raw_json_value(&mut builders[*idx], raw_text, normalize_nested_json);
         seen[*idx] = true;
     }
     for (i, filled) in seen.iter().enumerate() {
@@ -104,15 +111,13 @@ where
 ///
 /// - `null` → empty string
 /// - `"..."` → unescaped string contents (zero-copy when no `\` present)
-/// - number / bool / object / array → raw JSON text verbatim
-///
-/// **Behavioral note**: nested objects and arrays are stored as they appear
-/// in the source file, NOT canonicalized (key-sorted, whitespace-stripped).
-/// This differs from the older `json_value_to_string` path, which built a
-/// `serde_json::Value` tree and called `.to_string()` on it. Users who were
-/// filtering on stringified nested containers may see different values after
-/// this change — serialize on the Arrow side if you need a canonical form.
-fn append_raw_json_value(b: &mut StringBuilder, raw: &str) {
+/// - number / bool → raw text verbatim
+/// - object / array →
+///     - when `normalize_nested_json` is false: raw JSON text verbatim
+///       (source key order + whitespace preserved)
+///     - when true: re-serialized via `serde_json::Value` → canonical form
+///       (keys sorted, whitespace stripped)
+fn append_raw_json_value(b: &mut StringBuilder, raw: &str, normalize_nested_json: bool) {
     let bytes = raw.as_bytes();
     match bytes.first() {
         Some(b'"') => {
@@ -128,6 +133,12 @@ fn append_raw_json_value(b: &mut StringBuilder, raw: &str) {
             }
         }
         Some(b'n') if raw == "null" => b.append_value(""),
+        Some(b'{') | Some(b'[') if normalize_nested_json => {
+            match serde_json::from_str::<serde_json::Value>(raw) {
+                Ok(v) => b.append_value(v.to_string()),
+                Err(_) => b.append_value(raw),
+            }
+        }
         _ => b.append_value(raw),
     }
 }
@@ -137,12 +148,12 @@ mod tests {
     use super::*;
     use arrow::array::Array;
 
-    fn build(line: &[u8], cols: &[&str]) -> Vec<String> {
+    fn build_with(line: &[u8], cols: &[&str], normalize: bool) -> Vec<String> {
         let name_to_idx: HashMap<&str, usize> =
             cols.iter().enumerate().map(|(i, &n)| (n, i)).collect();
         let mut builders: Vec<StringBuilder> =
             (0..cols.len()).map(|_| StringBuilder::new()).collect();
-        let ok = append_jsonl_row_to_builders(line, &name_to_idx, &mut builders);
+        let ok = append_jsonl_row_to_builders(line, &name_to_idx, &mut builders, normalize);
         assert!(ok, "parse failed for: {}", std::str::from_utf8(line).unwrap());
         builders
             .iter_mut()
@@ -152,6 +163,10 @@ mod tests {
                 a.value(0).to_string()
             })
             .collect()
+    }
+
+    fn build(line: &[u8], cols: &[&str]) -> Vec<String> {
+        build_with(line, cols, false)
     }
 
     #[test]
@@ -199,11 +214,18 @@ mod tests {
     }
 
     #[test]
+    fn normalize_mode_sorts_keys_and_strips_whitespace() {
+        let row = br#"{"m":{"y": 2, "x": 1},"a":[1, 2, 3]}"#;
+        let out = build_with(row, &["m", "a"], true);
+        assert_eq!(out, vec![r#"{"x":1,"y":2}"#, "[1,2,3]"]);
+    }
+
+    #[test]
     fn malformed_row_is_skipped() {
         let row = br#"{not json"#;
         let name_to_idx: HashMap<&str, usize> = [("a", 0)].into_iter().collect();
         let mut builders = vec![StringBuilder::new()];
-        let ok = append_jsonl_row_to_builders(row, &name_to_idx, &mut builders);
+        let ok = append_jsonl_row_to_builders(row, &name_to_idx, &mut builders, false);
         assert!(!ok);
         assert_eq!(builders[0].finish().len(), 0);
     }
@@ -215,7 +237,7 @@ mod tests {
         let name_to_idx: HashMap<&str, usize> =
             [("a", 0), ("b", 1)].into_iter().collect();
         let mut builders = vec![StringBuilder::new(), StringBuilder::new()];
-        let ok = append_jsonl_row_to_builders(row, &name_to_idx, &mut builders);
+        let ok = append_jsonl_row_to_builders(row, &name_to_idx, &mut builders, false);
         assert!(!ok);
         assert_eq!(builders[0].finish().len(), 0);
         assert_eq!(builders[1].finish().len(), 0);
